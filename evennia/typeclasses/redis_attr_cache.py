@@ -298,3 +298,47 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
         for attr in refresh:
             if attr and attr.pk:
                 self._cache_set(attr.db_key, attr.db_category, attr)
+
+
+def flush_all_keys() -> int:
+    """Drop every ``attr:<version>:*`` key from the Redis L2 cache.
+
+    Wired into ``evennia.utils.idmapper.models.flush_cache`` so test
+    ``tearDown``, the ``@reload/flush`` admin command, and the
+    ``post_migrate`` signal all leave Redis in a clean state — without
+    this, CI runs (where Redis persists across tests) saw stale cache
+    hits leaking from a previous test's writes, while local runs
+    without Redis enabled never tripped the issue.
+
+    No-op when ``ATTRIBUTE_REDIS_CACHE_ENABLED`` is off or the Redis
+    connection is unavailable, so callers (including the idmapper
+    flush) can invoke unconditionally.
+
+    Uses ``SCAN`` rather than ``KEYS`` so the call stays non-blocking
+    on large keyspaces (the prefix scope keeps the scan tight to this
+    cache's own keys).
+
+    Returns:
+        int: Number of Redis keys deleted, or 0 on no-op / failure.
+    """
+    if not _enabled():
+        return 0
+    r = _redis_conn()
+    if not r:
+        return 0
+    deleted = 0
+    try:
+        # Match every attribute-cache key (attr:<version>:*) plus the
+        # per-object and per-category index keys (same prefix).
+        pattern = f"attr:{_CACHE_VERSION}:*"
+        batch = []
+        for key in r.scan_iter(match=pattern, count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                deleted += r.delete(*batch)
+                batch.clear()
+        if batch:
+            deleted += r.delete(*batch)
+    except Exception:
+        logger.log_trace("redis_attr_cache.flush_all_keys")
+    return deleted
