@@ -1363,6 +1363,65 @@ class TestCmdSet(BaseEvenniaTest):
 
         self.assertIsInstance(result, _CmdTest2)
 
+    def test_cmdset_remove_returns_bool(self):
+        test_cmd_set = _CmdSetTest()
+        self.assertTrue(test_cmd_set.remove("another command"))
+        self.assertFalse(test_cmd_set.remove("another command"))
+        self.assertFalse(test_cmd_set.remove("never existed"))
+
+    def test_cmdset_remove_strict_raises(self):
+        test_cmd_set = _CmdSetTest()
+        with self.assertRaises(KeyError):
+            test_cmd_set.remove("never existed", strict=True)
+        # strict on a present key still works and returns True
+        self.assertTrue(test_cmd_set.remove("another command", strict=True))
+
+    def test_cmdset_remove_missing_syscmd_string(self):
+        # Previously raised AttributeError on cmd.key when looking up a
+        # missing system command by string.
+        test_cmd_set = _CmdSetTest()
+        self.assertFalse(test_cmd_set.remove("__missing_sys"))
+
+    def test_cmdset_remove_syscmd_by_key(self):
+        class _SysCmd(Command):
+            key = "__sys"
+
+        cmdset = CmdSet()
+        cmdset.add(_SysCmd())
+        self.assertEqual(len(cmdset.system_commands), 1)
+        self.assertTrue(cmdset.remove("__sys"))
+        self.assertEqual(cmdset.system_commands, [])
+
+    def test_cmdset_has(self):
+        test_cmd_set = _CmdSetTest()
+        self.assertTrue(test_cmd_set.has("another command"))
+        self.assertFalse(test_cmd_set.has("nope"))
+        # by instance
+        cmd = test_cmd_set.get("another command")
+        self.assertTrue(test_cmd_set.has(cmd))
+
+    def test_cmdset_replace(self):
+        class _CmdReplacement(AccessableCommand):
+            key = "another command"
+            arg_regex = None
+
+        test_cmd_set = _CmdSetTest()
+        original = test_cmd_set.get("another command")
+        self.assertIsInstance(original, _CmdTest2)
+
+        found = test_cmd_set.replace("another command", _CmdReplacement())
+        self.assertTrue(found)
+        self.assertIsInstance(test_cmd_set.get("another command"), _CmdReplacement)
+
+        # replacing something that wasn't there still adds, returns False
+        class _CmdNew(AccessableCommand):
+            key = "brand new"
+            arg_regex = None
+
+        found = test_cmd_set.replace("brand new", _CmdNew())
+        self.assertFalse(found)
+        self.assertTrue(test_cmd_set.has("brand new"))
+
     def test_cmdset_add_allow_duplicates(self):
         class _CmdDuplicateA(Command):
             key = "duplicate"
@@ -1611,9 +1670,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
     @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
         from evennia.commands.cmd_access_cache import (
-            cached_cmd_access,
-            invalidate_cmd_access_cache,
-        )
+            cached_cmd_access, invalidate_cmd_access_cache)
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
