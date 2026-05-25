@@ -165,7 +165,18 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
         matches = build_matches(raw_string, cmdset, include_prefixes=False)
 
     # only select command matches we are actually allowed to call.
-    matches = [match for match in matches if match[2].access(caller, "cmd", session=session)]
+    if getattr(settings, "CMD_ACCESS_CACHE_ENABLED", False):
+        from evennia.commands.cmd_access_cache import cached_cmd_access
+
+        matches = [
+            match
+            for match in matches
+            if cached_cmd_access(match[2], caller, session=session)
+        ]
+    else:
+        matches = [
+            match for match in matches if match[2].access(caller, "cmd", session=session)
+        ]
 
     # try to bring the number of matches down to 1
     if len(matches) > 1:

@@ -468,6 +468,7 @@ class CmdSetHandler(object):
             else:
                 self.cmdset_stack.append(cmdset)
             self.update()
+            self._invalidate_cmd_access_caches()
 
     def add_default(self, cmdset, emit_to_obj=None, persistent=True, **kwargs):
         """
@@ -512,6 +513,7 @@ class CmdSetHandler(object):
             else:
                 self.cmdset_stack = [_EmptyCmdSet(cmdsetobj=self.obj)]
             self.update()
+            self._invalidate_cmd_access_caches()
             return
 
         if len(self.cmdset_stack) < 2:
@@ -561,6 +563,7 @@ class CmdSetHandler(object):
                     pass
         # re-sync the cmdsethandler.
         self.update()
+        self._invalidate_cmd_access_caches()
 
     # legacy alias
     delete = remove
@@ -600,6 +603,18 @@ class CmdSetHandler(object):
             storage = storage[0]
             self.obj.cmdset_storage = storage
         self.update()
+        self._invalidate_cmd_access_caches()
+
+    def _invalidate_cmd_access_caches(self):
+        """Clear cmd.access caches for objects affected by cmdset stack changes."""
+        try:
+            from evennia.commands.cmd_access_cache import invalidate_for_cmdset_owner
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+
+            bump_cmdset_generation(self.obj)
+            invalidate_for_cmdset_owner(self.obj)
+        except Exception:
+            pass
 
     def has(self, cmdset, must_be_default=False):
         """

@@ -1587,3 +1587,83 @@ class TestCmdSetMergeObjBindings(TestCase):
         self.assertEqual(len(merged2.commands), 2)
         keys = {cmd.key for cmd in merged2.commands}
         self.assertNotIn("b", keys)
+
+
+class TestCmdAccessCache(BaseEvenniaTest):
+    """Tests for evennia.commands.cmd_access_cache."""
+
+    def setUp(self):
+        super().setUp()
+        self.char1.ndb._cmd_access_cache = {}
+        self.char1.ndb._cmd_access_cache_gen = 0
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_cache_hit_avoids_second_access_call(self):
+        from evennia.commands.cmd_access_cache import cached_cmd_access
+
+        cmd = _CmdA("test")
+        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
+            mock_access.return_value = True
+            self.assertTrue(cached_cmd_access(cmd, self.char1))
+            self.assertTrue(cached_cmd_access(cmd, self.char1))
+            self.assertEqual(mock_access.call_count, 1)
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_invalidate_bumps_generation(self):
+        from evennia.commands.cmd_access_cache import (
+            cached_cmd_access,
+            invalidate_cmd_access_cache,
+        )
+
+        cmd = _CmdA("test")
+        with patch.object(cmd, "access", return_value=True) as mock_access:
+            cached_cmd_access(cmd, self.char1)
+            invalidate_cmd_access_cache(self.char1)
+            cached_cmd_access(cmd, self.char1)
+            self.assertEqual(mock_access.call_count, 2)
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_cmdset_add_invalidates_caller(self):
+        from evennia.commands import cmd_access_cache
+        from evennia.commands.cmdset import CmdSet
+
+        class _OneCmdSet(CmdSet):
+            def at_cmdset_creation(self):
+                self.add(_CmdA(self))
+
+        cmd = _CmdA("x")
+        with patch.object(
+            cmd_access_cache, "cached_cmd_access", wraps=cmd_access_cache.cached_cmd_access
+        ) as wrapped:
+            wrapped(cmd, self.char1)
+            self.assertEqual(wrapped.call_count, 1)
+            self.char1.cmdset.add(_OneCmdSet)
+            wrapped(cmd, self.char1)
+            self.assertEqual(wrapped.call_count, 2)
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=False)
+    def test_disabled_uses_access_directly(self):
+        from evennia.commands.cmd_access_cache import cached_cmd_access
+
+        cmd = _CmdA("test")
+        with patch.object(cmd, "access", return_value=True) as mock_access:
+            cached_cmd_access(cmd, self.char1)
+            cached_cmd_access(cmd, self.char1)
+            self.assertEqual(mock_access.call_count, 2)
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_cmdparser_with_cache_enabled(self):
+        from evennia.commands.cmdset import CmdSet
+
+        class _SayCmd(Command):
+            key = "saytest"
+            locks = "cmd:all()"
+
+        class _SayCmdSet(CmdSet):
+            def at_cmdset_creation(self):
+                self.add(_SayCmd())
+
+        cmdset = _SayCmdSet()
+        matches = cmdparser.cmdparser("saytest hello", cmdset, self.char1)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0][0], "saytest")

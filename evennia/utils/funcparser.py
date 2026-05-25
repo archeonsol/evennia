@@ -1249,18 +1249,30 @@ def funcparser_callable_you(
     if caller == receiver:
         name = "You" if capitalize else "you"
     else:
-        if kwargs.get("article"):
+        display_names = kwargs.get("display_names")
+        if display_names and args and args[0] in display_names:
+            name = display_names[args[0]]
+        elif kwargs.get("article"):
             name = (
                 caller.get_numbered_name(1, looker=receiver, return_string=True)
                 if hasattr(caller, "get_numbered_name")
                 else str(caller)
             )
         else:
-            name = (
-                caller.get_display_name(looker=receiver)
-                if hasattr(caller, "get_display_name")
-                else str(caller)
-            )
+            try:
+                from evennia.utils.display_name_cache import cached_get_display_name
+
+                name = (
+                    cached_get_display_name(caller, receiver)
+                    if hasattr(caller, "get_display_name")
+                    else str(caller)
+                )
+            except Exception:
+                name = (
+                    caller.get_display_name(looker=receiver)
+                    if hasattr(caller, "get_display_name")
+                    else str(caller)
+                )
 
     # a specified format overrides 'capitalize' and also applies to "you"
     fmt = kwargs.get("format")
@@ -1338,18 +1350,30 @@ def funcparser_callable_your(
     if caller == receiver:
         name = "Your" if capitalize else "your"
     else:
-        if kwargs.get("article"):
+        display_names = kwargs.get("display_names")
+        if display_names and args and args[0] in display_names:
+            name = display_names[args[0]]
+        elif kwargs.get("article"):
             name = (
                 caller.get_numbered_name(1, looker=receiver, return_string=True)
                 if hasattr(caller, "get_numbered_name")
                 else str(caller)
             )
         else:
-            name = (
-                caller.get_display_name(looker=receiver)
-                if hasattr(caller, "get_display_name")
-                else str(caller)
-            )
+            try:
+                from evennia.utils.display_name_cache import cached_get_display_name
+
+                name = (
+                    cached_get_display_name(caller, receiver)
+                    if hasattr(caller, "get_display_name")
+                    else str(caller)
+                )
+            except Exception:
+                name = (
+                    caller.get_display_name(looker=receiver)
+                    if hasattr(caller, "get_display_name")
+                    else str(caller)
+                )
 
     # a specified format overrides 'capitalize' and also applies to "your"
     fmt = kwargs.get("format")

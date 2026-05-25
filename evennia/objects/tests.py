@@ -12,6 +12,8 @@ from evennia.typeclasses.tags import (
     TagCategoryProperty,
     TagProperty,
 )
+from mock import patch
+
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
@@ -894,3 +896,26 @@ class TestProperties(EvenniaTestCase):
         self.assertTrue(obj.tags.has("mytag", category="mixin_tags"))
 
         obj.delete()
+
+
+class TestMsgContentsRecipients(BaseEvenniaTest):
+    def test_get_message_recipients_respects_exclude(self):
+        self.char2.location = self.room1
+        recipients = self.room1.get_message_recipients(exclude=[self.char1])
+        self.assertIn(self.char2, recipients)
+        self.assertNotIn(self.char1, recipients)
+
+    def test_msg_contents_director_only(self):
+        self.char1.location = self.room1
+        self.char2.location = self.room1
+        with patch.object(self.char2, "msg") as mock_msg:
+            self.room1.msg_contents(
+                "{speaker} waves.",
+                from_obj=self.char1,
+                mapping={"speaker": self.char1},
+            )
+            self.assertTrue(mock_msg.called)
+            text = mock_msg.call_args[1].get("text") or mock_msg.call_args[0][0]
+            if isinstance(text, tuple):
+                text = text[0]
+            self.assertIn("waves", text)

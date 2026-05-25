@@ -173,15 +173,24 @@ class GlobalScriptContainer(Container):
             self.load_data()
 
         # make sure settings-defined scripts are loaded
-        scripts_to_run = []
+        critical_scripts = []
+        lazy_scripts = []
         for key in self.loaded_data:
             script = self._load_script(key)
-            if script:
-                scripts_to_run.append(script)
-        # start all global scripts
+            if not script:
+                continue
+            priority = (self.loaded_data[key].get("start_priority") or "critical").lower()
+            if priority == "lazy":
+                lazy_scripts.append(script)
+            else:
+                critical_scripts.append(script)
         try:
-            for script in scripts_to_run:
+            for script in critical_scripts:
                 script.start()
+            if lazy_scripts:
+                from evennia.server.at_init_scheduler import schedule_lazy_global_scripts
+
+                schedule_lazy_global_scripts(lazy_scripts)
         except (OperationalError, ProgrammingError):
             # this can happen if db is not loaded yet (such as when building docs)
             pass

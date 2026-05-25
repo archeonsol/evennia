@@ -1048,6 +1048,24 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
         for obj in contents:
             func(obj, **kwargs)
 
+    def get_message_recipients(self, exclude=None):
+        """
+        Objects that receive ``msg_contents`` broadcasts from this location.
+
+        Override in game rooms to filter by distance, subzones, etc.
+
+        Args:
+            exclude (list, optional): Objects to omit (same as ``msg_contents``).
+
+        Returns:
+            list: Recipients (defaults to ``self.contents`` minus ``exclude``).
+        """
+        recipients = self.contents
+        if exclude:
+            exclude = make_iter(exclude)
+            recipients = [obj for obj in recipients if obj not in exclude]
+        return recipients
+
     def msg_contents(
         self,
         text=None,
@@ -1140,33 +1158,47 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
         if "you" not in mapping:
             mapping["you"] = you
 
-        contents = self.contents
-        if exclude:
-            exclude = make_iter(exclude)
-            contents = [obj for obj in contents if obj not in exclude]
+        contents = self.get_message_recipients(exclude=exclude)
+
+        try:
+            from evennia.utils.display_name_cache import cached_get_display_name
+        except Exception:
+
+            def cached_get_display_name(obj, looker, **kw):
+                return (
+                    obj.get_display_name(looker=looker, **kw)
+                    if hasattr(obj, "get_display_name")
+                    else str(obj)
+                )
+
+        display_names_by_receiver = {}
+        for receiver in contents:
+            display_names_by_receiver[id(receiver)] = {
+                key: cached_get_display_name(obj, receiver)
+                if hasattr(obj, "get_display_name")
+                else str(obj)
+                for key, obj in mapping.items()
+            }
+
+        use_funcparser = settings.FUNCPARSER_START_CHAR in (inmessage or "")
 
         for receiver in contents:
-            # actor-stance replacements
-            outmessage = _MSG_CONTENTS_PARSER.parse(
-                inmessage,
-                raise_errors=raise_funcparse_errors,
-                return_string=True,
-                caller=you,
-                receiver=receiver,
-                mapping=mapping,
-            )
+            names = display_names_by_receiver[id(receiver)]
 
-            # director-stance replacements
-            outmessage = outmessage.format_map(
-                {
-                    key: (
-                        obj.get_display_name(looker=receiver)
-                        if hasattr(obj, "get_display_name")
-                        else str(obj)
-                    )
-                    for key, obj in mapping.items()
-                }
-            )
+            if use_funcparser:
+                outmessage = _MSG_CONTENTS_PARSER.parse(
+                    inmessage,
+                    raise_errors=raise_funcparse_errors,
+                    return_string=True,
+                    caller=you,
+                    receiver=receiver,
+                    mapping=mapping,
+                    display_names=names,
+                )
+            else:
+                outmessage = inmessage
+
+            outmessage = outmessage.format_map(names)
 
             receiver.msg(text=(outmessage, outkwargs), from_obj=from_obj, **kwargs)
 
@@ -2680,6 +2712,13 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
                 )
             except AttributeError:
                 return _("Could not view '{target_name}'.").format(target_name=target.key)
+
+        if getattr(settings, "LOOK_ATTR_PREFETCH_ENABLED", True):
+            try:
+                if hasattr(target, "attributes"):
+                    target.attributes.get_all()
+            except Exception:
+                logger.log_trace("at_look attribute prefetch")
 
         description = target.return_appearance(self, **kwargs)
 
