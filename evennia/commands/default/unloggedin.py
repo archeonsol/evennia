@@ -173,14 +173,14 @@ class CmdUnconnectedCreate(COMMAND_DEFAULT_CLASS):
     locks = "cmd:all()"
     arg_regex = r"\s.*?|$"
 
-    def at_pre_cmd(self):
+    def at_pre_parse(self):
         """Verify that account creation is enabled."""
         if not settings.NEW_ACCOUNT_REGISTRATION_ENABLED:
             # truthy return cancels the command
             self.msg("Registration is currently disabled.")
             return True
 
-        return super().at_pre_cmd()
+        return super().at_pre_parse()
 
     def func(self):
         """Do checks and create account"""

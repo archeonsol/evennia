@@ -14,7 +14,101 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.2 — Phase 2 step 1: at_pre_cmd rename + dispatch reorder
+
+First slice of the Phase 2 cmdset refactor. Renames the pre-parse hook
+and introduces a (currently engine-only) post-parse hook. Pure rename
+under a hard-error guard: no semantic change yet, no auto-alias.
+
+### Breaking
+
+- **`Command.at_pre_cmd` renamed to `Command.at_pre_parse`.** Same
+  semantics (runs before `parse()`, return truthy to abort).
+- **`Command.__init_subclass__` hard-error guard.** Any subclass that
+  defines `at_pre_cmd` raises `TypeError` at class-creation pointing at
+  the file/class with a migration message. The new post-parse
+  `at_pre_cmd` exists but is engine-only during this window;
+  subclassing it is forbidden so legacy overrides cannot silently
+  no-op.
+- **Cmdhandler dispatch order changed** to
+  `at_pre_parse → parse → at_pre_cmd → func → at_post_cmd`. The new
+  `at_pre_cmd` runs *after* parse. The base class's `at_pre_cmd` is a
+  no-op; it does nothing observable to current code.
+- `evennia.utils.test_resources.BaseEvenniaCommandTest.call` mirrors
+  the new dispatch order. Tests that subclass `Command` and override
+  the old hook must rename to `at_pre_parse`.
+
+### Migration
+
+If you see `TypeError: <Module>.<Class> defines at_pre_cmd, which was
+renamed to at_pre_parse...` at import:
+
+1. Rename the method to `at_pre_parse`.
+2. Update any `super().at_pre_cmd()` calls to `super().at_pre_parse()`.
+3. Re-import; the guard accepts the new name.
+
+The post-parse `at_pre_cmd` will become subclass-able in a future
+release (target: `6.0.0+underspire.4`) once the guard is removed.
+
+### Engine renames in this commit
+
+`evennia/contrib/game_systems/storage/storage.py`,
+`evennia/contrib/base_systems/email_login/email_login.py`,
+`evennia/contrib/base_systems/ingame_reports/reports.py`,
+`evennia/commands/default/unloggedin.py`. The no-op
+`MuxCommand.at_pre_cmd` stub was deleted (it inherited the base
+no-op). Test fixtures in `commands/default/tests.py` and
+`contrib/base_systems/ingame_reports/tests.py` renamed.
+
+### Signals
+
+`on_command_pre.elapsed_ms` window unchanged in semantics but
+documented relative to `at_pre_parse` rather than the old name. No
+signal contract changes.
+
+### PostgreSQL session init via `connection_created`
+
+`apply_postgres_engine_defaults` no longer injects
+`OPTIONS["options"] = "-c statement_timeout=..."` and
+`build_read_replica_entry` no longer injects
+`-c default_transaction_read_only=on`. PgBouncer in transaction-pool
+mode rejects the `options` startup parameter at the protocol level
+(`FATAL: unsupported startup parameter in options: ...`), so the
+previous defaults broke pooled deployments out of the box.
+
+Replacement: a `connection_created` receiver issues `SET
+statement_timeout` on the `default` alias and `SET
+default_transaction_read_only = on` on aliases registered by
+`build_read_replica_entry`. Works through PgBouncer. Caveat for pure
+transaction-pool deployments: session-level `SET` may not persist
+across backend rebinding — set at the role level (`ALTER ROLE ... SET
+statement_timeout = '30s'`) for hard guarantees, and treat the signal
+receiver as best-effort on top.
+
+`build_read_replica_entry(primary, name=...)` now has a side effect:
+the `name` argument is registered in
+`evennia.server.database_postgres._READ_REPLICA_ALIASES` so the
+receiver knows which aliases get the read-only flag. The caller must
+still assign the returned dict at `DATABASES[name]`.
+
+---
+
 ## 6.0.0+underspire.1 — initial fork version mark
+
+> **⚠ Packaging caveat.** The tagged commit (`02063d4e6`) bumped
+> `evennia/VERSION.txt` to `6.0.0+underspire.1` but `pyproject.toml`
+> still read `6.0.0`. A follow-up commit (`607ecc4fa`) fixed
+> `pyproject.toml`, but it landed after the tag. Pip-installing from
+> exactly `underspire.1` therefore records the installed version as
+> `6.0.0` (no local segment), even though `evennia.__version__` at
+> runtime reads `6.0.0+underspire.1` from `VERSION.txt`.
+>
+> Consumers that gate on `pkg_resources.get_distribution("evennia").version`
+> (or equivalent) should pin **`>= 6.0.0+underspire.2`** instead. Runtime
+> code reading `evennia.__version__` is unaffected.
+>
+> Tags from `underspire.2` onward bundle both files in the same commit.
+
 
 First release tagged after the fork diverged meaningfully from upstream
 `6.0.0`. Base = upstream `6.0.0`; everything below is fork-only.

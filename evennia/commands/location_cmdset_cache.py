@@ -65,3 +65,8 @@ def set_cached_location_cmdsets(key: tuple, cmdsets: list) -> None:
     maxsize = _maxsize()
     while len(_CACHE) > maxsize:
         _CACHE.popitem(last=False)
+
+
+def clear_location_cmdset_cache() -> None:
+    """Drop every cached entry. Intended for test teardown."""
+    _CACHE.clear()

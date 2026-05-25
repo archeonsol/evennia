@@ -21,8 +21,10 @@ command line. The processing of a command works as follows:
    fallback to error message. Exit.
 8. At this point we have found a normal command. We assign useful variables to it that
    will be available to the command coder at run-time.
-9. We have a unique cmdobject, primed for use. Call all hooks:
-   `at_pre_cmd()`, `cmdobj.parse()`, `cmdobj.func()` and finally `at_post_cmd()`.
+9. We have a unique cmdobject, primed for use. Call all hooks in order:
+   `at_pre_parse()`, `cmdobj.parse()`, `at_pre_cmd()`, `cmdobj.func()`,
+   `at_post_cmd()`. (`at_pre_cmd` runs after parse since 6.0.0+underspire.2;
+   the old pre-parse hook was renamed to `at_pre_parse`.)
 10. Return deferred that will fire with the return from `cmdobj.func()` (unused by default).
 
 """
@@ -724,7 +726,7 @@ def cmdhandler(
                 )
                 raise RuntimeError(err)
 
-            # Wall-clock and trace-id captured up front, before at_pre_cmd
+            # Wall-clock and trace-id captured up front, before at_pre_parse
             # so on_command_post.elapsed_ms covers the full hook range.
             # Stashed on cmd for the generator path; _progressive_cmd_run
             # cannot read the contextvar after end_command_trace() runs.
@@ -741,14 +743,19 @@ def cmdhandler(
                 trace_id=_signal_trace_id,
             )
 
-            # pre-command hook
-            abort = yield cmd.at_pre_cmd()
+            # pre-parse hook (was: at_pre_cmd before 6.0.0+underspire.2)
+            abort = yield cmd.at_pre_parse()
             if abort:
                 # abort sequence
                 return abort
 
             # Parse and execute
             yield cmd.parse()
+
+            # post-parse, pre-func hook (new in 6.0.0+underspire.2)
+            abort = yield cmd.at_pre_cmd()
+            if abort:
+                return abort
 
             # main command code
             # (return value is normally None)

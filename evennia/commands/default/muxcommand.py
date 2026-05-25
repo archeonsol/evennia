@@ -32,12 +32,6 @@ class MuxCommand(Command):
         """
         return super().has_perm(srcobj)
 
-    def at_pre_cmd(self):
-        """
-        This hook is called before self.parse() on all commands
-        """
-        pass
-
     def at_post_cmd(self):
         """
         This hook is called after the command has finished executing

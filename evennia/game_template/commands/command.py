@@ -23,9 +23,11 @@ class Command(BaseCommand):
     # Each Command class implements the following methods, called in this order
     # (only func() is actually required):
     #
-    #     - at_pre_cmd(): If this returns anything truthy, execution is aborted.
+    #     - at_pre_parse(): Runs before parse(). Return truthy to abort.
     #     - parse(): Should perform any extra parsing needed on self.args
     #         and store the result on self.
+    #     - at_pre_cmd(): Runs after parse(), before func(). Engine-only
+    #         during the rename deprecation window; do not override yet.
     #     - func(): Performs the actual work.
     #     - at_post_cmd(): Extra actions, often things done after
     #         every command, like prompts.
@@ -74,9 +76,10 @@ class Command(BaseCommand):
 #         """
 #         return super().has_perm(srcobj)
 #
-#     def at_pre_cmd(self):
+#     def at_pre_parse(self):
 #         """
-#         This hook is called before self.parse() on all commands
+#         This hook is called before self.parse() on all commands.
+#         Return truthy to abort.
 #         """
 #         pass
 #

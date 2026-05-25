@@ -25,8 +25,9 @@ to remain forward-compatible):
 ``on_command_pre``
     Fired after the command's runtime attributes (``caller``, ``session``,
     ``cmdname``, ``args``, ``raw_string`` ...) are set and before
-    ``at_pre_cmd()`` runs. Receivers are observers only; they cannot
-    abort dispatch (use ``at_pre_cmd`` for gatekeeping).
+    ``at_pre_parse()`` runs. Receivers are observers only; they cannot
+    abort dispatch (use ``at_pre_parse`` to gate before parse, or
+    ``at_pre_cmd`` to gate after parse but before ``func``).
 
     - ``cmd`` (Command): the command instance about to be executed.
     - ``caller``: the caller object (Session, Account, or Object).
@@ -41,7 +42,7 @@ to remain forward-compatible):
 
     - ``cmd``, ``caller``, ``session``, ``trace_id``: as above.
     - ``elapsed_ms`` (float): wall time in milliseconds from just before
-      ``at_pre_cmd`` to just after ``at_post_cmd``.
+      ``at_pre_parse`` to just after ``at_post_cmd``.
 
 ``on_command_error``
     Fired inside the ``_run_command`` exception handler that converts a

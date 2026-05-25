@@ -1727,6 +1727,85 @@ class TestCmdAccessCache(BaseEvenniaTest):
 
 
 # ----------------------------------------------------------------------------
+# Phase 2 step 1: at_pre_cmd → at_pre_parse rename + post-parse at_pre_cmd
+# ----------------------------------------------------------------------------
+
+
+class TestAtPreCmdRename(BaseEvenniaTest):
+    """Hook dispatch order and the __init_subclass__ guard."""
+
+    def test_dispatch_order_calls_pre_parse_then_parse_then_pre_cmd_then_func(self):
+        events = []
+
+        class _CmdOrder(Command):
+            key = "order"
+            locks = "cmd:all()"
+
+            def at_pre_parse(self):
+                events.append("at_pre_parse")
+
+            def parse(self):
+                events.append("parse")
+
+            def func(self):
+                events.append("func")
+
+            def at_post_cmd(self):
+                events.append("at_post_cmd")
+
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdOrder(), cmdobj_key="order")
+
+        def _check(_):
+            # at_pre_cmd is engine-only (no-op) during the deprecation
+            # window, so it doesn't show up in events but still runs in
+            # dispatch. Order of the hooks the subclass CAN observe:
+            self.assertEqual(events, ["at_pre_parse", "parse", "func", "at_post_cmd"])
+
+        d.addCallback(_check)
+        return d
+
+    def test_pre_parse_truthy_return_aborts_before_parse(self):
+        events = []
+
+        class _CmdAbortPre(Command):
+            key = "abortpre"
+            locks = "cmd:all()"
+
+            def at_pre_parse(self):
+                events.append("at_pre_parse")
+                return True
+
+            def parse(self):
+                events.append("parse")
+
+            def func(self):
+                events.append("func")
+
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPre(), cmdobj_key="abortpre")
+
+        def _check(_):
+            self.assertEqual(events, ["at_pre_parse"])
+
+        d.addCallback(_check)
+        return d
+
+    def test_subclassing_at_pre_cmd_raises_typeerror_at_import(self):
+        # __init_subclass__ guard fires at class-creation time.
+        with self.assertRaises(TypeError) as ctx:
+
+            class _CmdIllegal(Command):
+                key = "illegal"
+
+                def at_pre_cmd(self):
+                    return True
+
+        msg = str(ctx.exception)
+        self.assertIn("at_pre_cmd", msg)
+        self.assertIn("at_pre_parse", msg)
+        self.assertIn("underspire.2", msg)
+
+
+# ----------------------------------------------------------------------------
 # Tests for evennia.commands.signals (cmdhandler pre/post/error signals)
 # ----------------------------------------------------------------------------
 
@@ -2044,11 +2123,18 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation, cmdset_generation, get_cached_location_cmdsets,
-    make_cache_key, set_cached_location_cmdsets)
+    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
+    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
+    def setUp(self):
+        super().setUp()
+        # The cache is a process-global OrderedDict. Without cleanup, sentinel
+        # values written by test_cache_roundtrip leak into later tests
+        # (TestBuilding.test_tunnel etc.) and trip cmdset.key attribute access.
+        self.addCleanup(clear_location_cmdset_cache)
+
     def test_generation_bumps_on_cmdset_change(self):
         gen0 = cmdset_generation(self.char1)
         self.char1.cmdset.add("evennia.commands.default.cmdset_character.CharacterCmdSet")

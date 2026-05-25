@@ -142,14 +142,14 @@ class CmdUnconnectedCreate(MuxCommand):
     aliases = ["cre", "cr"]
     locks = "cmd:all()"
 
-    def at_pre_cmd(self):
+    def at_pre_parse(self):
         """Verify that account creation is enabled."""
         if not settings.NEW_ACCOUNT_REGISTRATION_ENABLED:
             # truthy return cancels the command
             self.msg("Registration is currently disabled.")
             return True
 
-        return super().at_pre_cmd()
+        return super().at_pre_parse()
 
     def parse(self):
         """

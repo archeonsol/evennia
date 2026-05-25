@@ -189,18 +189,45 @@ path, so correlation across signals + logs works uniformly.
 
 ## Phase 2 — Account/Character split + hook reorder
 
-_Pending. Anticipated migration:_
+### Step 1 (shipped in `6.0.0+underspire.2`): `at_pre_cmd` rename + dispatch reorder
 
-- **Auto (planned):** subclasses that define `at_pre_cmd` without
-  `at_pre_parse` will have the engine alias the method onto `at_pre_parse`
-  at class-creation time and emit a `DeprecationWarning` citing the file.
-  Game keeps working as-is.
-- **Required (planned):** to use the new post-parse `at_pre_cmd` semantic,
-  rename your hook explicitly and adjust callsites. The rename is a
-  per-subclass audit, not a blanket grep: any override that *reads*
-  parsed args (`self.args`, `self.switches`, `self.character`) is a
-  latent bug today and should stay on (or move to) the new post-parse
-  `at_pre_cmd`.
+- **Hook rename.** `Command.at_pre_cmd` (pre-parse early gate) is now
+  `Command.at_pre_parse`. Same semantics: runs before `parse()`,
+  return truthy to abort.
+- **New dispatch order:**
+  `at_pre_parse → parse → at_pre_cmd → func → at_post_cmd`. The new
+  `at_pre_cmd` runs *after* parse.
+- **Hard-error guard.** Subclasses defining `at_pre_cmd` raise
+  `TypeError` at class-creation. The new post-parse `at_pre_cmd` is
+  engine-only during the deprecation window; the guard is removed in
+  `6.0.0+underspire.4` (target).
+
+**Migration (required):**
+
+1. If you see `TypeError: <Module>.<Class> defines at_pre_cmd, which
+   was renamed to at_pre_parse...` at import time, rename the method
+   body to `at_pre_parse`.
+2. Update `super().at_pre_cmd()` calls to `super().at_pre_parse()`.
+3. Per-subclass audit: an override that *reads* parsed args
+   (`self.args`, `self.switches`, `self.character`) is a latent bug
+   today because it ran before `parse`. Today the fix is to move that
+   logic into `func` (or override `parse`). Once the post-parse
+   `at_pre_cmd` becomes subclass-able, those overrides should target
+   the new hook.
+
+### Remaining Phase 2 steps (planned)
+
+These ship under later `+underspire.N` versions.
+
+- `AccountCommand` engine class + cmdhandler caller-normalization.
+- `MuxCommand` / `MuxAccountCommand` deprecation aliases.
+- `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
+- Switch parsing into `Command.parse`.
+- **Hard-error guard removal** (target `+underspire.4`): the
+  post-parse `at_pre_cmd` becomes available for subclassing.
+
+Game-side cleanup that lands once those steps are in:
+
 - **Optional cleanup (planned):** delete game-side `AccountCommand`
   normalization (`_normalize_account_caller`, etc.) once the engine
   guarantees `self.caller`/`self.character` shape.

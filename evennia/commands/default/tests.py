@@ -25,29 +25,15 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command, InterruptCommand
-from evennia.commands.default import (
-    account,
-    admin,
-    batchprocess,
-    building,
-    comms,
-    general,
-)
+from evennia.commands.default import (account, admin, batchprocess, building,
+                                      comms, general)
 from evennia.commands.default import help as help_module
-from evennia.commands.default import (
-    syscommands,
-    system,
-    unloggedin,
-)
+from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (
-    DefaultCharacter,
-    DefaultExit,
-    DefaultObject,
-    DefaultRoom,
-)
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
 from evennia.prototypes import prototypes as protlib
 from evennia.utils import create, gametime, utils
 from evennia.utils.search import search_object
@@ -404,7 +390,8 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         self.timedelay = 5
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import \
+                TASK_HANDLER as _TASK_HANDLER
         _TASK_HANDLER.clock = task.Clock()
         self.task_handler = _TASK_HANDLER
         self.task_handler.clear()
@@ -2303,9 +2290,11 @@ class TestSystemCommands(BaseEvenniaCommandTest):
 
 
 class TestPreCmdOutputTestable(BaseEvenniaCommandTest):
-    def test_pre_cmd(self):
+    def test_pre_parse(self):
+        # at_pre_parse (was: at_pre_cmd before 6.0.0+underspire.2) aborts
+        # the command sequence when it returns truthy.
         class CmdTest(Command):
-            def at_pre_cmd(self):
+            def at_pre_parse(self):
                 self.msg("This should be testable")
                 return True
 
