@@ -619,6 +619,11 @@ START_LOCATION = "#2"
 # out of sync between the processes. Keep on unless you face such
 # issues.
 TYPECLASS_AGGRESSIVE_CACHE = True
+# Attribute backend class path (ModelAttributeBackend or RedisCachedModelAttributeBackend)
+ATTRIBUTE_BACKEND_CLASS = "evennia.typeclasses.attributes.ModelAttributeBackend"
+ATTRIBUTE_REDIS_CACHE_ENABLED = False
+ATTRIBUTE_REDIS_CACHE_ALIAS = "attributes"
+ATTRIBUTE_REDIS_CACHE_TTL = 3600
 # These are fallbacks for BASE typeclasses failing to load. Usually needed only
 # during doc building. The system expects these to *always* load correctly, so
 # only modify if you are making fundamental changes to how objects/accounts

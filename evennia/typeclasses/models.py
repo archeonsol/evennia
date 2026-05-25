@@ -367,7 +367,14 @@ class TypedObject(SharedMemoryModel):
     # initialize all handlers in a lazy fashion
     @lazy_property
     def attributes(self):
-        return AttributeHandler(self, ModelAttributeBackend)
+        backend_class = class_from_module(
+            getattr(
+                settings,
+                "ATTRIBUTE_BACKEND_CLASS",
+                "evennia.typeclasses.attributes.ModelAttributeBackend",
+            )
+        )
+        return AttributeHandler(self, backend_class)
 
     @lazy_property
     def locks(self):

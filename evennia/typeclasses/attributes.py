@@ -29,12 +29,79 @@ _TYPECLASS_AGGRESSIVE_CACHE = settings.TYPECLASS_AGGRESSIVE_CACHE
 
 # Write-behind registry: backends with unflushed dirty attrs
 _DIRTY_BACKENDS: "weakref.WeakSet" = weakref.WeakSet()
+# Attrs mutated via .value setter / lock_storage (bypass backend dirty set)
+_ORPHAN_DIRTY_ATTRS: "weakref.WeakSet" = weakref.WeakSet()
+_DIRTY_ATTR_UPDATE_FIELDS = [
+    "db_value",
+    "db_strvalue",
+    "db_category",
+    "db_lock_storage",
+    "db_val_type",
+    "db_int_val",
+    "db_float_val",
+    "db_str_val",
+]
+
+
+def _classify_value(value):
+    """Classify a value into typed columns or the pickle path.
+
+    Returns (val_type, int_val, float_val, str_val, pickle_val).
+    bool is checked before int because bool is a subclass of int.
+    """
+    if value is None:
+        return ("none", None, None, None, None)
+    t = type(value)
+    if t is bool:
+        return ("bool", int(value), None, None, None)
+    if t is int:
+        return ("int", value, None, None, None)
+    if t is float:
+        return ("float", None, value, None, None)
+    if t is str:
+        return ("str", None, None, value, None)
+    return ("", None, None, None, to_pickle(value))
+
+
+def _apply_classified_value(attr, value, strvalue=False):
+    """Set attribute ORM fields from a value without saving."""
+    if strvalue:
+        attr.db_value = None
+        attr.db_strvalue = value
+        attr.db_val_type = ""
+        attr.db_int_val = None
+        attr.db_float_val = None
+        attr.db_str_val = None
+    else:
+        val_type, int_val, float_val, str_val, pickle_val = _classify_value(value)
+        attr.db_val_type = val_type
+        attr.db_int_val = int_val
+        attr.db_float_val = float_val
+        attr.db_str_val = str_val
+        attr.db_value = pickle_val
+        attr.db_strvalue = None
+
+
+def _mark_attr_dirty(attr):
+    """Queue an Attribute for write-behind flush (orphan path)."""
+    if attr and getattr(attr, "pk", None):
+        _ORPHAN_DIRTY_ATTRS.add(attr)
+
+
+def _flush_orphan_dirty():
+    """Bulk-write attributes dirtied outside ModelAttributeBackend."""
+    dirty = [attr for attr in list(_ORPHAN_DIRTY_ATTRS) if getattr(attr, "pk", None)]
+    for attr in dirty:
+        _ORPHAN_DIRTY_ATTRS.discard(attr)
+    if dirty:
+        Attribute.objects.bulk_update(dirty, _DIRTY_ATTR_UPDATE_FIELDS)
 
 
 def flush_all_dirty():
     """Flush all pending attribute writes to DB. Called from tick handler."""
     for backend in list(_DIRTY_BACKENDS):
         backend.flush_dirty()
+    _flush_orphan_dirty()
 
 # -------------------------------------------------------------
 #
@@ -452,11 +519,11 @@ class Attribute(IAttribute, SharedMemoryModel):
 
     def __lock_storage_set(self, value):
         self.db_lock_storage = value
-        self.save(update_fields=["db_lock_storage"])
+        _mark_attr_dirty(self)
 
     def __lock_storage_del(self):
         self.db_lock_storage = ""
-        self.save(update_fields=["db_lock_storage"])
+        _mark_attr_dirty(self)
 
     lock_storage = property(__lock_storage_get, __lock_storage_set, __lock_storage_del)
 
@@ -484,11 +551,11 @@ class Attribute(IAttribute, SharedMemoryModel):
     @value.setter
     def value(self, new_value):
         """
-        Setter. Allows for self.value = value. We cannot cache here,
-        see self.__value_get.
+        Setter. Allows for self.value = value. Write-behind: marks dirty
+        for flush_all_dirty() instead of immediate save (Saver mutables).
         """
-        self.db_value = to_pickle(new_value)
-        self.save(update_fields=["db_value"])
+        _apply_classified_value(self, new_value, strvalue=False)
+        _mark_attr_dirty(self)
 
     @value.deleter
     def value(self):
@@ -1042,26 +1109,6 @@ class InMemoryAttributeBackend(IAttributeBackend):
         """
         del self._storage[(attr.key, attr.category)]
         self._category_storage[attr.category].remove(attr)
-
-
-def _classify_value(value):
-    """Classify a value into typed columns or the pickle path.
-
-    Returns (val_type, int_val, float_val, str_val, pickle_val).
-    bool is checked before int because bool is a subclass of int.
-    """
-    if value is None:
-        return ("none", None, None, None, None)
-    t = type(value)
-    if t is bool:
-        return ("bool", int(value), None, None, None)
-    if t is int:
-        return ("int", value, None, None, None)
-    if t is float:
-        return ("float", None, value, None, None)
-    if t is str:
-        return ("str", None, None, value, None)
-    return ("", None, None, None, to_pickle(value))
 
 
 class ModelAttributeBackend(IAttributeBackend):
