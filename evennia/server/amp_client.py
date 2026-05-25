@@ -138,7 +138,11 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
 
         """
         # print("server data_to_portal: {}, {}, {}".format(command, sessid, kwargs))
-        return self.callRemote(command, packed_data=amp.dumps((sessid, kwargs))).addErrback(
+        if command in (amp.MsgServer2Portal,) and amp.session_serde_enabled():
+            packed = amp.dumps_session((sessid, kwargs))
+        else:
+            packed = amp.dumps((sessid, kwargs))
+        return self.callRemote(command, packed_data=packed).addErrback(
             self.errback, command.key
         )
 
@@ -188,7 +192,7 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
             packed_data (str): Data to receive (a pickled tuple (sessid,kwargs))
 
         """
-        sessid, kwargs = self.data_in(packed_data)
+        sessid, kwargs = amp.loads_session(packed_data)
         session = evennia.SERVER_SESSION_HANDLER.get(sessid, None)
         if session:
             evennia.SERVER_SESSION_HANDLER.data_in(session, **kwargs)

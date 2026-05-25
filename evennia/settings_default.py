@@ -587,6 +587,34 @@ AT_INIT_DEFER_ON_RELOAD = True
 GLOBAL_SCRIPTS_DEFER_LAZY_START = True
 GLOBAL_SCRIPTS_LAZY_BATCH_SIZE = 5
 GLOBAL_SCRIPTS_LAZY_DELAY = 0
+# --- Tier 2: event bus, job queue, channel cache, AMP session serde, Postgres ---
+# Msg* AMP traffic: "json" (secure) or "pickle" (legacy only).
+AMP_SESSION_SERDE = "json"
+# Reject pickle on Msg* unless explicitly enabled for migration.
+AMP_SESSION_ACCEPT_LEGACY_PICKLE = False
+# Engine event bus (in-process listeners + optional Redis stream / Postgres rows).
+EVENT_BUS_ENABLED = True
+EVENT_BUS_BACKEND = "memory"  # memory | redis | postgres | both
+EVENT_BUS_REDIS_ALIAS = "default"
+EVENT_BUS_REDIS_STREAM = "evennia:events"
+EVENT_BUS_REDIS_STREAM_MAXLEN = 100000
+# Subjects always persisted to GameEvent when listed (moderation audit).
+EVENT_BUS_PERSIST_SUBJECTS = frozenset()
+# Whitelisted background jobs (type -> dotted callable taking one dict payload).
+JOB_QUEUE_ENABLED = True
+JOB_QUEUE_BACKEND = "redis"  # redis | postgres
+JOB_QUEUE_REGISTRY = {}
+JOB_QUEUE_REDIS_ALIAS = "default"
+JOB_QUEUE_REDIS_KEY = "evennia:jobs:pending"
+JOB_QUEUE_DRAIN_EVERY_N_TICKS = 10
+JOB_QUEUE_DRAIN_MAX_JOBS = 5
+# Redis SET index for channel subscribers (PG M2M remains source of truth).
+CHANNEL_SUBSCRIBER_CACHE_ENABLED = True
+CHANNEL_SUBSCRIBER_CACHE_REDIS_ALIAS = "default"
+# PostgreSQL connection defaults (apply via evennia.server.database_postgres.apply_postgres_engine_defaults).
+ENGINE_DATABASE_CONN_MAX_AGE = 600
+ENGINE_DATABASE_CONN_HEALTH_CHECKS = True
+ENGINE_DATABASE_STATEMENT_TIMEOUT_MS = 30000
 # Fallbacks for cmdset paths that fail to load. Note that if you change the path for your
 # default cmdsets, you will also need to copy CMDSET_FALLBACKS after your change in your
 # settings file for it to detect the change.
