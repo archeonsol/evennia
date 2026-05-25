@@ -2123,11 +2123,18 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation, cmdset_generation, get_cached_location_cmdsets,
-    make_cache_key, set_cached_location_cmdsets)
+    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
+    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
+    def setUp(self):
+        super().setUp()
+        # The cache is a process-global OrderedDict. Without cleanup, sentinel
+        # values written by test_cache_roundtrip leak into later tests
+        # (TestBuilding.test_tunnel etc.) and trip cmdset.key attribute access.
+        self.addCleanup(clear_location_cmdset_cache)
+
     def test_generation_bumps_on_cmdset_change(self):
         gen0 = cmdset_generation(self.char1)
         self.char1.cmdset.add("evennia.commands.default.cmdset_character.CharacterCmdSet")
