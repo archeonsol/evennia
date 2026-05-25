@@ -66,6 +66,31 @@ no-op). Test fixtures in `commands/default/tests.py` and
 documented relative to `at_pre_parse` rather than the old name. No
 signal contract changes.
 
+### PostgreSQL session init via `connection_created`
+
+`apply_postgres_engine_defaults` no longer injects
+`OPTIONS["options"] = "-c statement_timeout=..."` and
+`build_read_replica_entry` no longer injects
+`-c default_transaction_read_only=on`. PgBouncer in transaction-pool
+mode rejects the `options` startup parameter at the protocol level
+(`FATAL: unsupported startup parameter in options: ...`), so the
+previous defaults broke pooled deployments out of the box.
+
+Replacement: a `connection_created` receiver issues `SET
+statement_timeout` on the `default` alias and `SET
+default_transaction_read_only = on` on aliases registered by
+`build_read_replica_entry`. Works through PgBouncer. Caveat for pure
+transaction-pool deployments: session-level `SET` may not persist
+across backend rebinding — set at the role level (`ALTER ROLE ... SET
+statement_timeout = '30s'`) for hard guarantees, and treat the signal
+receiver as best-effort on top.
+
+`build_read_replica_entry(primary, name=...)` now has a side effect:
+the `name` argument is registered in
+`evennia.server.database_postgres._READ_REPLICA_ALIASES` so the
+receiver knows which aliases get the read-only flag. The caller must
+still assign the returned dict at `DATABASES[name]`.
+
 ---
 
 ## 6.0.0+underspire.1 — initial fork version mark
