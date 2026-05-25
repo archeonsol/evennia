@@ -95,6 +95,21 @@ still assign the returned dict at `DATABASES[name]`.
 
 ## 6.0.0+underspire.1 — initial fork version mark
 
+> **⚠ Packaging caveat.** The tagged commit (`02063d4e6`) bumped
+> `evennia/VERSION.txt` to `6.0.0+underspire.1` but `pyproject.toml`
+> still read `6.0.0`. A follow-up commit (`607ecc4fa`) fixed
+> `pyproject.toml`, but it landed after the tag. Pip-installing from
+> exactly `underspire.1` therefore records the installed version as
+> `6.0.0` (no local segment), even though `evennia.__version__` at
+> runtime reads `6.0.0+underspire.1` from `VERSION.txt`.
+>
+> Consumers that gate on `pkg_resources.get_distribution("evennia").version`
+> (or equivalent) should pin **`>= 6.0.0+underspire.2`** instead. Runtime
+> code reading `evennia.__version__` is unaffected.
+>
+> Tags from `underspire.2` onward bundle both files in the same commit.
+
+
 First release tagged after the fork diverged meaningfully from upstream
 `6.0.0`. Base = upstream `6.0.0`; everything below is fork-only.
 
