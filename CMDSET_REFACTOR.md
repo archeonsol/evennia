@@ -135,6 +135,12 @@ not yet change command semantics.
    `(cmd, caller, session, exc, traceback_text, trace_id)`. `trace_id` comes
    from `command_trace.get_trace_id()`.
 
+   **Companion signal `on_cmdset_merge_error`** covers the three merge-error
+   sites in `get_and_merge_cmdsets` where `ErrorReported` is raised without a
+   `cmd` instance (cmdset-getter and merge failures). Receivers get
+   `(caller, session, raw_string, exc, traceback_text, trace_id)`. Sender is
+   `type(caller)` since no command exists yet.
+
 2. **`cmdhandler.on_command_pre` / `on_command_post` signals**. Fire around
    `func()` invocation. Receivers get the same context plus `elapsed_ms` on
    the post signal. Profiling subscribes to these instead of patching

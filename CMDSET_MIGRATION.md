@@ -56,20 +56,24 @@ source now run without the `Conflicting 'object' models` error.
   object passed as `session=` to `cmdhandler.cmdhandler`.
 - Drop `_patch_cmdhandler_error_capture` from
   `server/conf/at_server_startstop.py`; subscribe to `on_command_error`
-  instead.
+  for per-command failures and `on_cmdset_merge_error` for cmdset
+  build/merge failures.
 
 ### Signals (`evennia.commands.signals`)
 
-Three `django.dispatch.Signal` instances, fired with `send_robust` (a bad
+Four `django.dispatch.Signal` instances, fired with `send_robust` (a bad
 receiver returns the exception in the response list but cannot break
-dispatch for other receivers or for the user). All three carry
-`sender=type(cmd)` so receivers can filter by Command class.
+dispatch for other receivers or for the user). The per-command signals
+carry `sender=type(cmd)` so receivers can filter by Command class;
+`on_cmdset_merge_error` has no `cmd` and uses `sender=type(caller)`
+instead.
 
 | Signal | Fires | Kwargs |
 |---|---|---|
 | `on_command_pre` | After cmd's runtime attrs are set, before `at_pre_cmd()` | `cmd, caller, session, trace_id` |
 | `on_command_post` | After `at_post_cmd()` (sync or generator path) | `cmd, caller, session, trace_id, elapsed_ms` |
 | `on_command_error` | Inside `_run_command`'s `except Exception:` block when `func()` raised | `cmd, caller, session, trace_id, exc, traceback_text` |
+| `on_cmdset_merge_error` | At the three merge-error sites in `get_and_merge_cmdsets` (`_get_local_obj_cmdsets`, `_get_cmdsets`, outer except) | `caller, session, raw_string, trace_id, exc, traceback_text` |
 
 `trace_id` is the per-command id from
 `evennia.utils.command_trace.get_trace_id()`. The same id is now also
@@ -105,9 +109,9 @@ re-registration across reloads.
 #### Error-capture subscriber pattern
 
 ```python
-from evennia.commands.signals import on_command_error
+from evennia.commands.signals import on_cmdset_merge_error, on_command_error
 
-@receiver(on_command_error)
+@receiver(on_command_error, dispatch_uid="capture-command-error")
 def _capture_command_error(sender, cmd, exc, traceback_text, trace_id, **kwargs):
     sentry_or_whatever.report(
         cmd_key=getattr(cmd, "key", "?"),
@@ -115,7 +119,20 @@ def _capture_command_error(sender, cmd, exc, traceback_text, trace_id, **kwargs)
         exc=exc,
         traceback_text=traceback_text,
     )
+
+@receiver(on_cmdset_merge_error, dispatch_uid="capture-merge-error")
+def _capture_merge_error(sender, caller, raw_string, exc, traceback_text, trace_id, **kwargs):
+    sentry_or_whatever.report(
+        cmd_key="<cmdset-merge>",
+        raw_string=raw_string,
+        trace_id=trace_id,
+        exc=exc,
+        traceback_text=traceback_text,
+    )
 ```
+
+Use `dispatch_uid` on receivers if you re-register at reload so duplicate
+subscriptions don't accumulate.
 
 ### Session-proxy contract
 
@@ -135,11 +152,11 @@ and tested.
 
 **Scope note for `on_command_error`:** the signal fires only at the
 `_run_command` error site (where there is a real `cmd` instance to hand
-to receivers). `ErrorReported` raised from cmdset-merge / cmdset-getter
-failures still carries `trace_id`, but does not fire the signal. If the
-game previously relied on the monkey-patched error capture seeing
-cmdset-merge errors as well, capture them via the standard logger
-(`logger.log_err`) and correlate by `trace_id`.
+to receivers). Cmdset build/merge failures fire `on_cmdset_merge_error`
+instead — subscribe to both if the previous monkey-patched error capture
+needed to see merge errors too. Both signals carry the same `trace_id`
+shape, and `ErrorReported` exposes `.trace_id` on raises from either
+path, so correlation across signals + logs works uniformly.
 
 ---
 
