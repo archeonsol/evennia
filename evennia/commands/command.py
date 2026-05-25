@@ -485,6 +485,12 @@ class Command(metaclass=CommandMeta):
                 "overridden yet."
             )
 
+    # Set to True on subclasses (or AccountCommand) so cmdhandler normalises
+    # ``self.caller`` to the Account and exposes ``self.character`` as the
+    # puppet for ``self.session``. See ``AccountCommand`` and
+    # ``cmdhandler._normalize_account_command_caller``.
+    account_command_caller = False
+
     def at_pre_parse(self):
         """Hook called before ``self.parse()``.
 
@@ -840,3 +846,32 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
         if "mode" not in kwargs:
             kwargs["mode"] = "footer"
         return self._render_decoration(*args, **kwargs)
+
+
+class AccountCommand(Command):
+    """Command dispatched against an Account rather than a puppeted Character.
+
+    The cmdhandler detects this class via the ``account_command_caller``
+    class flag (no metaclass or ``isinstance`` import-cycle) and normalises
+    runtime attributes before any hooks fire:
+
+    - ``self.caller``: the Account, taken from
+      ``cmdset_providers["account"]`` and falling back to
+      ``caller.account`` if the providers dict has no account entry.
+    - ``self.account``: alias for ``self.caller``.
+    - ``self.character``: the puppet for ``self.session`` (from
+      ``cmdset_providers["object"]``), or ``None`` if the session is
+      OOC.
+
+    Normalisation runs before ``at_pre_parse``, so both pre- and
+    post-parse hooks observe a consistent shape. ``self.session`` keeps
+    its usual value (real ``ServerSession`` or ``None``).
+
+    If no Account is resolvable, ``self.caller`` is left as the
+    cmdhandler-supplied value and ``self.character`` is set to ``None``
+    so the attribute always exists on the instance.
+
+    Shipped in ``6.0.0+underspire.3``.
+    """
+
+    account_command_caller = True

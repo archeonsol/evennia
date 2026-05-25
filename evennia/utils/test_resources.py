@@ -429,6 +429,16 @@ class EvenniaCommandTestMixin:
         cmdobj.account = self.account
         cmdobj.raw_string = raw_string if raw_string is not None else cmdobj.key + " " + input_args
         cmdobj.obj = obj or (caller if caller else self.char1)
+        # Mirror cmdhandler's AccountCommand normalisation so test fixtures
+        # see the same caller/character/account shape as real dispatch.
+        if getattr(cmdobj, "account_command_caller", False):
+            from evennia.commands.cmdhandler import \
+                _normalize_account_command_caller
+
+            providers = {"account": self.account}
+            if cmdobj.session is not None and getattr(cmdobj.session, "puppet", None) is not None:
+                providers["object"] = cmdobj.session.puppet
+            _normalize_account_command_caller(cmdobj, caller, providers)
         inputs = inputs or []
         # set up receivers
         receiver_mapping = {}

@@ -233,6 +233,40 @@ def _resolve_signal_session(session, cmdset_providers):
     return None
 
 
+def _normalize_account_command_caller(cmd, caller, cmdset_providers):
+    """Normalise runtime attrs for ``AccountCommand`` dispatch.
+
+    No-op unless ``cmd.account_command_caller`` is truthy. For account
+    commands, rewrites:
+
+    - ``cmd.caller`` to the Account (from ``cmdset_providers["account"]``,
+      falling back to ``getattr(caller, "account", None)``).
+    - ``cmd.account`` to the same Account (alias of ``cmd.caller``).
+    - ``cmd.character`` to the puppet for the dispatching session
+      (``cmdset_providers.get("object")``), or ``None`` if no puppet.
+
+    If no Account is resolvable, ``cmd.caller`` is left untouched and
+    ``cmd.character`` is set to ``None`` so the attribute always exists.
+
+    Called once inside ``_run_command`` before ``_testing`` returns and
+    before ``at_pre_parse``, so all hooks (and the test fixture in
+    ``EvenniaCommandTestMixin.call``) observe a consistent shape.
+
+    Args:
+        cmd (Command): Command instance being prepared for dispatch.
+        caller (Object, Account or Session): Pre-normalisation caller as
+            chosen by ``generate_cmdset_providers``.
+        cmdset_providers (dict): ``{cmdset_provider_type: provider}`` map.
+    """
+    if not getattr(cmd, "account_command_caller", False):
+        return
+    account = cmdset_providers.get("account") or getattr(caller, "account", None)
+    if account is not None:
+        cmd.caller = account
+        cmd.account = account
+    cmd.character = cmdset_providers.get("object")
+
+
 def _process_input(caller, prompt, result, cmd, generator):
     """
     Specifically handle the get_input value to send to _progressive_cmd_run as
@@ -708,6 +742,12 @@ def cmdhandler(
             # cmd.obj  # set via on-object cmdset handler for each command,
             # since this may be different for every command when
             # merging multiple cmdsets
+
+            # AccountCommand normalisation: rewrite caller/account/character
+            # before _testing returns and before at_pre_parse, so all hooks
+            # (and the _testing path) observe consistent state. No-op for
+            # ordinary Command subclasses.
+            _normalize_account_command_caller(cmd, caller, cmdset_providers)
 
             if _testing:
                 # only return the command instance

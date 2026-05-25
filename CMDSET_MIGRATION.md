@@ -215,11 +215,50 @@ path, so correlation across signals + logs works uniformly.
    `at_pre_cmd` becomes subclass-able, those overrides should target
    the new hook.
 
+### Step 2 (shipped in `6.0.0+underspire.3`): `AccountCommand` + caller normalisation
+
+- **New class** `evennia.commands.command.AccountCommand`. Sibling of
+  `Command`. Detected by the cmdhandler via the class flag
+  `account_command_caller = True` (no metaclass, no `isinstance`
+  import cycle). `Command.account_command_caller` is `False`.
+- **Cmdhandler normalisation** in `_run_command`, before the
+  `_testing` early return and before `at_pre_parse`, so all hooks see
+  the same shape:
+  - `self.caller` = the Account, from
+    `cmdset_providers["account"]` (falls back to
+    `getattr(caller, "account", None)`).
+  - `self.account` = same Account (alias).
+  - `self.character` = the puppet for `self.session` (from
+    `cmdset_providers["object"]`), or `None` if OOC.
+  - `self.session` keeps its usual real-`ServerSession`-or-`None`
+    value.
+- If no Account is resolvable (defensive: ill-formed dispatch),
+  `self.caller` is left untouched and `self.character` is set to
+  `None` so the attribute always exists.
+- **Trace + access cache unchanged on purpose.**
+  `command_trace.begin_command_trace` keeps the pre-normalisation
+  caller (the dispatch origin). `cmd_access_cache` keys on the
+  pre-normalisation caller too, so the lock check still gates against
+  the puppeted Character; normalisation only rewrites `cmd.caller`
+  after the match.
+
+**Migration (optional cleanup):**
+
+- Downstream `AccountCommand` classes that previously did
+  `_normalize_account_caller` (or equivalent) can drop that logic
+  and subclass `evennia.commands.command.AccountCommand` directly.
+- Game-side tests that instantiate `AccountCommand` subclasses via
+  `BaseEvenniaCommandTest.call` automatically get the normalised
+  shape; manual `cmdobj.caller = ...` assignments around such calls
+  can be removed.
+
+**Not yet:** the post-parse `at_pre_cmd` is still engine-only (the
+hard-error guard remains until `+underspire.4`).
+
 ### Remaining Phase 2 steps (planned)
 
 These ship under later `+underspire.N` versions.
 
-- `AccountCommand` engine class + cmdhandler caller-normalization.
 - `MuxCommand` / `MuxAccountCommand` deprecation aliases.
 - `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
 - Switch parsing into `Command.parse`.
