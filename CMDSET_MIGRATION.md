@@ -165,6 +165,13 @@ receivers see — that's fine for fully synthetic sessions, but receivers
 that filter by session identity will treat the proxy as opaque. Set
 `real_session` whenever the proxy wraps a real session.
 
+**Receiver-side guidance.** Because synthetic proxies can pass through,
+receivers that read session-specific attributes (`sessid`,
+`protocol_flags`, `address`, etc.) should either tolerate duck-typed
+sessions or `isinstance(session, ServerSession)` before dereferencing.
+For plain identity comparisons (`session is some_known_session`) no
+check is needed.
+
 The same resolution closes the previous footgun where
 `callertype="session"` left `session=None` in signal kwargs even though
 `called_by` *was* a session — that path now exposes the real session
