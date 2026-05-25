@@ -199,6 +199,38 @@ def _fire_cmdset_merge_error(caller, session, raw_string, exc):
     )
 
 
+def _resolve_signal_session(session, cmdset_providers):
+    """Resolve the session value exposed to signal receivers and ``cmd.session``.
+
+    A session-proxy (e.g. multipuppet relay) is welcome at the cmdhandler
+    boundary but should not leak into signal kwargs or ``cmd.session``
+    those consumers want the real ``ServerSession`` (or ``None``).
+    Proxies expose the underlying session via a ``real_session``
+    attribute by convention; real sessions do not, so the ``getattr``
+    is a no-op for them.
+
+    Resolution order:
+    1. If ``session`` was passed in, return its ``real_session`` if
+       present, otherwise the value itself. The proxy is trusted to
+       know which underlying session it wraps; we do not second-guess
+       by looking at ``cmdset_providers`` (a multi-session caller could
+       have providers that disagree with the proxy's intended session).
+    2. Otherwise, fall back to ``cmdset_providers["session"]``
+       (populated by ``generate_cmdset_providers`` from ``called_by``).
+       Apply the same ``real_session`` unwrap for symmetry.
+    3. Else ``None``.
+
+    Returns:
+        The resolved session, or ``None`` if no session is involved.
+    """
+    if session is not None:
+        return getattr(session, "real_session", session)
+    fallback = cmdset_providers.get("session")
+    if fallback is not None:
+        return getattr(fallback, "real_session", fallback)
+    return None
+
+
 def _process_input(caller, prompt, result, cmd, generator):
     """
     Specifically handle the get_input value to send to _progressive_cmd_run as
@@ -785,6 +817,13 @@ def cmdhandler(
         caller,
         error_to,
     ) = generate_cmdset_providers(called_by, session=session)
+
+    # Resolve `session` once so signal payloads and ``cmd.session``
+    # always carry the real ServerSession when one exists (or None).
+    # Before this, callertype="session" left `session=None` even when
+    # `called_by` was itself a session, surfacing as a footgun in
+    # downstream signal receivers and `cmd.session` users.
+    session = _resolve_signal_session(session, cmdset_providers)
 
     account = cmdset_providers.get("account", None)
 

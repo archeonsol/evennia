@@ -534,17 +534,17 @@ phase:
 - **EvMore "q" interaction:** the system-cmd dedup fix in `cmdset.py:530`
   is what made `q` stop multi-matching. Re-test after Phase 3 in case
   prefix-strip removal opens a new ambiguity.
-- **Webclient OOB / sessionless commands:** `cmd_access_cache` and the new
-  signals tolerate `session is None`, and the
-  `TestCmdsetMergeErrorSignal` test exercises that path. Open follow-up:
-  when `callertype == "session"`, the cmdhandler's `session` parameter is
-  `None` even though the real session is `called_by`. Today the signal
-  payload reflects this and receivers must look at `caller` to recover
-  the session in that case. Consider resolving
-  `session = session or cmdset_providers.get("session")` once at the top
-  of `cmdhandler.cmdhandler` so signal kwargs always carry the real
-  session when one exists. Small behavior change; defer until a Phase
-  1.x cleanup or fold into Phase 2.
+- **Webclient OOB / sessionless commands:** *resolved.* `cmd_access_cache`
+  and the signals tolerate `session is None`. Signal payload contract
+  is now "real `ServerSession` if any session is involved, else
+  `None`": `cmdhandler.cmdhandler` resolves `session` once at the top
+  via `getattr(session, "real_session", session)` falling back to
+  `cmdset_providers["session"]`, before any signal fires or `cmd.session`
+  is assigned. Session-proxies set `real_session` on themselves so the
+  proxy doesn't leak into receivers; the unwrap is a no-op for real
+  sessions. See `TestSignalSessionResolution` in
+  `evennia/commands/tests.py` for the three cases (session-callertype,
+  proxy with `real_session`, proxy without).
 - **Phase 4 cache invalidation on caller-level cmdsets:** caching the
   trie on the *merged* cmdset is fine for the location/object stack, but
   caller-level cmdset assemblies (puppet menus, channel commands, ad-hoc

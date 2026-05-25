@@ -150,6 +150,26 @@ is needed beyond documentation (already in `cmdhandler.cmdhandler`'s
 docstring) — Phase 1's contribution is to make that contract official
 and tested.
 
+**Signal payload contract.** Signal kwargs (`session=...`) and
+`cmd.session` always carry the real `ServerSession` if any session is
+involved, or `None`. To make this work, a session-proxy should expose
+the underlying real session via a `real_session` attribute; the
+cmdhandler resolves once at the top using:
+
+```python
+real = getattr(session, "real_session", session)
+```
+
+If a proxy does not set `real_session`, the proxy itself is what
+receivers see — that's fine for fully synthetic sessions, but receivers
+that filter by session identity will treat the proxy as opaque. Set
+`real_session` whenever the proxy wraps a real session.
+
+The same resolution closes the previous footgun where
+`callertype="session"` left `session=None` in signal kwargs even though
+`called_by` *was* a session — that path now exposes the real session
+too.
+
 **Scope note for `on_command_error`:** the signal fires only at the
 `_run_command` error site (where there is a real `cmd` instance to hand
 to receivers). Cmdset build/merge failures fire `on_cmdset_merge_error`

@@ -1857,6 +1857,93 @@ class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
         return d
 
 
+class TestSignalSessionResolution(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1.x: signal payload always carries the real session when one exists.
+
+    Before this, callertype="session" left `session=None` even though
+    `called_by` was the session; session-proxy objects (multipuppet relay)
+    also leaked into signal kwargs. The cmdhandler now resolves once at the
+    top: prefers the explicit `session` arg, unwraps its `real_session`
+    attribute if present, and falls back to `cmdset_providers["session"]`.
+    """
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+        self.recorder = _SignalRecorder()
+
+    def tearDown(self):
+        self.recorder.disconnect()
+        super().tearDown()
+
+    def test_session_callertype_surfaces_real_session(self):
+        # called_by IS the session, no explicit session= arg. Pre-fix this
+        # left signal kwargs with session=None.
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
+
+        def _check(_):
+            pre_kwargs = self.recorder.events[0][2]
+            post_kwargs = self.recorder.events[1][2]
+            self.assertIs(pre_kwargs["session"], self.session)
+            self.assertIs(post_kwargs["session"], self.session)
+
+        d.addCallback(_check)
+        return d
+
+    def test_proxy_session_unwraps_to_real_session(self):
+        # A session-proxy with `real_session` should surface the real
+        # session to receivers, not the proxy itself.
+        class _RelayProxy:
+            def __init__(self, real):
+                self.real_session = real
+
+            def get_cmdset_providers(self):
+                return self.real_session.get_cmdset_providers()
+
+        proxy = _RelayProxy(self.session)
+        d = cmdhandler.cmdhandler(
+            self.session,
+            "",
+            cmdobj=_CmdSignalsOk(),
+            cmdobj_key="ok",
+            session=proxy,
+        )
+
+        def _check(_):
+            post_kwargs = self.recorder.events[1][2]
+            self.assertIs(post_kwargs["session"], self.session)
+            self.assertIsNot(post_kwargs["session"], proxy)
+
+        d.addCallback(_check)
+        return d
+
+    def test_proxy_without_real_session_attr_passes_through(self):
+        # A proxy with no `real_session` attribute (synthetic session)
+        # is returned as-is. Receivers can isinstance-check if needed.
+        class _SyntheticSession:
+            def __init__(self, providers):
+                self._providers = providers
+
+            def get_cmdset_providers(self):
+                return self._providers
+
+        synthetic = _SyntheticSession(self.session.get_cmdset_providers())
+        d = cmdhandler.cmdhandler(
+            self.session,
+            "",
+            cmdobj=_CmdSignalsOk(),
+            cmdobj_key="ok",
+            session=synthetic,
+        )
+
+        def _check(_):
+            post_kwargs = self.recorder.events[1][2]
+            self.assertIs(post_kwargs["session"], synthetic)
+
+        d.addCallback(_check)
+        return d
+
+
 class TestCmdsetMergeErrorSignal(TwistedTestCase, BaseEvenniaTest):
     """Phase 1.1: on_cmdset_merge_error fires when cmdset build/merge fails."""
 
@@ -1894,7 +1981,9 @@ class TestCmdsetMergeErrorSignal(TwistedTestCase, BaseEvenniaTest):
             _, kwargs = self.events[0]
             # caller is whoever cmdhandler resolved to merge cmdsets for.
             self.assertIn("caller", kwargs)
-            self.assertIn("session", kwargs)
+            # session is resolved at the top of cmdhandler, so the real
+            # session reaches the merge-error site too.
+            self.assertIs(kwargs["session"], self.session)
             self.assertEqual(kwargs["raw_string"], "noop")
             self.assertIsInstance(kwargs["exc"], RuntimeError)
             self.assertEqual(str(kwargs["exc"]), "merge boom")
