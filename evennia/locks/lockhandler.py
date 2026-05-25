@@ -554,6 +554,10 @@ class LockHandler:
             functions (as defined by your settings) are executed.
 
         """
+        # Fast path: direct is_superuser check before any attribute chain traversal
+        if not no_superuser_bypass and getattr(accessing_obj, "is_superuser", False):
+            return True
+
         try:
             # check if the lock should be bypassed (e.g. superuser status)
             if accessing_obj.locks.lock_bypass and not no_superuser_bypass:
@@ -561,8 +565,7 @@ class LockHandler:
         except AttributeError:
             # happens before session is initiated.
             if not no_superuser_bypass and (
-                (hasattr(accessing_obj, "is_superuser") and accessing_obj.is_superuser)
-                or (
+                (
                     utils.inherits_from(accessing_obj, evennia.DefaultObject)
                     and hasattr(accessing_obj.account, "is_superuser")
                     and accessing_obj.account.is_superuser
