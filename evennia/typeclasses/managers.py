@@ -13,7 +13,8 @@ from django.db.models.functions import Cast
 from evennia.typeclasses.attributes import Attribute
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
-from evennia.utils.utils import class_from_module, make_iter, variable_from_module
+from evennia.utils.utils import (class_from_module, make_iter,
+                                 variable_from_module)
 
 __all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__
@@ -28,6 +29,15 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
     Common ObjectManager for all dbobjects.
 
     """
+
+    def get_queryset(self):
+        # Flush write-behind attribute updates before any ORM query, so SQL
+        # filters joining through db_attributes see committed values rather
+        # than stale rows. No-op when nothing is dirty.
+        from evennia.typeclasses.attributes import flush_if_pending
+
+        flush_if_pending()
+        return super().get_queryset()
 
     # common methods for all typed managers. These are used
     # in other methods. Returns querysets.

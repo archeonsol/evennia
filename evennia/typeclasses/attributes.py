@@ -11,6 +11,7 @@ which is a non-db version of Attributes.
 
 import fnmatch
 import re
+import threading
 import weakref
 from collections import defaultdict
 from copy import copy
@@ -21,6 +22,7 @@ from django.utils.encoding import smart_str
 
 from evennia.locks.lockhandler import LockHandler
 from evennia.utils.dbserialize import from_pickle, to_pickle
+from evennia.utils.idmapper.manager import SharedMemoryManager
 from evennia.utils.idmapper.models import SharedMemoryModel
 from evennia.utils.picklefield import PickledObjectField
 from evennia.utils.utils import is_iter, lazy_property, make_iter, to_str
@@ -112,6 +114,29 @@ def count_pending_dirty():
     return {"backends": backends, "orphans": orphans, "pending": pending}
 
 
+# Reentrance guard: flush_all_dirty calls bulk_update, which goes through
+# AttributeManager.get_queryset, which would re-enter flush_if_pending without this.
+_FLUSHING = threading.local()
+
+
+def flush_if_pending():
+    """
+    Flush pending attribute writes only if any are queued.
+
+    Called before ORM queries that filter on Attribute columns, so that
+    write-behind updates are visible to SQL. No-op when nothing is dirty.
+    """
+    if getattr(_FLUSHING, "active", False):
+        return
+    if not (_DIRTY_BACKENDS or _ORPHAN_DIRTY_ATTRS):
+        return
+    _FLUSHING.active = True
+    try:
+        flush_all_dirty()
+    finally:
+        _FLUSHING.active = False
+
+
 def flush_all_dirty():
     """
     Flush all pending attribute writes to DB. Called from tick handler.
@@ -123,7 +148,8 @@ def flush_all_dirty():
 
     pending_stats = count_pending_dirty()
     try:
-        from evennia.server.prometheus_metrics import observe_attribute_dirty_pending
+        from evennia.server.prometheus_metrics import \
+            observe_attribute_dirty_pending
 
         observe_attribute_dirty_pending(pending_stats["pending"])
     except Exception:
@@ -147,12 +173,14 @@ def flush_all_dirty():
         "pending": pending_stats["pending"],
     }
     try:
-        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
+        from evennia.typeclasses.attribute_metrics import \
+            record_attribute_flush_stats
 
         record_attribute_flush_stats(stats, duration_seconds=duration)
     except Exception:
         pass
     return stats
+
 
 # -------------------------------------------------------------
 #
@@ -474,6 +502,20 @@ class NAttributeProperty(AttributeProperty):
     attrhandler_name = "nattributes"
 
 
+class AttributeManager(SharedMemoryManager):
+    """
+    Default manager for the Attribute model. Flushes pending write-behind
+    attribute updates before any query, so SQL filters on Attribute columns
+    (e.g. db_value, db_str_val) see the current in-memory state. Without
+    this, ``Class.objects.filter(db_attributes__db_value=obj)`` and similar
+    return stale results until the next tick flush.
+    """
+
+    def get_queryset(self):
+        flush_if_pending()
+        return super().get_queryset()
+
+
 class Attribute(IAttribute, SharedMemoryModel):
     """
     This attribute is stored via Django. Most Attributes will be using this class.
@@ -548,8 +590,7 @@ class Attribute(IAttribute, SharedMemoryModel):
     db_float_val = models.FloatField("float_val", null=True, blank=True)
     db_str_val = models.TextField("str_val", null=True, blank=True)
 
-    # Database manager
-    # objects = managers.AttributeManager()
+    objects = AttributeManager()
 
     class Meta:
         "Define Django meta options"
@@ -832,9 +873,7 @@ class IAttributeBackend:
             self._cache.pop((key, category), None)
         else:
             self._cache = {
-                ckey: attrobj
-                for ckey, attrobj in list(self._cache.items())
-                if ckey[1] != category
+                ckey: attrobj for ckey, attrobj in list(self._cache.items()) if ckey[1] != category
             }
         # mark that the category cache is no longer up-to-date
         self._catcache.pop(category, None)
@@ -1289,8 +1328,14 @@ class ModelAttributeBackend(IAttributeBackend):
         self._attrclass.objects.bulk_update(
             dirty,
             [
-                "db_value", "db_strvalue", "db_category", "db_lock_storage",
-                "db_val_type", "db_int_val", "db_float_val", "db_str_val",
+                "db_value",
+                "db_strvalue",
+                "db_category",
+                "db_lock_storage",
+                "db_val_type",
+                "db_int_val",
+                "db_float_val",
+                "db_str_val",
             ],
         )
 
