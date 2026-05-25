@@ -241,13 +241,31 @@ The breaking change inside the engine. Once done, `at_pre_cmd` means
   the engine class (or thin subclass adding `ProfilingCommandMixin` if the
   profiling hook isn't enough).
 - `parse_game_cmdline` keeps **only** the switch-parsing logic (or is
-  deleted entirely if engine's `Command.parse` matches).
+  deleted entirely if engine's `Command.parse` matches). Diff
+  `self.switches` / `self.args` shape on a few test commands before
+  deleting to confirm parity.
 - `_normalize_account_caller` deleted; engine does it.
 - Every `at_pre_cmd` override in the game that relied on running before
-  parse gets renamed to `at_pre_parse`. Grep target.
+  parse gets renamed to `at_pre_parse`. Per-subclass audit, not a blind
+  rename: an override that *reads* parsed args (`self.args`,
+  `self.switches`, `self.character`) is a latent bug today and should
+  move to (or stay on) the new `at_pre_cmd`.
 - `skip_character_state_gate` becomes a documented contract on
   `AccountCommand` (it's always `True`), or — cleaner — the game's
   gatekeeper checks `isinstance(cmd, AccountCommand)` directly.
+- **Delete `patch_relay_default`** — the engine no longer defaults
+  `allow_multipuppet_relay`, and downstream relay code should check
+  `isinstance(matched, AccountCommand)` instead of reading a class
+  attribute. The remaining
+  `MuxAccountCommand.allow_multipuppet_relay = False` half of the patch
+  becomes redundant. (The `_EvCmd.allow_multipuppet_relay = True` half is
+  already redundant today, since downstream uses
+  `getattr(matched, "allow_multipuppet_relay", True)` — that half can
+  be deleted any time, independently of Phase 2.)
+- **Sweep `MuxCommand` / `MuxAccountCommand` subclasses** in the same
+  cleanup commit. The deprecation warning fires on first subclass
+  instantiation; do not let the noise linger across releases. Scheduled
+  here, not deferred.
 
 **Risk:** **highest in the plan.** Every `at_pre_cmd` override in the engine,
 the game, and any tests becomes a rename. Mitigation:
@@ -299,7 +317,7 @@ is gone.
 3. **Engine default commands keyed for the new world.**
    `evennia/commands/default/building.py`: builder commands keep `@dig`,
    `@open`, etc. as **their actual key**, not as aliases stripped at parse
-   time. Re-key every default builder/admin command. List:
+   time. Re-key every default builder/admin command. Initial list:
    - `CmdOpen` → key `@open` (currently aliased as `@open` with key `open`)
    - `CmdDig` → key `@dig`
    - `CmdCreate` → key `@create`
@@ -308,8 +326,17 @@ is gone.
    - `CmdDesc` → key `@desc`
    - `CmdTag` → key `@tag`
    - `CmdTeleport` → key `@tel` (current alias `@tel`/`@teleport`)
-   - …full list compiled during implementation.
+   - `CmdSpawn` → key `@spawn`
+   - `CmdUnLink` → key `@unlink`
+   - `CmdTypeclass` → key `@typeclass`
+   - `CmdFind` → key `@find`
    Player commands stay unprefixed.
+
+   **Before merging Phase 3:** publish the *complete* re-key list (as part
+   of the migration guide) and ask each downstream consumer to diff their
+   game's `safe_remove` / wrapper list against it. The lint script in the
+   risk section produces the list automatically — wire it into CI for the
+   Phase 3 branch so the list cannot silently drift.
 
 4. **Cmdparser cleanup.** `cmdparser.cmdparser` calls `build_matches` twice
    today — once with `include_prefixes=True`, once with
@@ -329,14 +356,36 @@ is gone.
   affects results.
 
 **Game-side cleanup:**
+
+Distinguish two kinds of call sites — they look syntactically similar but
+mean different things:
+
+- **Collision workarounds** (`safe_remove(EngineCmd) + GameCmd()` where
+  `GameCmd` is just an `@`-prefixed re-export of `EngineCmd`): delete the
+  remove-and-add pair entirely. The engine now keys the command the way
+  the game wanted in the first place.
+- **Genuine custom overrides** (`replace_command(EngineCmd, MyCmd())` where
+  `MyCmd` adds real behavior, e.g. Underspire's `CmdGet` with grapple-
+  after-get): keep the override, just swap to the Phase 0 method form
+  (`self.replace(MyCmd())`). Do **not** delete these — there is no engine
+  equivalent.
+
+Concrete examples on the engine side:
 - Delete `commands/staff_admin_wrappers.py` (the `CmdAt*` ban/wall/perm/etc.
   layer). Engine commands now have the right keys.
 - Drop `safe_remove(default_building.CmdOpen)` / `CmdAtOpen()` workaround in
   `CharacterCmdSet.at_cmdset_creation`.
-- Drop `replace_command(self, CmdGet, CmdGet())` and related grapple-after-
-  get ordering hacks; the alias collisions they worked around are gone.
+- Drop the *ordering* hacks that paired remove+add to reshuffle merge
+  priority, since prefix-strip is gone. Keep any `replace_command` whose
+  replacement is a behavioral subclass.
 - Remove `GameCmdTypeclass` if its only purpose was avoiding the
   `@typeclasses` EvMore-list alias collision.
+
+**"Genuine override" audit checklist:** before deleting any
+`replace_command(EngineCmd, X())` call, confirm `X` is just `EngineCmd()`
+with maybe an `@`-prefixed alias and no behavior changes. If `X.func`,
+`X.parse`, or any hook differs from `EngineCmd`, the call must become
+`self.replace(X())`, not a delete.
 
 **Risk:** **highest external risk.** Anyone (else) using the fork with custom
 commands that relied on prefix-strip will break. We are the only consumer,
@@ -443,9 +492,23 @@ cleanup commit. Order:
    - Delete game-side `AccountCommand`; subclass engine's.
    - Delete `_normalize_account_caller`, `parse_game_cmdline` if
      replaced fully.
+   - **Delete `patch_relay_default`.** Replace the
+     `getattr(matched, "allow_multipuppet_relay", True)` check with
+     `isinstance(matched, AccountCommand)` (relay is for account-level
+     commands; everything else relays by default).
+   - Sweep `MuxCommand` / `MuxAccountCommand` subclasses in the same
+     commit so the deprecation warning quiets immediately.
 4. After **Phase 3**: delete `staff_admin_wrappers.py`; remove
-   `replace_command` / `safe_remove` calls that were specifically
-   working around prefix-strip collisions.
+   `safe_remove`/`replace_command` calls that were specifically working
+   around prefix-strip collisions. **Do not** delete `replace_command`
+   calls that introduce real behavior — swap those to the Phase 0
+   method form instead. See Phase 3 game-side cleanup for the audit
+   checklist.
+   - Before merging the engine Phase 3 branch, run the publish-and-diff
+     procedure: engine ships the complete re-key list; downstream diffs
+     their game's `safe_remove`/`replace_command` list against it; any
+     uncovered remove becomes either an engine re-key (push back upstream)
+     or a confirmed game-specific override (keep as `self.replace`).
 5. After **Phase 4**: delete `world/parsing/trie_parser.py`; remove
    `COMMAND_PARSER` setting override.
 
@@ -471,9 +534,24 @@ phase:
 - **EvMore "q" interaction:** the system-cmd dedup fix in `cmdset.py:530`
   is what made `q` stop multi-matching. Re-test after Phase 3 in case
   prefix-strip removal opens a new ambiguity.
-- **Webclient OOB / sessionless commands:** confirm `cmd_access_cache` and
-  the new signals behave when `session is None` (some internal calls into
-  `cmdhandler`). Already partly handled; verify in Phase 1 tests.
+- **Webclient OOB / sessionless commands:** `cmd_access_cache` and the new
+  signals tolerate `session is None`, and the
+  `TestCmdsetMergeErrorSignal` test exercises that path. Open follow-up:
+  when `callertype == "session"`, the cmdhandler's `session` parameter is
+  `None` even though the real session is `called_by`. Today the signal
+  payload reflects this and receivers must look at `caller` to recover
+  the session in that case. Consider resolving
+  `session = session or cmdset_providers.get("session")` once at the top
+  of `cmdhandler.cmdhandler` so signal kwargs always carry the real
+  session when one exists. Small behavior change; defer until a Phase
+  1.x cleanup or fold into Phase 2.
+- **Phase 4 cache invalidation on caller-level cmdsets:** caching the
+  trie on the *merged* cmdset is fine for the location/object stack, but
+  caller-level cmdset assemblies (puppet menus, channel commands, ad-hoc
+  cmdsets pushed on a caller) participate in the merge under a different
+  key. Spell out the cache-key derivation for those paths before Phase 4
+  merges — the per-merge `fingerprint` already used by
+  `_CMDSET_MERGE_CACHE` is the right primitive to reuse.
 
 ## 9. Sequencing
 

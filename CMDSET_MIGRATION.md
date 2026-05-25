@@ -169,10 +169,24 @@ _Pending. Anticipated migration:_
   at class-creation time and emit a `DeprecationWarning` citing the file.
   Game keeps working as-is.
 - **Required (planned):** to use the new post-parse `at_pre_cmd` semantic,
-  rename your hook explicitly and adjust callsites.
+  rename your hook explicitly and adjust callsites. The rename is a
+  per-subclass audit, not a blanket grep: any override that *reads*
+  parsed args (`self.args`, `self.switches`, `self.character`) is a
+  latent bug today and should stay on (or move to) the new post-parse
+  `at_pre_cmd`.
 - **Optional cleanup (planned):** delete game-side `AccountCommand`
   normalization (`_normalize_account_caller`, etc.) once the engine
   guarantees `self.caller`/`self.character` shape.
+- **Optional cleanup (planned):** delete any game-side
+  `patch_relay_default` that sets `allow_multipuppet_relay` defaults on
+  `Command` / `MuxAccountCommand`. Replace the runtime check in the
+  multipuppet relay with `isinstance(matched, AccountCommand)`. The
+  `Command.allow_multipuppet_relay = True` half is already redundant
+  today and can be removed independently.
+- **Optional cleanup (planned):** sweep `MuxCommand` /
+  `MuxAccountCommand` subclasses to silence the `DeprecationWarning`
+  added in Phase 2. Schedule this with the rest of the Phase 2 cleanup,
+  not after.
 
 ---
 
@@ -185,7 +199,21 @@ _Pending. Anticipated migration:_
 - **Required (planned):** cmdsets that worked around the `@cmd`/`cmd` alias
   collision (e.g. `safe_remove(CmdOpen)` + `CmdAtOpen()`) drop the
   workaround. Engine default builder commands are keyed `@open`/`@dig`/etc.
-  directly.
+  directly. The complete re-key list will ship with this release; diff it
+  against your own `safe_remove` / wrapper list before merging.
+- **Distinguish two kinds of call site** when sweeping
+  `safe_remove`/`replace_command`:
+  - *Collision workarounds* (`safe_remove(EngineCmd) + GameCmd()` where
+    `GameCmd` only differs by `@`-prefixing): delete entirely.
+  - *Genuine custom overrides* (`replace_command(EngineCmd, MyCmd())`
+    where `MyCmd` adds real behavior — e.g. a `CmdGet` subclass with
+    grapple-after-get logic): keep, but swap to the Phase 0 method form
+    (`self.replace(MyCmd())`). Do not delete.
+
+  Before deleting any `replace_command(EngineCmd, X())`, confirm `X` is
+  `EngineCmd()` plus only an alias change. Any difference in `func`,
+  `parse`, or hooks means it's a genuine override and must become
+  `self.replace`, not a delete.
 
 ---
 
