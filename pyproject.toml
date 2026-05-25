@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "evennia"
 version = "6.0.0"
 maintainers = [{ name = "Griatch", email = "griatch@gmail.com" }]
-description = "A full-featured toolkit and server for text-based multiplayer games (MUDs, MU*, etc)."
+description = "Underspire Engine — Evennia 6.x fork for UNDERSPIRE (MUD server + game toolkit)."
 requires-python = ">=3.12"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { text = "BSD" }
@@ -120,6 +120,25 @@ extra = [
 
   # PostgreSQL support
   "psycopg[binary] >= 3.1.12",
+]
+
+# Typical UNDERSPIRE game-server dependencies (install after -e evennia)
+game = [
+  "django-redis",
+  "redis",
+  "argon2-cffi",
+  "djangorestframework >= 3.16, < 3.17",
+  "django-cors-headers >= 4.3, < 5",
+  "django-htmx",
+  "django-prometheus",
+  "prometheus-client >= 0.20",
+  "PyYAML >= 6.0",
+  "pydantic >= 2.12",
+  "transitions >= 0.9",
+  "networkx >= 3.6",
+  "APScheduler >= 3.11",
+  "structlog >= 25.0",
+  "requests >= 2.31",
 ]
 
 [project.urls]

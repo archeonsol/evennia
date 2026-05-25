@@ -352,6 +352,17 @@ def get_and_merge_cmdsets(
                 except Exception:
                     location = None
                 if location:
+                    from evennia.commands.location_cmdset_cache import (
+                        get_cached_location_cmdsets,
+                        make_cache_key,
+                        set_cached_location_cmdsets,
+                    )
+
+                    loc_cache_key = make_cache_key(caller, location)
+                    cached_cmdsets = get_cached_location_cmdsets(loc_cache_key)
+                    if cached_cmdsets is not None:
+                        return cached_cmdsets
+
                     # Gather all cmdsets stored on objects in the room and
                     # also in the caller's inventory and the location itself
                     local_objlist = yield (
@@ -386,6 +397,7 @@ def get_and_merge_cmdsets(
                         # explicitly.
                         cset.old_duplicates = cset.duplicates
                         cset.duplicates = True if cset.duplicates is None else cset.duplicates
+                    set_cached_location_cmdsets(loc_cache_key, local_obj_cmdsets)
                 return local_obj_cmdsets
             except Exception:
                 _msg_err(caller, _ERROR_CMDSETS)
@@ -585,6 +597,20 @@ def cmdhandler(
         """
         global _COMMAND_NESTING
         try:
+            from django.conf import settings as _settings
+
+            if getattr(_settings, "COMMAND_TRACE_ENABLED", True):
+                from evennia.utils.command_trace import begin_command_trace
+
+                begin_command_trace(
+                    caller=caller,
+                    session=session,
+                    raw_string=unformatted_raw_string,
+                    cmd_key=raw_cmdname,
+                )
+        except Exception:
+            pass
+        try:
             # Assign useful variables to the instance
             cmd.caller = caller
             cmd.cmdname = cmdname
@@ -656,6 +682,15 @@ def cmdhandler(
             raise ErrorReported(cmd.raw_string)
         finally:
             _COMMAND_NESTING[called_by] -= 1
+            try:
+                from django.conf import settings as _settings
+
+                if getattr(_settings, "COMMAND_TRACE_ENABLED", True):
+                    from evennia.utils.command_trace import end_command_trace
+
+                    end_command_trace()
+            except Exception:
+                pass
 
     (
         cmdset_providers,

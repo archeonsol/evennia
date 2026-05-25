@@ -97,11 +97,62 @@ def _flush_orphan_dirty():
         Attribute.objects.bulk_update(dirty, _DIRTY_ATTR_UPDATE_FIELDS)
 
 
-def flush_all_dirty():
-    """Flush all pending attribute writes to DB. Called from tick handler."""
+def count_pending_dirty():
+    """
+    Count attribute rows not yet flushed to the database.
+
+    Returns:
+        dict: ``backends``, ``orphans``, ``pending`` (sum).
+    """
+    backends = 0
     for backend in list(_DIRTY_BACKENDS):
-        backend.flush_dirty()
+        backends += len(getattr(backend, "_dirty_attrs", None) or ())
+    orphans = len(list(_ORPHAN_DIRTY_ATTRS))
+    pending = backends + orphans
+    return {"backends": backends, "orphans": orphans, "pending": pending}
+
+
+def flush_all_dirty():
+    """
+    Flush all pending attribute writes to DB. Called from tick handler.
+
+    Returns:
+        dict: ``backends``, ``orphans``, ``total``, ``pending`` (pre-flush backlog).
+    """
+    import time
+
+    pending_stats = count_pending_dirty()
+    try:
+        from evennia.server.prometheus_metrics import observe_attribute_dirty_pending
+
+        observe_attribute_dirty_pending(pending_stats["pending"])
+    except Exception:
+        pass
+
+    t0 = time.perf_counter()
+    backends = 0
+    for backend in list(_DIRTY_BACKENDS):
+        dirty_n = len(getattr(backend, "_dirty_attrs", None) or ())
+        if dirty_n:
+            backend.flush_dirty()
+            backends += dirty_n
+    orphans = len(list(_ORPHAN_DIRTY_ATTRS))
     _flush_orphan_dirty()
+    duration = time.perf_counter() - t0
+    total = backends + orphans
+    stats = {
+        "backends": backends,
+        "orphans": orphans,
+        "total": total,
+        "pending": pending_stats["pending"],
+    }
+    try:
+        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
+
+        record_attribute_flush_stats(stats, duration_seconds=duration)
+    except Exception:
+        pass
+    return stats
 
 # -------------------------------------------------------------
 #

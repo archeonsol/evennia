@@ -102,6 +102,16 @@ class EvenniaServerService(MultiService):
         evennia.gametime.SERVER_RUNTIME_LAST_UPDATED = now
         evennia.ServerConfig.objects.conf("runtime", evennia.gametime.SERVER_RUNTIME)
 
+        if getattr(settings, "ATTRIBUTE_FLUSH_ON_MAINTENANCE", False):
+            try:
+                from evennia.typeclasses.attributes import flush_all_dirty
+                from evennia.typeclasses.attribute_metrics import maybe_log_flush_metrics
+
+                stats = flush_all_dirty()
+                maybe_log_flush_metrics(stats, self.maintenance_count)
+            except Exception:
+                logger.log_trace("server_maintenance attribute flush")
+
         if self.maintenance_count % 5 == 0:
             # check cache size every 5 minutes
             self._flush_cache(settings.IDMAPPER_CACHE_MAXSIZE)
@@ -159,6 +169,13 @@ class EvenniaServerService(MultiService):
 
         if settings.WEBSERVER_ENABLED:
             self.register_webserver()
+
+        try:
+            from evennia.server.prometheus_metrics import _init_metrics
+
+            _init_metrics()
+        except Exception:
+            pass
 
         ENABLED = []
         if settings.IRC_ENABLED:
@@ -460,11 +477,10 @@ class EvenniaServerService(MultiService):
         # update eventual changed defaults
         self.update_defaults()
 
-        # run at_init() on all cached entities on reconnect
-        [
-            [entity.at_init() for entity in typeclass_db.get_all_cached_instances()]
-            for typeclass_db in TypedObject.__subclasses__()
-        ]
+        # run at_init() on cached entities (batched / deferred on reload)
+        from evennia.server.at_init_scheduler import run_cached_at_init_burst
+
+        run_cached_at_init_burst(mode)
 
         self.at_server_init()
 

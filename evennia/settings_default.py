@@ -544,6 +544,49 @@ CMDSET_PATHS = ["commands", "evennia", "evennia.contrib"]
 # entry is evicted. Increase if your game has many unique rooms/objects; decrease
 # to save memory.
 CMDSET_MERGE_CACHE_MAXSIZE = 1000
+# Cache cmd.access(caller, "cmd") during parsing (evennia.commands.cmd_access_cache).
+# Invalidated on cmdset stack changes; call invalidate_cmd_access_cache(caller) when
+# permissions/locks change without a cmdset update.
+CMD_ACCESS_CACHE_ENABLED = False
+# Log attribute flush batch sizes every N global ticks (0 = off). Uses
+# evennia.typeclasses.attribute_metrics.maybe_log_flush_metrics.
+ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60
+# Safety net: also flush write-behind attrs every server_maintenance (60s).
+# Game ticks should still call flush_all_dirty() on their global tick.
+ATTRIBUTE_FLUSH_ON_MAINTENANCE = False
+# Log a warning when flush_all_dirty() reports pending dirty rows above this (0 = off).
+ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD = 0
+# Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).
+ENGINE_PROMETHEUS_METRICS_ENABLED = True
+# --- Tier 1 performance (RP / command path) ---
+# msg_contents: cache get_display_name per looker (seconds; 0 = no expiry).
+MSG_DISPLAY_NAME_CACHE_ENABLED = True
+MSG_DISPLAY_NAME_CACHE_TTL = 300
+# cmdhandler: cache location cmdset gathering between generation bumps.
+LOCATION_CMDSET_CACHE_ENABLED = True
+LOCATION_CMDSET_CACHE_MAXSIZE = 512
+# lockhandler: per-caller ndb cache for Command lock checks (no pk).
+LOCK_CHECK_CACHE_ENABLED = True
+# at_look: prefetch all attributes on target before return_appearance.
+LOOK_ATTR_PREFETCH_ENABLED = True
+# --- Tier 1D: off-reactor workers + command trace ---
+# Run heavy work via evennia.utils.worker_pool.defer_to_worker (thread pool).
+ENGINE_WORKER_POOL_ENABLED = True
+# Log when a worker job took unusually long in-thread (ms; 0 = off).
+ENGINE_WORKER_BLOCK_WARN_MS = 50
+# Attach trace_id to each command for structured logs (evennia.utils.command_trace).
+COMMAND_TRACE_ENABLED = True
+# --- Tier 1E: reload / startup scheduling ---
+# Batch cached at_init() calls (entities per reactor turn).
+AT_INIT_BATCH_SIZE = 50
+# Seconds between at_init batches (0 = next reactor tick only).
+AT_INIT_BATCH_DELAY = 0
+# On @reload, defer the at_init burst to after portal session sync.
+AT_INIT_DEFER_ON_RELOAD = True
+# GLOBAL_SCRIPTS entries with start_priority="lazy" start after critical scripts.
+GLOBAL_SCRIPTS_DEFER_LAZY_START = True
+GLOBAL_SCRIPTS_LAZY_BATCH_SIZE = 5
+GLOBAL_SCRIPTS_LAZY_DELAY = 0
 # Fallbacks for cmdset paths that fail to load. Note that if you change the path for your
 # default cmdsets, you will also need to copy CMDSET_FALLBACKS after your change in your
 # settings file for it to detect the change.

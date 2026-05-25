@@ -112,11 +112,20 @@ from django.utils.translation import gettext as _
 import evennia
 from evennia.utils import logger, utils
 
-__all__ = ("LockHandler", "LockException")
+__all__ = ("LockHandler", "LockException", "invalidate_lock_cache")
 
 WARNING_LOG = settings.LOCKWARNING_LOG_FILE
 _LOCK_HANDLER = None
 _LOCK_CACHE_MISS = object()  # sentinel for ndb lock cache lookups
+
+
+def invalidate_lock_cache(accessing_obj) -> None:
+    """Clear per-caller lock check cache (e.g. after permission changes)."""
+    if accessing_obj and hasattr(accessing_obj, "ndb"):
+        try:
+            del accessing_obj.ndb._lock_cache
+        except AttributeError:
+            accessing_obj.ndb._lock_cache = {}
 
 
 #
@@ -581,18 +590,23 @@ class LockHandler:
                 return True
 
         # no superuser or bypass -> normal lock operation
-        # Per-caller ndb cache: key = (id(lock_obj), access_type, no_superuser_bypass).
-        # Only cache for non-DB objects (commands have no pk) — DB objects (rooms, accounts)
-        # can have lockstrings changed at runtime, which would cause stale cached results.
-        # id(self.obj) invalidates naturally when cmdset rebuilds (new command instances).
-        # ndb is volatile — cleared on reconnect/reload — so no cross-session staleness.
+        # Per-caller ndb cache when LOCK_CHECK_CACHE_ENABLED (default on).
+        # Commands (no pk): cache by object id + access_type + lock_storage.
+        # DB objects are not cached — lockstrings can change at runtime.
+        _use_lock_cache = getattr(settings, "LOCK_CHECK_CACHE_ENABLED", True)
         _ndb = getattr(accessing_obj, "ndb", None)
-        if _ndb is not None and getattr(self.obj, "pk", None) is None:
+        if _use_lock_cache and _ndb is not None and getattr(self.obj, "pk", None) is None:
             _lcache = getattr(_ndb, "_lock_cache", None)
             if _lcache is None:
                 _ndb._lock_cache = {}
                 _lcache = _ndb._lock_cache
-            _ckey = (id(self.obj), access_type, no_superuser_bypass)
+            _ckey = (
+                id(self.obj),
+                access_type,
+                no_superuser_bypass,
+                getattr(self.obj, "lock_storage", "") or "",
+                id(session) if session is not None else None,
+            )
             _cached = _lcache.get(_ckey, _LOCK_CACHE_MISS)
             if _cached is not _LOCK_CACHE_MISS:
                 return _cached
