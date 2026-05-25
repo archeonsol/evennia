@@ -269,9 +269,12 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
             pk = cls._meta.pks[0]
         else:
             pk = cls._meta.pk
-        # get the index of the pk in the class fields. this should be calculated *once*, but isn't
-        # atm
-        pk_position = cls._meta.fields.index(pk)
+        # Cache pk_position per class to avoid repeated list.index() on every instantiation
+        try:
+            pk_position = cls.__dbclass__._pk_position_cache
+        except AttributeError:
+            pk_position = cls._meta.fields.index(pk)
+            cls.__dbclass__._pk_position_cache = pk_position
         if len(args) > pk_position:
             # if it's in the args, we can get it easily by index
             result = args[pk_position]

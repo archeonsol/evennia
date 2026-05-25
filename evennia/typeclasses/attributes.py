@@ -532,7 +532,7 @@ class IAttributeBackend:
             return
         attrs = self.query_all()
         self._cache = {
-            f"{to_str(attr.key).lower()}-{attr.category.lower() if attr.category else None}": attr
+            (to_str(attr.key).lower(), attr.category.lower() if attr.category else None): attr
             for attr in attrs
         }
         self._cache_complete = True
@@ -548,7 +548,7 @@ class IAttributeBackend:
         Returns:
             attribute (IAttribute): A single Attribute.
         """
-        cachekey = "%s-%s" % (key, category)
+        cachekey = (key, category)
         cachefound = False
         try:
             attr = _TYPECLASS_AGGRESSIVE_CACHE and self._cache[cachekey]
@@ -591,19 +591,18 @@ class IAttributeBackend:
         Returns:
             attrs (list): The discovered Attributes.
         """
-        catkey = "-%s" % category
-        if _TYPECLASS_AGGRESSIVE_CACHE and catkey in self._catcache:
-            return [attr for key, attr in self._cache.items() if key.endswith(catkey) and attr]
+        if _TYPECLASS_AGGRESSIVE_CACHE and category in self._catcache:
+            return [attr for ckey, attr in self._cache.items() if ckey[1] == category and attr]
         else:
             # we have to query to make this category up-date in the cache
             attrs = self.query_category(category)
             if _TYPECLASS_AGGRESSIVE_CACHE:
                 for attr in attrs:
                     if attr.pk:
-                        cachekey = "%s-%s" % (attr.key, category)
+                        cachekey = (attr.key, category)
                         self._cache[cachekey] = attr
                 # mark category cache as up-to-date
-                self._catcache[catkey] = True
+                self._catcache[category] = True
             return attrs
 
     def _get_cache(self, key=None, category=None):
@@ -663,11 +662,10 @@ class IAttributeBackend:
             return
         if not key:  # don't allow an empty key in cache
             return
-        cachekey = "%s-%s" % (key, category)
-        catkey = "-%s" % category
+        cachekey = (key, category)
         self._cache[cachekey] = attr_obj
         # mark that the category cache is no longer up-to-date
-        self._catcache.pop(catkey, None)
+        self._catcache.pop(category, None)
         self._cache_complete = False
 
     def _delete_cache(self, key, category):
@@ -679,18 +677,16 @@ class IAttributeBackend:
             category (str or None): A cleaned category name
 
         """
-        catkey = "-%s" % category
         if key:
-            cachekey = "%s-%s" % (key, category)
-            self._cache.pop(cachekey, None)
+            self._cache.pop((key, category), None)
         else:
             self._cache = {
-                key: attrobj
-                for key, attrobj in list(self._cache.items())
-                if not key.endswith(catkey)
+                ckey: attrobj
+                for ckey, attrobj in list(self._cache.items())
+                if ckey[1] != category
             }
         # mark that the category cache is no longer up-to-date
-        self._catcache.pop(catkey, None)
+        self._catcache.pop(category, None)
         self._cache_complete = False
 
     def reset_cache(self):
@@ -1084,10 +1080,10 @@ class ModelAttributeBackend(IAttributeBackend):
 
     def do_update_attribute(self, attr, value, strvalue):
         if strvalue:
-            attr.value = None
+            attr.db_value = None
             attr.db_strvalue = value
         else:
-            attr.value = value
+            attr.db_value = to_pickle(value)
             attr.db_strvalue = None
         attr.save(update_fields=["db_strvalue", "db_value"])
 
@@ -1097,10 +1093,9 @@ class ModelAttributeBackend(IAttributeBackend):
         if strvalue:
             # store as a simple string (will not notify OOB handlers)
             attr_obj.db_strvalue = new_value
-            attr_obj.value = None
+            attr_obj.db_value = None
         else:
-            # store normally (this will also notify OOB handlers)
-            attr_obj.value = new_value
+            attr_obj.db_value = to_pickle(new_value)
             attr_obj.db_strvalue = None
         attr_obj.save(update_fields=["db_strvalue", "db_value", "db_category", "db_lock_storage"])
 
