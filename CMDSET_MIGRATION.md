@@ -252,6 +252,39 @@ path, so correlation across signals + logs works uniformly.
   shape; manual `cmdobj.caller = ...` assignments around such calls
   can be removed.
 
+**Known gap during the deprecation window.** Two parallel flags
+exist:
+
+- `account_command_caller` (new, engine `Command`): drives pre-parse
+  normalisation in `cmdhandler._run_command`. Set on
+  `evennia.commands.command.AccountCommand`.
+- `account_caller` (legacy, `MuxCommand`): drives parse-time
+  normalisation inside `MuxCommand.parse`. Set on
+  `MuxAccountCommand`.
+
+Until the MuxCommand/MuxAccountCommand sweep ships, stock
+`MuxAccountCommand` subclasses (`CmdIC`, `CmdOOC`, account-context
+`CmdHelp`, etc.) are normalised via the legacy parse-time path and do
+**not** carry `account_command_caller = True`. Downstream code that
+wants a unified detection for "is this an account-context command"
+should prefer the flag-based check **and** an attribute fallback:
+
+```python
+def _is_account_command(cmd):
+    # account_command_caller is the engine's chosen detection mechanism.
+    # account_caller is the MuxCommand legacy flag; check both during
+    # the deprecation window.
+    return (
+        getattr(cmd, "account_command_caller", False)
+        or getattr(cmd, "account_caller", False)
+    )
+```
+
+A pure `isinstance(matched, AccountCommand)` check is **not** safe
+yet: stock `MuxAccountCommand` does not inherit from engine
+`AccountCommand`. Prefer the flag-based check above; it stays correct
+across the sweep.
+
 **Not yet:** the post-parse `at_pre_cmd` is still engine-only (the
 hard-error guard remains until `+underspire.4`).
 
@@ -259,6 +292,9 @@ hard-error guard remains until `+underspire.4`).
 
 These ship under later `+underspire.N` versions.
 
+- Unify `MuxAccountCommand` with the engine `account_command_caller`
+  contract (so a single flag covers both classes). See
+  "MuxAccountCommand unification" below for the planned shape.
 - `MuxCommand` / `MuxAccountCommand` deprecation aliases.
 - `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
 - Switch parsing into `Command.parse`.
@@ -269,13 +305,37 @@ Game-side cleanup that lands once those steps are in:
 
 - **Optional cleanup (planned):** delete game-side `AccountCommand`
   normalization (`_normalize_account_caller`, etc.) once the engine
-  guarantees `self.caller`/`self.character` shape.
-- **Optional cleanup (planned):** delete any game-side
-  `patch_relay_default` that sets `allow_multipuppet_relay` defaults on
-  `Command` / `MuxAccountCommand`. Replace the runtime check in the
-  multipuppet relay with `isinstance(matched, AccountCommand)`. The
-  `Command.allow_multipuppet_relay = True` half is already redundant
-  today and can be removed independently.
+  guarantees `self.caller`/`self.character` shape. (Available now
+  for `evennia.commands.command.AccountCommand` subclasses; waiting
+  on the MuxAccountCommand unification for `MuxAccountCommand`
+  subclasses.)
+
+- **Can drop now** (independently of any further engine step):
+  the `Command.allow_multipuppet_relay = True` half of any game-side
+  `patch_relay_default`. Downstream relay code already reads
+  `getattr(matched, "allow_multipuppet_relay", True)`, so the
+  explicit default on `Command` is redundant.
+
+- **Wait-for-sweep:** the
+  `MuxAccountCommand.allow_multipuppet_relay = False` half is still
+  load-bearing for stock `MuxAccountCommand` subclasses until the
+  MuxCommand/MuxAccountCommand sweep replaces the per-class default
+  with a flag-based runtime check. Keep this half of
+  `patch_relay_default` until then.
+
+- **Relay-gate swap (wait-for-sweep):** replacing the runtime
+  `getattr(matched, "allow_multipuppet_relay", True)` check with a
+  pure `isinstance(matched, AccountCommand)` check regresses today
+  because stock `MuxAccountCommand` subclasses do not inherit from
+  engine `AccountCommand`. Two safe options until the sweep ships:
+
+  1. **Recommended:** swap to the flag-based check
+     `getattr(matched, "account_command_caller", False)` (covers
+     engine `AccountCommand` today; covers `MuxAccountCommand` once
+     the unification step lands).
+  2. Keep `isinstance(matched, AccountCommand)` **or** the
+     attribute fallback during the deprecation window.
+
 - **Optional cleanup (planned):** sweep `MuxCommand` /
   `MuxAccountCommand` subclasses to silence the `DeprecationWarning`
   added in Phase 2. Schedule this with the rest of the Phase 2 cleanup,
