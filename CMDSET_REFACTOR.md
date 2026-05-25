@@ -187,12 +187,15 @@ The breaking change inside the engine. Once done, `at_pre_cmd` means
 
 **Engine changes:**
 
-1. **Rename `Command.at_pre_cmd` to `Command.at_pre_parse`** wherever it
-   exists in the engine. Grep all `at_pre_cmd` definitions in
-   `evennia/commands/default/*.py` and rename.
+1. **[SHIPPED in `+underspire.2`] Rename `Command.at_pre_cmd` to
+   `Command.at_pre_parse`** wherever it exists in the engine. All 7
+   engine sites renamed. `__init_subclass__` hard-error guard added
+   to catch any missed downstream override at import time.
 
-2. **Add new `Command.at_pre_cmd` that runs after `parse()`.** Default
-   implementation returns `None`. Cmdhandler dispatch becomes:
+2. **[SHIPPED in `+underspire.2`] Add new `Command.at_pre_cmd` that
+   runs after `parse()`.** Default implementation returns `None`.
+   Engine-only during the deprecation window: subclassing it trips
+   the hard-error guard from step 1. Cmdhandler dispatch becomes:
 
    ```python
    if cmd.at_pre_parse():     # was: at_pre_cmd

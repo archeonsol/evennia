@@ -37,12 +37,8 @@ from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
 from evennia.commands.command import InterruptCommand
 from evennia.commands.default.muxcommand import MuxCommand
-from evennia.objects.objects import (
-    DefaultCharacter,
-    DefaultExit,
-    DefaultObject,
-    DefaultRoom,
-)
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.serversession import ServerSession
 from evennia.utils import ansi, create
@@ -413,8 +409,9 @@ class EvenniaCommandTestMixin:
             As part of the tests, all methods of the Command will be called in
             the proper order:
 
-            - cmdobj.at_pre_cmd()
+            - cmdobj.at_pre_parse()
             - cmdobj.parse()
+            - cmdobj.at_pre_cmd()
             - cmdobj.func()
             - cmdobj.at_post_cmd()
 
@@ -457,9 +454,12 @@ class EvenniaCommandTestMixin:
         # cmdhandler. This will have the mocked .msg be called as part of the
         # execution. Mocks remembers what was sent to them so we will be able
         # to retrieve what was sent later.
-        if not cmdobj.at_pre_cmd():
+        if not cmdobj.at_pre_parse():
             try:
                 cmdobj.parse()
+                if cmdobj.at_pre_cmd():
+                    # post-parse abort
+                    raise StopIteration
                 ret = cmdobj.func()
                 # handle func's with yield in them (making them generators)
                 if isinstance(ret, types.GeneratorType):

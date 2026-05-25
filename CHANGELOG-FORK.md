@@ -14,6 +14,60 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.2 — Phase 2 step 1: at_pre_cmd rename + dispatch reorder
+
+First slice of the Phase 2 cmdset refactor. Renames the pre-parse hook
+and introduces a (currently engine-only) post-parse hook. Pure rename
+under a hard-error guard: no semantic change yet, no auto-alias.
+
+### Breaking
+
+- **`Command.at_pre_cmd` renamed to `Command.at_pre_parse`.** Same
+  semantics (runs before `parse()`, return truthy to abort).
+- **`Command.__init_subclass__` hard-error guard.** Any subclass that
+  defines `at_pre_cmd` raises `TypeError` at class-creation pointing at
+  the file/class with a migration message. The new post-parse
+  `at_pre_cmd` exists but is engine-only during this window;
+  subclassing it is forbidden so legacy overrides cannot silently
+  no-op.
+- **Cmdhandler dispatch order changed** to
+  `at_pre_parse → parse → at_pre_cmd → func → at_post_cmd`. The new
+  `at_pre_cmd` runs *after* parse. The base class's `at_pre_cmd` is a
+  no-op; it does nothing observable to current code.
+- `evennia.utils.test_resources.BaseEvenniaCommandTest.call` mirrors
+  the new dispatch order. Tests that subclass `Command` and override
+  the old hook must rename to `at_pre_parse`.
+
+### Migration
+
+If you see `TypeError: <Module>.<Class> defines at_pre_cmd, which was
+renamed to at_pre_parse...` at import:
+
+1. Rename the method to `at_pre_parse`.
+2. Update any `super().at_pre_cmd()` calls to `super().at_pre_parse()`.
+3. Re-import; the guard accepts the new name.
+
+The post-parse `at_pre_cmd` will become subclass-able in a future
+release (target: `6.0.0+underspire.4`) once the guard is removed.
+
+### Engine renames in this commit
+
+`evennia/contrib/game_systems/storage/storage.py`,
+`evennia/contrib/base_systems/email_login/email_login.py`,
+`evennia/contrib/base_systems/ingame_reports/reports.py`,
+`evennia/commands/default/unloggedin.py`. The no-op
+`MuxCommand.at_pre_cmd` stub was deleted (it inherited the base
+no-op). Test fixtures in `commands/default/tests.py` and
+`contrib/base_systems/ingame_reports/tests.py` renamed.
+
+### Signals
+
+`on_command_pre.elapsed_ms` window unchanged in semantics but
+documented relative to `at_pre_parse` rather than the old name. No
+signal contract changes.
+
+---
+
 ## 6.0.0+underspire.1 — initial fork version mark
 
 First release tagged after the fork diverged meaningfully from upstream

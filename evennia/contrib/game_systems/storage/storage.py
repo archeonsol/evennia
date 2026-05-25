@@ -11,7 +11,7 @@ class StorageCommand(MuxCommand):
     Shared functionality for storage-related commands
     """
 
-    def at_pre_cmd(self):
+    def at_pre_parse(self):
         """
         Check if the current location is tagged as a storage location
         Every stored object is tagged on storage, and untagged on retrieval
@@ -19,7 +19,7 @@ class StorageCommand(MuxCommand):
         Returns:
             bool: True if the command is to be stopped here
         """
-        if super().at_pre_cmd():
+        if super().at_pre_parse():
             return True
 
         self.storage_location_id = self.caller.location.tags.get(category="storage_location")

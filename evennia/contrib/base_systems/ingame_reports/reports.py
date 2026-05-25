@@ -37,7 +37,8 @@ from evennia import CmdSet
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.comms.models import Msg
 from evennia.utils import create, evmenu, logger, search
-from evennia.utils.utils import class_from_module, datetime_format, is_iter, iter_to_str
+from evennia.utils.utils import (class_from_module, datetime_format, is_iter,
+                                 iter_to_str)
 
 from . import menu
 
@@ -146,14 +147,14 @@ class ReportCmdBase(_DEFAULT_COMMAND_CLASS):
     # the report type for this command, if different from the key
     report_type = None
 
-    def at_pre_cmd(self):
+    def at_pre_parse(self):
         """validate that the needed hub script exists - if not, cancel the command"""
         hub = _get_report_hub(self.report_type or self.key)
         if not hub:
-            # a return value of True from `at_pre_cmd` cancels the command
+            # a return value of True from `at_pre_parse` cancels the command
             return True
         self.hub = hub
-        return super().at_pre_cmd()
+        return super().at_pre_parse()
 
     def parse(self):
         """

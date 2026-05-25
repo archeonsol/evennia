@@ -456,12 +456,59 @@ class Command(metaclass=CommandMeta):
 
     # Common Command hooks
 
-    def at_pre_cmd(self):
-        """
-        This hook is called before self.parse() on all commands.  If
-        this hook returns anything but False/None, the command
-        sequence is aborted.
+    def __init_subclass__(cls, **kwargs):
+        """Guard against the legacy ``at_pre_cmd`` override during the rename.
 
+        ``at_pre_cmd`` was renamed to ``at_pre_parse`` in
+        ``6.0.0+underspire.2`` (the pre-parse "early gate" hook). A new
+        post-parse ``at_pre_cmd`` exists with engine-only semantics for
+        one release; subclassing it is forbidden so legacy overrides
+        cannot silently no-op.
+
+        Any subclass that defines ``at_pre_cmd`` raises ``TypeError`` at
+        class-creation pointing at the file and class. To migrate,
+        rename your method to ``at_pre_parse``.
+
+        Removed in a future release once downstream consumers have
+        migrated (target: ``6.0.0+underspire.4``).
+        """
+        super().__init_subclass__(**kwargs)
+        if "at_pre_cmd" in cls.__dict__:
+            module = getattr(cls, "__module__", "<unknown>")
+            qualname = getattr(cls, "__qualname__", cls.__name__)
+            raise TypeError(
+                f"{module}.{qualname} defines at_pre_cmd, which was renamed to "
+                "at_pre_parse in 6.0.0+underspire.2. Rename the method to "
+                "at_pre_parse (same semantics: runs before parse(), return "
+                "truthy to abort). The new post-parse at_pre_cmd hook is "
+                "engine-only during the deprecation window and cannot be "
+                "overridden yet."
+            )
+
+    def at_pre_parse(self):
+        """Hook called before ``self.parse()``.
+
+        If this hook returns anything truthy, the command sequence is
+        aborted (no ``parse``, no ``at_pre_cmd``, no ``func``,
+        no ``at_post_cmd``).
+
+        Renamed from ``at_pre_cmd`` in ``6.0.0+underspire.2`` so the
+        name reflects when it runs.
+        """
+        pass
+
+    def at_pre_cmd(self):
+        """Hook called after ``self.parse()``, before ``self.func()``.
+
+        If this hook returns anything truthy, the command is aborted
+        after parse but before ``func`` runs (``at_post_cmd`` is still
+        skipped).
+
+        Currently engine-only during the rename deprecation window:
+        subclass overrides raise ``TypeError`` at class-creation. The
+        guard is dropped in a future release; until then game code
+        wanting post-parse logic should override ``parse`` or place the
+        logic at the top of ``func``.
         """
         pass
 

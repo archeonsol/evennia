@@ -19,7 +19,7 @@ class _MockQuerySet(list):
 
 
 def _mock_pre(cmdobj):
-    """helper to mock at_pre_cmd"""
+    """helper to mock at_pre_parse (the hub-availability gate)"""
     cmdobj.hub = Mock()
 
 
@@ -30,7 +30,7 @@ class TestReportCommands(EvenniaCommandTest):
         cmd = reports.ReportCmdBase
 
         # avoid test side-effects
-        with patch.object(cmd, "at_pre_cmd", new=_mock_pre) as _:
+        with patch.object(cmd, "at_pre_parse", new=_mock_pre) as _:
             # no arguments
             self.call(cmd(), "", "You must provide a message.")
             # arguments, no target, no target required
@@ -56,7 +56,7 @@ Ideas you've submitted:
   idea 3 (submitted now)
 """
 
-        with patch.object(cmd, "at_pre_cmd", new=_mock_pre) as _:
+        with patch.object(cmd, "at_pre_parse", new=_mock_pre) as _:
             # submitting an idea
             self.call(cmd(), "", "You must provide a message.")
             # arguments, no target, no target required
