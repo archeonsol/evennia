@@ -2349,6 +2349,60 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         d.addCallback(_check)
         return d
 
+    def test_command_parse_handles_mux_switches_and_lhs_rhs(self):
+        # Command.parse now does MuxCommand-style parsing by default
+        # (parse_mux_syntax=True, since +underspire.5).
+        cmd = Command()
+        cmd.cmdstring = "test"
+        cmd.args = "/foo/bar a, b = c, d"
+        cmd.parse()
+        self.assertEqual(cmd.switches, ["foo", "bar"])
+        self.assertEqual(cmd.args, "a, b = c, d")
+        self.assertEqual(cmd.lhs, "a, b")
+        self.assertEqual(cmd.rhs, "c, d")
+        self.assertEqual(cmd.lhslist, ["a", "b"])
+        self.assertEqual(cmd.rhslist, ["c", "d"])
+
+    def test_command_parse_is_noop_when_parse_mux_syntax_false(self):
+        # Subclasses can opt out with `parse_mux_syntax = False` and
+        # still safely call super().parse() (back to legacy no-op shape).
+        class _CmdRawArgs(Command):
+            key = "rawargs"
+            parse_mux_syntax = False
+
+        cmd = _CmdRawArgs()
+        cmd.cmdstring = "rawargs"
+        cmd.args = "/foo a = b"
+        cmd.parse()
+        # No switch parsing happened: args is untouched, no switches attr set.
+        self.assertEqual(cmd.args, "/foo a = b")
+        self.assertFalse(hasattr(cmd, "switches"))
+        self.assertFalse(hasattr(cmd, "lhs"))
+
+    def test_muxcommand_parse_delegates_to_super_and_runs_account_caller(self):
+        # MuxCommand.parse now calls super().parse() for switch parsing
+        # and only adds the legacy account_caller normalisation.
+        from evennia.commands.default.muxcommand import MuxCommand
+
+        class _CmdLegacyAcctOnly2(MuxCommand):
+            key = "legacyacctonly2"
+            account_caller = True
+            account_command_caller = False  # engine flag explicitly off
+
+        cmd = _CmdLegacyAcctOnly2()
+        cmd.cmdstring = "legacyacctonly2"
+        cmd.args = "/sw target = value"
+        cmd.caller = self.char1
+        cmd.session = self.session
+        cmd.parse()
+        # Super did switch parsing:
+        self.assertEqual(cmd.switches, ["sw"])
+        self.assertEqual(cmd.lhs, "target")
+        self.assertEqual(cmd.rhs, "value")
+        # Legacy account_caller block ran (caller was a Character):
+        self.assertIs(cmd.caller, self.account)
+        self.assertIs(cmd.character, self.char1)
+
     def test_cmd_access_cache_identity_differentiates_command_classes(self):
         # _cmd_identity keys on class module + name, so a Command and an
         # AccountCommand with the same key string do not collide in the
