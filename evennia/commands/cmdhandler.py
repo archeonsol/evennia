@@ -42,8 +42,8 @@ from twisted.internet.task import deferLater
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
-from evennia.commands.signals import (on_command_error, on_command_post,
-                                      on_command_pre)
+from evennia.commands.signals import (on_cmdset_merge_error, on_command_error,
+                                      on_command_post, on_command_pre)
 from evennia.utils import logger, utils
 from evennia.utils.command_trace import get_trace_id
 from evennia.utils.utils import string_suggestions
@@ -180,6 +180,23 @@ def _msg_err(receiver, stringtuple, cmdid=None):
             timestamp=timestamp,
         ).strip()
     receiver.msg(err_helper(out, cmdid=cmdid))
+
+
+def _fire_cmdset_merge_error(caller, session, raw_string, exc):
+    """Dispatch on_cmdset_merge_error for a failure during cmdset build/merge.
+
+    Call this from within an active except handler so format_exc() captures
+    the current traceback.
+    """
+    on_cmdset_merge_error.send_robust(
+        sender=type(caller),
+        caller=caller,
+        session=session,
+        raw_string=raw_string,
+        trace_id=get_trace_id(),
+        exc=exc,
+        traceback_text=format_exc(),
+    )
 
 
 def _process_input(caller, prompt, result, cmd, generator):
@@ -333,7 +350,7 @@ def generate_cmdset_providers(called_by, session=None):
 
 @inlineCallbacks
 def get_and_merge_cmdsets(
-    caller, cmdset_providers, callertype, raw_string, report_to=None, cmdid=None
+    caller, cmdset_providers, callertype, raw_string, report_to=None, cmdid=None, session=None
 ):
     """
     Gather all relevant cmdsets and merge them.
@@ -421,7 +438,8 @@ def get_and_merge_cmdsets(
                         cset.duplicates = True if cset.duplicates is None else cset.duplicates
                     set_cached_location_cmdsets(loc_cache_key, local_obj_cmdsets)
                 return local_obj_cmdsets
-            except Exception:
+            except Exception as exc:
+                _fire_cmdset_merge_error(caller, session, raw_string, exc)
                 _msg_err(caller, _ERROR_CMDSETS)
                 raise ErrorReported(raw_string)
 
@@ -434,7 +452,8 @@ def get_and_merge_cmdsets(
             """
             try:
                 yield obj.at_cmdset_get(caller=caller, current=current)
-            except Exception:
+            except Exception as exc:
+                _fire_cmdset_merge_error(caller, session, raw_string, exc)
                 _msg_err(caller, _ERROR_CMDSETS)
                 raise ErrorReported(raw_string)
             try:
@@ -525,7 +544,8 @@ def get_and_merge_cmdsets(
         return cmdset
     except ErrorReported:
         raise
-    except Exception:
+    except Exception as exc:
+        _fire_cmdset_merge_error(caller, session, raw_string, exc)
         _msg_err(caller, _ERROR_CMDSETS)
         raise
         # raise ErrorReported
@@ -784,7 +804,12 @@ def cmdhandler(
             else:
                 # no explicit cmdobject given, figure it out
                 cmdset = yield get_and_merge_cmdsets(
-                    caller, cmdset_providers_list, callertype, raw_string, cmdid=cmdid
+                    caller,
+                    cmdset_providers_list,
+                    callertype,
+                    raw_string,
+                    cmdid=cmdid,
+                    session=session,
                 )
                 if not cmdset:
                     # this is bad and shouldn't happen.

@@ -1731,6 +1731,8 @@ class TestCmdAccessCache(BaseEvenniaTest):
 # ----------------------------------------------------------------------------
 
 
+from evennia.commands.signals import \
+    on_cmdset_merge_error as _on_cmdset_merge_error
 from evennia.commands.signals import on_command_error as _on_command_error
 from evennia.commands.signals import on_command_post as _on_command_post
 from evennia.commands.signals import on_command_pre as _on_command_pre
@@ -1855,6 +1857,55 @@ class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
         return d
 
 
+class TestCmdsetMergeErrorSignal(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1.1: on_cmdset_merge_error fires when cmdset build/merge fails."""
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+        self.events = []
+
+        def _record(sender, **kwargs):
+            self.events.append((sender, kwargs))
+
+        self._record = _record
+        _on_cmdset_merge_error.connect(_record, weak=False, dispatch_uid="merge-err-test")
+
+    def tearDown(self):
+        _on_cmdset_merge_error.disconnect(self._record, dispatch_uid="merge-err-test")
+        super().tearDown()
+
+    @patch("evennia.commands.cmdhandler.logger.log_err")
+    @patch("evennia.commands.cmdhandler._msg_err")
+    def test_at_cmdset_get_failure_fires_signal(self, _msg_err_mock, _log_err_mock):
+        # Force the session's at_cmdset_get to raise; cmdhandler will hit
+        # the per-provider merge-error site inside _get_cmdsets.
+        def _boom(*args, **kwargs):
+            raise RuntimeError("merge boom")
+
+        original = self.session.at_cmdset_get
+        self.session.at_cmdset_get = _boom
+        self.addCleanup(setattr, self.session, "at_cmdset_get", original)
+
+        d = cmdhandler.cmdhandler(self.session, "noop")
+
+        def _check(_):
+            self.assertEqual(len(self.events), 1, self.events)
+            _, kwargs = self.events[0]
+            # caller is whoever cmdhandler resolved to merge cmdsets for.
+            self.assertIn("caller", kwargs)
+            self.assertIn("session", kwargs)
+            self.assertEqual(kwargs["raw_string"], "noop")
+            self.assertIsInstance(kwargs["exc"], RuntimeError)
+            self.assertEqual(str(kwargs["exc"]), "merge boom")
+            self.assertIn("RuntimeError", kwargs["traceback_text"])
+            self.assertIn("merge boom", kwargs["traceback_text"])
+            self.assertIn("trace_id", kwargs)
+
+        d.addCallback(_check)
+        return d
+
+
 class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
@@ -1904,12 +1955,8 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation,
-    cmdset_generation,
-    get_cached_location_cmdsets,
-    make_cache_key,
-    set_cached_location_cmdsets,
-)
+    bump_cmdset_generation, cmdset_generation, get_cached_location_cmdsets,
+    make_cache_key, set_cached_location_cmdsets)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):

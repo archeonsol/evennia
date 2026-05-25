@@ -46,12 +46,24 @@ to remain forward-compatible):
 ``on_command_error``
     Fired inside the ``_run_command`` exception handler that converts a
     user-command exception into ``ErrorReported``. Not fired for
-    cmdset-merge or cmdset-getter failures (those still raise
-    ``ErrorReported`` with a ``trace_id`` attribute set, but there is no
-    ``cmd`` to hand to a receiver).
+    cmdset-merge or cmdset-getter failures (subscribe to
+    ``on_cmdset_merge_error`` for those).
 
     - ``cmd`` (Command): the command instance whose ``func()`` raised.
     - ``caller``, ``session``, ``trace_id``: as above.
+    - ``exc`` (BaseException): the exception that was raised.
+    - ``traceback_text`` (str): output of ``traceback.format_exc()`` for
+      the exception, captured at signal-fire time.
+
+``on_cmdset_merge_error``
+    Fired when building or merging the effective cmdset for a caller
+    fails. There is no ``cmd`` instance at this stage, so the sender is
+    ``type(caller)`` instead.
+
+    - ``caller``: the caller object whose cmdset stack failed to build.
+    - ``session``: the dispatching session, or ``None``.
+    - ``raw_string`` (str): the input string that triggered the dispatch.
+    - ``trace_id`` (str | None): the current per-command trace id.
     - ``exc`` (BaseException): the exception that was raised.
     - ``traceback_text`` (str): output of ``traceback.format_exc()`` for
       the exception, captured at signal-fire time.
@@ -59,8 +71,14 @@ to remain forward-compatible):
 
 from django.dispatch import Signal
 
-__all__ = ("on_command_pre", "on_command_post", "on_command_error")
+__all__ = (
+    "on_command_pre",
+    "on_command_post",
+    "on_command_error",
+    "on_cmdset_merge_error",
+)
 
 on_command_pre = Signal()
 on_command_post = Signal()
 on_command_error = Signal()
+on_cmdset_merge_error = Signal()
