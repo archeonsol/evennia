@@ -21,6 +21,16 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 - **Lock check cache**: `LOCK_CHECK_CACHE_ENABLED` — Command `lockhandler.check` memoized per caller ndb
 - **Look prefetch**: `LOOK_ATTR_PREFETCH_ENABLED` — `attributes.get_all()` at start of `at_look`
 
+### Tier 2 (subsystem modernization)
+
+- **AMP session serde:** `AMP_SESSION_SERDE = "json"` for Msg* traffic (no pickle on hot path). Admin/sync still uses pickle. Reject legacy pickle unless `AMP_SESSION_ACCEPT_LEGACY_PICKLE = True`.
+- **Event bus:** `evennia.events.emit(subject, payload, actor=..., persist=...)` — sanitized JSON payloads; optional Redis stream + `GameEvent` Postgres rows (`EVENT_BUS_BACKEND`, `EVENT_BUS_PERSIST_SUBJECTS`).
+- **Job queue:** `evennia.jobs.enqueue_job(type, payload)` — **registry-only** callables (`JOB_QUEUE_REGISTRY`); Redis list or `EngineJob` table; drain via `JOB_QUEUE_DRAIN_EVERY_N_TICKS` on global tick.
+- **Channel subscriber cache:** Redis SET per channel (`CHANNEL_SUBSCRIBER_CACHE_ENABLED`); PG M2M remains source of truth; invalidates on subscribe/unsubscribe.
+- **Postgres tooling:** `evennia.server.database_postgres.apply_postgres_engine_defaults(DATABASES)` — `CONN_MAX_AGE`, health checks, statement timeout. Read replicas for website/logs only (not game thread).
+
+**Not implemented (by design):** WebSocket typing/presence/draft OOB.
+
 ### Tier 1D–E (ops / startup)
 
 - **`defer_to_worker`**: `evennia.utils.worker_pool` — thread offload for Whoosh, search rebuild, HTTP, etc.

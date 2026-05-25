@@ -148,13 +148,16 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
 
         """
         # print("portal data_to_server: {}, {}, {}".format(command, sessid, kwargs))
+        if command in (amp.MsgPortal2Server,) and amp.session_serde_enabled():
+            packed = amp.dumps_session((sessid, kwargs))
+        else:
+            packed = amp.dumps((sessid, kwargs))
         if self.factory.server_connection:
             return self.factory.server_connection.callRemote(
-                command, packed_data=amp.dumps((sessid, kwargs))
+                command, packed_data=packed
             ).addErrback(self.errback, command.key)
         else:
-            # if no server connection is available, broadcast
-            return self.broadcast(command, sessid, packed_data=amp.dumps((sessid, kwargs)))
+            return self.broadcast(command, sessid, packed_data=packed)
 
     def start_server(self, server_twistd_cmd):
         """
@@ -385,7 +388,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
 
         """
         try:
-            sessid, kwargs = self.data_in(packed_data)
+            sessid, kwargs = amp.loads_session(packed_data)
             session = evennia.PORTAL_SESSION_HANDLER.get(sessid, None)
             if session:
                 evennia.PORTAL_SESSION_HANDLER.data_out(session, **kwargs)

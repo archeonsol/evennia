@@ -131,3 +131,39 @@ class ServerConfig(WeakSharedMemoryModel):
         """
         self.key = key
         self.value = value
+
+
+class GameEvent(models.Model):
+    """
+    Persisted engine event bus records (moderation audit, analytics).
+    """
+
+    subject = models.CharField(max_length=128, db_index=True)
+    payload_json = models.TextField(default="{}")
+    actor_ref = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Game event"
+        verbose_name_plural = "Game events"
+        indexes = [
+            models.Index(fields=["subject", "created_at"]),
+        ]
+
+
+class EngineJob(models.Model):
+    """
+    PostgreSQL-backed job queue (alternative to Redis list).
+    """
+
+    job_id = models.CharField(max_length=32, unique=True, db_index=True)
+    job_type = models.CharField(max_length=64, db_index=True)
+    payload_json = models.TextField(default="{}")
+    priority = models.IntegerField(default=0, db_index=True)
+    status = models.CharField(max_length=16, default="pending", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Engine job"
+        verbose_name_plural = "Engine jobs"

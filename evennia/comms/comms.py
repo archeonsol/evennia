@@ -636,10 +636,20 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
         """
         senders = make_iter(senders) if senders else []
-        if self.send_to_online_only:
-            receivers = self.subscriptions.online()
-        else:
-            receivers = self.subscriptions.all()
+        receivers = None
+        try:
+            from evennia.comms.channel_subscriber_cache import get_cached_subscribers
+
+            receivers = get_cached_subscribers(
+                self, online_only=bool(self.send_to_online_only)
+            )
+        except Exception:
+            receivers = None
+        if receivers is None:
+            if self.send_to_online_only:
+                receivers = self.subscriptions.online()
+            else:
+                receivers = list(self.subscriptions.all().keys())
         if not bypass_mute:
             receivers = [receiver for receiver in receivers if receiver not in self.mutelist]
 

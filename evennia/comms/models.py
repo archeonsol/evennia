@@ -605,6 +605,12 @@ class SubscriptionHandler:
                 elif clsname == "AccountDB":
                     self.obj.db_account_subscriptions.add(subscriber)
         self._recache()
+        try:
+            from evennia.comms.channel_subscriber_cache import add_subscriber
+
+            add_subscriber(self.obj, subscriber)
+        except Exception:
+            pass
 
     def remove(self, entity):
         """
@@ -620,10 +626,17 @@ class SubscriptionHandler:
                 clsname = subscriber.__dbclass__.__name__
                 # chooses the right type
                 if clsname == "AccountDB":
-                    self.obj.db_account_subscriptions.remove(entity)
+                    self.obj.db_account_subscriptions.remove(subscriber)
                 elif clsname == "ObjectDB":
-                    self.obj.db_object_subscriptions.remove(entity)
+                    self.obj.db_object_subscriptions.remove(subscriber)
         self._recache()
+        try:
+            from evennia.comms.channel_subscriber_cache import remove_subscriber
+
+            for subscriber in make_iter(entity):
+                remove_subscriber(self.obj, subscriber)
+        except Exception:
+            pass
 
     def all(self):
         """
@@ -673,6 +686,12 @@ class SubscriptionHandler:
         self.obj.db_account_subscriptions.clear()
         self.obj.db_object_subscriptions.clear()
         self._cache = None
+        try:
+            from evennia.comms.channel_subscriber_cache import clear_channel
+
+            clear_channel(self.obj)
+        except Exception:
+            pass
 
 
 class ChannelDB(TypedObject):

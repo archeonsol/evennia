@@ -93,6 +93,27 @@ def loads(data):
     return pickle.loads(data)
 
 
+def dumps_session(data):
+    """Pack (sessid, kwargs) for Msg* commands — JSON envelope, not pickle."""
+    from evennia.server.amp_serde import pack_session_message
+
+    sessid, kwargs = data
+    return pack_session_message(sessid, kwargs)
+
+
+def loads_session(data):
+    """Unpack Msg* session wire bytes."""
+    from evennia.server.amp_serde import unpack_session_message
+
+    return unpack_session_message(data)
+
+
+def session_serde_enabled():
+    from evennia.server.amp_serde import session_serde_enabled as _enabled
+
+    return _enabled()
+
+
 def _get_logger():
     """
     Delay import of logger until absolutely necessary
