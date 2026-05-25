@@ -90,7 +90,7 @@ def END(caller):
 #
 
 
-class CmdTalk(default_cmds.MuxCommand):
+class CmdTalk(default_cmds.Command):
     """
     Talks to an npc
 

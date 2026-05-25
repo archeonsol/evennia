@@ -87,7 +87,7 @@ class CmdXYZTeleport(building.CmdTeleport):
             raise InterruptCommand
 
     def parse(self):
-        default_cmds.MuxCommand.parse(self)
+        default_cmds.Command.parse(self)
         self.obj_to_teleport = self.caller
         self.destination = None
 

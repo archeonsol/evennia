@@ -351,11 +351,63 @@ If your `Command` subclass overrides `parse` *without* calling
   collapse coming in a later release will make this implicit; doing
   it now is purely a clarity move.
 
+### Step 5 (shipped in `6.0.0+underspire.6`): Delete MuxCommand / MuxAccountCommand
+
+`MuxCommand` and `MuxAccountCommand` are gone. `evennia/commands/default/muxcommand.py`
+is deleted. Importing the classes raises `ImportError`; subclassing
+is no longer possible. Engine sweep converted every internal
+subclass to `Command` / `AccountCommand` in the same release.
+
+**Engine sweep done in the same release:**
+
+- `settings_default.COMMAND_DEFAULT_CLASS` switched from
+  `evennia.commands.default.muxcommand.MuxCommand` to
+  `evennia.commands.command.Command`. Stock default commands that
+  use `COMMAND_DEFAULT_CLASS` now inherit `Command` (which carries
+  switch parsing since `+underspire.5`).
+- `evennia/commands/default/account.py`: every account command now
+  subclasses `AccountCommand` directly. All `account_caller = True`
+  attributes dropped (redundant — `AccountCommand` carries
+  `account_command_caller = True`, and the engine pre-parse
+  normalisation handles caller/account/character).
+- `evennia/contrib/*`: every contrib MuxCommand / MuxAccountCommand
+  subclass converted to `Command` / `AccountCommand` (both
+  direct-import and `default_cmds.MuxCommand` patterns). The one
+  `account_caller = True` contrib usage
+  (`ingame_reports.CmdReport`) becomes `account_command_caller =
+  True` so the engine flag handles normalisation.
+- `evennia/commands/default/comms.py`: `CmdChannel` and `CmdPage`
+  swapped `account_caller = True` for `account_command_caller =
+  True`. `CmdObjectChannel` (character-context channel command)
+  now overrides with `account_command_caller = False`.
+- `evennia/__init__.py`: `default_cmds` API extended with
+  `Command` and `AccountCommand` shortcuts. Contrib code can
+  subclass `default_cmds.Command` / `default_cmds.AccountCommand`
+  via the public path.
+- `evennia/utils/test_resources.py`: test patches of
+  `COMMAND_DEFAULT_CLASS` swapped from `MuxCommand` to `Command`.
+- No engine code (core, default, contrib, tests) subclasses
+  `MuxCommand` or `MuxAccountCommand` any more, except the
+  `MuxAccountCommand` class definition itself (skipped via a
+  qualname check in `MuxCommand.__init_subclass__`) and a handful
+  of test fixtures that deliberately exercise the deprecated
+  classes (each wrapped in `warnings.catch_warnings`).
+
+**Migration (required) for downstream code:**
+
+| You have | Switch to | Notes |
+|---|---|---|
+| `from evennia.commands.default.muxcommand import MuxCommand` | `from evennia.commands.command import Command` | Module is deleted; import raises ImportError. |
+| `class X(MuxCommand)` (plain) | `class X(Command)` | Switch parsing now in `Command.parse`. |
+| `class X(MuxCommand)` with `parse` override calling `super` expecting no-op | `class X(Command)` + `parse_mux_syntax = False` | See `+underspire.5` migration. |
+| `class X(MuxCommand)` with `account_caller = True` (no engine flag) | `class X(AccountCommand)` | Legacy parse-time block is gone. Cleanest path: subclass `AccountCommand` (engine flag handles it). |
+| `class X(MuxAccountCommand)` | `class X(AccountCommand)` | One-for-one swap. |
+| `default_cmds.MuxCommand` / `default_cmds.MuxAccountCommand` | `default_cmds.Command` / `default_cmds.AccountCommand` | Added to the public API in this release. |
+
 ### Remaining Phase 2 steps (planned)
 
 These ship under later `+underspire.N` versions.
 
-- `MuxCommand` / `MuxAccountCommand` deprecation aliases.
 - `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
 
 Game-side cleanup that lands once those steps are in:

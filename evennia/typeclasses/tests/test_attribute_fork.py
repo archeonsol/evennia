@@ -7,13 +7,9 @@ from unittest.mock import MagicMock
 from django.test import override_settings
 from mock import patch
 
-from evennia.typeclasses.attributes import (
-    Attribute,
-    ModelAttributeBackend,
-    _classify_value,
-    _mark_attr_dirty,
-    flush_all_dirty,
-)
+from evennia.typeclasses.attributes import (Attribute, ModelAttributeBackend,
+                                            _classify_value, _mark_attr_dirty,
+                                            flush_all_dirty)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -41,9 +37,7 @@ class TestWriteBehindFlush(BaseEvenniaTest):
 
     def test_orphan_dirty_flush(self):
         self.obj1.attributes.add("wb_orphan", 1)
-        attr = Attribute.objects.filter(
-            db_key="wb_orphan", db_model__iexact="objectdb"
-        ).first()
+        attr = Attribute.objects.filter(db_key="wb_orphan", db_model__iexact="objectdb").first()
         self.assertIsNotNone(attr)
         attr.value = 99
         _mark_attr_dirty(attr)
@@ -70,12 +64,16 @@ class TestPrometheusMetrics(BaseEvenniaTest):
         with patch.object(prometheus_metrics, "_METRICS_READY", False):
             with patch.object(prometheus_metrics, "ATTR_FLUSH_TOTAL", mock_counter):
                 with patch.object(prometheus_metrics, "ATTR_FLUSH_BACKENDS_TOTAL", mock_counter):
-                    with patch.object(prometheus_metrics, "ATTR_FLUSH_ORPHANTS_TOTAL", mock_counter):
+                    with patch.object(
+                        prometheus_metrics, "ATTR_FLUSH_ORPHANTS_TOTAL", mock_counter
+                    ):
                         with patch.object(prometheus_metrics, "ATTR_DIRTY_PENDING", mock_gauge):
                             with patch.object(
                                 prometheus_metrics, "ATTR_FLUSH_DURATION_SECONDS", mock_histogram
                             ):
-                                with patch.object(prometheus_metrics, "_init_metrics", return_value=True):
+                                with patch.object(
+                                    prometheus_metrics, "_init_metrics", return_value=True
+                                ):
                                     prometheus_metrics.record_attribute_flush(
                                         {
                                             "total": 3,
@@ -190,3 +188,51 @@ class TestRedisAttrCache(BaseEvenniaTest):
                 pg_get.assert_not_called()
                 self.assertEqual(len(conns), 1)
                 self.assertEqual(conns[0].attribute.value, 100)
+
+    @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=True)
+    def test_idmapper_flush_cache_drops_redis_keys(self):
+        # Wired in +underspire.6: flush_cache() must clear the Redis L2
+        # cache, otherwise CI runs with persistent Redis see stale
+        # Attribute rows leaking from a prior test's writes.
+        from evennia.typeclasses import redis_attr_cache
+        from evennia.utils.idmapper.models import flush_cache
+
+        deleted = []
+        scanned = []
+
+        class FakeRedis:
+            def scan_iter(self, match=None, count=None):
+                scanned.append((match, count))
+                # Yield two fake matching keys to confirm batching.
+                yield b"attr:v1:objectdb:1:hp:"
+                yield b"attr:v1:objectdb:1:__index__"
+
+            def delete(self, *keys):
+                deleted.extend(keys)
+                return len(keys)
+
+        with patch.object(redis_attr_cache, "_redis_conn", return_value=FakeRedis()):
+            flush_cache()
+
+        self.assertEqual(len(scanned), 1)
+        self.assertEqual(scanned[0][0], "attr:v1:*")
+        self.assertEqual(
+            deleted,
+            [b"attr:v1:objectdb:1:hp:", b"attr:v1:objectdb:1:__index__"],
+        )
+
+    @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=False)
+    def test_flush_all_keys_noop_when_disabled(self):
+        from evennia.typeclasses import redis_attr_cache
+
+        # Should not even try to open a connection when disabled.
+        with patch.object(redis_attr_cache, "_redis_conn") as conn:
+            self.assertEqual(redis_attr_cache.flush_all_keys(), 0)
+            conn.assert_not_called()
+
+    @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=True)
+    def test_flush_all_keys_noop_when_redis_unavailable(self):
+        from evennia.typeclasses import redis_attr_cache
+
+        with patch.object(redis_attr_cache, "_redis_conn", return_value=None):
+            self.assertEqual(redis_attr_cache.flush_all_keys(), 0)

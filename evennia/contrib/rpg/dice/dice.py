@@ -219,7 +219,7 @@ RE_MOD = re.compile(r"(\+|-|/|\*)")
 RE_COND = re.compile(r"(<|>|<=|>=|!=|==)")
 
 
-class CmdDice(default_cmds.MuxCommand):
+class CmdDice(default_cmds.Command):
     """
     roll dice
 

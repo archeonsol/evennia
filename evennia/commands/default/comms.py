@@ -237,8 +237,10 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         "unban",
         "who",
     )
-    # disable this in child command classes if wanting on-character channels
-    account_caller = True
+    # Opt into engine pre-parse caller normalisation: self.caller is the
+    # Account regardless of puppet state. Subclasses for on-character
+    # channels (see CmdObjectChannel below) flip this to False.
+    account_command_caller = True
 
     def search_channel(self, channelname, exact=False, handle_errors=True):
         """
@@ -1299,7 +1301,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
 # a channel-command parent for use with Characters/Objects.
 class CmdObjectChannel(CmdChannel):
-    account_caller = False
+    # Override parent's account_command_caller=True so self.caller stays
+    # as the puppeted Character (no engine caller-normalisation).
+    account_command_caller = False
 
 
 class CmdPage(COMMAND_DEFAULT_CLASS):
@@ -1328,13 +1332,14 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
     locks = "cmd:not pperm(page_banned)"
     help_category = "Comms"
 
-    # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
+    # Opt into engine pre-parse caller normalisation: self.caller will
+    # be the Account regardless of puppet state.
+    account_command_caller = True
 
     def func(self):
         """Implement function using the Msg methods"""
 
-        # Since account_caller is set above, this will be an Account.
+        # Since account_command_caller is set above, this will be an Account.
         caller = self.caller
 
         # get the messages we've sent (not to channels)

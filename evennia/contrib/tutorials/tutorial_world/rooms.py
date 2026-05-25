@@ -16,18 +16,9 @@ import random
 # it regardless of if we change settings later.
 from django.conf import settings
 
-from evennia import (
-    TICKER_HANDLER,
-    CmdSet,
-    Command,
-    DefaultExit,
-    DefaultRoom,
-    create_object,
-    default_cmds,
-    search_object,
-    syscmdkeys,
-    utils,
-)
+from evennia import (TICKER_HANDLER, CmdSet, Command, DefaultExit, DefaultRoom,
+                     create_object, default_cmds, search_object, syscmdkeys,
+                     utils)
 
 from .objects import LightSource
 
@@ -91,7 +82,7 @@ class CmdTutorial(Command):
 # for the @detail command we inherit from MuxCommand, since
 # we want to make use of MuxCommand's pre-parsing of '=' in the
 # argument.
-class CmdTutorialSetDetail(default_cmds.MuxCommand):
+class CmdTutorialSetDetail(default_cmds.Command):
     """
     sets a detail on a room
 
@@ -213,7 +204,7 @@ class CmdTutorialLook(default_cmds.CmdLook):
         return
 
 
-class CmdTutorialGiveUp(default_cmds.MuxCommand):
+class CmdTutorialGiveUp(default_cmds.Command):
     """
     Give up the tutorial-world quest and return to Limbo, the start room of the
     server.

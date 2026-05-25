@@ -146,7 +146,7 @@ class CmdOpen(default_cmds.CmdOpen):
 # operate on other types of open-able objects as needed.
 
 
-class CmdOpenCloseDoor(default_cmds.MuxCommand):
+class CmdOpenCloseDoor(default_cmds.Command):
     """
     Open and close a door
 

@@ -62,7 +62,7 @@ import time
 from django.conf import settings
 
 from evennia import CmdSet
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 
 _BASIC_MAP_SIZE = settings.BASIC_MAP_SIZE if hasattr(settings, "BASIC_MAP_SIZE") else 2
 _MAX_MAP_SIZE = settings.BASIC_MAP_SIZE if hasattr(settings, "MAX_MAP_SIZE") else 10
@@ -294,7 +294,7 @@ class Map(object):
         return "%s" % map_string
 
 
-class CmdMap(MuxCommand):
+class CmdMap(Command):
     """
     Check the local map around you.
 

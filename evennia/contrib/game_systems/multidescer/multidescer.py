@@ -127,7 +127,7 @@ def _quit_editor(caller):
 # The actual command class
 
 
-class CmdMultiDesc(default_cmds.MuxCommand):
+class CmdMultiDesc(default_cmds.Command):
     """
     Manage multiple descriptions
 

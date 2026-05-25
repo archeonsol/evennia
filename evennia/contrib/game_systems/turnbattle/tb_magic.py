@@ -69,7 +69,7 @@ in your game and using it as-is.
 from random import randint
 
 from evennia import Command, DefaultScript, create_object, default_cmds
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 from evennia.utils.logger import log_trace
 
 from . import tb_basic
@@ -567,7 +567,7 @@ class CmdLearnSpell(Command):
         """
 
 
-class CmdCast(MuxCommand):
+class CmdCast(Command):
     """
     Cast a magic spell that you know, provided you have the MP
     to spend on its casting.

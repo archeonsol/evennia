@@ -437,9 +437,8 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         """
         global _MONITOR_HANDLER
         if not _MONITOR_HANDLER:
-            from evennia.scripts.monitorhandler import (
-                MONITOR_HANDLER as _MONITOR_HANDLER,
-            )
+            from evennia.scripts.monitorhandler import \
+                MONITOR_HANDLER as _MONITOR_HANDLER
 
         if _IS_SUBPROCESS:
             # we keep a store of objects modified in subprocesses so
@@ -545,6 +544,18 @@ def flush_cache(**kwargs):
 
     for cls in class_hierarchy([SharedMemoryModel]):
         cls.flush_instance_cache()
+    # Drop the Redis L2 attribute cache too, otherwise cached Attribute
+    # rows leak across boundaries that already clear the in-process
+    # idmapper (test tearDown, post_migrate, the @reload/flush admin
+    # command). No-op unless ATTRIBUTE_REDIS_CACHE_ENABLED is on and a
+    # Redis connection is reachable. Wrapped so a Redis hiccup never
+    # breaks idmapper flush.
+    try:
+        from evennia.typeclasses.redis_attr_cache import flush_all_keys
+
+        flush_all_keys()
+    except Exception:
+        pass
     # run the python garbage collector
     return gc.collect()
 

@@ -6,11 +6,11 @@ from django.core.management import call_command
 
 import evennia
 from evennia import CmdSet, InterruptCommand
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 from evennia.utils.utils import list_to_string
 
 
-class GitCommand(MuxCommand):
+class GitCommand(Command):
     """
     The shared functionality between git/git evennia
     """

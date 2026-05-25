@@ -37,7 +37,7 @@ from django.conf import settings
 from evennia.accounts.models import AccountDB
 from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.commands.cmdset import CmdSet
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 from evennia.server.models import ServerConfig
 from evennia.utils import ansi, class_from_module, utils
 
@@ -64,7 +64,7 @@ if not CONNECTION_SCREEN:
     )
 
 
-class CmdUnconnectedConnect(MuxCommand):
+class CmdUnconnectedConnect(Command):
     """
     Connect to the game.
 
@@ -127,7 +127,7 @@ class CmdUnconnectedConnect(MuxCommand):
         session.sessionhandler.login(session, account)
 
 
-class CmdUnconnectedCreate(MuxCommand):
+class CmdUnconnectedCreate(Command):
     """
     Create a new account.
 
@@ -232,7 +232,7 @@ class CmdUnconnectedCreate(MuxCommand):
             session.msg("|R%s|n" % "\n".join(errors))
 
 
-class CmdUnconnectedQuit(MuxCommand):
+class CmdUnconnectedQuit(Command):
     """
     We maintain a different version of the `quit` command
     here for unconnected accounts for the sake of simplicity. The logged in
@@ -249,7 +249,7 @@ class CmdUnconnectedQuit(MuxCommand):
         session.sessionhandler.disconnect(session, "Good bye! Disconnecting.")
 
 
-class CmdUnconnectedLook(MuxCommand):
+class CmdUnconnectedLook(Command):
     """
     This is an unconnected version of the `look` command for simplicity.
 
@@ -266,7 +266,7 @@ class CmdUnconnectedLook(MuxCommand):
         self.caller.msg(CONNECTION_SCREEN)
 
 
-class CmdUnconnectedHelp(MuxCommand):
+class CmdUnconnectedHelp(Command):
     """
     This is an unconnected version of the help command,
     for simplicity. It shows a pane of info.

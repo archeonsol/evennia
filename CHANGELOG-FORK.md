@@ -14,6 +14,118 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.6 — Delete MuxCommand / MuxAccountCommand
+
+Removes `MuxCommand` and `MuxAccountCommand` entirely. Engine-internal
+subclasses (default commands, contribs, test patches) all converted
+to `Command` / `AccountCommand` in the same release.
+
+**Breaking:** importing `evennia.commands.default.muxcommand` or
+`evennia.default_cmds.MuxCommand` / `MuxAccountCommand` raises
+`ImportError`. Subclassing these classes is no longer possible. The
+module file `evennia/commands/default/muxcommand.py` is deleted.
+
+### Engine
+
+- `settings_default.COMMAND_DEFAULT_CLASS` switched from
+  `evennia.commands.default.muxcommand.MuxCommand` to
+  `evennia.commands.command.Command`. Default commands that use
+  `COMMAND_DEFAULT_CLASS` now inherit `Command` (switch parsing
+  preserved via `Command.parse` since `+underspire.5`).
+- `evennia/commands/default/account.py`: every account command now
+  subclasses `AccountCommand` directly. All `account_caller =
+  True` attributes dropped — redundant on `AccountCommand`, which
+  carries the engine flag `account_command_caller = True`.
+- `evennia/contrib/*`: every MuxCommand / MuxAccountCommand
+  subclass converted to `Command` / `AccountCommand`, covering
+  both direct-import (`from evennia.commands.default.muxcommand
+  import MuxCommand`) and `default_cmds.MuxCommand` patterns. The
+  single contrib `account_caller = True` usage
+  (`ingame_reports.CmdReport`) becomes `account_command_caller =
+  True`.
+- `evennia/commands/default/comms.py`: `CmdChannel` and `CmdPage`
+  swapped `account_caller = True` for `account_command_caller =
+  True`. `CmdObjectChannel` (character-context channel command)
+  overrides with `account_command_caller = False` to disable the
+  engine pre-parse normalisation. Test helpers that runtime-toggled
+  `cmd.account_caller = False` for character-context dispatch
+  swapped to `cmd.account_command_caller = False`.
+- `evennia/__init__.py`: `default_cmds` API extended with
+  `Command` and `AccountCommand` shortcuts so contrib code can
+  subclass them via the public path (`default_cmds.Command`)
+  rather than reaching into `evennia.commands.command`.
+- `evennia/utils/test_resources.py`: test patches of
+  `COMMAND_DEFAULT_CLASS` swapped from `MuxCommand` to `Command`.
+- Engine tests that previously exercised `MuxCommand` /
+  `MuxAccountCommand` behaviour deleted: the legacy `account_caller`
+  parse-time block is gone (no path to test); the engine
+  normalisation path is already covered by `AccountCommand` tests;
+  the deprecation-warning machinery is gone with the classes.
+  `test_mux_command` in `commands/default/tests.py` redirected to
+  use `Command` directly (still tests E2E switch handling via
+  `.call()`).
+
+### Rationale
+
+After `+underspire.5`, `MuxCommand` no longer carried unique
+behaviour beyond the legacy `account_caller` parse-time
+normalisation block. Once the engine sweep had no remaining
+internal subclasses, the classes were dead weight and the legacy
+block had no consumers worth preserving. Delete instead of
+deprecate; downstream pins `+underspire.5` if they need migration
+time.
+
+### Migration
+
+- **`from evennia.commands.default.muxcommand import MuxCommand`**:
+  → `from evennia.commands.command import Command`. Switch parsing
+  keeps working (now in `Command.parse`). If your `parse` override
+  called `super().parse()` expecting the historical no-op, add
+  `parse_mux_syntax = False` to the class — see `+underspire.5`
+  migration notes.
+- **`from evennia.commands.default.muxcommand import
+  MuxAccountCommand`**: → `from evennia.commands.command import
+  AccountCommand`. Engine pre-parse normalisation already gives the
+  same `caller`/`account`/`character` shape via the
+  `account_command_caller = True` flag.
+- **`default_cmds.MuxCommand` / `default_cmds.MuxAccountCommand`**:
+  → `default_cmds.Command` / `default_cmds.AccountCommand` (added
+  to the API in this release).
+- **Third-party subclasses with `account_caller = True`** (without
+  the engine flag): the parse-time normalisation block is gone.
+  Switch the base to `AccountCommand` (cleanest) or set
+  `account_command_caller = True` directly on the class.
+
+### Tests
+
+All `evennia.commands`, `evennia.commands.default`, and
+`evennia.contrib` tests pass (modulo pre-existing failures in
+`puzzles`, `mail`, and `extended_room` that exist on
+`+underspire.5` and are unrelated to this change).
+
+### Bug fix: Redis L2 attribute cache + idmapper teardown
+
+`RedisCachedModelAttributeBackend` was not wired into the idmapper
+`flush_cache` path. CI runs with persistent Redis saw stale
+`Attribute` rows leak from one test's writes into a later test's
+reads; local runs (Redis backend disabled by default) never tripped
+it. New `evennia.typeclasses.redis_attr_cache.flush_all_keys()`
+scans `attr:<version>:*` and deletes via `SCAN` (non-blocking on
+large keyspaces); `evennia.utils.idmapper.models.flush_cache` calls
+it after the in-process idmapper flush. No-op when
+`ATTRIBUTE_REDIS_CACHE_ENABLED` is off or Redis is unreachable,
+wrapped so any Redis hiccup never breaks idmapper flush.
+
+Covers all three flush call-sites by free: test `tearDown`,
+`post_migrate` signal, and the `@reload/flush` admin command.
+
+Three new tests in `test_attribute_fork.TestRedisAttrCache`:
+`flush_cache` drives the scan+delete; disabled flag is a no-op
+without opening a connection; unreachable Redis is a no-op without
+raising.
+
+---
+
 ## 6.0.0+underspire.5 — Switch parsing in Command.parse
 
 MuxCommand's switch / lhs / rhs parsing is promoted into the base
