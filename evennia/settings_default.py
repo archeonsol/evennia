@@ -611,6 +611,14 @@ JOB_QUEUE_DRAIN_MAX_JOBS = 5
 # Redis SET index for channel subscribers (PG M2M remains source of truth).
 CHANNEL_SUBSCRIBER_CACHE_ENABLED = True
 CHANNEL_SUBSCRIBER_CACHE_REDIS_ALIAS = "default"
+# Redis SET per room for msg_contents recipients (PG location is source of truth).
+ROOM_SCENE_INDEX_ENABLED = True
+ROOM_SCENE_INDEX_REDIS_ALIAS = "default"
+ROOM_SCENE_INDEX_TYPECLASS_PATHS = (
+    "typeclasses.characters.base.Character",
+    "typeclasses.characters.Character",
+    "typeclasses.creatures.Creature",
+)
 # PostgreSQL connection defaults (apply via evennia.server.database_postgres.apply_postgres_engine_defaults).
 ENGINE_DATABASE_CONN_MAX_AGE = 600
 ENGINE_DATABASE_CONN_HEALTH_CHECKS = True
