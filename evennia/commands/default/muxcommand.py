@@ -185,7 +185,16 @@ class MuxCommand(Command):
         # sure that self.caller is always the account if possible. We also create
         # a special property "character" for the puppeted object, if any. This
         # is convenient for commands defined on the Account only.
-        if self.account_caller:
+        #
+        # Skip when the engine's pre-parse normalisation already ran for this
+        # cmd (``account_command_caller = True``, shipped in
+        # ``6.0.0+underspire.3``). The engine path produces the same
+        # ``self.caller`` / ``self.account`` / ``self.character`` shape, so
+        # re-running here is redundant and would re-call ``get_puppet`` for
+        # no benefit. The flag-based short-circuit keeps third-party
+        # ``account_caller``-only subclasses (no engine flag) on the legacy
+        # path during the deprecation window.
+        if self.account_caller and not getattr(self, "account_command_caller", False):
             if utils.inherits_from(self.caller, "evennia.objects.objects.DefaultObject"):
                 # caller is an Object/Character
                 self.character = self.caller
@@ -262,3 +271,14 @@ class MuxAccountCommand(MuxCommand):
     """
 
     account_caller = True  # Using MuxAccountCommand explicitly defaults the caller to an account
+    # Opt into engine pre-parse normalisation
+    # (``cmdhandler._normalize_account_command_caller``, shipped in
+    # ``6.0.0+underspire.3``). With both flags set, the engine handles the
+    # caller/account/character rewrite before any hook fires, and
+    # ``MuxCommand.parse``'s legacy normalisation block short-circuits via
+    # the ``not getattr(self, "account_command_caller", False)`` guard.
+    # Downstream code can detect "this is an account command" uniformly via
+    # ``getattr(cmd, "account_command_caller", False)`` — covering both
+    # ``evennia.commands.command.AccountCommand`` subclasses and stock
+    # ``MuxAccountCommand`` subclasses.
+    account_command_caller = True
