@@ -11,6 +11,7 @@ which is a non-db version of Attributes.
 
 import fnmatch
 import re
+import weakref
 from collections import defaultdict
 from copy import copy
 
@@ -25,6 +26,15 @@ from evennia.utils.picklefield import PickledObjectField
 from evennia.utils.utils import is_iter, lazy_property, make_iter, to_str
 
 _TYPECLASS_AGGRESSIVE_CACHE = settings.TYPECLASS_AGGRESSIVE_CACHE
+
+# Write-behind registry: backends with unflushed dirty attrs
+_DIRTY_BACKENDS: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def flush_all_dirty():
+    """Flush all pending attribute writes to DB. Called from tick handler."""
+    for backend in list(_DIRTY_BACKENDS):
+        backend.flush_dirty()
 
 # -------------------------------------------------------------
 #
@@ -407,6 +417,19 @@ class Attribute(IAttribute, SharedMemoryModel):
     # time stamp
     db_date_created = models.DateTimeField("date_created", editable=False, auto_now_add=True)
 
+    # Typed value columns — fast path for simple Python types; avoids pickle round-trip.
+    # db_val_type: 'int'|'bool'|'float'|'str'|'none'|'' ('' = use pickle db_value)
+    db_val_type = models.CharField(
+        "val_type",
+        max_length=8,
+        default="",
+        blank=True,
+        help_text="Type discriminator for typed columns: int/bool/float/str/none/'' (pickle).",
+    )
+    db_int_val = models.BigIntegerField("int_val", null=True, blank=True)
+    db_float_val = models.FloatField("float_val", null=True, blank=True)
+    db_str_val = models.TextField("str_val", null=True, blank=True)
+
     # Database manager
     # objects = managers.AttributeManager()
 
@@ -437,15 +460,25 @@ class Attribute(IAttribute, SharedMemoryModel):
 
     lock_storage = property(__lock_storage_get, __lock_storage_set, __lock_storage_del)
 
-    # value property (wraps db_value)
+    # value property (wraps db_value / typed columns)
     @property
     def value(self):
         """
         Getter. Allows for `value = self.value`.
-        We cannot cache here since it makes certain cases (such
-        as storing a dbobj which is then deleted elsewhere) out-of-sync.
-        The overhead of unpickling seems hard to avoid.
+        Fast path: reads from typed columns (int/bool/float/str/none) when set.
+        Falls back to pickle for complex types and all existing data.
         """
+        _type = self.db_val_type
+        if _type == "int":
+            return self.db_int_val
+        elif _type == "bool":
+            return bool(self.db_int_val)
+        elif _type == "float":
+            return self.db_float_val
+        elif _type == "str":
+            return self.db_str_val
+        elif _type == "none":
+            return None
         return from_pickle(self.db_value, db_obj=self)
 
     @value.setter
@@ -1011,6 +1044,26 @@ class InMemoryAttributeBackend(IAttributeBackend):
         self._category_storage[attr.category].remove(attr)
 
 
+def _classify_value(value):
+    """Classify a value into typed columns or the pickle path.
+
+    Returns (val_type, int_val, float_val, str_val, pickle_val).
+    bool is checked before int because bool is a subclass of int.
+    """
+    if value is None:
+        return ("none", None, None, None, None)
+    t = type(value)
+    if t is bool:
+        return ("bool", int(value), None, None, None)
+    if t is int:
+        return ("int", value, None, None, None)
+    if t is float:
+        return ("float", None, value, None, None)
+    if t is str:
+        return ("str", None, None, value, None)
+    return ("", None, None, None, to_pickle(value))
+
+
 class ModelAttributeBackend(IAttributeBackend):
     """
     Uses Django models for storing Attributes.
@@ -1022,6 +1075,7 @@ class ModelAttributeBackend(IAttributeBackend):
     def __init__(self, handler, attrtype):
         super().__init__(handler, attrtype)
         self._model = to_str(handler.obj.__dbclass__.__name__.lower())
+        self._dirty_attrs: set = set()
 
     def query_all(self):
         query = {
@@ -1065,12 +1119,21 @@ class ModelAttributeBackend(IAttributeBackend):
             "db_model": self._model,
             "db_lock_storage": lockstring if lockstring else "",
             "db_attrtype": self._attrtype,
+            "db_val_type": "",
+            "db_int_val": None,
+            "db_float_val": None,
+            "db_str_val": None,
         }
         if strvalue:
             kwargs["db_value"] = None
             kwargs["db_strvalue"] = value
         else:
-            kwargs["db_value"] = to_pickle(value)
+            val_type, int_val, float_val, str_val, pickle_val = _classify_value(value)
+            kwargs["db_val_type"] = val_type
+            kwargs["db_int_val"] = int_val
+            kwargs["db_float_val"] = float_val
+            kwargs["db_str_val"] = str_val
+            kwargs["db_value"] = pickle_val
             kwargs["db_strvalue"] = None
         new_attr = self._attrclass(**kwargs)
         new_attr.save()
@@ -1082,28 +1145,63 @@ class ModelAttributeBackend(IAttributeBackend):
         if strvalue:
             attr.db_value = None
             attr.db_strvalue = value
+            attr.db_val_type = ""
+            attr.db_int_val = None
+            attr.db_float_val = None
+            attr.db_str_val = None
         else:
-            attr.db_value = to_pickle(value)
+            val_type, int_val, float_val, str_val, pickle_val = _classify_value(value)
+            attr.db_val_type = val_type
+            attr.db_int_val = int_val
+            attr.db_float_val = float_val
+            attr.db_str_val = str_val
+            attr.db_value = pickle_val
             attr.db_strvalue = None
-        attr.save(update_fields=["db_strvalue", "db_value"])
+        self._dirty_attrs.add(attr)
+        _DIRTY_BACKENDS.add(self)
 
     def do_batch_update_attribute(self, attr_obj, category, lock_storage, new_value, strvalue):
         attr_obj.db_category = category
         attr_obj.db_lock_storage = lock_storage if lock_storage else ""
         if strvalue:
-            # store as a simple string (will not notify OOB handlers)
             attr_obj.db_strvalue = new_value
             attr_obj.db_value = None
+            attr_obj.db_val_type = ""
+            attr_obj.db_int_val = None
+            attr_obj.db_float_val = None
+            attr_obj.db_str_val = None
         else:
-            attr_obj.db_value = to_pickle(new_value)
+            val_type, int_val, float_val, str_val, pickle_val = _classify_value(new_value)
+            attr_obj.db_val_type = val_type
+            attr_obj.db_int_val = int_val
+            attr_obj.db_float_val = float_val
+            attr_obj.db_str_val = str_val
+            attr_obj.db_value = pickle_val
             attr_obj.db_strvalue = None
-        attr_obj.save(update_fields=["db_strvalue", "db_value", "db_category", "db_lock_storage"])
+        self._dirty_attrs.add(attr_obj)
+        _DIRTY_BACKENDS.add(self)
+
+    def flush_dirty(self):
+        """Bulk-write all buffered attribute changes to DB."""
+        if not self._dirty_attrs:
+            return
+        dirty = list(self._dirty_attrs)
+        self._dirty_attrs.clear()
+        _DIRTY_BACKENDS.discard(self)
+        self._attrclass.objects.bulk_update(
+            dirty,
+            [
+                "db_value", "db_strvalue", "db_category", "db_lock_storage",
+                "db_val_type", "db_int_val", "db_float_val", "db_str_val",
+            ],
+        )
 
     def do_batch_finish(self, attr_objs):
         # Add new objects to m2m field all at once
         getattr(self.obj, self._m2m_fieldname).add(*attr_objs)
 
     def do_delete_attribute(self, attr):
+        self._dirty_attrs.discard(attr)
         try:
             attr.delete()
         except AssertionError:

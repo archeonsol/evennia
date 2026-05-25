@@ -311,6 +311,8 @@ class ServerSessionHandler(SessionHandler):
         evennia.server_data = {"servername": _SERVERNAME}
         # will be set on psync
         self.portal_start_time = 0.0
+        # per-session outbound message buffer for batching (sessid -> [kwargs, ...])
+        self._outbuf = {}
 
     def _run_cmd_login(self, session):
         """
@@ -585,6 +587,7 @@ class ServerSessionHandler(SessionHandler):
         session.at_disconnect(reason)
         SIGNAL_ACCOUNT_POST_LOGOUT.send(sender=session.account, session=session)
         sessid = session.sessid
+        self._outbuf.pop(sessid, None)
         if sessid in self and not hasattr(self, "_disconnect_all"):
             del self[sessid]
         if sync_portal:
@@ -810,7 +813,8 @@ class ServerSessionHandler(SessionHandler):
 
     def data_out(self, session, **kwargs):
         """
-        Sending data Server -> Portal
+        Sending data Server -> Portal. Messages are buffered per session for
+        the current reactor iteration and flushed as a single AMP call.
 
         Args:
             session (Session): Session to relay to.
@@ -820,11 +824,48 @@ class ServerSessionHandler(SessionHandler):
             The outdata will be scrubbed for sending across
             the wire here.
         """
-        # clean output for sending
-        kwargs = self.clean_senddata(session, kwargs)
+        uid = session.sessid
+        if uid not in self._outbuf:
+            self._outbuf[uid] = []
+            from twisted.internet import reactor as _reactor
+            _reactor.callLater(0, self._flush_outbuf, uid)
+        self._outbuf[uid].append(kwargs)
 
-        # send across AMP
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_MsgServer2Portal(session, **kwargs)
+    def _flush_outbuf(self, uid):
+        """Drain the per-session output buffer and send one merged AMP call."""
+        msgs = self._outbuf.pop(uid, None)
+        if not msgs:
+            return
+        session = self.get(uid)
+        if session is None:
+            return
+
+        text_parts = []
+        text_options = {}
+        merged = {}
+        for msg in msgs:
+            for k, v in msg.items():
+                if k == "text":
+                    # v is str or (str, options_dict)
+                    if isinstance(v, tuple) and len(v) >= 1:
+                        text_parts.append(v[0])
+                        if len(v) >= 2 and isinstance(v[1], dict) and not text_options:
+                            text_options = v[1]
+                    else:
+                        text_parts.append(str(v) if v is not None else "")
+                else:
+                    # last-wins for non-text keys (OOB, GMCP, options, etc.)
+                    merged[k] = v
+
+        if text_parts:
+            joined = "\n".join(p for p in text_parts if p)
+            merged["text"] = (joined, text_options) if text_options else joined
+
+        if not merged:
+            return
+
+        merged = self.clean_senddata(session, merged)
+        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_MsgServer2Portal(session, **merged)
 
     def get_inputfuncs(self):
         """

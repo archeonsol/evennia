@@ -116,6 +116,7 @@ __all__ = ("LockHandler", "LockException")
 
 WARNING_LOG = settings.LOCKWARNING_LOG_FILE
 _LOCK_HANDLER = None
+_LOCK_CACHE_MISS = object()  # sentinel for ndb lock cache lookups
 
 
 #
@@ -580,6 +581,25 @@ class LockHandler:
                 return True
 
         # no superuser or bypass -> normal lock operation
+        # Per-caller ndb cache: key = (id(lock_obj), access_type, no_superuser_bypass).
+        # Only cache for non-DB objects (commands have no pk) — DB objects (rooms, accounts)
+        # can have lockstrings changed at runtime, which would cause stale cached results.
+        # id(self.obj) invalidates naturally when cmdset rebuilds (new command instances).
+        # ndb is volatile — cleared on reconnect/reload — so no cross-session staleness.
+        _ndb = getattr(accessing_obj, "ndb", None)
+        if _ndb is not None and getattr(self.obj, "pk", None) is None:
+            _lcache = getattr(_ndb, "_lock_cache", None)
+            if _lcache is None:
+                _ndb._lock_cache = {}
+                _lcache = _ndb._lock_cache
+            _ckey = (id(self.obj), access_type, no_superuser_bypass)
+            _cached = _lcache.get(_ckey, _LOCK_CACHE_MISS)
+            if _cached is not _LOCK_CACHE_MISS:
+                return _cached
+        else:
+            _lcache = None
+            _ckey = None
+
         if access_type in self.locks:
             # we have a lock, test it.
             evalstring, func_tup, raw_string = self.locks[access_type]
@@ -599,9 +619,13 @@ class LockHandler:
             )
             # the True/False tuple goes into evalstring, which combines them
             # with AND/OR/NOT in order to get the final result.
-            return eval(evalstring % true_false)
+            result = eval(evalstring % true_false)
         else:
-            return default
+            result = default
+
+        if _lcache is not None:
+            _lcache[_ckey] = result
+        return result
 
     def _eval_access_type(self, accessing_obj, locks, access_type):
         """

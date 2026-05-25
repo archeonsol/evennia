@@ -37,6 +37,34 @@ from datetime import datetime
 from pickle import dumps, loads
 from zlib import compress, decompress
 
+try:
+    import msgspec as _msgspec
+
+    _MSGSPEC_AVAILABLE = True
+except ImportError:
+    _MSGSPEC_AVAILABLE = False
+
+_MSGSPEC_PREFIX = "J:"
+_MSGSPEC_PREFIX_LEN = len(_MSGSPEC_PREFIX)
+
+
+def _is_pure_json_safe(value):
+    """Return True if value can round-trip through msgspec JSON without data loss.
+
+    Tuples serialize to JSON arrays and round-trip as lists, which would break
+    packed-dbobj detection (checks isinstance(o, tuple)). Sets, bytes, and other
+    non-JSON types also can't round-trip safely. Only str/int/float/bool/None/list/dict
+    with str keys are accepted.
+    """
+    dtype = type(value)
+    if dtype in (str, int, float, bool) or value is None:
+        return True
+    if dtype is list:
+        return all(_is_pure_json_safe(v) for v in value)
+    if dtype is dict:
+        return all(type(k) is str and _is_pure_json_safe(v) for k, v in value.items())
+    return False
+
 # import six # this is actually a pypy component, not in default syslib
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -86,39 +114,46 @@ def wrap_conflictual_object(obj):
 
 
 def dbsafe_encode(value, compress_object=False, pickle_protocol=DEFAULT_PROTOCOL):
+    # Fast path: msgspec JSON for pure str/int/float/bool/None/list/dict values.
+    # Tuples round-trip as lists through JSON, which would corrupt packed-dbobj
+    # sentinel tuples, so we skip msgspec whenever the value contains any tuple.
+    if _MSGSPEC_AVAILABLE and not isinstance(value, _ObjectWrapper) and _is_pure_json_safe(value):
+        try:
+            return PickledObject(_MSGSPEC_PREFIX + _msgspec.json.encode(value).decode("utf-8"))
+        except Exception:
+            pass  # fall through to pickle
+
+    # Pickle fallback — handles tuples, sets, dbobj refs, callables, custom objects.
     # We use deepcopy() here to avoid a problem with cPickle, where dumps
     # can generate different character streams for same lookup value if
     # they are referenced differently.
-    # The reason this is important is because we do all of our lookups as
-    # simple string matches, thus the character streams must be the same
-    # for the lookups to work properly. See tests.py for more information.
     try:
         if isinstance(value, _ObjectWrapper):
-            # Keep conflict wrappers for regular values, but still normalize wrapped
-            # db objects to the same packed representation as Attribute storage.
             packed = pack_dbobj(value._obj)
             if packed is not value._obj:
                 value = packed
         else:
-            # Make sure database objects are normalized before pickling for lookups.
             value = pack_dbobj(value)
 
         value = deepcopy(value)
     except CopyError:
-        # this can happen on a manager query where the search query string is a
-        # database model.
         value = pack_dbobj(value)
 
     value = dumps(value, protocol=pickle_protocol)
 
     if compress_object:
         value = compress(value)
-    value = b64encode(value).decode()  # decode bytes to str
+    value = b64encode(value).decode()
     return PickledObject(value)
 
 
 def dbsafe_decode(value, compress_object=False):
-    value = value.encode()  # encode str to bytes
+    # Detect msgspec JSON format (prefix "J:" — colon is not a valid base64 char)
+    if _MSGSPEC_AVAILABLE and isinstance(value, str) and value.startswith(_MSGSPEC_PREFIX):
+        return _msgspec.json.decode(value[_MSGSPEC_PREFIX_LEN:])
+
+    # Legacy pickle path — handles all existing DB data
+    value = value.encode()
     value = b64decode(value)
     if compress_object:
         value = decompress(value)
