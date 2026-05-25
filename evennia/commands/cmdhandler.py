@@ -27,6 +27,7 @@ command line. The processing of a command works as follows:
 
 """
 
+import time
 import types
 from collections import OrderedDict, defaultdict
 from copy import copy
@@ -41,7 +42,10 @@ from twisted.internet.task import deferLater
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
+from evennia.commands.signals import (on_command_error, on_command_post,
+                                      on_command_pre)
 from evennia.utils import logger, utils
+from evennia.utils.command_trace import get_trace_id
 from evennia.utils.utils import string_suggestions
 
 _IN_GAME_ERRORS = settings.IN_GAME_ERRORS
@@ -234,6 +238,18 @@ def _progressive_cmd_run(cmd, generator, response=None):
         # duplicated from cmdhandler._run_command, to have these
         # run in the right order while staying inside the deferred
         cmd.at_post_cmd()
+        # fire on_command_post for the generator path. t0 and trace_id were
+        # stashed on the cmd in _run_command before the generator started.
+        t0 = getattr(cmd, "_signal_t0", None)
+        if t0 is not None:
+            on_command_post.send_robust(
+                sender=type(cmd),
+                cmd=cmd,
+                caller=cmd.caller,
+                session=getattr(cmd, "session", None),
+                trace_id=getattr(cmd, "_signal_trace_id", None),
+                elapsed_ms=(time.monotonic() - t0) * 1000.0,
+            )
         if cmd.save_for_next:
             # store a reference to this command, possibly
             # accessible by the next command.
@@ -270,11 +286,19 @@ class ExecSystemCommand(Exception):
 
 
 class ErrorReported(Exception):
-    "Re-raised when a subsructure already reported the error"
+    """Re-raised when a substructure already reported the error.
+
+    Carries the current ``command_trace`` id (if any) on ``trace_id`` so
+    external error handlers can correlate the reported error with
+    structured logs.
+    """
 
     def __init__(self, raw_string):
+        from evennia.utils.command_trace import get_trace_id
+
         self.args = (raw_string,)
         self.raw_string = raw_string
+        self.trace_id = get_trace_id()
 
 
 # Helper function
@@ -353,10 +377,8 @@ def get_and_merge_cmdsets(
                     location = None
                 if location:
                     from evennia.commands.location_cmdset_cache import (
-                        get_cached_location_cmdsets,
-                        make_cache_key,
-                        set_cached_location_cmdsets,
-                    )
+                        get_cached_location_cmdsets, make_cache_key,
+                        set_cached_location_cmdsets)
 
                     loc_cache_key = make_cache_key(caller, location)
                     cached_cmdsets = get_cached_location_cmdsets(loc_cache_key)
@@ -543,7 +565,14 @@ def cmdhandler(
             order, so that Object cmdsets are merged in last, giving them
             precendence for same-name and same-prio commands.
         session (Session, optional): Relevant if callertype is "account" - the session will help
-            retrieve the correct cmdsets from puppeted objects.
+            retrieve the correct cmdsets from puppeted objects. Any object
+            implementing the session-proxy contract is accepted: a
+            ``get_cmdset_providers()`` method returning a dict (same shape
+            as ``ServerSession.get_cmdset_providers()``) is required;
+            ``puppet`` / ``account`` / ``sessid`` attributes are read by
+            downstream callers when present. This allows the multipuppet
+            relay (and similar) to construct a lightweight proxy and pass
+            it in instead of monkey-patching ``Command``.
         cmdobj (Command, optional): If given a command instance, this will be executed using
             `called_by` as the caller, `raw_string` representing its arguments and (optionally)
             `cmdobj_key` as its input command name. No cmdset lookup will be performed but
@@ -643,6 +672,23 @@ def cmdhandler(
                 )
                 raise RuntimeError(err)
 
+            # Wall-clock and trace-id captured up front, before at_pre_cmd
+            # so on_command_post.elapsed_ms covers the full hook range.
+            # Stashed on cmd for the generator path; _progressive_cmd_run
+            # cannot read the contextvar after end_command_trace() runs.
+            _signal_t0 = time.monotonic()
+            _signal_trace_id = get_trace_id()
+            cmd._signal_t0 = _signal_t0
+            cmd._signal_trace_id = _signal_trace_id
+
+            on_command_pre.send_robust(
+                sender=type(cmd),
+                cmd=cmd,
+                caller=caller,
+                session=session,
+                trace_id=_signal_trace_id,
+            )
+
             # pre-command hook
             abort = yield cmd.at_pre_cmd()
             if abort:
@@ -662,10 +708,20 @@ def cmdhandler(
                 # the at_post_cmd etc as it finishes; this is a bit of
                 # code duplication but there seems to be no way to
                 # catch the StopIteration here (it's not in the same
-                # frame since this is in a deferred chain)
+                # frame since this is in a deferred chain).
+                # on_command_post is fired from _progressive_cmd_run.
             else:
                 # post-command hook
                 yield cmd.at_post_cmd()
+
+                on_command_post.send_robust(
+                    sender=type(cmd),
+                    cmd=cmd,
+                    caller=caller,
+                    session=session,
+                    trace_id=_signal_trace_id,
+                    elapsed_ms=(time.monotonic() - _signal_t0) * 1000.0,
+                )
 
                 if cmd.save_for_next:
                     # store a reference to this command, possibly
@@ -677,7 +733,17 @@ def cmdhandler(
         except InterruptCommand:
             # Do nothing, clean exit
             pass
-        except Exception:
+        except Exception as exc:
+            tb_text = format_exc()
+            on_command_error.send_robust(
+                sender=type(cmd),
+                cmd=cmd,
+                caller=caller,
+                session=session,
+                trace_id=get_trace_id(),
+                exc=exc,
+                traceback_text=tb_text,
+            )
             _msg_err(caller, _ERROR_UNTRAPPED)
             raise ErrorReported(cmd.raw_string)
         finally:
