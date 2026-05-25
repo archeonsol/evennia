@@ -53,15 +53,11 @@ from collections import Counter
 
 from django.conf import settings
 
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 from evennia.utils import logger
 from evennia.utils.evmore import EvMore
-from evennia.utils.utils import (
-    all_from_module,
-    is_iter,
-    make_iter,
-    string_partial_matching,
-)
+from evennia.utils.utils import (all_from_module, is_iter, make_iter,
+                                 string_partial_matching)
 
 # this is either a string of the attribute name, or a tuple of strings of the attribute name and category
 _ACHIEVEMENT_ATTR = make_iter(getattr(settings, "ACHIEVEMENT_CONTRIB_ATTRIBUTE", "achievements"))
@@ -274,7 +270,7 @@ def search_achievement(search_term):
     return dict((keys[i], dict(_ACHIEVEMENT_DATA[keys[i]])) for i in indices)
 
 
-class CmdAchieve(MuxCommand):
+class CmdAchieve(Command):
     """
     view achievements
 

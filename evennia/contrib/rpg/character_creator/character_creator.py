@@ -23,8 +23,8 @@ from django.conf import settings
 
 from evennia import DefaultAccount
 from evennia.commands.cmdset import CmdSet
+from evennia.commands.command import AccountCommand
 from evennia.commands.default.account import CmdIC
-from evennia.commands.default.muxcommand import MuxAccountCommand
 from evennia.objects.models import ObjectDB
 from evennia.utils.evmenu import EvMenu
 from evennia.utils.utils import is_iter, string_partial_matching
@@ -48,7 +48,7 @@ class ContribCmdIC(CmdIC):
         super().func()
 
 
-class ContribCmdCharCreate(MuxAccountCommand):
+class ContribCmdCharCreate(AccountCommand):
     """
     create a new character
 

@@ -70,7 +70,6 @@ class CmdAddCom(CmdChannel):
     locks = "cmd:not pperm(channel_banned)"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """Implement the command"""
@@ -139,7 +138,6 @@ class CmdDelCom(CmdChannel):
     locks = "cmd:not perm(channel_banned)"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """Implementing the command."""
@@ -200,7 +198,6 @@ class CmdAllCom(CmdChannel):
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """Runs the function"""
@@ -271,7 +268,6 @@ class CmdCdestroy(CmdChannel):
     locks = "cmd: not pperm(channel_banned)"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """Destroy objects cleanly."""
@@ -321,7 +317,6 @@ class CmdCBoot(CmdChannel):
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """implement the function"""
@@ -381,7 +376,6 @@ class CmdCWho(CmdChannel):
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """implement function"""
@@ -419,7 +413,6 @@ class CmdChannelCreate(CmdChannel):
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """Implement the command"""
@@ -463,7 +456,6 @@ class CmdClock(CmdChannel):
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """run the function"""
@@ -512,7 +504,6 @@ class CmdCdesc(CmdChannel):
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
-    account_caller = True
 
     def func(self):
         """Implement command"""

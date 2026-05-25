@@ -3,15 +3,14 @@ Account (OOC) commands. These are stored on the Account object
 and self.caller is thus always an Account, not an Object/Character.
 
 These commands go in the AccountCmdset and are accessible also
-when puppeting a Character (although with lower priority)
+when puppeting a Character (although with lower priority).
 
-These commands use the account_caller property which tells the command
-parent (MuxCommand, usually) to setup caller correctly. They use
-self.account to make sure to always use the account object rather than
-self.caller (which change depending on the level you are calling from)
-The property self.character can be used to access the character when
-these commands are triggered with a connected character (such as the
-case of the `ooc` command), it is None if we are OOC.
+These commands subclass ``evennia.commands.command.AccountCommand``,
+which carries ``account_command_caller = True``. The cmdhandler
+normalises ``self.caller`` to the Account, ``self.account`` to the
+same, and ``self.character`` to the puppet for ``self.session`` (or
+``None`` when OOC) before any hook runs. See ``CMDSET_REFACTOR.md``
+§Phase 2 for the engine contract.
 
 Note that under MULTISESSION_MODE > 2, Account commands should use
 self.msg() and similar methods to reroute returns to the correct
@@ -25,6 +24,7 @@ from codecs import lookup as codecs_lookup
 from django.conf import settings
 
 import evennia
+from evennia.commands.command import AccountCommand
 from evennia.utils import create, logger, search, utils
 
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
@@ -50,7 +50,7 @@ __all__ = (
 )
 
 
-class MuxAccountLookCommand(COMMAND_DEFAULT_CLASS):
+class MuxAccountLookCommand(AccountCommand):
     """
     Custom parent (only) parsing for OOC looking, sets a "playable"
     property on the command based on the parsing.
@@ -100,7 +100,6 @@ class CmdOOCLook(MuxAccountLookCommand):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """implement the ooc look command"""
@@ -120,7 +119,7 @@ class CmdOOCLook(MuxAccountLookCommand):
         self.msg(self.account.at_look(target=self.playable, session=self.session))
 
 
-class CmdCharCreate(COMMAND_DEFAULT_CLASS):
+class CmdCharCreate(AccountCommand):
     """
     create a new character
 
@@ -138,7 +137,6 @@ class CmdCharCreate(COMMAND_DEFAULT_CLASS):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """create the new character"""
@@ -233,7 +231,7 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
             get_input(account, prompt % match.key, _callback)
 
 
-class CmdIC(COMMAND_DEFAULT_CLASS):
+class CmdIC(AccountCommand):
     """
     control an object you have permission to puppet
 
@@ -258,7 +256,6 @@ class CmdIC(COMMAND_DEFAULT_CLASS):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """
@@ -367,7 +364,6 @@ class CmdOOC(MuxAccountLookCommand):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """Implement function"""
@@ -399,7 +395,7 @@ class CmdOOC(MuxAccountLookCommand):
             self.msg(f"|rCould not unpuppet from |c{old_char}|n: {exc}")
 
 
-class CmdSessions(COMMAND_DEFAULT_CLASS):
+class CmdSessions(AccountCommand):
     """
     check your connected session(s)
 
@@ -415,7 +411,6 @@ class CmdSessions(COMMAND_DEFAULT_CLASS):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """Implement function"""
@@ -436,7 +431,7 @@ class CmdSessions(COMMAND_DEFAULT_CLASS):
             self.msg(f"|wYour current session(s):|n\n{table}")
 
 
-class CmdWho(COMMAND_DEFAULT_CLASS):
+class CmdWho(AccountCommand):
     """
     list who is currently online
 
@@ -453,7 +448,6 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
     locks = "cmd:all()"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """
@@ -523,7 +517,7 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
         )
 
 
-class CmdOption(COMMAND_DEFAULT_CLASS):
+class CmdOption(AccountCommand):
     """
     Set an account option
 
@@ -547,7 +541,6 @@ class CmdOption(COMMAND_DEFAULT_CLASS):
     locks = "cmd:all()"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """
@@ -699,7 +692,7 @@ class CmdOption(COMMAND_DEFAULT_CLASS):
             self.session.update_flags(**optiondict)
 
 
-class CmdPassword(COMMAND_DEFAULT_CLASS):
+class CmdPassword(AccountCommand):
     """
     change your password
 
@@ -713,7 +706,6 @@ class CmdPassword(COMMAND_DEFAULT_CLASS):
     locks = "cmd:pperm(Player)"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """hook function."""
@@ -743,7 +735,7 @@ class CmdPassword(COMMAND_DEFAULT_CLASS):
             )
 
 
-class CmdQuit(COMMAND_DEFAULT_CLASS):
+class CmdQuit(AccountCommand):
     """
     quit the game
 
@@ -762,7 +754,6 @@ class CmdQuit(COMMAND_DEFAULT_CLASS):
     locks = "cmd:all()"
 
     # this is used by the parent
-    account_caller = True
 
     def func(self):
         """hook function"""
@@ -791,7 +782,7 @@ class CmdQuit(COMMAND_DEFAULT_CLASS):
             account.disconnect_session_from_account(self.session, reason)
 
 
-class CmdColorTest(COMMAND_DEFAULT_CLASS):
+class CmdColorTest(AccountCommand):
     """
     testing which colors your client support
 
@@ -810,7 +801,6 @@ class CmdColorTest(COMMAND_DEFAULT_CLASS):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     # the slices of the ANSI_PARSER lists to use for retrieving the
     # relevant color tags to display. Replace if using another schema.
@@ -961,7 +951,7 @@ class CmdColorTest(COMMAND_DEFAULT_CLASS):
             self.msg("Usage: color ansi || xterm256 || truecolor")
 
 
-class CmdQuell(COMMAND_DEFAULT_CLASS):
+class CmdQuell(AccountCommand):
     """
     use character's permissions instead of account's
 
@@ -984,7 +974,6 @@ class CmdQuell(COMMAND_DEFAULT_CLASS):
     help_category = "General"
 
     # this is used by the parent
-    account_caller = True
 
     def _recache_locks(self, account):
         """Helper method to reset the lockhandler on an already puppeted object"""

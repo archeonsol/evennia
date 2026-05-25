@@ -78,16 +78,10 @@ from collections import defaultdict
 from django.conf import settings
 
 from evennia import DefaultCharacter, DefaultObject, default_cmds
-from evennia.commands.default.muxcommand import MuxCommand
-from evennia.utils import (
-    at_search_result,
-    crop,
-    evtable,
-    group_objects_by_key_and_desc,
-    inherits_from,
-    int2str,
-    iter_to_str,
-)
+from evennia.commands.command import Command
+from evennia.utils import (at_search_result, crop, evtable,
+                           group_objects_by_key_and_desc, inherits_from,
+                           int2str, iter_to_str)
 from evennia.utils.ansi import raw as raw_ansi
 
 # Options start here.
@@ -424,7 +418,7 @@ class ClothedCharacter(DefaultCharacter):
 # COMMANDS START HERE
 
 
-class CmdWear(MuxCommand):
+class CmdWear(Command):
     """
     Puts on an item of clothing you are holding.
 
@@ -511,7 +505,7 @@ class CmdWear(MuxCommand):
         clothing.wear(self.caller, wearstyle)
 
 
-class CmdRemove(MuxCommand):
+class CmdRemove(Command):
     """
     Takes off an item of clothing.
 
@@ -543,7 +537,7 @@ class CmdRemove(MuxCommand):
         clothing.remove(self.caller)
 
 
-class CmdCover(MuxCommand):
+class CmdCover(Command):
     """
     Covers a worn item of clothing with another you're holding or wearing.
 
@@ -597,7 +591,7 @@ class CmdCover(MuxCommand):
         )
 
 
-class CmdUncover(MuxCommand):
+class CmdUncover(Command):
     """
     Reveals a worn item of clothing that's currently covered up.
 
@@ -639,7 +633,7 @@ class CmdUncover(MuxCommand):
             return
 
 
-class CmdInventory(MuxCommand):
+class CmdInventory(Command):
     """
     view inventory
 

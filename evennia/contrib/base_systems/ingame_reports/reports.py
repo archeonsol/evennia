@@ -34,7 +34,6 @@ The contrib can be further configured through two settings, `INGAME_REPORT_TYPES
 from django.conf import settings
 
 from evennia import CmdSet
-from evennia.commands.default.muxcommand import MuxCommand
 from evennia.comms.models import Msg
 from evennia.utils import create, evmenu, logger, search
 from evennia.utils.utils import (class_from_module, datetime_format, is_iter,
@@ -162,7 +161,7 @@ class ReportCmdBase(_DEFAULT_COMMAND_CLASS):
 
         Override if you want different syntax, but make sure to assign `report_message` and `target_str`.
         """
-        # do the base MuxCommand parsing first
+        # do the base switch/lhs/rhs parsing first (Command.parse)
         super().parse()
         # split out the report message and target strings
         if self.rhs:
@@ -263,7 +262,9 @@ class CmdReport(ReportCmdBase):
     key = "report"
     report_type = "player"
     require_target = True
-    account_caller = True
+    # Opt into the engine pre-parse normalisation so self.caller is the
+    # Account regardless of puppet state (see CMDSET_REFACTOR.md §Phase 2).
+    account_command_caller = True
 
 
 class CmdIdea(ReportCmdBase):

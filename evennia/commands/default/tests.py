@@ -29,8 +29,8 @@ from evennia.commands.default import (account, admin, batchprocess, building,
                                       comms, general)
 from evennia.commands.default import help as help_module
 from evennia.commands.default import syscommands, system, unloggedin
+from evennia.commands.command import Command
 from evennia.commands.default.cmdset_character import CharacterCmdSet
-from evennia.commands.default.muxcommand import MuxCommand
 from evennia.objects.models import ObjectDB
 from evennia.objects.objects import (DefaultCharacter, DefaultExit,
                                      DefaultObject, DefaultRoom)
@@ -136,7 +136,10 @@ class TestGeneral(BaseEvenniaCommandTest):
         self.call(CmdTest(), "1 obj", "Number: 1 Args: obj")
 
     def test_mux_command(self):
-        class CmdTest(MuxCommand):
+        # Switch parsing was promoted to Command.parse in +underspire.5,
+        # and MuxCommand was deleted in +underspire.6. This test covers
+        # the E2E switch handling path through .call() against Command.
+        class CmdTest(Command):
             key = "test"
             switch_options = ("test", "testswitch", "testswitch2")
 
@@ -1969,7 +1972,9 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.channel = create_channel(key="testchannel", desc="A test channel")
         self.channel.connect(self.char1)
         self.cmdchannel = cmd_comms.CmdChannel
-        self.cmdchannel.account_caller = False
+        # Disable engine pre-parse caller normalisation for this test
+        # context (test uses a Character caller, not an Account).
+        self.cmdchannel.account_command_caller = False
 
     def tearDown(self):
         if self.channel.pk:
@@ -2151,7 +2156,9 @@ class TestDiscord(BaseEvenniaCommandTest):
         super().setUp()
         self.channel = create.create_channel(key="testchannel", desc="A test channel")
         self.cmddiscord = cmd_comms.CmdDiscord2Chan
-        self.cmddiscord.account_caller = False
+        # Disable engine pre-parse caller normalisation for this test
+        # context (test uses a Character caller, not an Account).
+        self.cmddiscord.account_command_caller = False
         # create bot manually so it doesn't get started
         self.discordbot = create.create_account(
             "DiscordBot", None, None, typeclass="evennia.accounts.bots.DiscordBot"

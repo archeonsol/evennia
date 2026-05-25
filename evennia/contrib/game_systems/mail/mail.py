@@ -45,21 +45,15 @@ import re
 
 from evennia import AccountDB, ObjectDB, default_cmds
 from evennia.comms.models import Msg
-from evennia.utils import (
-    create,
-    datetime_format,
-    evtable,
-    inherits_from,
-    make_iter,
-    utc_to_local,
-)
+from evennia.utils import (create, datetime_format, evtable, inherits_from,
+                           make_iter, utc_to_local)
 
 _HEAD_CHAR = "|015-|n"
 _SUB_HEAD_CHAR = "-"
 _WIDTH = 78
 
 
-class CmdMail(default_cmds.MuxAccountCommand):
+class CmdMail(default_cmds.AccountCommand):
     """
     Communicate with others by sending mail.
 

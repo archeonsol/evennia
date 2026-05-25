@@ -1,12 +1,12 @@
 from evennia import CmdSet
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 from evennia.utils import list_to_string
 from evennia.utils.search import search_object_by_tag
 
 SHARED_TAG_PREFIX = "shared"
 
 
-class StorageCommand(MuxCommand):
+class StorageCommand(Command):
     """
     Shared functionality for storage-related commands
     """
@@ -129,7 +129,7 @@ class CmdList(StorageCommand):
         caller.msg(f"Stored here:\n{list_to_string(self.currently_stored)}")
 
 
-class CmdStorage(MuxCommand):
+class CmdStorage(Command):
     """
     Make the current location a storage room, or delete it as a storage and move all stored objects into the room contents.
 

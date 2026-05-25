@@ -634,11 +634,19 @@ CMDSET_FALLBACKS = {
 }
 # Parent class for all default commands. Changing this class will
 # modify all default commands, so do so carefully.
-COMMAND_DEFAULT_CLASS = "evennia.commands.default.muxcommand.MuxCommand"
+#
+# Switch / lhs-rhs parsing lives on ``Command.parse`` since
+# ``6.0.0+underspire.5``. Account commands (``account.py``) explicitly
+# subclass ``evennia.commands.command.AccountCommand`` for engine
+# pre-parse caller normalisation. The ``MuxCommand`` /
+# ``MuxAccountCommand`` classes were deleted in
+# ``6.0.0+underspire.6`` — subclass ``Command`` or ``AccountCommand``
+# directly.
+COMMAND_DEFAULT_CLASS = "evennia.commands.command.Command"
 # Command.arg_regex is a regular expression desribing how the arguments
 # to the command must be structured for the command to match a given user
 # input. By default the command-name should end with a space or / (since the
-# default commands uses MuxCommand and /switches). Note that the extra \n
+# default commands use Command.parse switch syntax `/switches`). Note that the extra \n
 # is necessary for use with batchprocessor.
 COMMAND_DEFAULT_ARG_REGEX = r"^[ /]|\n|$"
 # By default, Command.msg will only send data to the Session calling

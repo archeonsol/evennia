@@ -2286,69 +2286,6 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         self.assertTrue(_AccountCommand.account_command_caller)
         self.assertTrue(_CmdAcctMarker.account_command_caller)
 
-    def test_mux_account_command_normalises_via_engine_flag(self):
-        # MuxAccountCommand carries account_command_caller=True (since
-        # 6.0.0+underspire.3.1) so engine pre-parse normalisation covers
-        # stock account commands. The legacy account_caller block in
-        # MuxCommand.parse short-circuits when the engine flag is set.
-        from evennia.commands.default.muxcommand import MuxAccountCommand
-
-        self.assertTrue(MuxAccountCommand.account_command_caller)
-        self.assertTrue(MuxAccountCommand.account_caller)
-
-        class _CmdMuxAcctMarker(MuxAccountCommand):
-            key = "muxacctmarker"
-            locks = "cmd:all()"
-            retain_instance = True
-
-            def func(self):
-                pass
-
-        self.session.puppet = self.char1
-        cmd = _CmdMuxAcctMarker()
-        d = cmdhandler.cmdhandler(self.session, "", cmdobj=cmd, cmdobj_key=cmd.key, _testing=True)
-
-        def _check(_):
-            self.assertIs(cmd.caller, self.account)
-            self.assertIs(cmd.account, self.account)
-            self.assertIs(cmd.character, self.char1)
-
-        d.addCallback(_check)
-        return d
-
-    def test_legacy_account_caller_only_subclass_still_normalises(self):
-        # A subclass that sets account_caller=True but NOT
-        # account_command_caller (third-party MuxCommand subclass) must
-        # keep its legacy parse-time normalisation. The engine flag
-        # guard short-circuits only when the engine flag is set.
-        from evennia.commands.default.muxcommand import MuxCommand
-
-        class _CmdLegacyAcctOnly(MuxCommand):
-            key = "legacyacctonly"
-            locks = "cmd:all()"
-            retain_instance = True
-            account_caller = True
-            # account_command_caller intentionally not set
-            account_command_caller = False
-
-            def func(self):
-                pass
-
-        self.session.puppet = self.char1
-        cmd = _CmdLegacyAcctOnly()
-        # Full dispatch (not _testing) so parse() runs and the legacy
-        # block has a chance to do its work.
-        d = cmdhandler.cmdhandler(self.session, "", cmdobj=cmd, cmdobj_key=cmd.key)
-
-        def _check(_):
-            # Engine normalisation skipped (flag False), so MuxCommand.parse's
-            # legacy account_caller block must have flipped caller/character.
-            self.assertIs(cmd.caller, self.account)
-            self.assertIs(cmd.character, self.char1)
-
-        d.addCallback(_check)
-        return d
-
     def test_command_parse_handles_mux_switches_and_lhs_rhs(self):
         # Command.parse now does MuxCommand-style parsing by default
         # (parse_mux_syntax=True, since +underspire.5).
@@ -2378,30 +2315,6 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         self.assertEqual(cmd.args, "/foo a = b")
         self.assertFalse(hasattr(cmd, "switches"))
         self.assertFalse(hasattr(cmd, "lhs"))
-
-    def test_muxcommand_parse_delegates_to_super_and_runs_account_caller(self):
-        # MuxCommand.parse now calls super().parse() for switch parsing
-        # and only adds the legacy account_caller normalisation.
-        from evennia.commands.default.muxcommand import MuxCommand
-
-        class _CmdLegacyAcctOnly2(MuxCommand):
-            key = "legacyacctonly2"
-            account_caller = True
-            account_command_caller = False  # engine flag explicitly off
-
-        cmd = _CmdLegacyAcctOnly2()
-        cmd.cmdstring = "legacyacctonly2"
-        cmd.args = "/sw target = value"
-        cmd.caller = self.char1
-        cmd.session = self.session
-        cmd.parse()
-        # Super did switch parsing:
-        self.assertEqual(cmd.switches, ["sw"])
-        self.assertEqual(cmd.lhs, "target")
-        self.assertEqual(cmd.rhs, "value")
-        # Legacy account_caller block ran (caller was a Character):
-        self.assertIs(cmd.caller, self.account)
-        self.assertIs(cmd.character, self.char1)
 
     def test_cmd_access_cache_identity_differentiates_command_classes(self):
         # _cmd_identity keys on class module + name, so a Command and an

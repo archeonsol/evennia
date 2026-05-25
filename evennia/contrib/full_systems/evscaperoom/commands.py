@@ -513,7 +513,7 @@ class CmdGet(CmdEvscapeRoom):
         self.caller.msg("Use |wfocus|n or |wexamine|n for handling objects.")
 
 
-class CmdRerouter(default_cmds.MuxCommand):
+class CmdRerouter(default_cmds.Command):
     """
     Interact with an object in focus.
 

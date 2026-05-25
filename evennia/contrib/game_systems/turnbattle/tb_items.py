@@ -70,7 +70,7 @@ from random import randint
 
 from evennia import TICKER_HANDLER as tickerhandler
 from evennia import Command, default_cmds
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command
 from evennia.prototypes.spawner import spawn
 
 from . import tb_basic
@@ -965,7 +965,7 @@ class CmdCombatHelp(tb_basic.CmdCombatHelp):
     )
 
 
-class CmdUse(MuxCommand):
+class CmdUse(Command):
     """
     Use an item.
 

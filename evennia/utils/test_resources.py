@@ -35,8 +35,7 @@ from twisted.internet.defer import Deferred
 import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
-from evennia.commands.command import InterruptCommand
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia.commands.command import Command, InterruptCommand
 from evennia.objects.objects import (DefaultCharacter, DefaultExit,
                                      DefaultObject, DefaultRoom)
 from evennia.scripts.scripts import DefaultScript
@@ -620,16 +619,16 @@ class EvenniaTest(EvenniaTestMixin, TestCase):
     script_typeclass = settings.BASE_SCRIPT_TYPECLASS
 
 
-@patch("evennia.commands.account.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.admin.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.batchprocess.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.building.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.comms.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.general.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.help.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.syscommands.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.system.COMMAND_DEFAULT_CLASS", MuxCommand)
-@patch("evennia.commands.unloggedin.COMMAND_DEFAULT_CLASS", MuxCommand)
+@patch("evennia.commands.account.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.admin.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.batchprocess.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.building.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.comms.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.general.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.help.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.syscommands.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.system.COMMAND_DEFAULT_CLASS", Command)
+@patch("evennia.commands.unloggedin.COMMAND_DEFAULT_CLASS", Command)
 @override_settings(**DEFAULT_SETTINGS)
 class BaseEvenniaCommandTest(BaseEvenniaTest, EvenniaCommandTestMixin):
     """

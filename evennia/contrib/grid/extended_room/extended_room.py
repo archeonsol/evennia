@@ -48,16 +48,8 @@ from collections import deque
 from django.conf import settings
 from django.db.models import Q
 
-from evennia import (
-    CmdSet,
-    DefaultRoom,
-    EvEditor,
-    FuncParser,
-    InterruptCommand,
-    default_cmds,
-    gametime,
-    utils,
-)
+from evennia import (CmdSet, DefaultRoom, EvEditor, FuncParser,
+                     InterruptCommand, default_cmds, gametime, utils)
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils.utils import list_to_string, repeat
 
@@ -822,7 +814,7 @@ class CmdExtendedRoomDesc(default_cmds.CmdDesc):
             )
 
 
-class CmdExtendedRoomDetail(default_cmds.MuxCommand):
+class CmdExtendedRoomDetail(default_cmds.Command):
     """
     sets a detail on a room
 
@@ -887,7 +879,7 @@ class CmdExtendedRoomDetail(default_cmds.MuxCommand):
             self.caller.msg(f"Set detail '{self.lhs}': '{self.rhs}'")
 
 
-class CmdExtendedRoomState(default_cmds.MuxCommand):
+class CmdExtendedRoomState(default_cmds.Command):
     """
     Toggle and view room state for the current room.
 
@@ -941,7 +933,7 @@ class CmdExtendedRoomState(default_cmds.MuxCommand):
             )
 
 
-class CmdExtendedRoomGameTime(default_cmds.MuxCommand):
+class CmdExtendedRoomGameTime(default_cmds.Command):
     """
     Check the game time.
 

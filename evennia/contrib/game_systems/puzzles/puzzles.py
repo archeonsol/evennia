@@ -74,15 +74,9 @@ are spawened on their corresponding location.
 import itertools
 from random import choice
 
-from evennia import (
-    CmdSet,
-    DefaultCharacter,
-    DefaultExit,
-    DefaultRoom,
-    DefaultScript,
-    create_script,
-)
-from evennia.commands.default.muxcommand import MuxCommand
+from evennia import (CmdSet, DefaultCharacter, DefaultExit, DefaultRoom,
+                     DefaultScript, create_script)
+from evennia.commands.command import Command
 from evennia.prototypes.spawner import spawn
 from evennia.utils import logger, search, utils
 from evennia.utils.utils import inherits_from
@@ -167,7 +161,7 @@ class PuzzleRecipe(DefaultScript):
         self.db.use_success_location_message = _PUZZLE_DEFAULT_SUCCESS_USE_LOCATION_MESSAGE
 
 
-class CmdCreatePuzzleRecipe(MuxCommand):
+class CmdCreatePuzzleRecipe(Command):
     """
     Creates a puzzle recipe. A puzzle consists of puzzle-parts that
     the player can 'use' together to create a specified result.
@@ -312,7 +306,7 @@ class CmdCreatePuzzleRecipe(MuxCommand):
         )
 
 
-class CmdEditPuzzle(MuxCommand):
+class CmdEditPuzzle(Command):
     """
     Edits puzzle properties
 
@@ -486,7 +480,7 @@ class CmdEditPuzzle(MuxCommand):
         return removed
 
 
-class CmdArmPuzzle(MuxCommand):
+class CmdArmPuzzle(Command):
     """
     Arms a puzzle by spawning all its parts.
 
@@ -594,7 +588,7 @@ def _matching_puzzles(puzzles, puzzlename_tags_dict, puzzle_ingredients):
     return matched_puzzles
 
 
-class CmdUsePuzzleParts(MuxCommand):
+class CmdUsePuzzleParts(Command):
     """
     Use an object, or a group of objects at once.
 
@@ -719,7 +713,7 @@ class CmdUsePuzzleParts(MuxCommand):
         )
 
 
-class CmdListPuzzleRecipes(MuxCommand):
+class CmdListPuzzleRecipes(Command):
     """
     Searches for all puzzle recipes
 
@@ -766,7 +760,7 @@ class CmdListPuzzleRecipes(MuxCommand):
         caller.msg("\n".join(text))
 
 
-class CmdListArmedPuzzles(MuxCommand):
+class CmdListArmedPuzzles(Command):
     """
     Searches for all armed puzzles
 
