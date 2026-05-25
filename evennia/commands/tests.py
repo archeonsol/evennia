@@ -1894,3 +1894,34 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
         )
         self.assertTrue(_Proxy.called)
         self.assertTrue(providers)
+
+
+# ----------------------------------------------------------------------------
+# Tests for evennia.commands.location_cmdset_cache
+# (merged in from the formerly-orphaned evennia/commands/tests/
+#  directory, which was shadowed by this tests.py module.)
+# ----------------------------------------------------------------------------
+
+
+from evennia.commands.location_cmdset_cache import (
+    bump_cmdset_generation,
+    cmdset_generation,
+    get_cached_location_cmdsets,
+    make_cache_key,
+    set_cached_location_cmdsets,
+)
+
+
+class TestLocationCmdsetCache(BaseEvenniaTest):
+    def test_generation_bumps_on_cmdset_change(self):
+        gen0 = cmdset_generation(self.char1)
+        self.char1.cmdset.add("evennia.commands.default.cmdset_character.CharacterCmdSet")
+        self.assertGreater(cmdset_generation(self.char1), gen0)
+        if self.char1.location:
+            self.assertGreaterEqual(cmdset_generation(self.char1.location), gen0)
+
+    def test_cache_roundtrip(self):
+        key = make_cache_key(self.char1, self.char1.location)
+        sentinel = ["cmdset-list"]
+        set_cached_location_cmdsets(key, sentinel)
+        self.assertIs(get_cached_location_cmdsets(key), sentinel)
