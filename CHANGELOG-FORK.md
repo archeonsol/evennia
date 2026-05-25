@@ -14,6 +14,70 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.5 — Switch parsing in Command.parse
+
+MuxCommand's switch / lhs / rhs parsing is promoted into the base
+`Command.parse`. Sets up the `MuxCommand = Command` collapse coming
+in a follow-up release.
+
+### Engine
+
+- `Command.parse` now splits `self.args` into `switches`, `lhs`,
+  `rhs`, `lhslist`, `rhslist`, `arglist`, and stashes the original
+  on `self.raw`. Honours optional class attrs `switch_options`
+  (validates supplied switches, abbreviation match, warns on
+  unknown/ambiguous via `self.msg`) and `rhs_split` (delimiter or
+  iterable of delimiters, default `"="`).
+- `Command.parse_mux_syntax = True` class flag gates the new
+  behaviour. Subclasses that want `super().parse()` to behave like
+  the historical no-op set `parse_mux_syntax = False` — one line,
+  no need to override `parse`.
+- `MuxCommand.parse` reduced to `super().parse()` + the legacy
+  `account_caller` normalisation block. The block stays for
+  third-party subclasses that set `account_caller = True` without
+  the engine `account_command_caller` flag; it short-circuits when
+  the engine flag is set (unchanged from `+underspire.3.1`).
+
+### Backwards compatibility
+
+- Existing `MuxCommand` subclasses: no change. `MuxCommand.parse`
+  still produces the same attribute shape (via `super().parse()` now
+  instead of inline).
+- Existing `Command` subclasses that override `parse` without
+  calling `super`: no change.
+- Existing `Command` subclasses that *do* call `super().parse()`
+  expecting the historical no-op: **breaking** — they now get switch
+  parsing applied to `self.args`. Fix: add `parse_mux_syntax =
+  False` to the subclass. The pattern of calling `super` on a no-op
+  is unusual but exists; flagged loudly here.
+
+### Migration
+
+If `super().parse()` calls in your `Command` subclasses produced
+unexpected `self.args` mutation (stripped, post-switch), add:
+
+```python
+class MyCmd(Command):
+    parse_mux_syntax = False
+    def parse(self):
+        super().parse()  # no-op shape, as before
+        ...
+```
+
+If you want the new switch parsing in a `Command` subclass that
+previously had its own parse logic, drop the override and let
+`Command.parse` handle it (or call `super().parse()` first and add
+your own logic after).
+
+### Tests
+
+`evennia.commands.tests.TestAccountCommandNormalization` extended
+with three cases: base `Command.parse` produces MuxCommand-style
+attrs; `parse_mux_syntax = False` opts out; `MuxCommand.parse`
+delegates to `super` then runs the legacy `account_caller` block.
+
+---
+
 ## 6.0.0+underspire.4 — Drop at_pre_cmd subclass guard
 
 The `__init_subclass__` guard introduced in `+underspire.2` is

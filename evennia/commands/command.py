@@ -502,18 +502,141 @@ class Command(metaclass=CommandMeta):
         """
         pass
 
-    def parse(self):
-        """
-        Once the cmdhandler has identified this as the command we
-        want, this function is run. If many of your commands have a
-        similar syntax (for example 'cmd arg1 = arg2') you should
-        simply define this once and just let other commands of the
-        same form inherit from this. See the docstring of this module
-        for which object properties are available to use (notably
-        self.args).
+    # When True (default), :meth:`Command.parse` splits ``self.args``
+    # using MuxCommand-style syntax (switches, lhs/rhs, arglist). Set
+    # ``False`` on subclasses that want raw ``self.args`` and intend to
+    # call ``super().parse()`` without the switch-parsing side effects.
+    # Subclasses that override ``parse`` entirely (without ``super()``)
+    # are unaffected by this flag.
+    #
+    # Promoted from ``MuxCommand`` in ``6.0.0+underspire.5``.
+    parse_mux_syntax = True
 
+    def parse(self):
+        """Parse ``self.args`` using MuxCommand-style syntax.
+
+        Promoted from ``MuxCommand`` into the base ``Command`` in
+        ``6.0.0+underspire.5``. Gated on the class-level
+        ``parse_mux_syntax`` flag (default ``True``); set the flag to
+        ``False`` on subclasses that want ``parse`` to be a no-op
+        while still calling ``super().parse()``.
+
+        Splits the raw arg string into:
+
+        - ``self.raw``: original ``self.args`` (pre-parse).
+        - ``self.switches``: list of ``/switch`` tokens (without the
+          leading ``/``).
+        - ``self.args``: post-switch, stripped arg string.
+        - ``self.arglist``: ``self.args`` split on whitespace.
+        - ``self.lhs`` / ``self.rhs``: left/right of the first
+          ``self.rhs_split`` delimiter (default ``"="``). ``self.rhs``
+          is ``None`` when no delimiter is found.
+        - ``self.lhslist`` / ``self.rhslist``: ``self.lhs`` / ``self.rhs``
+          split on commas.
+
+        Optional class attributes used here:
+
+        - ``switch_options``: iterable of valid switch names (without
+          the ``/``). When set, the parser validates user-supplied
+          switches against it and emits warnings for unknown / ambiguous
+          switches via ``self.msg``. Abbreviations are accepted via
+          ``startswith`` matching against the option list. Default:
+          ``None`` (no validation).
+        - ``rhs_split``: delimiter (or iterable of delimiters tried in
+          order) between lhs and rhs. Default: ``"="``.
+
+        Subclasses that need *different* parsing (no switches, no rhs
+        split, JSON args, etc.) should override ``parse`` without
+        calling ``super().parse()`` *or* set ``parse_mux_syntax =
+        False`` and call ``super().parse()`` for the no-op shape.
         """
-        pass
+        if not self.parse_mux_syntax:
+            return
+
+        raw = self.args
+        args = raw.strip()
+        # Without explicitly setting these attributes, they assume default values:
+        if not hasattr(self, "switch_options"):
+            self.switch_options = None
+        if not hasattr(self, "rhs_split"):
+            self.rhs_split = "="
+
+        # split out switches
+        switches, delimiters = [], self.rhs_split
+        if self.switch_options:
+            self.switch_options = [opt.lower() for opt in self.switch_options]
+        if args and len(args) > 1 and raw[0] == "/":
+            # we have a switch, or a set of switches. These end with a space.
+            switches = args[1:].split(None, 1)
+            if len(switches) > 1:
+                switches, args = switches
+                switches = switches.split("/")
+            else:
+                args = ""
+                switches = switches[0].split("/")
+            # If user-provides switches, parse them with parser switch options.
+            if switches and self.switch_options:
+                valid_switches, unused_switches, extra_switches = [], [], []
+                for element in switches:
+                    option_check = [opt for opt in self.switch_options if opt == element]
+                    if not option_check:
+                        option_check = [
+                            opt for opt in self.switch_options if opt.startswith(element)
+                        ]
+                    match_count = len(option_check)
+                    if match_count > 1:
+                        # Either the option provided is ambiguous,
+                        extra_switches.extend(option_check)
+                    elif match_count == 1:
+                        # or it is a valid option abbreviation,
+                        valid_switches.extend(option_check)
+                    elif match_count == 0:
+                        # or an extraneous option to be ignored.
+                        unused_switches.append(element)
+                if extra_switches:  # User provided switches
+                    self.msg(
+                        "|g%s|n: |wAmbiguous switch supplied: Did you mean /|C%s|w?"
+                        % (self.cmdstring, " |nor /|C".join(extra_switches))
+                    )
+                if unused_switches:
+                    plural = "" if len(unused_switches) == 1 else "es"
+                    self.msg(
+                        '|g%s|n: |wExtra switch%s "/|C%s|w" ignored.'
+                        % (self.cmdstring, plural, "|n, /|C".join(unused_switches))
+                    )
+                # Only include valid_switches in command function call
+                switches = valid_switches
+        arglist = [arg.strip() for arg in args.split()]
+
+        # check for arg1, arg2, ... = argA, argB, ... constructs
+        lhs, rhs = args.strip(), None
+        if lhs:
+            if delimiters and hasattr(delimiters, "__iter__"):  # If delimiter is iterable,
+                best_split = delimiters[0]  # (default to first delimiter)
+                for this_split in delimiters:  # try each delimiter
+                    if this_split in lhs:  # to find first successful split
+                        best_split = this_split  # to be the best split.
+                        break
+            else:
+                best_split = delimiters
+            # Parse to separate left into left/right sides using best_split delimiter string
+            if best_split in lhs:
+                lhs, rhs = lhs.split(best_split, 1)
+        # Trim user-injected whitespace
+        rhs = rhs.strip() if rhs is not None else None
+        lhs = lhs.strip()
+        # Further split left/right sides by comma delimiter
+        lhslist = [arg.strip() for arg in lhs.split(",")] if lhs is not None else []
+        rhslist = [arg.strip() for arg in rhs.split(",")] if rhs is not None else []
+        # save to object properties:
+        self.raw = raw
+        self.switches = switches
+        self.args = args.strip()
+        self.arglist = arglist
+        self.lhs = lhs
+        self.lhslist = lhslist
+        self.rhs = rhs
+        self.rhslist = rhslist
 
     def get_command_info(self):
         """

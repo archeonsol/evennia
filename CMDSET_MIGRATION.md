@@ -302,13 +302,61 @@ keeps working. Game-side post-parse logic currently jammed into
 `func` (or a `parse` override) can now move into `at_pre_cmd` if
 that reads better.
 
+### Step 4 (shipped in `6.0.0+underspire.5`): switch parsing in `Command.parse`
+
+- `Command.parse` now parses MuxCommand-style switches and
+  `lhs`/`rhs` by default. Sets `self.switches`, `self.lhs`,
+  `self.rhs`, `self.lhslist`, `self.rhslist`, `self.arglist`,
+  `self.raw`. Honours `switch_options` and `rhs_split` class attrs
+  (same semantics MuxCommand has always had).
+- `MuxCommand.parse` reduced to `super().parse()` + the legacy
+  `account_caller` normalisation block. Existing `MuxCommand`
+  subclasses keep working unchanged.
+- New class flag `Command.parse_mux_syntax = True` gates the
+  behaviour. Set it `False` on subclasses that want
+  `super().parse()` to be a no-op (matches the historical Command
+  shape pre-`+underspire.5`).
+
+**Migration (required only in one edge case):**
+
+If you have `Command` subclasses that override `parse` and call
+`super().parse()` expecting the historical no-op, `super` now
+mutates `self.args` (strips, removes switches). Two fixes:
+
+```python
+# Option A: opt out, keep the no-op super
+class MyCmd(Command):
+    parse_mux_syntax = False
+    def parse(self):
+        super().parse()  # no-op shape, as before
+        ...
+
+# Option B: embrace the parse, drop your manual switch handling
+class MyCmd(Command):
+    def parse(self):
+        super().parse()  # gives you self.switches / self.lhs / self.rhs
+        ...
+```
+
+If your `Command` subclass overrides `parse` *without* calling
+`super`, nothing changes.
+
+**Migration (optional cleanup):**
+
+- Game-side custom switch / lhs-rhs parsers can be deleted if they
+  reproduced MuxCommand semantics. Use `Command.parse` directly.
+- `MuxCommand` subclasses can be reclassified as plain `Command`
+  subclasses if they only used MuxCommand for switch parsing (no
+  reliance on `account_caller`). The `MuxCommand = Command`
+  collapse coming in a later release will make this implicit; doing
+  it now is purely a clarity move.
+
 ### Remaining Phase 2 steps (planned)
 
 These ship under later `+underspire.N` versions.
 
 - `MuxCommand` / `MuxAccountCommand` deprecation aliases.
 - `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
-- Switch parsing into `Command.parse`.
 
 Game-side cleanup that lands once those steps are in:
 
