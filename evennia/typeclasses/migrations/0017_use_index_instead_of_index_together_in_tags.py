@@ -4,39 +4,23 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    """
+    Replace index_together with Index on Tag.
+
+    Adds the long auto-style name first; 0018 renames to typeclasses_db_key_be0c81_idx.
+    (Previous get_operations() + operations=[] never ran any ops on fresh databases.)
+    """
 
     dependencies = [
         ("typeclasses", "0016_alter_attribute_id_alter_tag_id"),
     ]
 
-    def get_operations(self, app_labels, schema_editor):
-        """Return database-specific operations"""
-        if schema_editor.connection.vendor == "sqlite":
-            # For SQLite, we know the two-step process works
-            return [
-                migrations.AddIndex(
-                    model_name="tag",
-                    index=models.Index(
-                        fields=["db_key", "db_category", "db_tagtype", "db_model"],
-                        name="typeclasses_tag_db_key_db_category_db_tagtype_db_model_idx",
-                    ),
-                ),
-                migrations.RenameIndex(
-                    model_name="tag",
-                    new_name="typeclasses_db_key_be0c81_idx",
-                    old_fields=("db_key", "db_category", "db_tagtype", "db_model"),
-                ),
-            ]
-        else:
-            # For other databases, create the index directly with its final name
-            return [
-                migrations.AddIndex(
-                    model_name="tag",
-                    index=models.Index(
-                        fields=["db_key", "db_category", "db_tagtype", "db_model"],
-                        name="typeclasses_db_key_be0c81_idx",
-                    ),
-                ),
-            ]
-
-    operations = []  # Will be populated at runtime by get_operations()
+    operations = [
+        migrations.AddIndex(
+            model_name="tag",
+            index=models.Index(
+                fields=["db_key", "db_category", "db_tagtype", "db_model"],
+                name="typeclasses_tag_db_key_db_category_db_tagtype_db_model_idx",
+            ),
+        ),
+    ]
