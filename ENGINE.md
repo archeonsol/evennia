@@ -31,6 +31,13 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 
 **Not implemented (by design):** WebSocket typing/presence/draft OOB.
 
+### Tier 2.5 (game + engine hooks)
+
+- **Room scene index:** `evennia.objects.scene_index` — Redis SET per room; `DefaultObject.get_message_recipients()` uses it when `ROOM_SCENE_INDEX_ENABLED`.
+- **Audit:** `evennia.events.emit` via `mootest/world/audit.py` (economy, staff pending, ban/unban, `@perm`).
+- **Jobs:** extended `JOB_QUEUE_REGISTRY` in game settings (indexes, channel cache rebuild, event export, Discord webhook).
+- **Channel cache:** PG M2M is truth; Redis rebuilt on start via `channel_subscriber_cache_rebuild` job.
+
 ### Tier 1D–E (ops / startup)
 
 - **`defer_to_worker`**: `evennia.utils.worker_pool` — thread offload for Whoosh, search rebuild, HTTP, etc.
