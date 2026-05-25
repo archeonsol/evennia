@@ -14,6 +14,59 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.3.1 — MuxAccountCommand opts into engine normalisation
+
+Targeted follow-up to `+underspire.3` driven by downstream feedback.
+Unifies the detection contract for "this command is account-context"
+so a single flag covers both engine `AccountCommand` and stock
+`MuxAccountCommand` subclasses.
+
+### Engine
+
+- `evennia.commands.default.muxcommand.MuxAccountCommand` now sets
+  `account_command_caller = True`. Engine pre-parse normalisation
+  (`cmdhandler._normalize_account_command_caller`) therefore runs for
+  every `MuxAccountCommand` subclass, including stock commands like
+  `CmdIC`, `CmdOOC`, and the account-context `CmdHelp`.
+- `MuxCommand.parse`'s legacy `account_caller` normalisation block
+  short-circuits when `account_command_caller` is truthy on the
+  instance. The engine path produces the same
+  `self.caller` / `self.account` / `self.character` shape, so the
+  legacy block would just re-call `get_puppet` for no benefit. Pure
+  `account_caller`-only third-party subclasses (no engine flag) keep
+  the legacy path during the deprecation window.
+
+### Downstream detection contract
+
+Use the flag, not `isinstance`:
+
+```python
+def _is_account_command(cmd):
+    return getattr(cmd, "account_command_caller", False)
+```
+
+This covers both `evennia.commands.command.AccountCommand` and
+`MuxAccountCommand` subclasses uniformly. A pure
+`isinstance(matched, AccountCommand)` check is **not** safe yet:
+stock `MuxAccountCommand` does not inherit from engine
+`AccountCommand`. The flag-based check stays correct across the
+forthcoming MuxCommand sweep too.
+
+### Migration
+
+No breaking changes. Downstream that previously fell back to
+`getattr(cmd, "account_caller", False)` because the engine flag missed
+stock account commands can drop the fallback and rely on
+`account_command_caller` alone.
+
+### Note on tagging
+
+Local version uses an extra dot (`+underspire.3.1`), which is
+permitted by PEP 440 local-segment rules and orders strictly above
+`+underspire.3`. Tagged on a `--no-ff` merge into `underspire`.
+
+---
+
 ## 6.0.0+underspire.3 — Phase 2 step 2: AccountCommand + caller normalisation
 
 Adds the first-class engine class for Account-level commands and the
