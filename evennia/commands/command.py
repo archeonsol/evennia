@@ -456,35 +456,6 @@ class Command(metaclass=CommandMeta):
 
     # Common Command hooks
 
-    def __init_subclass__(cls, **kwargs):
-        """Guard against the legacy ``at_pre_cmd`` override during the rename.
-
-        ``at_pre_cmd`` was renamed to ``at_pre_parse`` in
-        ``6.0.0+underspire.2`` (the pre-parse "early gate" hook). A new
-        post-parse ``at_pre_cmd`` exists with engine-only semantics for
-        one release; subclassing it is forbidden so legacy overrides
-        cannot silently no-op.
-
-        Any subclass that defines ``at_pre_cmd`` raises ``TypeError`` at
-        class-creation pointing at the file and class. To migrate,
-        rename your method to ``at_pre_parse``.
-
-        Removed in a future release once downstream consumers have
-        migrated (target: ``6.0.0+underspire.4``).
-        """
-        super().__init_subclass__(**kwargs)
-        if "at_pre_cmd" in cls.__dict__:
-            module = getattr(cls, "__module__", "<unknown>")
-            qualname = getattr(cls, "__qualname__", cls.__name__)
-            raise TypeError(
-                f"{module}.{qualname} defines at_pre_cmd, which was renamed to "
-                "at_pre_parse in 6.0.0+underspire.2. Rename the method to "
-                "at_pre_parse (same semantics: runs before parse(), return "
-                "truthy to abort). The new post-parse at_pre_cmd hook is "
-                "engine-only during the deprecation window and cannot be "
-                "overridden yet."
-            )
-
     # Set to True on subclasses (or AccountCommand) so cmdhandler normalises
     # ``self.caller`` to the Account and exposes ``self.character`` as the
     # puppet for ``self.session``. See ``AccountCommand`` and
@@ -510,11 +481,16 @@ class Command(metaclass=CommandMeta):
         after parse but before ``func`` runs (``at_post_cmd`` is still
         skipped).
 
-        Currently engine-only during the rename deprecation window:
-        subclass overrides raise ``TypeError`` at class-creation. The
-        guard is dropped in a future release; until then game code
-        wanting post-parse logic should override ``parse`` or place the
-        logic at the top of ``func``.
+        Preferred home for post-parse, pre-dispatch logic: input
+        validation that needs ``self.args`` / ``self.switches`` /
+        ``self.character``, gating on parsed values, short-circuiting
+        on bad arguments without entering ``func``. Override
+        ``at_pre_parse`` instead if you need to gate **before** parse
+        runs (raw-string checks, permission shortcuts that don't
+        depend on parsed args).
+
+        Subclass-able since ``6.0.0+underspire.4`` (the rename
+        deprecation-window guard from ``+underspire.2`` was removed).
         """
         pass
 

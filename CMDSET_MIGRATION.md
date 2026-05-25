@@ -200,7 +200,7 @@ path, so correlation across signals + logs works uniformly.
 - **Hard-error guard.** Subclasses defining `at_pre_cmd` raise
   `TypeError` at class-creation. The new post-parse `at_pre_cmd` is
   engine-only during the deprecation window; the guard is removed in
-  `6.0.0+underspire.4` (target).
+  `6.0.0+underspire.4` (shipped).
 
 **Migration (required):**
 
@@ -285,21 +285,30 @@ yet: stock `MuxAccountCommand` does not inherit from engine
 `AccountCommand`. Prefer the flag-based check above; it stays correct
 across the sweep.
 
-**Not yet:** the post-parse `at_pre_cmd` is still engine-only (the
-hard-error guard remains until `+underspire.4`).
+### Step 3 (shipped in `6.0.0+underspire.4`): drop the `at_pre_cmd` subclass guard
+
+- The `__init_subclass__` hard-error guard from
+  `+underspire.2` is removed. `at_pre_cmd` is now freely
+  subclass-able and fires post-parse, pre-`func`.
+- Override `at_pre_cmd` for input validation that needs parsed
+  state (`self.args`, `self.switches`, `self.character`). Override
+  `at_pre_parse` for raw-string checks or gating that runs before
+  parse.
+- Truthy return from `at_pre_cmd` aborts dispatch: `func` and
+  `at_post_cmd` are skipped.
+
+**Migration:** none required. Code that worked on `+underspire.3.1`
+keeps working. Game-side post-parse logic currently jammed into
+`func` (or a `parse` override) can now move into `at_pre_cmd` if
+that reads better.
 
 ### Remaining Phase 2 steps (planned)
 
 These ship under later `+underspire.N` versions.
 
-- Unify `MuxAccountCommand` with the engine `account_command_caller`
-  contract (so a single flag covers both classes). See
-  "MuxAccountCommand unification" below for the planned shape.
 - `MuxCommand` / `MuxAccountCommand` deprecation aliases.
 - `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
 - Switch parsing into `Command.parse`.
-- **Hard-error guard removal** (target `+underspire.4`): the
-  post-parse `at_pre_cmd` becomes available for subclassing.
 
 Game-side cleanup that lands once those steps are in:
 

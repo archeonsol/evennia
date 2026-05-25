@@ -1789,20 +1789,75 @@ class TestAtPreCmdRename(BaseEvenniaTest):
         d.addCallback(_check)
         return d
 
-    def test_subclassing_at_pre_cmd_raises_typeerror_at_import(self):
-        # __init_subclass__ guard fires at class-creation time.
-        with self.assertRaises(TypeError) as ctx:
+    def test_at_pre_cmd_override_runs_after_parse_before_func(self):
+        # As of 6.0.0+underspire.4 the __init_subclass__ guard is gone;
+        # at_pre_cmd is freely subclass-able and fires post-parse.
+        events = []
 
-            class _CmdIllegal(Command):
-                key = "illegal"
+        class _CmdPostParseHook(Command):
+            key = "postparsehook"
+            locks = "cmd:all()"
 
-                def at_pre_cmd(self):
-                    return True
+            def at_pre_parse(self):
+                events.append("at_pre_parse")
 
-        msg = str(ctx.exception)
-        self.assertIn("at_pre_cmd", msg)
-        self.assertIn("at_pre_parse", msg)
-        self.assertIn("underspire.2", msg)
+            def parse(self):
+                events.append("parse")
+
+            def at_pre_cmd(self):
+                events.append("at_pre_cmd")
+
+            def func(self):
+                events.append("func")
+
+            def at_post_cmd(self):
+                events.append("at_post_cmd")
+
+        d = cmdhandler.cmdhandler(
+            self.session, "", cmdobj=_CmdPostParseHook(), cmdobj_key="postparsehook"
+        )
+
+        def _check(_):
+            self.assertEqual(
+                events,
+                ["at_pre_parse", "parse", "at_pre_cmd", "func", "at_post_cmd"],
+            )
+
+        d.addCallback(_check)
+        return d
+
+    def test_at_pre_cmd_truthy_return_aborts_after_parse_before_func(self):
+        events = []
+
+        class _CmdAbortPost(Command):
+            key = "abortpost"
+            locks = "cmd:all()"
+
+            def at_pre_parse(self):
+                events.append("at_pre_parse")
+
+            def parse(self):
+                events.append("parse")
+
+            def at_pre_cmd(self):
+                events.append("at_pre_cmd")
+                return True
+
+            def func(self):
+                events.append("func")
+
+            def at_post_cmd(self):
+                events.append("at_post_cmd")
+
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPost(), cmdobj_key="abortpost")
+
+        def _check(_):
+            # parse ran (post-parse hook only fires after) but func and
+            # at_post_cmd are skipped on truthy abort.
+            self.assertEqual(events, ["at_pre_parse", "parse", "at_pre_cmd"])
+
+        d.addCallback(_check)
+        return d
 
 
 # ----------------------------------------------------------------------------
