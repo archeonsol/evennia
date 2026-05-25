@@ -2147,3 +2147,103 @@ class TestLocationCmdsetCache(BaseEvenniaTest):
         sentinel = ["cmdset-list"]
         set_cached_location_cmdsets(key, sentinel)
         self.assertIs(get_cached_location_cmdsets(key), sentinel)
+
+
+# ----------------------------------------------------------------------------
+# Tests for AccountCommand caller normalisation (Phase 2 step 2,
+# shipped in 6.0.0+underspire.3).
+# ----------------------------------------------------------------------------
+
+
+from evennia.commands.command import AccountCommand as _AccountCommand
+
+
+class _CmdAcctMarker(_AccountCommand):
+    key = "acctmarker"
+    locks = "cmd:all()"
+    # retain_instance so the cmd we hand to cmdhandler is the one normalised
+    # in-place (the default copy path would rebind to a separate object).
+    retain_instance = True
+
+    def func(self):
+        pass
+
+
+class _CmdObjMarker(Command):
+    key = "objmarker"
+    locks = "cmd:all()"
+    retain_instance = True
+
+    def func(self):
+        pass
+
+
+class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
+    """Cmdhandler rewrites caller/account/character for AccountCommand only."""
+
+    def _dispatch(self, cmd):
+        return cmdhandler.cmdhandler(
+            self.session, "", cmdobj=cmd, cmdobj_key=cmd.key, _testing=True
+        )
+
+    def test_account_command_with_puppet_normalises_caller_and_character(self):
+        self.session.puppet = self.char1
+        cmd = _CmdAcctMarker()
+        d = self._dispatch(cmd)
+
+        def _check(_):
+            self.assertIs(cmd.caller, self.account)
+            self.assertIs(cmd.account, self.account)
+            self.assertIs(cmd.character, self.char1)
+
+        d.addCallback(_check)
+        return d
+
+    def test_account_command_without_puppet_sets_character_none(self):
+        self.session.puppet = None
+        cmd = _CmdAcctMarker()
+        d = self._dispatch(cmd)
+
+        def _check(_):
+            # account still resolvable via cmdset_providers["account"]
+            self.assertIs(cmd.caller, self.account)
+            self.assertIs(cmd.account, self.account)
+            self.assertIsNone(cmd.character)
+
+        d.addCallback(_check)
+        return d
+
+    def test_regular_command_caller_untouched_and_no_character_attr(self):
+        self.session.puppet = self.char1
+        cmd = _CmdObjMarker()
+        d = self._dispatch(cmd)
+
+        def _check(_):
+            # ServerSession with a puppet → caller is the puppet.
+            self.assertIs(cmd.caller, self.char1)
+            self.assertFalse(hasattr(cmd, "character"))
+
+        d.addCallback(_check)
+        return d
+
+    def test_account_command_caller_flag_default_false_on_base_command(self):
+        self.assertFalse(Command.account_command_caller)
+        self.assertTrue(_AccountCommand.account_command_caller)
+        self.assertTrue(_CmdAcctMarker.account_command_caller)
+
+    def test_cmd_access_cache_identity_differentiates_command_classes(self):
+        # _cmd_identity keys on class module + name, so a Command and an
+        # AccountCommand with the same key string do not collide in the
+        # cmd_access_cache even though they share a key.
+        from evennia.commands.cmd_access_cache import _cmd_identity
+
+        class _CmdSharedKeyObj(Command):
+            key = "shared"
+
+        class _CmdSharedKeyAcct(_AccountCommand):
+            key = "shared"
+
+        self.assertNotEqual(
+            _cmd_identity(_CmdSharedKeyObj()),
+            _cmd_identity(_CmdSharedKeyAcct()),
+        )

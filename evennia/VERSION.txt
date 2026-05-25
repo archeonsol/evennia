@@ -1,1 +1,1 @@
-6.0.0+underspire.2
+6.0.0+underspire.3

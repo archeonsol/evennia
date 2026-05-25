@@ -14,6 +14,58 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.3 — Phase 2 step 2: AccountCommand + caller normalisation
+
+Adds the first-class engine class for Account-level commands and the
+cmdhandler normalisation that guarantees a consistent
+``caller``/``account``/``character`` shape before any hook runs.
+
+### Engine
+
+- New ``evennia.commands.command.AccountCommand``: sibling of
+  ``Command`` with class flag ``account_command_caller = True``. No
+  metaclass tricks; subclasses just inherit.
+- ``Command.account_command_caller = False`` added on the base so the
+  attribute always exists.
+- ``cmdhandler._normalize_account_command_caller(cmd, caller,
+  cmdset_providers)``: invoked inside ``_run_command`` after the
+  existing runtime-attr block and *before* the ``_testing`` early
+  return and ``at_pre_parse``. For commands with
+  ``account_command_caller`` truthy:
+  - ``cmd.caller`` becomes the Account (from
+    ``cmdset_providers["account"]``, falling back to
+    ``caller.account``).
+  - ``cmd.account`` becomes the same Account (alias of ``cmd.caller``).
+  - ``cmd.character`` becomes the puppet for the dispatching session
+    (``cmdset_providers.get("object")``), or ``None`` if OOC.
+  No-op for ordinary ``Command`` subclasses; their ``cmd.caller`` is
+  untouched and no ``character`` attribute is set on the instance.
+- ``EvenniaCommandTestMixin.call`` mirrors the normalisation so
+  ``BaseEvenniaCommandTest``-based tests of ``AccountCommand``
+  subclasses observe the same attribute shape as live dispatch.
+
+### Tracing / caches (unchanged on purpose)
+
+- ``command_trace.begin_command_trace`` continues to receive the
+  pre-normalisation ``caller`` (the dispatch origin). The trace_id
+  surfaces puppet→account routing in error logs without rewriting
+  caller identity.
+- ``cmd_access_cache`` keys on the pre-normalisation ``caller``
+  (resolved during ``_COMMAND_PARSER``). Access is still gated against
+  the puppeted Character; normalisation only affects ``cmd.caller``
+  after the match, which is the right boundary. ``_cmd_identity``
+  differentiates ``Command`` and ``AccountCommand`` subclasses
+  naturally via class name, so cache keys do not collide.
+
+### Migration
+
+No breaking changes. Downstream ``AccountCommand`` shims can subclass
+``evennia.commands.command.AccountCommand`` and drop their own
+``_normalize_account_caller`` step. See
+``CMDSET_MIGRATION.md`` §"Phase 2 — Step 2".
+
+---
+
 ## 6.0.0+underspire.2 — Phase 2 step 1: at_pre_cmd rename + dispatch reorder
 
 First slice of the Phase 2 cmdset refactor. Renames the pre-parse hook
