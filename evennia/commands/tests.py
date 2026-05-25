@@ -1363,6 +1363,65 @@ class TestCmdSet(BaseEvenniaTest):
 
         self.assertIsInstance(result, _CmdTest2)
 
+    def test_cmdset_remove_returns_bool(self):
+        test_cmd_set = _CmdSetTest()
+        self.assertTrue(test_cmd_set.remove("another command"))
+        self.assertFalse(test_cmd_set.remove("another command"))
+        self.assertFalse(test_cmd_set.remove("never existed"))
+
+    def test_cmdset_remove_strict_raises(self):
+        test_cmd_set = _CmdSetTest()
+        with self.assertRaises(KeyError):
+            test_cmd_set.remove("never existed", strict=True)
+        # strict on a present key still works and returns True
+        self.assertTrue(test_cmd_set.remove("another command", strict=True))
+
+    def test_cmdset_remove_missing_syscmd_string(self):
+        # Previously raised AttributeError on cmd.key when looking up a
+        # missing system command by string.
+        test_cmd_set = _CmdSetTest()
+        self.assertFalse(test_cmd_set.remove("__missing_sys"))
+
+    def test_cmdset_remove_syscmd_by_key(self):
+        class _SysCmd(Command):
+            key = "__sys"
+
+        cmdset = CmdSet()
+        cmdset.add(_SysCmd())
+        self.assertEqual(len(cmdset.system_commands), 1)
+        self.assertTrue(cmdset.remove("__sys"))
+        self.assertEqual(cmdset.system_commands, [])
+
+    def test_cmdset_has(self):
+        test_cmd_set = _CmdSetTest()
+        self.assertTrue(test_cmd_set.has("another command"))
+        self.assertFalse(test_cmd_set.has("nope"))
+        # by instance
+        cmd = test_cmd_set.get("another command")
+        self.assertTrue(test_cmd_set.has(cmd))
+
+    def test_cmdset_replace(self):
+        class _CmdReplacement(AccessableCommand):
+            key = "another command"
+            arg_regex = None
+
+        test_cmd_set = _CmdSetTest()
+        original = test_cmd_set.get("another command")
+        self.assertIsInstance(original, _CmdTest2)
+
+        found = test_cmd_set.replace("another command", _CmdReplacement())
+        self.assertTrue(found)
+        self.assertIsInstance(test_cmd_set.get("another command"), _CmdReplacement)
+
+        # replacing something that wasn't there still adds, returns False
+        class _CmdNew(AccessableCommand):
+            key = "brand new"
+            arg_regex = None
+
+        found = test_cmd_set.replace("brand new", _CmdNew())
+        self.assertFalse(found)
+        self.assertTrue(test_cmd_set.has("brand new"))
+
     def test_cmdset_add_allow_duplicates(self):
         class _CmdDuplicateA(Command):
             key = "duplicate"
@@ -1611,9 +1670,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
     @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
         from evennia.commands.cmd_access_cache import (
-            cached_cmd_access,
-            invalidate_cmd_access_cache,
-        )
+            cached_cmd_access, invalidate_cmd_access_cache)
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -1667,3 +1724,340 @@ class TestCmdAccessCache(BaseEvenniaTest):
         matches = cmdparser.cmdparser("saytest hello", cmdset, self.char1)
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0][0], "saytest")
+
+
+# ----------------------------------------------------------------------------
+# Tests for evennia.commands.signals (cmdhandler pre/post/error signals)
+# ----------------------------------------------------------------------------
+
+
+from evennia.commands.signals import \
+    on_cmdset_merge_error as _on_cmdset_merge_error
+from evennia.commands.signals import on_command_error as _on_command_error
+from evennia.commands.signals import on_command_post as _on_command_post
+from evennia.commands.signals import on_command_pre as _on_command_pre
+
+
+class _CmdSignalsOk(Command):
+    key = "ok"
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+
+class _CmdSignalsBoom(Command):
+    key = "boom"
+    locks = "cmd:all()"
+
+    def func(self):
+        raise RuntimeError("kaboom")
+
+
+class _SignalRecorder:
+    """Subscribes to the cmdhandler signals and records call order + kwargs."""
+
+    def __init__(self):
+        self.events = []
+        _on_command_pre.connect(self._on_pre, weak=False, dispatch_uid=id(self))
+        _on_command_post.connect(self._on_post, weak=False, dispatch_uid=id(self))
+        _on_command_error.connect(self._on_error, weak=False, dispatch_uid=id(self))
+
+    def disconnect(self):
+        _on_command_pre.disconnect(self._on_pre, dispatch_uid=id(self))
+        _on_command_post.disconnect(self._on_post, dispatch_uid=id(self))
+        _on_command_error.disconnect(self._on_error, dispatch_uid=id(self))
+
+    def _on_pre(self, sender, **kwargs):
+        self.events.append(("pre", sender, kwargs))
+
+    def _on_post(self, sender, **kwargs):
+        self.events.append(("post", sender, kwargs))
+
+    def _on_error(self, sender, **kwargs):
+        self.events.append(("error", sender, kwargs))
+
+
+class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1: cmdhandler fires on_command_pre/post/error around dispatch."""
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+        self.recorder = _SignalRecorder()
+
+    def tearDown(self):
+        self.recorder.disconnect()
+        super().tearDown()
+
+    def test_pre_post_fire_in_order_with_shared_trace_id(self):
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
+
+        def _check(_):
+            kinds = [ev[0] for ev in self.recorder.events]
+            self.assertEqual(kinds, ["pre", "post"])
+
+            pre_sender, pre_kwargs = self.recorder.events[0][1], self.recorder.events[0][2]
+            post_sender, post_kwargs = self.recorder.events[1][1], self.recorder.events[1][2]
+
+            self.assertIs(pre_sender, _CmdSignalsOk)
+            self.assertIs(post_sender, _CmdSignalsOk)
+            self.assertIsInstance(pre_kwargs["cmd"], _CmdSignalsOk)
+            self.assertIsNotNone(pre_kwargs["caller"])
+            self.assertIs(pre_kwargs["caller"], post_kwargs["caller"])
+            self.assertEqual(pre_kwargs["trace_id"], post_kwargs["trace_id"])
+            self.assertIsNotNone(pre_kwargs["trace_id"])
+            self.assertGreaterEqual(post_kwargs["elapsed_ms"], 0.0)
+
+        d.addCallback(_check)
+        return d
+
+    @patch("evennia.commands.cmdhandler.logger.log_err")
+    @patch("evennia.commands.cmdhandler._msg_err")
+    def test_error_signal_fires_with_exception_and_traceback(self, _msg_err_mock, _log_err_mock):
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsBoom(), cmdobj_key="boom")
+
+        def _check(_):
+            kinds = [ev[0] for ev in self.recorder.events]
+            self.assertEqual(kinds, ["pre", "error"])
+
+            err_kwargs = self.recorder.events[1][2]
+            self.assertIsInstance(err_kwargs["cmd"], _CmdSignalsBoom)
+            self.assertIsNotNone(err_kwargs["caller"])
+            self.assertIs(err_kwargs["caller"], self.recorder.events[0][2]["caller"])
+            self.assertIsInstance(err_kwargs["exc"], RuntimeError)
+            self.assertEqual(str(err_kwargs["exc"]), "kaboom")
+            self.assertIn("RuntimeError", err_kwargs["traceback_text"])
+            self.assertIn("kaboom", err_kwargs["traceback_text"])
+            self.assertIsNotNone(err_kwargs["trace_id"])
+            self.assertEqual(
+                self.recorder.events[0][2]["trace_id"],
+                err_kwargs["trace_id"],
+            )
+
+        d.addCallback(_check)
+        return d
+
+    def test_bad_receiver_does_not_break_dispatch(self):
+        """send_robust isolates receiver failures."""
+
+        def _bad(sender, **kwargs):
+            raise ValueError("receiver exploded")
+
+        _on_command_pre.connect(_bad, weak=False, dispatch_uid="bad-pre")
+        self.addCleanup(_on_command_pre.disconnect, _bad, dispatch_uid="bad-pre")
+
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
+
+        def _check(_):
+            kinds = [ev[0] for ev in self.recorder.events]
+            self.assertEqual(kinds, ["pre", "post"])
+
+        d.addCallback(_check)
+        return d
+
+
+class TestSignalSessionResolution(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1.x: signal payload always carries the real session when one exists.
+
+    Before this, callertype="session" left `session=None` even though
+    `called_by` was the session; session-proxy objects (multipuppet relay)
+    also leaked into signal kwargs. The cmdhandler now resolves once at the
+    top: prefers the explicit `session` arg, unwraps its `real_session`
+    attribute if present, and falls back to `cmdset_providers["session"]`.
+    """
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+        self.recorder = _SignalRecorder()
+
+    def tearDown(self):
+        self.recorder.disconnect()
+        super().tearDown()
+
+    def test_session_callertype_surfaces_real_session(self):
+        # called_by IS the session, no explicit session= arg. Pre-fix this
+        # left signal kwargs with session=None.
+        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
+
+        def _check(_):
+            pre_kwargs = self.recorder.events[0][2]
+            post_kwargs = self.recorder.events[1][2]
+            self.assertIs(pre_kwargs["session"], self.session)
+            self.assertIs(post_kwargs["session"], self.session)
+
+        d.addCallback(_check)
+        return d
+
+    def test_proxy_session_unwraps_to_real_session(self):
+        # A session-proxy with `real_session` should surface the real
+        # session to receivers, not the proxy itself.
+        class _RelayProxy:
+            def __init__(self, real):
+                self.real_session = real
+
+            def get_cmdset_providers(self):
+                return self.real_session.get_cmdset_providers()
+
+        proxy = _RelayProxy(self.session)
+        d = cmdhandler.cmdhandler(
+            self.session,
+            "",
+            cmdobj=_CmdSignalsOk(),
+            cmdobj_key="ok",
+            session=proxy,
+        )
+
+        def _check(_):
+            post_kwargs = self.recorder.events[1][2]
+            self.assertIs(post_kwargs["session"], self.session)
+            self.assertIsNot(post_kwargs["session"], proxy)
+
+        d.addCallback(_check)
+        return d
+
+    def test_proxy_without_real_session_attr_passes_through(self):
+        # A proxy with no `real_session` attribute (synthetic session)
+        # is returned as-is. Receivers can isinstance-check if needed.
+        class _SyntheticSession:
+            def __init__(self, providers):
+                self._providers = providers
+
+            def get_cmdset_providers(self):
+                return self._providers
+
+        synthetic = _SyntheticSession(self.session.get_cmdset_providers())
+        d = cmdhandler.cmdhandler(
+            self.session,
+            "",
+            cmdobj=_CmdSignalsOk(),
+            cmdobj_key="ok",
+            session=synthetic,
+        )
+
+        def _check(_):
+            post_kwargs = self.recorder.events[1][2]
+            self.assertIs(post_kwargs["session"], synthetic)
+
+        d.addCallback(_check)
+        return d
+
+
+class TestCmdsetMergeErrorSignal(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1.1: on_cmdset_merge_error fires when cmdset build/merge fails."""
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+        self.events = []
+
+        def _record(sender, **kwargs):
+            self.events.append((sender, kwargs))
+
+        self._record = _record
+        _on_cmdset_merge_error.connect(_record, weak=False, dispatch_uid="merge-err-test")
+
+    def tearDown(self):
+        _on_cmdset_merge_error.disconnect(self._record, dispatch_uid="merge-err-test")
+        super().tearDown()
+
+    @patch("evennia.commands.cmdhandler.logger.log_err")
+    @patch("evennia.commands.cmdhandler._msg_err")
+    def test_at_cmdset_get_failure_fires_signal(self, _msg_err_mock, _log_err_mock):
+        # Force the session's at_cmdset_get to raise; cmdhandler will hit
+        # the per-provider merge-error site inside _get_cmdsets.
+        def _boom(*args, **kwargs):
+            raise RuntimeError("merge boom")
+
+        original = self.session.at_cmdset_get
+        self.session.at_cmdset_get = _boom
+        self.addCleanup(setattr, self.session, "at_cmdset_get", original)
+
+        d = cmdhandler.cmdhandler(self.session, "noop")
+
+        def _check(_):
+            self.assertEqual(len(self.events), 1, self.events)
+            _, kwargs = self.events[0]
+            # caller is whoever cmdhandler resolved to merge cmdsets for.
+            self.assertIn("caller", kwargs)
+            # session is resolved at the top of cmdhandler, so the real
+            # session reaches the merge-error site too.
+            self.assertIs(kwargs["session"], self.session)
+            self.assertEqual(kwargs["raw_string"], "noop")
+            self.assertIsInstance(kwargs["exc"], RuntimeError)
+            self.assertEqual(str(kwargs["exc"]), "merge boom")
+            self.assertIn("RuntimeError", kwargs["traceback_text"])
+            self.assertIn("merge boom", kwargs["traceback_text"])
+            self.assertIn("trace_id", kwargs)
+
+        d.addCallback(_check)
+        return d
+
+
+class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
+
+    def test_trace_id_set_inside_trace(self):
+        from evennia.utils.command_trace import (begin_command_trace,
+                                                 end_command_trace)
+
+        try:
+            tid = begin_command_trace(raw_string="x", cmd_key="x")
+            err = cmdhandler.ErrorReported("x")
+            self.assertEqual(err.trace_id, tid)
+        finally:
+            end_command_trace()
+
+    def test_trace_id_none_outside_trace(self):
+        err = cmdhandler.ErrorReported("x")
+        self.assertIsNone(err.trace_id)
+
+
+class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
+    """Phase 1: cmdhandler accepts a duck-typed session-proxy."""
+
+    def test_proxy_session_get_cmdset_providers_is_called(self):
+        real_session = self.session
+        real_providers = real_session.get_cmdset_providers()
+
+        class _Proxy:
+            called = False
+
+            def get_cmdset_providers(self_inner):
+                self_inner.__class__.called = True
+                return dict(real_providers)
+
+        proxy = _Proxy()
+        providers, _list, _err_list, caller, _error_to = cmdhandler.generate_cmdset_providers(
+            real_session, session=proxy
+        )
+        self.assertTrue(_Proxy.called)
+        self.assertTrue(providers)
+
+
+# ----------------------------------------------------------------------------
+# Tests for evennia.commands.location_cmdset_cache
+# (merged in from the formerly-orphaned evennia/commands/tests/
+#  directory, which was shadowed by this tests.py module.)
+# ----------------------------------------------------------------------------
+
+
+from evennia.commands.location_cmdset_cache import (
+    bump_cmdset_generation, cmdset_generation, get_cached_location_cmdsets,
+    make_cache_key, set_cached_location_cmdsets)
+
+
+class TestLocationCmdsetCache(BaseEvenniaTest):
+    def test_generation_bumps_on_cmdset_change(self):
+        gen0 = cmdset_generation(self.char1)
+        self.char1.cmdset.add("evennia.commands.default.cmdset_character.CharacterCmdSet")
+        self.assertGreater(cmdset_generation(self.char1), gen0)
+        if self.char1.location:
+            self.assertGreaterEqual(cmdset_generation(self.char1.location), gen0)
+
+    def test_cache_roundtrip(self):
+        key = make_cache_key(self.char1, self.char1.location)
+        sentinel = ["cmdset-list"]
+        set_cached_location_cmdsets(key, sentinel)
+        self.assertIs(get_cached_location_cmdsets(key), sentinel)

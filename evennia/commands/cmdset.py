@@ -613,35 +613,81 @@ class CmdSet(object, metaclass=_CmdSetMeta):
         self.commands = commands
         self._cached_fingerprint = None
 
-    def remove(self, cmd):
+    def remove(self, cmd, strict=False):
         """
-        Remove a command instance from the cmdset.
+        Remove a command from the cmdset.
 
         Args:
             cmd (Command or str): Either the Command object to remove
                 or the key of such a command.
+            strict (bool, optional): If True, raise KeyError when the
+                command is not present. Defaults to False (idempotent).
+
+        Returns:
+            bool: True if a command was removed, False otherwise.
 
         """
         if isinstance(cmd, str):
-            _cmd = next((_cmd for _cmd in self.commands if _cmd.key == cmd), None)
+            key = cmd
+            _cmd = next(
+                (_cmd for _cmd in self.commands + self.system_commands if _cmd.key == key),
+                None,
+            )
             if _cmd is None:
-                if not cmd.startswith("__"):
-                    # if a syscommand, keep the original string and instantiate on it
-                    return None
-            else:
-                cmd = _cmd
+                if strict:
+                    raise KeyError(f"Command {key!r} not found in cmdset {self.key!r}")
+                return False
+            cmd = _cmd
 
         cmd = self._instantiate(cmd)
+        removed = False
         if cmd.key.startswith("__"):
             try:
                 ic = self.system_commands.index(cmd)
                 del self.system_commands[ic]
+                removed = True
             except ValueError:
-                # ignore error
                 pass
         else:
-            self.commands = [oldcmd for oldcmd in self.commands if oldcmd != cmd]
-        self._cached_fingerprint = None
+            new_commands = [oldcmd for oldcmd in self.commands if oldcmd != cmd]
+            removed = len(new_commands) != len(self.commands)
+            self.commands = new_commands
+
+        if removed:
+            self._cached_fingerprint = None
+        elif strict:
+            raise KeyError(f"Command {cmd.key!r} not found in cmdset {self.key!r}")
+        return removed
+
+    def replace(self, old, new):
+        """
+        Replace a command in this cmdset with another.
+
+        Args:
+            old (Command or str): The command to remove (by instance or key).
+            new (Command): The replacement command (class or instance).
+
+        Returns:
+            bool: True if `old` was found and removed, False otherwise. The
+                new command is added either way.
+
+        """
+        was_present = self.remove(old)
+        self.add(new)
+        return was_present
+
+    def has(self, cmd):
+        """
+        Check whether a command is in this cmdset.
+
+        Args:
+            cmd (Command or str): Either the Command object or its key.
+
+        Returns:
+            bool: True if the command is present.
+
+        """
+        return self.get(cmd) is not None
 
     def get(self, cmd):
         """
