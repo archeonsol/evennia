@@ -14,6 +14,48 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.4 — Drop at_pre_cmd subclass guard
+
+The `__init_subclass__` guard introduced in `+underspire.2` is
+removed. The post-parse `at_pre_cmd` hook is now freely
+subclass-able: override it for input validation that needs parsed
+state (`self.args`, `self.switches`, `self.character`) or for
+gating that depends on parse results.
+
+### Engine
+
+- `Command.__init_subclass__` deleted. There was no other logic in
+  it; the guard was its sole purpose.
+- `Command.at_pre_cmd` docstring updated to describe its role
+  ("preferred home for post-parse, pre-dispatch logic") and to
+  distinguish it from `at_pre_parse`.
+
+### Dispatch order (unchanged from `+underspire.2`)
+
+```
+at_pre_parse → parse → at_pre_cmd → func → at_post_cmd
+```
+
+Both `at_pre_parse` and `at_pre_cmd` return-truthy-to-abort. Truthy
+abort from `at_pre_cmd` skips `func` and `at_post_cmd`.
+
+### Migration
+
+No required action. Downstream that previously moved post-parse
+logic into `func` (or into a `parse` override) to dodge the guard
+can now move it into `at_pre_cmd` if that reads better. No code
+that ran on `+underspire.3.1` breaks on `+underspire.4`.
+
+### Tests
+
+`TestAtPreCmdRename.test_subclassing_at_pre_cmd_raises_typeerror_at_import`
+deleted. Replaced with
+`test_at_pre_cmd_override_runs_after_parse_before_func` and
+`test_at_pre_cmd_truthy_return_aborts_after_parse_before_func`,
+which exercise the now-allowed override path.
+
+---
+
 ## 6.0.0+underspire.3.1 — MuxAccountCommand opts into engine normalisation
 
 Targeted follow-up to `+underspire.3` driven by downstream feedback.
