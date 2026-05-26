@@ -21,6 +21,10 @@ Columns:
 | `@about` | @version |  | `evennia.commands.default.system.CmdAbout` | `cmd:all()` |
 | `@accounts` | @account |  | `evennia.commands.default.system.CmdAccounts` | `cmd:perm(listaccounts) or perm(Admin)` |
 | `@alias` | setobjalias |  | `evennia.commands.default.building.CmdSetObjAlias` | `cmd:perm(setobjalias) or perm(Builder)` |
+| `@ban` | @bans |  | `evennia.commands.default.admin.CmdBan` | `cmd:perm(ban) or perm(Developer)` |
+| `@batchcode` | @batchcodes |  | `evennia.commands.default.batchprocess.CmdBatchCode` | `cmd:superuser()` |
+| `@batchcommands` | @batchcmd, @batchcommand |  | `evennia.commands.default.batchprocess.CmdBatchCommands` | `cmd:perm(batchcommands) or perm(Developer)` |
+| `@boot` |  |  | `evennia.commands.default.admin.CmdBoot` | `cmd:perm(boot) or perm(Admin)` |
 | `@cmdsets` |  |  | `evennia.commands.default.building.CmdListCmdSets` | `cmd:perm(listcmdsets) or perm(Builder)` |
 | `@copy` |  |  | `evennia.commands.default.building.CmdCopy` | `cmd:perm(copy) or perm(Builder)` |
 | `@cpattr` |  |  | `evennia.commands.default.building.CmdCpAttr` | `cmd:perm(cpattr) or perm(Builder)` |
@@ -28,19 +32,23 @@ Columns:
 | `@desc` |  |  | `evennia.commands.default.building.CmdDesc` | `cmd:perm(desc) or perm(Builder)` |
 | `@destroy` | @del, @delete |  | `evennia.commands.default.building.CmdDestroy` | `cmd:perm(destroy) or perm(Builder)` |
 | `@dig` |  |  | `evennia.commands.default.building.CmdDig` | `cmd:perm(dig) or perm(Builder)` |
+| `@emit` | @pemit, @remit |  | `evennia.commands.default.admin.CmdEmit` | `cmd:perm(emit) or perm(Builder)` |
 | `@examine` | @ex, @exam |  | `evennia.commands.default.building.CmdExamine` | `cmd:perm(examine) or perm(Builder)` |
 | `@find` | @locate, @search |  | `evennia.commands.default.building.CmdFind` | `cmd:perm(find) or perm(Builder)` |
+| `@force` |  |  | `evennia.commands.default.admin.CmdForce` | `cmd:perm(spawn) or perm(Builder)` |
 | `@link` |  |  | `evennia.commands.default.building.CmdLink` | `cmd:perm(link) or perm(Builder)` |
 | `@lock` | @locks |  | `evennia.commands.default.building.CmdLock` | `cmd:all();cmd: perm(locks) or perm(Builder)` |
 | `@mvattr` |  |  | `evennia.commands.default.building.CmdMvAttr` | `cmd:perm(mvattr) or perm(Builder)` |
 | `@name` | @rename |  | `evennia.commands.default.building.CmdName` | `cmd:perm(rename) or perm(Builder)` |
 | `@objects` |  |  | `evennia.commands.default.building.CmdObjects` | `cmd:perm(listobjects) or perm(Builder)` |
 | `@open` |  |  | `evennia.commands.default.building.CmdOpen` | `cmd:perm(open) or perm(Builder)` |
+| `@perm` | @setperm |  | `evennia.commands.default.admin.CmdPerm` | `cmd:perm(perm) or perm(Developer)` |
 | `@py` | @! |  | `evennia.commands.default.system.CmdPy` | `cmd:perm(py) or perm(Developer)` |
 | `@scripts` | @script |  | `evennia.commands.default.building.CmdScripts` | `cmd:perm(scripts) or perm(Builder)` |
 | `@server` | @serverload |  | `evennia.commands.default.system.CmdServerLoad` | `cmd:perm(list) or perm(Developer)` |
 | `@service` | @services |  | `evennia.commands.default.system.CmdService` | `cmd:perm(service) or perm(Developer)` |
 | `@set` |  |  | `evennia.commands.default.building.CmdSetAttribute` | `cmd:perm(set) or perm(Builder)` |
+| `@sethelp` |  |  | `evennia.commands.default.help.CmdSetHelp` | `cmd:perm(Helper)` |
 | `@sethome` |  |  | `evennia.commands.default.building.CmdSetHome` | `cmd:perm(sethome) or perm(Builder)` |
 | `@spawn` | @olc |  | `evennia.commands.default.building.CmdSpawn` | `cmd:perm(spawn) or perm(Builder)` |
 | `@tag` | @tags |  | `evennia.commands.default.building.CmdTag` | `cmd:perm(tag) or perm(Builder)` |
@@ -50,15 +58,12 @@ Columns:
 | `@time` | @uptime |  | `evennia.commands.default.system.CmdTime` | `cmd:perm(time) or perm(Player)` |
 | `@tunnel` | @tun |  | `evennia.commands.default.building.CmdTunnel` | `cmd:all();cmd: perm(tunnel) or perm(Builder)` |
 | `@typeclass` | @parent, @swap, @type, @typeclasses, @update |  | `evennia.commands.default.building.CmdTypeclass` | `cmd:perm(typeclass) or perm(Builder)` |
+| `@unban` |  |  | `evennia.commands.default.admin.CmdUnban` | `cmd:perm(unban) or perm(Developer)` |
+| `@unlink` |  |  | `evennia.commands.default.building.CmdUnLink` | `cmd:perm(unlink) or perm(Builder)` |
+| `@wall` |  |  | `evennia.commands.default.admin.CmdWall` | `cmd:perm(wall) or perm(Admin)` |
 | `@wipe` |  |  | `evennia.commands.default.building.CmdWipe` | `cmd:perm(wipe) or perm(Builder)` |
 | `access` | groups, hierarchy |  | `evennia.commands.default.general.CmdAccess` | `cmd:all()` |
-| `ban` | bans |  | `evennia.commands.default.admin.CmdBan` | `cmd:perm(ban) or perm(Developer)` |
-| `batchcode` | batchcodes |  | `evennia.commands.default.batchprocess.CmdBatchCode` | `cmd:superuser()` |
-| `batchcommands` | batchcmd, batchcommand |  | `evennia.commands.default.batchprocess.CmdBatchCommands` | `cmd:perm(batchcommands) or perm(Developer)` |
-| `boot` |  |  | `evennia.commands.default.admin.CmdBoot` | `cmd:perm(boot) or perm(Admin)` |
 | `drop` |  |  | `evennia.commands.default.general.CmdDrop` | `cmd:all()` |
-| `emit` | pemit, remit |  | `evennia.commands.default.admin.CmdEmit` | `cmd:perm(emit) or perm(Builder)` |
-| `force` |  |  | `evennia.commands.default.admin.CmdForce` | `cmd:perm(spawn) or perm(Builder)` |
 | `get` | grab |  | `evennia.commands.default.general.CmdGet` | `cmd:all()` |
 | `give` |  |  | `evennia.commands.default.general.CmdGive` | `cmd:all()` |
 | `help` | ? |  | `evennia.commands.default.help.CmdHelp` | `cmd:all()` |
@@ -66,14 +71,9 @@ Columns:
 | `inventory` | i, inv |  | `evennia.commands.default.general.CmdInventory` | `cmd:all()` |
 | `look` | l, ls |  | `evennia.commands.default.general.CmdLook` | `cmd:all()` |
 | `nick` | nickname, nicks |  | `evennia.commands.default.general.CmdNick` | `cmd:all()` |
-| `perm` | setperm |  | `evennia.commands.default.admin.CmdPerm` | `cmd:perm(perm) or perm(Developer)` |
 | `pose` | :, emote |  | `evennia.commands.default.general.CmdPose` | `cmd:all()` |
 | `say` | ", ' |  | `evennia.commands.default.general.CmdSay` | `cmd:all()` |
 | `setdesc` |  |  | `evennia.commands.default.general.CmdSetDesc` | `cmd:all()` |
-| `sethelp` |  |  | `evennia.commands.default.help.CmdSetHelp` | `cmd:perm(Helper)` |
-| `unban` |  |  | `evennia.commands.default.admin.CmdUnban` | `cmd:perm(unban) or perm(Developer)` |
-| `unlink` |  |  | `evennia.commands.default.building.CmdUnLink` | `cmd:perm(unlink) or perm(Builder)` |
-| `wall` |  |  | `evennia.commands.default.admin.CmdWall` | `cmd:perm(wall) or perm(Admin)` |
 | `whisper` |  |  | `evennia.commands.default.general.CmdWhisper` | `cmd:all()` |
 
 ## AccountCmdSet
@@ -86,6 +86,7 @@ Columns:
 | `@reload` | @restart |  | `evennia.commands.default.system.CmdReload` | `cmd:perm(reload) or perm(Developer)` |
 | `@reset` |  |  | `evennia.commands.default.system.CmdReset` | `cmd:perm(reload) or perm(Developer)` |
 | `@shutdown` |  |  | `evennia.commands.default.system.CmdShutdown` | `cmd:perm(shutdown) or perm(Developer)` |
+| `@userpassword` |  |  | `evennia.commands.default.admin.CmdNewPassword` | `cmd:perm(newpassword) or perm(Admin)` |
 | `charcreate` |  | yes | `evennia.commands.default.account.CmdCharCreate` | `cmd:pperm(Player)` |
 | `chardelete` |  |  | `evennia.commands.default.account.CmdCharDelete` | `cmd:pperm(Player)` |
 | `color` |  | yes | `evennia.commands.default.account.CmdColorTest` | `cmd:all()` |
@@ -105,7 +106,6 @@ Columns:
 | `quit` |  | yes | `evennia.commands.default.account.CmdQuit` | `cmd:all()` |
 | `rss2chan` |  |  | `evennia.commands.default.comms.CmdRSS2Chan` | `cmd:serversetting(RSS_ENABLED) and pperm(Developer)` |
 | `style` |  |  | `evennia.commands.default.account.CmdStyle` | `cmd:all();` |
-| `userpassword` |  |  | `evennia.commands.default.admin.CmdNewPassword` | `cmd:perm(newpassword) or perm(Admin)` |
 | `who` | doing | yes | `evennia.commands.default.account.CmdWho` | `cmd:all()` |
 
 ## SessionCmdSet
