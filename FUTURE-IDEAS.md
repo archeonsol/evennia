@@ -8,17 +8,57 @@ Each entry: a short framing, the rough shape, what's been decided to
 defer, and any concrete sequencing if/when it gets picked up. Move
 entries out when they ship; delete entries explicitly killed.
 
-## Engine stance (informal)
+## Engine stance
 
-> Tight and opinionated. Game-agnostic-ish, but where agnosticism would
-> hurt Underspire we tune for Underspire.
+The fork's stance lives in
+[`core-beliefs.md`](.agents/docs/core-beliefs.md): opinionated,
+Underspire-tuned where agnosticism would hurt. This file holds the
+operational detail.
 
-The fork is not pretending to be a maximally generic toolkit. It is
-Underspire's engine, and aims at game-agnostic shapes only where doing
-so doesn't cost the consumer. This sits alongside the core beliefs in
-[`.agents/docs/core-beliefs.md`](.agents/docs/core-beliefs.md); when
-they conflict, the consumer wins for now. (This is a fork stance, not
-an upstream-Evennia stance.)
+### The engine/game line
+
+Test: if a hypothetical second consumer could not reasonably
+re-implement this from scratch, it belongs in the engine. Everything
+else is game-shaped, no matter how generic it looks.
+
+Three lanes:
+
+1. **Engine infrastructure.** Pure seams (cmdhandler, cmdset, locks,
+   attributes, AMP, two-process boundary). Settable but not
+   opinionated.
+2. **Engine defaults with opinions.** Engine code, Underspire-tuned
+   defaults, clean opt-out via setting. Examples: trie parser default,
+   ftfy normalisation, `@`-prefix convention, switch lowercasing,
+   token-boundary matching. Lane-2 test: opt-out via setting must be
+   clean. If the only way out is forking, the opinion is too deep.
+3. **Game.** Handlers, systems, content, naming policy,
+   world-specific commands. Lives downstream.
+
+### Direction signals
+
+**Engine → game (carve out):**
+
+- Single consumer, deep subclass/extension on the game side.
+- "Generic shape, game-specific content" pattern.
+- Touched only by game code; engine internals don't reference it.
+- The five-contrib move (`+underspire.16`) was textbook.
+
+**Game → engine (pull in):**
+
+- Game has accidentally built infrastructure while solving a game
+  problem.
+- A seam exists in the engine but the implementation lives downstream.
+  Phase 2 `AccountCommand` (`+underspire.4`) was this.
+- Multiple game-side files re-implement the same primitive slightly
+  differently — "this wants to be one thing."
+
+**Stay put (in either direction):**
+
+- "Smell but it works" — watch through one or two refactor cycles
+  before acting.
+- Boundary requires DB migration, settings rename across consumers, or
+  multi-release deprecation. Earns dedicated work, not a hygiene-pass
+  impulse.
 
 ---
 

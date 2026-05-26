@@ -2,9 +2,13 @@
 
 Design principles that inform implementation decisions in Evennia. When in doubt, these guide tradeoffs.
 
-## Evennia is a toolkit, not a game
+## Engine is a toolkit, opinionated for Underspire
 
-Evennia provides infrastructure (networking, persistence, command routing) without imposing genre, mechanics, or game style. Never add features that assume a specific type of game. Keep the core generic — game-specific systems belong in `contrib/` or downstream game code.
+This is Underspire's engine fork, not maximally generic upstream Evennia. It stays game-agnostic in shape but ships Underspire-tuned defaults where agnosticism would hurt the consumer. Test for any opinion in engine code: a game that didn't want it can opt out *cleanly via a setting*. If the only way out is forking, the opinion is too deep.
+
+The engine/game line: if a hypothetical second consumer could not reasonably re-implement this from scratch, it belongs in the engine. Everything else is game-shaped, no matter how generic it looks. Game-specific systems live downstream. `evennia/contrib/` is a legacy bucket: no new additions, contribs migrate or get deleted as hygiene passes catch them.
+
+See [FUTURE-IDEAS.md](../../FUTURE-IDEAS.md) for the three-lane breakdown (infrastructure / opinionated defaults / game) and the direction signals for carving out or pulling in.
 
 ## Think in Python, not SQL
 
