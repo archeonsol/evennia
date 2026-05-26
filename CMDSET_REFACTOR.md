@@ -498,6 +498,16 @@ mitigated by tests measuring parse time on a synthetic 200-command cmdset.
 Bookkeeping after engine work is merged. Tracked as a single PR against
 Underspire, not the engine.
 
+> **Lesson from the +underspire.13 / +underspire.14 alignment:** most of
+> the items below ended up being cleaned up *incrementally* during the
+> Phase 0-4 downstream alignment commits, not deferred to a final pass.
+> The actual Phase 5 PR was tiny because each downstream alignment
+> commit deleted the wrappers and scaffolding that the just-landed
+> engine API made redundant. Future fork migrations should expect the
+> same shape: clean up as the API lands, not as a final cleanup pass.
+> Treat this list as a backstop catalog rather than a planned final
+> commit.
+
 - Delete `commands/cmdset_utils.py`, `commands/staff_admin_wrappers.py`,
   `world/parsing/trie_parser.py`.
 - Reduce `server/conf/at_server_startstop.py` monkey-patch block to just
