@@ -19,6 +19,7 @@ Columns:
 | key | aliases | acct | class | locks |
 |---|---|---|---|---|
 | `@about` | @version |  | `evennia.commands.default.system.CmdAbout` | `cmd:all()` |
+| `@access` | @groups, @hierarchy |  | `evennia.commands.default.general.CmdAccess` | `cmd:all()` |
 | `@accounts` | @account |  | `evennia.commands.default.system.CmdAccounts` | `cmd:perm(listaccounts) or perm(Admin)` |
 | `@alias` | setobjalias |  | `evennia.commands.default.building.CmdSetObjAlias` | `cmd:perm(setobjalias) or perm(Builder)` |
 | `@ban` | @bans |  | `evennia.commands.default.admin.CmdBan` | `cmd:perm(ban) or perm(Developer)` |
@@ -40,6 +41,7 @@ Columns:
 | `@lock` | @locks |  | `evennia.commands.default.building.CmdLock` | `cmd:all();cmd: perm(locks) or perm(Builder)` |
 | `@mvattr` |  |  | `evennia.commands.default.building.CmdMvAttr` | `cmd:perm(mvattr) or perm(Builder)` |
 | `@name` | @rename |  | `evennia.commands.default.building.CmdName` | `cmd:perm(rename) or perm(Builder)` |
+| `@nick` | @nickname, @nicks |  | `evennia.commands.default.general.CmdNick` | `cmd:all()` |
 | `@objects` |  |  | `evennia.commands.default.building.CmdObjects` | `cmd:perm(listobjects) or perm(Builder)` |
 | `@open` |  |  | `evennia.commands.default.building.CmdOpen` | `cmd:perm(open) or perm(Builder)` |
 | `@perm` | @setperm |  | `evennia.commands.default.admin.CmdPerm` | `cmd:perm(perm) or perm(Developer)` |
@@ -62,7 +64,6 @@ Columns:
 | `@unlink` |  |  | `evennia.commands.default.building.CmdUnLink` | `cmd:perm(unlink) or perm(Builder)` |
 | `@wall` |  |  | `evennia.commands.default.admin.CmdWall` | `cmd:perm(wall) or perm(Admin)` |
 | `@wipe` |  |  | `evennia.commands.default.building.CmdWipe` | `cmd:perm(wipe) or perm(Builder)` |
-| `access` | groups, hierarchy |  | `evennia.commands.default.general.CmdAccess` | `cmd:all()` |
 | `drop` |  |  | `evennia.commands.default.general.CmdDrop` | `cmd:all()` |
 | `get` | grab |  | `evennia.commands.default.general.CmdGet` | `cmd:all()` |
 | `give` |  |  | `evennia.commands.default.general.CmdGive` | `cmd:all()` |
@@ -70,7 +71,6 @@ Columns:
 | `home` |  |  | `evennia.commands.default.general.CmdHome` | `cmd:perm(home) or perm(Builder)` |
 | `inventory` | i, inv |  | `evennia.commands.default.general.CmdInventory` | `cmd:all()` |
 | `look` | l, ls |  | `evennia.commands.default.general.CmdLook` | `cmd:all()` |
-| `nick` | nickname, nicks |  | `evennia.commands.default.general.CmdNick` | `cmd:all()` |
 | `pose` | :, emote |  | `evennia.commands.default.general.CmdPose` | `cmd:all()` |
 | `say` | ", ' |  | `evennia.commands.default.general.CmdSay` | `cmd:all()` |
 | `setdesc` |  |  | `evennia.commands.default.general.CmdSetDesc` | `cmd:all()` |
@@ -91,6 +91,7 @@ Columns:
 | `@irc2chan` |  |  | `evennia.commands.default.comms.CmdIRC2Chan` | `cmd:serversetting(IRC_ENABLED) and pperm(Developer)` |
 | `@ircstatus` |  |  | `evennia.commands.default.comms.CmdIRCStatus` | `cmd:serversetting(IRC_ENABLED) and perm(ircstatus) or perm(Builder))` |
 | `@look` | @l, @ls | yes | `evennia.commands.default.account.CmdOOCLook` | `cmd:all()` |
+| `@nick` | @nickname, @nicks |  | `evennia.commands.default.general.CmdNick` | `cmd:all()` |
 | `@ooc` | @unpuppet | yes | `evennia.commands.default.account.CmdOOC` | `cmd:pperm(Player)` |
 | `@option` | @options | yes | `evennia.commands.default.account.CmdOption` | `cmd:all()` |
 | `@page` | @tell | yes | `evennia.commands.default.comms.CmdPage` | `cmd:not pperm(page_banned)` |
@@ -106,7 +107,6 @@ Columns:
 | `@userpassword` |  |  | `evennia.commands.default.admin.CmdNewPassword` | `cmd:perm(newpassword) or perm(Admin)` |
 | `@who` | @doing | yes | `evennia.commands.default.account.CmdWho` | `cmd:all()` |
 | `help` | ? |  | `evennia.commands.default.help.CmdHelp` | `cmd:all()` |
-| `nick` | nickname, nicks |  | `evennia.commands.default.general.CmdNick` | `cmd:all()` |
 
 ## SessionCmdSet
 

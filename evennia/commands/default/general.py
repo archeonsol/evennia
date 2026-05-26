@@ -99,26 +99,26 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
     match and replace it with another on the fly
 
     Usage:
-      nick[/switches] <string> [= [replacement_string]]
-      nick[/switches] <template> = <replacement_template>
-      nick/delete <string> or number
-      nicks
+      @nick[/switches] <string> [= [replacement_string]]
+      @nick[/switches] <template> = <replacement_template>
+      @nick/delete <string> or number
+      @nicks
 
     Switches:
       inputline - replace on the inputline (default)
       object    - replace on object-lookup
       account   - replace on account-lookup
-      list      - show all defined aliases (also "nicks" works)
+      list      - show all defined aliases (also "@nicks" works)
       delete    - remove nick by index in /list
       clearall  - clear all nicks
 
     Examples:
-      nick hi = say Hello, I'm Sarah!
-      nick/object tom = the tall man
-      nick build $1 $2 = create/drop $1;$2
-      nick tell $1 $2=page $1=$2
-      nick tm?$1=page tallman=$1
-      nick tm\\\\=$1=page tallman=$1
+      @nick hi = say Hello, I'm Sarah!
+      @nick/object tom = the tall man
+      @nick build $1 $2 = @create/drop $1;$2
+      @nick tell $1 $2=@page $1=$2
+      @nick tm?$1=@page tallman=$1
+      @nick tm\\\\=$1=@page tallman=$1
 
     A 'nick' is a personal string replacement. Use $1, $2, ... to catch arguments.
     Put the last $-marker without an ending space to catch all remaining text. You
@@ -136,9 +136,9 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
 
     """
 
-    key = "nick"
+    key = "@nick"
     switch_options = ("inputline", "object", "account", "list", "delete", "clearall")
-    aliases = ["nickname", "nicks"]
+    aliases = ["@nickname", "@nicks"]
     locks = "cmd:all()"
 
     def parse(self):
@@ -296,7 +296,7 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
             return
 
         if not self.args or not self.lhs:
-            caller.msg("Usage: nick[/switches] nickname = [realname]")
+            caller.msg("Usage: @nick[/switches] nickname = [realname]")
             return
 
         # setting new nicks
@@ -773,14 +773,14 @@ class CmdAccess(COMMAND_DEFAULT_CLASS):
     show your current game access
 
     Usage:
-      access
+      @access
 
     This command shows you the permission hierarchy and
     which permission groups you are a member of.
     """
 
-    key = "access"
-    aliases = ["groups", "hierarchy"]
+    key = "@access"
+    aliases = ["@groups", "@hierarchy"]
     locks = "cmd:all()"
     arg_regex = r"$"
 
