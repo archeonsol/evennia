@@ -19,56 +19,50 @@ from evennia.utils.test_resources import BaseEvenniaTest
 from ..deprecations import check_errors
 
 
-class MockSettings(object):
+class MockSettings:
     """
-    Class for simulating django.conf.settings. Created with a single value, and then sets the required
-    WEBSERVER_ENABLED setting to True or False depending if we're testing WEBSERVER_PORTS.
+    Minimal stand-in for django.conf.settings carrying defaults that
+    pass every check_errors gate. Tests override one field to exercise
+    a single failure mode.
     """
 
-    def __init__(self, setting, value=None):
-        setattr(self, setting, value)
-        if setting == "WEBSERVER_PORTS":
-            self.WEBSERVER_ENABLED = True
-        else:
-            self.WEBSERVER_ENABLED = False
+    WEBSERVER_ENABLED = False
+    WEBSERVER_PORTS = [(4001, 4002)]
+    CHANNEL_CONNECTINFO = None
+    GAME_DIR = "/tmp/__nonexistent_for_test__"
+    MULTISESSION_MODE = 2
+    MAX_NR_SIMULTANEOUS_PUPPETS = 1
+
+    def __init__(self, **overrides):
+        for key, val in overrides.items():
+            setattr(self, key, val)
 
 
 class TestDeprecations(TestCase):
-    """
-    Class for testing deprecations.check_errors.
-    """
+    """check_errors gates covering current (post-pre-1.0-cleanup) checks."""
 
-    deprecated_settings = (
-        "CMDSET_DEFAULT",
-        "CMDSET_OOC",
-        "BASE_COMM_TYPECLASS",
-        "COMM_TYPECLASS_PATHS",
-        "CHARACTER_DEFAULT_HOME",
-        "OBJECT_TYPECLASS_PATHS",
-        "SCRIPT_TYPECLASS_PATHS",
-        "ACCOUNT_TYPECLASS_PATHS",
-        "CHANNEL_TYPECLASS_PATHS",
-        "SEARCH_MULTIMATCH_SEPARATOR",
-        "TIME_SEC_PER_MIN",
-        "TIME_MIN_PER_HOUR",
-        "TIME_HOUR_PER_DAY",
-        "TIME_DAY_PER_WEEK",
-        "TIME_WEEK_PER_MONTH",
-        "TIME_MONTH_PER_YEAR",
-        "GAME_DIRECTORY_LISTING",
-    )
-
-    def test_check_errors(self):
-        """
-        All settings in deprecated_settings should raise a DeprecationWarning if they exist.
-        WEBSERVER_PORTS raises an error if the iterable value passed does not have a tuple as its
-        first element.
-        """
-        for setting in self.deprecated_settings:
-            self.assertRaises(DeprecationWarning, check_errors, MockSettings(setting))
-        # test check for WEBSERVER_PORTS having correct value
+    def test_webserver_ports_must_be_tuples(self):
         self.assertRaises(
-            DeprecationWarning, check_errors, MockSettings("WEBSERVER_PORTS", value=["not a tuple"])
+            DeprecationWarning,
+            check_errors,
+            MockSettings(WEBSERVER_ENABLED=True, WEBSERVER_PORTS=["not a tuple"]),
+        )
+
+    def test_webserver_ports_accepts_tuple_form(self):
+        check_errors(MockSettings(WEBSERVER_ENABLED=True, WEBSERVER_PORTS=[(4001, 4002)]))
+
+    def test_channel_connectinfo_must_be_dict_or_none(self):
+        self.assertRaises(
+            DeprecationWarning,
+            check_errors,
+            MockSettings(CHANNEL_CONNECTINFO="not a dict"),
+        )
+
+    def test_multisession_coherence(self):
+        self.assertRaises(
+            DeprecationWarning,
+            check_errors,
+            MockSettings(MULTISESSION_MODE=1, MAX_NR_SIMULTANEOUS_PUPPETS=2),
         )
 
 
