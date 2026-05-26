@@ -4270,9 +4270,11 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
             return
 
         if expect == dict:
-            # an actual prototype. We need to make sure it's safe,
-            # so don't allow exec.
-            # TODO: Exec support is deprecated. Remove completely for 1.0.
+            # an actual prototype. Block 'exec' for non-Developer staff:
+            # spawner.py still runs prototype 'exec' strings via exec() at
+            # spawn time (see prototypes/spawner.py), so this gate is the
+            # privilege barrier, not a hygiene comment. Removing exec
+            # support entirely is tracked separately.
             if "exec" in prototype and not self.caller.check_permstring("Developer"):
                 self.msg("Spawn aborted: You are not allowed to use the 'exec' prototype key.")
                 return
