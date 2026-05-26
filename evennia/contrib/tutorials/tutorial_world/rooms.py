@@ -16,9 +16,18 @@ import random
 # it regardless of if we change settings later.
 from django.conf import settings
 
-from evennia import (TICKER_HANDLER, CmdSet, Command, DefaultExit, DefaultRoom,
-                     create_object, default_cmds, search_object, syscmdkeys,
-                     utils)
+from evennia import (
+    TICKER_HANDLER,
+    CmdSet,
+    Command,
+    DefaultExit,
+    DefaultRoom,
+    create_object,
+    default_cmds,
+    search_object,
+    syscmdkeys,
+    utils,
+)
 
 from .objects import LightSource
 
@@ -425,7 +434,7 @@ class CmdEvenniaIntro(Command):
         # quell also superusers
         if self.caller.account:
             self.caller.msg("Auto-quelling permissions while in intro ...")
-            self.caller.account.execute_cmd("quell")
+            self.caller.account.execute_cmd("@quell")
         init_menu(self.caller)
 
 
@@ -477,7 +486,7 @@ class IntroRoom(TutorialRoom):
         else:
             # quell user if they have account and is not currently running the batch processor
             if character.account and not character.ndb.batch_batchmode:
-                character.account.execute_cmd("quell")
+                character.account.execute_cmd("@quell")
                 character.msg("(Auto-quelling while in tutorial-world)")
 
 

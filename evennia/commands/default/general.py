@@ -174,7 +174,7 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
             + utils.make_iter(caller.nicks.get(category="account", return_obj=True) or [])
         )
 
-        if "list" in switches or self.cmdstring in ("nicks",):
+        if "list" in switches or self.cmdstring in ("@nicks",):
             if not nicklist:
                 string = "|wNo nicks defined.|n"
             else:

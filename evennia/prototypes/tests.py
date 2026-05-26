@@ -990,7 +990,7 @@ class PrototypeCrashTest(BaseEvenniaTest):
             self.create(num_prototypes)
             # print("Attempting to list prototypes...")
             # start_time = time()
-            self.char1.execute_cmd("spawn/list")
+            self.char1.execute_cmd("@spawn/list")
             # print(f"Prototypes listed in {time()-start_time} seconds.")
 
 

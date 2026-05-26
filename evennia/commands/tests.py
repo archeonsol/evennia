@@ -1247,28 +1247,44 @@ class TestCmdParser(TestCase):
 
     @override_settings(CMD_IGNORE_PREFIXES="@&/+")
     def test_build_matches(self):
-        a_cmdset = _CmdSetTest()
-        bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "test1"][0]
+        """Token-boundary matching (since +underspire.8).
 
-        # normal parsing
+        Verifies the post-CMD_IGNORE_PREFIXES world: prefix characters
+        are load-bearing parts of the key, no parse-time stripping.
+        """
+        a_cmdset = _CmdSetTest()
+
+        # Plain key matches verbatim.
+        bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "test1"][0]
         self.assertEqual(
-            cmdparser.build_matches("test1 rock", a_cmdset, include_prefixes=False),
+            cmdparser.build_matches("test1 rock", a_cmdset),
             [("test1", " rock", bcmd, 5, 0.5, "test1")],
         )
 
-        # test prefix exclusion
+        # `@another command ...` does NOT match `another command` — the
+        # @ is no longer stripped at parse time.
+        self.assertEqual(
+            cmdparser.build_matches("@another command smiles to me  ", a_cmdset),
+            [],
+        )
+
+        # ...but the unprefixed input still matches the unprefixed key.
         bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "another command"][0]
         self.assertEqual(
-            cmdparser.build_matches(
-                "@another command smiles to me  ", a_cmdset, include_prefixes=False
-            ),
+            cmdparser.build_matches("another command smiles to me  ", a_cmdset),
             [("another command", " smiles to me  ", bcmd, 15, 0.5, "another command")],
         )
-        # test prefix exclusion on the cmd class
+
+        # Conversely, a `&`-keyed command requires the `&` in the input;
+        # plain `the third command` no longer reaches it.
+        self.assertEqual(
+            cmdparser.build_matches("the third command", a_cmdset),
+            [],
+        )
         bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "&the third command"][0]
         self.assertEqual(
-            cmdparser.build_matches("the third command", a_cmdset, include_prefixes=False),
-            [("the third command", "", bcmd, 17, 1.0, "&the third command")],
+            cmdparser.build_matches("&the third command", a_cmdset),
+            [("&the third command", "", bcmd, 18, 1.0, "&the third command")],
         )
 
     @override_settings(SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)")
@@ -1669,8 +1685,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
 
     @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
-        from evennia.commands.cmd_access_cache import (
-            cached_cmd_access, invalidate_cmd_access_cache)
+        from evennia.commands.cmd_access_cache import cached_cmd_access, invalidate_cmd_access_cache
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -1917,8 +1932,7 @@ class TestFtfyNormalization(BaseEvenniaTest):
 # ----------------------------------------------------------------------------
 
 
-from evennia.commands.signals import \
-    on_cmdset_merge_error as _on_cmdset_merge_error
+from evennia.commands.signals import on_cmdset_merge_error as _on_cmdset_merge_error
 from evennia.commands.signals import on_command_error as _on_command_error
 from evennia.commands.signals import on_command_post as _on_command_post
 from evennia.commands.signals import on_command_pre as _on_command_pre
@@ -2185,8 +2199,7 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import (begin_command_trace,
-                                                 end_command_trace)
+        from evennia.utils.command_trace import begin_command_trace, end_command_trace
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2230,8 +2243,13 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
-    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
+    bump_cmdset_generation,
+    clear_location_cmdset_cache,
+    cmdset_generation,
+    get_cached_location_cmdsets,
+    make_cache_key,
+    set_cached_location_cmdsets,
+)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2409,8 +2427,7 @@ class TestCmdsetPrefixAuditDrift(TestCase):
 
         if str(tools_dir) not in sys.path:
             sys.path.insert(0, str(tools_dir))
-        from cmdset_prefix_audit import (_load_default_cmdset_classes,
-                                         audit_cmdsets, format_markdown)
+        from cmdset_prefix_audit import _load_default_cmdset_classes, audit_cmdsets, format_markdown
 
         generated = format_markdown(audit_cmdsets(_load_default_cmdset_classes()))
         self.assertTrue(
@@ -2433,3 +2450,65 @@ class TestCmdsetPrefixAuditDrift(TestCase):
                 "PHASE3_AUDIT.md is out of date. Regenerate with\n"
                 "  .agents/tools/cmdset_prefix_audit.py --write\n\n" + diff
             )
+
+
+# ----------------------------------------------------------------------------
+# Phase 3 step 4: token-boundary matching semantics
+# ----------------------------------------------------------------------------
+
+
+class TestTokenBoundaryMatch(TestCase):
+    """`Command.match` is token-boundary and prefix-literal.
+
+    Since +underspire.8, `CMD_IGNORE_PREFIXES` no longer strips prefix
+    characters at parse time. `@open` and `open` are distinct keys, and
+    a key only matches when the next character of the input is a
+    boundary (whitespace, `/`, newline, or end-of-string).
+    """
+
+    def _make_cmd(self, key, aliases=None):
+        class _Cmd(Command):
+            pass
+
+        _Cmd.key = key
+        _Cmd.aliases = list(aliases or [])
+        cmd = _Cmd()
+        cmd._optimize()
+        return cmd
+
+    def test_exact_key_matches(self):
+        cmd = self._make_cmd("look")
+        self.assertEqual(cmd.match("look"), ("look", "look"))
+
+    def test_key_with_trailing_space_matches(self):
+        cmd = self._make_cmd("look")
+        self.assertEqual(cmd.match("look here"), ("look", "look"))
+
+    def test_key_without_boundary_does_not_match(self):
+        # `looker` must NOT match `look` — the boundary requires
+        # whitespace/EOI after the key.
+        cmd = self._make_cmd("look")
+        self.assertEqual(cmd.match("looker"), (None, None))
+
+    def test_at_prefix_is_load_bearing(self):
+        # `@open foo = bar` matches the @-keyed command...
+        at_cmd = self._make_cmd("@open")
+        self.assertEqual(at_cmd.match("@open foo = bar"), ("@open", "@open"))
+        # ...but plain `open foo` does NOT match (no prefix-strip).
+        self.assertEqual(at_cmd.match("open foo"), (None, None))
+
+    def test_unprefixed_key_does_not_match_prefixed_input(self):
+        # Conversely, an unprefixed key does not match `@key`.
+        cmd = self._make_cmd("open")
+        self.assertEqual(cmd.match("@open foo"), (None, None))
+        self.assertEqual(cmd.match("open foo"), ("open", "open"))
+
+    def test_alias_follows_same_rule(self):
+        cmd = self._make_cmd("@ban", aliases=["@bans"])
+        self.assertEqual(cmd.match("@bans alice"), ("@bans", "@bans"))
+        self.assertEqual(cmd.match("bans alice"), (None, None))
+
+    def test_no_noprefix_aliases_attribute(self):
+        # _noprefix_aliases is gone since +underspire.8.
+        cmd = self._make_cmd("@open")
+        self.assertFalse(hasattr(cmd, "_noprefix_aliases"))

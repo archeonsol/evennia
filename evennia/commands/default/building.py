@@ -636,11 +636,11 @@ class CmdMvAttr(ObjManipCommand):
             self.msg(string)
             return
 
-        # simply use cpattr for all the functionality
+        # simply use @cpattr for all the functionality
         if "copy" in self.switches:
-            self.execute_cmd("cpattr %s" % self.args)
+            self.execute_cmd("@cpattr %s" % self.args)
         else:
-            self.execute_cmd("cpattr/move %s" % self.args)
+            self.execute_cmd("@cpattr/move %s" % self.args)
 
 
 class CmdCreate(ObjManipCommand):
