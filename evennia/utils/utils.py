@@ -2984,11 +2984,11 @@ def str2int(number):
     try:
         # it's a digit already
         return int(number)
-    except:
+    except ValueError:
         # if it's an ordinal number such as "1st", it'll convert to int with the last two characters chopped off
         try:
             return int(number[:-2])
-        except:
+        except ValueError:
             pass
 
     # convert sound changes for generic ordinal numbers

@@ -264,13 +264,13 @@ class HelpDetailView(HelpMixin, DetailView):
         try:
             assert i + 1 <= len(objs) and objs[i + 1] is not obj
             context["topic_next"] = objs[i + 1]
-        except:
+        except (AssertionError, IndexError):
             context["topic_next"] = None
 
         try:
             assert i - 1 >= 0 and objs[i - 1] is not obj
             context["topic_previous"] = objs[i - 1]
-        except:
+        except (AssertionError, IndexError):
             context["topic_previous"] = None
 
         # Get the help entry text
