@@ -536,9 +536,93 @@ downstream consumers should reconcile against.
 
 ## Phase 4 — Trie parser into engine
 
-_Pending. Anticipated migration:_
+Shipped in `+underspire.13` along with the Phase 3 leftovers
+(`include_prefixes` kwarg removal, `CMD_IGNORE_PREFIXES` setting
+deletion) and Levenshtein-based no-match suggestions.
 
-- **Auto (planned):** `COMMAND_PARSER` default flips to the trie parser.
-  Opt-out via setting to `evennia.commands.cmdparser_linear.cmdparser` if
-  needed.
-- **Optional cleanup (planned):** delete any game-side trie parser copy.
+### Engine changes (`+underspire.13`)
+
+- **New module** `evennia/commands/cmdparser_trie.py` with public
+  `cmdparser(raw_string, cmdset, caller, match_index=None,
+  session=None, **kwargs)` and `trie_build_matches(raw_string,
+  cmdset)`. Matches the `COMMAND_PARSER` contract and `build_matches`
+  output shape respectively.
+- **`COMMAND_PARSER` default flipped** to
+  `evennia.commands.cmdparser_trie.cmdparser`. The linear
+  `evennia.commands.cmdparser.cmdparser` is preserved as the opt-out
+  path.
+- New settings:
+  - `COMMAND_PARSER_TRIE_FASTPATH` (default `True`) — single-candidate
+    fast path inlining the `Command.match` boundary check when the
+    class did not override `match` and is not an exit.
+  - `COMMAND_PARSER_TRIE_ABBREV` (default `True`) — unambiguous
+    first-token abbreviation expansion.
+  - `COMMAND_FUZZY_SUGGESTIONS_ENABLED` (default `True`),
+    `COMMAND_FUZZY_SUGGESTIONS_MAX_DIST` (default `2`),
+    `COMMAND_FUZZY_SUGGESTIONS_LIMIT` (default `3`) — Levenshtein
+    suggestions on the no-match fallback path.
+- **`CMD_IGNORE_PREFIXES` deleted entirely.** The startup warning is
+  gone; the setting itself is no longer defined in
+  `settings_default.py`. Help-system convenience constants live inline
+  as `_HELP_PREFIX_CHARS = "@&/+"` in
+  `evennia/commands/command.py` and `evennia/commands/default/help.py`.
+- **`include_prefixes` kwarg dropped** from `Command.match()` and
+  `cmdparser.build_matches()`. Both were documented as no-ops since
+  `+underspire.8`.
+
+### Migration (required)
+
+- **`settings.CMD_IGNORE_PREFIXES` references will `AttributeError`.**
+  If your `server/conf/settings.py` (or any code) still reads it,
+  delete the reference. It was a no-op since `+underspire.8`; nothing
+  in the engine consumes it any more.
+- **`Command.match` overrides with `include_prefixes` in the
+  signature** will raise `TypeError` when the engine calls
+  `cmd.match(search_string)` and the override expects two positional
+  args. Drop the kwarg from the override signature.
+- **Custom `COMMAND_PARSER`** settings continue to work unchanged; the
+  new default only applies when the setting is unset.
+
+### Migration (optional cleanup)
+
+- Delete game-side trie parser copies (e.g.
+  `world/parsing/trie_parser.py`) and the `COMMAND_PARSER` setting
+  override that pointed at them.
+- The engine's `fuzzy_command_suggestions` is now importable as
+  `from evennia.commands.cmdparser_trie import fuzzy_command_suggestions`
+  if a custom `CmdNoMatch` wants to surface the same hint.
+- If a downstream `CmdNoMatch` override was previously surfacing
+  difflib suggestions via `evennia.utils.utils.string_suggestions`, the
+  helper is still available but new code can prefer the Levenshtein
+  variant for consistency with the engine fallback.
+
+### Performance
+
+Synthetic 500-cmd cmdset, 2000 parses across 8 unique inputs:
+- linear: ~72 µs/parse
+- trie:   ~45 µs/parse  (**1.59× faster**)
+
+Synthetic 20-cmd cmdset, same parses: ~3 µs absolute regression on
+trie (~3.6 → ~6.8 µs/parse). Well below user-perceptible thresholds
+and offset by the 500-cmd win for any nontrivial game cmdset.
+
+### Trie cache invalidation contract
+
+The merged cmdset carries `_trie_command_trie` +
+`_trie_command_trie_cheap` + `_trie_command_trie_sig` after first
+parse. Two-tier invalidation:
+
+- **Cheap key** (length + id-sum of `cmdset.commands`) catches the
+  common case of cmdset membership change without paying the O(n)
+  signature cost.
+- **Full sig** (per-cmd key/aliases/`is_exit` tuple) is recomputed
+  only when the cheap key drifts; this catches in-place mutation of
+  an existing cmd's key/aliases (where the cmd's identity is unchanged
+  but its match keys are not).
+
+Edge case: if you mutate a cached cmd's `aliases` in place via
+`set_aliases` (or `set_key`) while reusing the same merged cmdset
+object, the cheap-key check will skip the sig recompute and the trie
+will stay stale. Production code rebuilds the containing cmdset on
+any cmd change, so this is exotic; if you hit it, clear
+`cmdset._trie_command_trie` to force a rebuild.
