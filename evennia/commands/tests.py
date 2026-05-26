@@ -2383,6 +2383,50 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         self.assertFalse(hasattr(cmd, "switches"))
         self.assertFalse(hasattr(cmd, "lhs"))
 
+    def test_command_parse_lowercases_switches_by_default(self):
+        # Default since +underspire.15: switches arrive lowercased on
+        # self.switches so consumers can compare against lowercase
+        # literals without each one re-implementing case folding.
+        cmd = Command()
+        cmd.cmdstring = "test"
+        cmd.args = "/Del/Force a"
+        cmd.parse()
+        self.assertEqual(cmd.switches, ["del", "force"])
+
+    def test_command_parse_switch_options_accepts_mixed_case_input(self):
+        # Regression: switch_options is class-lowercased, so without
+        # input-side lowercasing /Del against switch_options=["del"]
+        # was silently rejected as an unused switch. The lowercase
+        # default fixes that.
+        class _CmdValidated(Command):
+            key = "v"
+            switch_options = ("del", "force")
+
+        cmd = _CmdValidated()
+        cmd.cmdstring = "v"
+        cmd.args = "/Del a"
+        # msg would be called with an "Extra switch" warning on the bug;
+        # collect to assert it does NOT fire.
+        warnings = []
+        cmd.msg = lambda text=None, **_: warnings.append(text)
+        cmd.parse()
+        self.assertEqual(cmd.switches, ["del"])
+        self.assertEqual(warnings, [])
+
+    def test_command_parse_opt_out_preserves_switch_case(self):
+        # parse_lowercase_switches = False keeps the historical
+        # case-preserving shape for any subclass that genuinely wants
+        # case-sensitive switch handling.
+        class _CmdCaseSensitive(Command):
+            key = "cs"
+            parse_lowercase_switches = False
+
+        cmd = _CmdCaseSensitive()
+        cmd.cmdstring = "cs"
+        cmd.args = "/Del/Force a"
+        cmd.parse()
+        self.assertEqual(cmd.switches, ["Del", "Force"])
+
     def test_cmd_access_cache_identity_differentiates_command_classes(self):
         # _cmd_identity keys on class module + name, so a Command and an
         # AccountCommand with the same key string do not collide in the
