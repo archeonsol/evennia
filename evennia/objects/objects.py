@@ -1179,9 +1179,11 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
         display_names_by_receiver = {}
         for receiver in contents:
             display_names_by_receiver[id(receiver)] = {
-                key: cached_get_display_name(obj, receiver)
-                if hasattr(obj, "get_display_name")
-                else str(obj)
+                key: (
+                    cached_get_display_name(obj, receiver)
+                    if hasattr(obj, "get_display_name")
+                    else str(obj)
+                )
                 for key, obj in mapping.items()
             }
 
@@ -2844,9 +2846,6 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
             before it is even started.
 
         """
-        if not self.locks.get("drop"):
-            # TODO: This if-statment will be removed in Evennia 1.0
-            return True
         if not self.access(dropper, "drop", default=False):
             dropper.msg(_("You cannot drop {obj}").format(obj=self.get_display_name(dropper)))
             return False
