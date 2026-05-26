@@ -81,38 +81,38 @@ Columns:
 | key | aliases | acct | class | locks |
 |---|---|---|---|---|
 | `@channel` | @chan, @channels | yes | `evennia.commands.default.comms.CmdChannel` | `cmd:not pperm(channel_banned);admin:all();manage:all();changelocks:perm(Admin)` |
+| `@charcreate` |  | yes | `evennia.commands.default.account.CmdCharCreate` | `cmd:pperm(Player)` |
+| `@chardelete` |  |  | `evennia.commands.default.account.CmdCharDelete` | `cmd:pperm(Player)` |
+| `@color` |  | yes | `evennia.commands.default.account.CmdColorTest` | `cmd:all()` |
+| `@discord2chan` | @discord |  | `evennia.commands.default.comms.CmdDiscord2Chan` | `cmd:serversetting(DISCORD_ENABLED) and pperm(Developer)` |
 | `@examine` | @ex, @exam |  | `evennia.commands.default.building.CmdExamine` | `cmd:perm(examine) or perm(Builder)` |
+| `@grapevine2chan` |  |  | `evennia.commands.default.comms.CmdGrapevine2Chan` | `cmd:serversetting(GRAPEVINE_ENABLED) and pperm(Developer)` |
+| `@ic` | @puppet | yes | `evennia.commands.default.account.CmdIC` | `cmd:all()` |
+| `@irc2chan` |  |  | `evennia.commands.default.comms.CmdIRC2Chan` | `cmd:serversetting(IRC_ENABLED) and pperm(Developer)` |
+| `@ircstatus` |  |  | `evennia.commands.default.comms.CmdIRCStatus` | `cmd:serversetting(IRC_ENABLED) and perm(ircstatus) or perm(Builder))` |
+| `@look` | @l, @ls | yes | `evennia.commands.default.account.CmdOOCLook` | `cmd:all()` |
+| `@ooc` | @unpuppet | yes | `evennia.commands.default.account.CmdOOC` | `cmd:pperm(Player)` |
+| `@option` | @options | yes | `evennia.commands.default.account.CmdOption` | `cmd:all()` |
+| `@page` | @tell | yes | `evennia.commands.default.comms.CmdPage` | `cmd:not pperm(page_banned)` |
+| `@password` |  | yes | `evennia.commands.default.account.CmdPassword` | `cmd:pperm(Player)` |
 | `@py` | @! |  | `evennia.commands.default.system.CmdPy` | `cmd:perm(py) or perm(Developer)` |
+| `@quell` | @unquell | yes | `evennia.commands.default.account.CmdQuell` | `cmd:pperm(Player)` |
+| `@quit` |  | yes | `evennia.commands.default.account.CmdQuit` | `cmd:all()` |
 | `@reload` | @restart |  | `evennia.commands.default.system.CmdReload` | `cmd:perm(reload) or perm(Developer)` |
 | `@reset` |  |  | `evennia.commands.default.system.CmdReset` | `cmd:perm(reload) or perm(Developer)` |
+| `@rss2chan` |  |  | `evennia.commands.default.comms.CmdRSS2Chan` | `cmd:serversetting(RSS_ENABLED) and pperm(Developer)` |
 | `@shutdown` |  |  | `evennia.commands.default.system.CmdShutdown` | `cmd:perm(shutdown) or perm(Developer)` |
+| `@style` |  |  | `evennia.commands.default.account.CmdStyle` | `cmd:all();` |
 | `@userpassword` |  |  | `evennia.commands.default.admin.CmdNewPassword` | `cmd:perm(newpassword) or perm(Admin)` |
-| `charcreate` |  | yes | `evennia.commands.default.account.CmdCharCreate` | `cmd:pperm(Player)` |
-| `chardelete` |  |  | `evennia.commands.default.account.CmdCharDelete` | `cmd:pperm(Player)` |
-| `color` |  | yes | `evennia.commands.default.account.CmdColorTest` | `cmd:all()` |
-| `discord2chan` | discord |  | `evennia.commands.default.comms.CmdDiscord2Chan` | `cmd:serversetting(DISCORD_ENABLED) and pperm(Developer)` |
-| `grapevine2chan` |  |  | `evennia.commands.default.comms.CmdGrapevine2Chan` | `cmd:serversetting(GRAPEVINE_ENABLED) and pperm(Developer)` |
+| `@who` | @doing | yes | `evennia.commands.default.account.CmdWho` | `cmd:all()` |
 | `help` | ? |  | `evennia.commands.default.help.CmdHelp` | `cmd:all()` |
-| `ic` | puppet | yes | `evennia.commands.default.account.CmdIC` | `cmd:all()` |
-| `irc2chan` |  |  | `evennia.commands.default.comms.CmdIRC2Chan` | `cmd:serversetting(IRC_ENABLED) and pperm(Developer)` |
-| `ircstatus` |  |  | `evennia.commands.default.comms.CmdIRCStatus` | `cmd:serversetting(IRC_ENABLED) and perm(ircstatus) or perm(Builder))` |
-| `look` | l, ls | yes | `evennia.commands.default.account.CmdOOCLook` | `cmd:all()` |
 | `nick` | nickname, nicks |  | `evennia.commands.default.general.CmdNick` | `cmd:all()` |
-| `ooc` | unpuppet | yes | `evennia.commands.default.account.CmdOOC` | `cmd:pperm(Player)` |
-| `option` | options | yes | `evennia.commands.default.account.CmdOption` | `cmd:all()` |
-| `page` | tell | yes | `evennia.commands.default.comms.CmdPage` | `cmd:not pperm(page_banned)` |
-| `password` |  | yes | `evennia.commands.default.account.CmdPassword` | `cmd:pperm(Player)` |
-| `quell` | unquell | yes | `evennia.commands.default.account.CmdQuell` | `cmd:pperm(Player)` |
-| `quit` |  | yes | `evennia.commands.default.account.CmdQuit` | `cmd:all()` |
-| `rss2chan` |  |  | `evennia.commands.default.comms.CmdRSS2Chan` | `cmd:serversetting(RSS_ENABLED) and pperm(Developer)` |
-| `style` |  |  | `evennia.commands.default.account.CmdStyle` | `cmd:all();` |
-| `who` | doing | yes | `evennia.commands.default.account.CmdWho` | `cmd:all()` |
 
 ## SessionCmdSet
 
 | key | aliases | acct | class | locks |
 |---|---|---|---|---|
-| `sessions` |  | yes | `evennia.commands.default.account.CmdSessions` | `cmd:all()` |
+| `@sessions` |  | yes | `evennia.commands.default.account.CmdSessions` | `cmd:all()` |
 
 ## UnloggedinCmdSet
 

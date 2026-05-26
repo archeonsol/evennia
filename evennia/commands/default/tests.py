@@ -691,7 +691,7 @@ class TestAccount(BaseEvenniaCommandTest):
         self.call(
             account.CmdCharCreate(),
             "Test1=Test char",
-            "Created new character Test1. Use ic Test1 to enter the game",
+            "Created new character Test1. Use @ic Test1 to enter the game",
             caller=self.account,
         )
 
