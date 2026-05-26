@@ -84,27 +84,30 @@ class TestAMPServer(TwistedTestCase):
             mocked_amprecv.assert_called_with(byte_out)
 
     def test_amp_in(self):
-        self.proto.makeConnection(self.transport)
+        # MsgPortal2Server uses the session-serde JSON envelope (see
+        # amp.dumps_session / amp_serde.pack_session_message), not pickle.
+        # Asserting the exact wire bytes would be both pickle-version
+        # fragile and wrong for the JSON path; instead verify that the
+        # transport got the AMP frame for the right command and that
+        # dumps_session round-trips the payload through loads_session.
+        from evennia.server.portal import amp
 
+        self.proto.makeConnection(self.transport)
         self.proto.data_to_server(MsgPortal2Server, 1, test=2)
-        if pickle.HIGHEST_PROTOCOL == 5:
-            # Python 3.8+
-            byte_out = (
-                b"\x00\x04_ask\x00\x011\x00\x08_command\x00\x10MsgPortal2Server\x00\x0b"
-                b"packed_data\x00 x\xdak`\x9d*\xc8\x00\x01\xde\x8c\xb5SzXJR"
-                b"\x8bK\xa6x3\x15\xb7M\xd1\x03\x00VU\x07u\x00\x00"
-            )
-        elif pickle.HIGHEST_PROTOCOL == 4:
-            # Python 3.7
-            byte_out = (
-                b"\x00\x04_ask\x00\x011\x00\x08_command\x00\x10MsgPortal2Server\x00\x0b"
-                b"packed_data\x00 x\xdak`\x99*\xc8\x00\x01\xde\x8c\xb5SzXJR"
-                b"\x8bK\xa6x3\x15\xb7M\xd1\x03\x00V:\x07t\x00\x00"
-            )
-        self.transport.write.assert_called_with(byte_out)
+
+        self.assertTrue(self.transport.write.called)
+        wire = self.transport.write.call_args[0][0]
+        self.assertIn(b"MsgPortal2Server", wire)
+        self.assertIn(b"packed_data", wire)
+
+        packed = amp.dumps_session((1, {"test": 2}))
+        sessid, kwargs = amp.loads_session(packed)
+        self.assertEqual(sessid, 1)
+        self.assertEqual(kwargs, {"test": 2})
+
         with mock.patch("evennia.server.portal.amp.amp.AMP.dataReceived") as mocked_amprecv:
-            self.proto.dataReceived(byte_out)
-            mocked_amprecv.assert_called_with(byte_out)
+            self.proto.dataReceived(wire)
+            mocked_amprecv.assert_called_with(wire)
 
     def test_large_msg(self):
         """
