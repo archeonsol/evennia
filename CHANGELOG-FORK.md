@@ -36,6 +36,74 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.15 — Cmdset refactor followups: switch case + docs
+
+Three small followups from the downstream alignment pass. One latent
+bug fix shipped as a behavior default flip, one doc-of-record update,
+one downstream wrapper recorded as redundant for the next game-side
+cleanup.
+
+### Latent fix: `Command.parse` lowercases switches by default
+
+`Command.parse` previously stored user-supplied switches on
+`self.switches` with case preserved. Two problems:
+
+1. **Latent validation bug.** `switch_options` is class-lowercased at
+   parse time
+   ([`command.py:565`](evennia/commands/command.py)), but user input
+   was compared raw at line 579, so a command declaring
+   `switch_options=("del",)` would silently reject `/Del` as an
+   "unused" switch and warn the user — even though that's obviously
+   what the user meant. Nobody noticed because the warning text just
+   said "Extra switch /Del ignored" and the user assumed the command
+   was case-sensitive.
+2. **Per-consumer rework.** Real-world consumers compare against
+   lowercase literals (`if "del" in self.switches`); case preservation
+   meant every consumer had to re-implement the same `[s.lower() for
+   s in self.switches]` step.
+
+New class flag `parse_lowercase_switches = True` (default `True`).
+When `True`, `parse` lowercases user input before storing on
+`self.switches` *and* before `switch_options` validation, so both the
+bug above and the per-consumer lowercasing go away.
+
+Set `parse_lowercase_switches = False` on subclasses that genuinely
+need case-sensitive switch handling.
+
+**Migration:** tiny breaking change for any consumer that compared
+`self.switches` against uppercase literals. The flag exists for them
+to flip. Downstream Underspire kept its own one-line lowercase wrapper
+during the deprecation window; it can drop the wrapper now that the
+engine handles it.
+
+Three new tests in `TestAccountCommandNormalization` cover the
+default, the `switch_options` regression, and the opt-out path. 284/284
+commands tests pass.
+
+### Docs: `CMDSET_REFACTOR.md` Phase 5 callout
+
+Adds an explicit "lesson learned" callout to the Phase 5 section of
+[`CMDSET_REFACTOR.md`](CMDSET_REFACTOR.md): most of the enumerated
+Phase 5 cleanup items got removed incrementally during downstream
+Phase 0-4 alignment commits, not deferred to a final pass. The actual
+Phase 5 PR ended up tiny. Future fork migrations should expect the
+same shape — clean up as the API lands, not as a big final-cleanup
+commit. The Phase 5 list now reads as a backstop catalog rather than
+a planned final commit.
+
+### Recorded: redundant downstream patch
+
+Underspire's `commands/staff_admin_wrappers.py:97-103` patches
+`CmdNick.func` to recognize `@nicks` as triggering list mode. The
+engine already does this since `b78cf2e88` (Phase 3 step 4,
+[+underspire.8](#600underspire8--phase-3-token-boundary-matching--drop-cmd_ignore_prefixes))
+— the wrapper predates the engine fix and was never compared back.
+No engine commit needed. Downstream cleanup: delete the wrapper, verify
+`@nicks` still triggers list mode in stock behavior. Recorded here so
+the next downstream cleanup pass knows to look for it.
+
+---
+
 ## 6.0.0+underspire.14 — Phase 4 polish: integration tests + ergonomics
 
 Small post-Phase-4 release driven by downstream alignment feedback from
