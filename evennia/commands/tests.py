@@ -2581,6 +2581,23 @@ class TestPermissionsChangedSignal(BaseEvenniaCommandTest):
         self.assertEqual(kw["added"], ())
         self.assertEqual(kw["removed"], ("Builder",))
 
+    def test_cmd_perm_no_op_does_not_fire(self):
+        # Setting a permission that already exists is a no-op — no
+        # mutation, no invalidation, no signal. Case-insensitive check
+        # so input casing doesn't matter.
+        from evennia.commands.default import admin
+
+        self.obj1.permissions.add("Builder")
+        self._prime_cache(self.obj1)
+        self.call(
+            admin.CmdPerm(),
+            "Obj = Builder",
+            "Permission 'Builder' is already defined on Obj.",
+        )
+        # Cache untouched, no signal.
+        self.assertIsNotNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(self._captured, [])
+
     def test_cmd_quell_invalidates_account_and_puppet_and_fires(self):
         from evennia.commands.default import account as account_cmds
 

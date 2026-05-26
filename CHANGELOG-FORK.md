@@ -14,6 +14,83 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.10 — Phase 2 cleanup + unused contrib removal
+
+Two pre-existing Phase 2 bugs surfaced during the Phase 3 sweep and
+the +underspire.9 follow-up; fixed in a single commit since both are
+small and tightly scoped to the same migration. Bundled with deletion
+of two unused contribs to cut test-sweep noise from code Underspire
+doesn't run.
+
+### Engine
+
+- **`CmdPerm.func` case-insensitive duplicate check.**
+  `obj.permissions.all()` returns lowercased strings, but the
+  "already defined" check compared against the input verbatim. Typing
+  `@perm Obj = Builder` against a target that already had `builder`
+  fell through to re-add and reported `"given"` instead of
+  `"already defined"`. After +underspire.9 this also caused a
+  redundant `cmd_access_cache` flush and a spurious
+  `permissions_changed` signal fire. Fix: build a lowercased set
+  once and compare case-insensitively.
+
+- **`test_resources.call()` hardcoded `providers["account"]`.** Tests
+  that passed `caller=self.account2` (or a different character) had
+  their account silently rewritten to `self.account` inside the
+  `account_command_caller` normalisation branch, masking real
+  behavior. Same for `cmdobj.account`. Pre-existing since
+  +underspire.6 when `_normalize_account_command_caller` was added.
+  Fix: derive `cmd_account` from caller (caller-if-Account →
+  caller.account → self.account fallback) and use it for both
+  `cmdobj.account` and `providers["account"]`.
+
+### Test fallout
+
+`evennia.contrib.game_systems.mail.tests.TestMail.test_mail` now
+passes — it was failing on the second assertion (`caller=self.account2`
+sending to `TestAccount2`) because the account hardcoding produced
+`"from TestAccount"` instead of `"from TestAccount2"`.
+
+`TestPermissionsChangedSignal.test_cmd_perm_no_op_does_not_fire`
+restored (was dropped in +underspire.9 because the case-insensitivity
+bug made it untestable).
+
+All 263 evennia.commands + evennia.commands.default.tests +
+evennia.contrib.game_systems.mail.tests pass.
+
+### Contrib removals
+
+`evennia/contrib/grid/extended_room/` and
+`evennia/contrib/game_systems/puzzles/` deleted outright. Neither has
+any engine consumer; both are opt-in features Underspire doesn't use,
+and both had broken tests in the +underspire.9 sweep that were pure
+noise for this fork. The typeclass-path remap entries in
+`evennia/accounts/migrations/0011_*`,
+`evennia/objects/migrations/0012_*`, and
+`evennia/scripts/migrations/0015_*` are kept as-is — they reference
+the modules by string for DB-side path normalisation and don't import
+them, so anyone migrating an old DB still gets the remap.
+
+### Migration
+
+No downstream action required for the bug fixes. Behaviour changes:
+
+- `@perm Obj = Builder` against an obj that already has the
+  permission now correctly reports "already defined" and does not
+  fire `permissions_changed` (downstream subscribers see fewer false
+  signals).
+- Tests that called `self.call(..., caller=self.account2, ...)` or
+  similar will now see the correct account on `cmdobj.account` and
+  in the normalisation providers. If a test was inadvertently relying
+  on the old "everything is self.account" behavior, it will need to
+  update its expected output.
+- Importing `evennia.contrib.grid.extended_room` or
+  `evennia.contrib.game_systems.puzzles` raises ImportError. Anyone
+  relying on these contribs in this fork needs to vendor them in
+  their game tree.
+
+---
+
 ## 6.0.0+underspire.9 — Engine-owned permission cache invalidation
 
 Phase 2 follow-up. `CmdPerm` and `CmdQuell` now invalidate the

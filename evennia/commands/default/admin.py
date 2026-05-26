@@ -513,8 +513,11 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                         f"Permissions Deleted: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
                     )
         else:
-            # add a new permission
-            permissions = obj.permissions.all()
+            # add a new permission. obj.permissions.all() returns
+            # lowercased strings, so build a case-insensitive set for
+            # the "already defined" check — otherwise typing `Builder`
+            # against a stored `builder` fell through to re-add.
+            permissions_lower = {p.lower() for p in obj.permissions.all()}
 
             for perm in self.rhslist:
                 # don't allow to set a permission higher in the hierarchy than
@@ -527,7 +530,7 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                     )
                     return
 
-                if perm in permissions:
+                if perm.lower() in permissions_lower:
                     caller_result.append(f"\nPermission '{perm}' is already defined on {obj.name}.")
                 else:
                     obj.permissions.add(perm)
