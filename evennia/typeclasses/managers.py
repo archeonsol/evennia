@@ -13,8 +13,7 @@ from django.db.models.functions import Cast
 from evennia.typeclasses.attributes import Attribute
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
-from evennia.utils.utils import (class_from_module, make_iter,
-                                 variable_from_module)
+from evennia.utils.utils import class_from_module, make_iter, variable_from_module
 
 __all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__
@@ -82,9 +81,11 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             query.append(("attribute__db_category", category))
         if strvalue:
             query.append(("attribute__db_strvalue", strvalue))
-        if value:
-            # no reason to make strvalue/value mutually exclusive at this level
-            query.append(("attribute__db_value", value))
+        if value is not None:
+            # Primitives bypass db_value (typed columns); dispatch by type.
+            from evennia.typeclasses.attributes import value_query_filter
+
+            query.extend(value_query_filter(value, prefix="attribute__").items())
         return Attribute.objects.filter(
             pk__in=self.model.db_attributes.through.objects.filter(**dict(query)).values_list(
                 "attribute_id", flat=True
@@ -153,9 +154,11 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             query.append(("db_attributes__db_category", category))
         if strvalue:
             query.append(("db_attributes__db_strvalue", strvalue))
-        elif value:
-            # strvalue and value are mutually exclusive
-            query.append(("db_attributes__db_value", value))
+        elif value is not None:
+            # Primitives bypass db_value (typed columns); dispatch by type.
+            from evennia.typeclasses.attributes import value_query_filter
+
+            query.extend(value_query_filter(value, prefix="db_attributes__").items())
         return self.filter(**dict(query))
 
     def get_by_nick(self, key=None, nick=None, category="inputline"):
