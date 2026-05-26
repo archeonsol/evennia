@@ -1245,12 +1245,11 @@ class TestCmdParser(TestCase):
         self.assertIn("connect johnny ***********", logged)
         self.assertNotIn("password123", logged)
 
-    @override_settings(CMD_IGNORE_PREFIXES="@&/+")
     def test_build_matches(self):
         """Token-boundary matching (since +underspire.8).
 
-        Verifies the post-CMD_IGNORE_PREFIXES world: prefix characters
-        are load-bearing parts of the key, no parse-time stripping.
+        Prefix characters are load-bearing parts of the key with no
+        parse-time stripping.
         """
         a_cmdset = _CmdSetTest()
 
@@ -1325,9 +1324,7 @@ class TestCmdParser(TestCase):
             cmdparser.try_num_differentiators("ball-2 some args"), (2, "ball some args")
         )
 
-    @override_settings(
-        SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)", CMD_IGNORE_PREFIXES="@&/+"
-    )
+    @override_settings(SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)")
     def test_cmdparser(self):
         a_cmdset = _CmdSetTest()
         bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "test1"][0]
@@ -2460,10 +2457,9 @@ class TestCmdsetPrefixAuditDrift(TestCase):
 class TestTokenBoundaryMatch(TestCase):
     """`Command.match` is token-boundary and prefix-literal.
 
-    Since +underspire.8, `CMD_IGNORE_PREFIXES` no longer strips prefix
-    characters at parse time. `@open` and `open` are distinct keys, and
-    a key only matches when the next character of the input is a
-    boundary (whitespace, `/`, newline, or end-of-string).
+    `@open` and `open` are distinct keys, and a key only matches when the
+    next character of the input is a boundary (whitespace, `/`, newline,
+    or end-of-string). Prefix-strip was removed in +underspire.8.
     """
 
     def _make_cmd(self, key, aliases=None):
