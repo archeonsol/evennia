@@ -12,7 +12,15 @@ See [FUTURE-IDEAS.md](../../FUTURE-IDEAS.md) for the three-lane breakdown (infra
 
 ## Think in Python, not SQL
 
-The typeclass system exists so developers work with Python classes, not database schemas. One `ObjectDB` table holds all objects; the `db_typeclass_path` field points to the Python class that gives it behavior. New entity types are created by subclassing in Python, not by adding database tables. Attributes (`db` handler) store arbitrary Python data without schema changes.
+The typeclass system is the right primitive for entity behavior: developers work with Python classes, not database schemas. New entity types come from subclassing, not new tables. Attributes (`db` handler) store arbitrary per-object data without schema changes.
+
+Beyond typeclasses, the fork adds Django models when Attributes don't fit. Three patterns earn a model:
+
+- **Queryable indexed state** — high-cardinality lookups, joins, membership tables, anything where Attribute scans don't cut it.
+- **Hot-path counters** — atomic updates that the Attribute layer isn't shaped for.
+- **Heavy content** — large text or data you don't want sitting in idmapper cache on every load (document bodies, grid posts, audit logs). The model is a pointer; content stays on disk until asked for.
+
+Models are not a fallback for "this feels structured." Each new model names which pattern earns it.
 
 ## Extend through hooks, not patches
 
@@ -28,7 +36,11 @@ The lock system denies access by default. Everything is inaccessible unless expl
 
 ## Objects carry their own state
 
-Handlers (Attributes, Tags, Locks, Scripts, Commands) attach directly to objects. State and behavior travel with the object, not in external registries. The idmapper cache ensures you always get the same Python instance for a given database object, so on-object state is reliable.
+Mutable game state lives on objects. Handlers (Attributes, Tags, Locks, Scripts, Commands) attach directly to objects so state and behavior travel together. The idmapper cache guarantees instance identity per DB object so on-object state is reliable.
+
+The fork runs external caches for *derived* state (lock cache, cmd-access cache, display-name cache, location-cmdset cache, trie cache, write-behind attrs, redis attr cache). Caches earn their place with a documented invalidation contract: what fills it, what invalidates it, the upper bound on stale reads. They never hold authoritative state; they accelerate access to authoritative state that still lives on objects.
+
+Reference data (prototypes, registries, YAML lookups, constants) is not state and is not subject to this belief. A registry of "what is a rock" earns the registry pattern when key-based lookup is what callers actually want. Reach for it freely.
 
 ## Portal and Server are separate concerns
 
@@ -40,4 +52,4 @@ Evennia includes its own web server, webclient, admin interface, and REST API. A
 
 ## Keep the schema simple
 
-Complexity grows through Python objects (typeclasses, attributes, tags), not through database tables. The core schema is intentionally minimal and stable. Resist adding new models — use Attributes and Tags on existing models instead when possible.
+Complexity grows through Python objects first. The core schema (`ObjectDB`, `AccountDB`, `ScriptDB`, `ChannelDB`) is intentionally minimal and stable; resist changing it. Domain-specific models are fine when they earn it under one of the patterns named in "Think in Python, not SQL" (queryable state, hot-path counters, heavy content). Earn the model with a real pattern, not structure for structure's sake.
