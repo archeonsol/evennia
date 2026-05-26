@@ -9,21 +9,6 @@ reason). Severity: red/yellow/green = bug/smell/polish. Status: `open`
 
 ## Open (execution order)
 
-**F2.** `evennia/server/deprecations.py` upstream cargo. Yellow.
-~150 LOC raising on pre-1.0 settings Underspire never set
-(`CMDSET_DEFAULT`, `INLINEFUNC_*`, `TIME_SEC_PER_MIN…`). Shrink or
-delete; version bump.
-
-**F12.** Lane-2 test wording. Yellow. `core-beliefs.md` says "opt-out
-cleanly via a setting"; practice accepts subclass-override for naming
-conventions (else Phase 3 `@`-prefix looks like a violation).
-Two-sentence edit.
-
-**F11.** Phase 2 caller-derived-state sweep. Yellow. Phase 2
-(`+underspire.4`) normalized `self.account`/`self.character`. Engine
-defaults still read `caller.account` directly (e.g. building.py:703,
-general.py:193). Mechanical sweep finishes the Phase 2 promise.
-
 **F8.** Cache invalidation contracts. Yellow. Seven caches
 (location-cmdset, cmd-access, display-name, lock, write-behind attrs,
 trie, redis-attr). Belief requires each name "what fills me / what
@@ -112,5 +97,8 @@ Named in scope; split out as concrete findings when touched.
 ## Shipped
 
 - **F1.** Contrib mass extraction — six contribs moved to downstream newmoo (cooldowns, name_generator, traits, components, buffs, rpsystem). Shipped in `+underspire.16`.
+- **F2.** `server/deprecations.py` shrunk 188 → 88 LOC. Pre-1.0 setting-rename breadcrumbs (CMDSET_DEFAULT, BASE_COMM_TYPECLASS, *_TYPECLASS_PATHS, INLINEFUNC_*, PROTFUNC_MODULES, TIME_*_PER_*, etc.) deleted; surviving checks (WEBSERVER_PORTS shape, CHANNEL_CONNECTINFO type, template/static_overrides dir renames, MULTISESSION coherence) kept. Plus `prototypes/prototypes.py` docstring fix for `PROTFUNC_MODULES` rename and rewrite of `TestDeprecations` for the smaller surface. Shipped in `+underspire.19`.
+- **F12.** Lane-2 belief test now accepts subclass-override as clean opt-out for structural/naming conventions (Phase 3 `@`-prefix isn't a violation). Two-sentence edit to `core-beliefs.md`. Shipped in `+underspire.19`.
+- **F11.** Killed (won't-fix). Premise was wrong: Phase 2's `_normalize_account_command_caller` is explicitly no-op for ordinary `Command` subclasses (per `+underspire.3` changelog), so the 10 cited `caller.account` reads in default object commands have no `self.account` to fall back to. The reads are correct as-is.
 - **F4.** Bare excepts in engine narrowed to typed (`(AssertionError, IndexError)` in `web/website/views/help.py`, `ValueError` in `utils/utils.py:str2int`). Four sites total; backlog entry under-counted utils.py. Wider 83-site `except *: pass` audit still deferred. Shipped in `+underspire.18`.
 - **F5.** Past-due TODO markers — five sites cleared. `Channel.*` deprecation stubs deleted; `at_pre_drop` missing-lock escape removed; `building.py` exec-gate comment corrected (real removal → F20); `evmenu.py` `ndb._menutree` alias removed, all in-tree consumers (prototypes OLC menu + tests, evscaperoom, fieldfill, tree_select, character_creator, evmenu tests/example) migrated to `ndb._evmenu`. Surfaced F20, F21. Shipped in `+underspire.17`.

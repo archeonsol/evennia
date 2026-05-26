@@ -1007,7 +1007,7 @@ def protfunc_parser(
     Parse a prototype value string for a protfunc and process it.
 
     Available protfuncs are specified as callables in one of the modules of
-    `settings.PROTFUNC_MODULES`, or specified on the command line.
+    `settings.FUNCPARSER_PROTOTYPE_VALUE_MODULES`, or specified on the command line.
 
     Args:
         value (any): The value to test for a parseable protfunc. Only strings will be parsed for

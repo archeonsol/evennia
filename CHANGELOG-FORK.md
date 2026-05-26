@@ -36,6 +36,101 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.19 — Deprecation breadcrumb cleanup (F2, F12)
+
+Engine-side cleanup of pre-1.0 upstream cargo and a doc clarification.
+
+### Engine
+
+- [`evennia/server/deprecations.py`](evennia/server/deprecations.py)
+  shrunk from 188 to 88 LOC. The launcher-time `check_errors` hook
+  used to raise on ~17 setting names renamed pre-1.0 upstream
+  (`CMDSET_DEFAULT`, `CMDSET_OOC`, `BASE_COMM_TYPECLASS`,
+  `COMM_TYPECLASS_PATHS`, `CHARACTER_DEFAULT_HOME`,
+  `OBJECT/SCRIPT/ACCOUNT/CHANNEL_TYPECLASS_PATHS`,
+  `SEARCH_MULTIMATCH_SEPARATOR`, `INLINEFUNC_ENABLED`,
+  `INLINEFUNC_STACK_MAXSIZE`, `INLINEFUNC_MODULES`,
+  `PROTFUNC_MODULES`, `TIME_*_PER_*` (six total),
+  `GAME_DIRECTORY_LISTING`, `AMP_ENABLED`, `CYCLE_LOGFILES`,
+  `CHANNEL_COMMAND_CLASS`, `CHANNEL_HANDLER_CLASS`). Underspire
+  never set any of these (grep clean across `evennia/` and
+  `newmoo/`); the entire block was breadcrumbs for a migration
+  that already happened.
+
+  Surviving checks still defend against real foot-guns on the
+  current schema and stay: `WEBSERVER_PORTS` tuple-shape,
+  `CHANNEL_CONNECTINFO` type-shape, `template_overrides` and
+  `static_overrides` directory-rename guards, and the
+  `MULTISESSION_MODE` vs `MAX_NR_SIMULTANEOUS_PUPPETS` coherence
+  check. `check_warnings` (dev-mode prod-readiness signals:
+  `DEBUG`, `IN_GAME_ERRORS`, `ALLOWED_HOSTS=*`,
+  `SERVER_HOSTNAME=localhost`, psycopg2 deprecation) is unchanged.
+- [`evennia/prototypes/prototypes.py`](evennia/prototypes/prototypes.py)
+  docstring fix: stale reference to `settings.PROTFUNC_MODULES`
+  renamed to `settings.FUNCPARSER_PROTOTYPE_VALUE_MODULES` (the
+  pre-1.0 rename whose deprecation breadcrumb was just removed).
+
+### Tests
+
+[`evennia/server/tests/test_misc.py`](evennia/server/tests/test_misc.py)
+`TestDeprecations` rewritten. The old test enumerated the 17
+pre-1.0 names that no longer exist as gates, and only worked
+because each pre-1.0 check raised before the next one would have
+AttributeErrored on the single-field MockSettings. Replaced with
+four targeted cases against the surviving gates: WEBSERVER_PORTS
+tuple-shape (fail + pass), CHANNEL_CONNECTINFO type, and
+MULTISESSION coherence. MockSettings is now a defaults-class.
+
+Two pre-existing server-test failures that surfaced along the F2
+test path (reproduce on the prior underspire HEAD) were fixed in
+the same release rather than carried forward as "known fail":
+
+- [`evennia/server/portal/tests.py`](evennia/server/portal/tests.py)`::TestAMPServer::test_amp_in`
+  asserted a hand-baked pickle byte literal for the
+  `MsgPortal2Server` wire, but that command path uses the JSON
+  session-serde envelope (`dumps_session` /
+  `pack_session_message`), not pickle. Structurally wrong, not
+  just version-fragile. Rewrote to assert the transport saw the
+  right AMP frame and that `dumps_session` / `loads_session`
+  round-trip the payload.
+- [`evennia/server/tests/test_at_init_scheduler.py`](evennia/server/tests/test_at_init_scheduler.py)
+  forced `AT_INIT_BATCH_SIZE=2` against 3 entities; the third
+  entity's `at_init` was scheduled through `reactor.callLater`,
+  which never fires under Django `TestCase` (same class as the
+  `test_worker_pool` failure fixed in `+underspire.17`). Patched
+  `reactor.callLater` with a synchronous stand-in.
+
+### Docs
+
+[`core-beliefs.md`](.agents/docs/core-beliefs.md): the lane-2 test
+("a game that didn't want it can opt out cleanly via a setting")
+was strict about settings as the opt-out shape. Practice already
+accepts subclass-override as a clean opt-out for structural or
+naming conventions that travel with a class (the Phase 3
+`@`-prefix command convention being the canonical case). Wording
+adjusted to two sentences acknowledging both shapes without
+re-litigating the prefix design (F12).
+
+### Migration
+
+Downstream should not need changes. Underspire was not setting any
+of the removed pre-1.0 names, and the launcher will no longer raise
+on them if a downstream consumer happens to set one — it will
+silently accept and ignore, which is the same as having never been
+there. If anyone needs the old breadcrumb messages, they're
+recoverable from git history.
+
+### Hygiene backlog
+
+F2 and F12 → Shipped. F11 (Phase 2 caller-derived-state sweep)
+removed from Open as won't-fix: the backlog entry assumed
+`_normalize_account_command_caller` applied to all Command subclasses
+but the `+underspire.3` changelog explicitly states it's a no-op
+outside AccountCommand subclasses, so the cited `caller.account`
+reads in default object commands are correct as-is.
+
+---
+
 ## 6.0.0+underspire.18 — Typed-exception sweep (F4)
 
 Four bare `except:` clauses in the engine narrowed to typed exception

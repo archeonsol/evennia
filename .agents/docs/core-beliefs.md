@@ -4,7 +4,7 @@ Design principles that inform implementation decisions in Evennia. When in doubt
 
 ## Engine is a toolkit, opinionated for Underspire
 
-This is Underspire's engine fork, not maximally generic upstream Evennia. It stays game-agnostic in shape but ships Underspire-tuned defaults where agnosticism would hurt the consumer. Test for any opinion in engine code: a game that didn't want it can opt out *cleanly via a setting*. If the only way out is forking, the opinion is too deep.
+This is Underspire's engine fork, not maximally generic upstream Evennia. It stays game-agnostic in shape but ships Underspire-tuned defaults where agnosticism would hurt the consumer. Test for any opinion in engine code: a game that didn't want it can opt out cleanly. The default opt-out shape is a setting; for structural or naming conventions that travel with a class (e.g. the Phase 3 `@`-prefix command convention), a subclass override also counts. If the only way out is forking, the opinion is too deep.
 
 The engine/game line: if a hypothetical second consumer could not reasonably re-implement this from scratch, it belongs in the engine. Everything else is game-shaped, no matter how generic it looks. Game-specific systems live downstream. `evennia/contrib/` is a legacy bucket: no new additions, contribs migrate or get deleted as hygiene passes catch them.
 
