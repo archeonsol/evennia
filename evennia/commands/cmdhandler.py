@@ -38,14 +38,19 @@ from traceback import format_exc
 
 from django.conf import settings
 from django.utils.translation import gettext as _
+from ftfy import fix_text as _ftfy_fix_text
 from twisted.internet import reactor
 from twisted.internet.defer import inlineCallbacks
 from twisted.internet.task import deferLater
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
-from evennia.commands.signals import (on_cmdset_merge_error, on_command_error,
-                                      on_command_post, on_command_pre)
+from evennia.commands.signals import (
+    on_cmdset_merge_error,
+    on_command_error,
+    on_command_post,
+    on_command_pre,
+)
 from evennia.utils import logger, utils
 from evennia.utils.command_trace import get_trace_id
 from evennia.utils.utils import string_suggestions
@@ -462,8 +467,10 @@ def get_and_merge_cmdsets(
                     location = None
                 if location:
                     from evennia.commands.location_cmdset_cache import (
-                        get_cached_location_cmdsets, make_cache_key,
-                        set_cached_location_cmdsets)
+                        get_cached_location_cmdsets,
+                        make_cache_key,
+                        set_cached_location_cmdsets,
+                    )
 
                     loc_cache_key = make_cache_key(caller, location)
                     cached_cmdsets = get_cached_location_cmdsets(loc_cache_key)
@@ -684,6 +691,20 @@ def cmdhandler(
 
     """
     cmdid = kwargs.get("cmdid", None)
+
+    # Repair mojibake / bad-encoding artefacts before any downstream stage
+    # observes the input. Runs ahead of generate_cmdset_providers so that
+    # signal payloads, the cmdset merge, the parser, and cmd.raw_string all
+    # see the normalised text. Gated on INPUT_FTFY_NORMALIZE (default True).
+    # Pure-ASCII input skips ftfy entirely: ftfy can't repair anything in
+    # ASCII text, and `str.isascii()` is a C-level check that beats letting
+    # ftfy do its own scan-then-bail.
+    if (
+        isinstance(raw_string, str)
+        and not raw_string.isascii()
+        and getattr(settings, "INPUT_FTFY_NORMALIZE", True)
+    ):
+        raw_string = _ftfy_fix_text(raw_string)
 
     @inlineCallbacks
     def _run_command(cmd, cmdname, args, raw_cmdname, cmdset, session, account, cmdset_providers):

@@ -427,6 +427,11 @@ SEARCH_AT_RESULT = "evennia.utils.utils.at_search_result"
 # of only a prefix character will not be stripped. Set to the empty
 # string ("") to turn off prefix ignore.
 CMD_IGNORE_PREFIXES = "@&/+"
+# When True, run `ftfy.fix_text` on every raw command string at the
+# cmdhandler entry, repairing mojibake and other encoding artefacts before
+# cmdset merging and parsing. Costs one regex sweep per dispatched command;
+# set False to skip if you need raw byte-for-byte input through to commands.
+INPUT_FTFY_NORMALIZE = True
 # The module holding text strings for the connection screen.
 # This module should contain one or more variables
 # with strings defining the look of the screen.

@@ -1861,6 +1861,58 @@ class TestAtPreCmdRename(BaseEvenniaTest):
 
 
 # ----------------------------------------------------------------------------
+# Phase 2 step 6: ftfy normalisation at cmdhandler entry
+# ----------------------------------------------------------------------------
+
+
+class TestFtfyNormalization(BaseEvenniaTest):
+    """`ftfy.fix_text` runs on `raw_string` at cmdhandler entry.
+
+    Mojibake-bearing input arrives at `cmd.raw_string` already repaired
+    when `INPUT_FTFY_NORMALIZE` is True; when False, the raw value
+    passes through untouched.
+    """
+
+    # Classic mojibake: "café" round-tripped through latin-1 -> utf-8.
+    MOJIBAKE_ARG = " cafÃ©"
+    FIXED_ARG = " café"
+
+    def _capture_cmd(self):
+        captured = {}
+
+        class _CmdCapture(Command):
+            key = "key"
+            locks = "cmd:all()"
+
+            def func(self):
+                captured["raw_string"] = self.raw_string
+
+        return _CmdCapture(), captured
+
+    @override_settings(INPUT_FTFY_NORMALIZE=True)
+    def test_mojibake_normalized_on_raw_string(self):
+        cmd, captured = self._capture_cmd()
+        d = cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key")
+
+        def _check(_):
+            self.assertEqual(captured["raw_string"], "key" + self.FIXED_ARG)
+
+        d.addCallback(_check)
+        return d
+
+    @override_settings(INPUT_FTFY_NORMALIZE=False)
+    def test_setting_off_passes_through(self):
+        cmd, captured = self._capture_cmd()
+        d = cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key")
+
+        def _check(_):
+            self.assertEqual(captured["raw_string"], "key" + self.MOJIBAKE_ARG)
+
+        d.addCallback(_check)
+        return d
+
+
+# ----------------------------------------------------------------------------
 # Tests for evennia.commands.signals (cmdhandler pre/post/error signals)
 # ----------------------------------------------------------------------------
 

@@ -404,13 +404,28 @@ subclass to `Command` / `AccountCommand` in the same release.
 | `class X(MuxAccountCommand)` | `class X(AccountCommand)` | One-for-one swap. |
 | `default_cmds.MuxCommand` / `default_cmds.MuxAccountCommand` | `default_cmds.Command` / `default_cmds.AccountCommand` | Added to the public API in this release. |
 
-### Remaining Phase 2 steps (planned)
+### Step 6 (shipped in `6.0.0+underspire.7`): ftfy normalisation in cmdhandler
 
-These ship under later `+underspire.N` versions.
+`ftfy.fix_text` is now applied to every dispatched `raw_string` at
+the top of `cmdhandler()`, before `generate_cmdset_providers`,
+`_resolve_signal_session`, and the cmdset merge. Gated on
+`INPUT_FTFY_NORMALIZE` (default `True`). `ftfy == 6.3.1` is a hard
+dep on this fork.
 
-- `ftfy.fix_text` into cmdhandler (gated on `INPUT_FTFY_NORMALIZE`).
+**Migration (optional cleanup):**
 
-Game-side cleanup that lands once those steps are in:
+- Game-side ftfy passes on player input can be dropped; the engine
+  guarantees `cmd.raw_string` and signal payloads see repaired text.
+- Set `INPUT_FTFY_NORMALIZE = False` to opt out of the per-dispatch
+  cost (e.g. if your front-end already guarantees clean UTF-8).
+
+Phase 2 is complete with this release. Phase 3 (token-boundary
+matching, drop `CMD_IGNORE_PREFIXES`) is the next planned chunk.
+
+### Phase 2 game-side cleanup
+
+Once Phase 2 is shipped, the following game-side cleanups are
+available:
 
 - **Optional cleanup (planned):** delete game-side `AccountCommand`
   normalization (`_normalize_account_caller`, etc.) once the engine
