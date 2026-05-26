@@ -14,6 +14,44 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.7 — ftfy normalisation in cmdhandler
+
+Moves `ftfy.fix_text` into the engine. Every dispatched raw command
+string is repaired at the cmdhandler entry, ahead of cmdset merge,
+parser, signal payloads, and the final `cmd.raw_string`. Completes
+Phase 2 of the cmdset refactor.
+
+### Engine
+
+- `evennia/commands/cmdhandler.py`: import `ftfy.fix_text` at module
+  scope and apply it to `raw_string` at the top of `cmdhandler()`,
+  before `generate_cmdset_providers` / `_resolve_signal_session` /
+  the cmdset merge. Gated on `INPUT_FTFY_NORMALIZE` (default `True`).
+  Skipped for non-str `raw_string` (sentinel paths).
+- `evennia/settings_default.py`: new `INPUT_FTFY_NORMALIZE = True`
+  setting next to `CMD_IGNORE_PREFIXES`.
+- `pyproject.toml`: `ftfy == 6.3.1` is now a hard dependency (was
+  not previously declared, direct or transitive). `uv.lock` updated.
+
+### Rationale
+
+The game already ftfy'd input at the parser layer. Promoting the
+pass into the engine means downstream consumers (signal receivers,
+`cmd.raw_string` readers, the cmdset merge cache, the parser) all
+observe normalised text from a single point, instead of relying on
+every consumer to ftfy independently. `ftfy` becomes a hard dep
+rather than optional, so the import is unconditional; if it is
+missing the engine refuses to start, which is the correct contract.
+
+### Migration
+
+- Downstream code that ftfy'd input itself can drop that pass. No
+  other action required.
+- Set `INPUT_FTFY_NORMALIZE = False` in `server.conf.settings` to
+  opt out of the per-dispatch normalisation cost.
+
+---
+
 ## 6.0.0+underspire.6 — Delete MuxCommand / MuxAccountCommand
 
 Removes `MuxCommand` and `MuxAccountCommand` entirely. Engine-internal

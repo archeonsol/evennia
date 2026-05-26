@@ -734,7 +734,7 @@ wheels = [
 
 [[package]]
 name = "evennia"
-version = "6.0.0+underspire.6"
+version = "6.0.0+underspire.7"
 source = { editable = "." }
 dependencies = [
     { name = "anything" },
@@ -744,6 +744,7 @@ dependencies = [
     { name = "django-filter" },
     { name = "django-sekizai" },
     { name = "djangorestframework" },
+    { name = "ftfy" },
     { name = "inflect" },
     { name = "inflection" },
     { name = "isort" },
@@ -815,6 +816,7 @@ requires-dist = [
     { name = "django-sekizai", specifier = "==2.0.0" },
     { name = "djangorestframework", specifier = ">=3.16,<3.17" },
     { name = "djangorestframework", marker = "extra == 'game'", specifier = ">=3.16,<3.17" },
+    { name = "ftfy", specifier = "==6.3.1" },
     { name = "gitpython", marker = "extra == 'extra'", specifier = ">=3.1.27" },
     { name = "inflect", specifier = ">=5.2.0" },
     { name = "inflection", specifier = "==0.5.1" },
@@ -873,6 +875,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/30/3e/a80a8c077fd798951169626cde3e239adeba7dab75deb3555716415bd9b0/fqdn-1.5.1.tar.gz", hash = "sha256:105ed3677e767fb5ca086a0c1f4bb66ebc3c100be518f0e0d755d9eae164d89f", size = 6015, upload-time = "2021-03-11T07:16:29.08Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cf/58/8acf1b3e91c58313ce5cb67df61001fc9dcd21be4fadb76c1a2d540e09ed/fqdn-1.5.1-py3-none-any.whl", hash = "sha256:3a179af3761e4df6eb2e026ff9e1a3033d3587bf980a0b1b2e1e5d08d7358014", size = 9121, upload-time = "2021-03-11T07:16:28.351Z" },
+]
+
+[[package]]
+name = "ftfy"
+version = "6.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wcwidth" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a5/d3/8650919bc3c7c6e90ee3fa7fd618bf373cbbe55dff043bd67353dbb20cd8/ftfy-6.3.1.tar.gz", hash = "sha256:9b3c3d90f84fb267fe64d375a07b7f8912d817cf86009ae134aa03e1819506ec", size = 308927, upload-time = "2024-10-26T00:50:35.149Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/6e/81d47999aebc1b155f81eca4477a616a70f238a2549848c38983f3c22a82/ftfy-6.3.1-py3-none-any.whl", hash = "sha256:7c70eb532015cd2f9adb53f101fb6c7945988d023a085d127d1573dc49dd0083", size = 44821, upload-time = "2024-10-26T00:50:33.425Z" },
 ]
 
 [[package]]
