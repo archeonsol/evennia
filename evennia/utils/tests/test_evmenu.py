@@ -364,7 +364,6 @@ class TestEvMenuPersistentReloadRegression(BaseEvenniaTest):
 
         # Simulate reload behavior where ndb is cleared but cmdset persists.
         del self.char1.ndb._evmenu
-        del self.char1.ndb._menutree
 
         evmenu.EvMenu(
             self.char1, menutree, persistent=True, cmdset_mergetype="Union", session=self.session

@@ -66,17 +66,11 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
                     access on this channel (default access_type is listen)
         create(key, creator=None, *args, **kwargs)
         delete() - delete this channel
-        message_transform(msg, emit=False, prefix=True,
-                          sender_strings=None, external=False) - called by
-                          the comm system and triggers the hooks below
         msg(msgobj, header=None, senders=None, sender_strings=None,
             persistent=None, online=False, emit=False, external=False) - main
                 send method, builds and sends a new message to channel.
         tempmsg(msg, header=None, senders=None) - wrapper for sending non-persistent
                 messages.
-        distribute_message(msg, online=False) - send a message to all
-                connected accounts on channel, optionally sending only
-                to accounts that are currently online (optimized for very large sends)
         mute(subscriber, **kwargs)
         unmute(subscriber, **kwargs)
         ban(target, **kwargs)
@@ -92,16 +86,6 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         at_first_save()
         channel_prefix() - how the channel should be
                   prefixed when returning to user. Returns a string
-        format_senders(senders) - should return how to display multiple
-                senders to a channel
-        pose_transform(msg, sender_string) - should detect if the
-                sender is posing, and if so, modify the string
-        format_external(msg, senders, emit=False) - format messages sent
-                from outside the game, like from IRC
-        format_message(msg, emit=False) - format the message body before
-                displaying it to the user. 'emit' generally means that the
-                message should not be displayed with the sender's name.
-        channel_prefix()
 
         pre_join_channel(joiner) - if returning False, abort join
         post_join_channel(joiner) - called right after successful join
@@ -638,11 +622,10 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         senders = make_iter(senders) if senders else []
         receivers = None
         try:
-            from evennia.comms.channel_subscriber_cache import get_cached_subscribers
+            from evennia.comms.channel_subscriber_cache import \
+                get_cached_subscribers
 
-            receivers = get_cached_subscribers(
-                self, online_only=bool(self.send_to_online_only)
-            )
+            receivers = get_cached_subscribers(self, online_only=bool(self.send_to_online_only))
         except Exception:
             receivers = None
         if receivers is None:
@@ -930,43 +913,3 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
     # Used by Django Sites/Admin
     get_absolute_url = web_get_detail_url
-
-    # TODO Evennia 1.0+ removed hooks. Remove in 5.0
-    def message_transform(self, *args, **kwargs):
-        raise RuntimeError(
-            "Channel.message_transform is no longer used in 1.0+. "
-            "Use Account/Object.at_pre_channel_msg instead."
-        )
-
-    def distribute_message(self, msgobj, online=False, **kwargs):
-        raise RuntimeError("Channel.distribute_message is no longer used in 1.0+.")
-
-    def format_senders(self, senders=None, **kwargs):
-        raise RuntimeError(
-            "Channel.format_senders is no longer used in 1.0+. "
-            "Use Account/Object.at_pre_channel_msg instead."
-        )
-
-    def pose_transform(self, msgobj, sender_string, **kwargs):
-        raise RuntimeError(
-            "Channel.pose_transform is no longer used in 1.0+. "
-            "Use Account/Object.at_pre_channel_msg instead."
-        )
-
-    def format_external(self, msgobj, senders, emit=False, **kwargs):
-        raise RuntimeError(
-            "Channel.format_external is no longer used in 1.0+. "
-            "Use Account/Object.at_pre_channel_msg instead."
-        )
-
-    def format_message(self, msgobj, emit=False, **kwargs):
-        raise RuntimeError(
-            "Channel.format_message is no longer used in 1.0+. "
-            "Use Account/Object.at_pre_channel_msg instead."
-        )
-
-    def pre_send_message(self, msg, **kwargs):
-        raise RuntimeError("Channel.pre_send_message was renamed to Channel.at_pre_msg.")
-
-    def post_send_message(self, msg, **kwargs):
-        raise RuntimeError("Channel.post_send_message was renamed to Channel.at_post_msg.")

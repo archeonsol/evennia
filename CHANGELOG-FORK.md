@@ -36,6 +36,130 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.17 — Stale TODO sweep (F5)
+
+Five past-due TODO markers in engine code, all scheduled for upstream
+1.0 or 5.0 removal. Fork is on 6.0. Hygiene-backlog finding F5.
+
+### Engine deletions
+
+- **`Channel.*` deprecation stubs** ([`comms/comms.py`](evennia/comms/comms.py)):
+  eight methods on `DefaultChannel` that raised `RuntimeError` pointing
+  callers at their 1.0+ replacements — `message_transform`,
+  `distribute_message`, `format_senders`, `pose_transform`,
+  `format_external`, `format_message`, `pre_send_message`,
+  `post_send_message`. All removed, along with the dead docstring
+  references in the class docstring and the matching paste in
+  [`game_template/typeclasses/channels.py`](evennia/game_template/typeclasses/channels.py).
+  No engine callers; pure tombstones.
+
+- **`at_pre_drop` missing-lock escape hatch**
+  ([`objects/objects.py`](evennia/objects/objects.py)): the three-line
+  guard `if not self.locks.get("drop"): return True` is removed. Every
+  object that goes through `basetype_setup` gets `drop:holds()` by
+  default (objects.py:2057). Downstream edge case: any object created
+  without `basetype_setup` and without an explicit drop lock now fails
+  `at_pre_drop` (consistent with the lock system's fail-closed belief).
+
+- **`caller.ndb._menutree` deprecation alias**
+  ([`utils/evmenu.py`](evennia/utils/evmenu.py)): the alias that
+  shadowed `caller.ndb._evmenu` for backwards compat is removed at both
+  the `__init__` write site and the `close_menu` cleanup. Internal
+  `self._menutree` (the parsed menudata dict) and the persistent
+  `_menutree_saved` attribute key are unrelated and stay.
+
+  In-tree consumer migrations bundled in the same release:
+  [`prototypes/menus.py`](evennia/prototypes/menus.py) (~25 sites; the
+  default prototype OLC menu, lane-2 engine code),
+  [`prototypes/tests.py`](evennia/prototypes/tests.py),
+  [`commands/default/tests.py`](evennia/commands/default/tests.py),
+  [`contrib/full_systems/evscaperoom/menu.py`](evennia/contrib/full_systems/evscaperoom/menu.py),
+  [`contrib/utils/fieldfill/fieldfill.py`](evennia/contrib/utils/fieldfill/fieldfill.py)
+  (only the `ndb` branch — a separate broken `caller.db._menutree`
+  branch is left untouched as a pre-existing bug),
+  [`contrib/utils/tree_select/tree_select.py`](evennia/contrib/utils/tree_select/tree_select.py),
+  [`contrib/rpg/character_creator/tests.py`](evennia/contrib/rpg/character_creator/tests.py),
+  [`utils/tests/test_evmenu.py`](evennia/utils/tests/test_evmenu.py),
+  [`utils/tests/data/evmenu_example.py`](evennia/utils/tests/data/evmenu_example.py).
+
+### Comment-only fix (no behavior change)
+
+- **`building.py` exec gate comment** ([`commands/default/building.py`](evennia/commands/default/building.py)):
+  the TODO at building.py:4275 claimed "Exec support is deprecated.
+  Remove completely for 1.0" — but exec support is still live in
+  [`prototypes/spawner.py`](evennia/prototypes/spawner.py) (`exec(code, ...)`
+  on prototype `exec` strings at spawn time). The if-check the comment
+  guards is the actual privilege barrier blocking non-Developer staff
+  from arbitrary code execution. Comment rewritten to describe what the
+  check does. Removing exec support entirely is tracked as a new
+  backlog item (out of scope for F5).
+
+### Migration (required)
+
+Downstream code that still reads `caller.ndb._menutree` must rename to
+`caller.ndb._evmenu`. Newmoo grepped clean before merge. The alias has
+been deprecated since pre-1.0 upstream; this just lands the removal
+that was already scheduled.
+
+The eight `Channel.*` stub methods were never callable (they raised on
+invocation). If downstream code overrode any of them, the override
+won't be inherited from `DefaultChannel` any more, but since the base
+implementations raised, any inheriting override was already shadowing
+a dead method.
+
+### Tests
+
+All 91 tests in
+`evennia.utils.tests.test_evmenu evennia.comms evennia.objects evennia.prototypes`
+pass after the F5 changes.
+
+Six failures that surfaced during the F5 sweep but were pre-existing
+on the prior underspire HEAD were also fixed in this release (commits
+land after the `release:` commit, in the same branch):
+
+- **`test_display_name_cache` (3 tests)**: test bug. The mock was on
+  `self.char1.get_display_name` (the looker) while
+  `cached_get_display_name(self.char2, self.char1)` calls the
+  *object's* method (`self.char2`), so the mock never registered.
+  Patch target swapped to `self.char2`; args left intact so
+  `invalidate_display_name_cache` and `bump_recog_generation` still
+  hit the looker (`self.char1`).
+
+- **`test_search` (2 tests)**: real engine bug surfaced by the recent
+  typed-column optimization in
+  [`typeclasses/attributes.py`](evennia/typeclasses/attributes.py).
+  Primitive Attribute values now live in `db_int_val` /
+  `db_float_val` / `db_str_val` with `db_value` NULL; the search
+  managers still filtered on `db_attributes__db_value=value` and
+  silently returned no matches for any primitive search. Added
+  `value_query_filter(value, prefix)` in `attributes.py` mirroring
+  the writer's dispatch (str → `db_str_val`, bool → `db_int_val` +
+  `db_val_type="bool"` to disambiguate from int 0/1, etc.) and wired
+  both `get_attribute` and `get_by_attribute` in
+  [`typeclasses/managers.py`](evennia/typeclasses/managers.py) through
+  it. Affects every `search_*_attribute` helper.
+
+- **`test_worker_pool` (1 test)**: test/framework mismatch. The test
+  drove the real `twisted.internet.threads.deferToThread` and waited
+  on a `threading.Event`, but `deferToThread` schedules its callback
+  via `reactor.callFromThread`; Django's `TestCase` doesn't run a
+  reactor, so the callback queued and the event never set — a 5s
+  hang on every run. Rewritten as four targeted unit tests that
+  patch `deferToThread` and assert the wrapper's contract (returns
+  Deferred, wraps args, chains callback/errback, raises on disabled
+  pool, fires elapsed-time warn past threshold).
+
+Migration impact: code that called any `search_*_attribute` with a
+primitive `value=` argument was silently returning no results. After
+this release it returns matches.
+
+### Hygiene backlog
+
+F5 moves from Open → Shipped. No new findings opened here; the
+backlog gained F18/F19 in a parallel doc commit on this same branch.
+
+---
+
 ## 6.0.0+underspire.16 — Contrib extraction: move six contribs into downstream
 
 Six `evennia.contrib.*` packages moved to downstream Underspire as

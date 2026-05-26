@@ -39,22 +39,22 @@ _MENU_ATTR_LITERAL_EVAL_ERROR = (
 def _get_menu_prototype(caller):
     """Return currently active menu prototype."""
     prototype = None
-    if hasattr(caller.ndb._menutree, "olc_prototype"):
-        prototype = caller.ndb._menutree.olc_prototype
+    if hasattr(caller.ndb._evmenu, "olc_prototype"):
+        prototype = caller.ndb._evmenu.olc_prototype
     if not prototype:
-        caller.ndb._menutree.olc_prototype = prototype = {}
-        caller.ndb._menutree.olc_new = True
+        caller.ndb._evmenu.olc_prototype = prototype = {}
+        caller.ndb._evmenu.olc_new = True
     return prototype
 
 
 def _get_flat_menu_prototype(caller, refresh=False, validate=False):
     """Return prototype where parent values are included"""
     flat_prototype = None
-    if not refresh and hasattr(caller.ndb._menutree, "olc_flat_prototype"):
-        flat_prototype = caller.ndb._menutree.olc_flat_prototype
+    if not refresh and hasattr(caller.ndb._evmenu, "olc_flat_prototype"):
+        flat_prototype = caller.ndb._evmenu.olc_flat_prototype
     if not flat_prototype:
         prot = _get_menu_prototype(caller)
-        caller.ndb._menutree.olc_flat_prototype = flat_prototype = spawner.flatten_prototype(
+        caller.ndb._evmenu.olc_flat_prototype = flat_prototype = spawner.flatten_prototype(
             prot, validate=validate
         )
     return flat_prototype
@@ -74,14 +74,14 @@ def _get_unchanged_inherited(caller, protname):
 
 def _set_menu_prototype(caller, prototype):
     """Set the prototype with existing one"""
-    caller.ndb._menutree.olc_prototype = prototype
-    caller.ndb._menutree.olc_new = False
+    caller.ndb._evmenu.olc_prototype = prototype
+    caller.ndb._evmenu.olc_new = False
     return prototype
 
 
 def _is_new_prototype(caller):
     """Check if prototype is marked as new or was loaded from a saved one."""
-    return hasattr(caller.ndb._menutree, "olc_new")
+    return hasattr(caller.ndb._evmenu, "olc_new")
 
 
 def _format_option_value(prop, required=False, prototype=None, cropper=None):
@@ -119,7 +119,7 @@ def _set_prototype_value(caller, field, value, parse=True):
     """Set prototype's field in a safe way."""
     prototype = _get_menu_prototype(caller)
     prototype[field] = value
-    caller.ndb._menutree.olc_prototype = prototype
+    caller.ndb._evmenu.olc_prototype = prototype
     return prototype
 
 
@@ -166,7 +166,7 @@ def _set_property(caller, raw_string, **kwargs):
         return next_node
 
     prototype = _set_prototype_value(caller, prop, value)
-    caller.ndb._menutree.olc_prototype = prototype
+    caller.ndb._evmenu.olc_prototype = prototype
 
     try:
         # TODO simple way to get rid of the u'' markers in list reprs, remove this when on py3.
@@ -232,7 +232,7 @@ def _wizard_options(curr_node, prev_node, next_node, color="|W", search=False):
 
 
 def _set_actioninfo(caller, string):
-    caller.ndb._menutree.actioninfo = string
+    caller.ndb._evmenu.actioninfo = string
 
 
 def _path_cropper(pythonpath):
@@ -449,8 +449,8 @@ def node_examine_entity(caller, raw_string, **kwargs):
 def _search_object(caller):
     "update search term based on query stored on menu; store match too"
     try:
-        searchstring = caller.ndb._menutree.olc_search_object_term.strip()
-        caller.ndb._menutree.olc_search_object_matches = []
+        searchstring = caller.ndb._evmenu.olc_search_object_term.strip()
+        caller.ndb._evmenu.olc_search_object_matches = []
     except AttributeError:
         return []
 
@@ -477,19 +477,19 @@ def _search_object(caller):
         results = ObjectDB.objects.filter(keyquery | aliasquery).distinct()
 
     caller.msg("Searching for '{}' ...".format(searchstring))
-    caller.ndb._menutree.olc_search_object_matches = results
+    caller.ndb._evmenu.olc_search_object_matches = results
     return ["{}(#{})".format(obj.key, obj.id) for obj in results]
 
 
 def _object_search_select(caller, obj_entry, **kwargs):
     choices = kwargs["available_choices"]
     num = choices.index(obj_entry)
-    matches = caller.ndb._menutree.olc_search_object_matches
+    matches = caller.ndb._evmenu.olc_search_object_matches
     obj = matches[num]
 
     if not obj.access(caller, "examine"):
         caller.msg("|rYou don't have 'examine' access on this object.|n")
-        del caller.ndb._menutree.olc_search_object_term
+        del caller.ndb._evmenu.olc_search_object_term
         return "node_search_object"
 
     prot = spawner.prototype_from_object(obj)
@@ -508,14 +508,14 @@ def _object_search_actions(caller, raw_inp, **kwargs):
 
     if obj_entry:
         num = choices.index(obj_entry)
-        matches = caller.ndb._menutree.olc_search_object_matches
+        matches = caller.ndb._evmenu.olc_search_object_matches
         obj = matches[num]
         prot = spawner.prototype_from_object(obj)
 
         if action == "examine":
             if not obj.access(caller, "examine"):
                 caller.msg("\n|rYou don't have 'examine' access on this object.|n")
-                del caller.ndb._menutree.olc_search_object_term
+                del caller.ndb._evmenu.olc_search_object_term
                 return "node_search_object"
 
             txt = protlib.prototype_to_str(prot)
@@ -525,14 +525,14 @@ def _object_search_actions(caller, raw_inp, **kwargs):
 
             if not obj.access(caller, "edit"):
                 caller.msg("|rYou don't have access to do this with this object.|n")
-                del caller.ndb._menutree.olc_search_object_term
+                del caller.ndb._evmenu.olc_search_object_term
                 return "node_search_object"
 
             _set_menu_prototype(caller, prot)
             caller.msg("Created prototype from object.")
             return "node_index"
     elif raw_inp:
-        caller.ndb._menutree.olc_search_object_term = raw_inp
+        caller.ndb._evmenu.olc_search_object_term = raw_inp
         return "node_search_object", kwargs
     else:
         # empty input - exit back to previous node
@@ -546,7 +546,7 @@ def node_search_object(caller, raw_inp, **kwargs):
     Node for searching for an existing object.
     """
     try:
-        matches = caller.ndb._menutree.olc_search_object_matches
+        matches = caller.ndb._evmenu.olc_search_object_matches
     except AttributeError:
         matches = []
     nmatches = len(matches)
@@ -724,8 +724,8 @@ def _check_prototype_key(caller, key):
             return "node_prototype_key"
         elif olc_new:
             # we are selecting an existing prototype to edit. Reset to index.
-            del caller.ndb._menutree.olc_new
-            caller.ndb._menutree.olc_prototype = old_prototype
+            del caller.ndb._evmenu.olc_new
+            caller.ndb._evmenu.olc_prototype = old_prototype
             caller.msg("Prototype already exists. Reloading.")
             return "node_index"
 

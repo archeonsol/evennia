@@ -106,7 +106,7 @@ def _get_all_rooms(caller):
         )
         room_map[desc] = room
         room_option_descs.append(desc)
-    caller.ndb._menutree.room_map = room_map
+    caller.ndb._evmenu.room_map = room_map
     return room_option_descs
 
 
@@ -114,7 +114,7 @@ def _select_room(caller, menuchoice, **kwargs):
     """
     Get a room from the selection using the mapping we created earlier.
     """
-    room = caller.ndb._menutree.room_map[menuchoice]
+    room = caller.ndb._evmenu.room_map[menuchoice]
     return "node_join_room", {"room": room}
 
 
@@ -218,7 +218,7 @@ def node_quit(caller, raw_string, **kwargs):
             from evennia.commands import cmdhandler
 
             cmdhandler.cmdhandler(
-                caller.ndb._menutree._session, "", cmdobj=default_cmds.CmdQuit(), cmdobj_key="@quit"
+                caller.ndb._evmenu._session, "", cmdobj=default_cmds.CmdQuit(), cmdobj_key="@quit"
             )
 
     return text, None  # empty options exit the menu

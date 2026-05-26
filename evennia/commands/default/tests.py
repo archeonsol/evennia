@@ -1897,13 +1897,13 @@ class TestBuilding(BaseEvenniaCommandTest):
         # brings up olc menu loaded with prototype
         msg = self.call(building.CmdSpawn(), "/edit testball")
         assert "Prototype wizard" in msg
-        assert hasattr(self.char1.ndb._menutree, "olc_prototype")
+        assert hasattr(self.char1.ndb._evmenu, "olc_prototype")
         assert (
-            dict == type(self.char1.ndb._menutree.olc_prototype)
-            and "prototype_key" in self.char1.ndb._menutree.olc_prototype
-            and "key" in self.char1.ndb._menutree.olc_prototype
-            and "testball" == self.char1.ndb._menutree.olc_prototype["prototype_key"]
-            and "Ball" == self.char1.ndb._menutree.olc_prototype["key"]
+            dict == type(self.char1.ndb._evmenu.olc_prototype)
+            and "prototype_key" in self.char1.ndb._evmenu.olc_prototype
+            and "key" in self.char1.ndb._evmenu.olc_prototype
+            and "testball" == self.char1.ndb._evmenu.olc_prototype["prototype_key"]
+            and "Ball" == self.char1.ndb._evmenu.olc_prototype["key"]
         )
         assert "Ball" in msg and "testball" in msg
 

@@ -540,7 +540,7 @@ class TestMenuModule(BaseEvenniaTest):
         # set up fake store
         self.caller = self.char1
         menutree = _MockMenu()
-        self.caller.ndb._menutree = menutree
+        self.caller.ndb._evmenu = menutree
 
         self.test_prot = {
             "prototype_key": "test_prot",
@@ -617,7 +617,7 @@ class TestMenuModule(BaseEvenniaTest):
         ):
             # prototype_key helpers
             self.assertEqual(olc_menus._check_prototype_key(caller, "test_prot"), None)
-            caller.ndb._menutree.olc_new = True
+            caller.ndb._evmenu.olc_new = True
             self.assertEqual(olc_menus._check_prototype_key(caller, "test_prot"), "node_index")
 
             # prototype_parent helpers

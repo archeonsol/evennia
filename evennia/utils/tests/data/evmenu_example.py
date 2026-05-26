@@ -12,7 +12,7 @@ def _generate_goto(caller, **kwargs):
 
 
 def test_start_node(caller):
-    menu = caller.ndb._menutree
+    menu = caller.ndb._evmenu
     text = """
     This is an example menu.
 

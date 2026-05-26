@@ -64,17 +64,11 @@ class Channel(DefaultChannel):
                     access on this channel (default access_type is listen)
         create(key, creator=None, *args, **kwargs)
         delete() - delete this channel
-        message_transform(msg, emit=False, prefix=True,
-                          sender_strings=None, external=False) - called by
-                          the comm system and triggers the hooks below
         msg(msgobj, header=None, senders=None, sender_strings=None,
             persistent=None, online=False, emit=False, external=False) - main
                 send method, builds and sends a new message to channel.
         tempmsg(msg, header=None, senders=None) - wrapper for sending non-persistent
                 messages.
-        distribute_message(msg, online=False) - send a message to all
-                connected accounts on channel, optionally sending only
-                to accounts that are currently online (optimized for very large sends)
         mute(subscriber, **kwargs)
         unmute(subscriber, **kwargs)
         ban(target, **kwargs)
@@ -90,16 +84,6 @@ class Channel(DefaultChannel):
         at_first_save()
         channel_prefix() - how the channel should be
                   prefixed when returning to user. Returns a string
-        format_senders(senders) - should return how to display multiple
-                senders to a channel
-        pose_transform(msg, sender_string) - should detect if the
-                sender is posing, and if so, modify the string
-        format_external(msg, senders, emit=False) - format messages sent
-                from outside the game, like from IRC
-        format_message(msg, emit=False) - format the message body before
-                displaying it to the user. 'emit' generally means that the
-                message should not be displayed with the sender's name.
-        channel_prefix()
 
         pre_join_channel(joiner) - if returning False, abort join
         post_join_channel(joiner) - called right after successful join

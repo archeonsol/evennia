@@ -251,14 +251,14 @@ def menunode_fieldfill(caller, raw_string, **kwargs):
 
     # Retrieve menu info - taken from ndb if not persistent or db if persistent
     if not caller.db._menutree:
-        formdata = caller.ndb._menutree.formdata
-        formtemplate = caller.ndb._menutree.formtemplate
-        formcallback = caller.ndb._menutree.formcallback
-        pretext = caller.ndb._menutree.pretext
-        posttext = caller.ndb._menutree.posttext
-        submitcmd = caller.ndb._menutree.submitcmd
-        borderstyle = caller.ndb._menutree.borderstyle
-        formhelptext = caller.ndb._menutree.formhelptext
+        formdata = caller.ndb._evmenu.formdata
+        formtemplate = caller.ndb._evmenu.formtemplate
+        formcallback = caller.ndb._evmenu.formcallback
+        pretext = caller.ndb._evmenu.pretext
+        posttext = caller.ndb._evmenu.posttext
+        submitcmd = caller.ndb._evmenu.submitcmd
+        borderstyle = caller.ndb._evmenu.borderstyle
+        formhelptext = caller.ndb._evmenu.formhelptext
     else:
         formdata = caller.db._menutree.formdata
         formtemplate = caller.db._menutree.formtemplate
@@ -343,7 +343,7 @@ def menunode_fieldfill(caller, raw_string, **kwargs):
 
             # Clear the field
             formdata.update({matched_field: None})
-            caller.ndb._menutree.formdata = formdata
+            caller.ndb._evmenu.formdata = formdata
             caller.msg("Field '%s' cleared." % matched_field)
             return text, options
 
@@ -469,7 +469,7 @@ def menunode_fieldfill(caller, raw_string, **kwargs):
 
         # If everything checks out, update form!!
         formdata.update({matched_field: newvalue})
-        caller.ndb._menutree.formdata = formdata
+        caller.ndb._evmenu.formdata = formdata
 
         # Account for truestr and falsestr when updating a boolean form
         announced_newvalue = newvalue

@@ -45,6 +45,35 @@ _DIRTY_ATTR_UPDATE_FIELDS = [
 ]
 
 
+def value_query_filter(value, prefix=""):
+    """Map a search value to the typed column it actually lives in.
+
+    Primitive values bypass ``db_value`` (which stays NULL) and land in
+    ``db_int_val`` / ``db_float_val`` / ``db_str_val``. Querying
+    ``db_value=value`` for a primitive therefore never matches; this
+    helper returns the filter dict that does.
+
+    Args:
+        value: The search value.
+        prefix: Django ORM lookup prefix (e.g. ``"db_attributes__"``).
+
+    Returns:
+        dict: A single-entry dict suitable for ``QuerySet.filter(**...)``.
+    """
+    if value is None:
+        return {f"{prefix}db_val_type": "none"}
+    t = type(value)
+    if t is bool:
+        return {f"{prefix}db_int_val": int(value), f"{prefix}db_val_type": "bool"}
+    if t is int:
+        return {f"{prefix}db_int_val": value, f"{prefix}db_val_type": "int"}
+    if t is float:
+        return {f"{prefix}db_float_val": value}
+    if t is str:
+        return {f"{prefix}db_str_val": value}
+    return {f"{prefix}db_value": value}
+
+
 def _classify_value(value):
     """Classify a value into typed columns or the pickle path.
 
@@ -148,8 +177,7 @@ def flush_all_dirty():
 
     pending_stats = count_pending_dirty()
     try:
-        from evennia.server.prometheus_metrics import \
-            observe_attribute_dirty_pending
+        from evennia.server.prometheus_metrics import observe_attribute_dirty_pending
 
         observe_attribute_dirty_pending(pending_stats["pending"])
     except Exception:
@@ -173,8 +201,7 @@ def flush_all_dirty():
         "pending": pending_stats["pending"],
     }
     try:
-        from evennia.typeclasses.attribute_metrics import \
-            record_attribute_flush_stats
+        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
 
         record_attribute_flush_stats(stats, duration_seconds=duration)
     except Exception:
