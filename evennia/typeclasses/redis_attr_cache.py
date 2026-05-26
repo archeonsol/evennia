@@ -7,7 +7,6 @@ Cache hits hydrate Attribute instances from JSON without a database round-trip.
 
 from __future__ import annotations
 
-import base64
 import json
 import time
 from typing import List, Optional
@@ -16,9 +15,10 @@ from django.conf import settings
 
 from evennia.typeclasses.attributes import ModelAttributeBackend
 from evennia.utils import logger
+from evennia.utils.picklefield import dbsafe_decode, dbsafe_encode
 from evennia.utils.utils import to_str
 
-_CACHE_VERSION = "v1"
+_CACHE_VERSION = "v2"
 _LOG_INTERVAL = 60.0
 _last_redis_warn = 0.0
 _MISSING_MARKER = "__missing__"
@@ -81,7 +81,13 @@ def _encode_attr(attr):
     if attr.db_value is None:
         payload["db_value"] = None
     else:
-        payload["db_value"] = base64.b64encode(attr.db_value).decode("ascii")
+        # db_value holds a Python object in packed-tuple form: _classify_value runs
+        # to_pickle() on every write path, and PickledObjectField.from_db_value calls
+        # dbsafe_decode (preserving packed tuples) on every PG load.  We encode it
+        # back to a portable string using the same codec so dbsafe_decode on hydration
+        # produces the identical in-memory state.  PickledObject is a str subclass so
+        # json.dumps serialises it correctly without an explicit str() cast.
+        payload["db_value"] = dbsafe_encode(attr.db_value)
     return json.dumps(payload)
 
 
@@ -102,7 +108,9 @@ def _hydrate_attr_from_payload(attr_cls, raw):
             return None
         pickle_val = data.get("db_value")
         if pickle_val is not None:
-            pickle_val = base64.b64decode(pickle_val)
+            # Reverse of _encode_attr: dbsafe_decode returns the live Python object,
+            # matching what PickledObjectField.from_db_value produces on an ORM load.
+            pickle_val = dbsafe_decode(pickle_val)
         attr = attr_cls(
             pk=pk,
             db_key=data.get("db_key"),
