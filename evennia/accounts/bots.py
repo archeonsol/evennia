@@ -660,6 +660,39 @@ class DiscordBot(Bot):
 
         super().msg(role=(role_id, guild_id, user_id))
 
+    def remove_role(self, role_id, guild_id, user_id, **kwargs):
+        """
+        Removes a role from a guild member.
+
+        Args:
+            role_id (int) - The Discord role's ID.
+            guild_id (int) - The guild the role will be removed in.
+            user_id (int) - The user the role will be removed from.
+        """
+        super().msg(remove_role=(role_id, guild_id, user_id))
+
+    def interaction_reply(self, content, interaction_id, token, **kwargs):
+        """
+        Respond to a Discord slash command interaction.
+
+        Args:
+            content (str)          - Text to send as the interaction response.
+            interaction_id (str)   - The interaction's id snowflake.
+            token (str)            - The interaction token (single-use, 15 min TTL).
+        """
+        super().msg(interaction_reply=(content, interaction_id, token))
+
+    def register_guild_commands(self, commands, app_id, guild_id, **kwargs):
+        """
+        Bulk-overwrite the bot's guild application commands (slash commands).
+
+        Args:
+            commands (list) - List of application command dicts.
+            app_id (str)    - Discord application/client ID.
+            guild_id (str)  - Target guild snowflake.
+        """
+        super().msg(register_commands=(commands, app_id, guild_id))
+
     def direct_msg(self, message, sender, **kwargs):
         """
         Called when the Discord bot receives a direct message on Discord.

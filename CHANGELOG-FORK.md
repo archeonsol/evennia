@@ -14,6 +14,57 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.11 — Discord portal: interaction routing, remove_role, slash-command registration
+
+Three additions to the Discord portal layer enabling full Discord interactions
+(slash commands + typing indicators) and non-blocking role removal.
+
+### Portal (`evennia/server/portal/discord.py`)
+
+- **Fix: `INTERACTION_CREATE` type key no longer clobbered.**
+  The `else` branch in `DiscordClient.data_in` previously called
+  `keywords.update(data["d"])`, which silently overwrote
+  `keywords["type"] = "INTERACTION_CREATE"` with the integer `2` from
+  the Discord payload's own `type` field.  The inner dict is now copied,
+  its `type` popped and stored as `keywords["interaction_type"]`, and
+  only then merged into `keywords`.  The routing string in
+  `keywords["type"]` is preserved for `DiscordBot.execute_cmd` dispatch.
+  Same protection applies to any future Gateway event whose `d` payload
+  contains a `type` integer (e.g. `TYPING_START` channel type).
+
+- **New outputfunc `send_remove_role(role_id, guild_id, user_id)`.**
+  Issues a non-blocking REST `DELETE /guilds/{guild_id}/members/{user_id}/roles/{role_id}`.
+  Use via `session.msg(remove_role=(role_id, guild_id, user_id))`.
+
+- **New outputfunc `send_interaction_reply(content, interaction_id, token)`.**
+  Posts an interaction callback (type 4 = `CHANNEL_MESSAGE_WITH_SOURCE`)
+  to `POST /interactions/{interaction_id}/{token}/callback`.
+  Use via `session.msg(interaction_reply=(content, interaction_id, token))`.
+
+- **New outputfunc `send_register_commands(commands, app_id, guild_id)`.**
+  Bulk-overwrites guild slash commands via
+  `PUT /applications/{app_id}/guilds/{guild_id}/commands`.
+  Use via `session.msg(register_commands=(commands_list, app_id, guild_id))`.
+
+### Bot base class (`evennia/accounts/bots.py`)
+
+- **`DiscordBot.remove_role(role_id, guild_id, user_id)`** — thin wrapper
+  calling `super().msg(remove_role=(...))`.
+- **`DiscordBot.interaction_reply(content, interaction_id, token)`** —
+  thin wrapper calling `super().msg(interaction_reply=(...))`.
+- **`DiscordBot.register_guild_commands(commands, app_id, guild_id)`** —
+  thin wrapper calling `super().msg(register_commands=(...))`.
+
+### Migration
+
+No breaking changes.  Downstream `DiscordBot` subclasses that previously
+used `reactor.callInThread(requests.delete, ...)` for role removal can
+switch to `self.remove_role(...)` (or `super().msg(remove_role=...)`
+directly).  The old thread-based path will continue to work; this is an
+additive improvement.
+
+---
+
 ## 6.0.0+underspire.10 — Phase 2 cleanup + unused contrib removal
 
 Two pre-existing Phase 2 bugs surfaced during the Phase 3 sweep and

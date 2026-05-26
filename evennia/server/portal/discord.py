@@ -505,6 +505,45 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
         data = kwargs
         self._post_json(f"guilds/{guild_id}/members/{user_id}/roles/{role_id}", data, type="PUT")
 
+    def send_remove_role(self, role_id, guild_id, user_id, **kwargs):
+        """
+        Remove a role from a guild member via REST DELETE.
+
+        Use with session.msg(remove_role=(role_id, guild_id, user_id))
+        """
+        self._post_json(
+            f"guilds/{guild_id}/members/{user_id}/roles/{role_id}", {}, type="DELETE"
+        )
+
+    def send_interaction_reply(self, content, interaction_id, token, **kwargs):
+        """
+        Respond to a Discord interaction (slash command) via REST.
+
+        Use with session.msg(interaction_reply=(content, interaction_id, token))
+        Sends an CHANNEL_MESSAGE_WITH_SOURCE (type 4) response.
+        """
+        data = {
+            "type": 4,
+            "data": {"content": content},
+        }
+        # Interaction responses go to a special endpoint that does not require the
+        # bot token — it uses the interaction token for auth.  We still send our
+        # normal Bot auth header; Discord accepts both.
+        self._post_json(f"interactions/{interaction_id}/{token}/callback", data)
+
+    def send_register_commands(self, commands, app_id, guild_id, **kwargs):
+        """
+        Bulk-overwrite guild slash commands via REST PUT.
+
+        Use with session.msg(register_commands=(commands_list, app_id, guild_id))
+        ``commands`` is a list of application command dicts.
+        """
+        self._post_json(
+            f"applications/{app_id}/guilds/{guild_id}/commands",
+            commands,
+            type="PUT",
+        )
+
     def send_default(self, *args, **kwargs):
         """
         Ignore other outputfuncs
@@ -569,5 +608,13 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
         else:
             # send the data for any other action types on to the bot as-is for optional server-side handling
             keywords = {"type": action_type}
-            keywords.update(data["d"])
+            inner = data.get("d")
+            if isinstance(inner, dict):
+                inner = dict(inner)
+                # Discord payloads often have their own "type" integer key. Preserve
+                # our routing string in keywords["type"] and expose the Discord payload
+                # integer separately as keywords["interaction_type"].
+                if "type" in inner:
+                    keywords["interaction_type"] = inner.pop("type")
+                keywords.update(inner)
             self.sessionhandler.data_in(self, bot_data_in=("", keywords))
