@@ -253,15 +253,32 @@ def trie_build_matches(raw_string: str, cmdset) -> List[Tuple]:
     """
     matches: List[Tuple] = []
     try:
-        sig = _cmdset_command_structure_sig(cmdset)
+        # Two-tier cache: the cheap key (length + id-sum of command
+        # instances) catches the common case (cmdset membership
+        # unchanged) without paying the O(n) signature cost.
+        # add()/remove() change the id-sum and force a sig recheck.
+        # In-place mutation of a cached command's key/aliases is *not*
+        # detected by the cheap key on its own; production code rebuilds
+        # the containing cmdset on any cmd change, which produces a new
+        # cmdset object (no cached attrs) and rebuilds the trie. If you
+        # mutate a command's aliases in place while reusing the same
+        # cmdset object, clear ``cmdset._trie_command_trie`` to force a
+        # rebuild.
+        commands = cmdset.commands
+        cheap_key = (len(commands), sum(id(c) for c in commands))
         trie = getattr(cmdset, "_trie_command_trie", None)
-        old_sig = getattr(cmdset, "_trie_command_trie_sig", None)
-        if trie is None or old_sig != sig:
-            trie = CommandTrie.from_cmdset(cmdset)
-            # Safe under Evennia's single-threaded Twisted reactor. If parsing
-            # ever moves to deferToThread, a per-cmdset lock is needed.
-            cmdset._trie_command_trie = trie
-            cmdset._trie_command_trie_sig = sig
+        old_cheap = getattr(cmdset, "_trie_command_trie_cheap", None)
+        if trie is None or old_cheap != cheap_key:
+            sig = _cmdset_command_structure_sig(cmdset)
+            old_sig = getattr(cmdset, "_trie_command_trie_sig", None)
+            if trie is None or old_sig != sig:
+                trie = CommandTrie.from_cmdset(cmdset)
+                # Safe under Evennia's single-threaded Twisted reactor. If
+                # parsing ever moves to deferToThread, a per-cmdset lock is
+                # needed.
+                cmdset._trie_command_trie = trie
+                cmdset._trie_command_trie_sig = sig
+            cmdset._trie_command_trie_cheap = cheap_key
         search_string = raw_string.lower()
         words = search_string.split()
         if words:

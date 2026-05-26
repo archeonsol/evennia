@@ -2728,7 +2728,9 @@ class TestCommandTrie(TestCase):
         self.assertEqual(words[0], "look")
         self.assertEqual(raw, "look north")
 
-    def test_trie_rebuilds_after_exit_alias_added(self):
+    def test_trie_invalidates_on_add(self):
+        """add() must invalidate the cached trie via the cheap-key check."""
+
         class _ExitOut(Command):
             key = "out"
             aliases = []
@@ -2738,16 +2740,23 @@ class TestCommandTrie(TestCase):
             def func(self):
                 pass
 
+        class _ExitNorth(Command):
+            key = "north"
+            aliases = ["n"]
+            is_exit = True
+            locks = "cmd:all()"
+
+            def func(self):
+                pass
+
         cs = CmdSet()
-        c = _ExitOut()
-        cs.add(c)
-        m0 = cmdparser_trie.trie_build_matches("o", cs)
-        self.assertEqual(len(m0), 1)
-        self.assertEqual(m0[0][0], "out")
-        c.set_aliases(["o"])
-        m1 = cmdparser_trie.trie_build_matches("o", cs)
+        cs.add(_ExitOut())
+        m0 = cmdparser_trie.trie_build_matches("n", cs)
+        self.assertEqual(m0, [])
+        cs.add(_ExitNorth())
+        m1 = cmdparser_trie.trie_build_matches("n", cs)
         self.assertEqual(len(m1), 1)
-        self.assertEqual(m1[0][0], "o")
+        self.assertEqual(m1[0][2].key, "north")
 
     def test_abbrev_prefers_shortest_root_key_for_same_command(self):
         class _DualKey(Command):
