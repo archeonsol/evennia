@@ -36,6 +36,76 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.16 — Contrib extraction: move six contribs into downstream
+
+Six `evennia.contrib.*` packages moved to downstream Underspire as
+ordinary game code. Each was either used as-is via a single
+`TypeProperty` (cooldowns, traits), used by one consumer at
+module-level (name_generator), or so deeply extended by the game that
+the engine was hosting a system the consumer had already built on top
+of (components, buffs). The `rpsystem` package goes the same way: only
+`rplanguage` was imported; the rest of the system has long been ported
+into game code (`world/rp_features.py`, `RecogHandler`, helmet/mask
+display rules) so the contrib delete is total.
+
+Core-belief rationale: "toolkit not game." Underspire is the sole
+consumer of this fork; carrying these in the engine added no toolkit
+value past what the game now hosts directly. Mirrors the
+`+underspire.10` methodology (extended_room, puzzles) at larger scale.
+
+### Engine deletions
+
+| Contrib | LOC | Downstream home |
+|---|---|---|
+| `evennia.contrib.game_systems.cooldowns` | 419 | `world.cooldowns` |
+| `evennia.contrib.utils.name_generator` | 32 033 (mostly data files) | `world.name_generator` |
+| `evennia.contrib.rpg.traits` | 3 303 | `world.traits` |
+| `evennia.contrib.base_systems.components` | 1 655 | `world.components` |
+| `evennia.contrib.rpg.buffs` | 2 222 | `world.buffs_base` |
+| `evennia.contrib.rpg.rpsystem` | 3 036 | only `rplanguage` → `world.rpg.rplanguage` |
+
+Each contrib's tests travel with the code. Engine `evennia.contrib`
+test count drops accordingly. No engine non-test code referenced any
+of these modules; verified by grep before each commit.
+
+### Migration (required)
+
+Downstream import sweep:
+
+| Old import | New import |
+|---|---|
+| `from evennia.contrib.game_systems.cooldowns import CooldownHandler` | `from world.cooldowns import CooldownHandler` |
+| `from evennia.contrib.utils.name_generator import namegen` | `from world.name_generator import namegen` |
+| `from evennia.contrib.rpg.traits import TraitHandler` | `from world.traits import TraitHandler` |
+| `from evennia.contrib.base_systems.components import Component, ComponentHolderMixin, ComponentProperty, DBField` | `from world.components import ...` |
+| `from evennia.contrib.rpg.buffs.buff import BaseBuff, BuffHandler, Mod` | `from world.buffs_base import ...` |
+| `from evennia.contrib.rpg.rpsystem.rplanguage import add_language, obfuscate_language` | `from world.rpg.rplanguage import add_language, obfuscate_language` |
+
+Newmoo partner branch: `engine-16-adopt-contribs`. Engine release ships
+only after the partner PR is ready against the engine pin.
+
+`evennia.contrib.grid.xyzgrid` and `evennia.contrib.grid.wilderness`
+remain in the engine per prior decision; both are generic spatial
+infrastructure and still match the toolkit shape.
+
+### Hygiene backlog
+
+This release also lands [`.agents/docs/hygiene-backlog.md`](.agents/docs/hygiene-backlog.md):
+catalogues findings from the hygiene pass that weren't actioned in
+this release (upstream-deprecations cargo, doc rot in
+`docs/source/`, bare excepts, past-due TODO markers, settings-prefix
+split, CMDSET_REFACTOR §8 verifications, cache-coherence audit, big-
+module audit, and six deferred audits). Future hygiene passes start
+from this file. Indexed in [`AGENTS.md`](AGENTS.md).
+
+### Tests
+
+- `evennia.commands`: 284/284 pass.
+- `evennia.contrib`: 466 → fewer tests as the contrib surface
+  shrinks; all remaining contrib tests pass.
+
+---
+
 ## 6.0.0+underspire.15 — Cmdset refactor followups: switch case + docs
 
 Three small followups from the downstream alignment pass. One latent
