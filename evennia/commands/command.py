@@ -510,6 +510,20 @@ class Command(metaclass=CommandMeta):
     # Promoted from ``MuxCommand`` in ``6.0.0+underspire.5``.
     parse_mux_syntax = True
 
+    # When ``True`` (default since ``6.0.0+underspire.15``), ``parse``
+    # lowercases user-supplied switches before storing them on
+    # ``self.switches`` and before validating against ``switch_options``.
+    # Default ``True`` because:
+    #   1. ``switch_options`` is already lowercased on the class; without
+    #      input-side lowercasing, ``/Del`` was silently rejected as an
+    #      "unused" switch by a command declaring ``switch_options=["del"]``.
+    #   2. Real-world consumers compare against lowercase literals
+    #      (``if "del" in self.switches``); preserving case made every
+    #      consumer responsible for the same lowercasing.
+    # Set ``False`` on subclasses that genuinely need case-sensitive
+    # switch handling.
+    parse_lowercase_switches = True
+
     def parse(self):
         """Parse ``self.args`` using MuxCommand-style syntax.
 
@@ -572,6 +586,13 @@ class Command(metaclass=CommandMeta):
             else:
                 args = ""
                 switches = switches[0].split("/")
+            # Lowercase user input before validation (and before storing on
+            # self.switches) so case-insensitive switch handling is the
+            # default; switch_options is already lowercased on the class,
+            # so without this step "/Del" against switch_options=["del"]
+            # was silently rejected as an "unused" switch.
+            if self.parse_lowercase_switches:
+                switches = [s.lower() for s in switches]
             # If user-provides switches, parse them with parser switch options.
             if switches and self.switch_options:
                 valid_switches, unused_switches, extra_switches = [], [], []
