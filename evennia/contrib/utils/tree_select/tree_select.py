@@ -436,15 +436,15 @@ def menunode_treeselect(caller, raw_string, **kwargs):
 
     # If 'newindex' is in the kwargs, change the stored index.
     if "newindex" in kwargs:
-        caller.ndb._menutree.index = kwargs["newindex"]
+        caller.ndb._evmenu.index = kwargs["newindex"]
 
     # Retrieve menu info
-    index = caller.ndb._menutree.index
-    mark_category = caller.ndb._menutree.mark_category
-    go_back = caller.ndb._menutree.go_back
-    treestr = caller.ndb._menutree.treestr
-    callback = caller.ndb._menutree.callback
-    start_text = caller.ndb._menutree.start_text
+    index = caller.ndb._evmenu.index
+    mark_category = caller.ndb._evmenu.mark_category
+    go_back = caller.ndb._evmenu.go_back
+    treestr = caller.ndb._evmenu.treestr
+    callback = caller.ndb._evmenu.callback
+    start_text = caller.ndb._evmenu.start_text
 
     # List of options if index is 'None' or category, or 'True' if a selection
     optlist = parse_opts(treestr, category_index=index)

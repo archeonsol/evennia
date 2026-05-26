@@ -667,9 +667,6 @@ class EvMenu:
         # store ourself on the object
         self.caller.ndb._evmenu = self
 
-        # TODO DEPRECATED - for backwards-compatibility. Use `.ndb._evmenu` instead
-        self.caller.ndb._menutree = self
-
         if persistent:
             # save the menu to the database
             calldict = {
@@ -1008,7 +1005,6 @@ class EvMenu:
             self._quitting = True
             self.caller.cmdset.remove(EvMenuCmdSet)
             del self.caller.ndb._evmenu
-            del self.caller.ndb._menutree  # TODO Deprecated
             if self._persistent:
                 self.caller.attributes.remove("_menutree_saved")
                 self.caller.attributes.remove("_menutree_saved_startnode")
