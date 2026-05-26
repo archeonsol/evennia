@@ -36,6 +36,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.18 — Typed-exception sweep (F4)
+
+Four bare `except:` clauses in the engine narrowed to typed exception
+clauses. Hygiene-backlog finding F4. The wider 83-site
+`except *: pass` audit remains deferred.
+
+### Engine changes
+
+- [`evennia/web/website/views/help.py`](evennia/web/website/views/help.py)
+  (`HelpDetailView.get_context_data`): two bare-except blocks wrapping
+  prev/next-topic lookup narrowed to `(AssertionError, IndexError)`.
+  Drops a latent `NameError` swallow that would have masked an empty
+  category set as a real bug.
+- [`evennia/utils/utils.py`](evennia/utils/utils.py) (`str2int`): two
+  consecutive bare-except blocks around `int(number)` and
+  `int(number[:-2])` narrowed to `ValueError`. The backlog entry
+  listed only line 2991, but there are actually two sites; both fixed.
+
+### Migration
+
+Downstream code should not need changes. The narrowing is invisible
+under normal load. If something previously hidden behind the bare
+except was raising an unexpected exception type, that exception will
+now propagate — but in those cases the prior silent-swallow was the
+bug, not a feature.
+
+### Tests
+
+`evennia.utils evennia.web evennia.help` — 714 pass, 2 pre-existing
+skips. No regressions.
+
+### Hygiene backlog
+
+F4 moves from Open → Shipped. No new findings.
+
+---
+
 ## 6.0.0+underspire.17 — Stale TODO sweep (F5)
 
 Five past-due TODO markers in engine code, all scheduled for upstream

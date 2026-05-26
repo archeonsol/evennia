@@ -9,11 +9,6 @@ reason). Severity: red/yellow/green = bug/smell/polish. Status: `open`
 
 ## Open (execution order)
 
-**F4.** Bare `except:` in engine. Yellow. Three sites need typed
-exception: `evennia/web/website/views/help.py:267,273`,
-`evennia/utils/utils.py:2991`. Bounds-check fallbacks, mechanical fix.
-Wider 83-site `except *: pass` audit deferred.
-
 **F2.** `evennia/server/deprecations.py` upstream cargo. Yellow.
 ~150 LOC raising on pre-1.0 settings Underspire never set
 (`CMDSET_DEFAULT`, `INLINEFUNC_*`, `TIME_SEC_PER_MIN…`). Shrink or
@@ -117,4 +112,5 @@ Named in scope; split out as concrete findings when touched.
 ## Shipped
 
 - **F1.** Contrib mass extraction — six contribs moved to downstream newmoo (cooldowns, name_generator, traits, components, buffs, rpsystem). Shipped in `+underspire.16`.
+- **F4.** Bare excepts in engine narrowed to typed (`(AssertionError, IndexError)` in `web/website/views/help.py`, `ValueError` in `utils/utils.py:str2int`). Four sites total; backlog entry under-counted utils.py. Wider 83-site `except *: pass` audit still deferred. Shipped in `+underspire.18`.
 - **F5.** Past-due TODO markers — five sites cleared. `Channel.*` deprecation stubs deleted; `at_pre_drop` missing-lock escape removed; `building.py` exec-gate comment corrected (real removal → F20); `evmenu.py` `ndb._menutree` alias removed, all in-tree consumers (prototypes OLC menu + tests, evscaperoom, fieldfill, tree_select, character_creator, evmenu tests/example) migrated to `ndb._evmenu`. Surfaced F20, F21. Shipped in `+underspire.17`.
