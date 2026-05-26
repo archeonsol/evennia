@@ -36,6 +36,93 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.17 — Stale TODO sweep (F5)
+
+Five past-due TODO markers in engine code, all scheduled for upstream
+1.0 or 5.0 removal. Fork is on 6.0. Hygiene-backlog finding F5.
+
+### Engine deletions
+
+- **`Channel.*` deprecation stubs** ([`comms/comms.py`](evennia/comms/comms.py)):
+  eight methods on `DefaultChannel` that raised `RuntimeError` pointing
+  callers at their 1.0+ replacements — `message_transform`,
+  `distribute_message`, `format_senders`, `pose_transform`,
+  `format_external`, `format_message`, `pre_send_message`,
+  `post_send_message`. All removed, along with the dead docstring
+  references in the class docstring and the matching paste in
+  [`game_template/typeclasses/channels.py`](evennia/game_template/typeclasses/channels.py).
+  No engine callers; pure tombstones.
+
+- **`at_pre_drop` missing-lock escape hatch**
+  ([`objects/objects.py`](evennia/objects/objects.py)): the three-line
+  guard `if not self.locks.get("drop"): return True` is removed. Every
+  object that goes through `basetype_setup` gets `drop:holds()` by
+  default (objects.py:2057). Downstream edge case: any object created
+  without `basetype_setup` and without an explicit drop lock now fails
+  `at_pre_drop` (consistent with the lock system's fail-closed belief).
+
+- **`caller.ndb._menutree` deprecation alias**
+  ([`utils/evmenu.py`](evennia/utils/evmenu.py)): the alias that
+  shadowed `caller.ndb._evmenu` for backwards compat is removed at both
+  the `__init__` write site and the `close_menu` cleanup. Internal
+  `self._menutree` (the parsed menudata dict) and the persistent
+  `_menutree_saved` attribute key are unrelated and stay.
+
+  In-tree consumer migrations bundled in the same release:
+  [`prototypes/menus.py`](evennia/prototypes/menus.py) (~25 sites; the
+  default prototype OLC menu, lane-2 engine code),
+  [`prototypes/tests.py`](evennia/prototypes/tests.py),
+  [`commands/default/tests.py`](evennia/commands/default/tests.py),
+  [`contrib/full_systems/evscaperoom/menu.py`](evennia/contrib/full_systems/evscaperoom/menu.py),
+  [`contrib/utils/fieldfill/fieldfill.py`](evennia/contrib/utils/fieldfill/fieldfill.py)
+  (only the `ndb` branch — a separate broken `caller.db._menutree`
+  branch is left untouched as a pre-existing bug),
+  [`contrib/utils/tree_select/tree_select.py`](evennia/contrib/utils/tree_select/tree_select.py),
+  [`contrib/rpg/character_creator/tests.py`](evennia/contrib/rpg/character_creator/tests.py),
+  [`utils/tests/test_evmenu.py`](evennia/utils/tests/test_evmenu.py),
+  [`utils/tests/data/evmenu_example.py`](evennia/utils/tests/data/evmenu_example.py).
+
+### Comment-only fix (no behavior change)
+
+- **`building.py` exec gate comment** ([`commands/default/building.py`](evennia/commands/default/building.py)):
+  the TODO at building.py:4275 claimed "Exec support is deprecated.
+  Remove completely for 1.0" — but exec support is still live in
+  [`prototypes/spawner.py`](evennia/prototypes/spawner.py) (`exec(code, ...)`
+  on prototype `exec` strings at spawn time). The if-check the comment
+  guards is the actual privilege barrier blocking non-Developer staff
+  from arbitrary code execution. Comment rewritten to describe what the
+  check does. Removing exec support entirely is tracked as a new
+  backlog item (out of scope for F5).
+
+### Migration (required)
+
+Downstream code that still reads `caller.ndb._menutree` must rename to
+`caller.ndb._evmenu`. Newmoo grepped clean before merge. The alias has
+been deprecated since pre-1.0 upstream; this just lands the removal
+that was already scheduled.
+
+The eight `Channel.*` stub methods were never callable (they raised on
+invocation). If downstream code overrode any of them, the override
+won't be inherited from `DefaultChannel` any more, but since the base
+implementations raised, any inheriting override was already shadowing
+a dead method.
+
+### Tests
+
+All 91 tests in
+`evennia.utils.tests.test_evmenu evennia.comms evennia.objects evennia.prototypes`
+pass after the changes. Six pre-existing failures in
+`test_search`, `test_worker_pool`, and `test_display_name_cache` are
+unrelated to F5 (reproduce on the prior underspire HEAD; flagged for
+separate triage).
+
+### Hygiene backlog
+
+F5 moves from Open → Shipped. No new findings opened here; the
+backlog gained F18/F19 in a parallel doc commit on this same branch.
+
+---
+
 ## 6.0.0+underspire.16 — Contrib extraction: move six contribs into downstream
 
 Six `evennia.contrib.*` packages moved to downstream Underspire as
