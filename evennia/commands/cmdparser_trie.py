@@ -38,6 +38,21 @@ from django.conf import settings
 from evennia.commands.cmdparser import create_match, try_num_differentiators
 from evennia.utils.logger import log_trace, mask_sensitive_input
 
+# Re-export parser-neutral helpers from the linear cmdparser module so
+# downstream parser wrappers can import everything they need from
+# ``cmdparser_trie`` without reaching into the now-non-default module.
+# ``try_num_differentiators`` parses the numerical multimatch separator
+# (``2-ball``) and is used by both the linear and trie parsers verbatim.
+__all__ = (
+    "CommandTrie",
+    "cmdparser",
+    "create_match",
+    "fuzzy_command_suggestions",
+    "levenshtein",
+    "trie_build_matches",
+    "try_num_differentiators",
+)
+
 _FIRST_TOKEN_RE = re.compile(r"^(\s*)(\S+)", re.UNICODE)
 
 

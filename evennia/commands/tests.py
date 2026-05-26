@@ -2890,3 +2890,111 @@ class TestFuzzyCommandSuggestions(TestCase):
         # Suggestions key off the first token; trailing junk does not pollute.
         out = cmdparser_trie.fuzzy_command_suggestions("loo blah blah", cs)
         self.assertIn("look", out)
+
+
+# Module-level CmdNoMatch fixture: a CmdSet-class-attribute reference (used in
+# CharacterCmdSet.at_cmdset_creation below) must point at a stable Command
+# class; the recorder dict is module-level so per-test setUp can reset it.
+_POSE_RECORDER = {"raw": None, "called": False}
+
+
+class _RecordingCmdNoMatch(Command):
+    """CMD_NOMATCH stand-in: records the raw input it was dispatched with.
+
+    Mirrors the downstream pattern of a custom no-match handler that
+    interprets leading-punctuation input (``.pose smiles``) as emote/pose.
+    Recording lets the test assert the raw_string survives the parser
+    intact (no trie shortcut intercepted it, no abbrev rewrite mangled it).
+    """
+
+    key = cmdhandler.CMD_NOMATCH
+    locks = "cmd:all()"
+
+    def func(self):
+        _POSE_RECORDER["raw"] = self.raw_string
+        _POSE_RECORDER["called"] = True
+
+
+class _PosePassthroughCmdSet(CmdSet):
+    key = "PosePassthroughCmdSet"
+    priority = 110
+
+    def at_cmdset_creation(self):
+        self.add(_RecordingCmdNoMatch())
+
+
+class TestPosePassthroughIntegration(TwistedTestCase, BaseEvenniaTest):
+    """End-to-end: leading-punctuation input reaches CmdNoMatch verbatim.
+
+    The trie parser must not intercept ``.pose smiles`` (or similar
+    leading-punctuation input) via any of its shortcuts (abbrev,
+    fastpath, fuzzy hint). When a custom ``CMD_NOMATCH`` is registered
+    on the cmdset, the cmdhandler must dispatch that command with
+    ``self.raw_string`` equal to the input, so downstream emote/pose
+    handlers see the original punctuation intact.
+    """
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+        _POSE_RECORDER["raw"] = None
+        _POSE_RECORDER["called"] = False
+        self.char1.cmdset.add(_PosePassthroughCmdSet)
+
+    def tearDown(self):
+        self.char1.cmdset.remove(_PosePassthroughCmdSet)
+        super().tearDown()
+
+    def _assert_passthrough(self, raw):
+        d = cmdhandler.cmdhandler(self.session, raw)
+
+        def _check(_):
+            self.assertTrue(
+                _POSE_RECORDER["called"],
+                "CmdNoMatch was not dispatched for input %r" % raw,
+            )
+            self.assertEqual(_POSE_RECORDER["raw"], raw)
+
+        d.addCallback(_check)
+        return d
+
+    def test_pose_dot_prefix_reaches_nomatch_verbatim(self):
+        return self._assert_passthrough(".pose smiles")
+
+    def test_pose_semicolon_prefix_reaches_nomatch_verbatim(self):
+        # ``:`` is intentionally NOT covered: the engine's default
+        # CmdPose (evennia/commands/default/general.py) registers ``:``
+        # as an explicit alias with ``arg_regex = None``, so ``:waves``
+        # legitimately matches CmdPose. ``.``, ``;``, and ``,`` aren't
+        # engine-aliased to anything, so the passthrough invariant
+        # applies to all three.
+        return self._assert_passthrough(";nods")
+
+    def test_pose_comma_prefix_reaches_nomatch_verbatim(self):
+        # Underspire (and similar games) overload ``,`` as an alternate
+        # pose syntax in their custom CmdNoMatch. The engine has no
+        # ``,``-aliased command, so the input must reach CmdNoMatch
+        # verbatim for that downstream parsing to fire.
+        return self._assert_passthrough(",grins")
+
+    @patch("evennia.commands.cmdparser_trie.fuzzy_command_suggestions")
+    def test_fuzzy_suggestion_skipped_when_custom_nomatch_registered(self, fuzzy_mock):
+        """Custom CMD_NOMATCH must short-circuit the cmdhandler's fuzzy fallback.
+
+        The fuzzy hint ("Maybe you meant ...?") is the cmdhandler's
+        no-custom-CMD_NOMATCH fallback. When a custom CMD_NOMATCH is
+        registered (the common case for any non-trivial game), the
+        cmdhandler must hand the entire no-match branch to that override
+        and never invoke fuzzy_command_suggestions itself. Otherwise a
+        leading-punctuation pose like ``.poke`` could get a "Did you
+        mean: poke?" injected before the pose handler runs.
+        """
+        d = cmdhandler.cmdhandler(self.session, ".poke")
+
+        def _check(_):
+            self.assertTrue(_POSE_RECORDER["called"])
+            self.assertEqual(_POSE_RECORDER["raw"], ".poke")
+            fuzzy_mock.assert_not_called()
+
+        d.addCallback(_check)
+        return d

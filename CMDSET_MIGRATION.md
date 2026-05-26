@@ -587,10 +587,43 @@ deletion) and Levenshtein-based no-match suggestions.
 
 - Delete game-side trie parser copies (e.g.
   `world/parsing/trie_parser.py`) and the `COMMAND_PARSER` setting
-  override that pointed at them.
-- The engine's `fuzzy_command_suggestions` is now importable as
-  `from evennia.commands.cmdparser_trie import fuzzy_command_suggestions`
-  if a custom `CmdNoMatch` wants to surface the same hint.
+  override that pointed at them. **If your override does work other
+  than trie-vs-linear selection** (per-caller access caching, alias
+  gating, telemetry, an outer LRU), keep the wrapper but rebase it on
+  `evennia.commands.cmdparser_trie.trie_build_matches` (or the
+  top-level `cmdparser`) instead of the linear `build_matches`. The
+  trie has its own per-cmdset two-tier cache; an outer cache may still
+  be earning its keep at the per-caller layer.
+- **Surface `fuzzy_command_suggestions` from a custom `CmdNoMatch`.**
+  The cmdhandler's built-in fuzzy fallback (`"Maybe you meant ...?"`)
+  is **skipped entirely** when a custom `CMD_NOMATCH` is registered —
+  which most non-trivial downstreams do. To restore the hint inside
+  your override:
+
+  ```python
+  from evennia.commands.cmdparser_trie import fuzzy_command_suggestions
+
+  class CmdNoMatch(Command):
+      key = "__nomatch_command"
+      locks = "cmd:all()"
+
+      def func(self):
+          raw = self.raw_string
+          # ... your existing pose/emote/etc. handling first ...
+          suggestions = fuzzy_command_suggestions(raw, self.cmdset) or []
+          if suggestions:
+              self.msg(f"Did you mean: {', '.join(suggestions)}?")
+          else:
+              self.msg("Huh?")
+  ```
+
+  `self.cmdset` is the merged cmdset that produced the no-match;
+  `fuzzy_command_suggestions` honors
+  `settings.COMMAND_FUZZY_SUGGESTIONS_MAX_DIST` and
+  `settings.COMMAND_FUZZY_SUGGESTIONS_LIMIT` by default. Call it after
+  any leading-punctuation interception (pose, emote, channel chat)
+  so a typo of a real command still gets the suggestion but
+  intentional emote input doesn't trigger a "Did you mean: poke?".
 - If a downstream `CmdNoMatch` override was previously surfacing
   difflib suggestions via `evennia.utils.utils.string_suggestions`, the
   helper is still available but new code can prefer the Levenshtein
