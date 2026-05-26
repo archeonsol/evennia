@@ -1,13 +1,9 @@
 # Hygiene Backlog
 
-Catalogued findings from hygiene passes. Future passes start here.
-F-numbers are stable IDs (referenced from changelog entries and other
-docs); the order in this file is execution order. Move entries to
-**Shipped** when they land; delete if explicitly won't-fix (cite reason
-inline).
-
-Severity: red = bug/belief violation; yellow = clear smell; green = polish.
-Status: `open` (action recommended), `audit` (needs read before acting).
+Catalogued findings. F-numbers are stable IDs; file order is execution
+order. Move to **Shipped** when landed; delete on won't-fix (cite
+reason). Severity: red/yellow/green = bug/smell/polish. Status: `open`
+(act) or `audit` (read first).
 
 ---
 
@@ -56,21 +52,18 @@ convention in `code-style.md`. Pick one.
 
 **F13.** Contribs half-policy. Yellow. `evennia/contrib/*` is "no new
 additions" by stance but still public, tested, shipping. Either (a)
-"what's still here and why" doc + maintenance commitment, or (b) start
-a deprecation window with target removal release. Limbo isn't an
-answer.
+survivors-and-why doc + maintenance commitment, or (b) deprecation
+window with target removal. Limbo isn't an answer.
 
-**F14.** Refactor-doc archive pattern. Yellow. `CMDSET_REFACTOR.md` (620),
-`CMDSET_MIGRATION.md` (661), `PHASE3_AUDIT.md` (129) live at repo root
-post-refactor. Mostly archaeology; some content load-bearing (F7
-references `CMDSET_REFACTOR §8`). Introduce an archive subdir pattern:
-shipped-refactor docs move there, load-bearing items extract to backlog
-or live docs.
+**F14.** Refactor-doc archive pattern. Yellow. CMDSET_REFACTOR.md
+(620), CMDSET_MIGRATION.md (661), PHASE3_AUDIT.md (129) live at repo
+root post-refactor. Mostly archaeology; some load-bearing (F7 cites
+§8). Move shipped-refactor docs to archive subdir; extract live items
+to backlog.
 
 **F15.** Cache-addition discipline. Green. Seven caches added, zero
-removed. Adopt policy: next cache lands with its invalidation-contract
-docstring (see F8) and a changelog note defending why caches 1-N should
-all still exist. Policy doc, not code.
+removed. Policy: next cache lands with invalidation-contract docstring
+(F8) + changelog note defending why caches 1-N still all exist.
 
 **F3.** Doc rot in `docs/source/`. Yellow. 31 hits for removed APIs
 (`MuxCommand`, `MuxAccountCommand`, `CMD_IGNORE_PREFIXES`). Sweep after
@@ -89,6 +82,13 @@ convention) via CI. Other beliefs (lane-2 opt-out, model patterns,
 cache contracts) live entirely as prose. Identify which beliefs admit
 mechanical enforcement; add audits modeled on the prefix audit. Out of
 scope: beliefs that require human judgement.
+
+**F17.** `@patch("dotted.path")` audit in engine tests. Yellow.
+Path-based patches break on relocation; downstream's `+underspire.16`
+sweep rewrote 14 sites in one contrib test file alone. Engine tests
+likely carry similar at scale. Mechanical replace with
+`@patch.object(module, "name")`. See
+[`testing.md`](testing.md) "Mocking guidance."
 
 ---
 

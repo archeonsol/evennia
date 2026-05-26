@@ -156,3 +156,28 @@ Dogfood case: convert `grid/xyzgrid` to the plugin shape as proof.
 - **Engine surface growth.** A plugin system is itself engine API and
   the kind where mistakes are expensive to undo. The manifest above
   is deliberately conservative.
+
+---
+
+## Contrib extraction methodology
+
+Operational lessons from `+underspire.16`. Applies to future similar
+moves (further contribs, large-system migrations).
+
+- **Run the contrib's own tests with the moved code before deciding
+  what travels.** Sample/example files inside a contrib often look
+  optional but are load-bearing for the test suite. The `+underspire.16`
+  release notes called `buffs/samplebuffs.py` "probably don't need it";
+  downstream needed it because `StatBuff` from samplebuffs is used by
+  ~half the buffs tests. Travel rule: if the test suite imports from a
+  file, the file is load-bearing.
+- **Partial-extraction friendliness depends on test colocation.**
+  `rpsystem` shipped a single `tests.py` containing tests for
+  `rpsystem.py` + `rplanguage.py` together. The partial extraction had
+  to lift `TestLanguage` out by class name from inside the combined
+  file. Cleaner shape going forward: each submodule has its own test
+  file. Worth keeping in mind when shaping new packages or reshuffling
+  existing ones.
+- **Patching style matters across moves.** See
+  [`testing.md`](.agents/docs/testing.md) "Mocking guidance." Path-based
+  patches break on relocation; module-object patches follow the code.

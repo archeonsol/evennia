@@ -53,6 +53,14 @@ uv run pytest .agents/tools/tests/ -v
 
 Do not use bare `python -m pytest` — the system Python may not have pytest installed. `uv run` ensures the project venv is used.
 
+## Mocking guidance
+
+Prefer `@patch.object(module_under_test, "name")` over `@patch("dotted.path.to.name")`.
+
+Path-based patches break transparently when code relocates: the patch resolves a stale path and silently no-ops, but the test still passes against the un-patched code. Module-object patches follow the import, so they survive moves. Same rule for `mock.patch("module.delay")` where `delay` is imported into `module` from elsewhere — patch the imported reference, not the canonical path.
+
+The `+underspire.16` contrib extraction surfaced 14 sites of the brittle pattern in one downstream-side test file. Engine tests likely carry similar at scale; tracked as backlog F17.
+
 ## CI Matrix
 
 CI tests against SQLite, MySQL 8.0, and PostgreSQL 14 across Python 3.12/3.13/3.14. Coverage is collected on Python 3.12 + SQLite only.
