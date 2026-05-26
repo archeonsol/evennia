@@ -2384,3 +2384,52 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
             _cmd_identity(_CmdSharedKeyObj()),
             _cmd_identity(_CmdSharedKeyAcct()),
         )
+
+
+# ----------------------------------------------------------------------------
+# Phase 3 recon: cmdset prefix audit drift check
+# ----------------------------------------------------------------------------
+
+
+class TestCmdsetPrefixAuditDrift(TestCase):
+    """Fail loudly when the committed PHASE3_AUDIT.md no longer matches
+    the live default cmdsets. The script at
+    ``.agents/tools/cmdset_prefix_audit.py`` regenerates the manifest;
+    this test is the CI wedge that catches drift in either direction
+    (new commands snuck in, keys renamed, aliases changed).
+    """
+
+    def test_manifest_matches_live_cmdsets(self):
+        import sys
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[2]
+        tools_dir = repo_root / ".agents" / "tools"
+        manifest = repo_root / "PHASE3_AUDIT.md"
+
+        if str(tools_dir) not in sys.path:
+            sys.path.insert(0, str(tools_dir))
+        from cmdset_prefix_audit import (_load_default_cmdset_classes,
+                                         audit_cmdsets, format_markdown)
+
+        generated = format_markdown(audit_cmdsets(_load_default_cmdset_classes()))
+        self.assertTrue(
+            manifest.exists(),
+            f"{manifest} missing; regenerate with cmdset_prefix_audit.py --write",
+        )
+        committed = manifest.read_text()
+        if committed != generated:
+            import difflib
+
+            diff = "".join(
+                difflib.unified_diff(
+                    committed.splitlines(keepends=True),
+                    generated.splitlines(keepends=True),
+                    fromfile="PHASE3_AUDIT.md (committed)",
+                    tofile="(regenerated)",
+                )
+            )
+            self.fail(
+                "PHASE3_AUDIT.md is out of date. Regenerate with\n"
+                "  .agents/tools/cmdset_prefix_audit.py --write\n\n" + diff
+            )
