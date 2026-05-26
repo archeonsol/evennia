@@ -28,7 +28,7 @@ class TestCharacterCreator(BaseEvenniaCommandTest):
                 caller=self.account,
             )
         # verify menu was initialized
-        menu = self.session.ndb._menutree
+        menu = self.session.ndb._evmenu
         self.assertNotEqual(menu, None)
         # verify character was created
         new_char = self.session.new_char
@@ -39,7 +39,7 @@ class TestCharacterCreator(BaseEvenniaCommandTest):
         # exit the menu, verify it resumes
         menu.parse_input("q")
         del self.session.new_char
-        self.assertEqual(self.session.ndb._menutree, None)
+        self.assertEqual(self.session.ndb._evmenu, None)
         self.call(
             character_creator.ContribCmdCharCreate(),
             "",
