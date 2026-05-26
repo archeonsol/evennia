@@ -68,6 +68,29 @@ to remain forward-compatible):
     - ``exc`` (BaseException): the exception that was raised.
     - ``traceback_text`` (str): output of ``traceback.format_exc()`` for
       the exception, captured at signal-fire time.
+
+``permissions_changed``
+    Fired by engine commands that mutate effective permissions, after the
+    mutation lands and after the engine's own cache invalidation runs. The
+    engine invalidates ``cmd_access_cache`` and ``lock_cache`` for the
+    affected entity *before* firing, so subscribers observe consistent
+    state. Sender is the concrete Command class (``CmdPerm``, ``CmdQuell``).
+
+    - ``target``: the mutated entity. For ``@perm`` this is the Object or
+      Account whose permission list changed; for ``@quell`` this is the
+      Account whose effective stack flipped.
+    - ``added`` (tuple[str]): permission strings added by this dispatch.
+      Empty for ``@quell``.
+    - ``removed`` (tuple[str]): permission strings removed by this
+      dispatch. Empty for ``@quell``.
+    - ``actor``: the caller that ran the command.
+    - ``account_mode`` (bool): ``True`` when the mutation was applied at
+      the account level (``@perm/account``, ``*account`` syntax, or any
+      ``@quell``); ``False`` for object-level ``@perm``.
+
+    For ``@quell`` the engine also invalidates the active puppet's caches
+    so character-level access checks see the flipped effective perms; the
+    signal still fires once with ``target=<account>``.
 """
 
 from django.dispatch import Signal
@@ -77,9 +100,11 @@ __all__ = (
     "on_command_post",
     "on_command_error",
     "on_cmdset_merge_error",
+    "permissions_changed",
 )
 
 on_command_pre = Signal()
 on_command_post = Signal()
 on_command_error = Signal()
 on_cmdset_merge_error = Signal()
+permissions_changed = Signal()

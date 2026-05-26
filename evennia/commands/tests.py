@@ -10,7 +10,7 @@ from django.test import override_settings
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import BaseEvenniaTest, TestCase
+from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest, TestCase
 
 # Testing-command sets
 
@@ -2512,3 +2512,107 @@ class TestTokenBoundaryMatch(TestCase):
         # _noprefix_aliases is gone since +underspire.8.
         cmd = self._make_cmd("@open")
         self.assertFalse(hasattr(cmd, "_noprefix_aliases"))
+
+
+# ----------------------------------------------------------------------------
+# Phase 2 follow-up: engine-owned permission cache invalidation + signal
+# ----------------------------------------------------------------------------
+
+
+class TestPermissionsChangedSignal(BaseEvenniaCommandTest):
+    """Engine commands that mutate effective permissions invalidate the
+    cmd_access cache for the affected entity and fire the
+    ``permissions_changed`` signal exactly once. Replaces downstream
+    monkey-patches around ``CmdPerm`` / ``CmdQuell``.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from evennia.commands.signals import permissions_changed
+
+        self._captured = []
+
+        def _receiver(sender, **kwargs):
+            self._captured.append((sender, kwargs))
+
+        self._receiver = _receiver
+        permissions_changed.connect(_receiver)
+        self.addCleanup(permissions_changed.disconnect, _receiver)
+
+    def _prime_cache(self, caller):
+        # Put something in the cache so we can detect invalidation by its
+        # absence. Don't go through cached_cmd_access — the cache there
+        # only populates when CMD_ACCESS_CACHE_ENABLED is True.
+        caller.ndb._cmd_access_cache = {("sentinel",): True}
+        caller.ndb._cmd_access_cache_gen = 7
+
+    def test_cmd_perm_add_invalidates_target_and_fires(self):
+        from evennia.commands.default import admin
+
+        self._prime_cache(self.obj1)
+        self.call(
+            admin.CmdPerm(),
+            "Obj = Builder",
+            "Permission 'Builder' given to Obj (the Object/Character).",
+        )
+        self.assertIsNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(sender, admin.CmdPerm)
+        self.assertIs(kw["target"], self.obj1)
+        self.assertEqual(kw["added"], ("Builder",))
+        self.assertEqual(kw["removed"], ())
+        self.assertFalse(kw["account_mode"])
+
+    def test_cmd_perm_del_fires_with_removed(self):
+        from evennia.commands.default import admin
+
+        self.obj1.permissions.add("Builder")
+        self._prime_cache(self.obj1)
+        self.call(
+            admin.CmdPerm(),
+            "/del Obj = Builder",
+            "Permission Builder removed from Obj (if they existed).",
+        )
+        self.assertIsNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(kw["target"], self.obj1)
+        self.assertEqual(kw["added"], ())
+        self.assertEqual(kw["removed"], ("Builder",))
+
+    def test_cmd_quell_invalidates_account_and_puppet_and_fires(self):
+        from evennia.commands.default import account as account_cmds
+
+        # Make sure no _quell flag survives from a prior test.
+        self.account.attributes.remove("_quell")
+        self._prime_cache(self.account)
+        self._prime_cache(self.char1)
+        self.call(account_cmds.CmdQuell(), "", caller=self.account)
+        self.assertIsNone(getattr(self.account.ndb, "_cmd_access_cache", None))
+        # The session puppet (char1) should also have been invalidated.
+        self.assertIsNone(getattr(self.char1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(sender, account_cmds.CmdQuell)
+        self.assertIs(kw["target"], self.account)
+        self.assertEqual(kw["added"], ())
+        self.assertEqual(kw["removed"], ())
+        self.assertTrue(kw["account_mode"])
+
+    def test_cmd_unquell_fires_too(self):
+        from evennia.commands.default import account as account_cmds
+
+        # Pre-condition: account is quelled. Otherwise @unquell is a no-op
+        # and shouldn't fire (matches the "no actual mutation" guard).
+        self.account.attributes.add("_quell", True)
+        self._prime_cache(self.account)
+        cmd = account_cmds.CmdQuell()
+        self.call(cmd, "", cmdstring="@unquell", caller=self.account)
+        self.assertIsNone(getattr(self.account.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(kw["target"], self.account)
+        self.assertEqual(kw["added"], ())
+        self.assertEqual(kw["removed"], ())
+        self.assertTrue(kw["account_mode"])

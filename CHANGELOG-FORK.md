@@ -14,6 +14,87 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.9 — Engine-owned permission cache invalidation
+
+Phase 2 follow-up. `CmdPerm` and `CmdQuell` now invalidate the
+`cmd_access_cache` and `lock_cache` for the affected entities
+themselves, and fire a new `permissions_changed` signal so downstream
+consumers can subscribe instead of monkey-patching the command
+classes.
+
+### Engine
+
+- New signal `evennia.commands.signals.permissions_changed`. Kwargs:
+  `target` (the mutated entity), `added` (tuple of perm strings),
+  `removed` (tuple of perm strings), `actor` (the caller), and
+  `account_mode` (bool). For `@quell` / `@unquell` both `added` and
+  `removed` are empty since the raw permission list isn't changing
+  — only the effective permission stack flips. Sender is the
+  concrete Command class (`CmdPerm`, `CmdQuell`).
+- `CmdPerm.func` (`evennia/commands/default/admin.py`): tracks the
+  actually-added and actually-removed perm strings inside the
+  existing loops, then after the mutations calls
+  `invalidate_cmd_access_cache(obj)` and `invalidate_lock_cache(obj)`
+  for the target, and fires `permissions_changed` exactly once with
+  the cumulative sets. Both invalidation and signal are skipped if
+  the dispatch was a no-op (e.g. trying to add an already-present
+  permission).
+- `CmdQuell.func` (`evennia/commands/default/account.py`): on
+  successful quell or unquell, invalidates `cmd_access_cache` and
+  `lock_cache` for both the account and the active puppet (if any),
+  then fires `permissions_changed` once with `target=account`,
+  `added=()`, `removed=()`, `account_mode=True`. Already-quelled
+  `@quell` and already-unquelled `@unquell` no-ops do not fire.
+- Drive-by fix in `CmdQuell.func`: the `self.cmdstring in
+  ("@unquell", "@unquell")` test had a duplicated literal from the
+  +underspire.8 re-key sweep; collapsed to an equality comparison.
+
+### Invalidate-then-fire ordering
+
+The engine flushes its own caches *before* firing the signal so that
+downstream subscribers observe consistent engine state. A
+signal-driven invalidation pattern (engine listener subscribed first)
+was considered and rejected: django.dispatch ordering is import-
+order-dependent, which is too brittle for a correctness-critical
+ordering invariant.
+
+### Tests
+
+`evennia/commands/tests.py:TestPermissionsChangedSignal` covers:
+
+- `@perm <obj> = <perm>`: cache cleared on the target, signal fired
+  with `added=(perm,)` / `removed=()`.
+- `@perm/del <obj> = <perm>`: cache cleared, signal fired with
+  `added=()` / `removed=(perm,)`.
+- `@perm` against an already-set permission: no-op, no cache flush,
+  no signal.
+- `@quell` from unquelled state: cache cleared on account and
+  active puppet, signal fired with empty sets and
+  `account_mode=True`.
+- `@unquell` from quelled state: same shape.
+
+### Migration
+
+Downstream code that monkey-patched `CmdPerm.func` / `CmdQuell.func`
+to invalidate caches (or to run audit hooks) can subscribe to
+`permissions_changed` instead. Example:
+
+```python
+from django.dispatch import receiver
+from evennia.commands.signals import permissions_changed
+
+@receiver(permissions_changed)
+def audit_perm_change(sender, target, added, removed, actor,
+                      account_mode, **kwargs):
+    audit_event(actor, target, added, removed, account_mode)
+```
+
+The engine's own invalidation runs before any subscriber observes
+the signal, so subscribers can derive their own state from the
+target without worrying about cache coherence.
+
+---
+
 ## 6.0.0+underspire.8 — Phase 3: token-boundary matching + drop CMD_IGNORE_PREFIXES
 
 The big semantic break. After this release, `@open` and `open` are

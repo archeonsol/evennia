@@ -10,6 +10,9 @@ import time
 from django.conf import settings
 
 import evennia
+from evennia.commands.cmd_access_cache import invalidate_cmd_access_cache
+from evennia.commands.signals import permissions_changed
+from evennia.locks.lockhandler import invalidate_lock_cache
 from evennia.server.models import ServerConfig
 from evennia.utils import class_from_module, evtable, logger, search
 
@@ -488,6 +491,8 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
 
         caller_result = []
         target_result = []
+        added = []
+        removed = []
         if "del" in switches:
             # delete the given permission(s) from object.
             for perm in self.rhslist:
@@ -503,6 +508,7 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                     target_result.append(
                         f"\n{caller.name} revokes the permission(s) {perm} from you."
                     )
+                    removed.append(perm)
                     logger.log_sec(
                         f"Permissions Deleted: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
                     )
@@ -525,6 +531,7 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                     caller_result.append(f"\nPermission '{perm}' is already defined on {obj.name}.")
                 else:
                     obj.permissions.add(perm)
+                    added.append(perm)
                     plystring = "the Account" if accountmode else "the Object/Character"
                     caller_result.append(
                         f"\nPermission '{perm}' given to {obj.name} ({plystring})."
@@ -535,6 +542,22 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                     logger.log_sec(
                         f"Permissions Added: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
                     )
+
+        # Engine owns the cmd_access and lock caches; flush them for the
+        # mutated entity before any downstream listener observes the new
+        # permission state, then fan out the signal. Subscribers that
+        # invalidate their own derived caches see consistent engine state.
+        if added or removed:
+            invalidate_cmd_access_cache(obj)
+            invalidate_lock_cache(obj)
+            permissions_changed.send_robust(
+                sender=type(self),
+                target=obj,
+                added=tuple(added),
+                removed=tuple(removed),
+                actor=caller,
+                account_mode=accountmode,
+            )
 
         caller.msg("".join(caller_result).strip())
         if target_result:

@@ -24,7 +24,10 @@ from codecs import lookup as codecs_lookup
 from django.conf import settings
 
 import evennia
+from evennia.commands.cmd_access_cache import invalidate_cmd_access_cache
 from evennia.commands.command import AccountCommand
+from evennia.commands.signals import permissions_changed
+from evennia.locks.lockhandler import invalidate_lock_cache
 from evennia.utils import create, logger, search, utils
 
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
@@ -992,17 +995,20 @@ class CmdQuell(AccountCommand):
         permstr = (
             account.is_superuser and "(superuser)" or "(%s)" % ", ".join(account.permissions.all())
         )
-        if self.cmdstring in ("@unquell", "@unquell"):
+        mutated = False
+        if self.cmdstring == "@unquell":
             if not account.attributes.get("_quell"):
                 self.msg(f"Already using normal Account permissions {permstr}.")
             else:
                 account.attributes.remove("_quell")
                 self.msg(f"Account permissions {permstr} restored.")
+                mutated = True
         else:
             if account.attributes.get("_quell"):
                 self.msg(f"Already quelling Account {permstr} permissions.")
                 return
             account.attributes.add("_quell", True)
+            mutated = True
             puppet = self.session.puppet if self.session else None
             if puppet:
                 cpermstr = "(%s)" % ", ".join(puppet.permissions.all())
@@ -1016,6 +1022,26 @@ class CmdQuell(AccountCommand):
             else:
                 self.msg(f"Quelling Account permissions {permstr}. Use @unquell to get them back.")
         self._recache_locks(account)
+
+        # Quell flips the effective permission stack without changing the
+        # raw permission list. Invalidate cmd_access and lock caches for
+        # the account *and* the active puppet so character-level access
+        # checks see the new effective perms, then fire the signal.
+        if mutated:
+            puppet = self.session.puppet if self.session else None
+            invalidate_cmd_access_cache(account)
+            invalidate_lock_cache(account)
+            if puppet is not None:
+                invalidate_cmd_access_cache(puppet)
+                invalidate_lock_cache(puppet)
+            permissions_changed.send_robust(
+                sender=type(self),
+                target=account,
+                added=(),
+                removed=(),
+                actor=self.caller,
+                account_mode=True,
+            )
 
 
 class CmdStyle(COMMAND_DEFAULT_CLASS):
