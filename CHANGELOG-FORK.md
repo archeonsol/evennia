@@ -81,6 +81,25 @@ four targeted cases against the surviving gates: WEBSERVER_PORTS
 tuple-shape (fail + pass), CHANNEL_CONNECTINFO type, and
 MULTISESSION coherence. MockSettings is now a defaults-class.
 
+Two pre-existing server-test failures that surfaced along the F2
+test path (reproduce on the prior underspire HEAD) were fixed in
+the same release rather than carried forward as "known fail":
+
+- [`evennia/server/portal/tests.py`](evennia/server/portal/tests.py)`::TestAMPServer::test_amp_in`
+  asserted a hand-baked pickle byte literal for the
+  `MsgPortal2Server` wire, but that command path uses the JSON
+  session-serde envelope (`dumps_session` /
+  `pack_session_message`), not pickle. Structurally wrong, not
+  just version-fragile. Rewrote to assert the transport saw the
+  right AMP frame and that `dumps_session` / `loads_session`
+  round-trip the payload.
+- [`evennia/server/tests/test_at_init_scheduler.py`](evennia/server/tests/test_at_init_scheduler.py)
+  forced `AT_INIT_BATCH_SIZE=2` against 3 entities; the third
+  entity's `at_init` was scheduled through `reactor.callLater`,
+  which never fires under Django `TestCase` (same class as the
+  `test_worker_pool` failure fixed in `+underspire.17`). Patched
+  `reactor.callLater` with a synchronous stand-in.
+
 ### Docs
 
 [`core-beliefs.md`](.agents/docs/core-beliefs.md): the lane-2 test
