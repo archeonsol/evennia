@@ -45,8 +45,7 @@ import re
 
 from evennia import AccountDB, ObjectDB, default_cmds
 from evennia.comms.models import Msg
-from evennia.utils import (create, datetime_format, evtable, inherits_from,
-                           make_iter, utc_to_local)
+from evennia.utils import create, datetime_format, evtable, inherits_from, make_iter, utc_to_local
 
 _HEAD_CHAR = "|015-|n"
 _SUB_HEAD_CHAR = "-"
@@ -359,4 +358,8 @@ class CmdMail(default_cmds.AccountCommand):
 
 
 class CmdMailCharacter(CmdMail):
-    account_caller = False
+    # Opt out of engine pre-parse caller normalisation: this variant
+    # is bound to character cmdsets, so self.caller must stay the
+    # Character even though the parent CmdMail sets the engine flag
+    # for the account-level binding.
+    account_command_caller = False

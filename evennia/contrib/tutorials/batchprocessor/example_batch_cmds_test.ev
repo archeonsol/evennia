@@ -7,12 +7,12 @@
 
 # This creates a red button
 
-create/drop button:red_button.RedButton
+@create/drop button:red_button.RedButton
 
 # This comment ends input for @create
 # Next command:
 
-set button/desc =
+@set button/desc =
   This is a large red button. Now and then
   it flashes in an evil, yet strangely tantalizing way.
 

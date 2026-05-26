@@ -636,11 +636,11 @@ class CmdMvAttr(ObjManipCommand):
             self.msg(string)
             return
 
-        # simply use cpattr for all the functionality
+        # simply use @cpattr for all the functionality
         if "copy" in self.switches:
-            self.execute_cmd("cpattr %s" % self.args)
+            self.execute_cmd("@cpattr %s" % self.args)
         else:
-            self.execute_cmd("cpattr/move %s" % self.args)
+            self.execute_cmd("@cpattr/move %s" % self.args)
 
 
 class CmdCreate(ObjManipCommand):
@@ -1346,7 +1346,7 @@ class CmdUnLink(CmdLink):
     remove exit-connections between rooms
 
     Usage:
-      unlink <Object>
+      @unlink <Object>
 
     Unlinks an object, for example an exit, disconnecting
     it from whatever it was connected to.
@@ -1354,7 +1354,7 @@ class CmdUnLink(CmdLink):
 
     # this is just a child of CmdLink
 
-    key = "unlink"
+    key = "@unlink"
     locks = "cmd:perm(unlink) or perm(Builder)"
     help_key = "Building"
 

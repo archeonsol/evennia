@@ -53,8 +53,10 @@ def build_matches(raw_string, cmdset, include_prefixes=False):
         raw_string (str): Input string that can look in any way; the only assumption is
             that the sought command's name/alias must be *first* in the string.
         cmdset (CmdSet): The current cmdset to pick Commands from.
-        include_prefixes (bool): If set, include prefixes like @, ! etc (specified in settings)
-            in the match, otherwise strip them before matching.
+        include_prefixes (bool): Retained for backward compatibility with the
+            two-pass parser signature. Ignored since 6.0.0+underspire.8;
+            ``CMD_IGNORE_PREFIXES`` no longer strips prefix characters at
+            parse time.
 
     Returns:
         matches (list) A list of match tuples created by `cmdparser.create_match`.
@@ -62,11 +64,9 @@ def build_matches(raw_string, cmdset, include_prefixes=False):
     """
     matches = []
     try:
-        if not include_prefixes and len(raw_string) > 1:
-            raw_string = raw_string.lstrip(_CMD_IGNORE_PREFIXES)
         search_string = raw_string.lower()
         for cmd in cmdset:
-            cmdname, raw_cmdname = cmd.match(search_string, include_prefixes=include_prefixes)
+            cmdname, raw_cmdname = cmd.match(search_string)
             if cmdname:
                 matches.append(create_match(cmdname, raw_string, cmd, raw_cmdname))
     except Exception:
@@ -149,34 +149,27 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
     if not raw_string:
         return []
 
-    # find matches, first using the full name
-    matches = build_matches(raw_string, cmdset, include_prefixes=True)
+    # single-pass token-boundary matching since +underspire.8. The old
+    # second-pass that stripped CMD_IGNORE_PREFIXES is gone; prefix
+    # characters are now load-bearing parts of the key.
+    matches = build_matches(raw_string, cmdset)
 
     if not matches or len(matches) > 1:
         # no single match, try parsing for optional numerical tags like 1-cmd
         # or cmd-2, cmd.2 etc
         match_index, new_raw_string = try_num_differentiators(raw_string)
         if match_index is not None:
-            matches.extend(build_matches(new_raw_string, cmdset, include_prefixes=True))
-
-    if not matches and _CMD_IGNORE_PREFIXES:
-        # still no match. Try to strip prefixes
-        raw_string = raw_string.lstrip(_CMD_IGNORE_PREFIXES) if len(raw_string) > 1 else raw_string
-        matches = build_matches(raw_string, cmdset, include_prefixes=False)
+            matches.extend(build_matches(new_raw_string, cmdset))
 
     # only select command matches we are actually allowed to call.
     if getattr(settings, "CMD_ACCESS_CACHE_ENABLED", False):
         from evennia.commands.cmd_access_cache import cached_cmd_access
 
         matches = [
-            match
-            for match in matches
-            if cached_cmd_access(match[2], caller, session=session)
+            match for match in matches if cached_cmd_access(match[2], caller, session=session)
         ]
     else:
-        matches = [
-            match for match in matches if match[2].access(caller, "cmd", session=session)
-        ]
+        matches = [match for match in matches if match[2].access(caller, "cmd", session=session)]
 
     # try to bring the number of matches down to 1
     if len(matches) > 1:

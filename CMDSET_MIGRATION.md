@@ -469,28 +469,68 @@ available:
 
 ## Phase 3 — Token-boundary matching + drop prefix-strip
 
-_Pending. Anticipated migration:_
+Shipped across `+underspire.8`. Couples the engine matching change with
+the re-key sweep so the engine ships internally consistent.
 
-- **Auto (planned):** `CMD_IGNORE_PREFIXES` honored for one release with a
-  startup `DeprecationWarning` listing affected commands.
-- **Required (planned):** cmdsets that worked around the `@cmd`/`cmd` alias
-  collision (e.g. `safe_remove(CmdOpen)` + `CmdAtOpen()`) drop the
-  workaround. Engine default builder commands are keyed `@open`/`@dig`/etc.
-  directly. The complete re-key list will ship with this release; diff it
-  against your own `safe_remove` / wrapper list before merging.
-- **Distinguish two kinds of call site** when sweeping
-  `safe_remove`/`replace_command`:
-  - *Collision workarounds* (`safe_remove(EngineCmd) + GameCmd()` where
-    `GameCmd` only differs by `@`-prefixing): delete entirely.
+### Recon (shipped on the same branch, pre-engine commit)
+
+- `.agents/docs/code-style.md` gained the Command Naming section
+  codifying the IC/OOC convention: no prefix for character actions,
+  `@` for account/OOC actions, channel-chat carve-out.
+- `PHASE3_AUDIT.md` is the frozen committed inventory of every default
+  cmdset's keys/aliases. Regenerate with
+  `.agents/tools/cmdset_prefix_audit.py --write`. CI runs the audit in
+  `--check` mode via `TestCmdsetPrefixAuditDrift` in
+  `evennia/commands/tests.py`.
+
+### Engine match change (shipped in `6.0.0+underspire.8`)
+
+- `Command._optimize` no longer builds `_noprefix_aliases`.
+- `Command.match` is single-pass token-boundary matching. The
+  `include_prefixes` kwarg is retained on the signature but ignored.
+- `cmdparser.build_matches` no longer strips `CMD_IGNORE_PREFIXES`
+  from `raw_string`. The `include_prefixes` kwarg is retained but
+  ignored.
+- `cmdparser.cmdparser` is single-pass — no more second-pass fallback
+  with prefix-strip.
+- `settings.CMD_IGNORE_PREFIXES` stays defined for one release with a
+  startup warning if non-empty; removal slated for a follow-up.
+
+### Engine re-key sweep (shipped in `6.0.0+underspire.8`)
+
+Every staff/OOC engine default that was unprefixed now carries `@`.
+See [`CHANGELOG-FORK.md`](CHANGELOG-FORK.md) for the full list and
+[`PHASE3_AUDIT.md`](PHASE3_AUDIT.md) for the inventory diff
+downstream consumers should reconcile against.
+
+### Migration (required) for downstream code
+
+- **`CMD_IGNORE_PREFIXES` is a no-op.** If your `server.conf.settings`
+  still sets it, you'll see a startup warning. Removing the setting is
+  safe.
+- **Subclassed `Command.match` with custom prefix-strip logic** —
+  delete the strip; matching now does the boundary check via
+  `arg_regex` and treats the prefix character as part of the key.
+- **`execute_cmd("<unprefixed staff command> ...")` calls** must
+  update to the new keys (`@ban`, `@open`, etc.). Engine call sites
+  were updated in this release; downstream must sweep their own.
+- **`CmdAt*` wrapper classes** that only added `@`-prefix (no
+  behavior changes) can be deleted in favor of the engine defaults.
+  The `safe_remove(EngineCmd) + add(WrapperCmd())` pairs go with
+  them.
+- **Genuine custom overrides** — when sweeping
+  `safe_remove`/`replace_command`, distinguish:
+  - *Collision workarounds* (`safe_remove(EngineCmd) + GameCmd()`
+    where `GameCmd` only differs by `@`-prefix): delete entirely.
   - *Genuine custom overrides* (`replace_command(EngineCmd, MyCmd())`
     where `MyCmd` adds real behavior — e.g. a `CmdGet` subclass with
-    grapple-after-get logic): keep, but swap to the Phase 0 method form
-    (`self.replace(MyCmd())`). Do not delete.
+    grapple-after-get logic): keep, but swap to the Phase 0 method
+    form (`self.replace(MyCmd())`). Do not delete.
 
-  Before deleting any `replace_command(EngineCmd, X())`, confirm `X` is
-  `EngineCmd()` plus only an alias change. Any difference in `func`,
-  `parse`, or hooks means it's a genuine override and must become
-  `self.replace`, not a delete.
+  Before deleting any `replace_command(EngineCmd, X())`, confirm `X`
+  is `EngineCmd()` plus only an alias change. Any difference in
+  `func`, `parse`, or hooks means it's a genuine override and must
+  become `self.replace`, not a delete.
 
 ---
 

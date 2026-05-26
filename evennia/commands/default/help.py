@@ -809,7 +809,7 @@ class CmdSetHelp(CmdHelp):
     Edit the help database.
 
     Usage:
-      sethelp[/switches] <topic>[[;alias;alias][,category[,locks]]
+      @sethelp[/switches] <topic>[[;alias;alias][,category[,locks]]
                 [= <text or new value>]
     Switches:
       edit - open a line editor to edit the topic's help text.
@@ -821,12 +821,12 @@ class CmdSetHelp(CmdHelp):
       delete - remove help topic.
 
     Examples:
-      sethelp lore = In the beginning was ...
-      sethelp/append pickpocketing,Thievery = This steals ...
-      sethelp/replace pickpocketing, ,attr(is_thief) = This steals ...
-      sethelp/edit thievery
-      sethelp/locks thievery = read:all()
-      sethelp/category thievery = classes
+      @sethelp lore = In the beginning was ...
+      @sethelp/append pickpocketing,Thievery = This steals ...
+      @sethelp/replace pickpocketing, ,attr(is_thief) = This steals ...
+      @sethelp/edit thievery
+      @sethelp/locks thievery = read:all()
+      @sethelp/category thievery = classes
 
     If not assigning a category, the `settings.DEFAULT_HELP_CATEGORY` category
     will be used. If no lockstring is specified, everyone will be able to read
@@ -871,7 +871,7 @@ class CmdSetHelp(CmdHelp):
 
     """
 
-    key = "sethelp"
+    key = "@sethelp"
     aliases = []
     switch_options = ("edit", "replace", "append", "extend", "category", "locks", "delete")
     locks = "cmd:perm(Helper)"

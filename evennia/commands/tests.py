@@ -10,7 +10,7 @@ from django.test import override_settings
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import BaseEvenniaTest, TestCase
+from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest, TestCase
 
 # Testing-command sets
 
@@ -1247,28 +1247,44 @@ class TestCmdParser(TestCase):
 
     @override_settings(CMD_IGNORE_PREFIXES="@&/+")
     def test_build_matches(self):
-        a_cmdset = _CmdSetTest()
-        bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "test1"][0]
+        """Token-boundary matching (since +underspire.8).
 
-        # normal parsing
+        Verifies the post-CMD_IGNORE_PREFIXES world: prefix characters
+        are load-bearing parts of the key, no parse-time stripping.
+        """
+        a_cmdset = _CmdSetTest()
+
+        # Plain key matches verbatim.
+        bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "test1"][0]
         self.assertEqual(
-            cmdparser.build_matches("test1 rock", a_cmdset, include_prefixes=False),
+            cmdparser.build_matches("test1 rock", a_cmdset),
             [("test1", " rock", bcmd, 5, 0.5, "test1")],
         )
 
-        # test prefix exclusion
+        # `@another command ...` does NOT match `another command` — the
+        # @ is no longer stripped at parse time.
+        self.assertEqual(
+            cmdparser.build_matches("@another command smiles to me  ", a_cmdset),
+            [],
+        )
+
+        # ...but the unprefixed input still matches the unprefixed key.
         bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "another command"][0]
         self.assertEqual(
-            cmdparser.build_matches(
-                "@another command smiles to me  ", a_cmdset, include_prefixes=False
-            ),
+            cmdparser.build_matches("another command smiles to me  ", a_cmdset),
             [("another command", " smiles to me  ", bcmd, 15, 0.5, "another command")],
         )
-        # test prefix exclusion on the cmd class
+
+        # Conversely, a `&`-keyed command requires the `&` in the input;
+        # plain `the third command` no longer reaches it.
+        self.assertEqual(
+            cmdparser.build_matches("the third command", a_cmdset),
+            [],
+        )
         bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "&the third command"][0]
         self.assertEqual(
-            cmdparser.build_matches("the third command", a_cmdset, include_prefixes=False),
-            [("the third command", "", bcmd, 17, 1.0, "&the third command")],
+            cmdparser.build_matches("&the third command", a_cmdset),
+            [("&the third command", "", bcmd, 18, 1.0, "&the third command")],
         )
 
     @override_settings(SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)")
@@ -1669,8 +1685,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
 
     @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
-        from evennia.commands.cmd_access_cache import (
-            cached_cmd_access, invalidate_cmd_access_cache)
+        from evennia.commands.cmd_access_cache import cached_cmd_access, invalidate_cmd_access_cache
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -1917,8 +1932,7 @@ class TestFtfyNormalization(BaseEvenniaTest):
 # ----------------------------------------------------------------------------
 
 
-from evennia.commands.signals import \
-    on_cmdset_merge_error as _on_cmdset_merge_error
+from evennia.commands.signals import on_cmdset_merge_error as _on_cmdset_merge_error
 from evennia.commands.signals import on_command_error as _on_command_error
 from evennia.commands.signals import on_command_post as _on_command_post
 from evennia.commands.signals import on_command_pre as _on_command_pre
@@ -2185,8 +2199,7 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import (begin_command_trace,
-                                                 end_command_trace)
+        from evennia.utils.command_trace import begin_command_trace, end_command_trace
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2230,8 +2243,13 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
-    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
+    bump_cmdset_generation,
+    clear_location_cmdset_cache,
+    cmdset_generation,
+    get_cached_location_cmdsets,
+    make_cache_key,
+    set_cached_location_cmdsets,
+)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2384,3 +2402,234 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
             _cmd_identity(_CmdSharedKeyObj()),
             _cmd_identity(_CmdSharedKeyAcct()),
         )
+
+
+# ----------------------------------------------------------------------------
+# Phase 3 recon: cmdset prefix audit drift check
+# ----------------------------------------------------------------------------
+
+
+class TestCmdsetPrefixAuditDrift(TestCase):
+    """Fail loudly when the committed PHASE3_AUDIT.md no longer matches
+    the live default cmdsets. The script at
+    ``.agents/tools/cmdset_prefix_audit.py`` regenerates the manifest;
+    this test is the CI wedge that catches drift in either direction
+    (new commands snuck in, keys renamed, aliases changed).
+    """
+
+    def test_manifest_matches_live_cmdsets(self):
+        import sys
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[2]
+        tools_dir = repo_root / ".agents" / "tools"
+        manifest = repo_root / "PHASE3_AUDIT.md"
+
+        if str(tools_dir) not in sys.path:
+            sys.path.insert(0, str(tools_dir))
+        from cmdset_prefix_audit import _load_default_cmdset_classes, audit_cmdsets, format_markdown
+
+        generated = format_markdown(audit_cmdsets(_load_default_cmdset_classes()))
+        self.assertTrue(
+            manifest.exists(),
+            f"{manifest} missing; regenerate with cmdset_prefix_audit.py --write",
+        )
+        committed = manifest.read_text()
+        if committed != generated:
+            import difflib
+
+            diff = "".join(
+                difflib.unified_diff(
+                    committed.splitlines(keepends=True),
+                    generated.splitlines(keepends=True),
+                    fromfile="PHASE3_AUDIT.md (committed)",
+                    tofile="(regenerated)",
+                )
+            )
+            self.fail(
+                "PHASE3_AUDIT.md is out of date. Regenerate with\n"
+                "  .agents/tools/cmdset_prefix_audit.py --write\n\n" + diff
+            )
+
+
+# ----------------------------------------------------------------------------
+# Phase 3 step 4: token-boundary matching semantics
+# ----------------------------------------------------------------------------
+
+
+class TestTokenBoundaryMatch(TestCase):
+    """`Command.match` is token-boundary and prefix-literal.
+
+    Since +underspire.8, `CMD_IGNORE_PREFIXES` no longer strips prefix
+    characters at parse time. `@open` and `open` are distinct keys, and
+    a key only matches when the next character of the input is a
+    boundary (whitespace, `/`, newline, or end-of-string).
+    """
+
+    def _make_cmd(self, key, aliases=None):
+        class _Cmd(Command):
+            pass
+
+        _Cmd.key = key
+        _Cmd.aliases = list(aliases or [])
+        cmd = _Cmd()
+        cmd._optimize()
+        return cmd
+
+    def test_exact_key_matches(self):
+        cmd = self._make_cmd("look")
+        self.assertEqual(cmd.match("look"), ("look", "look"))
+
+    def test_key_with_trailing_space_matches(self):
+        cmd = self._make_cmd("look")
+        self.assertEqual(cmd.match("look here"), ("look", "look"))
+
+    def test_key_without_boundary_does_not_match(self):
+        # `looker` must NOT match `look` — the boundary requires
+        # whitespace/EOI after the key.
+        cmd = self._make_cmd("look")
+        self.assertEqual(cmd.match("looker"), (None, None))
+
+    def test_at_prefix_is_load_bearing(self):
+        # `@open foo = bar` matches the @-keyed command...
+        at_cmd = self._make_cmd("@open")
+        self.assertEqual(at_cmd.match("@open foo = bar"), ("@open", "@open"))
+        # ...but plain `open foo` does NOT match (no prefix-strip).
+        self.assertEqual(at_cmd.match("open foo"), (None, None))
+
+    def test_unprefixed_key_does_not_match_prefixed_input(self):
+        # Conversely, an unprefixed key does not match `@key`.
+        cmd = self._make_cmd("open")
+        self.assertEqual(cmd.match("@open foo"), (None, None))
+        self.assertEqual(cmd.match("open foo"), ("open", "open"))
+
+    def test_alias_follows_same_rule(self):
+        cmd = self._make_cmd("@ban", aliases=["@bans"])
+        self.assertEqual(cmd.match("@bans alice"), ("@bans", "@bans"))
+        self.assertEqual(cmd.match("bans alice"), (None, None))
+
+    def test_no_noprefix_aliases_attribute(self):
+        # _noprefix_aliases is gone since +underspire.8.
+        cmd = self._make_cmd("@open")
+        self.assertFalse(hasattr(cmd, "_noprefix_aliases"))
+
+
+# ----------------------------------------------------------------------------
+# Phase 2 follow-up: engine-owned permission cache invalidation + signal
+# ----------------------------------------------------------------------------
+
+
+class TestPermissionsChangedSignal(BaseEvenniaCommandTest):
+    """Engine commands that mutate effective permissions invalidate the
+    cmd_access cache for the affected entity and fire the
+    ``permissions_changed`` signal exactly once. Replaces downstream
+    monkey-patches around ``CmdPerm`` / ``CmdQuell``.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from evennia.commands.signals import permissions_changed
+
+        self._captured = []
+
+        def _receiver(sender, **kwargs):
+            self._captured.append((sender, kwargs))
+
+        self._receiver = _receiver
+        permissions_changed.connect(_receiver)
+        self.addCleanup(permissions_changed.disconnect, _receiver)
+
+    def _prime_cache(self, caller):
+        # Put something in the cache so we can detect invalidation by its
+        # absence. Don't go through cached_cmd_access — the cache there
+        # only populates when CMD_ACCESS_CACHE_ENABLED is True.
+        caller.ndb._cmd_access_cache = {("sentinel",): True}
+        caller.ndb._cmd_access_cache_gen = 7
+
+    def test_cmd_perm_add_invalidates_target_and_fires(self):
+        from evennia.commands.default import admin
+
+        self._prime_cache(self.obj1)
+        self.call(
+            admin.CmdPerm(),
+            "Obj = Builder",
+            "Permission 'Builder' given to Obj (the Object/Character).",
+        )
+        self.assertIsNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(sender, admin.CmdPerm)
+        self.assertIs(kw["target"], self.obj1)
+        self.assertEqual(kw["added"], ("Builder",))
+        self.assertEqual(kw["removed"], ())
+        self.assertFalse(kw["account_mode"])
+
+    def test_cmd_perm_del_fires_with_removed(self):
+        from evennia.commands.default import admin
+
+        self.obj1.permissions.add("Builder")
+        self._prime_cache(self.obj1)
+        self.call(
+            admin.CmdPerm(),
+            "/del Obj = Builder",
+            "Permission Builder removed from Obj (if they existed).",
+        )
+        self.assertIsNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(kw["target"], self.obj1)
+        self.assertEqual(kw["added"], ())
+        self.assertEqual(kw["removed"], ("Builder",))
+
+    def test_cmd_perm_no_op_does_not_fire(self):
+        # Setting a permission that already exists is a no-op — no
+        # mutation, no invalidation, no signal. Case-insensitive check
+        # so input casing doesn't matter.
+        from evennia.commands.default import admin
+
+        self.obj1.permissions.add("Builder")
+        self._prime_cache(self.obj1)
+        self.call(
+            admin.CmdPerm(),
+            "Obj = Builder",
+            "Permission 'Builder' is already defined on Obj.",
+        )
+        # Cache untouched, no signal.
+        self.assertIsNotNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(self._captured, [])
+
+    def test_cmd_quell_invalidates_account_and_puppet_and_fires(self):
+        from evennia.commands.default import account as account_cmds
+
+        # Make sure no _quell flag survives from a prior test.
+        self.account.attributes.remove("_quell")
+        self._prime_cache(self.account)
+        self._prime_cache(self.char1)
+        self.call(account_cmds.CmdQuell(), "", caller=self.account)
+        self.assertIsNone(getattr(self.account.ndb, "_cmd_access_cache", None))
+        # The session puppet (char1) should also have been invalidated.
+        self.assertIsNone(getattr(self.char1.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(sender, account_cmds.CmdQuell)
+        self.assertIs(kw["target"], self.account)
+        self.assertEqual(kw["added"], ())
+        self.assertEqual(kw["removed"], ())
+        self.assertTrue(kw["account_mode"])
+
+    def test_cmd_unquell_fires_too(self):
+        from evennia.commands.default import account as account_cmds
+
+        # Pre-condition: account is quelled. Otherwise @unquell is a no-op
+        # and shouldn't fire (matches the "no actual mutation" guard).
+        self.account.attributes.add("_quell", True)
+        self._prime_cache(self.account)
+        cmd = account_cmds.CmdQuell()
+        self.call(cmd, "", cmdstring="@unquell", caller=self.account)
+        self.assertIsNone(getattr(self.account.ndb, "_cmd_access_cache", None))
+        self.assertEqual(len(self._captured), 1)
+        sender, kw = self._captured[0]
+        self.assertIs(kw["target"], self.account)
+        self.assertEqual(kw["added"], ())
+        self.assertEqual(kw["removed"], ())
+        self.assertTrue(kw["account_mode"])

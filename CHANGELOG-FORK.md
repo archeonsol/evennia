@@ -14,6 +14,299 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.10 — Phase 2 cleanup + unused contrib removal
+
+Two pre-existing Phase 2 bugs surfaced during the Phase 3 sweep and
+the +underspire.9 follow-up; fixed in a single commit since both are
+small and tightly scoped to the same migration. Bundled with deletion
+of two unused contribs to cut test-sweep noise from code Underspire
+doesn't run.
+
+### Engine
+
+- **`CmdPerm.func` case-insensitive duplicate check.**
+  `obj.permissions.all()` returns lowercased strings, but the
+  "already defined" check compared against the input verbatim. Typing
+  `@perm Obj = Builder` against a target that already had `builder`
+  fell through to re-add and reported `"given"` instead of
+  `"already defined"`. After +underspire.9 this also caused a
+  redundant `cmd_access_cache` flush and a spurious
+  `permissions_changed` signal fire. Fix: build a lowercased set
+  once and compare case-insensitively.
+
+- **`test_resources.call()` hardcoded `providers["account"]`.** Tests
+  that passed `caller=self.account2` (or a different character) had
+  their account silently rewritten to `self.account` inside the
+  `account_command_caller` normalisation branch, masking real
+  behavior. Same for `cmdobj.account`. Pre-existing since
+  +underspire.6 when `_normalize_account_command_caller` was added.
+  Fix: derive `cmd_account` from caller (caller-if-Account →
+  caller.account → self.account fallback) and use it for both
+  `cmdobj.account` and `providers["account"]`.
+
+### Test fallout
+
+`evennia.contrib.game_systems.mail.tests.TestMail.test_mail` now
+passes — it was failing on the second assertion (`caller=self.account2`
+sending to `TestAccount2`) because the account hardcoding produced
+`"from TestAccount"` instead of `"from TestAccount2"`.
+
+`TestPermissionsChangedSignal.test_cmd_perm_no_op_does_not_fire`
+restored (was dropped in +underspire.9 because the case-insensitivity
+bug made it untestable).
+
+All 263 evennia.commands + evennia.commands.default.tests +
+evennia.contrib.game_systems.mail.tests pass.
+
+### Contrib removals
+
+`evennia/contrib/grid/extended_room/` and
+`evennia/contrib/game_systems/puzzles/` deleted outright. Neither has
+any engine consumer; both are opt-in features Underspire doesn't use,
+and both had broken tests in the +underspire.9 sweep that were pure
+noise for this fork. The typeclass-path remap entries in
+`evennia/accounts/migrations/0011_*`,
+`evennia/objects/migrations/0012_*`, and
+`evennia/scripts/migrations/0015_*` are kept as-is — they reference
+the modules by string for DB-side path normalisation and don't import
+them, so anyone migrating an old DB still gets the remap.
+
+### Migration
+
+No downstream action required for the bug fixes. Behaviour changes:
+
+- `@perm Obj = Builder` against an obj that already has the
+  permission now correctly reports "already defined" and does not
+  fire `permissions_changed` (downstream subscribers see fewer false
+  signals).
+- Tests that called `self.call(..., caller=self.account2, ...)` or
+  similar will now see the correct account on `cmdobj.account` and
+  in the normalisation providers. If a test was inadvertently relying
+  on the old "everything is self.account" behavior, it will need to
+  update its expected output.
+- Importing `evennia.contrib.grid.extended_room` or
+  `evennia.contrib.game_systems.puzzles` raises ImportError. Anyone
+  relying on these contribs in this fork needs to vendor them in
+  their game tree.
+
+---
+
+## 6.0.0+underspire.9 — Engine-owned permission cache invalidation
+
+Phase 2 follow-up. `CmdPerm` and `CmdQuell` now invalidate the
+`cmd_access_cache` and `lock_cache` for the affected entities
+themselves, and fire a new `permissions_changed` signal so downstream
+consumers can subscribe instead of monkey-patching the command
+classes.
+
+### Engine
+
+- New signal `evennia.commands.signals.permissions_changed`. Kwargs:
+  `target` (the mutated entity), `added` (tuple of perm strings),
+  `removed` (tuple of perm strings), `actor` (the caller), and
+  `account_mode` (bool). For `@quell` / `@unquell` both `added` and
+  `removed` are empty since the raw permission list isn't changing
+  — only the effective permission stack flips. Sender is the
+  concrete Command class (`CmdPerm`, `CmdQuell`).
+- `CmdPerm.func` (`evennia/commands/default/admin.py`): tracks the
+  actually-added and actually-removed perm strings inside the
+  existing loops, then after the mutations calls
+  `invalidate_cmd_access_cache(obj)` and `invalidate_lock_cache(obj)`
+  for the target, and fires `permissions_changed` exactly once with
+  the cumulative sets. Both invalidation and signal are skipped if
+  the dispatch was a no-op (e.g. trying to add an already-present
+  permission).
+- `CmdQuell.func` (`evennia/commands/default/account.py`): on
+  successful quell or unquell, invalidates `cmd_access_cache` and
+  `lock_cache` for both the account and the active puppet (if any),
+  then fires `permissions_changed` once with `target=account`,
+  `added=()`, `removed=()`, `account_mode=True`. Already-quelled
+  `@quell` and already-unquelled `@unquell` no-ops do not fire.
+- Drive-by fix in `CmdQuell.func`: the `self.cmdstring in
+  ("@unquell", "@unquell")` test had a duplicated literal from the
+  +underspire.8 re-key sweep; collapsed to an equality comparison.
+
+### Invalidate-then-fire ordering
+
+The engine flushes its own caches *before* firing the signal so that
+downstream subscribers observe consistent engine state. A
+signal-driven invalidation pattern (engine listener subscribed first)
+was considered and rejected: django.dispatch ordering is import-
+order-dependent, which is too brittle for a correctness-critical
+ordering invariant.
+
+### Tests
+
+`evennia/commands/tests.py:TestPermissionsChangedSignal` covers:
+
+- `@perm <obj> = <perm>`: cache cleared on the target, signal fired
+  with `added=(perm,)` / `removed=()`.
+- `@perm/del <obj> = <perm>`: cache cleared, signal fired with
+  `added=()` / `removed=(perm,)`.
+- `@perm` against an already-set permission: no-op, no cache flush,
+  no signal.
+- `@quell` from unquelled state: cache cleared on account and
+  active puppet, signal fired with empty sets and
+  `account_mode=True`.
+- `@unquell` from quelled state: same shape.
+
+### Migration
+
+Downstream code that monkey-patched `CmdPerm.func` / `CmdQuell.func`
+to invalidate caches (or to run audit hooks) can subscribe to
+`permissions_changed` instead. Example:
+
+```python
+from django.dispatch import receiver
+from evennia.commands.signals import permissions_changed
+
+@receiver(permissions_changed)
+def audit_perm_change(sender, target, added, removed, actor,
+                      account_mode, **kwargs):
+    audit_event(actor, target, added, removed, account_mode)
+```
+
+The engine's own invalidation runs before any subscriber observes
+the signal, so subscribers can derive their own state from the
+target without worrying about cache coherence.
+
+---
+
+## 6.0.0+underspire.8 — Phase 3: token-boundary matching + drop CMD_IGNORE_PREFIXES
+
+The big semantic break. After this release, `@open` and `open` are
+distinct command keys. `CMD_IGNORE_PREFIXES` no longer strips prefix
+characters at parse time, so prefix characters are load-bearing parts
+of the key.
+
+Couples with a re-key sweep across the engine default cmdsets to align
+with the IC/OOC convention (no prefix for character actions, `@` for
+account/OOC actions). See [`.agents/docs/code-style.md`](.agents/docs/code-style.md)
+(Command Naming) for the rule and [`PHASE3_AUDIT.md`](PHASE3_AUDIT.md)
+for the full inventory.
+
+**Breaking:** any command keyed without `@` that downstream callers
+were reaching via `@`-prefix (or vice versa) will stop matching. The
+re-key list below covers every engine-default that moved.
+
+### Engine matching changes
+
+- `evennia/commands/command.py`:
+  - `Command._optimize()` no longer builds `_noprefix_aliases`. The
+    mapping from stripped-key → original-key is gone; no external
+    callers (engine, contrib, tests) read it.
+  - `Command.match()` is now single-pass, token-boundary only. The
+    `include_prefixes` kwarg is retained on the signature for
+    backward compatibility with any custom subclass that still passes
+    it, but it is ignored. Token boundary is enforced via the
+    existing `arg_regex` default (`r"^[ /]|\n|$"`).
+- `evennia/commands/cmdparser.py`:
+  - `build_matches()` no longer calls `raw_string.lstrip(
+    _CMD_IGNORE_PREFIXES)`. The `include_prefixes` kwarg is retained
+    on the signature but ignored.
+  - `cmdparser()` no longer makes a second
+    `build_matches(..., include_prefixes=False)` fallback pass on
+    no-match. Matching is single-shot.
+- `evennia/__init__.py:_init()` emits a `logger.log_warn` once at
+  server startup if `settings.CMD_IGNORE_PREFIXES` is non-empty,
+  noting that the setting is a no-op since +underspire.8 and will be
+  deleted in a future release.
+
+### Engine re-key sweep
+
+Every command listed below received a new `@`-prefixed key (and its
+aliases were re-prefixed to match). Help-text Usage lines and inline
+`Usage:` error messages were updated. Cross-references inside
+docstrings (e.g. "Use unquell" → "Use @unquell") were updated.
+
+- **admin.py**: `ban` → `@ban` (`bans` → `@bans`), `unban` → `@unban`,
+  `boot` → `@boot`, `emit` → `@emit` (`pemit`, `remit` → `@pemit`,
+  `@remit`), `force` → `@force`, `perm` → `@perm` (`setperm` →
+  `@setperm`), `wall` → `@wall`, `userpassword` → `@userpassword`.
+- **batchprocess.py**: `batchcommands` → `@batchcommands`
+  (`batchcommand`, `batchcmd` → `@batchcommand`, `@batchcmd`),
+  `batchcode` → `@batchcode` (`batchcodes` → `@batchcodes`).
+- **help.py**: `sethelp` → `@sethelp`. `help` (the player-facing
+  meta command) intentionally stays unprefixed.
+- **building.py**: `unlink` → `@unlink` (lone straggler; every other
+  builder command was already `@`-prefixed in the engine).
+- **account.py**: OOC `look` (CmdOOCLook) → `@look` (aliases `l`,
+  `ls` → `@l`, `@ls`); IC `look` in `general.py` is unchanged.
+  `charcreate` → `@charcreate`, `chardelete` → `@chardelete`,
+  `ic` → `@ic` (`puppet` → `@puppet`), `ooc` → `@ooc`
+  (`unpuppet` → `@unpuppet`), `sessions` → `@sessions`,
+  `who` → `@who` (`doing` → `@doing`), `option` → `@option`
+  (`options` → `@options`), `password` → `@password`,
+  `quit` → `@quit`, `color` → `@color`, `style` → `@style`,
+  `quell` → `@quell` (`unquell` → `@unquell`).
+- **comms.py**: `page` → `@page` (`tell` → `@tell`),
+  `irc2chan` → `@irc2chan`, `ircstatus` → `@ircstatus`,
+  `rss2chan` → `@rss2chan`, `grapevine2chan` → `@grapevine2chan`,
+  `discord2chan` → `@discord2chan` (`discord` → `@discord`).
+- **general.py**: `nick` → `@nick` (`nickname`, `nicks` → `@nickname`,
+  `@nicks`), `access` → `@access` (`groups`, `hierarchy` → `@groups`,
+  `@hierarchy`).
+
+Engine call sites that issue these commands via `execute_cmd` were
+also updated:
+
+- `CmdMvAttr.func` issues `@cpattr` / `@cpattr/move` (was unprefixed).
+- `contrib/rpg/character_creator`: dispatches `@charcreate`, `@ic`,
+  `@look` (was unprefixed).
+- `contrib/tutorials/tutorial_world/rooms`: dispatches `@quell` (was
+  unprefixed).
+- `contrib/tutorials/batchprocessor/example_batch_cmds*.ev`: the
+  example batch files now use `@create`, `@set`, `@teleport`.
+- `prototypes/tests`: test dispatches `@spawn/list` (was unprefixed).
+
+`UnloggedinCmdSet` is unchanged — pre-login commands (`connect`,
+`create`, `quit`, etc.) sit outside the IC/OOC distinction.
+
+### Tests
+
+`evennia/commands/tests.py:TestCmdParser.test_build_matches`
+rewritten for the new semantics:
+
+- Plain key matches verbatim (`test1 rock` → `test1`).
+- `@another command ...` no longer matches the unprefixed
+  `another command` key.
+- A `&`-keyed command requires the `&` in the input.
+
+All other test failures from the re-key sweep were either expected-
+output string updates (e.g. `Use unban` → `Use @unban`) or call-site
+fixes (the engine sites listed above).
+
+### Rationale
+
+`CMD_IGNORE_PREFIXES` made the `@`-prefix semantically meaningless:
+any command keyed `@open` was also reachable as `open`, and any
+command keyed `open` could be reached as `@open`. Downstream games
+(Underspire/newmoo) ended up shipping `safe_remove(EngineCmd) +
+GameCmd()` pairs to forcibly delete the engine command so the strip
+couldn't reach it. This phase removes the strip entirely so the
+prefix carries meaning, then re-keys the engine defaults to the
+IC/OOC convention so the keys ship right out of the box.
+
+### Migration
+
+- Downstream `CmdAt*` wrapper classes that only added the `@`-prefix
+  (no behavior changes) can be deleted in favor of the engine
+  defaults. The `safe_remove(EngineCmd) + add(WrapperCmd())` pairs
+  go with them.
+- Custom commands that subclassed `Command` and overrode `match()`
+  with custom prefix-strip logic should drop the prefix-strip — it's
+  a no-op now.
+- Game code that called `caller.execute_cmd("ban ...")` or similar
+  must update to the new keys (`@ban`, etc.).
+- If you want to preserve the old behavior temporarily for a
+  custom command, add the unprefixed name as an alias on your
+  Command subclass. The engine no longer does this for you.
+- `CMD_IGNORE_PREFIXES` setting is preserved in `settings_default.py`
+  for one release with a startup warning if non-empty. Slated for
+  removal in a follow-up.
+
+---
+
 ## 6.0.0+underspire.7 — ftfy normalisation in cmdhandler
 
 Moves `ftfy.fix_text` into the engine. Every dispatched raw command

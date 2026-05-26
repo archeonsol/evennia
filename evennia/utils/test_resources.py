@@ -36,13 +36,12 @@ import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
 from evennia.commands.command import Command, InterruptCommand
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.serversession import ServerSession
 from evennia.utils import ansi, create
 from evennia.utils.idmapper.models import flush_cache
-from evennia.utils.utils import all_from_module, to_str
+from evennia.utils.utils import all_from_module, inherits_from, to_str
 
 _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
@@ -418,6 +417,17 @@ class EvenniaCommandTestMixin:
         # The `self.char1` is created in the `EvenniaTest` base along with
         # other helper objects like self.room and self.obj
         caller = caller if caller else self.char1
+        # Derive the account from caller so tests that pass an alternate
+        # caller (e.g. caller=self.account2 or a different character) get
+        # the right account on cmdobj.account and in the
+        # account_command_caller normalisation providers. Falls back to
+        # self.account when caller has no account chain.
+        if inherits_from(caller, DefaultAccount):
+            cmd_account = caller
+        elif getattr(caller, "account", None) is not None:
+            cmd_account = caller.account
+        else:
+            cmd_account = self.account
         cmdobj.caller = caller
         cmdobj.cmdname = cmdstring if cmdstring else cmdobj.key
         cmdobj.raw_cmdname = cmdobj.cmdname
@@ -425,16 +435,15 @@ class EvenniaCommandTestMixin:
         cmdobj.args = input_args
         cmdobj.cmdset = cmdset
         cmdobj.session = evennia.SESSION_HANDLER.session_from_sessid(1)
-        cmdobj.account = self.account
+        cmdobj.account = cmd_account
         cmdobj.raw_string = raw_string if raw_string is not None else cmdobj.key + " " + input_args
         cmdobj.obj = obj or (caller if caller else self.char1)
         # Mirror cmdhandler's AccountCommand normalisation so test fixtures
         # see the same caller/character/account shape as real dispatch.
         if getattr(cmdobj, "account_command_caller", False):
-            from evennia.commands.cmdhandler import \
-                _normalize_account_command_caller
+            from evennia.commands.cmdhandler import _normalize_account_command_caller
 
-            providers = {"account": self.account}
+            providers = {"account": cmd_account}
             if cmdobj.session is not None and getattr(cmdobj.session, "puppet", None) is not None:
                 providers["object"] = cmdobj.session.puppet
             _normalize_account_command_caller(cmdobj, caller, providers)

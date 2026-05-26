@@ -319,8 +319,6 @@ class Command(metaclass=CommandMeta):
         # with an argument 'at')
         self._keyaliases = tuple(sorted(matches, key=len, reverse=True))
 
-        self._noprefix_aliases = {x.lstrip(CMD_IGNORE_PREFIXES): x for x in self._keyaliases}
-
     def set_key(self, new_key):
         """
         Update key.
@@ -362,29 +360,31 @@ class Command(metaclass=CommandMeta):
         in order to determine if this is the one we wanted. cmdname was
         previously extracted from the raw string by the system.
 
+        Token-boundary matching: ``cmdname`` matches a key/alias when the key
+        is a literal prefix of ``cmdname`` and the next character is one that
+        ``arg_regex`` accepts as a boundary (default: whitespace, ``/`` for
+        switches, newline, or end-of-string). Since 6.0.0+underspire.8,
+        ``CMD_IGNORE_PREFIXES`` no longer strips prefix characters at parse
+        time, so ``@open`` and ``open`` are distinct keys.
+
         Args:
             cmdname (str): Always lowercase when reaching this point.
 
         Kwargs:
-            include_prefixes (bool): If false, will compare against the _noprefix
-                variants of commandnames.
+            include_prefixes (bool): Retained for backward compatibility with
+                custom subclasses that still pass this kwarg. Ignored since
+                +underspire.8 (single-pass matching).
 
         Returns:
-            result (bool): Match result.
+            result (tuple): ``(matched_key, matched_key)`` on match, or
+                ``(None, None)`` if no key/alias matched.
 
         """
-        if include_prefixes:
-            for cmd_key in self._keyaliases:
-                if cmdname.startswith(cmd_key) and (
-                    not self.arg_regex or self.arg_regex.match(cmdname[len(cmd_key) :])
-                ):
-                    return cmd_key, cmd_key
-        else:
-            for k, v in self._noprefix_aliases.items():
-                if cmdname.startswith(k) and (
-                    not self.arg_regex or self.arg_regex.match(cmdname[len(k) :])
-                ):
-                    return k, v
+        for cmd_key in self._keyaliases:
+            if cmdname.startswith(cmd_key) and (
+                not self.arg_regex or self.arg_regex.match(cmdname[len(cmd_key) :])
+            ):
+                return cmd_key, cmd_key
         return None, None
 
     def access(self, srcobj, access_type="cmd", default=False, session=None):

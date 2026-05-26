@@ -10,6 +10,9 @@ import time
 from django.conf import settings
 
 import evennia
+from evennia.commands.cmd_access_cache import invalidate_cmd_access_cache
+from evennia.commands.signals import permissions_changed
+from evennia.locks.lockhandler import invalidate_lock_cache
 from evennia.server.models import ServerConfig
 from evennia.utils import class_from_module, evtable, logger, search
 
@@ -34,8 +37,8 @@ class CmdBoot(COMMAND_DEFAULT_CLASS):
     """
     kick an account from the server.
 
-    Usage
-      boot[/switches] <account obj> [: reason]
+    Usage:
+      @boot[/switches] <account obj> [: reason]
 
     Switches:
       quiet - Silently boot without informing account
@@ -45,7 +48,7 @@ class CmdBoot(COMMAND_DEFAULT_CLASS):
     supplied it will be echoed to the user unless /quiet is set.
     """
 
-    key = "boot"
+    key = "@boot"
     switch_options = ("quiet", "sid")
     locks = "cmd:perm(boot) or perm(Admin)"
     help_category = "Admin"
@@ -56,7 +59,7 @@ class CmdBoot(COMMAND_DEFAULT_CLASS):
         args = self.args
 
         if not args:
-            caller.msg("Usage: boot[/switches] <account> [:reason]")
+            caller.msg("Usage: @boot[/switches] <account> [:reason]")
             return
 
         if ":" in args:
@@ -138,7 +141,7 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
     ban an account from the server
 
     Usage:
-      ban [<name or ip> [: reason]]
+      @ban [<name or ip> [: reason]]
 
     Without any arguments, shows numbered list of active bans.
 
@@ -154,10 +157,10 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
     wildcard.
 
     Examples:
-      ban thomas             - ban account 'thomas'
-      ban/ip 134.233.2.111   - ban specific ip address
-      ban/ip 134.233.2.*     - ban all in a subnet
-      ban/ip 134.233.*.*     - even wider ban
+      @ban thomas             - ban account 'thomas'
+      @ban/ip 134.233.2.111   - ban specific ip address
+      @ban/ip 134.233.2.*     - ban all in a subnet
+      @ban/ip 134.233.*.*     - even wider ban
 
     A single IP filter can be easy to circumvent by changing computers
     or requesting a new IP address. Setting a wide IP block filter with
@@ -167,8 +170,8 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
 
     """
 
-    key = "ban"
-    aliases = ["bans"]
+    key = "@ban"
+    aliases = ["@bans"]
     locks = "cmd:perm(ban) or perm(Developer)"
     help_category = "Admin"
 
@@ -225,7 +228,7 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
         # save updated banlist
         banlist.append(bantup)
         ServerConfig.objects.conf("server_bans", banlist)
-        self.msg(f"{typ}-ban '|w{ban}|n' was added. Use |wunban|n to reinstate.")
+        self.msg(f"{typ}-ban '|w{ban}|n' was added. Use |w@unban|n to reinstate.")
         logger.log_sec(
             f"Banned {typ}: {ban.strip()} (Caller: {self.caller}, IP: {self.session.address})."
         )
@@ -236,16 +239,16 @@ class CmdUnban(COMMAND_DEFAULT_CLASS):
     remove a ban from an account
 
     Usage:
-      unban <banid>
+      @unban <banid>
 
-    This will clear an account name/ip ban previously set with the ban
+    This will clear an account name/ip ban previously set with the @ban
     command.  Use this command without an argument to view a numbered
     list of bans. Use the numbers in this list to select which one to
     unban.
 
     """
 
-    key = "unban"
+    key = "@unban"
     locks = "cmd:perm(unban) or perm(Developer)"
     help_category = "Admin"
 
@@ -291,9 +294,9 @@ class CmdEmit(COMMAND_DEFAULT_CLASS):
     admin command for emitting message to multiple objects
 
     Usage:
-      emit[/switches] [<obj>, <obj>, ... =] <message>
-      remit           [<obj>, <obj>, ... =] <message>
-      pemit           [<obj>, <obj>, ... =] <message>
+      @emit[/switches] [<obj>, <obj>, ... =] <message>
+      @remit          [<obj>, <obj>, ... =] <message>
+      @pemit          [<obj>, <obj>, ... =] <message>
 
     Switches:
       room     -  limit emits to rooms only (default)
@@ -302,13 +305,13 @@ class CmdEmit(COMMAND_DEFAULT_CLASS):
 
     Emits a message to the selected objects or to
     your immediate surroundings. If the object is a room,
-    send to its contents. remit and pemit are just
-    limited forms of emit, for sending to rooms and
+    send to its contents. @remit and @pemit are just
+    limited forms of @emit, for sending to rooms and
     to accounts respectively.
     """
 
-    key = "emit"
-    aliases = ["pemit", "remit"]
+    key = "@emit"
+    aliases = ["@pemit", "@remit"]
     switch_options = ("room", "accounts", "contents")
     locks = "cmd:perm(emit) or perm(Builder)"
     help_category = "Admin"
@@ -321,9 +324,9 @@ class CmdEmit(COMMAND_DEFAULT_CLASS):
 
         if not args:
             string = "Usage: "
-            string += "\nemit[/switches] [<obj>, <obj>, ... =] <message>"
-            string += "\nremit           [<obj>, <obj>, ... =] <message>"
-            string += "\npemit           [<obj>, <obj>, ... =] <message>"
+            string += "\n@emit[/switches] [<obj>, <obj>, ... =] <message>"
+            string += "\n@remit          [<obj>, <obj>, ... =] <message>"
+            string += "\n@pemit          [<obj>, <obj>, ... =] <message>"
             caller.msg(string)
             return
 
@@ -332,10 +335,10 @@ class CmdEmit(COMMAND_DEFAULT_CLASS):
         send_to_contents = "contents" in self.switches
 
         # we check which command was used to force the switches
-        if self.cmdstring == "remit":
+        if self.cmdstring == "@remit":
             rooms_only = True
             send_to_contents = True
-        elif self.cmdstring == "pemit":
+        elif self.cmdstring == "@pemit":
             accounts_only = True
 
         if not self.rhs:
@@ -372,12 +375,12 @@ class CmdNewPassword(COMMAND_DEFAULT_CLASS):
     change the password of an account
 
     Usage:
-      userpassword <user obj> = <new password>
+      @userpassword <user obj> = <new password>
 
     Set an account's password.
     """
 
-    key = "userpassword"
+    key = "@userpassword"
     locks = "cmd:perm(newpassword) or perm(Admin)"
     help_category = "Admin"
 
@@ -387,7 +390,7 @@ class CmdNewPassword(COMMAND_DEFAULT_CLASS):
         caller = self.caller
 
         if not self.rhs:
-            self.msg("Usage: userpassword <user obj> = <new password>")
+            self.msg("Usage: @userpassword <user obj> = <new password>")
             return
 
         # the account search also matches 'me' etc.
@@ -420,8 +423,8 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
     set the permissions of an account/object
 
     Usage:
-      perm[/switch] <object> [= <permission>[,<permission>,...]]
-      perm[/switch] *<account> [= <permission>[,<permission>,...]]
+      @perm[/switch] <object> [= <permission>[,<permission>,...]]
+      @perm[/switch] *<account> [= <permission>[,<permission>,...]]
 
     Switches:
       del     -  delete the given permission from <object> or <account>.
@@ -431,8 +434,8 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
     or account. If no permission is given, list all permissions on <object>.
     """
 
-    key = "perm"
-    aliases = "setperm"
+    key = "@perm"
+    aliases = "@setperm"
     switch_options = ("del", "account")
     locks = "cmd:perm(perm) or perm(Developer)"
     help_category = "Admin"
@@ -445,7 +448,7 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
         lhs, rhs = self.lhs, self.rhs
 
         if not self.args:
-            string = "Usage: perm[/switch] object [ = permission, permission, ...]"
+            string = "Usage: @perm[/switch] object [ = permission, permission, ...]"
             caller.msg(string)
             return
 
@@ -488,6 +491,8 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
 
         caller_result = []
         target_result = []
+        added = []
+        removed = []
         if "del" in switches:
             # delete the given permission(s) from object.
             for perm in self.rhslist:
@@ -503,12 +508,16 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                     target_result.append(
                         f"\n{caller.name} revokes the permission(s) {perm} from you."
                     )
+                    removed.append(perm)
                     logger.log_sec(
                         f"Permissions Deleted: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
                     )
         else:
-            # add a new permission
-            permissions = obj.permissions.all()
+            # add a new permission. obj.permissions.all() returns
+            # lowercased strings, so build a case-insensitive set for
+            # the "already defined" check — otherwise typing `Builder`
+            # against a stored `builder` fell through to re-add.
+            permissions_lower = {p.lower() for p in obj.permissions.all()}
 
             for perm in self.rhslist:
                 # don't allow to set a permission higher in the hierarchy than
@@ -521,10 +530,11 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                     )
                     return
 
-                if perm in permissions:
+                if perm.lower() in permissions_lower:
                     caller_result.append(f"\nPermission '{perm}' is already defined on {obj.name}.")
                 else:
                     obj.permissions.add(perm)
+                    added.append(perm)
                     plystring = "the Account" if accountmode else "the Object/Character"
                     caller_result.append(
                         f"\nPermission '{perm}' given to {obj.name} ({plystring})."
@@ -536,6 +546,22 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                         f"Permissions Added: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
                     )
 
+        # Engine owns the cmd_access and lock caches; flush them for the
+        # mutated entity before any downstream listener observes the new
+        # permission state, then fan out the signal. Subscribers that
+        # invalidate their own derived caches see consistent engine state.
+        if added or removed:
+            invalidate_cmd_access_cache(obj)
+            invalidate_lock_cache(obj)
+            permissions_changed.send_robust(
+                sender=type(self),
+                target=obj,
+                added=tuple(added),
+                removed=tuple(removed),
+                actor=caller,
+                account_mode=accountmode,
+            )
+
         caller.msg("".join(caller_result).strip())
         if target_result:
             obj.msg("".join(target_result).strip())
@@ -546,20 +572,20 @@ class CmdWall(COMMAND_DEFAULT_CLASS):
     make an announcement to all
 
     Usage:
-      wall <message>
+      @wall <message>
 
     Announces a message to all connected sessions
     including all currently unlogged in.
     """
 
-    key = "wall"
+    key = "@wall"
     locks = "cmd:perm(wall) or perm(Admin)"
     help_category = "Admin"
 
     def func(self):
         """Implements command"""
         if not self.args:
-            self.msg("Usage: wall <message>")
+            self.msg("Usage: @wall <message>")
             return
         message = f'{self.caller.name} shouts "{self.args}"'
         self.msg("Announcing to all connected sessions ...")
@@ -571,13 +597,13 @@ class CmdForce(COMMAND_DEFAULT_CLASS):
     forces an object to execute a command
 
     Usage:
-        force <object>=<command string>
+        @force <object>=<command string>
 
     Example:
-        force bob=get stick
+        @force bob=get stick
     """
 
-    key = "force"
+    key = "@force"
     locks = "cmd:perm(spawn) or perm(Builder)"
     help_category = "Building"
     perm_used = "edit"

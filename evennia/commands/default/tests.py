@@ -25,15 +25,13 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command, InterruptCommand
-from evennia.commands.default import (account, admin, batchprocess, building,
-                                      comms, general)
+from evennia.commands.default import account, admin, batchprocess, building, comms, general
 from evennia.commands.default import help as help_module
 from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.command import Command
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.prototypes import prototypes as protlib
 from evennia.utils import create, gametime, utils
 from evennia.utils.search import search_object
@@ -393,8 +391,7 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         self.timedelay = 5
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import \
-                TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
         _TASK_HANDLER.clock = task.Clock()
         self.task_handler = _TASK_HANDLER
         self.task_handler.clear()
@@ -583,7 +580,7 @@ class TestAdmin(BaseEvenniaCommandTest):
         self.call(admin.CmdWall(), "Test", "Announcing to all connected sessions ...")
 
     def test_ban(self):
-        self.call(admin.CmdBan(), "Char", "Name-ban 'char' was added. Use unban to reinstate.")
+        self.call(admin.CmdBan(), "Char", "Name-ban 'char' was added. Use @unban to reinstate.")
 
     def test_force(self):
         cid = self.char2.id
@@ -694,7 +691,7 @@ class TestAccount(BaseEvenniaCommandTest):
         self.call(
             account.CmdCharCreate(),
             "Test1=Test char",
-            "Created new character Test1. Use ic Test1 to enter the game",
+            "Created new character Test1. Use @ic Test1 to enter the game",
             caller=self.account,
         )
 
@@ -1973,10 +1970,14 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.channel.connect(self.char1)
         self.cmdchannel = cmd_comms.CmdChannel
         # Disable engine pre-parse caller normalisation for this test
-        # context (test uses a Character caller, not an Account).
+        # context (test uses a Character caller, not an Account). Store
+        # the original value so tearDown can restore it; otherwise the
+        # mutation leaks across the rest of the test run.
+        self._orig_acct_caller = self.cmdchannel.account_command_caller
         self.cmdchannel.account_command_caller = False
 
     def tearDown(self):
+        self.cmdchannel.account_command_caller = self._orig_acct_caller
         if self.channel.pk:
             self.channel.delete()
 
@@ -2157,7 +2158,10 @@ class TestDiscord(BaseEvenniaCommandTest):
         self.channel = create.create_channel(key="testchannel", desc="A test channel")
         self.cmddiscord = cmd_comms.CmdDiscord2Chan
         # Disable engine pre-parse caller normalisation for this test
-        # context (test uses a Character caller, not an Account).
+        # context (test uses a Character caller, not an Account). Store
+        # the original value so tearDown can restore it; otherwise the
+        # mutation leaks across the rest of the test run.
+        self._orig_acct_caller = self.cmddiscord.account_command_caller
         self.cmddiscord.account_command_caller = False
         # create bot manually so it doesn't get started
         self.discordbot = create.create_account(
@@ -2165,6 +2169,7 @@ class TestDiscord(BaseEvenniaCommandTest):
         )
 
     def tearDown(self):
+        self.cmddiscord.account_command_caller = self._orig_acct_caller
         if self.channel.pk:
             self.channel.delete()
 

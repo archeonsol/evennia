@@ -24,7 +24,10 @@ from codecs import lookup as codecs_lookup
 from django.conf import settings
 
 import evennia
+from evennia.commands.cmd_access_cache import invalidate_cmd_access_cache
 from evennia.commands.command import AccountCommand
+from evennia.commands.signals import permissions_changed
+from evennia.locks.lockhandler import invalidate_lock_cache
 from evennia.utils import create, logger, search, utils
 
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
@@ -84,7 +87,7 @@ class CmdOOCLook(MuxAccountLookCommand):
     look while out-of-character
 
     Usage:
-      look
+      @look
 
     Look in the ooc state.
     """
@@ -94,8 +97,8 @@ class CmdOOCLook(MuxAccountLookCommand):
     # concept of location or "self". If we are controlling
     # a character, pass control over to normal look.
 
-    key = "look"
-    aliases = ["l", "ls"]
+    key = "@look"
+    aliases = ["@l", "@ls"]
     locks = "cmd:all()"
     help_category = "General"
 
@@ -112,7 +115,7 @@ class CmdOOCLook(MuxAccountLookCommand):
 
         if _AUTO_PUPPET_ON_LOGIN and _MAX_NR_CHARACTERS == 1 and self.playable:
             # only one exists and is allowed - simplify
-            self.msg("You are out-of-character (OOC).\nUse |wic|n to get back into the game.")
+            self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
             return
 
         # call on-account look helper method
@@ -124,7 +127,7 @@ class CmdCharCreate(AccountCommand):
     create a new character
 
     Usage:
-      charcreate <charname> [= desc]
+      @charcreate <charname> [= desc]
 
     Create a new character, optionally giving it a description. You
     may use upper-case letters in the name - you will nevertheless
@@ -132,7 +135,7 @@ class CmdCharCreate(AccountCommand):
     if you want.
     """
 
-    key = "charcreate"
+    key = "@charcreate"
     locks = "cmd:pperm(Player)"
     help_category = "General"
 
@@ -142,7 +145,7 @@ class CmdCharCreate(AccountCommand):
         """create the new character"""
         account = self.account
         if not self.args:
-            self.msg("Usage: charcreate <charname> [= description]")
+            self.msg("Usage: @charcreate <charname> [= description]")
             return
         key = self.lhs
         description = self.rhs or "This is a character."
@@ -157,7 +160,7 @@ class CmdCharCreate(AccountCommand):
             return
 
         self.msg(
-            f"Created new character {new_character.key}. Use |wic {new_character.key}|n to enter"
+            f"Created new character {new_character.key}. Use |w@ic {new_character.key}|n to enter"
             " the game as this character."
         )
 
@@ -167,12 +170,12 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
     delete a character - this cannot be undone!
 
     Usage:
-        chardelete <charname>
+        @chardelete <charname>
 
     Permanently deletes one of your characters.
     """
 
-    key = "chardelete"
+    key = "@chardelete"
     locks = "cmd:pperm(Player)"
     help_category = "General"
 
@@ -181,7 +184,7 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
         account = self.account
 
         if not self.args:
-            self.msg("Usage: chardelete <charactername>")
+            self.msg("Usage: @chardelete <charactername>")
             return
 
         # use the playable_characters list to search
@@ -236,7 +239,7 @@ class CmdIC(AccountCommand):
     control an object you have permission to puppet
 
     Usage:
-      ic <character>
+      @ic <character>
 
     Go in-character (IC) as a given Character.
 
@@ -249,10 +252,10 @@ class CmdIC(AccountCommand):
     as you the account have access right to puppet it.
     """
 
-    key = "ic"
+    key = "@ic"
     # lock must be all() for different puppeted objects to access it.
     locks = "cmd:all()"
-    aliases = "puppet"
+    aliases = "@puppet"
     help_category = "General"
 
     # this is used by the parent
@@ -270,7 +273,7 @@ class CmdIC(AccountCommand):
         if not self.args:
             character_candidates = [account.db._last_puppet] if account.db._last_puppet else []
             if not character_candidates:
-                self.msg("Usage: ic <character>")
+                self.msg("Usage: @ic <character>")
                 return
         else:
             # argument given
@@ -351,16 +354,16 @@ class CmdOOC(MuxAccountLookCommand):
     stop puppeting and go ooc
 
     Usage:
-      ooc
+      @ooc
 
     Go out-of-character (OOC).
 
     This will leave your current character and put you in a incorporeal OOC state.
     """
 
-    key = "ooc"
+    key = "@ooc"
     locks = "cmd:pperm(Player)"
-    aliases = "unpuppet"
+    aliases = "@unpuppet"
     help_category = "General"
 
     # this is used by the parent
@@ -386,7 +389,7 @@ class CmdOOC(MuxAccountLookCommand):
 
             if _AUTO_PUPPET_ON_LOGIN and _MAX_NR_CHARACTERS == 1 and self.playable:
                 # only one character exists and is allowed - simplify
-                self.msg("You are out-of-character (OOC).\nUse |wic|n to get back into the game.")
+                self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
                 return
 
             self.msg(account.at_look(target=self.playable, session=session))
@@ -400,13 +403,13 @@ class CmdSessions(AccountCommand):
     check your connected session(s)
 
     Usage:
-      sessions
+      @sessions
 
     Lists the sessions currently connected to your account.
 
     """
 
-    key = "sessions"
+    key = "@sessions"
     locks = "cmd:all()"
     help_category = "General"
 
@@ -436,15 +439,15 @@ class CmdWho(AccountCommand):
     list who is currently online
 
     Usage:
-      who
-      doing
+      @who
+      @doing
 
-    Shows who is currently online. Doing is an alias that limits info
+    Shows who is currently online. @doing is an alias that limits info
     also for those with all permissions.
     """
 
-    key = "who"
-    aliases = "doing"
+    key = "@who"
+    aliases = "@doing"
     locks = "cmd:all()"
 
     # this is used by the parent
@@ -458,7 +461,7 @@ class CmdWho(AccountCommand):
 
         session_list = sorted(session_list, key=lambda o: o.account.key)
 
-        if self.cmdstring == "doing":
+        if self.cmdstring == "@doing":
             show_session_data = False
         else:
             show_session_data = account.check_permstring("Developer") or account.check_permstring(
@@ -522,7 +525,7 @@ class CmdOption(AccountCommand):
     Set an account option
 
     Usage:
-      option[/save] [name = value]
+      @option[/save] [name = value]
 
     Switches:
       save - Save the current option settings for future logins.
@@ -535,8 +538,8 @@ class CmdOption(AccountCommand):
 
     """
 
-    key = "option"
-    aliases = "options"
+    key = "@option"
+    aliases = "@options"
     switch_options = ("save", "clear")
     locks = "cmd:all()"
 
@@ -601,7 +604,7 @@ class CmdOption(AccountCommand):
             return
 
         if not self.rhs:
-            self.msg("Usage: option [name = [value]]")
+            self.msg("Usage: @option [name = [value]]")
             return
 
         # Try to assign new values
@@ -697,12 +700,12 @@ class CmdPassword(AccountCommand):
     change your password
 
     Usage:
-      password <old password> = <new password>
+      @password <old password> = <new password>
 
     Changes your password. Make sure to pick a safe one.
     """
 
-    key = "password"
+    key = "@password"
     locks = "cmd:pperm(Player)"
 
     # this is used by the parent
@@ -712,7 +715,7 @@ class CmdPassword(AccountCommand):
 
         account = self.account
         if not self.rhs:
-            self.msg("Usage: password <oldpass> = <newpass>")
+            self.msg("Usage: @password <oldpass> = <newpass>")
             return
         oldpass = self.lhslist[0]  # Both of these are
         newpass = self.rhslist[0]  # already stripped by parse()
@@ -740,7 +743,7 @@ class CmdQuit(AccountCommand):
     quit the game
 
     Usage:
-      quit
+      @quit
 
     Switch:
       all - disconnect all connected sessions
@@ -749,7 +752,7 @@ class CmdQuit(AccountCommand):
     game. Use the /all switch to disconnect from all sessions.
     """
 
-    key = "quit"
+    key = "@quit"
     switch_options = ("all",)
     locks = "cmd:all()"
 
@@ -787,7 +790,7 @@ class CmdColorTest(AccountCommand):
     testing which colors your client support
 
     Usage:
-      color ansi | xterm256 | truecolor
+      @color ansi | xterm256 | truecolor
 
     Prints a color map along with in-mud color codes to use to produce
     them.  It also tests what is supported in your client. Choices are
@@ -796,7 +799,7 @@ class CmdColorTest(AccountCommand):
     color - if not you will see rubbish appear.
     """
 
-    key = "color"
+    key = "@color"
     locks = "cmd:all()"
     help_category = "General"
 
@@ -948,7 +951,7 @@ class CmdColorTest(AccountCommand):
 
         else:
             # malformed input
-            self.msg("Usage: color ansi || xterm256 || truecolor")
+            self.msg("Usage: @color ansi || xterm256 || truecolor")
 
 
 class CmdQuell(AccountCommand):
@@ -956,8 +959,8 @@ class CmdQuell(AccountCommand):
     use character's permissions instead of account's
 
     Usage:
-      quell
-      unquell
+      @quell
+      @unquell
 
     Normally the permission level of the Account is used when puppeting a
     Character/Object to determine access. This command will switch the lock
@@ -965,11 +968,11 @@ class CmdQuell(AccountCommand):
     useful mainly for testing.
     Hierarchical permission quelling only work downwards, thus an Account cannot
     use a higher-permission Character to escalate their permission level.
-    Use the unquell command to revert back to normal operation.
+    Use the @unquell command to revert back to normal operation.
     """
 
-    key = "quell"
-    aliases = ["unquell"]
+    key = "@quell"
+    aliases = ["@unquell"]
     locks = "cmd:pperm(Player)"
     help_category = "General"
 
@@ -992,17 +995,20 @@ class CmdQuell(AccountCommand):
         permstr = (
             account.is_superuser and "(superuser)" or "(%s)" % ", ".join(account.permissions.all())
         )
-        if self.cmdstring in ("unquell", "unquell"):
+        mutated = False
+        if self.cmdstring == "@unquell":
             if not account.attributes.get("_quell"):
                 self.msg(f"Already using normal Account permissions {permstr}.")
             else:
                 account.attributes.remove("_quell")
                 self.msg(f"Account permissions {permstr} restored.")
+                mutated = True
         else:
             if account.attributes.get("_quell"):
                 self.msg(f"Already quelling Account {permstr} permissions.")
                 return
             account.attributes.add("_quell", True)
+            mutated = True
             puppet = self.session.puppet if self.session else None
             if puppet:
                 cpermstr = "(%s)" % ", ".join(puppet.permissions.all())
@@ -1011,11 +1017,31 @@ class CmdQuell(AccountCommand):
                     f"\n(Note: If this is higher than Account permissions {permstr},"
                     " the lowest of the two will be used.)"
                 )
-                cpermstr += "\nUse unquell to return to normal permission usage."
+                cpermstr += "\nUse @unquell to return to normal permission usage."
                 self.msg(cpermstr)
             else:
-                self.msg(f"Quelling Account permissions {permstr}. Use unquell to get them back.")
+                self.msg(f"Quelling Account permissions {permstr}. Use @unquell to get them back.")
         self._recache_locks(account)
+
+        # Quell flips the effective permission stack without changing the
+        # raw permission list. Invalidate cmd_access and lock caches for
+        # the account *and* the active puppet so character-level access
+        # checks see the new effective perms, then fire the signal.
+        if mutated:
+            puppet = self.session.puppet if self.session else None
+            invalidate_cmd_access_cache(account)
+            invalidate_lock_cache(account)
+            if puppet is not None:
+                invalidate_cmd_access_cache(puppet)
+                invalidate_lock_cache(puppet)
+            permissions_changed.send_robust(
+                sender=type(self),
+                target=account,
+                added=(),
+                removed=(),
+                actor=self.caller,
+                account_mode=True,
+            )
 
 
 class CmdStyle(COMMAND_DEFAULT_CLASS):
@@ -1023,15 +1049,15 @@ class CmdStyle(COMMAND_DEFAULT_CLASS):
     In-game style options
 
     Usage:
-      style
-      style <option> = <value>
+      @style
+      @style <option> = <value>
 
     Configure stylings for in-game display elements like table borders, help
     entries etc. Use without arguments to see all available options.
 
     """
 
-    key = "style"
+    key = "@style"
     switch_options = ["clear"]
 
     def func(self):

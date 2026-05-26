@@ -1311,10 +1311,10 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
     send a private message to another account
 
     Usage:
-      page <account> <message>
-      page[/switches] [<account>,<account>,... = <message>]
-      tell        ''
-      page <number>
+      @page <account> <message>
+      @page[/switches] [<account>,<account>,... = <message>]
+      @tell        ''
+      @page <number>
 
     Switches:
       last - shows who you last messaged
@@ -1326,8 +1326,8 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
 
     """
 
-    key = "page"
-    aliases = ["tell"]
+    key = "@page"
+    aliases = ["@tell"]
     switch_options = ("last", "list")
     locks = "cmd:not pperm(page_banned)"
     help_category = "Comms"
@@ -1554,8 +1554,8 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
     Link an evennia channel to an external IRC channel
 
     Usage:
-      irc2chan[/switches] <evennia_channel> = <ircnetwork> <port> <#irchannel> <botname>[:typeclass]
-      irc2chan/delete botname|#dbid
+      @irc2chan[/switches] <evennia_channel> = <ircnetwork> <port> <#irchannel> <botname>[:typeclass]
+      @irc2chan/delete botname|#dbid
 
     Switches:
       /delete     - this will delete the bot and remove the irc connection
@@ -1566,8 +1566,8 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
       /ssl        - use an SSL-encrypted connection
 
     Example:
-      irc2chan myircchan = irc.dalnet.net 6667 #mychannel evennia-bot
-      irc2chan public = irc.freenode.net 6667 #evgaming #evbot:accounts.mybot.MyBot
+      @irc2chan myircchan = irc.dalnet.net 6667 #mychannel evennia-bot
+      @irc2chan public = irc.freenode.net 6667 #evgaming #evbot:accounts.mybot.MyBot
 
     This creates an IRC bot that connects to a given IRC network and
     channel. If a custom typeclass path is given, this will be used
@@ -1580,7 +1580,7 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
     Provide an optional bot class path to use a custom bot.
     """
 
-    key = "irc2chan"
+    key = "@irc2chan"
     switch_options = ("delete", "remove", "disconnect", "list", "ssl")
     locks = "cmd:serversetting(IRC_ENABLED) and pperm(Developer)"
     help_category = "Comms"
@@ -1614,7 +1614,7 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
 
         if not self.args or not self.rhs:
             string = (
-                "Usage: irc2chan[/switches] <evennia_channel> ="
+                "Usage: @irc2chan[/switches] <evennia_channel> ="
                 " <ircnetwork> <port> <#irchannel> <botname>[:typeclass]"
             )
             self.msg(string)
@@ -1670,10 +1670,10 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
     Check and reboot IRC bot.
 
     Usage:
-        ircstatus [#dbref ping | nicklist | reconnect]
+        @ircstatus [#dbref ping | nicklist | reconnect]
 
     If not given arguments, will return a list of all bots (like
-    irc2chan/list). The 'ping' argument will ping the IRC network to
+    @irc2chan/list). The 'ping' argument will ping the IRC network to
     see if the connection is still responsive. The 'nicklist' argument
     (aliases are 'who' and 'users') will return a list of users on the
     remote IRC channel.  Finally, 'reconnect' will force the client to
@@ -1684,7 +1684,7 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
 
     """
 
-    key = "ircstatus"
+    key = "@ircstatus"
     locks = "cmd:serversetting(IRC_ENABLED) and perm(ircstatus) or perm(Builder))"
     help_category = "Comms"
 
@@ -1697,7 +1697,7 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
         # should always be on the form botname option
         args = self.args.split()
         if len(args) != 2:
-            self.msg("Usage: ircstatus [#dbref ping||nicklist||reconnect]")
+            self.msg("Usage: @ircstatus [#dbref ping||nicklist||reconnect]")
             return
         botname, option = args
         if option not in ("ping", "users", "reconnect", "nicklist", "who"):
@@ -1708,7 +1708,7 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
             matches = AccountDB.objects.filter(db_is_bot=True, id=utils.dbref(botname))
         if not matches:
             self.msg(
-                "No matching IRC-bot found. Use ircstatus without arguments to list active bots."
+                "No matching IRC-bot found. Use @ircstatus without arguments to list active bots."
             )
             return
         ircbot = matches[0]
@@ -1741,7 +1741,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
     link an evennia channel to an external RSS feed
 
     Usage:
-      rss2chan[/switches] <evennia_channel> = <rss_url>
+      @rss2chan[/switches] <evennia_channel> = <rss_url>
 
     Switches:
       /disconnect - this will stop the feed and remove the connection to the
@@ -1750,7 +1750,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
       /list       - show all rss->evennia mappings
 
     Example:
-      rss2chan rsschan = http://code.google.com/feeds/p/evennia/updates/basic
+      @rss2chan rsschan = http://code.google.com/feeds/p/evennia/updates/basic
 
     This creates an RSS reader  that connects to a given RSS feed url. Updates
     will be echoed as a title and news link to the given channel. The rate of
@@ -1761,7 +1761,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
     to identify the connection uniquely.
     """
 
-    key = "rss2chan"
+    key = "@rss2chan"
     switch_options = ("disconnect", "remove", "list")
     locks = "cmd:serversetting(RSS_ENABLED) and pperm(Developer)"
     help_category = "Comms"
@@ -1824,7 +1824,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
             return
 
         if not self.args or not self.rhs:
-            string = "Usage: rss2chan[/switches] <evennia_channel> = <rss url>"
+            string = "Usage: @rss2chan[/switches] <evennia_channel> = <rss url>"
             self.msg(string)
             return
         channel = self.lhs
@@ -1850,8 +1850,8 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
     Link an Evennia channel to an external Grapevine channel
 
     Usage:
-      grapevine2chan[/switches] <evennia_channel> = <grapevine_channel>
-      grapevine2chan/disconnect <connection #id>
+      @grapevine2chan[/switches] <evennia_channel> = <grapevine_channel>
+      @grapevine2chan/disconnect <connection #id>
 
     Switches:
         /list     - (or no switch): show existing grapevine <-> Evennia
@@ -1860,7 +1860,7 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
         /delete   - alias to disconnect
 
     Example:
-        grapevine2chan mygrapevine = gossip
+        @grapevine2chan mygrapevine = gossip
 
     This creates a link between an in-game Evennia channel and an external
     Grapevine channel. The game must be registered with the Grapevine network
@@ -1868,7 +1868,7 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
     must be added to game settings.
     """
 
-    key = "grapevine2chan"
+    key = "@grapevine2chan"
     switch_options = ("disconnect", "remove", "delete", "list")
     locks = "cmd:serversetting(GRAPEVINE_ENABLED) and pperm(Developer)"
     help_category = "Comms"
@@ -1918,7 +1918,7 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
             return
 
         if not self.args or not self.rhs:
-            string = "Usage: grapevine2chan[/switches] <evennia_channel> = <grapevine_channel>"
+            string = "Usage: @grapevine2chan[/switches] <evennia_channel> = <grapevine_channel>"
             self.msg(string)
             return
 
@@ -1948,8 +1948,8 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
     Link an Evennia channel to an external Discord channel
 
     Usage:
-      discord2chan[/switches]
-      discord2chan[/switches] <evennia_channel> [= <discord_channel_id>]
+      @discord2chan[/switches]
+      @discord2chan[/switches] <evennia_channel> [= <discord_channel_id>]
 
     Switches:
         /list    - (or no switch) show existing Evennia <-> Discord links
@@ -1960,7 +1960,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
         /start   - tell the bot to start, in case it lost its connection
 
     Example:
-        discord2chan mydiscord = 555555555555555
+        @discord2chan mydiscord = 555555555555555
 
     This creates a link between an in-game Evennia channel and an external
     Discord channel. You must have a valid Discord bot application
@@ -1968,8 +1968,8 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
     must be added to settings. (Please put it in secret_settings !)
     """
 
-    key = "discord2chan"
-    aliases = ("discord",)
+    key = "@discord2chan"
+    aliases = ("@discord",)
     switch_options = (
         "channel",
         "delete",
