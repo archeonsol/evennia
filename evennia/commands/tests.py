@@ -1245,12 +1245,11 @@ class TestCmdParser(TestCase):
         self.assertIn("connect johnny ***********", logged)
         self.assertNotIn("password123", logged)
 
-    @override_settings(CMD_IGNORE_PREFIXES="@&/+")
     def test_build_matches(self):
         """Token-boundary matching (since +underspire.8).
 
-        Verifies the post-CMD_IGNORE_PREFIXES world: prefix characters
-        are load-bearing parts of the key, no parse-time stripping.
+        Prefix characters are load-bearing parts of the key with no
+        parse-time stripping.
         """
         a_cmdset = _CmdSetTest()
 
@@ -1325,9 +1324,7 @@ class TestCmdParser(TestCase):
             cmdparser.try_num_differentiators("ball-2 some args"), (2, "ball some args")
         )
 
-    @override_settings(
-        SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)", CMD_IGNORE_PREFIXES="@&/+"
-    )
+    @override_settings(SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)")
     def test_cmdparser(self):
         a_cmdset = _CmdSetTest()
         bcmd = [cmd for cmd in a_cmdset.commands if cmd.key == "test1"][0]
@@ -2460,10 +2457,9 @@ class TestCmdsetPrefixAuditDrift(TestCase):
 class TestTokenBoundaryMatch(TestCase):
     """`Command.match` is token-boundary and prefix-literal.
 
-    Since +underspire.8, `CMD_IGNORE_PREFIXES` no longer strips prefix
-    characters at parse time. `@open` and `open` are distinct keys, and
-    a key only matches when the next character of the input is a
-    boundary (whitespace, `/`, newline, or end-of-string).
+    `@open` and `open` are distinct keys, and a key only matches when the
+    next character of the input is a boundary (whitespace, `/`, newline,
+    or end-of-string). Prefix-strip was removed in +underspire.8.
     """
 
     def _make_cmd(self, key, aliases=None):
@@ -2633,3 +2629,264 @@ class TestPermissionsChangedSignal(BaseEvenniaCommandTest):
         self.assertEqual(kw["added"], ())
         self.assertEqual(kw["removed"], ())
         self.assertTrue(kw["account_mode"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: trie-backed parser + fuzzy suggestions
+# ---------------------------------------------------------------------------
+
+from unittest import mock as _trie_mock
+
+from evennia.commands import cmdparser_trie
+
+
+class _TrieCmdGoShard(Command):
+    key = "go shard"
+    aliases = ["shard"]
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+
+class _TrieCmdGo(Command):
+    key = "go"
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+
+class _TrieCmdLook(Command):
+    key = "look"
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+
+class _TrieCmdLookat(Command):
+    key = "lookat"
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+
+class _TrieCmdZebra(Command):
+    key = "zebraalpha"
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+
+class _TrieCmdZebraOverrideMatch(Command):
+    key = "zebraalpha"
+    locks = "cmd:all()"
+
+    def match(self, search_string):
+        return Command.match(self, search_string)
+
+    def func(self):
+        pass
+
+
+class TestCommandTrie(TestCase):
+    def test_insert_multiword_match(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdGoShard())
+        cs.add(_TrieCmdGo())
+        t = cmdparser_trie.CommandTrie.from_cmdset(cs)
+        self.assertIn("go", t.root)
+        m = cmdparser_trie.trie_build_matches("go shard", cs)
+        self.assertTrue(m)
+        self.assertEqual(m[0][2].key, "go shard")
+
+    def test_abbrev_unambiguous_rewrites_first_token_and_args(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        m = cmdparser_trie.trie_build_matches("l north", cs)
+        self.assertEqual(len(m), 1)
+        self.assertEqual(m[0][2].key, "look")
+        self.assertEqual(m[0][1].lstrip(), "north")
+
+    def test_abbrev_ambiguous_prefix_no_rewrite(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        cs.add(_TrieCmdLookat())
+        trie = cmdparser_trie.CommandTrie.from_cmdset(cs)
+        words, raw = cmdparser_trie._expand_first_token_abbrev(trie, ["loo"], "loo north")
+        self.assertEqual(words[0], "loo")
+        self.assertEqual(raw, "loo north")
+
+    def test_abbrev_unambiguous_prefix_rewrites_words(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        trie = cmdparser_trie.CommandTrie.from_cmdset(cs)
+        words, raw = cmdparser_trie._expand_first_token_abbrev(trie, ["l"], "l north")
+        self.assertEqual(words[0], "look")
+        self.assertEqual(raw, "look north")
+
+    def test_trie_invalidates_on_add(self):
+        """add() must invalidate the cached trie via the cheap-key check."""
+
+        class _ExitOut(Command):
+            key = "out"
+            aliases = []
+            is_exit = True
+            locks = "cmd:all()"
+
+            def func(self):
+                pass
+
+        class _ExitNorth(Command):
+            key = "north"
+            aliases = ["n"]
+            is_exit = True
+            locks = "cmd:all()"
+
+            def func(self):
+                pass
+
+        cs = CmdSet()
+        cs.add(_ExitOut())
+        m0 = cmdparser_trie.trie_build_matches("n", cs)
+        self.assertEqual(m0, [])
+        cs.add(_ExitNorth())
+        m1 = cmdparser_trie.trie_build_matches("n", cs)
+        self.assertEqual(len(m1), 1)
+        self.assertEqual(m1[0][2].key, "north")
+
+    def test_abbrev_prefers_shortest_root_key_for_same_command(self):
+        class _DualKey(Command):
+            key = "out"
+            aliases = ["o"]
+            locks = "cmd:all()"
+
+            def func(self):
+                pass
+
+        cs = CmdSet()
+        cs.add(_DualKey())
+        trie = cmdparser_trie.CommandTrie.from_cmdset(cs)
+        words, raw = cmdparser_trie._expand_first_token_abbrev(trie, ["ou"], "ou")
+        self.assertEqual(words[0], "out")
+        self.assertEqual(raw, "out")
+
+    def test_fastpath_skipped_for_exit_commands(self):
+        class _ExitLike(Command):
+            key = "out"
+            aliases = ["o"]
+            is_exit = True
+            locks = "cmd:all()"
+
+            def func(self):
+                pass
+
+        cs = CmdSet()
+        cs.add(_ExitLike())
+        calls = {"n": 0}
+        orig = Command.match
+
+        def wrapped(self, *a, **kw):
+            calls["n"] += 1
+            return orig(self, *a, **kw)
+
+        with _trie_mock.patch.object(Command, "match", wrapped):
+            cmdparser_trie.trie_build_matches("o", cs)
+        self.assertGreaterEqual(calls["n"], 1)
+
+    def test_fastpath_skips_command_match(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdZebra())
+        calls = {"n": 0}
+        orig = Command.match
+
+        def wrapped(self, *a, **kw):
+            calls["n"] += 1
+            return orig(self, *a, **kw)
+
+        with _trie_mock.patch.object(Command, "match", wrapped):
+            cmdparser_trie.trie_build_matches("zebraalpha tail", cs)
+        self.assertEqual(calls["n"], 0)
+
+    def test_fastpath_disabled_when_class_overrides_match(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdZebraOverrideMatch())
+        calls = {"n": 0}
+        orig = Command.match
+
+        def wrapped(self, *a, **kw):
+            calls["n"] += 1
+            return orig(self, *a, **kw)
+
+        with _trie_mock.patch.object(Command, "match", wrapped):
+            cmdparser_trie.trie_build_matches("zebraalpha tail", cs)
+        self.assertGreaterEqual(calls["n"], 1)
+
+    def test_fastpath_disabled_with_arg_regex(self):
+        import re as _re
+
+        class _Rx(Command):
+            key = "zebraalpha"
+            arg_regex = _re.compile(r"^@")
+            locks = "cmd:all()"
+
+            def func(self):
+                pass
+
+        cs = CmdSet()
+        cs.add(_Rx())
+        calls = {"n": 0}
+        orig = Command.match
+
+        def wrapped(self, *a, **kw):
+            calls["n"] += 1
+            return orig(self, *a, **kw)
+
+        with _trie_mock.patch.object(Command, "match", wrapped):
+            cmdparser_trie.trie_build_matches("zebraalpha tail", cs)
+        self.assertGreaterEqual(calls["n"], 1)
+
+    def test_pose_passthrough_yields_no_match(self):
+        """`.pose smiles` must produce zero trie matches against engine-style keys.
+
+        Newmoo and similar downstreams rely on a custom CMD_NOMATCH that
+        interprets leading-punctuation input as pose/emote. The trie parser
+        must not intercept ``.pose`` for any of its shortcuts (abbrev,
+        fastpath) when no command key starts with ``.``.
+        """
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        cs.add(_TrieCmdGo())
+        m = cmdparser_trie.trie_build_matches(".pose smiles", cs)
+        self.assertEqual(m, [])
+
+
+class TestFuzzyCommandSuggestions(TestCase):
+    def test_suggests_close_typo(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        out = cmdparser_trie.fuzzy_command_suggestions("loo", cs)
+        self.assertIn("look", out)
+
+    def test_skips_far_misses(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        out = cmdparser_trie.fuzzy_command_suggestions("xyzzyq", cs)
+        self.assertEqual(out, [])
+
+    def test_respects_limit(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        cs.add(_TrieCmdLookat())
+        out = cmdparser_trie.fuzzy_command_suggestions("look", cs, limit=1)
+        self.assertEqual(len(out), 1)
+
+    def test_first_token_only(self):
+        cs = CmdSet()
+        cs.add(_TrieCmdLook())
+        # Suggestions key off the first token; trailing junk does not pollute.
+        out = cmdparser_trie.fuzzy_command_suggestions("loo blah blah", cs)
+        self.assertIn("look", out)

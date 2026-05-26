@@ -18,7 +18,11 @@ from evennia.utils.ansi import ANSIString
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import is_iter, lazy_property, make_iter
 
-CMD_IGNORE_PREFIXES = settings.CMD_IGNORE_PREFIXES
+# Prefix characters stripped only when building the help search index, so
+# `help @open` and `help open` find the same entry. Parser-side prefix-strip
+# was removed in +underspire.8 (token-boundary matching); this constant
+# survives purely for help convenience and is not user-configurable.
+_HELP_PREFIX_CHARS = "@&/+"
 _RE_CMD_LOCKFUNC_IN_LOCKSTRING = re.compile(r"(^|;|\s)cmd\:\w+", re.DOTALL)
 
 
@@ -105,9 +109,9 @@ def _init_command(cls, **kwargs):
 
     # pre-prepare a help index entry for quicker lookup
     # strip the @- etc to allow help to be agnostic
-    stripped_key = cls.key[1:] if cls.key and cls.key[0] in CMD_IGNORE_PREFIXES else ""
+    stripped_key = cls.key[1:] if cls.key and cls.key[0] in _HELP_PREFIX_CHARS else ""
     stripped_aliases = " ".join(
-        al[1:] if al and al[0] in CMD_IGNORE_PREFIXES else al for al in cls.aliases
+        al[1:] if al and al[0] in _HELP_PREFIX_CHARS else al for al in cls.aliases
     )
     cls.search_index_entry = {
         "key": cls.key,
@@ -354,7 +358,7 @@ class Command(metaclass=CommandMeta):
         self.aliases = list(set(alias for alias in aliases if alias != self.key))
         self._optimize()
 
-    def match(self, cmdname, include_prefixes=True):
+    def match(self, cmdname):
         """
         This is called by the system when searching the available commands,
         in order to determine if this is the one we wanted. cmdname was
@@ -364,16 +368,10 @@ class Command(metaclass=CommandMeta):
         is a literal prefix of ``cmdname`` and the next character is one that
         ``arg_regex`` accepts as a boundary (default: whitespace, ``/`` for
         switches, newline, or end-of-string). Since 6.0.0+underspire.8,
-        ``CMD_IGNORE_PREFIXES`` no longer strips prefix characters at parse
-        time, so ``@open`` and ``open`` are distinct keys.
+        ``@open`` and ``open`` are distinct keys (no prefix-strip).
 
         Args:
             cmdname (str): Always lowercase when reaching this point.
-
-        Kwargs:
-            include_prefixes (bool): Retained for backward compatibility with
-                custom subclasses that still pass this kwarg. Ignored since
-                +underspire.8 (single-pass matching).
 
         Returns:
             result (tuple): ``(matched_key, matched_key)`` on match, or

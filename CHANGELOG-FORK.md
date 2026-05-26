@@ -14,6 +14,124 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.13 — Phase 4: trie parser default + fuzzy suggestions + Phase 3 cleanup bundle
+
+Promotes the trie-backed command parser into the engine as the default
+`COMMAND_PARSER`, bundles Levenshtein-based fuzzy suggestions on the
+no-match fallback, and finishes the Phase 3 leftovers (`include_prefixes`
+kwarg removal, `CMD_IGNORE_PREFIXES` setting deletion).
+
+### Trie parser (`evennia/commands/cmdparser_trie.py`, new module)
+
+- Ported from Underspire's `world/parsing/trie_parser.py`. Public
+  callable `cmdparser(raw_string, cmdset, caller, match_index=None,
+  session=None, **kwargs)` matches the existing `COMMAND_PARSER`
+  contract; `trie_build_matches(raw_string, cmdset)` mirrors
+  `cmdparser.build_matches`'s output.
+- Collects candidate commands via a token-prefix trie keyed on each
+  command's key/aliases (multi-word keys like `go shard` live at the
+  appropriate token depth and are also surfaced from the first token).
+- Unambiguous first-token abbreviation expansion: when the typed first
+  token is not a trie edge but uniquely prefixes one root key, the input
+  is rewritten to the shortest matching canonical key so `create_match`
+  slices `args` correctly. Gated on `COMMAND_PARSER_TRIE_ABBREV` (default
+  `True`).
+- Exact-match fast path skips `cmd.match()` for the sole candidate when
+  the class did not override `match` and is not an exit. Honors
+  `arg_regex`. Gated on `COMMAND_PARSER_TRIE_FASTPATH` (default `True`).
+- Two-tier cache on the merged cmdset (`_trie_command_trie` +
+  `_trie_command_trie_cheap` + `_trie_command_trie_sig`): the cheap key
+  (length + id-sum of commands) short-circuits the O(n) structure
+  signature on every parse. Trie rebuilds only when the cheap key
+  drifts (cmdset membership change) or the full sig drifts (in-place
+  key/alias mutation on an existing cmd). Production code rebuilds the
+  containing cmdset on any cmd change, so the cheap key catches the
+  common case.
+- Falls back to the linear `cmdparser.build_matches` when the trie
+  produces zero candidates, so commands whose `match()` overrides use
+  non-prefix logic still get evaluated.
+
+### Default flip + opt-out (`evennia/settings_default.py`)
+
+- `COMMAND_PARSER` default flipped to
+  `evennia.commands.cmdparser_trie.cmdparser`. The linear
+  `evennia.commands.cmdparser.cmdparser` stays available for opt-out
+  (set the setting back if a downstream needs the old behavior).
+- New settings: `COMMAND_PARSER_TRIE_FASTPATH` (default `True`),
+  `COMMAND_PARSER_TRIE_ABBREV` (default `True`),
+  `COMMAND_FUZZY_SUGGESTIONS_ENABLED` (default `True`),
+  `COMMAND_FUZZY_SUGGESTIONS_MAX_DIST` (default `2`),
+  `COMMAND_FUZZY_SUGGESTIONS_LIMIT` (default `3`).
+
+### Performance baseline
+
+Synthetic 500-cmd cmdset, 2000 parses across 8 unique inputs:
+- linear: ~72 µs/parse
+- trie:   ~45 µs/parse  (**1.59× faster**)
+
+Synthetic 20-cmd cmdset:
+- linear: ~3.6 µs/parse
+- trie:   ~6.8 µs/parse  (3 µs absolute regression on tiny cmdsets;
+  well below user-perceptible thresholds, and gameplay cmdsets are
+  typically 30–80 commands)
+
+### Fuzzy command suggestions (`evennia/commands/cmdhandler.py`)
+
+- The no-match fallback in the cmdhandler now offers Levenshtein-based
+  suggestions ("Maybe you meant ...?") via
+  `cmdparser_trie.fuzzy_command_suggestions`. Replaces the previous
+  `difflib`-based `string_suggestions` call.
+- Gated on `COMMAND_FUZZY_SUGGESTIONS_ENABLED` (default `True`).
+- **Only fires when no custom `CMD_NOMATCH` command is registered.**
+  Downstream code that registers a `CmdNoMatch` (e.g. emote/pose
+  parsing on leading punctuation) is unaffected: the cmdhandler
+  delegates the entire no-match branch to the override and never
+  reaches the fallback text.
+
+### Phase 3 cleanup bundle
+
+- `Command.match()` and `cmdparser.build_matches()` lose the no-op
+  `include_prefixes` kwarg (both signatures documented as ignored since
+  `+underspire.8`; engine-wide audit found no surviving call sites
+  passing it).
+- `settings.CMD_IGNORE_PREFIXES` is **deleted** from
+  `settings_default.py`. The startup warning in
+  `evennia/__init__.py:_init()` is removed.
+- Two remaining help-system consumers (help-search index in
+  `commands/command.py` and help lookup in `commands/default/help.py`)
+  inline `_HELP_PREFIX_CHARS = "@&/+"` as a module constant. Purely a
+  help-search convenience (`help @open` and `help open` resolve to the
+  same entry when only one exists); no longer user-configurable.
+
+### Migration
+
+- Downstreams setting `COMMAND_PARSER` to a custom parser keep working;
+  the new default only applies when the setting is unset.
+- Downstreams that referenced `settings.CMD_IGNORE_PREFIXES` get an
+  `AttributeError` at import. The setting was a no-op since
+  `+underspire.8`; remove the reference. If a custom help-search needs
+  the prefix-strip behavior, inline the constant locally.
+- `Command.match` and `cmdparser.build_matches` accept no `include_prefixes`
+  kwarg. Downstream subclasses overriding `match(self, cmdname,
+  include_prefixes=True)` should drop the kwarg.
+
+See [`CMDSET_MIGRATION.md`](CMDSET_MIGRATION.md) Phase 4 for the full
+downstream migration walkthrough.
+
+---
+
+## 6.0.0+underspire.12 — `redis_attr_cache` value serialisation fix
+
+Single-commit release (`ec39b3028`). `PickledObjectField` always holds a
+decoded Python object in memory, not raw bytes. Calling
+`base64.b64encode()` on a dict/list raised `TypeError`. The cache now
+serialises `db_value` via `dbsafe_encode` / `dbsafe_decode` so complex
+attribute values round-trip through the Redis L2 cache correctly.
+Cache schema bumped `v1` → `v2` to invalidate stale entries from before
+the fix.
+
+---
+
 ## 6.0.0+underspire.11 — Discord portal: interaction routing, remove_role, slash-command registration
 
 Three additions to the Discord portal layer enabling full Discord interactions

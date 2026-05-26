@@ -395,8 +395,30 @@ WEBCLIENT_OPTIONS = {
 # in contrib/examples.
 
 # The command parser module to use. See the default module for which
-# functions it must implement
-COMMAND_PARSER = "evennia.commands.cmdparser.cmdparser"
+# functions it must implement. The trie-backed parser (default since
+# 6.0.0+underspire.11) collects candidate commands via a token-prefix
+# trie before evaluating ``cmd.match()`` and falls back to the linear
+# parser when the trie yields no candidates. To opt out, set this to
+# ``"evennia.commands.cmdparser.cmdparser"`` (the linear parser is kept
+# for compatibility).
+COMMAND_PARSER = "evennia.commands.cmdparser_trie.cmdparser"
+# When True, the trie parser short-circuits ``cmd.match()`` for the sole
+# candidate when the command class does not override ``match`` and is
+# not an exit. Honors ``arg_regex``.
+COMMAND_PARSER_TRIE_FASTPATH = True
+# When True, a first input token that uniquely prefixes exactly one
+# command key is rewritten to that key before matching (so e.g. ``l``
+# resolves to ``look`` when no other root key starts with ``l``).
+COMMAND_PARSER_TRIE_ABBREV = True
+# When True, the cmdhandler's no-match fallback offers a Levenshtein-
+# based suggestion ("Maybe you meant ...?"). Only fires if no custom
+# CMD_NOMATCH command is registered.
+COMMAND_FUZZY_SUGGESTIONS_ENABLED = True
+# Maximum Levenshtein distance for a key/alias to count as a fuzzy
+# no-match suggestion.
+COMMAND_FUZZY_SUGGESTIONS_MAX_DIST = 2
+# Maximum number of fuzzy no-match suggestions to surface.
+COMMAND_FUZZY_SUGGESTIONS_LIMIT = 3
 # On a multi-match when searching objects or commands, the user has the
 # ability to search again with an index marker that differentiates
 # the results. If multiple "box" objects are found, they can by default
@@ -420,13 +442,6 @@ SEARCH_MULTIMATCH_TEMPLATE = " {name}-{number}{aliases}{info}\n"
 # both for command- and object-searches. This allows full control
 # over the error output (it uses SEARCH_MULTIMATCH_TEMPLATE by default).
 SEARCH_AT_RESULT = "evennia.utils.utils.at_search_result"
-# Single characters to ignore at the beginning of a command. When set, e.g.
-# cmd, @cmd and +cmd will all find a command "cmd" or one named "@cmd" etc. If
-# you have defined two different commands cmd and @cmd you can still enter
-# @cmd to exactly target the second one. Single-character commands consisting
-# of only a prefix character will not be stripped. Set to the empty
-# string ("") to turn off prefix ignore.
-CMD_IGNORE_PREFIXES = "@&/+"
 # When True, run `ftfy.fix_text` on every raw command string at the
 # cmdhandler entry, repairing mojibake and other encoding artefacts before
 # cmdset merging and parsing. Costs one regex sweep per dispatched command;

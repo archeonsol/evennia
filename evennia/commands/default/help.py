@@ -29,7 +29,10 @@ from evennia.utils.utils import (
     pad,
 )
 
-CMD_IGNORE_PREFIXES = settings.CMD_IGNORE_PREFIXES
+# Prefix characters stripped in help lookups so `help @open` and `help open`
+# resolve identically. See evennia.commands.command._HELP_PREFIX_CHARS for
+# the parallel constant used at help-index build time.
+_HELP_PREFIX_CHARS = "@&/+"
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 HELP_MORE_ENABLED = settings.HELP_MORE_ENABLED
 DEFAULT_HELP_CATEGORY = settings.DEFAULT_HELP_CATEGORY
@@ -481,7 +484,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
         """
 
         def strip_prefix(query):
-            if query and query[0] in settings.CMD_IGNORE_PREFIXES:
+            if query and query[0] in _HELP_PREFIX_CHARS:
                 return query[1:]
             return query
 
@@ -566,7 +569,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             str: Potentially modified key to use in help display.
 
         """
-        if key and key[0] in CMD_IGNORE_PREFIXES and key[1:] not in all_keys:
+        if key and key[0] in _HELP_PREFIX_CHARS and key[1:] not in all_keys:
             # filter out e.g. `@` prefixes from display if there is duplicate
             # with the prefix in the set (such as @open/open)
             return key[1:]

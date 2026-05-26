@@ -53,7 +53,6 @@ from evennia.commands.signals import (
 )
 from evennia.utils import logger, utils
 from evennia.utils.command_trace import get_trace_id
-from evennia.utils.utils import string_suggestions
 
 _IN_GAME_ERRORS = settings.IN_GAME_ERRORS
 
@@ -978,12 +977,13 @@ def cmdhandler(
                         sysarg = _("Command '{command}' is not available.").format(
                             command=raw_string
                         )
-                        suggestions = string_suggestions(
-                            raw_string,
-                            cmdset.get_all_cmd_keys_and_aliases(caller),
-                            cutoff=0.7,
-                            maxnum=3,
-                        )
+                        suggestions = []
+                        if getattr(settings, "COMMAND_FUZZY_SUGGESTIONS_ENABLED", True):
+                            from evennia.commands.cmdparser_trie import (
+                                fuzzy_command_suggestions,
+                            )
+
+                            suggestions = fuzzy_command_suggestions(raw_string, cmdset)
                         if suggestions:
                             sysarg += _(" Maybe you meant {command}?").format(
                                 command=utils.list_to_string(

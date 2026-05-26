@@ -13,7 +13,6 @@ from django.conf import settings
 from evennia.utils.logger import log_trace, mask_sensitive_input
 
 _MULTIMATCH_REGEX = re.compile(settings.SEARCH_MULTIMATCH_REGEX, re.I + re.U)
-_CMD_IGNORE_PREFIXES = settings.CMD_IGNORE_PREFIXES
 
 
 def create_match(cmdname, string, cmdobj, raw_cmdname):
@@ -45,7 +44,7 @@ def create_match(cmdname, string, cmdobj, raw_cmdname):
     return (cmdname, args, cmdobj, cmdlen, mratio, raw_cmdname)
 
 
-def build_matches(raw_string, cmdset, include_prefixes=False):
+def build_matches(raw_string, cmdset):
     """
     Build match tuples by matching raw_string against available commands.
 
@@ -53,10 +52,6 @@ def build_matches(raw_string, cmdset, include_prefixes=False):
         raw_string (str): Input string that can look in any way; the only assumption is
             that the sought command's name/alias must be *first* in the string.
         cmdset (CmdSet): The current cmdset to pick Commands from.
-        include_prefixes (bool): Retained for backward compatibility with the
-            two-pass parser signature. Ignored since 6.0.0+underspire.8;
-            ``CMD_IGNORE_PREFIXES`` no longer strips prefix characters at
-            parse time.
 
     Returns:
         matches (list) A list of match tuples created by `cmdparser.create_match`.

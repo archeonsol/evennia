@@ -430,19 +430,6 @@ def _init(portal_mode=False):
     del SystemCmds
     del _EvContainer
 
-    # Phase 3 (+underspire.8): CMD_IGNORE_PREFIXES is a no-op. Warn once
-    # at server startup if the operator still has it set, so the setting
-    # name doesn't silently mislead anyone reading old docs. Portal-mode
-    # is skipped so the warning isn't emitted twice in the same boot.
-    if not portal_mode and getattr(settings, "CMD_IGNORE_PREFIXES", ""):
-        logger.log_warn(
-            "settings.CMD_IGNORE_PREFIXES is set but has no effect since "
-            "6.0.0+underspire.8: command keys are matched verbatim "
-            "(token-boundary), so prefix characters like '@' are now "
-            "load-bearing parts of the key. Remove the setting or expect "
-            "it to be deleted in a future release."
-        )
-
 
 def set_trace(term_size=(140, 80), debugger="auto"):
     """
