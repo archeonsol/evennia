@@ -14,6 +14,83 @@ current git rev appended.
 
 ---
 
+## 6.0.0+underspire.14 — Phase 4 polish: integration tests + ergonomics
+
+Small post-Phase-4 release driven by downstream alignment feedback from
+the Underspire migration. Three changes, all additive.
+
+### Pose passthrough integration tests (`evennia/commands/tests.py`)
+
+New `TestPosePassthroughIntegration` exercises the full cmdhandler
+dispatch path against a fixture `CmdNoMatch`. Asserts that:
+
+- `.pose smiles`, `;nods`, and `,grins` (leading punctuation not
+  aliased by any engine default) reach `CmdNoMatch.func()` with
+  `self.raw_string` equal to the original input — no trie shortcut
+  intercepts them, no abbrev rewrite mangles the string.
+- When a custom `CMD_NOMATCH` is registered, the cmdhandler's built-in
+  fuzzy fallback (`"Maybe you meant ...?"`) is short-circuited and
+  `fuzzy_command_suggestions` is never invoked. This is the guarantee
+  that lets downstream pose/emote handlers run without the engine
+  preempting them with a typo suggestion.
+
+`:` is intentionally not covered: it's an explicit alias of the engine's
+default `CmdPose` (with `arg_regex = None`), so `:waves` legitimately
+matches CmdPose rather than falling through. The dot/semicolon/comma
+cases are the ones the trie+fuzzy work needed to keep clean.
+
+Downstreams inherit this safety net rather than each writing their own
+smoke test.
+
+### `try_num_differentiators` re-exported from `cmdparser_trie`
+
+Parser wrappers that subclass or compose on `cmdparser_trie` previously
+had to reach across to `evennia.commands.cmdparser` for
+`try_num_differentiators` (the `2-ball` multimatch separator parser).
+That's now re-exported so:
+
+```python
+from evennia.commands.cmdparser_trie import (
+    cmdparser,
+    trie_build_matches,
+    create_match,
+    try_num_differentiators,
+    fuzzy_command_suggestions,
+)
+```
+
+works without crossing modules. `__all__` is declared on
+`cmdparser_trie` to make the public surface explicit. The original
+`evennia.commands.cmdparser.try_num_differentiators` import path
+continues to work unchanged.
+
+### Migration doc clarifications (`CMDSET_MIGRATION.md` § Phase 4)
+
+Two clarifications added in response to downstream feedback:
+
+- **"Wrapper still earns its keep" path.** The optional-cleanup section
+  used to read as "delete the `COMMAND_PARSER` override." Now it
+  explicitly calls out the case where the override does work other
+  than parser selection (per-caller access caching, alias gating,
+  telemetry, outer LRU) and instructs you to rebase that wrapper on
+  `trie_build_matches` instead of deleting it.
+- **Worked example of fuzzy suggestions inside a custom `CmdNoMatch`.**
+  The engine's fuzzy fallback is *skipped* when a custom CMD_NOMATCH
+  is registered (the common case for any non-trivial game), so a
+  literal read of "fuzzy is the default" misleads downstreams. The
+  migration doc now ships a copy-pasteable `CmdNoMatch.func()` body
+  showing the `fuzzy_command_suggestions(raw, self.cmdset)` call,
+  including the rule that the call must come *after* any
+  leading-punctuation pose/emote interception so the fuzzy hint
+  doesn't preempt intended emote input.
+
+### Migration
+
+None required. All changes are additive (new test class, additive
+re-exports, doc clarifications).
+
+---
+
 ## 6.0.0+underspire.13 — Phase 4: trie parser default + fuzzy suggestions + Phase 3 cleanup bundle
 
 Promotes the trie-backed command parser into the engine as the default
