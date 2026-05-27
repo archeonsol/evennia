@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.RenameIndex(
             model_name="tag",
             new_name="typeclasses_db_key_be0c81_idx",
-            old_fields=("db_key", "db_category", "db_tagtype", "db_model"),
+            old_name="typeclasses_tag_db_key_db_category_db_tagtype_db_model_idx",
         ),
     ]

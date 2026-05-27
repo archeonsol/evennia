@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from django.conf import settings
 from django.db import models
-
+from django.db.models import Q
 from evennia.locks.lockfuncs import perm as perm_lockfunc
 from evennia.utils.utils import make_iter, to_str
 
@@ -326,7 +326,9 @@ class TagHandler(object):
         }
         return [
             conn.tag
-            for conn in getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
+            for conn in getattr(self.obj, self._m2m_fieldname)
+            .through.objects.select_related("tag")
+            .filter(**query)
         ]
 
     def _fullcache(self):
@@ -731,8 +733,85 @@ class TagHandler(object):
             else:
                 keys[tup[1]].append(tup[0])
                 data[tup[1]] = tup[2]  # overwrite previous
-        for category, key in keys.items():
-            self.add(key=key, category=category, data=data.get(category, None))
+
+        normalized = []
+        seen = set()
+        for category, category_keys in keys.items():
+            clean_category = str(category).strip().lower() if category else category
+            clean_data = data.get(category, None)
+            clean_data = str(clean_data) if clean_data is not None else None
+            for key in category_keys:
+                if not key:
+                    continue
+                clean_key = str(key).strip().lower()
+                if not clean_key:
+                    continue
+                ident = (clean_key, clean_category)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                normalized.append((clean_key, clean_category, clean_data))
+
+        if not normalized:
+            return
+
+        if not self._cache_complete:
+            self._fullcache()
+
+        tag_model = Tag
+        query = Q()
+        for key, category, _data in normalized:
+            query |= Q(db_key=key, db_category=category)
+
+        base_filter = {"db_model": self._model, "db_tagtype": self._tagtype}
+        tags_by_ident = {
+            (tag.db_key, tag.db_category): tag
+            for tag in tag_model.objects.filter(query, **base_filter)
+        }
+
+        missing = [
+            tag_model(
+                db_key=key,
+                db_category=category,
+                db_data=data,
+                db_model=self._model,
+                db_tagtype=self._tagtype,
+            )
+            for key, category, data in normalized
+            if (key, category) not in tags_by_ident
+        ]
+        if missing:
+            tag_model.objects.bulk_create(missing, ignore_conflicts=True)
+            tags_by_ident = {
+                (tag.db_key, tag.db_category): tag
+                for tag in tag_model.objects.filter(query, **base_filter)
+            }
+
+        dirty_tags = []
+        for key, category, data in normalized:
+            if data is None:
+                continue
+            tag = tags_by_ident.get((key, category))
+            if tag and tag.db_data != data:
+                tag.db_data = data
+                dirty_tags.append(tag)
+        if dirty_tags:
+            tag_model.objects.bulk_update(dirty_tags, ["db_data"])
+
+        through_model = getattr(self.obj, self._m2m_fieldname).through
+        through_model.objects.bulk_create(
+            [
+                through_model(**{f"{self._model}_id": self._objid, "tag_id": tag.id})
+                for key, category, _data in normalized
+                if (tag := tags_by_ident.get((key, category)))
+            ],
+            ignore_conflicts=True,
+        )
+
+        for key, category, _data in normalized:
+            tag = tags_by_ident.get((key, category))
+            if tag:
+                self._setcache(key, category, tag)
 
     def batch_remove(self, *args):
         """

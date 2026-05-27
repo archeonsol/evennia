@@ -691,7 +691,20 @@ class Attribute(IAttribute, SharedMemoryModel):
             import json
 
             return json.loads(self.db_str_val)
-        return from_pickle(self.db_value, db_obj=self)
+        _raw = self.db_value
+        if _raw is None:
+            return None
+        try:
+            return from_pickle(_raw, db_obj=self)
+        except Exception as _err:
+            from evennia.utils import logger as _log
+
+            _log.log_warn(
+                f"Attribute '{self.db_key}' (category={self.db_category!r}) on "
+                f"'{getattr(self, 'db_model', 'unknown')}' failed to unpickle: {_err}. "
+                "Returning None. Re-set or delete this attribute to resolve."
+            )
+            return None
 
     @value.setter
     def value(self, new_value):
@@ -1403,6 +1416,64 @@ class ModelAttributeBackend(IAttributeBackend):
     def do_batch_finish(self, attr_objs):
         # Add new objects to m2m field all at once
         getattr(self.obj, self._m2m_fieldname).add(*attr_objs)
+
+    def batch_add(self, *args, **kwargs):
+        """
+        Optimised override: uses bulk_create for new Attributes instead of
+        per-row INSERT, then adds all M2M relations in a single call.
+        Updates to existing Attributes still go through the write-behind path.
+        """
+        strattr = kwargs.get("strattr", False)
+        new_attr_specs = []   # (keystr, category, lockstring, value) tuples for bulk create
+        new_attr_objs = []    # built Attribute instances (no pk yet)
+
+        for tup in args:
+            if not is_iter(tup) or len(tup) < 2:
+                raise RuntimeError("batch_add requires iterables as arguments (got %r)." % (tup,))
+            ntup = len(tup)
+            keystr = str(tup[0]).strip().lower()
+            new_value = tup[1]
+            category = str(tup[2]).strip().lower() if ntup > 2 and tup[2] is not None else None
+            lockstring = tup[3] if ntup > 3 else ""
+
+            existing = self._get_cache(keystr, category)
+            if existing:
+                # update existing attribute in-place (write-behind)
+                self.do_batch_update_attribute(existing[0], category, lockstring, new_value, strattr)
+            else:
+                # build Attribute instance without saving
+                kwargs_attr = {
+                    "db_key": keystr,
+                    "db_category": category,
+                    "db_model": self._model,
+                    "db_lock_storage": lockstring if lockstring else "",
+                    "db_attrtype": self._attrtype,
+                    "db_val_type": "",
+                    "db_int_val": None,
+                    "db_float_val": None,
+                    "db_str_val": None,
+                }
+                if strattr:
+                    kwargs_attr["db_value"] = None
+                    kwargs_attr["db_strvalue"] = new_value
+                else:
+                    val_type, int_val, float_val, str_val, pickle_val = _classify_value(new_value)
+                    kwargs_attr["db_val_type"] = val_type
+                    kwargs_attr["db_int_val"] = int_val
+                    kwargs_attr["db_float_val"] = float_val
+                    kwargs_attr["db_str_val"] = str_val
+                    kwargs_attr["db_value"] = pickle_val
+                    kwargs_attr["db_strvalue"] = None
+                new_attr_objs.append(self._attrclass(**kwargs_attr))
+                new_attr_specs.append((keystr, category))
+
+        if new_attr_objs:
+            # bulk insert all new attributes in one query
+            created = self._attrclass.objects.bulk_create(new_attr_objs)
+            # wire up M2M and cache
+            getattr(self.obj, self._m2m_fieldname).add(*created)
+            for attr_obj, (keystr, category) in zip(created, new_attr_specs):
+                self._set_cache(keystr, category, attr_obj)
 
     def do_delete_attribute(self, attr):
         self._dirty_attrs.discard(attr)

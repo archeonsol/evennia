@@ -27,12 +27,9 @@ import re
 import sys
 import types
 
+import evennia
 from django.conf import settings
 from django.test import TestCase, override_settings
-from mock import MagicMock, Mock, patch
-from twisted.internet.defer import Deferred
-
-import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
 from evennia.commands.command import Command, InterruptCommand
@@ -42,6 +39,8 @@ from evennia.server.serversession import ServerSession
 from evennia.utils import ansi, create
 from evennia.utils.idmapper.models import flush_cache
 from evennia.utils.utils import all_from_module, inherits_from, to_str
+from mock import MagicMock, Mock, patch
+from twisted.internet.defer import Deferred
 
 _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
@@ -54,7 +53,10 @@ DEFAULT_SETTING_RESETS = dict(
     PORTAL_SERVICES_PLUGIN_MODULES=["evennia.game_template.server.conf.portal_services_plugins"],
     MSSP_META_MODULE="evennia.game_template.server.conf.mssp",
     WEB_PLUGINS_MODULE="server.conf.web_plugins",
-    LOCK_FUNC_MODULES=("evennia.locks.lockfuncs", "evennia.game_template.server.conf.lockfuncs"),
+    LOCK_FUNC_MODULES=(
+        "evennia.locks.lockfuncs",
+        "evennia.game_template.server.conf.lockfuncs",
+    ),
     INPUT_FUNC_MODULES=[
         "evennia.server.inputfuncs",
         "evennia.game_template.server.conf.inputfuncs",
@@ -197,10 +199,15 @@ class EvenniaTestMixin:
     def create_rooms(self):
         self.room1 = create.create_object(self.room_typeclass, key="Room", nohome=True)
         self.room1.db.desc = "room_desc"
+        settings.DEFAULT_HOME = f"#{self.room1.id}"
 
-        self.room2 = create.create_object(self.room_typeclass, key="Room2")
+        self.room2 = create.create_object(self.room_typeclass, key="Room2", home=self.room1)
         self.exit = create.create_object(
-            self.exit_typeclass, key="out", location=self.room1, destination=self.room2
+            self.exit_typeclass,
+            key="out",
+            location=self.room1,
+            destination=self.room2,
+            home=self.room1,
         )
 
     def create_objs(self):
@@ -258,6 +265,7 @@ class EvenniaTestMixin:
 
         self.create_accounts()
         self.create_rooms()
+        settings.DEFAULT_HOME = f"#{self.room1.id}"
         self.create_objs()
         self.create_chars()
         self.create_script()

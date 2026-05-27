@@ -29,6 +29,7 @@ command line. The processing of a command works as follows:
 
 """
 
+import inspect
 import time
 import types
 from collections import OrderedDict, defaultdict
@@ -40,7 +41,7 @@ from django.conf import settings
 from django.utils.translation import gettext as _
 from ftfy import fix_text as _ftfy_fix_text
 from twisted.internet import reactor
-from twisted.internet.defer import inlineCallbacks
+from twisted.internet.defer import ensureDeferred, inlineCallbacks
 from twisted.internet.task import deferLater
 
 from evennia.commands.cmdset import CmdSet
@@ -821,16 +822,15 @@ def cmdhandler(
             # (return value is normally None)
             ret = cmd.func()
             if isinstance(ret, types.GeneratorType):
-                # cmd.func() is a generator, execute progressively
+                # cmd.func() is a generator, execute progressively.
+                # _progressive_cmd_run handles at_post_cmd and on_command_post.
                 _progressive_cmd_run(cmd, ret)
-                # note that the _progressive_cmd_run will itself run
-                # the at_post_cmd etc as it finishes; this is a bit of
-                # code duplication but there seems to be no way to
-                # catch the StopIteration here (it's not in the same
-                # frame since this is in a deferred chain).
-                # on_command_post is fired from _progressive_cmd_run.
             else:
-                # post-command hook
+                if inspect.iscoroutine(ret):
+                    # async def func(self) — wait for completion before post-hooks.
+                    yield ensureDeferred(ret)
+
+                # post-command hook (sync and async paths both land here)
                 yield cmd.at_post_cmd()
 
                 on_command_post.send_robust(

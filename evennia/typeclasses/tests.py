@@ -4,11 +4,10 @@ Unit tests for typeclass base system
 """
 
 from django.test import override_settings
-from mock import patch
-from parameterized import parameterized
-
 from evennia.objects.objects import DefaultObject
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
+from mock import patch
+from parameterized import parameterized
 
 # ------------------------------------------------------------
 # Manager tests
@@ -217,6 +216,31 @@ class TestTypedObjectManager(BaseEvenniaTest):
         self.assertEqual(tagobj.db_key, "tag4")
         self.assertEqual(tagobj.db_category, "category4")
         self.assertEqual(tagobj.db_data, "data4")
+
+    def test_batch_add_reuses_existing_tags(self):
+        self.obj2.tags.add("tag1", "category1", data="old data")
+
+        self.obj1.tags.batch_add(
+            ("tag1", "category1", "new data"),
+            ("tag2", "category1", "new data"),
+        )
+
+        self.assertEqual(
+            self.obj1.tags.all(return_key_and_category=True),
+            [("tag1", "category1"), ("tag2", "category1")],
+        )
+        self.assertEqual(self.obj2.tags.get("tag1", category="category1"), "tag1")
+
+        tagobj = self.obj1.tags.get("tag1", category="category1", return_tagobj=True)
+        self.assertEqual(tagobj.db_data, "new data")
+
+    def test_batch_add_deduplicates_input(self):
+        self.obj1.tags.batch_add("tag1", "tag1", ("tag1", None), ("tag2", "category2"))
+
+        self.assertEqual(
+            self.obj1.tags.all(return_key_and_category=True),
+            [("tag1", None), ("tag2", "category2")],
+        )
 
 
 # setting up testing typeclass with child- and parent class

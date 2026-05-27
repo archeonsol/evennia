@@ -353,6 +353,9 @@ class ObjectDB(TypedObject):
                 old_location.contents_cache.remove(self)
             if self.db_location:
                 self.db_location.contents_cache.add(self)
+            # keep _loaded_location_id in sync so at_db_location_postsave
+            # has the right baseline if db_location is later saved directly.
+            self._loaded_location_id = self.db_location_id
 
         except RuntimeError:
             errmsg = "Error: %s.location = %s creates a location loop." % (self.key, location)
@@ -370,6 +373,13 @@ class ObjectDB(TypedObject):
         self.save(update_fields=["db_location"])
 
     location = property(__location_get, __location_set, __location_del)
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Override to track the location as loaded from DB for targeted cache invalidation."""
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_location_id = instance.db_location_id
+        return instance
 
     def at_db_location_postsave(self, new):
         """
@@ -390,12 +400,31 @@ class ObjectDB(TypedObject):
                 if self.db_location:
                     self.db_location.contents_cache.add(self)
             else:
-                # Since we cannot know at this point was old_location was, we
-                # trigger a full-on contents_cache update here.
-                logger.log_warn(
-                    "db_location direct save triggered contents_cache.init() for all objects!"
-                )
-                [o.contents_cache.init() for o in self.__dbclass__.get_all_cached_instances()]
+                # Targeted cache update using the location tracked at load time.
+                # This avoids the expensive full-reinit of all cached instances.
+                old_loc_id = getattr(self, "_loaded_location_id", None)
+                if old_loc_id is not None:
+                    old_loc = type(self).__instance_cache__.get(old_loc_id)
+                    if old_loc is not None:
+                        old_loc.contents_cache.remove(self)
+                    else:
+                        # Old location evicted from cache; reinit its cache only if we can load it.
+                        try:
+                            old_loc = ObjectDB.objects.get(pk=old_loc_id)
+                            old_loc.contents_cache.remove(self)
+                        except Exception:
+                            pass
+                else:
+                    # No tracked location (object predates this fix) — fall back to full reinit.
+                    logger.log_warn(
+                        "db_location direct save with no tracked location; "
+                        "triggering contents_cache.init() for all objects."
+                    )
+                    [o.contents_cache.init() for o in self.__dbclass__.get_all_cached_instances()]
+                if self.db_location:
+                    self.db_location.contents_cache.add(self)
+        # Keep tracked location in sync after any save.
+        self._loaded_location_id = self.db_location_id
 
     class Meta:
         """Define Django meta options"""
