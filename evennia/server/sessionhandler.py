@@ -838,11 +838,19 @@ class ServerSessionHandler(SessionHandler):
         if uid not in self._outbuf:
             self._outbuf[uid] = []
             from twisted.internet import reactor as _reactor
+
             _reactor.callLater(0, self._flush_outbuf, uid)
         self._outbuf[uid].append(kwargs)
 
     def _flush_outbuf(self, uid):
-        """Drain the per-session output buffer and send one merged AMP call."""
+        """Drain the per-session output buffer.
+
+        Pure-text messages are coalesced into a single AMP frame (the batcher's
+        whole reason to exist). Any message carrying non-text kwargs (OOB, GMCP,
+        prompt, options, etc.) ships as its own frame to preserve the
+        pre-batcher one-frame-per-call semantics; merging those last-wins
+        silently drops concurrent payloads to the same key.
+        """
         msgs = self._outbuf.pop(uid, None)
         if not msgs:
             return
@@ -852,30 +860,33 @@ class ServerSessionHandler(SessionHandler):
 
         text_parts = []
         text_options = {}
-        merged = {}
+        standalone_frames = []
+
         for msg in msgs:
-            for k, v in msg.items():
-                if k == "text":
-                    # v is str or (str, options_dict)
-                    if isinstance(v, tuple) and len(v) >= 1:
-                        text_parts.append(v[0])
-                        if len(v) >= 2 and isinstance(v[1], dict) and not text_options:
-                            text_options = v[1]
-                    else:
-                        text_parts.append(str(v) if v is not None else "")
-                else:
-                    # last-wins for non-text keys (OOB, GMCP, options, etc.)
-                    merged[k] = v
+            if any(k != "text" for k in msg):
+                # mixed or non-text payload: preserve atomically as its own frame
+                standalone_frames.append(dict(msg))
+                continue
+            v = msg.get("text")
+            if isinstance(v, tuple) and len(v) >= 1:
+                text_parts.append(v[0])
+                if len(v) >= 2 and isinstance(v[1], dict) and not text_options:
+                    text_options = v[1]
+            elif v is not None:
+                text_parts.append(str(v))
+
+        amp = evennia.EVENNIA_SERVER_SERVICE.amp_protocol
 
         if text_parts:
             joined = "\n".join(p for p in text_parts if p)
-            merged["text"] = (joined, text_options) if text_options else joined
+            if joined:
+                frame = {"text": (joined, text_options) if text_options else joined}
+                frame = self.clean_senddata(session, frame)
+                amp.send_MsgServer2Portal(session, **frame)
 
-        if not merged:
-            return
-
-        merged = self.clean_senddata(session, merged)
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_MsgServer2Portal(session, **merged)
+        for frame in standalone_frames:
+            frame = self.clean_senddata(session, frame)
+            amp.send_MsgServer2Portal(session, **frame)
 
     def get_inputfuncs(self):
         """
