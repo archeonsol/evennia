@@ -346,7 +346,9 @@ class PortalSessionHandler(SessionHandler):
             # disconnect out-of-sync missing protocols
             to_delete = [sessid for sessid in self if sessid not in to_save]
             for sessid in to_delete:
-                self.server_disconnect(sessid)
+                session = self.get(sessid)
+                if session:
+                    self.server_disconnect(session)
 
     def count_loggedin(self, include_unloggedin=False):
         """
