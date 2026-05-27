@@ -681,7 +681,7 @@ class TypedObject(SharedMemoryModel):
         elif run_start_hooks:
             # a custom hook-name to call.
             for start_hook in str(run_start_hooks).split():
-                getattr(self, run_start_hooks)()
+                getattr(self, start_hook)()
 
     #
     # Lock / permission methods

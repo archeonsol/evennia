@@ -3356,6 +3356,7 @@ class DefaultCharacter(DefaultObject):
             puppeting this Object.
 
         """
+        self.account.db._last_puppet = self
         self.msg(_("\nYou become |c{name}|n.\n").format(name=self.key))
         self.msg((self.at_look(self.location), {"type": "look"}), options=None)
 

@@ -36,6 +36,68 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.21 — Engine bug fixes (swap_typeclass hooks, character _last_puppet)
+
+Two genuine engine bugs caught during a five-item bug audit (three of
+the five turned out to be false positives on re-read; see the release
+commit body for the dispositions).
+
+### Engine
+
+- [`evennia/typeclasses/models.py:684`](evennia/typeclasses/models.py):
+  `swap_typeclass(..., run_start_hooks="hook_a hook_b")` raised
+  `AttributeError` when given multiple space-separated hook names.
+  The loop variable was `start_hook` but the call used the original
+  `run_start_hooks` string, so `getattr(self, "hook_a hook_b")` was
+  attempted on every iteration. Single-name strings happened to work
+  because `split()` yields one token equal to the original. Fixed to
+  `getattr(self, start_hook)()`. Effect: multi-hook callers (anything
+  passing more than one name to `run_start_hooks`) now actually run
+  each named hook once instead of erroring on the first iteration.
+- [`evennia/objects/objects.py`](evennia/objects/objects.py)
+  `DefaultCharacter.at_post_puppet` did not update
+  `account.db._last_puppet`. `DefaultObject.at_post_puppet` sets it,
+  but the character override didn't call `super()` and didn't set
+  the attribute itself, so the value only got written at character
+  creation ([`accounts.py:987`](evennia/accounts/accounts.py)),
+  initial setup, and the admin path. Switching `@ic` between
+  characters left `_last_puppet` stale, so reconnect / auto-puppet
+  flows ([`accounts.py:1738`](evennia/accounts/accounts.py),
+  [`accounts.py:2075`](evennia/accounts/accounts.py)) could re-attach
+  the wrong character. Fixed by setting `_last_puppet` directly in
+  the character override rather than chaining `super()` (the parent
+  also emits a "You become …" message which would have duplicated
+  the character's own message).
+
+### Tests
+
+- Added [`evennia/typeclasses/tests/test_swap_typeclass_hooks.py`](evennia/typeclasses/tests/test_swap_typeclass_hooks.py)
+  — attaches two `Mock` methods, calls `swap_typeclass` with both
+  names, asserts each fires exactly once. Without the fix the test
+  raises `AttributeError` on the bad `getattr`.
+- Added [`evennia/objects/tests/test_character_post_puppet.py`](evennia/objects/tests/test_character_post_puppet.py)
+  — clears `account.db._last_puppet`, calls `char1.at_post_puppet()`,
+  asserts the attribute points at the character. Without the fix it
+  stays `None`.
+- Added [`evennia/objects/tests/__init__.py`](evennia/objects/tests/__init__.py).
+  The directory was missing the package marker, so Django's test
+  loader silently skipped both the new test and the pre-existing
+  [`test_scene_index.py`](evennia/objects/tests/test_scene_index.py)
+  (which had been dark in CI since it was added). Both now discover
+  and pass.
+
+### Migration
+
+Downstream should not need changes. The hook-loop fix only affects
+callers passing multi-name `run_start_hooks` strings, which would
+previously have hard-errored — no working code depended on the
+broken behavior. The `_last_puppet` fix restores the documented
+contract; any downstream override of `DefaultCharacter.at_post_puppet`
+that needs to preserve the new behavior should either call `super()`
+or set `self.account.db._last_puppet = self` itself.
+
+---
+
 ## 6.0.0+underspire.20 — Multimatch UX (ordinals, location scope, auto-pick)
 
 Natural-language object multimatch: display and input use `first` / `second` /
