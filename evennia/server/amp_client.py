@@ -241,16 +241,19 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
         elif operation == amp.SRELOAD:  # server reload
             # shut down in reload mode
             evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload")
+            from twisted.internet import defer
+            defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"))
 
         elif operation == amp.SRESET:
             # shut down in reset mode
             evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset")
+            from twisted.internet import defer
+            defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"))
 
         elif operation == amp.SSHUTD:  # server shutdown
             # shutdown in stop mode
-            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown")
+            from twisted.internet import defer
+            defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"))
 
         else:
             raise Exception("operation %(op)s not recognized." % {"op": operation})

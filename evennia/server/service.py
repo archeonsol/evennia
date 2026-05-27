@@ -30,9 +30,9 @@ class EvenniaServerService(MultiService):
     def _wrap_sigint_handler(self, *args):
         if hasattr(self, "web_root"):
             d = self.web_root.empty_threadpool()
-            d.addCallback(lambda _: self.shutdown("reload", _reactor_stopping=True))
+            d.addCallback(lambda _: defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True)))
         else:
-            d = Deferred(lambda _: self.shutdown("reload", _reactor_stopping=True))
+            d = defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
         d.addCallback(lambda _: reactor.stop())
         reactor.callLater(1, d.callback, None)
 

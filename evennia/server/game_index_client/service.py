@@ -4,7 +4,7 @@ Service for integrating the Evennia Game Index client into Evennia.
 """
 
 from twisted.application.service import Service
-from twisted.internet import reactor
+from twisted.internet import defer, reactor
 from twisted.internet.task import LoopingCall
 
 from evennia.utils import logger
@@ -30,7 +30,7 @@ class EvenniaGameIndexService(Service):
 
     def __init__(self):
         self.client = EvenniaGameIndexClient(on_bad_request=self._die_on_bad_request)
-        self.loop = LoopingCall(self.client.send_game_details)
+        self.loop = LoopingCall(lambda: defer.ensureDeferred(self.client.send_game_details()))
 
     def startService(self):
         super().startService()
