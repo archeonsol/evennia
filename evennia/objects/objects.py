@@ -24,6 +24,12 @@ from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.typeclasses.attributes import ModelAttributeBackend, NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import ansi, create, funcparser, logger, search
+from evennia.utils.multimatch import (
+    narrow_candidates,
+    parse_search_qualifiers,
+    resolve_multimatch_index,
+    try_autopick,
+)
 from evennia.utils.utils import (
     class_from_module,
     compress_whitespace,
@@ -591,6 +597,12 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
         if candidates is not None:
             return candidates
 
+        scope = kwargs.get("_search_scope")
+        if scope:
+            scoped = narrow_candidates(self, scope)
+            if scoped is not None:
+                return scoped
+
         # find candidates based on location
         location = kwargs.get("location")
 
@@ -717,7 +729,12 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
             # don't care about no/multi-match errors, just return list of whatever we have
             return list(results)
 
-        # handle any error messages, otherwise return a single result
+        results = list(results)
+
+        if not kwargs.get("_search_had_qualifier"):
+            picked = try_autopick(results, self)
+            if picked is not None:
+                return picked
 
         nofound_string = kwargs.get("nofound_string")
         multimatch_string = kwargs.get("multimatch_string")
@@ -728,6 +745,7 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
             query=searchdata,
             nofound_string=nofound_string,
             multimatch_string=multimatch_string,
+            invalid_other=kwargs.get("invalid_other", False),
         )
 
     def search(
@@ -764,9 +782,11 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
 
                 - `#<num>`: search by unique dbref. This is always a global search.
                 - `me,self`: self-reference to this object
-                - `<num>-<string>` - can be used to differentiate
-                   between multiple same-named matches. The exact form of this input
-                   is given by `settings.SEARCH_MULTIMATCH_REGEX`.
+                - Ordinal disambiguation: `first <string>`, `second <string>`, `last <string>`,
+                  `other <string>` (two matches only), or `<num>-<string>` per
+                  `settings.SEARCH_MULTIMATCH_REGEX`.
+                - Location scope: `my <string>`, `here <string>`, `worn <string>` (see
+                  `settings.SEARCH_MULTIMATCH_LOCATION_PREFIXES`).
 
             global_search (bool): Search all objects globally. This overrules 'location' data.
             use_nicks (bool): Use nickname-replace (nicktype "object") on `searchdata`.
@@ -839,6 +859,12 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
         # replace incoming searchdata string with a potentially modified version
         searchdata = self.get_search_query_replacement(searchdata, **input_kwargs)
 
+        quals = parse_search_qualifiers(searchdata)
+        input_kwargs["_search_scope"] = quals["scope"]
+        input_kwargs["_search_selector"] = quals["selector"]
+        input_kwargs["_search_had_qualifier"] = quals["had_qualifier"]
+        searchdata = quals["searchdata"]
+
         # get candidates
         candidates = self.get_search_candidates(searchdata, **input_kwargs)
 
@@ -880,6 +906,16 @@ class DefaultObject(ObjectDB, metaclass=TypeclassBase):
         # filter out objects we are not allowed to search
         if use_locks:
             results = [x for x in list(results) if x.access(self, "search", default=True)]
+
+        selector = input_kwargs.get("_search_selector")
+        if selector is not None:
+            nresults = len(results)
+            if selector == "other" and nresults != 2:
+                input_kwargs["invalid_other"] = True
+            else:
+                idx = resolve_multimatch_index(selector, nresults)
+                if idx is not None:
+                    results = [results[idx]]
 
         # handle stacked objects
         is_stacked, results = self.get_stacked_results(results, **input_kwargs)

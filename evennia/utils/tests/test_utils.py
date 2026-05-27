@@ -937,43 +937,38 @@ class TestAtSearchResult(TestCase):
         caller.msg.assert_called_once_with("Could not find 'obj1'.")
 
     def test_basic_multimatch(self):
-        """multiple matches with the same name should return a message with incrementing indices"""
+        """multiple matches with the same name should return ordinal labels"""
         matches = [self.MockObject("obj1") for _ in range(3)]
         caller = mock.MagicMock()
+        caller.location = None
         self.assertIsNone(utils.at_search_result(matches, caller, "obj1"))
-        multimatch_msg = """\
-More than one match for 'obj1' (please narrow target):
- obj1-1
- obj1-2
- obj1-3"""
-        caller.msg.assert_called_once_with(multimatch_msg)
+        msg = caller.msg.call_args[0][0]
+        self.assertIn("first", msg)
+        self.assertIn("second", msg)
+        self.assertIn("last", msg)
+        self.assertNotIn("obj1-1", msg)
 
     def test_partial_multimatch(self):
-        """multiple partial matches with different names should increment index by unique name"""
+        """multiple partial matches with different names should use ordinals per group"""
         matches = [self.MockObject("obj1") for _ in range(3)] + [
             self.MockObject("obj2") for _ in range(2)
         ]
         caller = mock.MagicMock()
+        caller.location = None
         self.assertIsNone(utils.at_search_result(matches, caller, "obj"))
-        multimatch_msg = """\
-More than one match for 'obj' (please narrow target):
- obj1-1
- obj1-2
- obj1-3
- obj2-1
- obj2-2"""
-        caller.msg.assert_called_once_with(multimatch_msg)
+        msg = caller.msg.call_args[0][0]
+        self.assertIn("first", msg)
+        self.assertIn("other", msg)
 
     def test_mixed_case_multimatch(self):
         """multiple matches with different case should increment index by case-insensitive name"""
         matches = [self.MockObject("obj1"), self.MockObject("Obj1")]
         caller = mock.MagicMock()
+        caller.location = None
         self.assertIsNone(utils.at_search_result(matches, caller, "obj1"))
-        multimatch_msg = """\
-More than one match for 'obj1' (please narrow target):
- obj1-1
- Obj1-2"""
-        caller.msg.assert_called_once_with(multimatch_msg)
+        msg = caller.msg.call_args[0][0]
+        self.assertIn("first", msg)
+        self.assertIn("other", msg)
 
 
 class TestGroupObjectsByKeyAndDesc(TestCase):

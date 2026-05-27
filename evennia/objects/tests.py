@@ -163,6 +163,35 @@ class DefaultObjectTest(BaseEvenniaTest):
         # partial match to 'colon' - multimatch error since stack is not homogenous
         self.assertEqual(self.char1.search("co", stacked=2), None)
 
+    def test_search_ordinal_last(self):
+        """first/last/other multimatch input resolves to one object."""
+        a = DefaultObject.create("gem", location=self.room1)[0]
+        b = DefaultObject.create("gem", location=self.room1)[0]
+        c = DefaultObject.create("gem", location=self.room1)[0]
+        self.assertEqual(self.char1.search("first gem", quiet=True), a)
+        self.assertEqual(self.char1.search("last gem", quiet=True), c)
+        d = DefaultObject.create("orb", location=self.room1)[0]
+        e = DefaultObject.create("orb", location=self.room1)[0]
+        self.assertEqual(self.char1.search("other orb", quiet=True), e)
+        self.assertIsNone(self.char1.search("other gem"))
+
+    def test_search_location_scope(self):
+        """my/here narrow candidates before matching."""
+        room_gem = DefaultObject.create("gem", location=self.room1)[0]
+        inv_gem = DefaultObject.create("gem", location=self.char1)[0]
+        self.assertEqual(self.char1.search("here gem", quiet=True), room_gem)
+        self.assertEqual(self.char1.search("my gem", quiet=True), inv_gem)
+
+    def test_search_autopick(self):
+        """Auto-pick when all multimatches share one location bucket with one item."""
+        only_room = DefaultObject.create("pebble", location=self.room1)[0]
+        self.assertEqual(self.char1.search("pebble", quiet=True), only_room)
+        DefaultObject.create("pebble", location=self.room1)
+        self.assertEqual(len(self.char1.search("pebble", quiet=True)), 2)
+        inv_pebble = DefaultObject.create("pebble", location=self.char1)[0]
+        DefaultObject.create("pebble", location=self.char1)
+        self.assertEqual(self.char1.search("my pebble", quiet=True), inv_pebble)
+
     def test_search_plural_form(self):
         """Test searching for plural form of objects"""
         coin1 = DefaultObject.create("coin", location=self.room1)[0]

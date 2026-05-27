@@ -428,15 +428,30 @@ COMMAND_FUZZY_SUGGESTIONS_LIMIT = 3
 # optional (?P<args>...) group. It should also involve a number starting
 # from 1. When changing this you must also update SEARCH_MULTIMATCH_TEMPLATE
 # to properly describe the syntax.
-SEARCH_MULTIMATCH_REGEX = r"^(?P<name>.*?)-(?P<number>[0-9]+)(?P<args>(?:\s.*)?)$"
+SEARCH_MULTIMATCH_REGEX = r"^(?P<number>[0-9]+)-(?P<name>.*)(?P<args>(?:\s.*)?)$"
 # To display multimatch errors in various listings we must display
 # the syntax in a way that matches what SEARCH_MULTIMATCH_REGEX understand.
 # The template will be populated with data and expects the following markup:
-# {number} - the order of the multimatch, starting from 1; {name} - the
+# {label} - ordinal label (first, second, other, last, etc.); {name} - the
 # name (key) of the multimatched entity; {aliases} - eventual
-# aliases for the entity; {info} - extra info like #dbrefs for staff. Don't
-# forget a line break if you want one match per line.
-SEARCH_MULTIMATCH_TEMPLATE = " {name}-{number}{aliases}{info}\n"
+# aliases for the entity; {info} - extra info (location hints, #dbrefs). Legacy
+# templates may still use {number} instead of {label}. Don't forget a line break
+# if you want one match per line.
+SEARCH_MULTIMATCH_TEMPLATE = " {label} {name}{aliases}{info}\n"
+# Callable path for parsing multimatch input (ordinals, last, other, N-name).
+SEARCH_MULTIMATCH_INPUT = "evennia.utils.multimatch.parse_multimatch_input"
+# When True, a single unambiguous inventory-only or room-only multimatch is picked silently.
+SEARCH_MULTIMATCH_AUTOPICK = True
+# Location scope prefixes: my/mine -> inventory, here/room -> location, worn -> worn gear.
+SEARCH_MULTIMATCH_LOCATION_PREFIXES = {
+    "my": "inventory",
+    "mine": "inventory",
+    "here": "location",
+    "room": "location",
+    "worn": "worn",
+}
+# Optional callable path (obj, caller) -> bool for worn scope; None uses tag/attr default.
+SEARCH_MULTIMATCH_WORN_FILTER = None
 # The handler that outputs errors when using any API-level search
 # (not manager methods). This function should correctly report errors
 # both for command- and object-searches. This allows full control

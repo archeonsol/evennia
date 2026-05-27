@@ -2402,6 +2402,7 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
     Keyword Args:
         nofound_string (str): Replacement string to echo on a notfound error.
         multimatch_string (str): Replacement string to echo on a multimatch error.
+        invalid_other (bool): If True, show error that 'other' only works with two matches.
 
     Returns:
         processed_result (Object or None): This is always a single result
@@ -2410,6 +2411,19 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
         checking multimatches for (e.g. Objects or Commands)
 
     """
+    from evennia.utils.multimatch import (
+        apply_multimatch_template,
+        format_multimatch_footer,
+        invalid_other_message,
+        location_hint,
+        multimatch_label,
+        try_autopick,
+    )
+
+    if not quiet and len(matches) > 1 and not kwargs.get("_search_had_qualifier"):
+        picked = try_autopick(matches, caller)
+        if picked is not None:
+            return picked
 
     error = ""
     if not matches:
@@ -2417,10 +2431,12 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
         error = kwargs.get("nofound_string") or _("Could not find '{query}'.").format(query=query)
         matches = None
     elif len(matches) > 1:
+        if kwargs.get("invalid_other"):
+            error = invalid_other_message(query) + "\n"
         multimatch_string = kwargs.get("multimatch_string")
         if multimatch_string:
             error = "%s\n" % multimatch_string
-        else:
+        elif not error:
             error = _("More than one match for '{query}' (please narrow target):\n").format(
                 query=query
             )
@@ -2432,27 +2448,41 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
             # the actual searching is case-insensitive, so we force grouping keys to lower
             grouped_matches[item_key.lower()].append((item_key, item))
 
+        all_labels = []
         for key, match_list in grouped_matches.items():
+            n = len(match_list)
             for num, (result_key, result) in enumerate(match_list):
-                # we need to consider that result could be a Command, where .aliases
-                # is a list of strings
                 if hasattr(result.aliases, "all"):
-                    # result is a typeclassed entity where `.aliases` is an AliasHandler.
                     aliases = result.aliases.all(return_objs=True)
-                    # remove pluralization aliases
                     aliases = [
                         alias.db_key for alias in aliases if alias.db_category != "plural_key"
                     ]
                 else:
-                    # result is likely a Command, where `.aliases` is a list of strings.
-                    aliases = result.aliases
+                    aliases = getattr(result, "aliases", []) or []
 
-                error += _MULTIMATCH_TEMPLATE.format(
-                    number=num + 1,
+                label = multimatch_label(num, n)
+                all_labels.append(label)
+                info = location_hint(result, caller)
+                if not info and hasattr(result, "get_extra_info"):
+                    info = result.get_extra_info(caller) or ""
+
+                error += apply_multimatch_template(
+                    _MULTIMATCH_TEMPLATE,
+                    label=label,
                     name=result_key,
                     aliases=" [{alias}]".format(alias=";".join(aliases)) if aliases else "",
-                    info=result.get_extra_info(caller),
+                    info=info,
+                    number=num + 1,
                 )
+
+        if not kwargs.get("multimatch_string") and all_labels:
+            name = query
+            if grouped_matches:
+                first_list = next(iter(grouped_matches.values()))
+                if first_list:
+                    name = first_list[0][0]
+            error += format_multimatch_footer(name, all_labels, scope_hint=True)
+
         matches = None
     else:
         # exactly one match

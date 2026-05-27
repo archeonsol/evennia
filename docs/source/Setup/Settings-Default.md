@@ -416,24 +416,23 @@ WEBCLIENT_OPTIONS = {
 # The command parser module to use. See the default module for which
 # functions it must implement
 COMMAND_PARSER = "evennia.commands.cmdparser.cmdparser"
-# On a multi-match when searching objects or commands, the user has the
-# ability to search again with an index marker that differentiates
-# the results. If multiple "box" objects are found, they can by default
-# be separated as box-1, box-2. Below you can change the regular expression
-# used. The regex must have two capturing groups (?P<number>...) and
-# (?P<name>...) - the default parser expects this. It may also have an
-# optional (?P<args>...) group. It should also involve a number starting
-# from 1. When changing this you must also update SEARCH_MULTIMATCH_TEMPLATE
-# to properly describe the syntax.
-SEARCH_MULTIMATCH_REGEX = r"^(?P<name>.*?)-(?P<number>[0-9]+)(?P<args>(?:\s.*)?)$"
-# To display multimatch errors in various listings we must display
-# the syntax in a way that matches what SEARCH_MULTIMATCH_REGEX understand.
-# The template will be populated with data and expects the following markup:
-# {number} - the order of the multimatch, starting from 1; {name} - the
-# name (key) of the multimatched entity; {aliases} - eventual
-# aliases for the entity; {info} - extra info like #dbrefs for staff. Don't
-# forget a line break if you want one match per line.
-SEARCH_MULTIMATCH_TEMPLATE = " {name}-{number}{aliases}{info}\n"
+# On a multi-match when searching objects or commands, the user can
+# disambiguate with ordinals (first box, last box, other box when two),
+# numeric prefixes (1-box), or location scopes (my box, here box, worn box).
+# SEARCH_MULTIMATCH_REGEX handles N-name numeric input; word ordinals use
+# SEARCH_MULTIMATCH_INPUT. Template fields: {label}, {name}, {aliases}, {info}.
+SEARCH_MULTIMATCH_REGEX = r"^(?P<number>[0-9]+)-(?P<name>.*)(?P<args>(?:\s.*)?)$"
+SEARCH_MULTIMATCH_TEMPLATE = " {label} {name}{aliases}{info}\n"
+SEARCH_MULTIMATCH_INPUT = "evennia.utils.multimatch.parse_multimatch_input"
+SEARCH_MULTIMATCH_AUTOPICK = True
+SEARCH_MULTIMATCH_LOCATION_PREFIXES = {
+    "my": "inventory",
+    "mine": "inventory",
+    "here": "location",
+    "room": "location",
+    "worn": "worn",
+}
+SEARCH_MULTIMATCH_WORN_FILTER = None
 # The handler that outputs errors when using any API-level search
 # (not manager methods). This function should correctly report errors
 # both for command- and object-searches. This allows full control

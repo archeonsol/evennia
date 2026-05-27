@@ -36,6 +36,46 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.20 — Multimatch UX (ordinals, location scope, auto-pick)
+
+Natural-language object multimatch: display and input use `first` / `second` /
+`last` / `other` (two matches only), plus `my` / `here` / `worn` location scopes
+and conservative inventory/room auto-pick. Numeric `1-sword` prefix form remains
+supported.
+
+### Engine
+
+- New [`evennia/utils/multimatch.py`](evennia/utils/multimatch.py) — shared
+  parsing, labels, location hints, auto-pick.
+- [`evennia/settings_default.py`](evennia/settings_default.py) — default
+  `SEARCH_MULTIMATCH_REGEX` (prefix numeric), `SEARCH_MULTIMATCH_TEMPLATE`
+  (`{label}`), `SEARCH_MULTIMATCH_INPUT`, `SEARCH_MULTIMATCH_AUTOPICK`,
+  `SEARCH_MULTIMATCH_LOCATION_PREFIXES`, `SEARCH_MULTIMATCH_WORN_FILTER`.
+- [`evennia/objects/manager.py`](evennia/objects/manager.py),
+  [`evennia/objects/objects.py`](evennia/objects/objects.py),
+  [`evennia/utils/utils.py`](evennia/utils/utils.py) `at_search_result`,
+  [`evennia/commands/cmdparser.py`](evennia/commands/cmdparser.py) — wired to
+  multimatch helpers.
+- [`evennia/typeclasses/models.py`](evennia/typeclasses/models.py) —
+  `get_extra_info` delegates to `location_hint`.
+
+### Migration
+
+- Multimatch **display** changes from `sword-1` to `first sword` (etc.). Input
+  `1-sword` still works.
+- Auto-pick is **on** by default (`SEARCH_MULTIMATCH_AUTOPICK = True`). Set
+  `False` to always show the multimatch prompt.
+- Pose/emote targeting in game code is unchanged (separate `emote.py` parser).
+
+### Tests
+
+- [`evennia/utils/tests/test_multimatch.py`](evennia/utils/tests/test_multimatch.py)
+- Updates to [`evennia/utils/tests/test_utils.py`](evennia/utils/tests/test_utils.py),
+  [`evennia/objects/tests.py`](evennia/objects/tests.py),
+  [`evennia/commands/tests.py`](evennia/commands/tests.py).
+
+---
+
 ## 6.0.0+underspire.19 — Deprecation breadcrumb cleanup (F2, F12)
 
 Engine-side cleanup of pre-1.0 upstream cargo and a doc clarification.

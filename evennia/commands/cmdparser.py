@@ -11,6 +11,7 @@ import re
 from django.conf import settings
 
 from evennia.utils.logger import log_trace, mask_sensitive_input
+from evennia.utils.multimatch import parse_multimatch_input, resolve_multimatch_index
 
 _MULTIMATCH_REGEX = re.compile(settings.SEARCH_MULTIMATCH_REGEX, re.I + re.U)
 
@@ -69,40 +70,38 @@ def build_matches(raw_string, cmdset):
     return matches
 
 
-def try_num_differentiators(raw_string):
+def try_multimatch_differentiators(raw_string):
     """
-    Test if user tried to separate multi-matches with a number separator
-    (default 1-name, 2-name etc). This is usually called last, if no other
-    match was found.
-
-    Args:
-        raw_string (str): The user input to parse.
+    Parse multimatch disambiguation from user input (ordinals, last, other, N-name).
 
     Returns:
-        mindex, new_raw_string (tuple): If a multimatch-separator was detected,
-            this is stripped out as an integer to separate between the matches. The
-            new_raw_string is the result of stripping out that identifier. If no
-            such form was found, returns (None, None).
-
-    Example:
-        In the default configuration, entering 2-ball (e.g. in a room will more
-        than one 'ball' object), will lead to a multimatch and this function
-        will parse `"2-ball"` and return `(2, "ball")`.
-
+        selector, new_raw_string: selector is 0-based int, "last", "other", or None.
     """
-    # no matches found
+    selector, new_raw_string = parse_multimatch_input(raw_string)
+    if selector is not None:
+        return selector, new_raw_string
     num_ref_match = _MULTIMATCH_REGEX.match(raw_string)
     if num_ref_match:
-        # the user might be trying to identify the command
-        # with a #num-command style syntax. We expect the regex to
-        # contain the groups "number" and "name".
-        mindex, new_raw_string = (
-            num_ref_match.group("number"),
-            num_ref_match.group("name") + num_ref_match.group("args"),
-        )
-        return int(mindex), new_raw_string
-    else:
+        mindex = int(num_ref_match.group("number")) - 1
+        new_raw_string = num_ref_match.group("name") + (num_ref_match.group("args") or "")
+        return mindex, new_raw_string
+    return None, None
+
+
+def try_num_differentiators(raw_string):
+    """
+    Backward-compatible alias for try_multimatch_differentiators.
+
+    Returns:
+        mindex, new_raw_string: For numeric selectors, mindex is 1-based for legacy callers.
+        For "last"/"other", returns the string selector unchanged.
+    """
+    selector, new_raw_string = try_multimatch_differentiators(raw_string)
+    if selector is None:
         return None, None
+    if isinstance(selector, int):
+        return selector + 1, new_raw_string
+    return selector, new_raw_string
 
 
 def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwargs):
@@ -149,11 +148,10 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
     # characters are now load-bearing parts of the key.
     matches = build_matches(raw_string, cmdset)
 
+    match_selector = None
     if not matches or len(matches) > 1:
-        # no single match, try parsing for optional numerical tags like 1-cmd
-        # or cmd-2, cmd.2 etc
-        match_index, new_raw_string = try_num_differentiators(raw_string)
-        if match_index is not None:
+        match_selector, new_raw_string = try_multimatch_differentiators(raw_string)
+        if match_selector is not None:
             matches.extend(build_matches(new_raw_string, cmdset))
 
     # only select command matches we are actually allowed to call.
@@ -188,14 +186,11 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
         quality = [mat[4] for mat in matches]
         matches = matches[-quality.count(quality[-1]) :]
 
-    if len(matches) > 1 and match_index is not None:
-        # We couldn't separate match by quality, but we have an
-        # index argument to tell us which match to use.
-        if 0 < match_index <= len(matches):
-            matches = [matches[match_index - 1]]
+    if len(matches) > 1 and match_selector is not None:
+        idx = resolve_multimatch_index(match_selector, len(matches))
+        if idx is not None:
+            matches = [matches[idx]]
         else:
-            # we tried to give an index outside of the range - this means
-            # a no-match
             matches = []
 
     # no matter what we have at this point, we have to return it.

@@ -899,9 +899,9 @@ class TypedObject(SharedMemoryModel):
 
         """
 
-        if self.location == looker:
-            return _(" (carried)")
-        return ""
+        from evennia.utils.multimatch import location_hint
+
+        return location_hint(self, looker) or ""
 
     def at_rename(self, oldname, newname):
         """

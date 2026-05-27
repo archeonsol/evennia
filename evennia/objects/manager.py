@@ -27,7 +27,10 @@ _ATTR = None
 
 _MULTIMATCH_REGEX = re.compile(settings.SEARCH_MULTIMATCH_REGEX, re.I + re.U)
 
-# Try to use a custom way to parse id-tagged multimatches.
+from evennia.utils.multimatch import (  # noqa: E402
+    _get_multimatch_input_handler,
+    resolve_multimatch_index,
+)
 
 
 class ObjectDBManager(TypedObjectManager):
@@ -465,26 +468,24 @@ class ObjectDBManager(TypedObjectManager):
             typeclass = typeclasses
 
         # Search through all possibilities.
-        match_number = None
         # always run first check exact - we don't want partial matches
         # if on the form of 1-keyword etc.
         matches = _searcher(searchdata, candidates, typeclass, exact=True)
 
         stripped_searchdata = searchdata
+        match_selector = None
         if not matches:
-            # no matches found - check if we are dealing with N-keyword
-            # query - if so, strip it.
-            match_data = _MULTIMATCH_REGEX.match(str(searchdata))
-            match_number = None
-            if match_data:
-                # strips the number
-                match_number, stripped_searchdata = match_data.group("number"), match_data.group(
-                    "name"
-                )
-                match_number = int(match_number) - 1
-            if match_number is not None:
-                # run search against the stripped data
+            # word ordinals (first, last, other) and numeric N-name prefixes
+            parse_input = _get_multimatch_input_handler()
+            match_selector, stripped_searchdata = parse_input(str(searchdata))
+            if match_selector is not None:
                 matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
+            else:
+                match_data = _MULTIMATCH_REGEX.match(str(searchdata))
+                if match_data:
+                    match_selector = int(match_data.group("number")) - 1
+                    stripped_searchdata = match_data.group("name") + (match_data.group("args") or "")
+                    matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
 
         # at this point, if there are no matches, we give it a chance to find fuzzy matches
         if not exact and not matches:
@@ -492,13 +493,12 @@ class ObjectDBManager(TypedObjectManager):
             matches = _searcher(stripped_searchdata, candidates, typeclass, exact=False)
 
         # deal with result
-        if match_number is not None:
-            if 0 <= match_number < len(matches):
-                # limit to one match (we still want a queryset back)
-                # NOTE: still haven't found a way to avoid a second lookup
-                matches = self.filter(id=matches[match_number].id)
+        if match_selector is not None:
+            match_index = resolve_multimatch_index(match_selector, len(matches))
+            if match_index is not None:
+                matches = self.filter(id=matches[match_index].id)
             else:
-                # a number was given outside of range. This means a no-match.
+                # invalid selector (e.g. other with 3+ matches) or out of range
                 matches = self.none()
 
         # return a QuerySet (possibly empty)
