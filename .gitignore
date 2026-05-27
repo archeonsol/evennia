@@ -65,5 +65,8 @@ docs/build
 .venv/
 .env/
 
-# Testing folder 
+# Testing folder
 .test_game_dir
+
+# Fleet review run artifacts
+.fleet-review/
