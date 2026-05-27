@@ -18,11 +18,6 @@ from evennia.utils.ansi import ANSIString
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import is_iter, lazy_property, make_iter
 
-# Prefix characters stripped only when building the help search index, so
-# `help @open` and `help open` find the same entry. Parser-side prefix-strip
-# was removed in +underspire.8 (token-boundary matching); this constant
-# survives purely for help convenience and is not user-configurable.
-_HELP_PREFIX_CHARS = "@&/+"
 _RE_CMD_LOCKFUNC_IN_LOCKSTRING = re.compile(r"(^|;|\s)cmd\:\w+", re.DOTALL)
 
 
@@ -108,15 +103,9 @@ def _init_command(cls, **kwargs):
     cls.help_category = cls.help_category.lower()
 
     # pre-prepare a help index entry for quicker lookup
-    # strip the @- etc to allow help to be agnostic
-    stripped_key = cls.key[1:] if cls.key and cls.key[0] in _HELP_PREFIX_CHARS else ""
-    stripped_aliases = " ".join(
-        al[1:] if al and al[0] in _HELP_PREFIX_CHARS else al for al in cls.aliases
-    )
     cls.search_index_entry = {
         "key": cls.key,
         "aliases": " ".join(cls.aliases),
-        "no_prefix": f"{stripped_key} {stripped_aliases}",
         "category": cls.help_category,
         "text": cls.__doc__,
         "tags": "",

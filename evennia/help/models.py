@@ -148,7 +148,6 @@ class HelpEntry(SharedMemoryModel):
         return {
             "key": self.db_key,
             "aliases": " ".join(self.aliases.all()),
-            "no_prefix": "",
             "category": self.db_help_category,
             "text": self.db_entrytext,
             "tags": " ".join(str(tag) for tag in self.tags.all()),

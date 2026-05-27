@@ -36,6 +36,100 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.22 — Help prefix rip-out, test-suite regression fix
+
+The Phase-3 `@`-prefix convention says `@kudos` and `kudos` are distinct
+commands and the parser does not strip the prefix
+([code-style.md Command Naming](.agents/docs/code-style.md)). The help
+command's display layer was still papering over that convention by
+hiding the `@` whenever no non-prefixed twin existed, leaving users
+reading `kudos` in the index and getting "did you mean @kudos?" when
+they typed it. The whole prefix-tolerance layer is removed.
+
+### Engine
+
+- [`evennia/commands/command.py`](evennia/commands/command.py): dropped
+  `_HELP_PREFIX_CHARS` constant and the `stripped_key`/`stripped_aliases`
+  block that built the `no_prefix` field in `search_index_entry`. The
+  index entry no longer carries a parallel unprefixed variant.
+- [`evennia/commands/default/help.py`](evennia/commands/default/help.py):
+  dropped the duplicate `_HELP_PREFIX_CHARS`, the `no_prefix` field on
+  `HelpCategory.search_index_entry`, the `strip_prefix` local function
+  in `do_search`, the `no_prefix` lunr search field (boost 6), the two
+  rerank loops that treated prefixed/unprefixed matches as equivalent,
+  the `strip_cmd_prefix` method, and its five call sites (index listing,
+  text-search suggestions, topic header, alias list, suggestion list).
+  Help now displays the registered key verbatim — `@kudos` shows as
+  `@kudos`. Want `help kudos` to also resolve? Add `kudos` as an alias
+  on the command; aliases are still indexed.
+- [`evennia/help/filehelp.py`](evennia/help/filehelp.py),
+  [`evennia/help/models.py`](evennia/help/models.py): dropped the empty
+  `"no_prefix": ""` placeholders in `search_index_entry` for schema
+  consistency now that the lunr field is gone.
+- [`evennia/objects/character.py`](evennia/objects/character.py):
+  re-applied the `+underspire.21` `_last_puppet` fix here, since the
+  recent objects-module split moved `DefaultCharacter` to its own
+  file and the new override did not carry the fix from the old
+  monolithic `objects.py:3371`. Without it `@ic` between characters
+  would silently regress on `.22+`.
+
+### Behaviour delta
+
+- Exact `help <unprefixed-key>` no longer resolves to a prefixed
+  command via the `no_prefix` indexed alias. The fuzzy suggester
+  (`COMMAND_FUZZY_SUGGESTIONS_MAX_DIST = 2`) still surfaces `@kudos`
+  when you type `kudos` (edit distance 1) as a "did you mean…"
+  suggestion, so users are not stranded — they just stop being
+  silently auto-routed.
+- Considered bumping `COMMAND_FUZZY_SUGGESTIONS_MAX_DIST` to 3 to
+  "make room for prefixes"; rejected. Distance-3 on short tokens
+  (`look`, `get`, `say`) produces explosive false positives that kill
+  the suggestion UX. The rip-out alone covers the prefix case.
+
+### Tests
+
+- Renamed [`evennia/objects/tests.py`](evennia/objects/tests.py) →
+  `evennia/objects/tests/test_objects.py`. The `tests/` directory was
+  introduced in `+underspire.21` with `__init__.py` so Django could
+  discover `test_scene_index.py` and the new `_last_puppet` test, but
+  Python's package-over-module precedence then silently shadowed the
+  950-line `tests.py` — `evennia.objects.tests` resolved to the new
+  empty package and the legacy suite went dark in CI. Migrating the
+  file into the package restores discovery without churning callers
+  (`evennia.objects.tests.SomeTest` still resolves). This is a `.21`
+  regression that should have been caught in that release.
+
+### Known pre-existing failures (not introduced here)
+
+The full `evennia.objects` suite now reports 6 failures, all in the
+multimatch tests that landed in `+underspire.20` (`f2511a5d4`):
+
+- `DefaultObjectTest.test_search_autopick`
+- `DefaultObjectTest.test_search_ordinal_last`
+- `DefaultObjectTest.test_search_location_scope`
+- `TestObjectManager.test_get_objs_with_key_and_typeclass`
+- `TestObjectManager.test_get_objs_with_key_or_alias`
+- `TestObjectManager.test_search_object`
+
+These were dark in CI for the same `tests.py`-shadowing reason as
+above, so they were never observed at PR time. The root cause is a
+mismatch between the multimatch test expectations and
+[`evennia/objects/object.py:729-731`](evennia/objects/object.py)
+`at_search_result`'s `quiet=True` branch: tests expect autopick /
+single-unwrap to fire under `quiet=True`, but the implementation
+short-circuits to `return list(results)` first. Left for a follow-up
+release because the fix is a deliberate semantic choice (whose contract
+wins, `quiet=True` documented behaviour or `try_autopick` ergonomics).
+
+### Migration
+
+No downstream changes required. Games that relied on the help-display
+prefix-strip to make admin commands appear "unprefixed" in the help
+index should add explicit unprefixed aliases on those commands — that
+was always the right shape under the Phase-3 convention.
+
+---
+
 ## 6.0.0+underspire.21 — Engine bug fixes (swap_typeclass hooks, character _last_puppet)
 
 Two genuine engine bugs caught during a five-item bug audit (three of

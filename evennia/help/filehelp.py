@@ -108,7 +108,6 @@ class FileHelpEntry:
             "key": self.key,
             "aliases": " ".join(self.aliases),
             "category": self.help_category,
-            "no_prefix": "",
             "tags": "",
             "locks": "",
             "text": self.entrytext,

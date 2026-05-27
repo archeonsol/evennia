@@ -10,7 +10,6 @@ outside the game in modules given by ``settings.FILE_HELP_ENTRY_MODULES``.
 
 from collections import defaultdict
 from dataclasses import dataclass
-from itertools import chain
 
 from django.conf import settings
 
@@ -29,10 +28,6 @@ from evennia.utils.utils import (
     pad,
 )
 
-# Prefix characters stripped in help lookups so `help @open` and `help open`
-# resolve identically. See evennia.commands.command._HELP_PREFIX_CHARS for
-# the parallel constant used at help-index build time.
-_HELP_PREFIX_CHARS = "@&/+"
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 HELP_MORE_ENABLED = settings.HELP_MORE_ENABLED
 DEFAULT_HELP_CATEGORY = settings.DEFAULT_HELP_CATEGORY
@@ -57,7 +52,6 @@ class HelpCategory:
             "key": self.key,
             "aliases": "",
             "category": self.key,
-            "no_prefix": "",
             "tags": "",
             "text": "",
         }
@@ -483,22 +477,15 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
 
         """
 
-        def strip_prefix(query):
-            if query and query[0] in _HELP_PREFIX_CHARS:
-                return query[1:]
-            return query
-
         if not search_fields:
             # lunr search fields/boosts
             search_fields = [
                 {"field_name": "key", "boost": 10},
                 {"field_name": "aliases", "boost": 7},
-                {"field_name": "no_prefix", "boost": 6},
                 {"field_name": "category", "boost": 5},
                 {"field_name": "tags", "boost": 1},  # tags are not used by default
             ]
         match, suggestions = None, None
-        base_query = strip_prefix(query)
         for match_query in (query, f"{query}*"):
             # We first do an exact word-match followed by a start-by query. The
             # return of this will either be a HelpCategory, a Command or a
@@ -506,14 +493,13 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             matches, suggestions = help_search_with_index(
                 match_query, entries, suggestion_maxnum=self.suggestion_maxnum, fields=search_fields
             )
-            # Move an exact match (including aliases) to the front of the list, treating a prefixed
-            # and non-prefixed command as the same thing
+            # Move an exact key/alias match to the front of the list.
             for m in matches[:]:
                 aliases = [m.key]
                 if not isinstance(m, HelpCategory):
                     # Aliases for help created with 'sethelp' is an AliasHandler
                     aliases += m.aliases if isinstance(m.aliases, list) else m.aliases.all()
-                if base_query in [strip_prefix(alias) for alias in aliases]:
+                if query in aliases:
                     matches.remove(m)
                     matches.insert(0, m)
                     break
@@ -523,7 +509,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
         if match:
             # Move an exact suggestion match to the front of the list
             for s in suggestions[:]:
-                if base_query == strip_prefix(s):
+                if query == s:
                     suggestions.remove(s)
                     suggestions.insert(0, s)
                     break
@@ -555,26 +541,6 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             self.topic = ""
             self.subtopics = []
 
-    def strip_cmd_prefix(self, key, all_keys):
-        """
-        Conditional strip of a command prefix, such as @ in @desc. By default
-        this will be hidden unless there is a duplicate without the prefix
-        in the full command set (such as @open and open).
-
-        Args:
-            key (str): Command key to analyze.
-            all_cmds (list): All command-keys (and potentially aliases).
-
-        Returns:
-            str: Potentially modified key to use in help display.
-
-        """
-        if key and key[0] in _HELP_PREFIX_CHARS and key[1:] not in all_keys:
-            # filter out e.g. `@` prefixes from display if there is duplicate
-            # with the prefix in the set (such as @open/open)
-            return key[1:]
-        return key
-
     def func(self):
         """
         Run the dynamic help entry creator.
@@ -598,11 +564,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             cmd_help_by_category = defaultdict(list)
             file_db_help_by_category = defaultdict(list)
 
-            # get a collection of all keys + aliases to be able to strip prefixes like @
-            key_and_aliases = set(chain(*(cmd._keyaliases for cmd in cmd_help_topics.values())))
-
             for key, cmd in cmd_help_topics.items():
-                key = self.strip_cmd_prefix(key, key_and_aliases)
                 cmd_help_by_category[cmd.help_category].append(key)
             for key, entry in file_db_help_topics.items():
                 file_db_help_by_category[entry.help_category].append(key)
@@ -620,9 +582,6 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
         cmd_help_topics, db_help_topics, file_help_topics = self.collect_topics(
             caller, mode="query"
         )
-
-        # get a collection of all keys + aliases to be able to strip prefixes like @
-        key_and_aliases = set(chain(*(cmd._keyaliases for cmd in cmd_help_topics.values())))
 
         # db-help topics takes priority over file-help
         file_db_help_topics = {**file_help_topics, **db_help_topics}
@@ -667,9 +626,6 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                             "\n... But matches were found within the help "
                             "texts of the suggestions below."
                         )
-                        suggestions = [
-                            self.strip_cmd_prefix(sugg, key_and_aliases) for sugg in suggestions
-                        ]
                         break
 
             output = self.format_help_entry(
@@ -768,12 +724,8 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             # we reached the bottom of the topic tree
             help_text = subtopic_map[None]
 
-        topic = self.strip_cmd_prefix(topic, key_and_aliases)
         if subtopics:
             aliases = None
-        else:
-            aliases = [self.strip_cmd_prefix(alias, key_and_aliases) for alias in aliases]
-        suggested = [self.strip_cmd_prefix(sugg, key_and_aliases) for sugg in suggested]
 
         output = self.format_help_entry(
             topic=topic,
