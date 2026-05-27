@@ -281,6 +281,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
                 if task.running:
                     task.stop()
             self.ndb._task = None
+            self.save(update_fields=["db_paused_time", "db_paused_callcount", "db_manually_paused"])
 
             self.at_pause(auto_pause=auto_pause, **kwargs)
 
@@ -323,6 +324,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             self.db_paused_time = None
             self.db_paused_callcount = None
             self.db_manually_paused = False
+            self.save(update_fields=["db_paused_time", "db_paused_callcount", "db_manually_paused"])
 
             self.at_start(**kwargs)
 

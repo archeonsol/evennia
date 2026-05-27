@@ -658,9 +658,16 @@ def conditional_flush(max_rmem, force=False):
 
             actual_rmem = psutil.Process(os.getpid()).memory_info().rss / (1024.0 * 1024.0)
         else:
+            import sys
             import resource
 
-            actual_rmem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+            rusage = resource.getrusage(resource.RUSAGE_SELF)
+            if sys.platform == "darwin":
+                # macOS: ru_maxrss is in bytes
+                actual_rmem = rusage.ru_maxrss / (1024.0 * 1024.0)
+            else:
+                # Linux/other Unix: ru_maxrss is in kilobytes
+                actual_rmem = rusage.ru_maxrss / 1024.0
     except Exception:
         # If memory info is unavailable, fall back to cache-count heuristic only.
         actual_rmem = max_rmem  # assume at limit so cache-count alone decides

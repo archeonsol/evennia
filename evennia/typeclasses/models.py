@@ -174,6 +174,11 @@ class TypeclassBase(SharedMemoryModelBase):
         # attach signals
         signals.post_save.connect(call_at_first_save, sender=new_class)
         signals.pre_delete.connect(remove_attributes_on_delete, sender=new_class)
+        try:
+            from evennia.typeclasses.managers import TypeclassManager
+            TypeclassManager._subclass_cache.clear()
+        except ImportError:
+            pass
         return new_class
 
 

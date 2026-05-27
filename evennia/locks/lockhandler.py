@@ -700,7 +700,7 @@ class LockHandler:
 
     def _eval_access_type(self, accessing_obj, locks, access_type):
         """
-        Helper method for evaluating the access type using eval().
+        Helper method for evaluating the access type using _eval_bool_expr.
 
         Args:
             accessing_obj (object): Object seeking access.
@@ -710,7 +710,7 @@ class LockHandler:
         """
         evalstring, func_tup, raw_string = locks[access_type]
         true_false = tuple(tup[0](accessing_obj, self.obj, *tup[1], **tup[2]) for tup in func_tup)
-        return eval(evalstring % true_false)
+        return _eval_bool_expr(evalstring % true_false)
 
     def check_lockstring(
         self, accessing_obj, lockstring, no_superuser_bypass=False, default=False, access_type=None
