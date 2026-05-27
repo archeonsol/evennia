@@ -555,7 +555,7 @@ class EvenniaServerService(MultiService):
                 [_SA(p, "is_connected", False) for p in evennia.AccountDB.get_all_cached_instances()]
                 [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
                 [(p.unpuppet_all(), p.at_server_shutdown()) for p in evennia.AccountDB.get_all_cached_instances()]
-                await evennia.ObjectDB.objects.clear_all_sessids()
+                evennia.ObjectDB.objects.clear_all_sessids()
             [
                 (s._pause_task(auto_pause=True), s.at_server_shutdown())
                 for s in evennia.ScriptDB.get_all_cached_instances()
