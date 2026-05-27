@@ -133,7 +133,7 @@ def catch_traceback(func):
     @wraps(func)
     def decorator(*args, **kwargs):
         try:
-            func(*args, **kwargs)
+            return func(*args, **kwargs)
         except Exception as err:
             _get_logger().log_trace()
             raise  # make sure the error is visible on the other side of the connection too
