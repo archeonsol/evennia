@@ -1548,7 +1548,23 @@ def check_database(always_return=False):
             new.save()
         else:
             create_superuser()
-            check_database(always_return=always_return)
+            # Guard against infinite recursion in non-interactive shells, where
+            # createsuperuser silently skips and leaves Account#1 absent. Verify
+            # creation directly instead of recursing into check_database.
+            if not AccountDB.objects.filter(id=1).exists():
+                if always_return:
+                    return False
+                print(
+                    ERROR_DATABASE.format(
+                        traceback=(
+                            "Could not create the Account#1 superuser. This usually "
+                            "means the command was run in a non-interactive shell "
+                            "without EVENNIA_SUPERUSER_USERNAME/EMAIL/PASSWORD env "
+                            "vars set. Set those, or run from a TTY, then retry."
+                        )
+                    )
+                )
+                sys.exit()
     return True
 
 

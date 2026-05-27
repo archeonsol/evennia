@@ -36,6 +36,44 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.24 — Fix `evennia` launcher infinite recursion in non-TTY shells
+
+[`evennia/server/evennia_launcher.py:1549-1551`](evennia/server/evennia_launcher.py)
+`check_database`'s "no Account#1 found" branch unconditionally
+recursed into itself after calling `create_superuser()`. In
+interactive shells `createsuperuser` blocks for input and the recursion
+exits naturally once an account exists. In **non-interactive shells**
+(CI runners, scripted tooling, `evennia makemigrations` piped through
+anything), Django's `createsuperuser` skips silently with a
+"Superuser creation skipped due to not running in a TTY" notice. The
+account remains absent. The recursion has no termination condition
+and burns CPU until something kills it.
+
+This bug isn't new — long-standing in the launcher — but it became
+visible during the `.22`/`.23` migration-drift investigation when
+`evennia makemigrations` was attempted from agent shells. Caught
+during follow-up review.
+
+### Engine
+
+- [`evennia/server/evennia_launcher.py`](evennia/server/evennia_launcher.py):
+  replaced the recursion with a direct `AccountDB.objects.filter(id=1).exists()`
+  check after `create_superuser()`. If the account still doesn't exist
+  (the create silently no-op'd), print the same `ERROR_DATABASE`
+  template the other failure paths use, with a body explaining the
+  non-interactive-shell case and pointing at the
+  `EVENNIA_SUPERUSER_USERNAME/EMAIL/PASSWORD` env-var alternative.
+  `always_return=True` callers still get a `False` return instead of
+  exiting, matching the existing contract.
+
+### Migration
+
+None. Pure bug fix; behaviour in interactive shells is unchanged
+(Django's interactive `createsuperuser` still blocks, account gets
+created, function returns).
+
+---
+
 ## 6.0.0+underspire.23 — Pin Django exactly to stop hash-drift migration churn
 
 Downstream review of `.22` surfaced unrecorded model changes in two
