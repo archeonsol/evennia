@@ -36,6 +36,85 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.23 — Pin Django exactly to stop hash-drift migration churn
+
+Downstream review of `.22` surfaced unrecorded model changes in two
+engine apps (`server`, `typeclasses`). Investigation showed two
+distinct drift causes:
+
+1. **Django version drift on auto-generated index names.** Django's
+   `_create_index_name` derives a 6-char hash from `(table, fields)`
+   that has not been stable across Django minor versions. Migrations
+   generated on Django 5.x baked in one hash; running on 6.0.4 today
+   computes a different one. The autodetector sees the mismatch and
+   keeps wanting to rename indexes that already exist on disk under
+   the old name — pure noise, but it surfaces as drift on every
+   release.
+2. **`AutoField` vs `BigAutoField` in old migrations.** The
+   `server` app's migration `0004_gameevent_enginejob` was written
+   before [`settings_default.py:381`](evennia/settings_default.py)
+   set `DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"`, so the
+   recorded `id` field types disagree with what the project default
+   would generate today. Pure drift, no behavioural impact.
+
+This release addresses cause (1) for the future and documents what
+remains manual.
+
+### Engine
+
+- [`pyproject.toml`](pyproject.toml): tightened the Django pin from
+  `django >= 6.0.2, < 6.1` to `django == 6.0.4` (the version that
+  generated the most recent migrations, including the typeclasses
+  `0018_rename_tag_…` index rename). With an exact pin, hash names
+  are stable across upgrades and a future Django minor bump cannot
+  silently re-introduce this class of drift. Bumping Django becomes
+  a deliberate engine release with a regenerated set of migrations,
+  not a transparent dependency update.
+- [`uv.lock`](uv.lock): regenerated to lock to Django 6.0.4.
+
+### Migration
+
+Downstream consumers should re-resolve their lockfile after pulling
+this release. Anyone who had been resolving to a 6.0.x newer than
+6.0.4 will pin back to 6.0.4 — no schema impact, but the resolver
+output will change. Add this to the consumer's CI to catch any
+*future* drift at PR time rather than at deploy:
+
+```yaml
+- name: Check for migration drift
+  run: evennia makemigrations --check --dry-run
+```
+
+This is recommended in the consumer's CI, not the engine's, because
+the engine ships against the default settings while consumers ship
+against their own. The check only catches drift against the
+configuration that will actually run in production.
+
+### Known unfixed (deferred to a future release)
+
+The pin closes the door on new drift but doesn't retroactively fix
+the existing mismatches surfaced by `.22` review. Two engine
+migrations still need to be written and shipped:
+
+- **`server`**: `AlterField id` on `gameevent` and `enginejob`
+  (`AutoField → BigAutoField`), plus `RenameIndex` on
+  `gameevent.subject_created_at` from `_0e8f0d_idx` to
+  `_40e896_idx`. Safe to land via straight `makemigrations` output.
+- **`typeclasses`**: an index reconciliation on `tag`. The
+  autodetector proposes `RemoveIndex` of
+  `typeclasses_tag_db_key_db_category_db_tagtype_db_model_idx`, but
+  blindly accepting would drop the index on deployed DBs. Correct
+  fix requires confirming the actual on-disk index name on
+  production (`SELECT indexname FROM pg_indexes WHERE tablename =
+  'typeclasses_tag'`) and writing a `SeparateDatabaseAndState`
+  migration that aligns recorded state without touching schema.
+
+Both are tracked for a follow-up release. The downstream `world`
+app likely needs its own `makemigrations` pass (separate concern,
+consumer-side fix).
+
+---
+
 ## 6.0.0+underspire.22 — Help prefix rip-out, test-suite regression fix
 
 The Phase-3 `@`-prefix convention says `@kudos` and `kudos` are distinct

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "evennia"
-version = "6.0.0+underspire.22"
+version = "6.0.0+underspire.23"
 maintainers = [{ name = "Griatch", email = "griatch@gmail.com" }]
 description = "Underspire Engine — Evennia 6.x fork for UNDERSPIRE (MUD server + game toolkit)."
 requires-python = ">=3.12"
@@ -65,7 +65,7 @@ classifiers = [
 dependencies = [
   # core dependencies
   "legacy-cgi;python_version >= '3.13'",
-  "django >= 6.0.2, < 6.1",
+  "django == 6.0.4",
   "twisted >= 24.11.0, < 25",
   "pytz >= 2022.6",
   "djangorestframework >= 3.16, < 3.17",

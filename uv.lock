@@ -734,7 +734,7 @@ wheels = [
 
 [[package]]
 name = "evennia"
-version = "6.0.0+underspire.22"
+version = "6.0.0+underspire.23"
 source = { editable = "." }
 dependencies = [
     { name = "anything" },
@@ -806,7 +806,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'extra'", specifier = ">=1.4.4" },
     { name = "botocore", marker = "extra == 'extra'", specifier = ">=1.15" },
     { name = "cryptography", marker = "extra == 'extra'", specifier = ">=2.8" },
-    { name = "django", specifier = ">=6.0.2,<6.1" },
+    { name = "django", specifier = "==6.0.4" },
     { name = "django-cors-headers", marker = "extra == 'game'", specifier = ">=4.3,<5" },
     { name = "django-extensions", marker = "extra == 'extra'", specifier = ">=3.1.0" },
     { name = "django-filter", specifier = "==25.2" },
