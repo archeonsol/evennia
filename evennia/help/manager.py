@@ -190,6 +190,7 @@ class HelpEntryManager(TypedObjectManager):
             if tags:
                 new_help.tags.batch_add(*tags)
             new_help.save()
+            signals.SIGNAL_HELPENTRY_POST_CREATE.send(sender=new_help)
             return new_help
         except IntegrityError:
             string = "Could not add help entry: key '%s' already exists." % key
@@ -198,5 +199,3 @@ class HelpEntryManager(TypedObjectManager):
         except Exception:
             logger.log_trace()
             return None
-
-        signals.SIGNAL_HELPENTRY_POST_CREATE.send(sender=new_help)

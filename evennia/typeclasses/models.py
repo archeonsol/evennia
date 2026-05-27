@@ -137,7 +137,6 @@ class TypeclassBase(SharedMemoryModelBase):
                     continue
                 else:
                     return base
-                return None
 
         dbmodel = _get_dbmodel(bases)
 

@@ -137,7 +137,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             cdict = self._createdict
             if not cdict.get("key"):
                 if not self.db_key:
-                    self.db_key = "#i" % self.dbid
+                    self.db_key = "#%i" % self.dbid
             elif cdict["key"] and self.key != cdict["key"]:
                 self.key = cdict["key"]
             if cdict.get("aliases"):
@@ -154,6 +154,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
                 self.attributes.batch_add(*cdict["attrs"])
 
     def basetype_setup(self):
+        # Default locks keep channels open for all players. Override this in a
+        # game-specific DefaultChannel subclass to restrict send/listen for
+        # production (e.g. "send:perm(Player);listen:perm(Player);control:perm(Admin)").
         self.locks.add("send:all();listen:all();control:perm(Admin)")
 
         # make sure we don't have access to a same-named old channel's history.
@@ -287,6 +290,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         mutelist = self.mutelist
         if subscriber in mutelist:
             mutelist.remove(subscriber)
+            self.db.mute_list = mutelist
             return True
         return False
 
@@ -649,7 +653,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             try:
                 recv_message = receiver.at_pre_channel_msg(message, self, **send_kwargs)
                 if recv_message in (None, False):
-                    return
+                    continue
 
                 receiver.channel_msg(recv_message, self, **send_kwargs)
 

@@ -56,7 +56,6 @@ ERROR_DESCRIPTION = b"_error_description"
 UNKNOWN_ERROR_CODE = b"UNKNOWN"
 
 # buffers
-_SENDBATCH = defaultdict(list)
 _MSGBUFFER = defaultdict(list)
 
 # resources
@@ -125,20 +124,19 @@ def _get_logger():
     return _LOGGER
 
 
-@wraps
 def catch_traceback(func):
     """
     Helper decorator
 
     """
 
+    @wraps(func)
     def decorator(*args, **kwargs):
         try:
             func(*args, **kwargs)
         except Exception as err:
             _get_logger().log_trace()
             raise  # make sure the error is visible on the other side of the connection too
-            print(err)
 
     return decorator
 
@@ -409,7 +407,7 @@ class AMPMultiConnectionProtocol(amp.AMP):
             pto = "proto_" + self.state
             statehandler = getattr(self, pto)
         except AttributeError:
-            log.msg("callback", self.state, "not found")
+            _get_logger().log_warn("AMP callback for state '%s' not found" % self.state)
         else:
             try:
                 # make sure to catch a KeyError cleanly here
@@ -599,6 +597,14 @@ class AMPMultiConnectionProtocol(amp.AMP):
             func_kwargs (str): Pickled kwargs dict for use in `function` call.
 
         """
+        from django.conf import settings
+
+        allowed = getattr(settings, "AMP_FUNCTIONCALL_MODULES", ())
+        if allowed and module not in allowed:
+            raise ValueError(
+                "FunctionCall denied: module '%s' is not in AMP_FUNCTIONCALL_MODULES." % module
+            )
+
         args = loads(func_args)
         kwargs = loads(func_kwargs)
 

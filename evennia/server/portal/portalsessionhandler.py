@@ -221,9 +221,11 @@ class PortalSessionHandler(SessionHandler):
             del self[session.sessid]
 
         # Tell the Server to disconnect its version of the Session as well.
-        evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_AdminPortal2Server(
-            session, operation=PDISCONN
-        )
+        # Guard against AMP not yet being established (e.g. very early disconnects).
+        if evennia.EVENNIA_PORTAL_SERVICE.amp_protocol:
+            evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_AdminPortal2Server(
+                session, operation=PDISCONN
+            )
 
     def disconnect_all(self):
         """

@@ -25,8 +25,8 @@ class Command(BaseCommand):
     #
     #     - at_pre_parse(): Runs before parse(). Return truthy to abort.
     #     - parse(): Splits self.args into self.switches / self.lhs / self.rhs /
-    #         self.lhslist / self.rhslist / self.arglist by default (MuxCommand-
-    #         style syntax, opt out with `parse_mux_syntax = False`).
+    #         self.lhslist / self.rhslist / self.arglist by default
+    #         (opt out with `parse_mux_syntax = False`).
     #     - at_pre_cmd(): Runs after parse(), before func(). Override for
     #         input validation that needs parsed args.
     #     - func(): Performs the actual work.

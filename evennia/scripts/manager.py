@@ -112,6 +112,23 @@ class ScriptDBManager(TypedObjectManager):
             script.stop()
             script.delete()
 
+    def remove_non_persistent(self, obj=None):
+        """
+        Remove all non-persistent scripts, or only those on a given object.
+
+        Args:
+            obj (Object, optional): If given, only remove non-persistent scripts
+                attached to this object. If not given, all non-persistent scripts
+                in the database are stopped and deleted.
+
+        """
+        qs = self.filter(db_persistent=False)
+        if obj is not None:
+            qs = qs.filter(db_obj=obj)
+        for script in qs:
+            script.stop()
+            script.delete()
+
     def update_scripts_after_server_start(self):
         """
         Update/sync/restart/delete scripts after server shutdown/restart.
@@ -152,7 +169,7 @@ class ScriptDBManager(TypedObjectManager):
             dbref_match = self.dbref_search(dbref)
             if dbref_match:
                 dmatch = dbref_match[0]
-                if not (obj and obj != dmatch.obj) or (only_timed and dmatch.interval):
+                if (not obj or dmatch.obj == obj) and (not only_timed or dmatch.interval > 0):
                     return dbref_match
 
         if typeclass:

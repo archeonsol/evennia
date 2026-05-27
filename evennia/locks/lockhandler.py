@@ -112,6 +112,63 @@ from django.utils.translation import gettext as _
 import evennia
 from evennia.utils import logger, utils
 
+
+def _eval_bool_expr(expr: str) -> bool:
+    """
+    Evaluate a pre-validated lock boolean expression without using ``eval()``.
+
+    The expression may contain only ``True``, ``False``, ``and``, ``or``,
+    ``not`` and parentheses — exactly the tokens produced by the lock parser
+    after substituting lock-function results.
+
+    Operator precedence: ``not`` > ``and`` > ``or`` (standard Python).
+    """
+    # Ensure parentheses are always separate tokens.
+    tokens = expr.replace("(", " ( ").replace(")", " ) ").split()
+    pos = [0]
+
+    def peek():
+        return tokens[pos[0]] if pos[0] < len(tokens) else None
+
+    def consume():
+        tok = tokens[pos[0]]
+        pos[0] += 1
+        return tok
+
+    def parse_or():
+        left = parse_and()
+        while peek() == "or":
+            consume()
+            right = parse_and()
+            left = left or right
+        return left
+
+    def parse_and():
+        left = parse_not()
+        while peek() == "and":
+            consume()
+            right = parse_not()
+            left = left and right
+        return left
+
+    def parse_not():
+        if peek() == "not":
+            consume()
+            return not parse_not()
+        return parse_atom()
+
+    def parse_atom():
+        tok = peek()
+        if tok == "(":
+            consume()
+            val = parse_or()
+            consume()  # ")"
+            return val
+        consume()
+        return tok == "True"
+
+    return bool(parse_or())
+
 __all__ = ("LockHandler", "LockException", "invalidate_lock_cache")
 
 WARNING_LOG = settings.LOCKWARNING_LOG_FILE
@@ -269,7 +326,7 @@ class LockHandler:
             try:
                 # purge the eval string of any superfluous items, then test it
                 evalstring = " ".join(_RE_OK.findall(evalstring))
-                eval(evalstring % tuple(True for func in funclist), {}, {})
+                _eval_bool_expr(evalstring % tuple(True for func in funclist))
             except Exception:
                 elist.append(
                     _("Lock: definition '{lock_string}' has syntax errors.").format(
@@ -633,7 +690,7 @@ class LockHandler:
             )
             # the True/False tuple goes into evalstring, which combines them
             # with AND/OR/NOT in order to get the final result.
-            result = eval(evalstring % true_false)
+            result = _eval_bool_expr(evalstring % true_false)
         else:
             result = default
 

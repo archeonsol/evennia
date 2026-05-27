@@ -40,7 +40,7 @@ from evennia.utils.utils import is_iter, to_bytes, uses_database
 
 __all__ = ("to_pickle", "from_pickle", "do_pickle", "do_unpickle", "dbserialize", "dbunserialize")
 
-PICKLE_PROTOCOL = 2
+PICKLE_PROTOCOL = 5  # Python 3.8+; protocol 5 supports out-of-band buffers and is faster than 2
 
 
 # message to send if editing an already deleted Attribute in a savermutable

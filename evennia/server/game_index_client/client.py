@@ -11,7 +11,6 @@ import urllib.request
 import django
 from django.conf import settings
 from twisted.internet import defer, protocol, reactor
-from twisted.internet.defer import inlineCallbacks
 from twisted.web.client import Agent, HTTPConnectionPool, _HTTP11ClientFactory
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IBodyProducer
@@ -47,13 +46,12 @@ class EvenniaGameIndexClient:
         self._conn_pool = HTTPConnectionPool(reactor)
         self._conn_pool._factory = QuietHTTP11ClientFactory
 
-    @inlineCallbacks
-    def send_game_details(self):
+    async def send_game_details(self):
         """
         This is where the magic happens. Send details about the game to the
         Evennia Game Index.
         """
-        status_code, response_body = yield self._form_and_send_request()
+        status_code, response_body = await self._form_and_send_request()
         if status_code == 200:
             if not self.logged_first_connect:
                 logger.log_infomsg("Successfully sent game details to Evennia Game Index.")

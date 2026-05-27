@@ -35,7 +35,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from django.conf import settings
 
-from evennia.commands.cmdparser import create_match, try_num_differentiators
+from evennia.commands.cmdparser import (
+    create_match,
+    try_multimatch_differentiators,
+    try_num_differentiators,
+)
+from evennia.utils.multimatch import resolve_multimatch_index
 from evennia.utils.logger import log_trace, mask_sensitive_input
 
 # Re-export parser-neutral helpers from the linear cmdparser module so
@@ -361,9 +366,10 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
 
     matches = trie_build_matches(raw_string, cmdset)
 
+    match_selector = None
     if not matches or len(matches) > 1:
-        match_index, new_raw_string = try_num_differentiators(raw_string)
-        if match_index is not None:
+        match_selector, new_raw_string = try_multimatch_differentiators(raw_string)
+        if match_selector is not None:
             matches.extend(trie_build_matches(new_raw_string, cmdset))
 
     if getattr(settings, "CMD_ACCESS_CACHE_ENABLED", False):
@@ -390,9 +396,10 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
         quality = [mat[4] for mat in matches]
         matches = matches[-quality.count(quality[-1]) :]
 
-    if len(matches) > 1 and match_index is not None:
-        if 0 < match_index <= len(matches):
-            matches = [matches[match_index - 1]]
+    if len(matches) > 1 and match_selector is not None:
+        idx = resolve_multimatch_index(match_selector, len(matches))
+        if idx is not None:
+            matches = [matches[idx]]
         else:
             matches = []
 

@@ -88,9 +88,6 @@ class CmdTutorial(Command):
         caller.msg(helptext)
 
 
-# for the @detail command we inherit from MuxCommand, since
-# we want to make use of MuxCommand's pre-parsing of '=' in the
-# argument.
 class CmdTutorialSetDetail(default_cmds.Command):
     """
     sets a detail on a room

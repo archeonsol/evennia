@@ -397,6 +397,25 @@ class TickerHandler(object):
         outpath = path if path and isinstance(path, str) else None
         return (packed_obj, methodname, outpath, interval, idstring, persistent)
 
+    def _schedule_save(self):
+        """
+        Schedule a deferred save on the next reactor tick.  Multiple mutations
+        in the same tick are coalesced into a single DB write.
+        """
+        if not getattr(self, "_save_scheduled", False):
+            self._save_scheduled = True
+            try:
+                from twisted.internet import reactor
+
+                reactor.callLater(0, self._do_scheduled_save)
+            except Exception:
+                # Reactor not running yet (e.g. during unit tests) — save now.
+                self.save()
+
+    def _do_scheduled_save(self):
+        self._save_scheduled = False
+        self.save()
+
     def save(self):
         """
         Save ticker_storage as a serialized string into a temporary
@@ -532,7 +551,7 @@ class TickerHandler(object):
         kwargs["_callback"] = callfunc  # either method-name or callable
         self.ticker_storage[store_key] = (args, kwargs)
         self.ticker_pool.add(store_key, *args, **kwargs)
-        self.save()
+        self._schedule_save()
         return store_key
 
     def remove(self, interval=60, callback=None, idstring="", persistent=True, store_key=None):
@@ -575,7 +594,7 @@ class TickerHandler(object):
         to_remove = self.ticker_storage.pop(store_key, None)
         if to_remove:
             self.ticker_pool.remove(store_key)
-            self.save()
+            self._schedule_save()
         else:
             raise KeyError(f"No Ticker was found matching the store-key {store_key}.")
 
@@ -600,7 +619,7 @@ class TickerHandler(object):
             )
         else:
             self.ticker_storage = {}
-        self.save()
+        self._schedule_save()
 
     def all(self, interval=None):
         """

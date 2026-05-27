@@ -229,13 +229,14 @@ class FileHelpStorageHandler:
         unique_help_entries = {}
 
         for dct in loaded_help_dicts:
-            key = dct.get("key").lower().strip()
+            raw_key = dct.get("key")
+            key = raw_key.lower().strip() if raw_key else ""
             category = dct.get("category", _DEFAULT_HELP_CATEGORY).lower().strip()
             aliases = list(dct.get("aliases", []))
             entrytext = dct.get("text", "")
             locks = dct.get("locks", "")
 
-            if not key and entrytext:
+            if not key or not entrytext:
                 logger.error(f"Cannot load file-help-entry (missing key or text): {dct}")
                 continue
 

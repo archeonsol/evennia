@@ -153,6 +153,15 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
+# Allowlist of module paths that may be invoked via the AMP FunctionCall command.
+# FunctionCall allows Server↔Portal to call functions in each other's process.
+# Only modules listed here will be callable; an empty tuple disables FunctionCall
+# entirely. Keep AMP_INTERFACE bound to 127.0.0.1 so this channel is never
+# reachable from outside the machine.
+AMP_FUNCTIONCALL_MODULES = (
+    "evennia.server.portal.amp_server",
+    "evennia.server.amp_client",
+)
 
 
 # Path to the lib directory containing the bulk of the codebase's code.

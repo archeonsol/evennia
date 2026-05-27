@@ -1684,7 +1684,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 except ChannelDB.DoesNotExist:
                     logger.log_trace()
             else:
-                _MUDINFO = False
+                _MUDINFO_CHANNEL = False
         if _CONNECT_CHANNEL is None:
             if settings.CHANNEL_CONNECTINFO:
                 try:

@@ -246,9 +246,19 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         )
 
         if not self.ndb._task.running:
-            # if not unpausing started it, start script anew with the new values
+            # Determine actual start delay: prefer the explicit seconds column, fall back to
+            # the old boolean flag (True → delay by one interval).
+            effective_start_delay = start_delay
+            if effective_start_delay is None:
+                if self.db_start_delay_secs > 0:
+                    effective_start_delay = self.db_start_delay_secs
+                elif self.db_start_delay_secs == -1:
+                    effective_start_delay = None  # start immediately
+                # db_start_delay_secs == 0 means "use db_start_delay boolean"
             self.ndb._task.start(
-                self.db_interval, now=not self.db_start_delay, start_delay=start_delay
+                self.db_interval,
+                now=not (self.db_start_delay or bool(effective_start_delay)),
+                start_delay=effective_start_delay,
             )
 
         self.at_start(**kwargs)
@@ -261,13 +271,13 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             auto_pause (str):
 
         """
-        if not self.db._paused_time:
+        if not self.db_paused_time:
             # only allow pause if not already paused
             task = self.ndb._task
             if task:
-                self.db._paused_time = task.next_call_time()
-                self.db._paused_callcount = task.callcount
-                self.db._manually_paused = not auto_pause
+                self.db_paused_time = task.next_call_time()
+                self.db_paused_callcount = task.callcount
+                self.db_manually_paused = not auto_pause
                 if task.running:
                     task.stop()
             self.ndb._task = None
@@ -290,14 +300,14 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
                 to recalculate the unpause startup interval.
 
         """
-        paused_time = self.db._paused_time
+        paused_time = self.db_paused_time
         if paused_time:
-            if auto_unpause and self.db._manually_paused:
+            if auto_unpause and self.db_manually_paused:
                 # this was manually paused.
                 return
 
             # task was paused. This will use the new values as needed.
-            callcount = self.db._paused_callcount or 0
+            callcount = self.db_paused_callcount or 0
             if start_delay is None and interval is not None:
                 # adjust start-delay based on how far we were into previous interval
                 start_delay = max(0, interval - (old_interval - paused_time))
@@ -310,9 +320,9 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             self.ndb._task.start(
                 self.db_interval, now=False, start_delay=start_delay, count_start=callcount
             )
-            self.db._paused_time = None
-            self.db._paused_callcount = None
-            self.db._manually_paused = None
+            self.db_paused_time = None
+            self.db_paused_callcount = None
+            self.db_manually_paused = False
 
             self.at_start(**kwargs)
 
@@ -331,9 +341,9 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         self.db_is_active = False
 
         # make sure this is not confused as a paused script
-        self.db._paused_time = None
-        self.db._paused_callcount = None
-        self.db._manually_paused = None
+        self.db_paused_time = None
+        self.db_paused_callcount = None
+        self.db_manually_paused = False
 
         self.save(update_fields=["db_is_active"])
         if task_stopped:
@@ -463,7 +473,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
                 self.attributes.batch_add(*cdict["attributes"])
             if cdict.get("nattributes"):
                 # this should be a dict of nattrname:value
-                for key, value in cdict["nattributes"]:
+                for key, value in cdict["nattributes"].items():
                     self.nattributes.add(key, value)
 
             if cdict.get("autostart"):
@@ -599,7 +609,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             **kwargs: Optional (default unused) kwargs passed on into the `at_pause` hook.
 
         """
-        self._pause_task(manual_pause=True, **kwargs)
+        self._pause_task(**kwargs)
 
     def unpause(self, **kwargs):
         """

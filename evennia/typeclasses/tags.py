@@ -378,7 +378,7 @@ class TagHandler(object):
         if key:
             cachekey = "%s-%s" % (key, category)
             tag = _TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(cachekey, None)
-            if tag and (not hasattr(tag, "pk") and tag.pk is None):
+            if tag and (not hasattr(tag, "pk") or tag.pk is None):
                 # clear out Tags deleted from elsewhere. We must search this anew.
                 tag = None
                 del self._cache[cachekey]
@@ -392,7 +392,11 @@ class TagHandler(object):
                     "tag__db_key__iexact": key.lower(),
                     "tag__db_category__iexact": category.lower() if category else None,
                 }
-                conn = getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
+                conn = (
+                    getattr(self.obj, self._m2m_fieldname)
+                    .through.objects.select_related("tag")
+                    .filter(**query)
+                )
                 if conn:
                     tag = conn[0].tag
                     if _TYPECLASS_AGGRESSIVE_CACHE:
@@ -415,9 +419,9 @@ class TagHandler(object):
                 }
                 tags = [
                     conn.tag
-                    for conn in getattr(self.obj, self._m2m_fieldname).through.objects.filter(
-                        **query
-                    )
+                    for conn in getattr(self.obj, self._m2m_fieldname)
+                    .through.objects.select_related("tag")
+                    .filter(**query)
                 ]
                 if _TYPECLASS_AGGRESSIVE_CACHE:
                     for tag in tags:
@@ -749,7 +753,7 @@ class TagHandler(object):
             elif nlen > 1:
                 keys[tup[1]].append(tup[0])
         for category, key in keys.items():
-            self.remove(key=key, category=category, data=data.get(category, None))
+            self.remove(key=key, category=category)
 
     def __str__(self):
         return ",".join(self.all())

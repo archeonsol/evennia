@@ -206,15 +206,23 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
         if global_search:
             # search all tags using the Tag model
             query = [("db_tagtype", tagtype), ("db_model", dbmodel)]
-            if obj:
-                query.append(("id", obj.id))
             if key:
                 query.append(("db_key", key))
             if category:
                 query.append(("db_category", category))
             else:
                 query.append(("db_category", None))
-            return _Tag.objects.filter(**dict(query))
+            qs = _Tag.objects.filter(**dict(query))
+            if obj:
+                # Limit to tags actually linked to this specific object via the
+                # M2M through table (Tag has no direct FK back to objects).
+                through = self.model.db_tags.through
+                obj_field = self.model.__name__.lower()
+                linked_ids = through.objects.filter(
+                    **{"%s__id" % obj_field: obj.id}
+                ).values_list("tag_id", flat=True)
+                qs = qs.filter(id__in=linked_ids)
+            return qs
         else:
             # search only among tags stored on on this model
             query = [("tag__db_tagtype", tagtype), ("tag__db_model", dbmodel)]
@@ -670,8 +678,52 @@ class TypeclassManager(TypedObjectManager):
             # we assume is one word.
             queries.append(part)
         # build query from components
-        query = " ".join(queries)
-        # TODO
+        key_query = " ".join(queries)
+
+        # Start with the full typeclass queryset, then narrow down.
+        qs = self.all()
+
+        if key_query:
+            dbref = self.dbref(key_query)
+            if dbref:
+                qs = qs.filter(id=dbref)
+            else:
+                # Match by key or alias tag.
+                alias_ids = self.model.db_tags.through.objects.filter(
+                    tag__db_key__iexact=key_query,
+                    tag__db_tagtype="alias",
+                ).values_list("%s_id" % self.model.__name__.lower(), flat=True)
+                qs = qs.filter(
+                    Q(db_key__iexact=key_query) | Q(id__in=alias_ids)
+                )
+
+        for tagkey, tagcat in plustags:
+            qs = qs.filter(
+                db_tags__db_key__iexact=tagkey,
+                db_tags__db_category__iexact=tagcat if tagcat else None,
+                db_tags__db_tagtype=None,
+            )
+        for tagkey, tagcat in negtags:
+            qs = qs.exclude(
+                db_tags__db_key__iexact=tagkey,
+                db_tags__db_category__iexact=tagcat if tagcat else None,
+                db_tags__db_tagtype=None,
+            )
+
+        for attrkey, attrval, attrcat in plusattrs:
+            qs = qs.filter(
+                db_attributes__db_key__iexact=attrkey,
+                db_attributes__db_strvalue__iexact=attrval,
+                db_attributes__db_category__iexact=attrcat if attrcat else None,
+            )
+        for attrkey, attrval, attrcat in negattrs:
+            qs = qs.exclude(
+                db_attributes__db_key__iexact=attrkey,
+                db_attributes__db_strvalue__iexact=attrval,
+                db_attributes__db_category__iexact=attrcat if attrcat else None,
+            )
+
+        return qs.distinct()
 
     def get(self, *args, **kwargs):
         """
@@ -797,16 +849,24 @@ class TypeclassManager(TypedObjectManager):
         """
         return super().filter(db_typeclass_path=self.model.path).values_list(*args, **kwargs)
 
+    # Per-class cache: {cls: [subclass, ...]}  Cleared when new subclasses are registered.
+    _subclass_cache: dict = {}
+
     def _get_subclasses(self, cls):
         """
-        Recursively get all subclasses to a class.
+        Recursively get all subclasses of *cls*, with results cached on the
+        manager class to avoid repeated MRO walks on every filter_family call.
 
         Args:
-            cls (classoject): A class to get subclasses from.
+            cls (class): A class to get subclasses from.
         """
+        cached = self.__class__._subclass_cache.get(cls)
+        if cached is not None:
+            return cached
         all_subclasses = cls.__subclasses__()
-        for subclass in all_subclasses:
+        for subclass in list(all_subclasses):
             all_subclasses.extend(self._get_subclasses(subclass))
+        self.__class__._subclass_cache[cls] = all_subclasses
         return all_subclasses
 
     def get_family(self, *args, **kwargs):

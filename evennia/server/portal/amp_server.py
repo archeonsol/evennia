@@ -198,8 +198,10 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
             self.factory.portal.server_twistd_cmd = server_twistd_cmd
             logfile.flush()
         if process and not _is_windows():
-            # avoid zombie-process on Unix/BSD
-            process.wait()
+            # Reap the child in a thread so the reactor is never blocked.
+            from twisted.internet import reactor
+
+            reactor.callInThread(process.wait)
         return
 
     def wait_for_disconnect(self, callback, *args, **kwargs):

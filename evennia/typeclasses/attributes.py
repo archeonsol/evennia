@@ -74,6 +74,24 @@ def value_query_filter(value, prefix=""):
     return {f"{prefix}db_value": value}
 
 
+_JSON_PRIMITIVE_TYPES = (bool, int, float, str, type(None))
+
+
+def _is_json_safe(obj, _depth=0):
+    """Return True if *obj* can be round-tripped through json.dumps/loads without data loss."""
+    if _depth > 8:
+        return False
+    if type(obj) in _JSON_PRIMITIVE_TYPES:
+        return True
+    if isinstance(obj, (list, tuple)):
+        return all(_is_json_safe(v, _depth + 1) for v in obj)
+    if isinstance(obj, dict):
+        return all(
+            isinstance(k, str) and _is_json_safe(v, _depth + 1) for k, v in obj.items()
+        )
+    return False
+
+
 def _classify_value(value):
     """Classify a value into typed columns or the pickle path.
 
@@ -91,6 +109,10 @@ def _classify_value(value):
         return ("float", None, value, None, None)
     if t is str:
         return ("str", None, None, value, None)
+    if isinstance(value, (list, tuple, dict)) and _is_json_safe(value):
+        import json
+
+        return ("json", None, None, json.dumps(value, ensure_ascii=False), None)
     return ("", None, None, None, to_pickle(value))
 
 
@@ -665,6 +687,10 @@ class Attribute(IAttribute, SharedMemoryModel):
             return self.db_str_val
         elif _type == "none":
             return None
+        elif _type == "json":
+            import json
+
+            return json.loads(self.db_str_val)
         return from_pickle(self.db_value, db_obj=self)
 
     @value.setter
@@ -775,7 +801,7 @@ class IAttributeBackend:
         except KeyError:
             attr = None
 
-        if attr and (not hasattr(attr, "pk") and attr.pk is None):
+        if attr and (not hasattr(attr, "pk") or attr.pk is None):
             # clear out Attributes deleted from elsewhere. We must search this anew.
             attr = None
             cachefound = False
@@ -1249,7 +1275,9 @@ class ModelAttributeBackend(IAttributeBackend):
         }
         return [
             conn.attribute
-            for conn in getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
+            for conn in getattr(self.obj, self._m2m_fieldname)
+            .through.objects.select_related("attribute")
+            .filter(**query)
         ]
 
     def query_key(self, key, category):
@@ -1262,7 +1290,11 @@ class ModelAttributeBackend(IAttributeBackend):
         }
         if not self.obj.pk:
             return []
-        return getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
+        return (
+            getattr(self.obj, self._m2m_fieldname)
+            .through.objects.select_related("attribute")
+            .filter(**query)
+        )
 
     def query_category(self, category):
         query = {
@@ -1273,7 +1305,9 @@ class ModelAttributeBackend(IAttributeBackend):
         }
         return [
             conn.attribute
-            for conn in getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
+            for conn in getattr(self.obj, self._m2m_fieldname)
+            .through.objects.select_related("attribute")
+            .filter(**query)
         ]
 
     def do_create_attribute(self, key, category, lockstring, value, strvalue):

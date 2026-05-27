@@ -648,16 +648,22 @@ def conditional_flush(max_rmem, force=False):
         )
         return
 
-    if os.name == "nt":
-        # we can't look for mem info in Windows at the moment
-        return
-
     # check actual memory usage
     Ncache_max = mem2cachesize(max_rmem)
     Ncache, _ = cache_size()
-    actual_rmem = (
-        float(os.popen("ps -p %d -o %s | tail -1" % (os.getpid(), "rss")).read()) / 1000.0
-    )  # resident memory
+    try:
+        if os.name == "nt":
+            # Windows: use psutil if available, else skip the RSS check.
+            import psutil
+
+            actual_rmem = psutil.Process(os.getpid()).memory_info().rss / (1024.0 * 1024.0)
+        else:
+            import resource
+
+            actual_rmem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    except Exception:
+        # If memory info is unavailable, fall back to cache-count heuristic only.
+        actual_rmem = max_rmem  # assume at limit so cache-count alone decides
 
     if Ncache >= Ncache_max and actual_rmem > max_rmem * 0.9:
         # flush cache when number of objects in cache is big enough and our

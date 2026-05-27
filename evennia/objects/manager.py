@@ -202,11 +202,36 @@ class ObjectDBManager(TypedObjectManager):
         )
         type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
 
+        # Use typed columns for primitives — avoids an unpickling full-table scan.
+        if isinstance(attribute_value, bool):
+            val_q = Q(
+                db_attributes__db_val_type="bool",
+                db_attributes__db_int_val=int(attribute_value),
+            )
+        elif isinstance(attribute_value, int):
+            val_q = Q(
+                db_attributes__db_val_type="int", db_attributes__db_int_val=attribute_value
+            )
+        elif isinstance(attribute_value, float):
+            val_q = Q(
+                db_attributes__db_val_type="float", db_attributes__db_float_val=attribute_value
+            )
+        elif isinstance(attribute_value, str):
+            val_q = Q(
+                db_attributes__db_val_type="str",
+                db_attributes__db_str_val__iexact=attribute_value,
+            )
+        elif attribute_value is None:
+            val_q = Q(db_attributes__db_val_type="none")
+        else:
+            # Complex value: fall back to pickle column comparison.
+            val_q = Q(db_attributes__db_value=attribute_value)
+
         results = self.filter(
             cand_restriction
             & type_restriction
             & Q(db_attributes__db_key=attribute_name)
-            & Q(db_attributes__db_value=attribute_value)
+            & val_q
         ).order_by("id")
         return results
 
@@ -431,11 +456,13 @@ class ObjectDBManager(TypedObjectManager):
                     searchdata, exact=exact, candidates=candidates, typeclasses=typeclass
                 )
             if matches and tags:
-                # additionally filter matches by tags
+                # Filter by all required tags in a single query pass.
                 for tagkey, tagcategory in tags:
-                    matches = matches.filter(
-                        db_tags__db_key=tagkey, db_tags__db_category=tagcategory
-                    )
+                    tag_ids = self.model.db_tags.through.objects.filter(
+                        tag__db_key=tagkey,
+                        tag__db_category=tagcategory,
+                    ).values_list("%s_id" % self.model.__name__.lower(), flat=True)
+                    matches = matches.filter(id__in=tag_ids)
 
             return matches
 

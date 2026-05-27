@@ -91,7 +91,8 @@ class EvenniaServerService(MultiService):
             evennia.gametime.SERVER_RUNTIME = evennia.ServerConfig.objects.conf(
                 "runtime", default=0.0
             )
-            _LAST_SERVER_TIME_SNAPSHOT = now
+            # self._last_server_time_snapshot is set unconditionally at the end
+            # of this method; no separate assignment is needed here.
         else:
             # adjust the runtime not with 60s but with the actual elapsed time
             # in case this may varies slightly from 60s.
@@ -297,9 +298,6 @@ class EvenniaServerService(MultiService):
         can't save it to the database.
         """
         if (
-            ".".join(str(i) for i in django.VERSION) < "1.2"
-            and settings.DATABASES.get("default", {}).get("ENGINE") == "sqlite3"
-        ) or (
             hasattr(settings, "DATABASES")
             and settings.DATABASES.get("default", {}).get("ENGINE", None)
             == "django.db.backends.sqlite3"
@@ -506,8 +504,7 @@ class EvenniaServerService(MultiService):
         # initialize and start global scripts
         evennia.GLOBAL_SCRIPTS.start()
 
-    @defer.inlineCallbacks
-    def shutdown(self, mode="reload", _reactor_stopping=False):
+    async def shutdown(self, mode="reload", _reactor_stopping=False):
         """
         Shuts down the server from inside it.
 
@@ -526,19 +523,19 @@ class EvenniaServerService(MultiService):
         if _reactor_stopping and hasattr(self, "shutdown_complete"):
             # this means we have already passed through this method
             # once; we don't need to run the shutdown procedure again.
-            defer.returnValue(None)
+            return
 
         if mode == "reload":
             # call restart hooks
             evennia.ServerConfig.objects.conf("server_restart_mode", "reload")
-            yield [o.at_server_reload() for o in evennia.ObjectDB.get_all_cached_instances()]
-            yield [p.at_server_reload() for p in evennia.AccountDB.get_all_cached_instances()]
-            yield [
+            [o.at_server_reload() for o in evennia.ObjectDB.get_all_cached_instances()]
+            [p.at_server_reload() for p in evennia.AccountDB.get_all_cached_instances()]
+            [
                 (s._pause_task(auto_pause=True) if s.is_active else None, s.at_server_reload())
                 for s in evennia.ScriptDB.get_all_cached_instances()
                 if s.id
             ]
-            yield evennia.SESSION_HANDLER.all_sessions_portal_sync()
+            await evennia.SESSION_HANDLER.all_sessions_portal_sync()
             self.at_server_reload_stop()
             # only save monitor state on reload, not on shutdown/reset
             from evennia.scripts.monitorhandler import MONITOR_HANDLER
@@ -550,22 +547,16 @@ class EvenniaServerService(MultiService):
         else:
             if mode == "reset":
                 # like shutdown but don't unset the is_connected flag and don't disconnect sessions
-                yield [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
-                yield [p.at_server_shutdown() for p in evennia.AccountDB.get_all_cached_instances()]
+                [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
+                [p.at_server_shutdown() for p in evennia.AccountDB.get_all_cached_instances()]
                 if self.amp_protocol:
-                    yield evennia.SESSION_HANDLER.all_sessions_portal_sync()
+                    await evennia.SESSION_HANDLER.all_sessions_portal_sync()
             else:  # shutdown
-                yield [
-                    _SA(p, "is_connected", False)
-                    for p in evennia.AccountDB.get_all_cached_instances()
-                ]
-                yield [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
-                yield [
-                    (p.unpuppet_all(), p.at_server_shutdown())
-                    for p in evennia.AccountDB.get_all_cached_instances()
-                ]
-                yield evennia.ObjectDB.objects.clear_all_sessids()
-            yield [
+                [_SA(p, "is_connected", False) for p in evennia.AccountDB.get_all_cached_instances()]
+                [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
+                [(p.unpuppet_all(), p.at_server_shutdown()) for p in evennia.AccountDB.get_all_cached_instances()]
+                await evennia.ObjectDB.objects.clear_all_sessids()
+            [
                 (s._pause_task(auto_pause=True), s.at_server_shutdown())
                 for s in evennia.ScriptDB.get_all_cached_instances()
                 if s.id and s.is_active
@@ -593,7 +584,7 @@ class EvenniaServerService(MultiService):
         self.at_server_stop()
 
         if hasattr(self, "web_root"):  # not set very first start
-            yield self.web_root.empty_threadpool()
+            await self.web_root.empty_threadpool()
 
         if not _reactor_stopping:
             # kill the server

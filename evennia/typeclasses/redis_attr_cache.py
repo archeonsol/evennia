@@ -210,11 +210,17 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             return False
 
     def _attrs_from_redis_keys(self, r, keys) -> List:
+        decoded = list(_decode_redis_keys(keys))
+        if not decoded:
+            return []
+        try:
+            # Batch all key fetches into a single MGET pipeline round-trip.
+            raws = r.mget(decoded)
+        except Exception:
+            return []
         attrs = []
-        for rkey in _decode_redis_keys(keys):
-            try:
-                raw = r.get(rkey)
-            except Exception:
+        for raw in raws:
+            if raw is None:
                 continue
             attr = _hydrate_attr_from_payload(self._attrclass, raw)
             if attr:

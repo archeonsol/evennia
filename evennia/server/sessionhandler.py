@@ -60,8 +60,6 @@ _SERVERNAME = settings.SERVERNAME
 _MULTISESSION_MODE = settings.MULTISESSION_MODE
 _IDLE_TIMEOUT = settings.IDLE_TIMEOUT
 _DELAY_CMD_LOGINSTART = settings.DELAY_CMD_LOGINSTART
-_MAX_SERVER_COMMANDS_PER_SECOND = 100.0
-_MAX_SESSION_COMMANDS_PER_SECOND = 5.0
 _MODEL_MAP = None
 _FUNCPARSER = None
 
@@ -639,9 +637,15 @@ class ServerSessionHandler(SessionHandler):
             reason (str, optional): The reason for the disconnection.
 
         """
-
-        for session in self:
-            del session
+        # Set flag so self.disconnect() skips individual dict removal; we clear
+        # the whole mapping at once below.
+        self._disconnect_all = True
+        try:
+            for session in list(self.values()):
+                session.at_disconnect(reason)
+        finally:
+            del self._disconnect_all
+        self.clear()
         # tell portal to disconnect all sessions
         evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.SDISCONNALL, reason=reason
@@ -673,6 +677,12 @@ class ServerSessionHandler(SessionHandler):
         """
         Check all currently connected sessions (logged in and not) and
         see if any are dead or idle.
+
+        .. deprecated::
+            Idle timeout is handled by ``EvenniaServerService.process_idle_timeouts``
+            in ``server/service.py``. This method is never called by the engine and
+            exists only for backward compatibility with any code that called it
+            directly. Use ``service.process_idle_timeouts()`` instead.
 
         """
         tcurr = time.time()
