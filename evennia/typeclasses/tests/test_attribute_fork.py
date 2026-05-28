@@ -21,8 +21,29 @@ class TestClassifyValue(BaseEvenniaTest):
         self.assertEqual(_classify_value("x")[0], "str")
         self.assertEqual(_classify_value(None)[0], "none")
 
-    def test_pickle_path_for_dict(self):
-        self.assertEqual(_classify_value({"a": 1})[0], "")
+    def test_json_path_for_plain_dict(self):
+        # JSON-safe dicts/lists go through the json typed column.
+        self.assertEqual(_classify_value({"a": 1})[0], "json")
+        self.assertEqual(_classify_value([1, 2, 3])[0], "json")
+
+    def test_pickle_path_for_tuple_and_unsafe_containers(self):
+        # Tuples have no JSON type and would silently demote to lists, so
+        # both standalone tuples and structures containing them must take
+        # the pickle path to preserve type fidelity.
+        self.assertEqual(_classify_value((1, 2))[0], "")
+        self.assertEqual(_classify_value({"a": (1, 2)})[0], "")
+        self.assertEqual(_classify_value([1, (2, 3)])[0], "")
+        # Sets aren't JSON-representable either.
+        self.assertEqual(_classify_value({1, 2, 3})[0], "")
+
+    def test_pickle_path_for_oversized_int(self):
+        # Python ints > 2^63 - 1 don't fit BigIntegerField and must
+        # route to pickle instead of crashing the INSERT.
+        self.assertEqual(_classify_value(1 << 63)[0], "")
+        self.assertEqual(_classify_value(-(1 << 63) - 1)[0], "")
+        # Boundary values still fit.
+        self.assertEqual(_classify_value((1 << 63) - 1)[0], "int")
+        self.assertEqual(_classify_value(-(1 << 63))[0], "int")
 
 
 class TestWriteBehindFlush(BaseEvenniaTest):
