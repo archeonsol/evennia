@@ -28,9 +28,6 @@ _MAX_CHAR_LIMIT = int(settings.MAX_CHAR_LIMIT)
 _MIN_TIME_BETWEEN_CONNECTS = 1.0 / float(_MAX_CONNECTION_RATE)
 _MIN_TIME_BETWEEN_COMMANDS = 1.0 / float(_MAX_COMMAND_RATE)
 
-_ERROR_COMMAND_OVERFLOW = settings.COMMAND_RATE_WARNING
-_ERROR_MAX_CHAR = settings.MAX_CHAR_LIMIT_WARNING
-
 _CONNECTION_QUEUE = deque()
 
 DUMMYSESSION = namedtuple("DummySession", ["sessid"])(0)
@@ -416,7 +413,7 @@ class PortalSessionHandler(SessionHandler):
             text = kwargs["text"]
             if (_MAX_CHAR_LIMIT > 0) and len(text) > _MAX_CHAR_LIMIT:
                 if session:
-                    self.data_out(session, text=[[_ERROR_MAX_CHAR], {}])
+                    self.data_out(session, text=[[settings.MAX_CHAR_LIMIT_WARNING], {}])
                 return
         except Exception:
             # if there is a problem to send, we continue
@@ -439,7 +436,7 @@ class PortalSessionHandler(SessionHandler):
             session.command_counter += 1
 
             if session.command_counter * _MIN_TIME_BETWEEN_COMMANDS > 1.0:
-                self.data_out(session, text=[[_ERROR_COMMAND_OVERFLOW], {}])
+                self.data_out(session, text=[[settings.COMMAND_RATE_WARNING], {}])
                 return
 
             if not evennia.EVENNIA_PORTAL_SERVICE.amp_protocol:
