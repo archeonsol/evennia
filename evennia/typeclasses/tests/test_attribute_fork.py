@@ -7,9 +7,13 @@ from unittest.mock import MagicMock
 from django.test import override_settings
 from mock import patch
 
-from evennia.typeclasses.attributes import (Attribute, ModelAttributeBackend,
-                                            _classify_value, _mark_attr_dirty,
-                                            flush_all_dirty)
+from evennia.typeclasses.attributes import (
+    Attribute,
+    ModelAttributeBackend,
+    _classify_value,
+    _mark_attr_dirty,
+    flush_all_dirty,
+)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -404,6 +408,30 @@ class TestRedisAttrCache(BaseEvenniaTest):
                 [],
                 "Redis must not be published when bulk_update fails",
             )
+
+    def test_orphan_flush_failure_keeps_attrs_queued(self):
+        # If bulk_update raises during the orphan-dirty flush, the attrs
+        # must remain in _ORPHAN_DIRTY_ATTRS so the next maintenance tick
+        # retries. Pre-fix behaviour discarded them before bulk_update ran
+        # and silently lost the writes on failure.
+        from evennia.typeclasses.attributes import _ORPHAN_DIRTY_ATTRS, flush_all_dirty
+
+        self.obj1.attributes.add("orphan_retry", 1)
+        attr = Attribute.objects.filter(db_key="orphan_retry", db_model__iexact="objectdb").first()
+        self.assertIsNotNone(attr)
+        attr.value = 99  # orphan-dirty path
+
+        self.assertIn(attr, _ORPHAN_DIRTY_ATTRS)
+
+        with patch.object(Attribute.objects, "bulk_update", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                flush_all_dirty()
+
+        self.assertIn(
+            attr,
+            _ORPHAN_DIRTY_ATTRS,
+            "Orphan-dirty attr must stay queued when bulk_update fails",
+        )
 
     @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=True)
     def test_orphan_flush_invalidates_redis(self):

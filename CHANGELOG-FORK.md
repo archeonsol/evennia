@@ -36,6 +36,58 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.38 — Orphan-dirty flush retry on failure (Phase 2b)
+
+Closes the last item from the engine cleanup checklist. Fixes a silent
+data-loss window in the orphan-dirty write-behind path discovered while
+shipping Phase 2 (`+underspire.35`).
+
+### Engine
+
+- [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py):
+  `_flush_orphan_dirty` now mirrors the failure-handling shape of
+  `ModelAttributeBackend.flush_dirty`. Previously it called
+  `_ORPHAN_DIRTY_ATTRS.discard(attr)` for every dirty entry *before*
+  calling `bulk_update`. If `bulk_update` raised (deadlock, connection
+  drop, schema lock), the dirty entries were already gone from the
+  retry set and the writes were silently lost. The backend path was
+  hardened against this earlier (snapshot, `bulk_update`, then
+  `difference_update` on success only — see comments at
+  `attributes.py:1468-1473`); the orphan path was not.
+  Fix: snapshot `dirty`, run `bulk_update`, then iterate the snapshot
+  to discard from `_ORPHAN_DIRTY_ATTRS` only after the PG write
+  succeeds. On exception the entries stay queued and the call
+  re-raises so the next maintenance tick retries.
+
+### Tests
+
+- [`evennia/typeclasses/tests/test_attribute_fork.py`](evennia/typeclasses/tests/test_attribute_fork.py):
+  added `test_orphan_flush_failure_keeps_attrs_queued`. Patches
+  `Attribute.objects.bulk_update` to raise `RuntimeError`, calls
+  `flush_all_dirty`, asserts the attr is still in `_ORPHAN_DIRTY_ATTRS`
+  after the failure. Mirrors the existing
+  `test_flush_failure_does_not_publish_redis` regression for the
+  backend path.
+
+### Migration
+
+None. Behavior change is failure-only: successful flushes are
+identical; failed flushes now retry instead of silently dropping
+writes.
+
+### Closes
+
+Engine cleanup checklist
+([`.fleet-review/engine-cleanup-checklist.md`](.fleet-review/engine-cleanup-checklist.md))
+is now closed for the second tier of work. Phase 3 (`except Exception:`
+narrowing) stays as opportunistic cleanup applied when touching
+surrounding code, not a phase. Phase 4 stayed dropped. Phase 5, 6, and
+2b shipped across `+underspire.36`, `.37`, `.38`. A deferred follow-up
+(hit/miss metrics for the three engine caches that lack them) is noted
+under Phase 6 but isn't scheduled.
+
+---
+
 ## 6.0.0+underspire.37 — Channel subscriber resolve batching + setting rename (Phase 6)
 
 Closes out the engine cleanup checklist's lingering items on the

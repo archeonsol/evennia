@@ -168,21 +168,29 @@ def _mark_attr_dirty(attr):
 
 
 def _flush_orphan_dirty():
-    """Bulk-write attributes dirtied outside ModelAttributeBackend."""
+    """Bulk-write attributes dirtied outside ModelAttributeBackend.
+
+    Failure handling mirrors ``ModelAttributeBackend.flush_dirty``: snapshot
+    the dirty set, run ``bulk_update``, and only remove entries on success.
+    If ``bulk_update`` raises (deadlock, connection drop, etc.), the entries
+    stay queued in ``_ORPHAN_DIRTY_ATTRS`` so the next maintenance tick
+    retries. The exception is re-raised to the caller.
+    """
     dirty = [attr for attr in list(_ORPHAN_DIRTY_ATTRS) if getattr(attr, "pk", None)]
+    if not dirty:
+        return
+    Attribute.objects.bulk_update(dirty, _DIRTY_ATTR_UPDATE_FIELDS)
     for attr in dirty:
         _ORPHAN_DIRTY_ATTRS.discard(attr)
-    if dirty:
-        Attribute.objects.bulk_update(dirty, _DIRTY_ATTR_UPDATE_FIELDS)
-        # Orphan path bypasses backend.flush_dirty, so Redis L2 entries for
-        # these attrs are now stale. Best-effort invalidation; the cache
-        # module no-ops if Redis is disabled or unavailable.
-        try:
-            from evennia.typeclasses.redis_attr_cache import invalidate_attrs
+    # Orphan path bypasses backend.flush_dirty, so Redis L2 entries for
+    # these attrs are now stale. Best-effort invalidation; the cache
+    # module no-ops if Redis is disabled or unavailable.
+    try:
+        from evennia.typeclasses.redis_attr_cache import invalidate_attrs
 
-            invalidate_attrs(dirty)
-        except Exception:
-            pass
+        invalidate_attrs(dirty)
+    except Exception:
+        pass
 
 
 def count_pending_dirty():
@@ -234,8 +242,7 @@ def flush_all_dirty():
 
     pending_stats = count_pending_dirty()
     try:
-        from evennia.server.prometheus_metrics import \
-            observe_attribute_dirty_pending
+        from evennia.server.prometheus_metrics import observe_attribute_dirty_pending
 
         observe_attribute_dirty_pending(pending_stats["pending"])
     except Exception:
@@ -259,8 +266,7 @@ def flush_all_dirty():
         "pending": pending_stats["pending"],
     }
     try:
-        from evennia.typeclasses.attribute_metrics import \
-            record_attribute_flush_stats
+        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
 
         record_attribute_flush_stats(stats, duration_seconds=duration)
     except Exception:
