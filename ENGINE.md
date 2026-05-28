@@ -16,7 +16,6 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 ### Tier 1 (command / messaging hot path)
 
 - **`msg_contents`**: precomputed display names, `display_names` passed to actor-stance parser; skips `$` parse when message has no funcparser tokens; `get_message_recipients()` hook on locations
-- **`cached_get_display_name`**: `evennia.utils.display_name_cache` (per-looker ndb, TTL + `_recog_generation` / `_sdesc_generation` bumps)
 - **Location cmdset cache**: `evennia.commands.location_cmdset_cache` + `_cmdset_generation` invalidation
 - **Lock check cache**: `LOCK_CHECK_CACHE_ENABLED` — Command `lockhandler.check` memoized per caller ndb
 - **Look prefetch**: `LOOK_ATTR_PREFETCH_ENABLED` — `attributes.get_all()` at start of `at_look`
@@ -61,8 +60,7 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 3. **Crash / tick stall:** Unflushed attrs are lost back to the last flush. Enable `ATTRIBUTE_FLUSH_ON_MAINTENANCE = True` for a 60s safety net in `server_maintenance` (in addition to the game tick).
 4. **Production:** Use **PostgreSQL** (not SQLite) when write-behind is enabled.
 5. **Redis L2:** Optional read cache; PG remains source of truth. Enable with `ATTRIBUTE_REDIS_CACHE_ENABLED` and `ATTRIBUTE_BACKEND_CLASS = "evennia.typeclasses.redis_attr_cache.RedisCachedModelAttributeBackend"`.
-6. **Stale display names:** Bump `bump_recog_generation(viewer)` / `bump_sdesc_generation(character)` (or `invalidate_display_name_cache`) when recognition or visible sdesc changes; game hooks in `world/engine_cache.py`.
-7. **Metrics:** `ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS` + `maybe_log_flush_metrics(stats, tick_count)`. `ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD` logs tick backlog. With `django-prometheus` + `ENGINE_PROMETHEUS_METRICS_ENABLED` (default on), scrape `/metrics` for:
+6. **Metrics:** `ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS` + `maybe_log_flush_metrics(stats, tick_count)`. `ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD` logs tick backlog. With `django-prometheus` + `ENGINE_PROMETHEUS_METRICS_ENABLED` (default on), scrape `/metrics` for:
    - `evennia_attribute_flush_total`, `evennia_attribute_flush_backends_total`, `evennia_attribute_flush_orphans_total`
    - `evennia_attribute_dirty_pending` (gauge, pre-flush backlog)
    - `evennia_attribute_flush_duration_seconds` (histogram)

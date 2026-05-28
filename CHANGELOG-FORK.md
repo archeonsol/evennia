@@ -36,6 +36,90 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.36 — Display-name cache moves to game (Phase 5)
+
+Removes `evennia.utils.display_name_cache` from the engine. The cache
+existed to memoize `obj.get_display_name(looker)` per looker, but its
+invalidation triggers (`bump_recog_generation` / `bump_sdesc_generation`)
+were never called from core. They were only ever called by downstream
+games (rpsystem contrib, Underspire) that override `get_display_name`
+with sdesc/recog logic expensive enough to warrant caching. Stock
+Evennia paid the coordination cost (per-looker ndb dict, generation
+protocol on objects, TTL bookkeeping, two settings, conditional imports
+in `msg_contents` and `funcparser`) to memoize a function whose default
+body is roughly a lockstring check plus an f-string.
+
+Concretely, the downstream coupling included a reach-in to engine
+private symbols (`_cache`, `_enabled`, `_perception_gen`, `_ttl`) to
+build a custom cache key, and a `bump_*_generation` call paired
+immediately with `invalidate_display_name_cache` because the generation
+protocol alone wasn't trusted. Both go away when the cache lives next
+to the override that makes display-name resolution expensive.
+
+`get_display_name` itself remains the hook. Only the cache around it
+moves. Games with cheap default `get_display_name` see no change; games
+with expensive overrides (Underspire, rpsystem) own their own
+memoization and invalidation policy.
+
+### Engine
+
+- [`evennia/utils/display_name_cache.py`](evennia/utils/display_name_cache.py):
+  deleted. Module exported `cached_get_display_name`,
+  `invalidate_display_name_cache`, `bump_recog_generation`,
+  `bump_sdesc_generation`. All gone.
+- [`evennia/utils/tests/test_display_name_cache.py`](evennia/utils/tests/test_display_name_cache.py):
+  deleted.
+- [`evennia/objects/mixins/messaging.py`](evennia/objects/mixins/messaging.py):
+  `msg_contents` now calls `obj.get_display_name(looker=receiver)`
+  directly inside the per-receiver display_names mapping. The
+  try/except cache import with inline fallback is gone.
+- [`evennia/utils/funcparser.py`](evennia/utils/funcparser.py):
+  the `$you` and `$your` callables now call
+  `caller.get_display_name(looker=receiver)` directly. Both sites had
+  the same try/except cache pattern; both are now the plain call.
+
+### Settings
+
+- [`evennia/settings_default.py`](evennia/settings_default.py):
+  removed `MSG_DISPLAY_NAME_CACHE_ENABLED` and
+  `MSG_DISPLAY_NAME_CACHE_TTL`.
+
+### Migration
+
+Downstream games that called `bump_recog_generation`,
+`bump_sdesc_generation`, `invalidate_display_name_cache`, or imported
+`cached_get_display_name` from `evennia.utils.display_name_cache` must
+move that logic into their own `get_display_name` override on the
+relevant typeclass. The override is where the cache, the key, and the
+invalidation triggers all belong. Underspire's migration to a
+self-contained cache inside `roleplay_mixin.get_display_name` is the
+worked example.
+
+Games with no `get_display_name` override or a cheap one need no
+migration. The `MSG_DISPLAY_NAME_CACHE_*` settings can be deleted from
+local `settings.py` if present; otherwise Django will warn about them
+as unknown settings (which is harmless).
+
+### Tests
+
+`evennia.utils.tests.test_funcparser` (84 tests) and
+`evennia.objects.tests.test_objects` (142 tests) pass. The deleted
+`test_display_name_cache` had 3 tests; they covered the deleted module
+and have no replacement on the engine side.
+
+### Rationale
+
+This change reifies a principle now applied across the fork: the engine
+hosts code that pays off agnostically; game-shaped optimizations belong
+in the game. Hooks (the seams games plug into, like `get_display_name`)
+stay in engine even when no engine code exercises them. Implementations
+of behavior only some games want (the cache *around* the hook) move to
+the game. See Phase 5 in
+[`.fleet-review/engine-cleanup-checklist.md`](.fleet-review/engine-cleanup-checklist.md)
+for the full reasoning.
+
+---
+
 ## 6.0.0+underspire.35 — Redis attr cache write-behind ordering (Phase 2)
 
 Closes a phantom-data window in the Redis L2 attribute cache. Previously,

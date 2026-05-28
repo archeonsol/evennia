@@ -247,22 +247,11 @@ class MessagingMixin:
 
         contents = self.get_message_recipients(exclude=exclude)
 
-        try:
-            from evennia.utils.display_name_cache import cached_get_display_name
-        except Exception:
-
-            def cached_get_display_name(obj, looker, **kw):
-                return (
-                    obj.get_display_name(looker=looker, **kw)
-                    if hasattr(obj, "get_display_name")
-                    else str(obj)
-                )
-
         display_names_by_receiver = {}
         for receiver in contents:
             display_names_by_receiver[id(receiver)] = {
                 key: (
-                    cached_get_display_name(obj, receiver)
+                    obj.get_display_name(looker=receiver)
                     if hasattr(obj, "get_display_name")
                     else str(obj)
                 )

@@ -48,7 +48,7 @@ Target consumer: Underspire (`../newmoo`). No other downstream consumers.
 | Per-command trace context | `evennia/utils/command_trace.py` | **Done**, wired in `cmdhandler.cmdhandler` |
 | Location cmdset cache | `evennia/commands/location_cmdset_cache.py` | **Done**, opt-out via `LOCATION_CMDSET_CACHE_ENABLED` (default on) |
 | Cmd access cache | `evennia/commands/cmd_access_cache.py` | **Done**, opt-in via `CMD_ACCESS_CACHE_ENABLED` |
-| Display name / look prefetch / lock cache | `evennia/utils/display_name_cache.py`, etc. | **Done** |
+| Look prefetch / lock cache | `LOOK_ATTR_PREFETCH_ENABLED`, `LOCK_CHECK_CACHE_ENABLED` | **Done** (display-name cache moved to game; see Phase 5 of `.fleet-review/engine-cleanup-checklist.md`) |
 | Worker pool, at_init scheduler, write-behind attrs | various | **Done** |
 
 ### Still broken / pending

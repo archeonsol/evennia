@@ -51,17 +51,11 @@ import random
 from django.conf import settings
 
 from evennia.utils import logger, search
-from evennia.utils.utils import (
-    callables_from_module,
-    crop,
-    int2str,
-    justify,
-    make_iter,
-    pad,
-    safe_convert_to_types,
-    variable_from_module,
-)
-from evennia.utils.verb_conjugation.conjugate import verb_actor_stance_components
+from evennia.utils.utils import (callables_from_module, crop, int2str, justify,
+                                 make_iter, pad, safe_convert_to_types,
+                                 variable_from_module)
+from evennia.utils.verb_conjugation.conjugate import \
+    verb_actor_stance_components
 from evennia.utils.verb_conjugation.pronouns import pronoun_to_viewpoints
 
 # setup
@@ -180,9 +174,7 @@ class FuncParser:
         self.escape_char = (
             escape_char if escape_char is not None else settings.FUNCPARSER_ESCAPE_CHAR
         )
-        self.start_char = (
-            start_char if start_char is not None else settings.FUNCPARSER_START_CHAR
-        )
+        self.start_char = start_char if start_char is not None else settings.FUNCPARSER_START_CHAR
         self.max_nesting = (
             max_nesting if max_nesting is not None else settings.FUNCPARSER_MAX_NESTING
         )
@@ -1262,20 +1254,11 @@ def funcparser_callable_you(
                 else str(caller)
             )
         else:
-            try:
-                from evennia.utils.display_name_cache import cached_get_display_name
-
-                name = (
-                    cached_get_display_name(caller, receiver)
-                    if hasattr(caller, "get_display_name")
-                    else str(caller)
-                )
-            except Exception:
-                name = (
-                    caller.get_display_name(looker=receiver)
-                    if hasattr(caller, "get_display_name")
-                    else str(caller)
-                )
+            name = (
+                caller.get_display_name(looker=receiver)
+                if hasattr(caller, "get_display_name")
+                else str(caller)
+            )
 
     # a specified format overrides 'capitalize' and also applies to "you"
     fmt = kwargs.get("format")
@@ -1363,20 +1346,11 @@ def funcparser_callable_your(
                 else str(caller)
             )
         else:
-            try:
-                from evennia.utils.display_name_cache import cached_get_display_name
-
-                name = (
-                    cached_get_display_name(caller, receiver)
-                    if hasattr(caller, "get_display_name")
-                    else str(caller)
-                )
-            except Exception:
-                name = (
-                    caller.get_display_name(looker=receiver)
-                    if hasattr(caller, "get_display_name")
-                    else str(caller)
-                )
+            name = (
+                caller.get_display_name(looker=receiver)
+                if hasattr(caller, "get_display_name")
+                else str(caller)
+            )
 
     # a specified format overrides 'capitalize' and also applies to "your"
     fmt = kwargs.get("format")

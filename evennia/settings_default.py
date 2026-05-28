@@ -605,9 +605,6 @@ ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD = 0
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).
 ENGINE_PROMETHEUS_METRICS_ENABLED = True
 # --- Tier 1 performance (RP / command path) ---
-# msg_contents: cache get_display_name per looker (seconds; 0 = no expiry).
-MSG_DISPLAY_NAME_CACHE_ENABLED = True
-MSG_DISPLAY_NAME_CACHE_TTL = 300
 # cmdhandler: cache location cmdset gathering between generation bumps.
 LOCATION_CMDSET_CACHE_ENABLED = True
 LOCATION_CMDSET_CACHE_MAXSIZE = 512
