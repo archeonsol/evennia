@@ -38,16 +38,8 @@ def invalidate_display_name_cache(looker) -> None:
 
 def _perception_gen(obj, looker) -> tuple:
     """Generations included in cache keys so bumps invalidate without scanning ndb."""
-    og = (
-        int(getattr(getattr(looker, "ndb", None), "_recog_generation", 0) or 0)
-        if looker
-        else 0
-    )
-    sg = (
-        int(getattr(getattr(obj, "ndb", None), "_sdesc_generation", 0) or 0)
-        if obj
-        else 0
-    )
+    og = int(getattr(getattr(looker, "ndb", None), "_recog_generation", 0) or 0) if looker else 0
+    sg = int(getattr(getattr(obj, "ndb", None), "_sdesc_generation", 0) or 0) if obj else 0
     return (og, sg)
 
 
@@ -79,9 +71,16 @@ def cached_get_display_name(obj, looker, **kwargs):
         return obj.get_display_name(looker=looker, **kwargs)
 
     ttl = _ttl()
+    # ``looker`` is already implicit in the per-looker ndb store returned by
+    # ``_cache(looker)``, so leaving it out of the key keeps things tidy.
+    # ``obj.pk`` is stable across reactor turns; falling back to ``id(obj)``
+    # for transient (unsaved) objects is acceptable because such objects
+    # only matter within their own dispatch and don't outlive the cache TTL.
+    obj_id = getattr(obj, "pk", None)
+    if obj_id is None:
+        obj_id = id(obj)
     key = (
-        id(obj),
-        id(looker),
+        obj_id,
         _perception_gen(obj, looker),
         tuple(sorted(kwargs.items())) if kwargs else (),
     )

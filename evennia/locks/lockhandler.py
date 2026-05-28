@@ -169,6 +169,7 @@ def _eval_bool_expr(expr: str) -> bool:
 
     return bool(parse_or())
 
+
 __all__ = ("LockHandler", "LockException", "invalidate_lock_cache")
 
 WARNING_LOG = settings.LOCKWARNING_LOG_FILE
@@ -648,21 +649,44 @@ class LockHandler:
 
         # no superuser or bypass -> normal lock operation
         # Per-caller ndb cache when LOCK_CHECK_CACHE_ENABLED (default on).
-        # Commands (no pk): cache by object id + access_type + lock_storage.
-        # DB objects are not cached — lockstrings can change at runtime.
+        # Cache only when we can identify both ``self.obj`` and ``session``
+        # by stable IDs (pk, sessid). DB objects are deliberately not cached
+        # here either — their lockstrings can change at runtime. Using
+        # ``id()`` for a Command instance was unsafe because Python recycles
+        # ids after GC; a freed Command + a freshly-allocated one at the
+        # same address would serve the prior lock decision under the same
+        # cache key.
         _use_lock_cache = getattr(settings, "LOCK_CHECK_CACHE_ENABLED", True)
         _ndb = getattr(accessing_obj, "ndb", None)
-        if _use_lock_cache and _ndb is not None and getattr(self.obj, "pk", None) is None:
+        _obj_pk = getattr(self.obj, "pk", None)
+        # Stable class-level identity for Commands (which have no pk but
+        # do have a class + bound ``cmd.obj``). Two instances of the same
+        # Command bound to the same DB object are interchangeable for
+        # lock-check purposes; instances bound to different objects (or
+        # transient/unbound) skip the cache.
+        _cmd_obj_pk = getattr(getattr(self.obj, "obj", None), "pk", None)
+        _sessid = getattr(session, "sessid", None) if session is not None else None
+        _cacheable = (
+            _use_lock_cache
+            and _ndb is not None
+            and _obj_pk is None  # only Commands; DB objects are not cached
+            and (session is None or _sessid is not None)
+            and _cmd_obj_pk is not None
+        )
+        if _cacheable:
             _lcache = getattr(_ndb, "_lock_cache", None)
             if _lcache is None:
                 _ndb._lock_cache = {}
                 _lcache = _ndb._lock_cache
+            _cls = type(self.obj)
             _ckey = (
-                id(self.obj),
+                _cls.__module__,
+                _cls.__name__,
+                _cmd_obj_pk,
                 access_type,
                 no_superuser_bypass,
                 getattr(self.obj, "lock_storage", "") or "",
-                id(session) if session is not None else None,
+                _sessid,
             )
             _cached = _lcache.get(_ckey, _LOCK_CACHE_MISS)
             if _cached is not _LOCK_CACHE_MISS:
