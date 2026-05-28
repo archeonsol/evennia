@@ -273,7 +273,7 @@ class TestSearchTypeclassFamily(EvenniaTestCase):
 
         res1 = self.obj1.__class__.objects.typeclass_search(self.obj1.__class__)
         res2 = self.obj1.__class__.objects.typeclass_search(
-            "evennia.typeclasses.tests.TestSearchManagerTypeclass"
+            "evennia.typeclasses.tests.test_typeclasses.TestSearchManagerTypeclass"
         )
         self.assertEqual(set(res1), {self.obj1, self.obj2})
         self.assertEqual(set(res2), {self.obj1, self.obj2})

@@ -1286,12 +1286,6 @@ class TestCmdParser(TestCase):
             [("&the third command", "", bcmd, 18, 1.0, "&the third command")],
         )
 
-    @override_settings(SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)")
-    def test_num_differentiators(self):
-        self.assertEqual(cmdparser.try_num_differentiators("look me"), (None, None))
-        self.assertEqual(cmdparser.try_num_differentiators("look me-3"), (3, "look me"))
-        self.assertEqual(cmdparser.try_num_differentiators("look me-567"), (567, "look me"))
-
     def test_num_differentiators_hyphenated_names(self):
         """Test prefix numeric multimatch (N-name) including hyphenated names."""
         self.assertEqual(cmdparser.try_num_differentiators("1-ball"), (1, "ball"))

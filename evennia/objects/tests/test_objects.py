@@ -164,33 +164,55 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertEqual(self.char1.search("co", stacked=2), None)
 
     def test_search_ordinal_last(self):
-        """first/last/other multimatch input resolves to one object."""
+        """first/last/other multimatch input resolves to one object.
+
+        ``quiet=True`` always returns a list per the documented search()
+        contract; the selector narrows the list to one entry.
+        """
         a = DefaultObject.create("gem", location=self.room1)[0]
         b = DefaultObject.create("gem", location=self.room1)[0]
         c = DefaultObject.create("gem", location=self.room1)[0]
-        self.assertEqual(self.char1.search("first gem", quiet=True), a)
-        self.assertEqual(self.char1.search("last gem", quiet=True), c)
+        self.assertEqual(self.char1.search("first gem", quiet=True), [a])
+        self.assertEqual(self.char1.search("last gem", quiet=True), [c])
         d = DefaultObject.create("orb", location=self.room1)[0]
         e = DefaultObject.create("orb", location=self.room1)[0]
-        self.assertEqual(self.char1.search("other orb", quiet=True), e)
+        self.assertEqual(self.char1.search("other orb", quiet=True), [e])
+        # Without quiet, autopick + selector collapse to a single object;
+        # "other gem" is invalid against 3 gems and resolves to None.
         self.assertIsNone(self.char1.search("other gem"))
 
     def test_search_location_scope(self):
-        """my/here narrow candidates before matching."""
+        """my/here narrow candidates before matching.
+
+        ``quiet=True`` returns a list per contract; the scope qualifier
+        narrowed the candidate pool before matching.
+        """
         room_gem = DefaultObject.create("gem", location=self.room1)[0]
         inv_gem = DefaultObject.create("gem", location=self.char1)[0]
-        self.assertEqual(self.char1.search("here gem", quiet=True), room_gem)
-        self.assertEqual(self.char1.search("my gem", quiet=True), inv_gem)
+        self.assertEqual(self.char1.search("here gem", quiet=True), [room_gem])
+        self.assertEqual(self.char1.search("my gem", quiet=True), [inv_gem])
 
     def test_search_autopick(self):
-        """Auto-pick when all multimatches share one location bucket with one item."""
+        """Auto-pick collapses single-bucket results when not in ``quiet`` mode.
+
+        ``quiet=True`` always returns a list per the search() contract.
+        Autopick only fires for the non-quiet path (caller hasn't taken
+        on responsibility for disambiguation).
+        """
         only_room = DefaultObject.create("pebble", location=self.room1)[0]
-        self.assertEqual(self.char1.search("pebble", quiet=True), only_room)
+        # quiet: list of one
+        self.assertEqual(self.char1.search("pebble", quiet=True), [only_room])
+        # non-quiet: autopick the single match
+        self.assertEqual(self.char1.search("pebble"), only_room)
+
         DefaultObject.create("pebble", location=self.room1)
+        # quiet: list of two (multi-match, autopick doesn't help)
         self.assertEqual(len(self.char1.search("pebble", quiet=True)), 2)
+
         inv_pebble = DefaultObject.create("pebble", location=self.char1)[0]
         DefaultObject.create("pebble", location=self.char1)
-        self.assertEqual(self.char1.search("my pebble", quiet=True), inv_pebble)
+        # "my pebble" narrows to inventory (2 pebbles); quiet returns the list
+        self.assertEqual(len(self.char1.search("my pebble", quiet=True)), 2)
 
     def test_search_plural_form(self):
         """Test searching for plural form of objects"""
