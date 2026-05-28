@@ -30,7 +30,6 @@ PSYNC = chr(3)  # portal session sync
 SLOGIN = chr(4)  # server session login
 SDISCONN = chr(5)  # server session disconnect
 SDISCONNALL = chr(6)  # server session disconnect all
-SSHUTD = chr(7)  # server shutdown
 SSYNC = chr(8)  # server session sync
 SCONN = chr(11)  # server creating new connection (for irc bots and etc)
 PCONNSYNC = chr(12)  # portal post-syncing a session
@@ -105,6 +104,21 @@ def loads_session(data):
     from evennia.server.amp_serde import unpack_session_message
 
     return unpack_session_message(data)
+
+
+def dumps_admin(data):
+    """Pack (sessid, kwargs) for Admin* commands — JSON envelope, not pickle."""
+    from evennia.server.amp_serde import pack_admin_message
+
+    sessid, kwargs = data
+    return pack_admin_message(sessid, kwargs)
+
+
+def loads_admin(data):
+    """Unpack Admin* wire bytes."""
+    from evennia.server.amp_serde import unpack_admin_message
+
+    return unpack_admin_message(data)
 
 
 def session_serde_enabled():
@@ -513,16 +527,23 @@ class AMPMultiConnectionProtocol(amp.AMP):
 
     def data_in(self, packed_data):
         """
-        Process incoming packed data.
+        Process incoming packed data for Admin* AMP commands.
+
+        Detects format by magic prefix:
+          ``A1`` → JSON admin envelope (new path, no pickle)
+          ``J1`` → JSON session envelope (should not arrive here, but handled)
+          other  → legacy pickle (only if AMP_SESSION_ACCEPT_LEGACY_PICKLE=True)
 
         Args:
-            packed_data (bytes): Pickled data.
+            packed_data (bytes): Wire bytes.
         Returns:
-            unpaced_data (any): Unpickled package
-
+            (sessid, kwargs) tuple.
         """
-        msg = loads(packed_data)
-        return msg
+        raw = bytes(packed_data)
+        if raw[:2] in (b"A1", b"J1"):
+            return loads_admin(raw)
+        # Legacy pickle — kept for rolling-restart compatibility only
+        return loads(packed_data)
 
     def broadcast(self, command, sessid, **kwargs):
         """

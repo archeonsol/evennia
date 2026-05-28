@@ -18,6 +18,7 @@ from codecs import decode as codecs_decode
 
 from django.conf import settings
 from django.utils.translation import gettext as _
+from twisted.internet import defer
 
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
@@ -38,6 +39,13 @@ from evennia.utils.utils import (
 )
 
 _FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED = settings.FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED
+
+
+def _send_admin_to_portal(session, **kwargs):
+    amp_protocol = getattr(evennia.EVENNIA_SERVER_SERVICE, "amp_protocol", None)
+    if not amp_protocol:
+        return defer.succeed(None)
+    return amp_protocol.send_AdminServer2Portal(session, **kwargs)
 _BROADCAST_SERVER_RESTART_MESSAGES = settings.BROADCAST_SERVER_RESTART_MESSAGES
 
 # delayed imports
@@ -590,9 +598,7 @@ class ServerSessionHandler(SessionHandler):
             del self[sessid]
         if sync_portal:
             # inform portal that session should be closed.
-            evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
-                session, operation=amp.SDISCONN, reason=reason
-            )
+            _send_admin_to_portal(session, operation=amp.SDISCONN, reason=reason)
 
     def all_sessions_portal_sync(self):
         """
@@ -601,9 +607,7 @@ class ServerSessionHandler(SessionHandler):
 
         """
         sessdata = self.get_all_sync_data()
-        return evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
-            DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata
-        )
+        return _send_admin_to_portal(DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata)
 
     def session_portal_sync(self, session):
         """
@@ -612,7 +616,7 @@ class ServerSessionHandler(SessionHandler):
 
         """
         sessdata = {session.sessid: session.get_sync_data()}
-        return evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        return _send_admin_to_portal(
             DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata, clean=False
         )
 
@@ -625,7 +629,7 @@ class ServerSessionHandler(SessionHandler):
                 more sessions in detail.
 
         """
-        return evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        return _send_admin_to_portal(
             DUMMYSESSION, operation=amp.SSYNC, sessiondata=session_data, clean=False
         )
 

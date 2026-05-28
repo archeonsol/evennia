@@ -600,8 +600,7 @@ class CmdSetHandler(object):
         self.cmdset_stack = [self.cmdset_stack[0]]
         storage = self.obj.cmdset_storage
         if storage:
-            storage = storage[0]
-            self.obj.cmdset_storage = storage
+            self.obj.cmdset_storage = [storage[0]]
         self.update()
         self._invalidate_cmd_access_caches()
 

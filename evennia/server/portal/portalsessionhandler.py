@@ -85,10 +85,10 @@ class PortalSessionHandler(SessionHandler):
             sessid
 
         """
-        self.latest_sessid += 1
-        if self.latest_sessid in self:
-            return self.generate_sessid()
-        return self.latest_sessid
+        while True:
+            self.latest_sessid += 1
+            if self.latest_sessid not in self:
+                return self.latest_sessid
 
     def connect(self, session):
         """

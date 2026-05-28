@@ -220,11 +220,11 @@ class CmdSet(object, metaclass=_CmdSetMeta):
         # this is set only on merged sets, in cmdhandler.py, in order to
         # track, list and debug mergers correctly.
         self.merged_from = []
+        self._contains_cache = WeakKeyDictionary()  # {}
+        self._cached_fingerprint = None
 
         # initialize system
         self.at_cmdset_creation()
-        self._contains_cache = WeakKeyDictionary()  # {}
-        self._cached_fingerprint = None
 
     @property
     def fingerprint(self):
@@ -612,6 +612,7 @@ class CmdSet(object, metaclass=_CmdSetMeta):
             commands = list(set(commands))
         self.commands = commands
         self._cached_fingerprint = None
+        self._contains_cache.clear()
 
     def remove(self, cmd, strict=False):
         """
@@ -655,6 +656,7 @@ class CmdSet(object, metaclass=_CmdSetMeta):
 
         if removed:
             self._cached_fingerprint = None
+            self._contains_cache.clear()
         elif strict:
             raise KeyError(f"Command {cmd.key!r} not found in cmdset {self.key!r}")
         return removed

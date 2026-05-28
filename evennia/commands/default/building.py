@@ -2889,7 +2889,7 @@ class CmdExamine(ObjManipCommand):
 
     def format_attributes(self, obj):
         output = "\n  " + "\n  ".join(
-            sorted(self.format_single_attribute(attr) for attr in obj.db_attributes.all())
+            sorted(self.format_single_attribute(attr) for attr in obj.attributes.all())
         )
         if output.strip():
             # we don't want just an empty line
@@ -3138,7 +3138,7 @@ class CmdExamine(ObjManipCommand):
 
             if obj_attrs:
                 # we are only interested in specific attributes
-                attrs = [attr for attr in obj.db_attributes.all() if attr.db_key in obj_attrs]
+                attrs = [attr for attr in obj.attributes.all() if attr.db_key in obj_attrs]
                 if not attrs:
                     self.msg(f"No attributes found on {obj.name}.")
                 else:

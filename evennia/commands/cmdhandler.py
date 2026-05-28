@@ -601,8 +601,17 @@ def get_and_merge_cmdsets(
                     cmdset = yield cmdset + merging_cmdset
                 # store the original, ungrouped set for diagnosis
                 cmdset.merged_from = cmdsets
+                # Before caching, clear back-references that would pin game
+                # objects in memory long after players log out.  merged_from
+                # is diagnostic-only (acceptable loss for cache hits).
+                # Individual cmd.obj refs are left intentionally — they are
+                # needed during execution and the fingerprint key ensures stale
+                # entries are never used after an object's cmdset changes.
+                cached_set = cmdset
+                cached_set.merged_from = []
+                cached_set.cmdsetobj = None
                 # cache; evict oldest entry if full
-                _CMDSET_MERGE_CACHE[mergehash] = cmdset
+                _CMDSET_MERGE_CACHE[mergehash] = cached_set
                 if len(_CMDSET_MERGE_CACHE) > _CMDSET_MERGE_CACHE_MAXSIZE:
                     _CMDSET_MERGE_CACHE.popitem(last=False)
         else:
@@ -867,6 +876,8 @@ def cmdhandler(
             raise ErrorReported(cmd.raw_string)
         finally:
             _COMMAND_NESTING[called_by] -= 1
+            if _COMMAND_NESTING[called_by] <= 0:
+                _COMMAND_NESTING.pop(called_by, None)
             try:
                 from django.conf import settings as _settings
 
