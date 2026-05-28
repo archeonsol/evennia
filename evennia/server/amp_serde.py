@@ -21,6 +21,7 @@ from django.conf import settings
 _PICKLE_REJECT_PREFIXES = (b"\x80", b"(", b"]", b"}")
 
 _SESSION_MAGIC = b"J1"
+_ADMIN_SESSION_SYNC = chr(8)
 
 _SUBJECT_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 
@@ -150,7 +151,11 @@ def _sanitize_admin_kwargs(kwargs: dict) -> dict:
     for k, v in kwargs.items():
         if not isinstance(k, str):
             raise TypeError("admin message kwargs keys must be str")
-        if k == "sessiondata" and isinstance(v, dict):
+        if (
+            k == "sessiondata"
+            and kwargs.get("operation") == _ADMIN_SESSION_SYNC
+            and isinstance(v, dict)
+        ):
             # sessiondata: {int_sessid: {str: primitive}}
             encoded: dict = {}
             for sk, sv in v.items():
@@ -163,7 +168,11 @@ def _sanitize_admin_kwargs(kwargs: dict) -> dict:
 
 def _restore_admin_kwargs(kwargs: dict) -> dict:
     """Reverse _sanitize_admin_kwargs — convert __si__:N keys back to int."""
-    if "sessiondata" in kwargs and isinstance(kwargs["sessiondata"], dict):
+    if (
+        kwargs.get("operation") == _ADMIN_SESSION_SYNC
+        and "sessiondata" in kwargs
+        and isinstance(kwargs["sessiondata"], dict)
+    ):
         restored: dict = {}
         for sk, sv in kwargs["sessiondata"].items():
             if sk.startswith("__si__:"):
