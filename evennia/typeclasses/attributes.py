@@ -690,7 +690,12 @@ class Attribute(IAttribute, SharedMemoryModel):
         elif _type == "json":
             import json
 
-            return json.loads(self.db_str_val)
+            raw = json.loads(self.db_str_val)
+            # Wrap containers in _Saver* proxies so in-place mutations
+            # (e.g. ``obj.db.dct[key] = value``) write back through the
+            # value setter. Without this, JSON deserialization returns a
+            # fresh dict/list on every read and mutations are silently lost.
+            return from_pickle(raw, db_obj=self)
         _raw = self.db_value
         if _raw is None:
             return None
