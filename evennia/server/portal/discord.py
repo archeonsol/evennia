@@ -124,9 +124,17 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
                 d.addCallback(self.websocket_init, *args, **kwargs)
                 return d
             else:
-                logger.log_warn("Discord gateway request failed.")
+                logger.log_warn(f"Discord gateway request failed (HTTP {response.code}).")
+                # release the connect lock so ReconnectingClientFactory can retry
+                self.is_connecting = False
+
+        def ebFailed(failure):
+            logger.log_err(f"Discord gateway request errored: {failure.getErrorMessage()}")
+            # release the connect lock so ReconnectingClientFactory can retry
+            self.is_connecting = False
 
         d.addCallback(cbResponse)
+        d.addErrback(ebFailed)
 
     def websocket_init(self, payload, *args, **kwargs):
         """
@@ -407,6 +415,7 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
         if not self.last_sequence or not self.session_id:
             # we have no known state to resume from, identify normally
             self.identify()
+            return
 
         # build a RESUME request for Discord and send it
         data = {
@@ -414,7 +423,7 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
             "d": {
                 "token": DISCORD_BOT_TOKEN,
                 "session_id": self.session_id,
-                "s": self.sequence_id,
+                "s": self.last_sequence,
             },
         }
         self._send_json(data)
@@ -511,9 +520,7 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
 
         Use with session.msg(remove_role=(role_id, guild_id, user_id))
         """
-        self._post_json(
-            f"guilds/{guild_id}/members/{user_id}/roles/{role_id}", {}, type="DELETE"
-        )
+        self._post_json(f"guilds/{guild_id}/members/{user_id}/roles/{role_id}", {}, type="DELETE")
 
     def send_interaction_reply(self, content, interaction_id, token, **kwargs):
         """

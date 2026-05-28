@@ -150,19 +150,38 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
     Writes go through parent (write-behind to PG); Redis keys updated or dropped.
     """
 
-    def _cache_set(self, key, category, attr, *, mark_missing=False):
+    def _cache_set(self, key, category, attr, *, mark_missing=False, nx_only=False):
+        """Publish an attribute (or missing-marker) to Redis.
+
+        Args:
+            nx_only: If True, only write the value when the key doesn't already
+                exist (``SET ... NX``). Used by post-PG-read cache fills so a
+                concurrent writer's newer value isn't overwritten with the
+                stale snapshot we just pulled from PG (TOCTOU between PG read
+                and Redis publish).
+        """
         r = _redis_conn()
         if not r:
             return
         try:
             rkey = _redis_key(self._model, self._objid, key, category)
-            pipe = r.pipeline()
             if mark_missing:
-                pipe.set(rkey, _MISSING_MARKER, ex=_ttl())
+                payload = _MISSING_MARKER
             elif attr and attr.pk:
-                pipe.set(rkey, _encode_attr(attr), ex=_ttl())
+                payload = _encode_attr(attr)
             else:
                 return
+            if nx_only:
+                # SET NX: only writes if the key is currently absent. If a
+                # concurrent do_update_attribute already published a newer
+                # value, this returns None and we leave Redis alone.
+                if not r.set(rkey, payload, ex=_ttl(), nx=True):
+                    return
+                # Index membership is fine to add unconditionally.
+                pipe = r.pipeline()
+            else:
+                pipe = r.pipeline()
+                pipe.set(rkey, payload, ex=_ttl())
             pipe.sadd(_obj_index_key(self._model, self._objid), rkey)
             pipe.expire(_obj_index_key(self._model, self._objid), _ttl())
             cat_key = _category_index_key(self._model, self._objid, category)
@@ -252,10 +271,12 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
                 logger.log_trace("redis_attr_cache.query_key")
 
         conn = super().query_key(key, category)
+        # Use NX semantics: if a concurrent writer published a newer value
+        # to Redis between our miss above and this fill, leave it alone.
         if conn:
-            self._cache_set(key, category, conn[0].attribute)
+            self._cache_set(key, category, conn[0].attribute, nx_only=True)
         else:
-            self._cache_set(key, category, None, mark_missing=True)
+            self._cache_set(key, category, None, mark_missing=True, nx_only=True)
         return conn
 
     def query_category(self, category):
@@ -307,11 +328,16 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
         self._cache_drop(key, category)
 
     def flush_dirty(self):
-        refresh = list(self._dirty_attrs) if _enabled() else []
-        super().flush_dirty()
-        for attr in refresh:
+        # super().flush_dirty() returns the exact list it wrote. If the
+        # bulk_update raised, it re-raises before reaching us, so we
+        # never publish unflushed values to Redis.
+        flushed = super().flush_dirty() or ()
+        if not _enabled():
+            return flushed
+        for attr in flushed:
             if attr and attr.pk:
                 self._cache_set(attr.db_key, attr.db_category, attr)
+        return flushed
 
 
 def flush_all_keys() -> int:

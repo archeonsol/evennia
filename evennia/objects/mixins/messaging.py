@@ -147,11 +147,6 @@ class MessagingMixin:
         Returns:
             list: Recipients (defaults to ``self.contents`` minus ``exclude``).
         """
-        from evennia.objects.scene_index import resolve_recipients
-
-        indexed = resolve_recipients(self, exclude=exclude)
-        if indexed is not None:
-            return indexed
         recipients = self.contents
         if exclude:
             exclude = make_iter(exclude)

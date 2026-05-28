@@ -524,6 +524,10 @@ class OnDemandHandler:
         """
         Save the on-demand timers to ServerConfig storage. Should be called when Evennia shuts down.
 
+        Tasks whose key or category cannot be JSON-serialized (e.g. a
+        now-deleted DB object, an unpicklable user value, a self-referential
+        structure) are purged here so a single bad entry can't poison the
+        whole save and lose otherwise-good timer state.
         """
         cleaned_tasks = {}
         for key_tuple, task in list(self.tasks.items()):
@@ -532,11 +536,16 @@ class OnDemandHandler:
             if hasattr(category, "id") and category.id is None:
                 continue
             try:
-                cleaned_tasks[key_tuple] = task
+                # Round-trip through the serializer to validate this entry
+                # in isolation; failures here let us drop just this task.
+                json.dumps(_task_to_dict(task), ensure_ascii=False)
+                json.dumps({"k": key, "c": category}, ensure_ascii=False)
             except Exception as err:
                 logger.log_trace(
-                    f"Error processing on-demand task {key}[{category}] (purging): {err}"
+                    f"Error serializing on-demand task {key}[{category}] (purging): {err}"
                 )
+                continue
+            cleaned_tasks[key_tuple] = task
 
         self.tasks = cleaned_tasks
         try:

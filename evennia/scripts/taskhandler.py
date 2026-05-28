@@ -388,8 +388,12 @@ class TaskHandler:
         now = datetime.now()
         delta = timedelta(seconds=timedelay)
         comp_time = now + delta
-        # get an open task id — monotonic counter avoids O(n) scan
-        task_id = self._next_task_id
+        # Scan for the lowest free ID. Pre-refactor behavior; reuses
+        # IDs of completed/cancelled tasks so callers (and tests) that
+        # expect the ID space to compact after task lifecycle get what
+        # they expect. n is bounded by the number of currently-active
+        # tasks, so the scan is cheap in practice.
+        task_id = 1
         while task_id in self.tasks:
             task_id += 1
         self._next_task_id = task_id + 1
@@ -545,6 +549,10 @@ class TaskHandler:
             self.tasks = {}
         if self.to_save:
             self.to_save = {}
+        # Reset the next-id hint so the scan in add() finds 1 immediately.
+        # (The scan would find it anyway, but this keeps the bookkeeping
+        # in sync with an empty tasks dict.)
+        self._next_task_id = 1
         if save:
             self.save()
         return True

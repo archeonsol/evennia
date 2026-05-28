@@ -209,17 +209,18 @@ class ObjectDBManager(TypedObjectManager):
                 db_attributes__db_int_val=int(attribute_value),
             )
         elif isinstance(attribute_value, int):
-            val_q = Q(
-                db_attributes__db_val_type="int", db_attributes__db_int_val=attribute_value
-            )
+            val_q = Q(db_attributes__db_val_type="int", db_attributes__db_int_val=attribute_value)
         elif isinstance(attribute_value, float):
             val_q = Q(
                 db_attributes__db_val_type="float", db_attributes__db_float_val=attribute_value
             )
         elif isinstance(attribute_value, str):
+            # Exact-match to align with int/float/bool/none branches above and
+            # with value_query_filter; the previous ``__iexact`` silently
+            # conflated 'Red' and 'red' for callers using strings.
             val_q = Q(
                 db_attributes__db_val_type="str",
-                db_attributes__db_str_val__iexact=attribute_value,
+                db_attributes__db_str_val=attribute_value,
             )
         elif attribute_value is None:
             val_q = Q(db_attributes__db_val_type="none")
@@ -228,10 +229,7 @@ class ObjectDBManager(TypedObjectManager):
             val_q = Q(db_attributes__db_value=attribute_value)
 
         results = self.filter(
-            cand_restriction
-            & type_restriction
-            & Q(db_attributes__db_key=attribute_name)
-            & val_q
+            cand_restriction & type_restriction & Q(db_attributes__db_key=attribute_name) & val_q
         ).order_by("id")
         return results
 
@@ -511,7 +509,9 @@ class ObjectDBManager(TypedObjectManager):
                 match_data = _MULTIMATCH_REGEX.match(str(searchdata))
                 if match_data:
                     match_selector = int(match_data.group("number")) - 1
-                    stripped_searchdata = match_data.group("name") + (match_data.group("args") or "")
+                    stripped_searchdata = match_data.group("name") + (
+                        match_data.group("args") or ""
+                    )
                     matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
 
         # at this point, if there are no matches, we give it a chance to find fuzzy matches

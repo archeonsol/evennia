@@ -36,6 +36,233 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.30 — Fleet review pass: attribute typed-column stabilization, shutdown/Discord/cmdset fixes
+
+A multi-batch correctness pass driven by a fleet-review of the
+underspire fork against the engine surface. The headline fix unblocks
+in-place mutation of container attributes on the typed-column path —
+the regression that silently broke `self.db.dct[k] = v` everywhere
+the JSON branch was taken (149 xyzgrid tests failing among others).
+Plus a stack of smaller correctness fixes across the shutdown, Discord,
+sessionhandler, scene-resolution, attribute query/cache, job queue,
+channel cache, event bus, and script-pause paths.
+
+Net effect: full test suite goes from **262 failing → 20 failing**.
+The remaining 20 are pre-existing issues in unrelated areas (search
+edge cases, prototypes, lock-system corners) that already failed on
+`.29`; none are regressions from this release.
+
+### Engine — attribute typed-column refactor
+
+- [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py)
+  value getter, JSON branch: deserialized container values are now wrapped
+  in `_Saver*` proxies via `from_pickle(raw, db_obj=self)`. Without this,
+  every `attr.value` read returned a fresh `json.loads()` dict/list and
+  in-place mutations (`self.db.map_data[zcoord] = mapdata`, etc.) were
+  silently lost. Pre-refactor pickle storage masked this because `Saver*`
+  wrappers wrote through the value setter; the JSON path missed it.
+- `_classify_value` / `_is_json_safe`: tuples (and any container holding
+  a tuple anywhere in its tree) now route to pickle instead of JSON to
+  preserve type. Tuples have no JSON type and were silently demoted to
+  lists on read.
+- `_classify_value`: ints outside the signed 64-bit range now route to
+  pickle. `db_int_val` is a `BigIntegerField`; oversize values raised
+  `DataError`/`OverflowError` at INSERT before.
+- `_classify_value`, value getter JSON branch: `json.loads(None)` or
+  malformed JSON now logs and returns `None`, matching the pickle
+  branch's existing corruption-recovery behavior.
+- `value_query_filter`: container queries now route to `db_str_val`
+  with `db_val_type='json'` (was returning zero rows by querying the
+  empty `db_value`). Every primitive branch now pins `db_val_type` so
+  a string search can't collide with a JSON row whose serialized text
+  matches. Oversize-int branch routes to the pickle column.
+- [`evennia/objects/manager.py`](evennia/objects/manager.py)
+  `get_objs_with_attr_value`: the str branch is now exact-match instead
+  of `__iexact`, aligning with int/float/bool/none branches and
+  `value_query_filter`. **Behavior change**: callers that relied on
+  case-insensitive string attribute search will now miss. If you need
+  case-insensitive, filter on `db_attributes__db_str_val__iexact`
+  explicitly.
+- [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py)
+  `ModelAttributeBackend.flush_dirty`: clears `_dirty_attrs` *after*
+  `bulk_update` succeeds (via `difference_update`, so concurrent dirty
+  marks survive). On failure, dirty entries stay queued and the backend
+  stays in `_DIRTY_BACKENDS` so the next maintenance tick retries.
+  Returns the flushed list so the Redis subclass can publish exactly
+  what was written.
+- [`evennia/typeclasses/redis_attr_cache.py`](evennia/typeclasses/redis_attr_cache.py)
+  `_cache_set` gains `nx_only=True`. `query_key` uses it after PG read
+  so a concurrent writer's newer Redis value isn't overwritten with the
+  stale PG snapshot (TOCTOU close). `flush_dirty` now consumes the
+  flushed list returned from super so it never re-publishes
+  unflushed attrs.
+- New migration
+  [`0022_attribute_typed_value_indexes`](evennia/typeclasses/migrations/0022_attribute_typed_value_indexes.py):
+  composite indexes on `(db_val_type, db_int_val)` and `(db_val_type,
+  db_float_val)`. Every value-equality query pins `db_val_type` so the
+  discriminator-first composite lets the planner do an index range scan
+  instead of a sequential Attribute-table scan. `db_str_val` deliberately
+  unindexed for now (PG btree page-overflow risk on long values; revisit
+  with a partial/hash index if a real callsite warrants it).
+
+### Engine — server / sessionhandler / Discord
+
+- [`evennia/server/service.py`](evennia/server/service.py)
+  `shutdown()` now awaits hook Deferreds via a new `_await_hooks` helper
+  (was discarding them via list-comprehension-for-side-effects). User
+  hooks returning Deferreds — `at_server_reload`, `at_server_shutdown`,
+  `unpuppet_all` — are now actually awaited; the reactor no longer stops
+  with writes in flight. Per-instance hook errors are caught and logged
+  so one bad hook doesn't abort the rest.
+- `shutdown()` re-entry guard for concurrent SRELOAD/SRESET/SSHUTD.
+  Coexists with the SIGINT handler's pre-set flag by skipping the guard
+  when `_reactor_stopping=True`.
+- `server_maintenance` attribute-flush failures: now `log_err` with a
+  consecutive-failure counter, escalating to a `CRITICAL` log after 3
+  consecutive failures. Was silently `log_trace`-only; the only safety
+  net for the write-behind cache could fail invisibly.
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py)
+  `resume()`: was referencing an undefined `self.sequence_id` (the
+  attribute is `self.last_sequence`) and lacked a `return` after the
+  `identify()` fallback. Calls raised `AttributeError`, killing the
+  websocket. Fixed both.
+- `get_gateway_url`: added an errback, and both the non-200 branch and
+  the new error path now reset `is_connecting=False` so the
+  `ReconnectingClientFactory` can actually retry. A failed gateway HTTP
+  fetch previously left the bot wedged forever.
+- [`evennia/server/sessionhandler.py`](evennia/server/sessionhandler.py)
+  `_flush_outbuf`: was merging every kwarg with last-wins for non-text
+  keys, silently dropping concurrent OOB/GMCP/prompt payloads on
+  overlapping `data_out` calls in the same reactor tick. Pure-text
+  messages still coalesce; any message carrying non-text kwargs now
+  ships as its own AMP frame, restoring pre-batcher one-frame-per-call
+  semantics.
+
+### Engine — scene_index removal
+
+The Redis-backed room membership cache for `msg_contents` recipient
+resolution was deleted. Its mutation API (`on_move`, `add_to_room`,
+`remove_from_room`) was never wired into `MovementMixin.move_to`,
+`LifecycleMixin.delete`, `Character.at_pre_puppet/at_post_unpuppet`,
+or `ObjectDB.at_db_location_postsave`. Once a room's Redis set was
+populated lazily, it never refreshed — characters' movements,
+deletions, and unpuppets all left stale membership, so `msg_contents`
+served wrong recipient lists indefinitely. Additionally,
+`resolve_recipients` filtered by `ROOM_SCENE_INDEX_TYPECLASS_PATHS`
+which silently dropped any non-Character recipient (scripted props,
+broadcast relays, items overriding `at_msg_receive`).
+
+- Removed: `evennia/objects/scene_index.py`,
+  `evennia/objects/tests/test_scene_index.py`.
+- [`evennia/objects/mixins/messaging.py`](evennia/objects/mixins/messaging.py)
+  `get_message_recipients` reverted to direct contents walk.
+- [`evennia/settings_default.py`](evennia/settings_default.py):
+  `ROOM_SCENE_INDEX_ENABLED`, `ROOM_SCENE_INDEX_REDIS_ALIAS`, and
+  `ROOM_SCENE_INDEX_TYPECLASS_PATHS` removed.
+
+### Engine — misc correctness
+
+- [`evennia/jobs/queue.py`](evennia/jobs/queue.py) `_dequeue_db`: wraps
+  the claim in `transaction.atomic()` with `SELECT FOR UPDATE SKIP
+  LOCKED`. Two concurrent workers no longer claim the same pending row
+  and run the job twice. Falls back to a plain SELECT on SQLite.
+- [`evennia/comms/channel_subscriber_cache.py`](evennia/comms/channel_subscriber_cache.py)
+  `sync_channel_subscribers`: pipeline now uses `transaction=True` so
+  the DELETE+SADD pair is atomic. A concurrent `add_subscriber` /
+  `remove_subscriber` is no longer silently overwritten.
+- [`evennia/comms/models.py`](evennia/comms/models.py)
+  `SubscriptionHandler.add`: the `add_subscriber` cache call sat outside
+  the loop, referencing the leaked loop variable. Only the last
+  subscriber was registered when multiple were added at once. Fixed.
+- [`evennia/events/bus.py`](evennia/events/bus.py): per-call
+  `persist=False` now wins over the backend default. The previous
+  `backend in (...) or _should_persist(...)` ordering made the opt-out
+  unreachable when `EVENT_BUS_BACKEND` forced postgres/both.
+- [`evennia/scripts/scripts.py`](evennia/scripts/scripts.py)
+  `_pause_task`: added a `self.pk is None` guard before
+  `save(update_fields=...)`. Test fixtures and pre-start lifecycle
+  paths that called `pause()` on unsaved Scripts no longer raise
+  `ValueError: Cannot force an update in save() with no primary key`.
+- [`evennia/scripts/taskhandler.py`](evennia/scripts/taskhandler.py)
+  `TaskHandler.add`: scans for the lowest free ID (pre-refactor
+  behavior) instead of monotonically growing forever. Freed IDs are
+  reused, restoring downstream expectations.
+- [`evennia/scripts/ondemandhandler.py`](evennia/scripts/ondemandhandler.py)
+  `save()`: validates each task entry individually so a single
+  unpicklable/recursive task only purges itself instead of bailing the
+  whole save and losing all good timer state.
+
+### Migration
+
+- **Apply `evennia migrate`** — three new migrations:
+  - `typeclasses/0022_attribute_typed_value_indexes` (additive
+    `AddIndex`; online on PG 11+).
+  - `scripts/0019_backfill_paused_state_from_attributes` (RunPython
+    data migration; copies the old Attribute-based pause state into
+    the columns introduced by `0018` and removes the orphan
+    Attribute rows).
+- **Settings cleanup (optional)**: remove `ROOM_SCENE_INDEX_*` from
+  `server/conf/settings.py` if set. Harmless if left — Python ignores
+  unknown settings — but they're dead config now.
+- **Behavior change to verify**:
+  `get_objs_with_attr_value(name, "<string>")` is now exact-match. If
+  you have search code relying on the previous case-insensitive
+  behavior, replace with an explicit
+  `Q(db_attributes__db_str_val__iexact=value)` filter.
+- **Transparent improvements (no code change required)**: in-place
+  container mutations (`obj.db.dct[k] = v`) now persist, tuples come
+  back as tuples, large ints don't crash, container-value queries
+  actually match, hook-returning-Deferred users get awaited, OOB/GMCP
+  payloads in the same tick no longer overwrite each other.
+
+### Tests
+
+- New `_classify_value` coverage in
+  [`tests/test_attribute_fork.py`](evennia/typeclasses/tests/test_attribute_fork.py)
+  for tuple-in-container demotion, int overflow, JSON-path classification.
+- Fixed stale `attr:v1:*` SCAN pattern assertion (production is
+  `attr:v2:*`).
+- Moved [`evennia/typeclasses/tests.py`](evennia/typeclasses/tests/test_typeclasses.py)
+  into the `tests/` package. The file was being silently shadowed by
+  the `tests/` package and never ran; Python 3.14 strict discovery
+  also refused to walk past the duplicate name. The 489 lines of legacy
+  typeclass tests are now running again.
+
+---
+
+## 6.0.0+underspire.29 — Admin AMP sessiondata serde fixes
+
+Backfilled: bug fixes on `evennia/server/amp_serde.py` for the admin
+sessiondata map. See `0aa7b3f92`, `36cff5abc`, `7db8c1536`, `c2699aa81`.
+
+---
+
+## 6.0.0+underspire.28 — Replace pickle RCE vectors with JSON serde
+
+Backfilled: security work replacing pickle deserialization on AMP
+channels with a JSON-only serde. See `9df79df85`, `820b9c439`.
+
+---
+
+## 6.0.0+underspire.27 — Fix `CmdSetHandler.clear()` storage corruption
+
+Backfilled: cmdset storage preserved list type on clear. See `2c320f00e`,
+`226d0450f`.
+
+---
+
+## 6.0.0+underspire.26 — CSP fix, language handler guard, engine migration
+
+Backfilled. See `6bf7402b6`, `606e8cf38`.
+
+---
+
+## 6.0.0+underspire.25 — Fix `TypeError` on shutdown: `clear_all_sessids()` is sync
+
+Backfilled. See `f071b3bc5`, `429e0fd91`, `7f248e7fe`.
+
+---
+
 ## 6.0.0+underspire.24 — Fix `evennia` launcher infinite recursion in non-TTY shells
 
 [`evennia/server/evennia_launcher.py:1549-1551`](evennia/server/evennia_launcher.py)

@@ -51,14 +51,20 @@ def value_query_filter(value, prefix=""):
     Primitive values bypass ``db_value`` (which stays NULL) and land in
     ``db_int_val`` / ``db_float_val`` / ``db_str_val``. Querying
     ``db_value=value`` for a primitive therefore never matches; this
-    helper returns the filter dict that does.
+    helper returns the filter dict that does. Every branch pins
+    ``db_val_type`` so a primitive search cannot collide with a JSON-
+    serialized container whose ``db_str_val`` text happens to match.
+
+    JSON-safe containers (list/dict, no tuples or other non-JSON types)
+    are matched by serializing the value the same way ``_classify_value``
+    does and comparing ``db_str_val`` under ``db_val_type='json'``.
 
     Args:
         value: The search value.
         prefix: Django ORM lookup prefix (e.g. ``"db_attributes__"``).
 
     Returns:
-        dict: A single-entry dict suitable for ``QuerySet.filter(**...)``.
+        dict: Filter kwargs suitable for ``QuerySet.filter(**...)``.
     """
     if value is None:
         return {f"{prefix}db_val_type": "none"}
@@ -66,29 +72,48 @@ def value_query_filter(value, prefix=""):
     if t is bool:
         return {f"{prefix}db_int_val": int(value), f"{prefix}db_val_type": "bool"}
     if t is int:
-        return {f"{prefix}db_int_val": value, f"{prefix}db_val_type": "int"}
+        if _BIGINT_MIN <= value <= _BIGINT_MAX:
+            return {f"{prefix}db_int_val": value, f"{prefix}db_val_type": "int"}
+        # Oversized ints live in the pickle column; match there.
+        return {f"{prefix}db_value": to_pickle(value)}
     if t is float:
-        return {f"{prefix}db_float_val": value}
+        return {f"{prefix}db_float_val": value, f"{prefix}db_val_type": "float"}
     if t is str:
-        return {f"{prefix}db_str_val": value}
+        return {f"{prefix}db_str_val": value, f"{prefix}db_val_type": "str"}
+    if type(value) in (list, dict) and _is_json_safe(value):
+        import json
+
+        return {
+            f"{prefix}db_str_val": json.dumps(value, ensure_ascii=False),
+            f"{prefix}db_val_type": "json",
+        }
     return {f"{prefix}db_value": value}
 
 
 _JSON_PRIMITIVE_TYPES = (bool, int, float, str, type(None))
 
+# BigIntegerField is signed 64-bit. Python ints are arbitrary precision;
+# values outside this range would raise DataError/OverflowError at INSERT.
+_BIGINT_MAX = (1 << 63) - 1
+_BIGINT_MIN = -(1 << 63)
+
 
 def _is_json_safe(obj, _depth=0):
-    """Return True if *obj* can be round-tripped through json.dumps/loads without data loss."""
+    """Return True if *obj* can be round-tripped through json.dumps/loads without data loss.
+
+    Tuples are excluded because JSON has no tuple type and would silently
+    demote to a list on read. Any structure containing a tuple anywhere in
+    its tree also fails this check and falls through to the pickle path,
+    which preserves type fidelity.
+    """
     if _depth > 8:
         return False
     if type(obj) in _JSON_PRIMITIVE_TYPES:
         return True
-    if isinstance(obj, (list, tuple)):
+    if type(obj) is list:
         return all(_is_json_safe(v, _depth + 1) for v in obj)
-    if isinstance(obj, dict):
-        return all(
-            isinstance(k, str) and _is_json_safe(v, _depth + 1) for k, v in obj.items()
-        )
+    if type(obj) is dict:
+        return all(isinstance(k, str) and _is_json_safe(v, _depth + 1) for k, v in obj.items())
     return False
 
 
@@ -104,12 +129,15 @@ def _classify_value(value):
     if t is bool:
         return ("bool", int(value), None, None, None)
     if t is int:
-        return ("int", value, None, None, None)
+        if _BIGINT_MIN <= value <= _BIGINT_MAX:
+            return ("int", value, None, None, None)
+        # Too large for db_int_val; preserve via pickle path.
+        return ("", None, None, None, to_pickle(value))
     if t is float:
         return ("float", None, value, None, None)
     if t is str:
         return ("str", None, None, value, None)
-    if isinstance(value, (list, tuple, dict)) and _is_json_safe(value):
+    if type(value) in (list, dict) and _is_json_safe(value):
         import json
 
         return ("json", None, None, json.dumps(value, ensure_ascii=False), None)
@@ -645,6 +673,20 @@ class Attribute(IAttribute, SharedMemoryModel):
         "Define Django meta options"
 
         verbose_name = "Attribute"
+        # Composite indexes over (db_val_type, value_col). Every
+        # value-based query pins db_val_type via value_query_filter, so
+        # the discriminator-first composite lets the planner do an index
+        # range scan instead of a sequential table scan.
+        indexes = [
+            models.Index(
+                fields=["db_val_type", "db_int_val"],
+                name="attr_valtype_int_idx",
+            ),
+            models.Index(
+                fields=["db_val_type", "db_float_val"],
+                name="attr_valtype_float_idx",
+            ),
+        ]
 
     # Wrapper properties to easily set database fields. These are
     # @property decorators that allows to access these fields using
@@ -690,7 +732,22 @@ class Attribute(IAttribute, SharedMemoryModel):
         elif _type == "json":
             import json
 
-            return json.loads(self.db_str_val)
+            try:
+                raw = json.loads(self.db_str_val)
+            except (TypeError, ValueError) as _err:
+                from evennia.utils import logger as _log
+
+                _log.log_warn(
+                    f"Attribute '{self.db_key}' (category={self.db_category!r}) on "
+                    f"'{getattr(self, 'db_model', 'unknown')}' has corrupted JSON: {_err}. "
+                    "Returning None. Re-set or delete this attribute to resolve."
+                )
+                return None
+            # Wrap containers in _Saver* proxies so in-place mutations
+            # (e.g. ``obj.db.dct[key] = value``) write back through the
+            # value setter. Without this, JSON deserialization returns a
+            # fresh dict/list on every read and mutations are silently lost.
+            return from_pickle(raw, db_obj=self)
         _raw = self.db_value
         if _raw is None:
             return None
@@ -1393,25 +1450,46 @@ class ModelAttributeBackend(IAttributeBackend):
         _DIRTY_BACKENDS.add(self)
 
     def flush_dirty(self):
-        """Bulk-write all buffered attribute changes to DB."""
+        """Bulk-write all buffered attribute changes to DB.
+
+        Returns the list of attributes successfully written so subclasses
+        can act on the same set without re-snapshotting (which would race
+        concurrent ``do_update_attribute`` calls).
+
+        Failure handling: ``bulk_update`` runs *before* the dirty set is
+        cleared. If it raises (deadlock, connection drop, etc.), the
+        dirty entries stay queued and the backend stays in
+        ``_DIRTY_BACKENDS`` so the next tick retries. Only the entries
+        we successfully wrote are removed — concurrent dirty marks that
+        arrived during the flush survive.
+        """
         if not self._dirty_attrs:
-            return
+            return ()
         dirty = list(self._dirty_attrs)
-        self._dirty_attrs.clear()
-        _DIRTY_BACKENDS.discard(self)
-        self._attrclass.objects.bulk_update(
-            dirty,
-            [
-                "db_value",
-                "db_strvalue",
-                "db_category",
-                "db_lock_storage",
-                "db_val_type",
-                "db_int_val",
-                "db_float_val",
-                "db_str_val",
-            ],
-        )
+        try:
+            self._attrclass.objects.bulk_update(
+                dirty,
+                [
+                    "db_value",
+                    "db_strvalue",
+                    "db_category",
+                    "db_lock_storage",
+                    "db_val_type",
+                    "db_int_val",
+                    "db_float_val",
+                    "db_str_val",
+                ],
+            )
+        except Exception:
+            # Don't drop the dirty entries; let the next maintenance tick
+            # retry. Re-add ourselves to the global tracker in case a
+            # peer iteration removed us.
+            _DIRTY_BACKENDS.add(self)
+            raise
+        self._dirty_attrs.difference_update(dirty)
+        if not self._dirty_attrs:
+            _DIRTY_BACKENDS.discard(self)
+        return dirty
 
     def do_batch_finish(self, attr_objs):
         # Add new objects to m2m field all at once
@@ -1424,8 +1502,8 @@ class ModelAttributeBackend(IAttributeBackend):
         Updates to existing Attributes still go through the write-behind path.
         """
         strattr = kwargs.get("strattr", False)
-        new_attr_specs = []   # (keystr, category, lockstring, value) tuples for bulk create
-        new_attr_objs = []    # built Attribute instances (no pk yet)
+        new_attr_specs = []  # (keystr, category, lockstring, value) tuples for bulk create
+        new_attr_objs = []  # built Attribute instances (no pk yet)
 
         for tup in args:
             if not is_iter(tup) or len(tup) < 2:
@@ -1439,7 +1517,9 @@ class ModelAttributeBackend(IAttributeBackend):
             existing = self._get_cache(keystr, category)
             if existing:
                 # update existing attribute in-place (write-behind)
-                self.do_batch_update_attribute(existing[0], category, lockstring, new_value, strattr)
+                self.do_batch_update_attribute(
+                    existing[0], category, lockstring, new_value, strattr
+                )
             else:
                 # build Attribute instance without saving
                 kwargs_attr = {

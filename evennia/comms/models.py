@@ -596,6 +596,11 @@ class SubscriptionHandler:
                 no hooks will be called.
 
         """
+        try:
+            from evennia.comms.channel_subscriber_cache import add_subscriber
+        except Exception:
+            add_subscriber = None
+
         for subscriber in make_iter(entity):
             if subscriber:
                 clsname = subscriber.__dbclass__.__name__
@@ -604,13 +609,12 @@ class SubscriptionHandler:
                     self.obj.db_object_subscriptions.add(subscriber)
                 elif clsname == "AccountDB":
                     self.obj.db_account_subscriptions.add(subscriber)
+                if add_subscriber is not None:
+                    try:
+                        add_subscriber(self.obj, subscriber)
+                    except Exception:
+                        pass
         self._recache()
-        try:
-            from evennia.comms.channel_subscriber_cache import add_subscriber
-
-            add_subscriber(self.obj, subscriber)
-        except Exception:
-            pass
 
     def remove(self, entity):
         """

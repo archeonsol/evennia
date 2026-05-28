@@ -32,10 +32,16 @@ def _persist_subjects() -> frozenset:
 
 
 def _should_persist(subject: str, persist: Optional[bool]) -> bool:
-    if persist is True:
-        return True
+    # Per-call opt-out wins over any backend-driven default. Without this
+    # check, ``persist=False`` was unreachable when ``EVENT_BUS_BACKEND``
+    # forced postgres/both, since the emit() callsite OR'd the backend
+    # check ahead of this function.
     if persist is False:
         return False
+    if persist is True:
+        return True
+    if _backend() in ("postgres", "both"):
+        return True
     return subject in _persist_subjects()
 
 
@@ -93,7 +99,7 @@ def emit(
     backend = _backend()
     if backend in ("redis", "both"):
         _publish_redis(record)
-    if backend in ("postgres", "both") or _should_persist(subject, persist):
+    if _should_persist(subject, persist):
         _persist_record(record)
 
 

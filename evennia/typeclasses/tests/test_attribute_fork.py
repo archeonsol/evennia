@@ -7,9 +7,13 @@ from unittest.mock import MagicMock
 from django.test import override_settings
 from mock import patch
 
-from evennia.typeclasses.attributes import (Attribute, ModelAttributeBackend,
-                                            _classify_value, _mark_attr_dirty,
-                                            flush_all_dirty)
+from evennia.typeclasses.attributes import (
+    Attribute,
+    ModelAttributeBackend,
+    _classify_value,
+    _mark_attr_dirty,
+    flush_all_dirty,
+)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -21,8 +25,29 @@ class TestClassifyValue(BaseEvenniaTest):
         self.assertEqual(_classify_value("x")[0], "str")
         self.assertEqual(_classify_value(None)[0], "none")
 
-    def test_pickle_path_for_dict(self):
-        self.assertEqual(_classify_value({"a": 1})[0], "")
+    def test_json_path_for_plain_dict(self):
+        # JSON-safe dicts/lists go through the json typed column.
+        self.assertEqual(_classify_value({"a": 1})[0], "json")
+        self.assertEqual(_classify_value([1, 2, 3])[0], "json")
+
+    def test_pickle_path_for_tuple_and_unsafe_containers(self):
+        # Tuples have no JSON type and would silently demote to lists, so
+        # both standalone tuples and structures containing them must take
+        # the pickle path to preserve type fidelity.
+        self.assertEqual(_classify_value((1, 2))[0], "")
+        self.assertEqual(_classify_value({"a": (1, 2)})[0], "")
+        self.assertEqual(_classify_value([1, (2, 3)])[0], "")
+        # Sets aren't JSON-representable either.
+        self.assertEqual(_classify_value({1, 2, 3})[0], "")
+
+    def test_pickle_path_for_oversized_int(self):
+        # Python ints > 2^63 - 1 don't fit BigIntegerField and must
+        # route to pickle instead of crashing the INSERT.
+        self.assertEqual(_classify_value(1 << 63)[0], "")
+        self.assertEqual(_classify_value(-(1 << 63) - 1)[0], "")
+        # Boundary values still fit.
+        self.assertEqual(_classify_value((1 << 63) - 1)[0], "int")
+        self.assertEqual(_classify_value(-(1 << 63))[0], "int")
 
 
 class TestWriteBehindFlush(BaseEvenniaTest):
@@ -204,8 +229,8 @@ class TestRedisAttrCache(BaseEvenniaTest):
             def scan_iter(self, match=None, count=None):
                 scanned.append((match, count))
                 # Yield two fake matching keys to confirm batching.
-                yield b"attr:v1:objectdb:1:hp:"
-                yield b"attr:v1:objectdb:1:__index__"
+                yield b"attr:v2:objectdb:1:hp:"
+                yield b"attr:v2:objectdb:1:__index__"
 
             def delete(self, *keys):
                 deleted.extend(keys)
@@ -215,10 +240,10 @@ class TestRedisAttrCache(BaseEvenniaTest):
             flush_cache()
 
         self.assertEqual(len(scanned), 1)
-        self.assertEqual(scanned[0][0], "attr:v1:*")
+        self.assertEqual(scanned[0][0], "attr:v2:*")
         self.assertEqual(
             deleted,
-            [b"attr:v1:objectdb:1:hp:", b"attr:v1:objectdb:1:__index__"],
+            [b"attr:v2:objectdb:1:hp:", b"attr:v2:objectdb:1:__index__"],
         )
 
     @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=False)

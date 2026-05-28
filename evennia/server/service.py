@@ -35,7 +35,9 @@ class EvenniaServerService(MultiService):
         self._shutdown_in_progress = True
         if hasattr(self, "web_root"):
             d = self.web_root.empty_threadpool()
-            d.addCallback(lambda _: defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True)))
+            d.addCallback(
+                lambda _: defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
+            )
         else:
             d = defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
         self._shutdown_deferred = d
@@ -64,6 +66,7 @@ class EvenniaServerService(MultiService):
         self._runtime_config_row = None  # cached ServerConfig row for "runtime"
         self._shutdown_deferred = None
         self._shutdown_in_progress = False
+        self._consecutive_flush_failures = 0
 
         # Database-specific startup optimizations.
         self.sqlite3_prep()
@@ -89,7 +92,8 @@ class EvenniaServerService(MultiService):
         the server needs to do. It is called every minute.
         """
         if not self._flush_cache:
-            from evennia.utils.idmapper.models import conditional_flush as _FLUSH_CACHE
+            from evennia.utils.idmapper.models import \
+                conditional_flush as _FLUSH_CACHE
 
             self._flush_cache = _FLUSH_CACHE
 
@@ -125,13 +129,28 @@ class EvenniaServerService(MultiService):
 
         if getattr(settings, "ATTRIBUTE_FLUSH_ON_MAINTENANCE", False):
             try:
+                from evennia.typeclasses.attribute_metrics import \
+                    maybe_log_flush_metrics
                 from evennia.typeclasses.attributes import flush_all_dirty
-                from evennia.typeclasses.attribute_metrics import maybe_log_flush_metrics
 
                 stats = flush_all_dirty()
                 maybe_log_flush_metrics(stats, self.maintenance_count)
+                self._consecutive_flush_failures = 0
             except Exception:
+                self._consecutive_flush_failures += 1
+                logger.log_err(
+                    f"server_maintenance attribute flush failed "
+                    f"(consecutive failure #{self._consecutive_flush_failures})"
+                )
                 logger.log_trace("server_maintenance attribute flush")
+                if self._consecutive_flush_failures >= 3:
+                    # Write-behind cache is not making it to PG; phantom data
+                    # may be served from Redis until TTL expires.
+                    logger.log_err(
+                        f"CRITICAL: attribute flush has failed "
+                        f"{self._consecutive_flush_failures} consecutive cycles; "
+                        f"write-behind cache is not persisting to the database."
+                    )
 
         if self.maintenance_count % 5 == 0:
             # check cache size every 5 minutes
@@ -212,7 +231,8 @@ class EvenniaServerService(MultiService):
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
-            from evennia.server.game_index_client.service import EvenniaGameIndexService
+            from evennia.server.game_index_client.service import \
+                EvenniaGameIndexService
 
             egi_service = EvenniaGameIndexService()
             egi_service.setServiceParent(self)
@@ -265,13 +285,10 @@ class EvenniaServerService(MultiService):
     def register_webserver(self):
         # Start a django-compatible webserver.
 
-        from evennia.server.webserver import (
-            DjangoWebRoot,
-            LockableThreadPool,
-            PrivateStaticRoot,
-            Website,
-            WSGIWebServer,
-        )
+        from evennia.server.webserver import (DjangoWebRoot,
+                                              LockableThreadPool,
+                                              PrivateStaticRoot, Website,
+                                              WSGIWebServer)
 
         # start a thread pool and define the root url (/) as a wsgi resource
         # recognized by Django
@@ -524,6 +541,24 @@ class EvenniaServerService(MultiService):
         # initialize and start global scripts
         evennia.GLOBAL_SCRIPTS.start()
 
+    async def _await_hooks(self, instances, hook_name, *args, **kwargs):
+        """Run ``hook_name`` on each instance and await any returned Deferreds.
+
+        Hooks defined on user typeclasses are free to return a Deferred per the
+        Twisted contract. ``maybeDeferred`` normalizes sync returns to fired
+        Deferreds. Errors are logged per-instance and do not abort siblings.
+        """
+        deferreds = []
+        for obj in instances:
+            try:
+                d = defer.maybeDeferred(getattr(obj, hook_name), *args, **kwargs)
+            except Exception:
+                logger.log_trace(f"Error invoking {hook_name} on {obj}")
+                continue
+            deferreds.append(d)
+        if deferreds:
+            await defer.DeferredList(deferreds, consumeErrors=True)
+
     async def shutdown(self, mode="reload", _reactor_stopping=False):
         """
         Shuts down the server from inside it.
@@ -545,16 +580,32 @@ class EvenniaServerService(MultiService):
             # once; we don't need to run the shutdown procedure again.
             return
 
+        # The SIGINT handler pre-sets ``_shutdown_in_progress`` before calling
+        # us with ``_reactor_stopping=True``; skip the overlap guard in that
+        # case so the first SIGINT-driven shutdown still runs. The guard only
+        # applies to fresh SRELOAD/SRESET/SSHUTD entries, which can otherwise
+        # race ServerConfig writes and MONITOR/TICKER saves.
+        if not _reactor_stopping:
+            if self._shutdown_in_progress:
+                return
+            self._shutdown_in_progress = True
+
         if mode == "reload":
             # call restart hooks
             evennia.ServerConfig.objects.conf("server_restart_mode", "reload")
-            [o.at_server_reload() for o in evennia.ObjectDB.get_all_cached_instances()]
-            [p.at_server_reload() for p in evennia.AccountDB.get_all_cached_instances()]
-            [
-                (s._pause_task(auto_pause=True) if s.is_active else None, s.at_server_reload())
-                for s in evennia.ScriptDB.get_all_cached_instances()
-                if s.id
-            ]
+            await self._await_hooks(evennia.ObjectDB.get_all_cached_instances(), "at_server_reload")
+            await self._await_hooks(
+                evennia.AccountDB.get_all_cached_instances(), "at_server_reload"
+            )
+            for s in evennia.ScriptDB.get_all_cached_instances():
+                if not s.id:
+                    continue
+                try:
+                    if s.is_active:
+                        await defer.maybeDeferred(s._pause_task, auto_pause=True)
+                    await defer.maybeDeferred(s.at_server_reload)
+                except Exception:
+                    logger.log_trace(f"Error in at_server_reload on script {s}")
             await evennia.SESSION_HANDLER.all_sessions_portal_sync()
             self.at_server_reload_stop()
             # only save monitor state on reload, not on shutdown/reset
@@ -567,20 +618,36 @@ class EvenniaServerService(MultiService):
         else:
             if mode == "reset":
                 # like shutdown but don't unset the is_connected flag and don't disconnect sessions
-                [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
-                [p.at_server_shutdown() for p in evennia.AccountDB.get_all_cached_instances()]
+                await self._await_hooks(
+                    evennia.ObjectDB.get_all_cached_instances(), "at_server_shutdown"
+                )
+                await self._await_hooks(
+                    evennia.AccountDB.get_all_cached_instances(), "at_server_shutdown"
+                )
                 if self.amp_protocol:
                     await evennia.SESSION_HANDLER.all_sessions_portal_sync()
             else:  # shutdown
-                [_SA(p, "is_connected", False) for p in evennia.AccountDB.get_all_cached_instances()]
-                [o.at_server_shutdown() for o in evennia.ObjectDB.get_all_cached_instances()]
-                [(p.unpuppet_all(), p.at_server_shutdown()) for p in evennia.AccountDB.get_all_cached_instances()]
+                accounts = list(evennia.AccountDB.get_all_cached_instances())
+                for p in accounts:
+                    _SA(p, "is_connected", False)
+                await self._await_hooks(
+                    evennia.ObjectDB.get_all_cached_instances(), "at_server_shutdown"
+                )
+                for p in accounts:
+                    try:
+                        await defer.maybeDeferred(p.unpuppet_all)
+                    except Exception:
+                        logger.log_trace(f"Error in unpuppet_all on {p}")
+                await self._await_hooks(accounts, "at_server_shutdown")
                 evennia.ObjectDB.objects.clear_all_sessids()
-            [
-                (s._pause_task(auto_pause=True), s.at_server_shutdown())
-                for s in evennia.ScriptDB.get_all_cached_instances()
-                if s.id and s.is_active
-            ]
+            for s in evennia.ScriptDB.get_all_cached_instances():
+                if not s.id or not s.is_active:
+                    continue
+                try:
+                    await defer.maybeDeferred(s._pause_task, auto_pause=True)
+                    await defer.maybeDeferred(s.at_server_shutdown)
+                except Exception:
+                    logger.log_trace(f"Error in at_server_shutdown on script {s}")
             evennia.ServerConfig.objects.conf("server_restart_mode", "reset")
             self.at_server_cold_stop()
 

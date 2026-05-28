@@ -57,7 +57,9 @@ def _resolve_callable(job_type: str) -> Callable:
     return fn
 
 
-def enqueue_job(job_type: str, payload: Optional[dict] = None, *, priority: int = 0) -> Optional[str]:
+def enqueue_job(
+    job_type: str, payload: Optional[dict] = None, *, priority: int = 0
+) -> Optional[str]:
     """
     Enqueue a whitelisted job. Returns job id or None if disabled/rejected.
     """
@@ -161,22 +163,35 @@ def _dequeue_redis() -> Optional[dict]:
 
 def _dequeue_db() -> Optional[dict]:
     try:
+        from django.db import transaction
+
         from evennia.server.models import EngineJob
 
-        job = (
-            EngineJob.objects.filter(status="pending")
-            .order_by("-priority", "created_at")
-            .first()
-        )
-        if not job:
-            return None
-        job.status = "running"
-        job.save(update_fields=["status"])
-        return {
-            "id": job.job_id,
-            "type": job.job_type,
-            "payload": json.loads(job.payload_json or "{}"),
-        }
+        # Atomic claim: SELECT FOR UPDATE SKIP LOCKED lets one of N
+        # concurrent workers win a row while the rest see the next
+        # pending job. Falls back to an unlocked SELECT on SQLite where
+        # row-level locking isn't supported; for SQLite a single worker
+        # is assumed (the default Evennia deployment).
+        with transaction.atomic():
+            qs = EngineJob.objects.filter(status="pending").order_by("-priority", "created_at")
+            try:
+                job = qs.select_for_update(skip_locked=True).first()
+            except Exception:
+                job = qs.first()
+            if not job:
+                return None
+            # Re-check under the row lock; a peer that won the row would
+            # have flipped status away from 'pending'.
+            if job.status != "pending":
+                return None
+            job.status = "running"
+            job.save(update_fields=["status"])
+            payload = json.loads(job.payload_json or "{}")
+            return {
+                "id": job.job_id,
+                "type": job.job_type,
+                "payload": payload,
+            }
     except Exception:
         logger.log_trace("job_queue: db dequeue failed")
         return None
