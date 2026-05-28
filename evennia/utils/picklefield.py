@@ -65,6 +65,7 @@ def _is_pure_json_safe(value):
         return all(type(k) is str and _is_pure_json_safe(v) for k, v in value.items())
     return False
 
+
 # import six # this is actually a pypy component, not in default syslib
 from django.core.exceptions import ValidationError
 from django.db import models

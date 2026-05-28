@@ -38,7 +38,8 @@ def _redis_alias():
 
 def _record_hit() -> None:
     try:
-        from evennia.server.prometheus_metrics import record_redis_attr_cache_hit
+        from evennia.server.prometheus_metrics import \
+            record_redis_attr_cache_hit
 
         record_redis_attr_cache_hit()
     except Exception:
@@ -47,7 +48,8 @@ def _record_hit() -> None:
 
 def _record_miss() -> None:
     try:
-        from evennia.server.prometheus_metrics import record_redis_attr_cache_miss
+        from evennia.server.prometheus_metrics import \
+            record_redis_attr_cache_miss
 
         record_redis_attr_cache_miss()
     except Exception:

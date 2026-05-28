@@ -11,12 +11,8 @@ from twisted.internet import protocol, reactor
 from twisted.internet.task import LoopingCall
 
 import evennia
-from evennia.utils.utils import (
-    class_from_module,
-    get_evennia_version,
-    make_iter,
-    mod_import,
-)
+from evennia.utils.utils import (class_from_module, get_evennia_version,
+                                 make_iter, mod_import)
 
 
 class EvenniaPortalService(MultiService):
@@ -175,7 +171,8 @@ class EvenniaPortalService(MultiService):
                 self.info_dict["ssh"].append("ssh%s: %s" % (ifacestr, port))
 
     def register_webserver(self):
-        from evennia.server.webserver import EvenniaReverseProxyResource, Website
+        from evennia.server.webserver import (EvenniaReverseProxyResource,
+                                              Website)
 
         # Start a reverse proxy to relay data to the Server-side webserver
         interfaces = self.check_lockdown(settings.WEBSERVER_INTERFACES)
@@ -204,7 +201,8 @@ class EvenniaPortalService(MultiService):
                     ) and not websocket_started:
                         # start websocket client port for the webclient
                         # we only support one websocket client
-                        from autobahn.twisted.websocket import WebSocketServerFactory
+                        from autobahn.twisted.websocket import \
+                            WebSocketServerFactory
 
                         from evennia.server.portal import webclient  # noqa
 

@@ -24,11 +24,8 @@ from django.conf import settings
 
 from evennia import CmdSet, Command, syscmdkeys
 from evennia.utils.evmenu import EvMenu
-from evennia.utils.utils import (
-    callables_from_module,
-    class_from_module,
-    random_string_from_module,
-)
+from evennia.utils.utils import (callables_from_module, class_from_module,
+                                 random_string_from_module)
 
 _ACCOUNT = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
 _GUEST = class_from_module(settings.BASE_GUEST_TYPECLASS)

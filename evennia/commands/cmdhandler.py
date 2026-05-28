@@ -46,12 +46,8 @@ from twisted.internet.task import deferLater
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
-from evennia.commands.signals import (
-    on_cmdset_merge_error,
-    on_command_error,
-    on_command_post,
-    on_command_pre,
-)
+from evennia.commands.signals import (on_cmdset_merge_error, on_command_error,
+                                      on_command_post, on_command_pre)
 from evennia.utils import logger, utils
 from evennia.utils.command_trace import get_trace_id
 
@@ -464,10 +460,8 @@ def get_and_merge_cmdsets(
                     location = None
                 if location:
                     from evennia.commands.location_cmdset_cache import (
-                        get_cached_location_cmdsets,
-                        make_cache_key,
-                        set_cached_location_cmdsets,
-                    )
+                        get_cached_location_cmdsets, make_cache_key,
+                        set_cached_location_cmdsets)
 
                     loc_cache_key = make_cache_key(caller, location)
                     local_objlist = get_cached_location_cmdsets(loc_cache_key)
@@ -1002,9 +996,8 @@ def cmdhandler(
                         )
                         suggestions = []
                         if getattr(settings, "COMMAND_FUZZY_SUGGESTIONS_ENABLED", True):
-                            from evennia.commands.cmdparser_trie import (
-                                fuzzy_command_suggestions,
-                            )
+                            from evennia.commands.cmdparser_trie import \
+                                fuzzy_command_suggestions
 
                             suggestions = fuzzy_command_suggestions(raw_string, cmdset)
                         if suggestions:

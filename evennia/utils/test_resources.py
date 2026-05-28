@@ -27,20 +27,22 @@ import re
 import sys
 import types
 
-import evennia
 from django.conf import settings
 from django.test import TestCase, override_settings
+from mock import MagicMock, Mock, patch
+from twisted.internet.defer import Deferred
+
+import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
 from evennia.commands.command import Command, InterruptCommand
-from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.serversession import ServerSession
 from evennia.utils import ansi, create
 from evennia.utils.idmapper.models import flush_cache
 from evennia.utils.utils import all_from_module, inherits_from, to_str
-from mock import MagicMock, Mock, patch
-from twisted.internet.defer import Deferred
 
 _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
@@ -449,7 +451,8 @@ class EvenniaCommandTestMixin:
         # Mirror cmdhandler's AccountCommand normalisation so test fixtures
         # see the same caller/character/account shape as real dispatch.
         if getattr(cmdobj, "account_command_caller", False):
-            from evennia.commands.cmdhandler import _normalize_account_command_caller
+            from evennia.commands.cmdhandler import \
+                _normalize_account_command_caller
 
             providers = {"account": cmd_account}
             if cmdobj.session is not None and getattr(cmdobj.session, "puppet", None) is not None:

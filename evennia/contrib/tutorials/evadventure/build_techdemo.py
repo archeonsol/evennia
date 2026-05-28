@@ -22,14 +22,10 @@ You can also build/rebuild individiaul #CODE blocks in the `batchcode/interactiv
 from evennia import DefaultExit, create_object, search_object
 from evennia.contrib.tutorials.evadventure import npcs
 from evennia.contrib.tutorials.evadventure.dungeon import (
-    EvAdventureDungeonStartRoom,
-    EvAdventureDungeonStartRoomExit,
-)
+    EvAdventureDungeonStartRoom, EvAdventureDungeonStartRoomExit)
 from evennia.contrib.tutorials.evadventure.objects import EvAdventureWeapon
-from evennia.contrib.tutorials.evadventure.rooms import (
-    EvAdventurePvPRoom,
-    EvAdventureRoom,
-)
+from evennia.contrib.tutorials.evadventure.rooms import (EvAdventurePvPRoom,
+                                                         EvAdventureRoom)
 
 # CODE
 

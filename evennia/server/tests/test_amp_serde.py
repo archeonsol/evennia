@@ -6,11 +6,9 @@ import pickle
 
 from django.test import override_settings
 
-from evennia.server.amp_serde import (
-    pack_session_message,
-    sanitize_session_kwargs,
-    unpack_session_message,
-)
+from evennia.server.amp_serde import (pack_session_message,
+                                      sanitize_session_kwargs,
+                                      unpack_session_message)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 

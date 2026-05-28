@@ -252,7 +252,7 @@ class DefaultCharacter(DefaultObject):
             location = self.db.prelogout_location if self.db.prelogout_location else self.home
             if location:
                 self.location = location
-                self.location.at_object_receive(self, None)
+                self.location.at_post_arrive(self, None)
 
         if self.location:
             self.db.prelogout_location = self.location  # save location again to be sure.

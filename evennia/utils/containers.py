@@ -188,7 +188,8 @@ class GlobalScriptContainer(Container):
             for script in critical_scripts:
                 script.start()
             if lazy_scripts:
-                from evennia.server.at_init_scheduler import schedule_lazy_global_scripts
+                from evennia.server.at_init_scheduler import \
+                    schedule_lazy_global_scripts
 
                 schedule_lazy_global_scripts(lazy_scripts)
         except (OperationalError, ProgrammingError):

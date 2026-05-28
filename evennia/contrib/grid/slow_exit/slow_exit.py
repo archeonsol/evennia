@@ -68,7 +68,7 @@ class SlowExit(DefaultExit):
     This overloads the way moving happens.
     """
 
-    def at_traverse(self, traversing_object, target_location):
+    def do_traverse(self, traversing_object, target_location):
         """
         Implements the actual traversal, using utils.delay to delay the move_to.
         """

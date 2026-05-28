@@ -36,6 +36,215 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.40 — Engine/game boundary migration, Bundle 1 (hooks + naming sweep)
+
+First batch of the upstream-PR sequencing tracked in
+[`.agents/docs/engine-boundary-migration.md`](.agents/docs/engine-boundary-migration.md).
+Lands the additive seams downstream needs in order to push fork-owned
+infrastructure (multipuppet, pose/emote, follow, scene broadcast) up,
+plus a long-overdue cleanup of asymmetric and ambiguous hook names.
+
+This release is lock-step with the downstream game. No deprecation
+aliases are shipped; renamed hooks must be mirrored in every override
+on the game side. The downstream-facing breaking-change list is at the
+bottom of this entry.
+
+### Engine — new hooks
+
+- [`evennia/accounts/accounts.py`](evennia/accounts/accounts.py):
+  `DefaultAccount.at_puppet_added(character, session=None)` and
+  `at_puppet_removed(character, session=None)`. Fire on **first-attach**
+  and **last-detach** only; additional sessions attaching to a character
+  the account is already puppeting (sharing in `MULTISESSION_MODE` 1/3,
+  session takeover) do not trigger them — those are per-session events
+  already covered by `Object.at_post_puppet` / `at_post_unpuppet`. The
+  semantics match set membership in `get_all_puppets()`. Wired into the
+  existing `puppet_object` / `unpuppet_object` paths via a
+  `was_already_owned` flag captured before any takeover-unpuppet runs.
+- [`evennia/objects/mixins/appearance.py`](evennia/objects/mixins/appearance.py):
+  `AppearanceMixin.get_extra_display_state(looker)` plus the matching
+  `{extra_state}` key in the default `appearance_template`. Empty by
+  default; overrides return `""` for nothing or content prefixed with a
+  leading newline for a separate line. The template appends
+  `{extra_state}` directly to the name line so stock output is
+  byte-identical when the hook is the default stub. Unlocks pose, AFK,
+  mood, combat stance, and similar persistent-state lines without
+  forcing games to rewrite `return_appearance`.
+- [`evennia/objects/mixins/movement.py`](evennia/objects/mixins/movement.py):
+  `DefaultObject.at_post_leave(moved_obj, target_location, ...)` fires
+  on the source location **after** the location change. Mirrors the
+  existing `at_post_arrive` timing on the destination; the pair is
+  unordered relative to each other, both fire before mover-side
+  `at_post_move`.
+- [`evennia/objects/mixins/movement.py`](evennia/objects/mixins/movement.py):
+  `DefaultObject.at_pre_traverse(traversing_object, target_location, ...)`
+  fires inside `do_traverse` before the move is attempted. Return
+  `False` to route to `at_failed_traverse` and abort. Closes the
+  missing pre-side of the traverse lifecycle.
+- [`evennia/typeclasses/models.py`](evennia/typeclasses/models.py):
+  `TypedObject.at_pre_rename(oldname, newname)` fires before the
+  rename commits, with veto semantics. Identity renames
+  (`oldname == newname`) now no-op and skip both hooks and
+  `SIGNAL_TYPED_OBJECT_POST_RENAME` rather than firing them with
+  unchanged values.
+
+### Engine — renames (no aliases)
+
+- `at_pre_object_leave`   → `at_pre_leave`
+- `at_pre_object_receive` → `at_pre_arrive`
+- `at_object_receive`     → `at_post_arrive`
+- `at_object_leave`       → dropped; existing bodies should move into
+  `at_pre_leave` (with `return True`) for "object still here" semantics,
+  or into `at_post_leave` for "object has departed" semantics. Most
+  existing overrides want the former.
+- `at_init` → `at_post_load` on every typeclass
+  ([`TypedObject`](evennia/typeclasses/models.py),
+  [`DefaultObject`](evennia/objects/mixins/lifecycle.py),
+  [`DefaultExit`](evennia/objects/exit.py),
+  [`DefaultAccount`](evennia/accounts/accounts.py),
+  [`DefaultBot`](evennia/accounts/bots.py),
+  [`DefaultScript`](evennia/scripts/scripts.py),
+  [`DefaultChannel`](evennia/comms/comms.py)). The historical name
+  suggested object creation; it actually fires on **idmapper cache load**
+  (every initial fetch and every server reload). New name says what it
+  does. All internal callers updated:
+  [`utils/idmapper/models.py`](evennia/utils/idmapper/models.py),
+  [`server/sessionhandler.py`](evennia/server/sessionhandler.py),
+  [`server/at_init_scheduler.py`](evennia/server/at_init_scheduler.py),
+  [`server/service.py`](evennia/server/service.py),
+  [`web/admin/comms.py`](evennia/web/admin/comms.py),
+  [`web/admin/objects.py`](evennia/web/admin/objects.py),
+  [`commands/default/building.py`](evennia/commands/default/building.py).
+  Settings comments (`AT_INIT_BATCH_SIZE` etc.) reworded; the setting
+  names themselves are unchanged.
+- `at_traverse` → `do_traverse` on
+  [`DefaultObject`](evennia/objects/mixins/movement.py) and
+  [`DefaultExit`](evennia/objects/exit.py). The method performs the
+  move; the `at_*` prefix wrongly implied a notification hook. The
+  three notification hooks (`at_pre_traverse`, `at_post_traverse`,
+  `at_failed_traverse`) keep their names. `do_traverse` now calls
+  `at_pre_traverse` first and routes False to `at_failed_traverse`
+  before attempting the move.
+
+### Contrib sweep
+
+All in-tree contrib overrides and direct callers of the renamed hooks
+are updated to match. No behavior change in contribs.
+
+- Tutorial world: [`rooms.py`](evennia/contrib/tutorials/tutorial_world/rooms.py)
+  (9 override renames; the three former `at_object_leave` bodies now
+  return `True` after their cleanup),
+  [`mob.py`](evennia/contrib/tutorials/tutorial_world/mob.py),
+  [`objects.py`](evennia/contrib/tutorials/tutorial_world/objects.py),
+  [`tests.py`](evennia/contrib/tutorials/tutorial_world/tests.py)
+  (direct calls in the test fixtures).
+- Evadventure: [`characters.py`](evennia/contrib/tutorials/evadventure/characters.py)
+  (4 overrides; the equipment-remove side effect previously split
+  between `at_pre_object_leave` and `at_object_leave` is now folded
+  into the single renamed `at_pre_leave`),
+  [`dungeon.py`](evennia/contrib/tutorials/evadventure/dungeon.py),
+  [`combat_twitch.py`](evennia/contrib/tutorials/evadventure/combat_twitch.py),
+  [`tests/test_dungeon.py`](evennia/contrib/tutorials/evadventure/tests/test_dungeon.py).
+- Evscaperoom: [`room.py`](evennia/contrib/full_systems/evscaperoom/room.py),
+  [`commands.py`](evennia/contrib/full_systems/evscaperoom/commands.py),
+  [`menu.py`](evennia/contrib/full_systems/evscaperoom/menu.py).
+- Wilderness: [`wilderness.py`](evennia/contrib/grid/wilderness/wilderness.py)
+  (`do_traverse` plus the `at_pre_leave` / `at_post_arrive` overrides
+  on `WildernessRoom`).
+- Slow exit: [`slow_exit.py`](evennia/contrib/grid/slow_exit/slow_exit.py),
+  [`tests.py`](evennia/contrib/grid/slow_exit/tests.py).
+- Ingame Python: [`typeclasses.py`](evennia/contrib/base_systems/ingame_python/typeclasses.py)
+  (`do_traverse` override).
+- Game template: [`objects.py`](evennia/game_template/typeclasses/objects.py),
+  [`accounts.py`](evennia/game_template/typeclasses/accounts.py),
+  [`channels.py`](evennia/game_template/typeclasses/channels.py)
+  (docstring hook listings updated to match).
+
+### Test-infra fixes
+
+Both fix pre-existing failures on `underspire` HEAD that surfaced when
+this branch's tests ran against the full affected sweep.
+
+- [`evennia/scripts/tickerhandler.py`](evennia/scripts/tickerhandler.py):
+  `_schedule_save` now detects `settings.TEST_ENVIRONMENT` and saves
+  synchronously instead of going through `reactor.callLater`. Trial
+  runs each test on a stub reactor that never drains queued calls;
+  the pending `_do_scheduled_save` lingered into teardown and tripped
+  `DirtyReactorAggregateError` in
+  `evennia.server.tests.test_amp_connection.TestAMPClientRecv.test_adminportal2server`.
+  Production behavior unchanged (still deferred and coalesced on the
+  real reactor). The existing reactor-not-running fallback also clears
+  `_save_scheduled` before the synchronous save so the flag never gets
+  stuck.
+- [`evennia/contrib/grid/wilderness/tests.py`](evennia/contrib/grid/wilderness/tests.py):
+  `TestWilderness.test_room_creation` was asserting `has_account` after
+  `sessions.add(1)`, but the new char1/char2 objects created in the
+  wilderness `setUp` overwrite the BaseEvenniaTest-attached chars and
+  `sessions.add` never sets `db_account`. The "Pretend that both char1
+  and char2 are connected" comment was aspirational. Now attaches
+  `self.account` / `self.account2` to the new chars before adding
+  sessions, so `has_account` reflects what the test claims to test.
+
+### Tests
+
+- [`evennia/accounts/tests.py`](evennia/accounts/tests.py):
+  `TestAccountPuppetSetHooks` — three cases covering first-attach,
+  session takeover (must not fire `at_puppet_added` again), and
+  last-detach.
+- [`evennia/objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py):
+  `TestExtraDisplayState` (stub doesn't introduce a blank line; override
+  appears in output), `TestMovementHookRenames` (pre-leave / pre-arrive
+  veto; post-leave fires with mover out of source; post-arrive fires
+  with mover in destination), `TestAtPreRename` (veto, allow, identity
+  rename skips hooks), `TestTraverseRefactor` (pre-traverse veto routes
+  to failed; allow lets move through), `TestAtPostLoadRename` (hook is
+  callable; `at_init` is no longer a class attribute).
+- [`evennia/server/tests/test_server.py`](evennia/server/tests/test_server.py)
+  and [`test_at_init_scheduler.py`](evennia/server/tests/test_at_init_scheduler.py):
+  updated existing mock references from `at_init` to `at_post_load`.
+
+### Docs
+
+- [`.agents/docs/engine-boundary-migration.md`](.agents/docs/engine-boundary-migration.md)
+  (new): full Bundle 1..4 plan reconciled with downstream, in
+  implementation order. Indexed from
+  [`AGENTS.md`](AGENTS.md) alongside the existing hygiene backlog and
+  future-ideas docs.
+
+### Migration — downstream sweep required
+
+Lock-step fork must mirror these renames in every game-side override
+and direct call. No aliases; old names will fail.
+
+| Old | New |
+|---|---|
+| `at_pre_object_leave`   | `at_pre_leave` |
+| `at_pre_object_receive` | `at_pre_arrive` |
+| `at_object_receive`     | `at_post_arrive` |
+| `at_object_leave`       | `at_pre_leave` (append `return True`) OR `at_post_leave` |
+| `at_init`               | `at_post_load` |
+| `at_traverse`           | `do_traverse` |
+| `obj.at_traverse(...)`        (direct call) | `obj.do_traverse(...)` |
+| `room.at_object_receive(...)` (direct call) | `room.at_post_arrive(...)` |
+| `room.at_object_leave(...)`   (direct call) | `room.at_pre_leave(...)` |
+
+### Audit follow-up
+
+A hook-naming audit at the start of this bundle flagged
+`at_msg_send` / `at_msg_receive` as potentially asymmetric. Inspection
+of [`evennia/objects/mixins/messaging.py`](evennia/objects/mixins/messaging.py)
+showed the auditor was wrong: `at_msg_send` already fires on the sender
+and `at_msg_receive` on the receiver. No change needed there.
+
+### Next bundle
+
+Bundle 2 covers minor stock-output breaks bundled with release notes:
+empty `at_say` templates, content-group label hook, cmdset merge cache
+warmup utility. Tracked in
+[`.agents/docs/engine-boundary-migration.md`](.agents/docs/engine-boundary-migration.md).
+
+---
+
 ## 6.0.0+underspire.39 — Cache hit/miss metrics for the remaining three caches
 
 Closes the engine cleanup checklist. Adds Prometheus hit/miss counters

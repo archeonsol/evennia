@@ -123,13 +123,8 @@ create a new wilderness (with the name "default") but using our new map provider
 
 """
 
-from evennia import (
-    DefaultExit,
-    DefaultRoom,
-    DefaultScript,
-    create_object,
-    create_script,
-)
+from evennia import (DefaultExit, DefaultRoom, DefaultScript, create_object,
+                     create_script)
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils import inherits_from
 
@@ -354,7 +349,7 @@ class WildernessScript(DefaultScript):
 
         # Now that we have a valid room, run the leave hook on the previous location if necessary
         if from_outside and old_room:
-            old_room.at_object_leave(obj, room)
+            old_room.at_pre_leave(obj, room)
 
         # Put obj back, now in the correct room
         obj.location = room
@@ -505,7 +500,7 @@ class WildernessRoom(DefaultRoom):
         """
         return self.ndb.active_coordinates
 
-    def at_object_receive(self, moved_obj, source_location):
+    def at_post_arrive(self, moved_obj, source_location, move_type="move", **kwargs):
         """
         Called after an object has been moved into this object. This is a
         default Evennia hook.
@@ -532,17 +527,18 @@ class WildernessRoom(DefaultRoom):
             # This object wasn't in the wilderness yet. Let's add it.
             itemcoords[moved_obj] = self.coordinates
 
-    def at_object_leave(self, moved_obj, target_location, move_type="move", **kwargs):
+    def at_pre_leave(self, moved_obj, target_location, move_type="move", **kwargs):
         """
         Called just before an object leaves from inside this object. This is a
         default Evennia hook.
 
         Args:
-            moved_obj (Object): The object leaving
+            moved_obj (Object): The object leaving.
             target_location (Object): Where `moved_obj` is going.
 
         """
         self.wilderness.at_post_object_leave(moved_obj)
+        return True
 
     def set_active_coordinates(self, new_coordinates, obj):
         """
@@ -670,7 +666,7 @@ class WildernessExit(DefaultExit):
         If this returns True, then the traversing can happen. Otherwise it will
         be blocked.
 
-        This method is similar how the `at_traverse` works on normal exits.
+        This method is similar how the `do_traverse` works on normal exits.
 
         Args:
             traversing_object (Object): The object doing the travelling.
@@ -684,7 +680,7 @@ class WildernessExit(DefaultExit):
         """
         return self.wilderness.is_valid_coordinates(new_coordinates)
 
-    def at_traverse(self, traversing_object, target_location):
+    def do_traverse(self, traversing_object, target_location):
         """
         This implements the actual traversal. The traverse lock has
         already been checked (in the Exit command) at this point.

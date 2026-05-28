@@ -11,7 +11,8 @@ from django.db.models import Max, Min, Q
 
 import evennia
 from evennia import InterruptCommand
-from evennia.commands.cmdhandler import generate_cmdset_providers, get_and_merge_cmdsets
+from evennia.commands.cmdhandler import (generate_cmdset_providers,
+                                         get_and_merge_cmdsets)
 from evennia.locks.lockhandler import LockException
 from evennia.objects.models import ObjectDB
 from evennia.prototypes import menus as olc_menus
@@ -24,18 +25,10 @@ from evennia.utils.dbserialize import deserialize
 from evennia.utils.eveditor import EvEditor
 from evennia.utils.evmore import EvMore
 from evennia.utils.evtable import EvTable
-from evennia.utils.utils import (
-    class_from_module,
-    crop,
-    dbref,
-    display_len,
-    format_grid,
-    get_all_typeclasses,
-    inherits_from,
-    interactive,
-    list_to_string,
-    variable_from_module,
-)
+from evennia.utils.utils import (class_from_module, crop, dbref, display_len,
+                                 format_grid, get_all_typeclasses,
+                                 inherits_from, interactive, list_to_string,
+                                 variable_from_module)
 
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 
@@ -2606,7 +2599,7 @@ class CmdLock(ObjManipCommand):
             ):
                 # special fix to update Exits since "cmd"-type locks won't
                 # update on them unless their cmdsets are rebuilt.
-                obj.at_init()
+                obj.at_post_load()
             if ok:
                 caller.msg(f"Added lock '{lockdef}' to {obj}.")
             return
@@ -2962,7 +2955,11 @@ class CmdExamine(ObjManipCommand):
             account_subs = obj.db_account_subscriptions.all()
             if account_subs:
                 return "\n  " + "\n  ".join(
-                    format_grid([sub.key for sub in account_subs], sep=" ", width=settings.CLIENT_DEFAULT_WIDTH)
+                    format_grid(
+                        [sub.key for sub in account_subs],
+                        sep=" ",
+                        width=settings.CLIENT_DEFAULT_WIDTH,
+                    )
                 )
 
     def format_channel_object_subs(self, obj):
@@ -2970,7 +2967,11 @@ class CmdExamine(ObjManipCommand):
             object_subs = obj.db_object_subscriptions.all()
             if object_subs:
                 return "\n  " + "\n  ".join(
-                    format_grid([sub.key for sub in object_subs], sep=" ", width=settings.CLIENT_DEFAULT_WIDTH)
+                    format_grid(
+                        [sub.key for sub in object_subs],
+                        sep=" ",
+                        width=settings.CLIENT_DEFAULT_WIDTH,
+                    )
                 )
 
     def get_formatted_obj_data(self, obj, current_cmdset):

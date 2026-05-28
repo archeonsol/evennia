@@ -1,13 +1,9 @@
 from evennia import DefaultObject, DefaultRoom
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripts import DefaultScript
-from evennia.utils.search import (
-    search_object_attribute,
-    search_script,
-    search_script_attribute,
-    search_script_tag,
-    search_typeclass,
-)
+from evennia.utils.search import (search_object_attribute, search_script,
+                                  search_script_attribute, search_script_tag,
+                                  search_typeclass)
 from evennia.utils.test_resources import EvenniaTest
 
 

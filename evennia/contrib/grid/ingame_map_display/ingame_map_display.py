@@ -64,6 +64,7 @@ from django.conf import settings
 from evennia import CmdSet
 from evennia.commands.command import Command
 
+
 def _basic_map_size():
     return getattr(settings, "BASIC_MAP_SIZE", 2)
 
@@ -73,6 +74,7 @@ def _max_map_size():
     # for MAX_MAP_SIZE), but kept the same behavior to avoid a silent
     # behavior change. Inspect before retitling.
     return getattr(settings, "BASIC_MAP_SIZE", 10) if hasattr(settings, "MAX_MAP_SIZE") else 10
+
 
 # _COMPASS_DIRECTIONS specifies which way to move the pointer on the x/y axes and what characters to use to depict the exits on the map.
 _COMPASS_DIRECTIONS = {

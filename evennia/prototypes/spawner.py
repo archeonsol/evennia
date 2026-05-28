@@ -142,13 +142,9 @@ from django.utils.translation import gettext as _
 import evennia
 from evennia.objects.models import ObjectDB
 from evennia.prototypes import prototypes as protlib
-from evennia.prototypes.prototypes import (
-    PROTOTYPE_TAG_CATEGORY,
-    init_spawn_value,
-    search_prototype,
-    value_to_obj,
-    value_to_obj_or_any,
-)
+from evennia.prototypes.prototypes import (PROTOTYPE_TAG_CATEGORY,
+                                           init_spawn_value, search_prototype,
+                                           value_to_obj, value_to_obj_or_any)
 from evennia.utils import logger
 from evennia.utils.utils import class_from_module, is_iter, make_iter
 

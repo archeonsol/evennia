@@ -112,7 +112,7 @@ class Account(DefaultAccount):
      > note that the following hooks are also found on Objects and are
        usually handled on the character level:
 
-     - at_init()
+     - at_post_load()
      - at_first_save()
      - at_access()
      - at_cmdset_get(**kwargs)

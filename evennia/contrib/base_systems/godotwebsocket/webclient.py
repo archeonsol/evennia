@@ -11,7 +11,8 @@ from autobahn.twisted import WebSocketServerFactory
 from twisted.application import internet
 
 from evennia import settings
-from evennia.contrib.base_systems.godotwebsocket.text2bbcode import parse_to_bbcode
+from evennia.contrib.base_systems.godotwebsocket.text2bbcode import \
+    parse_to_bbcode
 from evennia.server.portal import webclient
 from evennia.settings_default import LOCKDOWN_MODE
 

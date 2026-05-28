@@ -12,8 +12,10 @@
 # HEADER
 
 from evennia import DefaultExit, create_object, search_object
-from evennia.contrib.tutorials.evadventure.characters import EvAdventureCharacter
-from evennia.contrib.tutorials.evadventure.combat_turnbased import TurnCombatCmdSet
+from evennia.contrib.tutorials.evadventure.characters import \
+    EvAdventureCharacter
+from evennia.contrib.tutorials.evadventure.combat_turnbased import \
+    TurnCombatCmdSet
 from evennia.contrib.tutorials.evadventure.npcs import EvAdventureNPC
 from evennia.contrib.tutorials.evadventure.rooms import EvAdventureRoom
 

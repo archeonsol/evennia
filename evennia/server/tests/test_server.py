@@ -221,7 +221,7 @@ class TestInitHooks(TestCase):
         ]
 
         for obj in self.objects:
-            obj.at_init = MagicMock()
+            obj.at_post_load = MagicMock()
 
     def tearDown(self):
         for obj in self.objects:
@@ -238,7 +238,7 @@ class TestInitHooks(TestCase):
             self.server.run_init_hooks("shutdown")
 
             for obj in self.objects:
-                obj.at_init.assert_called()
+                obj.at_post_load.assert_called()
 
             for hook in (reload, cold):
                 hook.assert_called()

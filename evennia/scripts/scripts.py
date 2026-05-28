@@ -530,7 +530,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         pass
 
-    def at_init(self):
+    def at_post_load(self):
         """
         Called when the Script is cached in the idmapper. This is usually more reliable
         than overriding `__init__` since the latter can be called at unexpected times.

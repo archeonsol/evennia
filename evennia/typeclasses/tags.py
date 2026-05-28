@@ -15,6 +15,7 @@ from collections import defaultdict
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+
 from evennia.locks.lockfuncs import perm as perm_lockfunc
 from evennia.utils.utils import make_iter, to_str
 

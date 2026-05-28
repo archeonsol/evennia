@@ -183,7 +183,8 @@ class HelpDetailTest(EvenniaWebTest):
         # clear file help entries, use local HELP_ENTRY_DICTS to recreate new entries
         global _FILE_HELP_ENTRIES
         if _FILE_HELP_ENTRIES is None:
-            from evennia.help.filehelp import FILE_HELP_ENTRIES as _FILE_HELP_ENTRIES
+            from evennia.help.filehelp import \
+                FILE_HELP_ENTRIES as _FILE_HELP_ENTRIES
         help_module = "evennia.web.website.tests"
         self.file_help_store = _FILE_HELP_ENTRIES.__init__(help_file_modules=[help_module])
 

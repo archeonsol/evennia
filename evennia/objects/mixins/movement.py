@@ -62,14 +62,17 @@ class MovementMixin:
         The `DefaultObject` hooks called (if `move_hooks=True`) are, in order:
 
         1. `self.at_pre_move(destination)` (abort if return False)
-        2. `source_location.at_pre_object_leave(self, destination)` (abort if return False)
-        3. `destination.at_pre_object_receive(self, source_location)` (abort if return False)
-        4. `source_location.at_object_leave(self, destination)`
-        5. `self.announce_move_from(destination)`
-        6. (move happens here)
-        7. `self.announce_move_to(source_location)`
-        8. `destination.at_object_receive(self, source_location)`
+        2. `source_location.at_pre_leave(self, destination)` (abort if return False)
+        3. `destination.at_pre_arrive(self, source_location)` (abort if return False)
+        4. `self.announce_move_from(destination)`
+        5. (move happens here)
+        6. `self.announce_move_to(source_location)`
+        7. `source_location.at_post_leave(self, destination)`
+        8. `destination.at_post_arrive(self, source_location)`
         9. `self.at_post_move(source_location)`
+
+        `at_post_leave` and `at_post_arrive` are unordered relative to each other;
+        both fire before mover-side `at_post_move`.
 
         """
 
@@ -109,29 +112,21 @@ class MovementMixin:
                 return False
             # check if source location lets us go
             try:
-                if source_location and not source_location.at_pre_object_leave(
+                if source_location and not source_location.at_pre_leave(
                     self, destination, move_type=move_type, **kwargs
                 ):
                     return False
             except Exception as err:
-                logerr(errtxt.format(err="at_pre_object_leave()"), err)
+                logerr(errtxt.format(err="at_pre_leave()"), err)
                 return False
             # check if destination accepts us
             try:
-                if destination and not destination.at_pre_object_receive(
+                if destination and not destination.at_pre_arrive(
                     self, source_location, move_type=move_type, **kwargs
                 ):
                     return False
             except Exception as err:
-                logerr(errtxt.format(err="at_pre_object_receive()"), err)
-                return False
-
-        # Call hook on source location
-        if move_hooks and source_location:
-            try:
-                source_location.at_object_leave(self, destination, move_type=move_type, **kwargs)
-            except Exception as err:
-                logerr(errtxt.format(err="at_object_leave()"), err)
+                logerr(errtxt.format(err="at_pre_arrive()"), err)
                 return False
 
         if not quiet:
@@ -153,7 +148,8 @@ class MovementMixin:
         # commands available in each room depends on what objects are
         # present, and the cache key is keyed by location generation.
         try:
-            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import \
+                bump_cmdset_generation
 
             if source_location is not None:
                 bump_cmdset_generation(source_location)
@@ -171,12 +167,18 @@ class MovementMixin:
                 return False
 
         if move_hooks:
-            # Perform eventual extra commands on the receiving location
-            # (the object has already arrived at this point)
+            # Post-leave on the source room; object is no longer here.
+            if source_location:
+                try:
+                    source_location.at_post_leave(self, destination, move_type=move_type, **kwargs)
+                except Exception as err:
+                    logerr(errtxt.format(err="at_post_leave()"), err)
+                    return False
+            # Post-arrive on the destination; object is now here.
             try:
-                destination.at_object_receive(self, source_location, move_type=move_type, **kwargs)
+                destination.at_post_arrive(self, source_location, move_type=move_type, **kwargs)
             except Exception as err:
-                logerr(errtxt.format(err="at_object_receive()"), err)
+                logerr(errtxt.format(err="at_post_arrive()"), err)
                 return False
 
         # Execute eventual extra commands on this object after moving it
@@ -271,47 +273,49 @@ class MovementMixin:
         """
         return True
 
-    def at_pre_object_leave(self, leaving_object, destination, **kwargs):
+    def at_pre_leave(self, leaving_object, destination, **kwargs):
         """
-        Called just before this object is about lose an object that was
-        previously 'inside' it. Return False to abort move.
+        Called on this object just before another object that is currently
+        'inside' it leaves. Return `False` (or `None`) to abort the move.
+        This is also the place for side effects that need to run while
+        `leaving_object` is still considered present here: returning `True`
+        at the end of an override allows the move to proceed.
 
         Args:
             leaving_object (DefaultObject): The object that is about to leave.
-            destination (DefaultObject): Where object is going to.
+            destination (DefaultObject): Where the object is going to.
             **kwargs: Arbitrary, optional arguments for users
                 overriding the call (unused by default).
         Returns:
             bool: If `leaving_object` should be allowed to leave or not.
 
         Notes:
-
-            If this method returns `False` or `None`, the move is canceled before
-            it even started.
+            If this method returns `False` or `None`, the move is canceled
+            before it even started.
 
         """
         return True
 
-    def at_pre_object_receive(self, arriving_object, source_location, **kwargs):
+    def at_pre_arrive(self, arriving_object, source_location, **kwargs):
         """
-        Called just before this object received another object. If this
-        method returns `False`, the move is aborted and the moved entity
-        remains where it was.
+        Called on this object just before it receives another object. If this
+        method returns `False` (or `None`), the move is aborted and the moved
+        entity remains where it was. This is also the place for side effects
+        that need to run before `arriving_object` is placed here.
 
         Args:
-            arriving_object (DefaultObject): The object moved into this one
-            source_location (DefaultObject): Where `moved_object` came from.
+            arriving_object (DefaultObject): The object moving into this one.
+            source_location (DefaultObject): Where `arriving_object` came from.
                 Note that this could be `None`.
             **kwargs: Arbitrary, optional arguments for users
                 overriding the call (unused by default).
 
         Returns:
-            bool: If False, abort move and `moved_obj` remains where it was.
+            bool: If `False`, abort move and `arriving_object` remains where it was.
 
         Notes:
-
-            If this method returns `False` or `None`, the move is canceled before
-            it even started.
+            If this method returns `False` or `None`, the move is canceled
+            before it even started.
 
         """
         return True
@@ -469,13 +473,14 @@ class MovementMixin:
     # deprecated
     at_after_move = at_post_move
 
-    def at_object_leave(self, moved_obj, target_location, move_type="move", **kwargs):
+    def at_post_leave(self, moved_obj, target_location, move_type="move", **kwargs):
         """
-        Called just before an object leaves from inside this object
+        Called after an object has left from inside this object. At this
+        point `moved_obj` is no longer in `self.contents`.
 
         Args:
-            moved_obj (DefaultObject): The object leaving
-            target_location (DefaultObject): Where `moved_obj` is going.
+            moved_obj (DefaultObject): The object that has left.
+            target_location (DefaultObject): Where `moved_obj` went.
             move_type (str): The type of move. "give", "traverse", etc.
                 This is an arbitrary string provided to obj.move_to().
                 Useful for altering messages or altering logic depending
@@ -483,16 +488,21 @@ class MovementMixin:
             **kwargs: Arbitrary, optional arguments for users
                 overriding the call (unused by default).
 
+        Notes:
+            Fires unordered relative to `target_location.at_post_arrive`,
+            and both fire before the mover's `at_post_move`.
+
         """
         pass
 
-    def at_object_receive(self, moved_obj, source_location, move_type="move", **kwargs):
+    def at_post_arrive(self, moved_obj, source_location, move_type="move", **kwargs):
         """
-        Called after an object has been moved into this object.
+        Called after an object has been moved into this object. At this
+        point `moved_obj` is in `self.contents`.
 
         Args:
-            moved_obj (DefaultObject): The object moved into this one
-            source_location (DefaultObject): Where `moved_object` came from.
+            moved_obj (DefaultObject): The object moved into this one.
+            source_location (DefaultObject): Where `moved_obj` came from.
                 Note that this could be `None`.
             move_type (str): The type of move. "give", "traverse", etc.
                 This is an arbitrary string provided to obj.move_to().
@@ -501,18 +511,20 @@ class MovementMixin:
             **kwargs: Arbitrary, optional arguments for users
                 overriding the call (unused by default).
 
+        Notes:
+            Fires unordered relative to `source_location.at_post_leave`,
+            and both fire before the mover's `at_post_move`.
+
         """
         pass
 
-    def at_traverse(self, traversing_object, target_location, **kwargs):
+    def do_traverse(self, traversing_object, target_location, **kwargs):
         """
-        This hook is responsible for handling the actual traversal,
-        normally by calling
-        `traversing_object.move_to(target_location)`. It is normally
-        only implemented by Exit objects. If it returns False (usually
-        because `move_to` returned False), `at_post_traverse` below
-        should not be called and instead `at_failed_traverse` should be
-        called.
+        Implementation method that performs the actual traversal, normally
+        by calling `traversing_object.move_to(target_location)`. Only Exit
+        objects implement this by default. Override to change *how* the
+        traverse happens; for side-effect hooks prefer `at_pre_traverse`,
+        `at_post_traverse`, or `at_failed_traverse`.
 
         Args:
             traversing_object (DefaultObject): Object traversing us.
@@ -522,6 +534,24 @@ class MovementMixin:
 
         """
         pass
+
+    def at_pre_traverse(self, traversing_object, target_location, **kwargs):
+        """
+        Called by `do_traverse` before the move is attempted. Return False
+        (or None) to abort the traverse; `at_failed_traverse` will then
+        fire instead. Return True to allow the move to proceed.
+
+        Args:
+            traversing_object (DefaultObject): Object attempting to traverse.
+            target_location (DefaultObject): Where the object would go.
+            **kwargs: Arbitrary, optional arguments for users
+                overriding the call (unused by default).
+
+        Returns:
+            bool: True to allow the traverse, False to abort.
+
+        """
+        return True
 
     def at_post_traverse(self, traversing_object, source_location, **kwargs):
         """

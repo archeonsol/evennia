@@ -273,7 +273,6 @@ from inspect import getfullargspec, isfunction
 from math import ceil
 
 from django.conf import settings
-
 # i18n
 from django.utils.translation import gettext as _
 
@@ -283,17 +282,8 @@ from evennia.commands import cmdhandler
 from evennia.utils import logger
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.evtable import EvColumn, EvTable
-from evennia.utils.utils import (
-    crop,
-    dedent,
-    inherits_from,
-    is_iter,
-    m_len,
-    make_iter,
-    mod_import,
-    pad,
-    to_str,
-)
+from evennia.utils.utils import (crop, dedent, inherits_from, is_iter, m_len,
+                                 make_iter, mod_import, pad, to_str)
 
 # we use cmdhandler instead of evennia.syscmdkeys to
 # avoid some cases of loading before evennia init'd
@@ -1254,7 +1244,9 @@ class EvMenu:
         sep = self.node_border_char
 
         if self._session:
-            screen_width = self._session.protocol_flags.get("SCREENWIDTH", {0: settings.CLIENT_DEFAULT_WIDTH})[0]
+            screen_width = self._session.protocol_flags.get(
+                "SCREENWIDTH", {0: settings.CLIENT_DEFAULT_WIDTH}
+            )[0]
         else:
             screen_width = settings.CLIENT_DEFAULT_WIDTH
 

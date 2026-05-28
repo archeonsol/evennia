@@ -9,7 +9,8 @@ from twisted.trial.unittest import TestCase as TwistedTestCase
 
 from evennia.commands.default.tests import BaseEvenniaCommandTest
 from evennia.utils.create import create_object
-from evennia.utils.test_resources import BaseEvenniaTest, mockdeferLater, mockdelay
+from evennia.utils.test_resources import (BaseEvenniaTest, mockdeferLater,
+                                          mockdelay)
 
 from . import mob
 from . import objects as tutobjects
@@ -167,7 +168,7 @@ class TestTutorialWorldRooms(BaseEvenniaCommandTest):
 
     def test_introroom(self):
         room = create_object(tutrooms.IntroRoom, key="introroom")
-        room.at_object_receive(self.char1, self.room1)
+        room.at_post_arrive(self.char1, self.room1)
 
     def test_bridgeroom(self):
         room = create_object(tutrooms.BridgeRoom, key="bridgeroom")
@@ -185,7 +186,7 @@ class TestTutorialWorldRooms(BaseEvenniaCommandTest):
             "bridgeroom\nYou are standing very close to the the bridge's western foundation.",
             obj=room,
         )
-        room.at_object_leave(self.char1, self.room1)
+        room.at_pre_leave(self.char1, self.room1)
         tutrooms.TICKER_HANDLER.remove(
             interval=room.db.interval, callback=room.update_weather, idstring="tutorial"
         )

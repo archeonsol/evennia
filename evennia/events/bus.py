@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from django.conf import settings
 
-from evennia.server.amp_serde import sanitize_event_payload, validate_event_subject
+from evennia.server.amp_serde import (sanitize_event_payload,
+                                      validate_event_subject)
 from evennia.utils import logger
 
 _listeners: Dict[str, List[Callable]] = {}

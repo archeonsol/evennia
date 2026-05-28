@@ -2,7 +2,8 @@ from evennia import create_object
 from evennia.utils.test_resources import BaseEvenniaCommandTest  # noqa
 from evennia.utils.test_resources import BaseEvenniaTest
 
-from .containers import CmdContainerGet, CmdContainerLook, CmdPut, ContribContainer
+from .containers import (CmdContainerGet, CmdContainerLook, CmdPut,
+                         ContribContainer)
 
 
 class TestContainer(BaseEvenniaTest):

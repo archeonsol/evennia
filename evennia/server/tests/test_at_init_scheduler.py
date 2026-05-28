@@ -35,4 +35,4 @@ class TestAtInitScheduler(BaseEvenniaTest):
             patch("twisted.internet.reactor.callLater", _sync_call_later),
         ):
             run_cached_at_init_burst("shutdown")
-        self.assertEqual(entity.at_init.call_count, 3)
+        self.assertEqual(entity.at_post_load.call_count, 3)

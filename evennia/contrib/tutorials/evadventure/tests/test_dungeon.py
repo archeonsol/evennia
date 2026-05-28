@@ -56,7 +56,7 @@ class TestDungeon(EvAdventureMixin, BaseEvenniaTest):
             if exi.key == direction:
                 # by setting target to old-location we trigger the
                 # special behavior of this Exit type
-                exi.at_traverse(self.character, exi.destination)
+                exi.do_traverse(self.character, exi.destination)
                 break
         return self.character.location
 

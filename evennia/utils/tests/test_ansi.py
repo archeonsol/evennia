@@ -8,15 +8,8 @@ Test of the ANSI parsing and ANSIStrings.
 
 from django.test import TestCase
 
-from evennia.utils.ansi import (
-    ANSI_BLUE,
-    ANSI_CYAN,
-    ANSI_GREEN,
-    ANSI_HILITE,
-    ANSI_NORMAL,
-    ANSI_RED,
-    ANSI_YELLOW,
-)
+from evennia.utils.ansi import (ANSI_BLUE, ANSI_CYAN, ANSI_GREEN, ANSI_HILITE,
+                                ANSI_NORMAL, ANSI_RED, ANSI_YELLOW)
 from evennia.utils.ansi import ANSIString as AN
 
 

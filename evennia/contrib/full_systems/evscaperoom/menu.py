@@ -62,7 +62,7 @@ def _move_to_room(caller, raw_string, **kwargs):
     # we do a manual move since we don't want all hooks to fire.
     old_location = caller.location
     caller.location = room
-    room.at_object_receive(caller, old_location)
+    room.at_post_arrive(caller, old_location)
     return "node_quit", {"quiet": True}
 
 

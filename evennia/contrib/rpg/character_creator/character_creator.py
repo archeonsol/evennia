@@ -196,11 +196,7 @@ class ContribChargenAccount(DefaultAccount):
             txt_characters = "You don't have a character yet."
         else:
             _max_chars = settings.MAX_NR_CHARACTERS
-            max_chars = (
-                "unlimited"
-                if self.is_superuser or _max_chars is None
-                else _max_chars
-            )
+            max_chars = "unlimited" if self.is_superuser or _max_chars is None else _max_chars
 
             char_strings = []
             for char in characters:

@@ -205,7 +205,8 @@ class LifecycleMixin:
         # location: removing this object removes its cmdset from the
         # room's available command pool.
         try:
-            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import \
+                bump_cmdset_generation
 
             if self.location is not None:
                 bump_cmdset_generation(self.location)
@@ -288,7 +289,7 @@ class LifecycleMixin:
             if cdict.get("aliases"):
                 self.aliases.batch_add(*cdict["aliases"])
             if cdict.get("location"):
-                cdict["location"].at_object_receive(self, None)
+                cdict["location"].at_post_arrive(self, None)
                 self.at_post_move(None)
             if cdict.get("tags"):
                 # this should be a list of tags, tuples (key, category) or (key, category, data)
@@ -391,7 +392,7 @@ class LifecycleMixin:
         """
         pass
 
-    def at_init(self):
+    def at_post_load(self):
         """
         This is always called whenever this object is initiated --
         that is, whenever it its typeclass is cached from memory. This

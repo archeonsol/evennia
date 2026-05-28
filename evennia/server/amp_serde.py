@@ -166,7 +166,9 @@ def _is_int_key(key: Any) -> bool:
     return isinstance(key, int) or (isinstance(key, str) and key.isdigit())
 
 
-def _sanitize_admin_sessiondata(value: dict, *, depth: int = 0, sessid_map: bool | None = None) -> dict:
+def _sanitize_admin_sessiondata(
+    value: dict, *, depth: int = 0, sessid_map: bool | None = None
+) -> dict:
     if depth > _max_depth():
         raise ValueError("AMP admin sessiondata exceeds max nesting depth")
     if len(value) > _MAX_DICT_KEYS:
@@ -189,9 +191,7 @@ def _sanitize_admin_sessiondata(value: dict, *, depth: int = 0, sessid_map: bool
             raise TypeError("AMP admin sessiondata dict keys must be str or int")
 
         if isinstance(val, dict):
-            encoded[clean_key] = _sanitize_admin_sessiondata(
-                val, depth=depth + 1, sessid_map=False
-            )
+            encoded[clean_key] = _sanitize_admin_sessiondata(val, depth=depth + 1, sessid_map=False)
         else:
             encoded[clean_key] = sanitize_value(val, depth=depth + 1)
     return encoded
@@ -248,6 +248,7 @@ def unpack_admin_message(data: bytes) -> Tuple[int, dict]:
     if raw[:1] in _PICKLE_REJECT_PREFIXES:
         if accept_legacy_session_pickle():
             from evennia.server.portal import amp as _amp
+
             msg = _amp.loads(raw)
             if not isinstance(msg, (list, tuple)) or len(msg) != 2:
                 raise ValueError("legacy pickle admin message malformed")

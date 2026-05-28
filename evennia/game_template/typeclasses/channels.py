@@ -80,7 +80,7 @@ class Channel(DefaultChannel):
     Useful hooks:
         at_channel_creation() - called once, when the channel is created
         basetype_setup()
-        at_init()
+        at_post_load()
         at_first_save()
         channel_prefix() - how the channel should be
                   prefixed when returning to user. Returns a string

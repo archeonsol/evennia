@@ -7,11 +7,8 @@ from django.test import override_settings
 from mock import MagicMock, Mock, patch
 
 import evennia
-from evennia.accounts.accounts import (
-    AccountSessionHandler,
-    DefaultAccount,
-    DefaultGuest,
-)
+from evennia.accounts.accounts import (AccountSessionHandler, DefaultAccount,
+                                       DefaultGuest)
 from evennia.utils import create
 from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.utils.utils import uses_database
@@ -377,6 +374,47 @@ class TestDefaultAccount(TestCase):
         )
         self.assertEqual(account.get_available_character_slots(), 5)
         account.delete()
+
+
+class TestAccountPuppetSetHooks(BaseEvenniaTest):
+    """at_puppet_added / at_puppet_removed fire on set-membership change."""
+
+    def test_added_fires_on_first_attach(self):
+        self.account.at_puppet_added = MagicMock()
+        # Detach the fixture session first, then re-attach via puppet_object
+        # so we exercise the hook path.
+        self.account.unpuppet_object(self.session)
+        self.account.at_puppet_added.reset_mock()
+        self.account.puppet_object(self.session, self.char1)
+        self.account.at_puppet_added.assert_called_once_with(self.char1, session=self.session)
+
+    def test_added_does_not_fire_on_session_takeover(self):
+        # Initial puppet already happened in setup_session. Simulate a second
+        # session of the same account taking over by puppeting the same obj
+        # again with a new session id.
+        from mock import MagicMock as MM
+
+        from evennia.server.serversession import ServerSession
+
+        other = ServerSession()
+        other.init_session("telnet", ("localhost", "testmode"), evennia.SESSION_HANDLER)
+        other.sessid = 2
+        evennia.SESSION_HANDLER.portal_connect(other.get_sync_data())
+        other = evennia.SESSION_HANDLER.session_from_sessid(2)
+        evennia.SESSION_HANDLER.login(other, self.account, testmode=True)
+        try:
+            self.account.at_puppet_added = MM()
+            # Now attempt to puppet char1 (already puppeted by self.session)
+            # from the new session. In MULTISESSION_MODE 0 this takes over.
+            self.account.puppet_object(other, self.char1)
+            self.account.at_puppet_added.assert_not_called()
+        finally:
+            del evennia.SESSION_HANDLER[other.sessid]
+
+    def test_removed_fires_on_last_detach(self):
+        self.account.at_puppet_removed = MagicMock()
+        self.account.unpuppet_object(self.session)
+        self.account.at_puppet_removed.assert_called_once_with(self.char1, session=self.session)
 
 
 class TestAccountPuppetDeletion(BaseEvenniaTest):

@@ -15,6 +15,7 @@ from evennia.scripts.scripts import DefaultScript
 from evennia.utils import logger, search, utils
 from evennia.utils.ansi import strip_ansi
 
+
 class BotStarter(DefaultScript):
     """
     This non-repeating script has the
@@ -563,7 +564,7 @@ class DiscordBot(Bot):
                 channel = channel[0]
                 self.ndb.ev_channels[channel_name] = channel
 
-    def at_init(self):
+    def at_post_load(self):
         """
         Load required channels back into memory
 

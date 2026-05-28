@@ -31,11 +31,9 @@ See the ./README.md file for details and install instructions.
 
 """
 
-from django.core.exceptions import (
-    ImproperlyConfigured,
-    SuspiciousFileOperation,
-    SuspiciousOperation,
-)
+from django.core.exceptions import (ImproperlyConfigured,
+                                    SuspiciousFileOperation,
+                                    SuspiciousOperation)
 
 try:
     from django.conf import settings as ev_settings
@@ -76,7 +74,8 @@ from tempfile import SpooledTemporaryFile
 from django.core.files.base import File
 from django.core.files.storage import Storage
 from django.utils.deconstruct import deconstructible
-from django.utils.encoding import filepath_to_uri, force_bytes, force_str, smart_str
+from django.utils.encoding import (filepath_to_uri, force_bytes, force_str,
+                                   smart_str)
 from django.utils.timezone import is_naive, make_naive
 
 try:

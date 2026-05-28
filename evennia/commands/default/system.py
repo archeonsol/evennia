@@ -1034,7 +1034,8 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         # get a reference of the global task handler
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import \
+                TASK_HANDLER as _TASK_HANDLER
 
         # verify manipulating the correct task
         task_args = _TASK_HANDLER.tasks.get(task_id, False)
@@ -1057,7 +1058,8 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         # get a reference of the global task handler
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import \
+                TASK_HANDLER as _TASK_HANDLER
         # handle no tasks active.
         if not _TASK_HANDLER.tasks:
             self.msg("There are no active tasks.")

@@ -12,7 +12,6 @@ See the docs for more information.
 """
 
 from evennia.contrib.base_systems.godotwebsocket.text2bbcode import (
-    BBCODE_PARSER,
-    parse_to_bbcode,
-)
-from evennia.contrib.base_systems.godotwebsocket.webclient import GodotWebSocketClient
+    BBCODE_PARSER, parse_to_bbcode)
+from evennia.contrib.base_systems.godotwebsocket.webclient import \
+    GodotWebSocketClient

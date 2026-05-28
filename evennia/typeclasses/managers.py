@@ -13,7 +13,8 @@ from django.db.models.functions import Cast
 from evennia.typeclasses.attributes import Attribute
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
-from evennia.utils.utils import class_from_module, make_iter, variable_from_module
+from evennia.utils.utils import (class_from_module, make_iter,
+                                 variable_from_module)
 
 __all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__
@@ -218,9 +219,9 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
                 # M2M through table (Tag has no direct FK back to objects).
                 through = self.model.db_tags.through
                 obj_field = self.model.__name__.lower()
-                linked_ids = through.objects.filter(
-                    **{"%s__id" % obj_field: obj.id}
-                ).values_list("tag_id", flat=True)
+                linked_ids = through.objects.filter(**{"%s__id" % obj_field: obj.id}).values_list(
+                    "tag_id", flat=True
+                )
                 qs = qs.filter(id__in=linked_ids)
             return qs
         else:
@@ -693,9 +694,7 @@ class TypeclassManager(TypedObjectManager):
                     tag__db_key__iexact=key_query,
                     tag__db_tagtype="alias",
                 ).values_list("%s_id" % self.model.__name__.lower(), flat=True)
-                qs = qs.filter(
-                    Q(db_key__iexact=key_query) | Q(id__in=alias_ids)
-                )
+                qs = qs.filter(Q(db_key__iexact=key_query) | Q(id__in=alias_ids))
 
         for tagkey, tagcat in plustags:
             qs = qs.filter(

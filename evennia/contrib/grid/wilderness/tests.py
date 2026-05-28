@@ -91,7 +91,10 @@ class TestWilderness(BaseEvenniaTest):
             self.assertTrue(any([e for e in exits if e.key == each_exit]))
 
     def test_room_creation(self):
-        # Pretend that both char1 and char2 are connected...
+        # Pretend that both char1 and char2 are connected. has_account checks
+        # db_account, not sessions, so attach the accounts explicitly.
+        self.char1.account = self.account
+        self.char2.account = self.account2
         self.char1.sessions.add(1)
         self.char2.sessions.add(1)
         self.assertTrue(self.char1.has_account)

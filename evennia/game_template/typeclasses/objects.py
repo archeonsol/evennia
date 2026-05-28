@@ -131,7 +131,7 @@ class Object(ObjectParent, DefaultObject):
                             inside a deleted object are automatically moved
                             to their <home>, they don't need to be removed here.
 
-     at_init()            - called whenever typeclass is cached from memory,
+     at_post_load()            - called whenever typeclass is cached from memory,
                             at least once every server restart/reload
      at_first_save()
      at_cmdset_get(**kwargs) - this is called just before the command handler
@@ -161,16 +161,16 @@ class Object(ObjectParent, DefaultObject):
                         after move, if obj.move_to() has quiet=False
      at_post_move(source_location)          - always called after a move has
                         been successfully performed.
-     at_pre_object_leave(leaving_object, destination, **kwargs)
-     at_object_leave(obj, target_location, move_type="move", **kwargs)
-     at_object_leave(obj, target_location)   - called when an object leaves
-                        this object in any fashion
-     at_pre_object_receive(obj, source_location)
-     at_object_receive(obj, source_location, move_type="move", **kwargs) - called when this object receives
-                        another object
-     at_post_move(source_location, move_type="move", **kwargs)
+     at_pre_leave(leaving_object, destination, **kwargs) - source room veto and
+                       pre-move side effects; return True to allow the move.
+     at_pre_arrive(arriving_object, source_location, **kwargs) - destination room
+                       veto and pre-move side effects.
+     at_post_leave(moved_obj, target_location, move_type="move", **kwargs) - source
+                       room notification after the object has left.
+     at_post_arrive(moved_obj, source_location, move_type="move", **kwargs) -
+                       destination room notification after the object has arrived.
 
-     at_traverse(traversing_object, target_location, **kwargs) - (exit-objects only)
+     do_traverse(traversing_object, target_location, **kwargs) - (exit-objects only)
                               handles all moving across the exit, including
                               calling the other exit hooks. Use super() to retain
                               the default functionality.

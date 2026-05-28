@@ -4,7 +4,8 @@ Tests for whitelisted job queue.
 
 from django.test import override_settings
 
-from evennia.jobs.queue import enqueue_job, process_pending_jobs, register_job_type
+from evennia.jobs.queue import (enqueue_job, process_pending_jobs,
+                                register_job_type)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 

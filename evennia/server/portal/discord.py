@@ -14,14 +14,12 @@ import os
 from io import BytesIO
 from random import random
 
-from autobahn.twisted.websocket import (
-    WebSocketClientFactory,
-    WebSocketClientProtocol,
-    connectWS,
-)
+from autobahn.twisted.websocket import (WebSocketClientFactory,
+                                        WebSocketClientProtocol, connectWS)
 from django.conf import settings
 from twisted.internet import protocol, reactor, ssl, task
-from twisted.web.client import Agent, FileBodyProducer, HTTPConnectionPool, readBody
+from twisted.web.client import (Agent, FileBodyProducer, HTTPConnectionPool,
+                                readBody)
 from twisted.web.http_headers import Headers
 
 from evennia.server.session import Session
