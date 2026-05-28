@@ -36,6 +36,44 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.31 — Make `0020_remove_redundant_tag_index` tolerate phantom-applied history
+
+[`evennia/typeclasses/migrations/0020_remove_redundant_tag_index.py`](evennia/typeclasses/migrations/0020_remove_redundant_tag_index.py)
+raised on databases whose history was recorded against the earlier
+no-op revision of `0017_use_index_instead_of_index_together_in_tags`
+(its docstring at line 12 acknowledges the original `0017` "never ran
+any ops on fresh databases"). On those DBs Django records `0017`
+applied but the index `typeclasses_db_key_be0c81_idx` was never
+created; the subsequent `0018` `RenameIndex` is also recorded but
+silently renames nothing; then `0020`'s `RemoveIndex` blows up trying
+to drop an index that isn't there.
+
+Production PG was unaffected because either it was initialized after
+`0017` was rewritten to be non-empty, or the rename failure was
+resolved at the time. Downstream consumers with longer migration
+histories hit the failure on upgrade to `.30`.
+
+### Engine
+
+- [`evennia/typeclasses/migrations/0020_remove_redundant_tag_index.py`](evennia/typeclasses/migrations/0020_remove_redundant_tag_index.py):
+  swap the bare `RemoveIndex` op for a `SeparateDatabaseAndState` block.
+  - `database_operations` runs `DROP INDEX IF EXISTS
+    typeclasses_db_key_be0c81_idx` so the DDL succeeds on both
+    DBs-that-have-the-index and DBs-that-never-did. `reverse_sql`
+    matches with `CREATE INDEX IF NOT EXISTS`.
+  - `state_operations` keeps the original `RemoveIndex` so Django's
+    model state stays aligned regardless of which database path
+    actually ran. Subsequent migrations and `makemigrations` won't
+    see a phantom index.
+
+### Migration
+
+No behavior change for fresh databases or PG production. DBs that
+hit the failure on `.30` upgrade can re-run `evennia migrate` after
+upgrading to `.31` and the index drop will silently no-op.
+
+---
+
 ## 6.0.0+underspire.30 — Fleet review pass: attribute typed-column stabilization, shutdown/Discord/cmdset fixes
 
 A multi-batch correctness pass driven by a fleet-review of the
