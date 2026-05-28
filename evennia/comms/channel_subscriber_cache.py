@@ -64,7 +64,14 @@ def _parse_ref(ref: str):
 
 
 def sync_channel_subscribers(channel) -> None:
-    """Rebuild Redis set from DB subscriptions."""
+    """Rebuild Redis set from DB subscriptions.
+
+    The DELETE + SADD pair runs inside a MULTI/EXEC transaction so a
+    concurrent add_subscriber / remove_subscriber landing between the
+    DB read and the cache rewrite is not silently overwritten. Without
+    ``transaction=True`` django_redis's pipeline is a simple batched
+    request and another client's SADD can be wiped by our DELETE.
+    """
     if not _enabled() or channel is None:
         return
     r = _redis_conn()
@@ -79,7 +86,7 @@ def sync_channel_subscribers(channel) -> None:
             ref = _member_ref(sub)
             if ref:
                 refs.add(ref)
-        pipe = r.pipeline()
+        pipe = r.pipeline(transaction=True)
         pipe.delete(key)
         if refs:
             pipe.sadd(key, *sorted(refs))
@@ -168,9 +175,7 @@ def get_cached_subscribers(channel, *, online_only: bool = True) -> Optional[Lis
         if not refs:
             return []
         if isinstance(refs, set):
-            ref_list = sorted(
-                (x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in refs)
-            )
+            ref_list = sorted((x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in refs))
         else:
             ref_list = list(refs)
         subs = _resolve_refs(ref_list)
