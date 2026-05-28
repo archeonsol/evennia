@@ -123,7 +123,6 @@ from evennia.utils.ansi import ANSIString, strip_mxp
 from evennia.utils.utils import display_len as d_len
 from evennia.utils.utils import is_iter, justify
 
-_DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
 
 
 def _to_ansi(obj):
@@ -308,7 +307,7 @@ class ANSITextWrapper(TextWrapper):
 # -- Convenience interface ---------------------------------------------
 
 
-def wrap(text, width=_DEFAULT_WIDTH, **kwargs):
+def wrap(text, width=None, **kwargs):
     """
     Wrap a single paragraph of text, returning a list of wrapped lines.
 
@@ -326,11 +325,13 @@ def wrap(text, width=_DEFAULT_WIDTH, **kwargs):
         wrapping behaviour.
 
     """
+    if width is None:
+        width = settings.CLIENT_DEFAULT_WIDTH
     w = ANSITextWrapper(width=width, **kwargs)
     return w.wrap(text)
 
 
-def fill(text, width=_DEFAULT_WIDTH, **kwargs):
+def fill(text, width=None, **kwargs):
     """Fill a single paragraph of text, returning a new string.
 
     Reformat the single paragraph in 'text' to fit in lines of no more
@@ -347,6 +348,8 @@ def fill(text, width=_DEFAULT_WIDTH, **kwargs):
         filling behaviour.
 
     """
+    if width is None:
+        width = settings.CLIENT_DEFAULT_WIDTH
     w = ANSITextWrapper(width=width, **kwargs)
     return w.fill(text)
 

@@ -47,7 +47,6 @@ from twisted.internet.task import deferLater
 import evennia
 from evennia.utils import logger
 
-_MULTIMATCH_TEMPLATE = settings.SEARCH_MULTIMATCH_TEMPLATE
 _EVENNIA_DIR = settings.EVENNIA_DIR
 _GAME_DIR = settings.GAME_DIR
 _IS_MAIN_THREAD = threading.current_thread().name == "MainThread"
@@ -2467,7 +2466,7 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
                     info = result.get_extra_info(caller) or ""
 
                 error += apply_multimatch_template(
-                    _MULTIMATCH_TEMPLATE,
+                    settings.SEARCH_MULTIMATCH_TEMPLATE,
                     label=label,
                     name=result_key,
                     aliases=" [{alias}]".format(alias=";".join(aliases)) if aliases else "",

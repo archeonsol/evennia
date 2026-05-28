@@ -57,8 +57,6 @@ _CMD_NOINPUT = cmdhandler.CMD_NOINPUT
 
 _RE_GROUP = re.compile(r"\".*?\"|\'.*?\'|\S*")
 _COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
-# use NAWS in the future?
-_DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
 
 # -------------------------------------------------------------
 #
@@ -98,7 +96,7 @@ _HELP_TEXT = _(f"""
 
  :j <l> <a> = <w> - justify buffer or line <l>. <a> is f, c, l or r. <w> is
                     width. <a> and <w> are optional and default to l (left)
-                    and {_DEFAULT_WIDTH} respectively
+                    and {settings.CLIENT_DEFAULT_WIDTH} respectively
  :f <l> = <w>     - flood-fill entire buffer or line <l> to width <w>.
                     Equivalent to :j <l> l. <w> is optional, as for :j
  :fi <l>    - indent entire buffer or line <l>
@@ -674,7 +672,7 @@ class CmdEditorGroup(CmdEditorBase):
         elif cmd == ":f":
             # :f <l> flood-fill buffer or <l> lines of buffer.
             # :f <l> =<w> flood-fill buffer or <l> lines of buffer to width <w>.
-            width = _DEFAULT_WIDTH
+            width = settings.CLIENT_DEFAULT_WIDTH
             if self.arg1:
                 value = self.arg1.lstrip("=")
                 if not value.isdigit():
@@ -716,7 +714,7 @@ class CmdEditorGroup(CmdEditorBase):
                 )
                 return
             align = align_map[self.arg1.lower()] if self.arg1 else "l"
-            width = _DEFAULT_WIDTH
+            width = settings.CLIENT_DEFAULT_WIDTH
             if self.arg2:
                 value = self.arg2.lstrip("=")
                 if not value.isdigit():
@@ -1115,7 +1113,7 @@ class EvEditor:
             "|n"
             + sep * 10
             + _("Line Editor [{name}]").format(name=self._key)
-            + sep * (_DEFAULT_WIDTH - 24 - len(self._key))
+            + sep * (settings.CLIENT_DEFAULT_WIDTH - 24 - len(self._key))
         )
         footer = (
             "|n"
@@ -1123,7 +1121,7 @@ class EvEditor:
             + "[l:%02i w:%03i c:%04i]" % (nlines, nwords, nchars)
             + sep * 12
             + _("(:h for help)")
-            + sep * (_DEFAULT_WIDTH - 54)
+            + sep * (settings.CLIENT_DEFAULT_WIDTH - 54)
         )
         if linenums:
             main = "\n".join(
@@ -1140,10 +1138,10 @@ class EvEditor:
         Shows the help entry for the editor.
 
         """
-        string = self._sep * _DEFAULT_WIDTH + _HELP_TEXT
+        string = self._sep * settings.CLIENT_DEFAULT_WIDTH + _HELP_TEXT
         if self._codefunc:
             string += _HELP_CODE
-        string += _HELP_LEGEND + self._sep * _DEFAULT_WIDTH
+        string += _HELP_LEGEND + self._sep * settings.CLIENT_DEFAULT_WIDTH
         self._caller.msg(string)
 
     def deduce_indent(self, line, buffer):

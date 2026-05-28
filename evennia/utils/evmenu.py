@@ -295,9 +295,6 @@ from evennia.utils.utils import (
     to_str,
 )
 
-# read from protocol NAWS later?
-_MAX_TEXT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
-
 # we use cmdhandler instead of evennia.syscmdkeys to
 # avoid some cases of loading before evennia init'd
 _CMD_NOMATCH = cmdhandler.CMD_NOMATCH
@@ -1219,7 +1216,7 @@ class EvMenu:
         elif hasattr(self.caller, "protocol_flags"):
             screenreader_mode = self.caller.protocol_flags.get("SCREENREADER")
 
-        ncols = 1 if screenreader_mode else _MAX_TEXT_WIDTH // table_width_max
+        ncols = 1 if screenreader_mode else settings.CLIENT_DEFAULT_WIDTH // table_width_max
 
         if ncols < 0:
             # no visible options at all
@@ -1257,9 +1254,9 @@ class EvMenu:
         sep = self.node_border_char
 
         if self._session:
-            screen_width = self._session.protocol_flags.get("SCREENWIDTH", {0: _MAX_TEXT_WIDTH})[0]
+            screen_width = self._session.protocol_flags.get("SCREENWIDTH", {0: settings.CLIENT_DEFAULT_WIDTH})[0]
         else:
-            screen_width = _MAX_TEXT_WIDTH
+            screen_width = settings.CLIENT_DEFAULT_WIDTH
 
         nodetext_width_max = max(m_len(line) for line in nodetext.split("\n"))
         options_width_max = max(m_len(line) for line in optionstext.split("\n"))
