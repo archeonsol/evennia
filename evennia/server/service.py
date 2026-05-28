@@ -28,12 +28,19 @@ _SA = object.__setattr__
 
 class EvenniaServerService(MultiService):
     def _wrap_sigint_handler(self, *args):
+        if getattr(self, "_shutdown_in_progress", False):
+            reactor.callLater(0, lambda: reactor.stop() if reactor.running else None)
+            return
+
+        self._shutdown_in_progress = True
         if hasattr(self, "web_root"):
             d = self.web_root.empty_threadpool()
             d.addCallback(lambda _: defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True)))
         else:
             d = defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
+        self._shutdown_deferred = d
         d.addCallback(lambda _: reactor.stop() if reactor.running else None)
+        d.addBoth(lambda result: (setattr(self, "_shutdown_in_progress", False), result)[1])
         # Fallback: force-stop after 5 s in case the graceful shutdown hangs.
         reactor.callLater(5, lambda: reactor.stop() if reactor.running else None)
 
@@ -55,6 +62,8 @@ class EvenniaServerService(MultiService):
         self._last_server_time_snapshot = 0
         self.maintenance_task = None
         self._runtime_config_row = None  # cached ServerConfig row for "runtime"
+        self._shutdown_deferred = None
+        self._shutdown_in_progress = False
 
         # Database-specific startup optimizations.
         self.sqlite3_prep()

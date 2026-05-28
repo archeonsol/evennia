@@ -4,7 +4,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
     """
     Drop the explicit composite index on Tag(db_key, db_category, db_tagtype, db_model)
-    that was redundant with the unique_together constraint.  The unique constraint
+    that was redundant with the unique_together constraint. The unique constraint
     already provides a B-tree index on these four columns; the second index wastes
     space and doubles write overhead on every tag insert/update/delete.
     """
