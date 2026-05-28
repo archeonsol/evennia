@@ -1,19 +1,11 @@
-from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (
-    DefaultCharacter,
-    DefaultExit,
-    DefaultObject,
-    DefaultRoom,
-)
-from evennia.typeclasses.attributes import AttributeProperty
-from evennia.typeclasses.tags import (
-    AliasProperty,
-    PermissionProperty,
-    TagCategoryProperty,
-    TagProperty,
-)
-from mock import patch
+from mock import MagicMock, patch
 
+from evennia.objects.models import ObjectDB
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
+from evennia.typeclasses.attributes import AttributeProperty
+from evennia.typeclasses.tags import (AliasProperty, PermissionProperty,
+                                      TagCategoryProperty, TagProperty)
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
@@ -972,3 +964,109 @@ class TestMsgContentsRecipients(BaseEvenniaTest):
             if isinstance(text, tuple):
                 text = text[0]
             self.assertIn("waves", text)
+
+
+class TestExtraDisplayState(BaseEvenniaTest):
+    """get_extra_display_state renders via the {extra_state} template key."""
+
+    def test_stub_is_empty(self):
+        out = strip_ansi(self.char1.return_appearance(self.char1))
+        self.assertNotIn("\n\n", out, msg="Stub should not introduce a blank line")
+
+    def test_override_appears_in_output(self):
+        with patch.object(
+            DefaultCharacter,
+            "get_extra_display_state",
+            return_value="\nis poised for combat.",
+        ):
+            out = strip_ansi(self.char1.return_appearance(self.char1))
+        self.assertIn("is poised for combat.", out)
+
+
+class TestMovementHookRenames(BaseEvenniaTest):
+    """Renamed and new movement hooks fire with the right semantics."""
+
+    def test_at_pre_leave_veto_aborts_move(self):
+        with patch.object(type(self.room1), "at_pre_leave", return_value=False):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertFalse(ok)
+        self.assertEqual(self.char1.location, self.room1)
+
+    def test_at_pre_arrive_veto_aborts_move(self):
+        with patch.object(type(self.room2), "at_pre_arrive", return_value=False):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertFalse(ok)
+        self.assertEqual(self.char1.location, self.room1)
+
+    def test_at_post_leave_fires_after_location_change(self):
+        observed = {}
+
+        def spy(self, moved_obj, target_location, **kwargs):
+            observed["src_contains_mover"] = moved_obj in self.contents
+            observed["mover_loc"] = moved_obj.location
+
+        with patch.object(type(self.room1), "at_post_leave", spy):
+            self.char1.move_to(self.room2, quiet=True)
+        self.assertFalse(observed["src_contains_mover"])
+        self.assertEqual(observed["mover_loc"], self.room2)
+
+    def test_at_post_arrive_fires_after_location_change(self):
+        observed = {}
+
+        def spy(self, moved_obj, source_location, **kwargs):
+            observed["dest_contains_mover"] = moved_obj in self.contents
+
+        with patch.object(type(self.room2), "at_post_arrive", spy):
+            self.char1.move_to(self.room2, quiet=True)
+        self.assertTrue(observed["dest_contains_mover"])
+
+
+class TestAtPreRename(BaseEvenniaTest):
+    """at_pre_rename can veto a rename."""
+
+    def test_veto_blocks_rename(self):
+        with patch.object(type(self.obj1), "at_pre_rename", return_value=False):
+            old = self.obj1.key
+            self.obj1.key = "shouldnotapply"
+        self.assertEqual(self.obj1.key, old)
+
+    def test_allow_lets_rename_proceed(self):
+        self.obj1.key = "renamed_ok"
+        self.assertEqual(self.obj1.key, "renamed_ok")
+
+    def test_identity_rename_skips_hooks(self):
+        same = self.obj1.key
+        with (
+            patch.object(type(self.obj1), "at_pre_rename") as pre,
+            patch.object(type(self.obj1), "at_rename") as post,
+        ):
+            self.obj1.key = same
+            pre.assert_not_called()
+            post.assert_not_called()
+
+
+class TestTraverseRefactor(BaseEvenniaTest):
+    """do_traverse routes through at_pre_traverse for veto semantics."""
+
+    def test_at_pre_traverse_veto_routes_to_failed(self):
+        # self.exit goes from room1 -> room2; self.char1 is in room1.
+        with (
+            patch.object(type(self.exit), "at_pre_traverse", return_value=False),
+            patch.object(type(self.exit), "at_failed_traverse") as failed,
+        ):
+            self.exit.do_traverse(self.char1, self.room2)
+        failed.assert_called_once()
+        self.assertEqual(self.char1.location, self.room1)
+
+    def test_at_pre_traverse_allow_lets_move_through(self):
+        self.exit.do_traverse(self.char1, self.room2)
+        self.assertEqual(self.char1.location, self.room2)
+
+
+class TestAtPostLoadRename(BaseEvenniaTest):
+    """at_post_load replaces at_init as the cache-load hook."""
+
+    def test_hook_exists_on_typed_object(self):
+        # The hook is defined; the rename did not silently drop it.
+        self.assertTrue(callable(getattr(self.obj1, "at_post_load", None)))
+        self.assertFalse(hasattr(type(self.obj1), "at_init"))

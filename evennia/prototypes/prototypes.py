@@ -22,15 +22,9 @@ from evennia.utils.create import create_script
 from evennia.utils.evmore import EvMore
 from evennia.utils.evtable import EvTable
 from evennia.utils.funcparser import FuncParser
-from evennia.utils.utils import (
-    all_from_module,
-    class_from_module,
-    dbid_to_obj,
-    is_iter,
-    justify,
-    make_iter,
-    variable_from_module,
-)
+from evennia.utils.utils import (all_from_module, class_from_module,
+                                 dbid_to_obj, is_iter, justify, make_iter,
+                                 variable_from_module)
 
 _MODULE_PROTOTYPE_MODULES = {}
 _MODULE_PROTOTYPES = {}

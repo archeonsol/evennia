@@ -195,7 +195,7 @@ class EvAdventureCharacter(LivingMixin, DefaultCharacter):
     def armor(self):
         return self.equipment.armor
 
-    def at_pre_object_receive(self, moved_object, source_location, **kwargs):
+    def at_pre_arrive(self, moved_object, source_location, **kwargs):
         """
         Hook called by Evennia before moving an object here. Return False to abort move.
 
@@ -212,7 +212,7 @@ class EvAdventureCharacter(LivingMixin, DefaultCharacter):
         # this will raise EquipmentError if inventory is full
         return self.equipment.validate_slot_usage(moved_object)
 
-    def at_object_receive(self, moved_object, source_location, **kwargs):
+    def at_post_arrive(self, moved_object, source_location, **kwargs):
         """
         Hook called by Evennia as an object is moved here. We make sure it's added
         to the equipment handler.
@@ -226,28 +226,17 @@ class EvAdventureCharacter(LivingMixin, DefaultCharacter):
         try:
             self.equipment.add(moved_object)
         except EquipmentError as err:
-            log_trace(f"at_object_receive error: {err}")
+            log_trace(f"at_post_arrive error: {err}")
 
-    def at_pre_object_leave(self, leaving_object, destination, **kwargs):
+    def at_pre_leave(self, leaving_object, destination, **kwargs):
         """
         Hook called when dropping an item. We don't allow to drop wielded/worn items
-        (need to unwield/remove them first). Return False to
+        (need to unwield/remove them first), and we remove the item from the equipment
+        handler at the same time. Return False to veto.
 
         """
+        self.equipment.remove(leaving_object)
         return True
-
-    def at_object_leave(self, moved_object, destination, **kwargs):
-        """
-        Called just before an object leaves from inside this object
-
-        Args:
-            moved_obj (Object): The object leaving
-            destination (Object): Where `moved_obj` is going.
-            **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
-
-        """
-        self.equipment.remove(moved_object)
 
     def at_defeat(self):
         """

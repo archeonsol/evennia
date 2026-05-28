@@ -193,14 +193,16 @@ def get_cached_subscribers(channel, *, online_only: bool = True) -> Optional[Lis
         if not r.exists(_channel_key(channel.id)):
             sync_channel_subscribers(channel)
             try:
-                from evennia.server.prometheus_metrics import record_channel_subscriber_cache_miss
+                from evennia.server.prometheus_metrics import \
+                    record_channel_subscriber_cache_miss
 
                 record_channel_subscriber_cache_miss()
             except Exception:
                 pass
         else:
             try:
-                from evennia.server.prometheus_metrics import record_channel_subscriber_cache_hit
+                from evennia.server.prometheus_metrics import \
+                    record_channel_subscriber_cache_hit
 
                 record_channel_subscriber_cache_hit()
             except Exception:

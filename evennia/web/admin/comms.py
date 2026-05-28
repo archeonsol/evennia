@@ -311,7 +311,7 @@ class ChannelAdmin(admin.ModelAdmin):
             # adding a new object
             # have to call init with typeclass passed to it
             obj.set_class_from_typeclass(typeclass_path=settings.BASE_CHANNEL_TYPECLASS)
-        obj.at_init()
+        obj.at_post_load()
 
     def response_add(self, request, obj, post_url_continue=None):
         from django.http import HttpResponseRedirect

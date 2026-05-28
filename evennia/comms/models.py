@@ -635,7 +635,8 @@ class SubscriptionHandler:
                     self.obj.db_object_subscriptions.remove(subscriber)
         self._recache()
         try:
-            from evennia.comms.channel_subscriber_cache import remove_subscriber
+            from evennia.comms.channel_subscriber_cache import \
+                remove_subscriber
 
             for subscriber in make_iter(entity):
                 remove_subscriber(self.obj, subscriber)

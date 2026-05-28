@@ -24,6 +24,6 @@ class TestSlowExit(BaseEvenniaCommandTest):
         exi = create_object(
             slow_exit.SlowExit, key="slowexit", location=self.room1, destination=self.room2
         )
-        exi.at_traverse(self.char1, self.room2)
+        exi.do_traverse(self.char1, self.room2)
         self.call(slow_exit.CmdSetSpeed(), "walk", "You are now walking.")
         self.call(slow_exit.CmdStop(), "", "You stop moving.")

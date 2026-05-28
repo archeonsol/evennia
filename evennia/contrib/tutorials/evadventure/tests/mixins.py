@@ -7,13 +7,8 @@ from evennia.utils import create
 
 from .. import enums
 from ..characters import EvAdventureCharacter
-from ..objects import (
-    EvAdventureArmor,
-    EvAdventureHelmet,
-    EvAdventureObject,
-    EvAdventureShield,
-    EvAdventureWeapon,
-)
+from ..objects import (EvAdventureArmor, EvAdventureHelmet, EvAdventureObject,
+                       EvAdventureShield, EvAdventureWeapon)
 from ..rooms import EvAdventureRoom
 
 

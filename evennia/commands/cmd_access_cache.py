@@ -95,7 +95,8 @@ def cached_cmd_access(cmd, caller, session=None) -> bool:
     key = _lookup_key(cmd, caller, session=session)
     if key in cache:
         try:
-            from evennia.server.prometheus_metrics import record_cmd_access_cache_hit
+            from evennia.server.prometheus_metrics import \
+                record_cmd_access_cache_hit
 
             record_cmd_access_cache_hit()
         except Exception:
@@ -105,7 +106,8 @@ def cached_cmd_access(cmd, caller, session=None) -> bool:
     allowed = cmd.access(caller, "cmd", session=session)
     cache[key] = allowed
     try:
-        from evennia.server.prometheus_metrics import record_cmd_access_cache_miss
+        from evennia.server.prometheus_metrics import \
+            record_cmd_access_cache_miss
 
         record_cmd_access_cache_miss()
     except Exception:

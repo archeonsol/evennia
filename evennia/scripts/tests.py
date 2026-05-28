@@ -23,7 +23,7 @@ from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTest
 class TestScript(BaseEvenniaTest):
     def test_create(self):
         "Check the script can be created via the convenience method."
-        with mock.patch("evennia.scripts.scripts.DefaultScript.at_init") as mockinit:
+        with mock.patch("evennia.scripts.scripts.DefaultScript.at_post_load") as mockinit:
             obj, errors = DefaultScript.create("useless-machine")
             self.assertTrue(obj, errors)
             self.assertFalse(errors, errors)

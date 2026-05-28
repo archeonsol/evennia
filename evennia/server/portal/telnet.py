@@ -10,21 +10,9 @@ sessions etc.
 import re
 
 from django.conf import settings
-from twisted.conch.telnet import (
-    ECHO,
-    GA,
-    IAC,
-    LINEMODE,
-    LINEMODE_EDIT,
-    LINEMODE_TRAPSIG,
-    MODE,
-    NOP,
-    NULL,
-    WILL,
-    WONT,
-    StatefulTelnetProtocol,
-    Telnet,
-)
+from twisted.conch.telnet import (ECHO, GA, IAC, LINEMODE, LINEMODE_EDIT,
+                                  LINEMODE_TRAPSIG, MODE, NOP, NULL, WILL,
+                                  WONT, StatefulTelnetProtocol, Telnet)
 from twisted.internet import protocol
 from twisted.internet.task import LoopingCall
 

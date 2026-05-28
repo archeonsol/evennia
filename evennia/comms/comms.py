@@ -82,7 +82,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
     Useful hooks:
         at_channel_creation() - called once, when the channel is created
         basetype_setup()
-        at_init()
+        at_post_load()
         at_first_save()
         channel_prefix() - how the channel should be
                   prefixed when returning to user. Returns a string
@@ -749,7 +749,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         for key_or_alias in key_or_aliases:
             self.remove_user_channel_alias(leaver, key_or_alias, **kwargs)
 
-    def at_init(self):
+    def at_post_load(self):
         """
         Hook method. This is always called whenever this channel is
         initiated -- that is, whenever it its typeclass is cached from

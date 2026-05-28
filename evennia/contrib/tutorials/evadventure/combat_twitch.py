@@ -9,24 +9,13 @@ This implements a 'twitch' (aka DIKU or other traditional muds) style of MUD com
 
 from evennia import AttributeProperty, CmdSet, default_cmds
 from evennia.commands.command import Command, InterruptCommand
-from evennia.utils.utils import (
-    display_len,
-    inherits_from,
-    list_to_string,
-    pad,
-    repeat,
-    unrepeat,
-)
+from evennia.utils.utils import (display_len, inherits_from, list_to_string,
+                                 pad, repeat, unrepeat)
 
 from .characters import EvAdventureCharacter
-from .combat_base import (
-    CombatActionAttack,
-    CombatActionHold,
-    CombatActionStunt,
-    CombatActionUseItem,
-    CombatActionWield,
-    EvAdventureCombatBaseHandler,
-)
+from .combat_base import (CombatActionAttack, CombatActionHold,
+                          CombatActionStunt, CombatActionUseItem,
+                          CombatActionWield, EvAdventureCombatBaseHandler)
 from .enums import ABILITY_REVERSE_MAP
 
 
@@ -80,7 +69,7 @@ class EvAdventureCombatTwitchHandler(EvAdventureCombatBaseHandler):
         """
         super().msg(message, combatant=self.obj, broadcast=broadcast, location=self.obj.location)
 
-    def at_init(self):
+    def at_post_load(self):
         self.obj.cmdset.add(TwitchLookCmdSet, persistent=False)
 
     def get_sides(self, combatant):

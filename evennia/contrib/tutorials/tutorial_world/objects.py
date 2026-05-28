@@ -320,7 +320,7 @@ class LightSource(TutorialObject):
     When burned out, the object will be deleted.
     """
 
-    def at_init(self):
+    def at_post_load(self):
         """
         If this is called with the Attribute is_giving_light already
         set, we know that the timer got killed by a server
@@ -637,7 +637,7 @@ class CrumblingWall(TutorialObject, DefaultExit):
                    until it actually is)
     """
 
-    def at_init(self):
+    def at_post_load(self):
         """
         Called when object is recalled from cache.
         """

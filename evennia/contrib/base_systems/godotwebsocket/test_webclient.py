@@ -1,4 +1,5 @@
-from evennia.contrib.base_systems.godotwebsocket.webclient import start_plugin_services
+from evennia.contrib.base_systems.godotwebsocket.webclient import \
+    start_plugin_services
 from evennia.server.portal.amp_server import AMPServerFactory
 
 try:

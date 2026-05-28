@@ -196,7 +196,8 @@ class ScriptDB(TypedObject):
                     try:
                         global _ObjectDB
                         if _ObjectDB is None:
-                            from evennia.objects.models import ObjectDB as _ObjectDB
+                            from evennia.objects.models import \
+                                ObjectDB as _ObjectDB
                         value = _ObjectDB.objects.get(id=dbid)
                     except ObjectDoesNotExist:
                         # maybe it is just a name that happens to look like a dbid

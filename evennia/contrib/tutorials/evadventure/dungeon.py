@@ -137,7 +137,7 @@ class EvAdventureDungeonExit(DefaultExit):
         """
         self.locks.add("traverse:not objloctag(not_clear, dungeon_room)")
 
-    def at_traverse(self, traversing_object, target_location, **kwargs):
+    def do_traverse(self, traversing_object, target_location, **kwargs):
         """
         Called when traversing. `target_location` will be pointing back to ourselves if the target
         was not yet created. It checks the current location to get the dungeon-branch in use.
@@ -149,7 +149,7 @@ class EvAdventureDungeonExit(DefaultExit):
             self.destination = target_location = dungeon_branch.new_room(self)
             dungeon_branch.register_exit_traversed(self)
 
-        super().at_traverse(traversing_object, target_location, **kwargs)
+        super().do_traverse(traversing_object, target_location, **kwargs)
 
     def at_failed_traverse(self, traversing_object, **kwargs):
         """
@@ -370,7 +370,7 @@ class EvAdventureDungeonStartRoomExit(DefaultExit):
         """
         self.destination = self.location
 
-    def at_traverse(self, traversing_object, target_location, **kwargs):
+    def do_traverse(self, traversing_object, target_location, **kwargs):
         """
         When traversing create a new branch if one is not already assigned.
 
@@ -390,7 +390,7 @@ class EvAdventureDungeonStartRoomExit(DefaultExit):
             # make sure to tag character when entering so we can find them again later
             traversing_object.tags.add(dungeon_branch.key, category="dungeon_character")
 
-        super().at_traverse(traversing_object, target_location, **kwargs)
+        super().do_traverse(traversing_object, target_location, **kwargs)
 
 
 class EvAdventureDungeonBranchDeleter(DefaultScript):
@@ -481,7 +481,7 @@ class EvAdventureDungeonStartRoom(EvAdventureDungeonRoom):
             attributes=(("branch_max_life", self.branch_max_life),),
         )
 
-    def at_object_receive(self, obj, source_location, **kwargs):
+    def at_post_arrive(self, obj, source_location, **kwargs):
         """
         Make sure to clean the dungeon branch-tag from characters when leaving a dungeon branch.
 

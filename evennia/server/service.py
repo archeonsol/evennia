@@ -108,6 +108,7 @@ class EvenniaServerService(MultiService):
             )
             # Cache the ServerConfig row so subsequent ticks skip the filter query.
             from evennia.server.models import ServerConfig as _SC
+
             self._runtime_config_row, _ = _SC.objects.get_or_create(db_key="runtime")
             # self._last_server_time_snapshot is set unconditionally at the end
             # of this method; no separate assignment is needed here.
@@ -122,6 +123,7 @@ class EvenniaServerService(MultiService):
         evennia.gametime.SERVER_RUNTIME_LAST_UPDATED = now
         if self._runtime_config_row is not None:
             from evennia.utils.dbserialize import to_pickle
+
             self._runtime_config_row.db_value = to_pickle(evennia.gametime.SERVER_RUNTIME)
             self._runtime_config_row.save(update_fields=["db_value"])
         else:
@@ -512,7 +514,7 @@ class EvenniaServerService(MultiService):
         # update eventual changed defaults
         self.update_defaults()
 
-        # run at_init() on cached entities (batched / deferred on reload)
+        # run at_post_load() on cached entities (batched / deferred on reload)
         from evennia.server.at_init_scheduler import run_cached_at_init_burst
 
         run_cached_at_init_burst(mode)

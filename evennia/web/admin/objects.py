@@ -363,7 +363,7 @@ class ObjectAdmin(admin.ModelAdmin):
             obj.at_object_creation()
         else:
             obj.save()
-            obj.at_init()
+            obj.at_post_load()
 
     def response_add(self, request, obj, post_url_continue=None):
         from django.http import HttpResponseRedirect

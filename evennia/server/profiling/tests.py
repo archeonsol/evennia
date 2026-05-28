@@ -2,22 +2,10 @@ from anything import Something
 from django.test import TestCase
 from mock import Mock, mock_open, patch
 
-from .dummyrunner_settings import (
-    c_creates_button,
-    c_creates_obj,
-    c_digs,
-    c_examines,
-    c_help,
-    c_idles,
-    c_login,
-    c_login_nodig,
-    c_logout,
-    c_looks,
-    c_moves,
-    c_moves_n,
-    c_moves_s,
-    c_socialize,
-)
+from .dummyrunner_settings import (c_creates_button, c_creates_obj, c_digs,
+                                   c_examines, c_help, c_idles, c_login,
+                                   c_login_nodig, c_logout, c_looks, c_moves,
+                                   c_moves_n, c_moves_s, c_socialize)
 
 try:
     import memplot

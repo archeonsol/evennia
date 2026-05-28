@@ -144,9 +144,7 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
             packed = amp.dumps_admin((sessid, kwargs))
         else:
             packed = amp.dumps((sessid, kwargs))
-        return self.callRemote(command, packed_data=packed).addErrback(
-            self.errback, command.key
-        )
+        return self.callRemote(command, packed_data=packed).addErrback(self.errback, command.key)
 
     def send_MsgServer2Portal(self, session, **kwargs):
         """
@@ -244,17 +242,20 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
             # shut down in reload mode
             evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
             from twisted.internet import defer
+
             defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"))
 
         elif operation == amp.SRESET:
             # shut down in reset mode
             evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
             from twisted.internet import defer
+
             defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"))
 
         elif operation == amp.SSHUTD:  # server shutdown
             # shutdown in stop mode
             from twisted.internet import defer
+
             defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"))
 
         else:

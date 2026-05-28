@@ -199,7 +199,8 @@ def _init(portal_mode=False):
     from .comms.models import ChannelDB, Msg
     from .locks import lockfuncs
     from .objects.models import ObjectDB
-    from .objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
+    from .objects.objects import (DefaultCharacter, DefaultExit, DefaultObject,
+                                  DefaultRoom)
     from .prototypes.spawner import spawn
     from .scripts.models import ScriptDB
     from .scripts.monitorhandler import MONITOR_HANDLER
@@ -219,31 +220,19 @@ def _init(portal_mode=False):
         from .utils.containers import GLOBAL_SCRIPTS, OPTION_CLASSES
 
     # create functions
-    from .utils.create import (
-        create_account,
-        create_channel,
-        create_help_entry,
-        create_message,
-        create_object,
-        create_script,
-    )
+    from .utils.create import (create_account, create_channel,
+                               create_help_entry, create_message,
+                               create_object, create_script)
     from .utils.eveditor import EvEditor
     from .utils.evform import EvForm
     from .utils.evmenu import EvMenu
     from .utils.evmore import EvMore
     from .utils.evtable import EvTable
     from .utils.funcparser import FuncParser
-
     # search functions
-    from .utils.search import (
-        search_account,
-        search_channel,
-        search_help,
-        search_message,
-        search_object,
-        search_script,
-        search_tag,
-    )
+    from .utils.search import (search_account, search_channel, search_help,
+                               search_message, search_object, search_script,
+                               search_tag)
     from .utils.utils import class_from_module
 
     PROCESS_ID = os.getpid()
@@ -373,17 +362,9 @@ def _init(portal_mode=False):
                 cmdlist = utils.variable_from_module(module, module.__all__)
                 self.__dict__.update(dict([(c.__name__, c) for c in cmdlist]))
 
-            from .commands.default import (
-                account,
-                admin,
-                batchprocess,
-                building,
-                comms,
-                general,
-                help,
-                system,
-                unloggedin,
-            )
+            from .commands.default import (account, admin, batchprocess,
+                                           building, comms, general, help,
+                                           system, unloggedin)
 
             add_cmds(admin)
             add_cmds(building)

@@ -185,7 +185,8 @@ class TestEvenniaV1Format(TestCase):
     """Tests for the v1.evennia.com wire format."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.evennia_v1 import EvenniaV1Format
+        from evennia.server.portal.wire_formats.evennia_v1 import \
+            EvenniaV1Format
 
         self.fmt = EvenniaV1Format()
 
@@ -343,7 +344,8 @@ class TestJsonStandardFormat(TestCase):
     """Tests for the json.mudstandards.org wire format."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.json_standard import JsonStandardFormat
+        from evennia.server.portal.wire_formats.json_standard import \
+            JsonStandardFormat
 
         self.fmt = JsonStandardFormat()
 
@@ -453,7 +455,8 @@ class TestGmcpStandardFormat(TestCase):
     """Tests for the gmcp.mudstandards.org wire format."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.gmcp_standard import GmcpStandardFormat
+        from evennia.server.portal.wire_formats.gmcp_standard import \
+            GmcpStandardFormat
 
         self.fmt = GmcpStandardFormat()
 
@@ -552,13 +555,11 @@ class TestWireFormatRegistry(TestCase):
         self.assertEqual(keys[0], "json.mudstandards.org")
 
     def test_registry_instances_are_correct_types(self):
-        from evennia.server.portal.wire_formats import (
-            WIRE_FORMATS,
-            EvenniaV1Format,
-            GmcpStandardFormat,
-            JsonStandardFormat,
-            TerminalFormat,
-        )
+        from evennia.server.portal.wire_formats import (WIRE_FORMATS,
+                                                        EvenniaV1Format,
+                                                        GmcpStandardFormat,
+                                                        JsonStandardFormat,
+                                                        TerminalFormat)
 
         self.assertIsInstance(WIRE_FORMATS["v1.evennia.com"], EvenniaV1Format)
         self.assertIsInstance(WIRE_FORMATS["json.mudstandards.org"], JsonStandardFormat)
@@ -682,7 +683,8 @@ class TestEvenniaV1RoundTrip(TestCase):
     """Test encode → decode round-trip for v1.evennia.com."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.evennia_v1 import EvenniaV1Format
+        from evennia.server.portal.wire_formats.evennia_v1 import \
+            EvenniaV1Format
 
         self.fmt = EvenniaV1Format()
 
@@ -699,7 +701,8 @@ class TestGmcpRoundTrip(TestCase):
     """Test encode → decode round-trip for gmcp.mudstandards.org."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.gmcp_standard import GmcpStandardFormat
+        from evennia.server.portal.wire_formats.gmcp_standard import \
+            GmcpStandardFormat
 
         self.fmt = GmcpStandardFormat()
 
@@ -722,7 +725,8 @@ class TestJsonStandardRoundTrip(TestCase):
     """Test encode → decode round-trip for json.mudstandards.org."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.json_standard import JsonStandardFormat
+        from evennia.server.portal.wire_formats.json_standard import \
+            JsonStandardFormat
 
         self.fmt = JsonStandardFormat()
 
@@ -777,7 +781,8 @@ class TestJsonStandardEdgeCases(TestCase):
     """Edge-case tests for JsonStandardFormat."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.json_standard import JsonStandardFormat
+        from evennia.server.portal.wire_formats.json_standard import \
+            JsonStandardFormat
 
         self.fmt = JsonStandardFormat()
 
@@ -814,7 +819,8 @@ class TestGmcpStandardEdgeCases(TestCase):
     """Edge-case tests for GmcpStandardFormat."""
 
     def setUp(self):
-        from evennia.server.portal.wire_formats.gmcp_standard import GmcpStandardFormat
+        from evennia.server.portal.wire_formats.gmcp_standard import \
+            GmcpStandardFormat
 
         self.fmt = GmcpStandardFormat()
 

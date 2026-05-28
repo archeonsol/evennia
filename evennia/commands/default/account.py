@@ -110,11 +110,7 @@ class CmdOOCLook(MuxAccountLookCommand):
             self.msg("You currently have no ability to look around.")
             return
 
-        if (
-            settings.AUTO_PUPPET_ON_LOGIN
-            and settings.MAX_NR_CHARACTERS == 1
-            and self.playable
-        ):
+        if settings.AUTO_PUPPET_ON_LOGIN and settings.MAX_NR_CHARACTERS == 1 and self.playable:
             # only one exists and is allowed - simplify
             self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
             return
@@ -388,11 +384,7 @@ class CmdOOC(MuxAccountLookCommand):
             account.unpuppet_object(session)
             self.msg("\n|GYou go OOC.|n\n")
 
-            if (
-            settings.AUTO_PUPPET_ON_LOGIN
-            and settings.MAX_NR_CHARACTERS == 1
-            and self.playable
-        ):
+            if settings.AUTO_PUPPET_ON_LOGIN and settings.MAX_NR_CHARACTERS == 1 and self.playable:
                 # only one character exists and is allowed - simplify
                 self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
                 return

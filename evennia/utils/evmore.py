@@ -256,14 +256,11 @@ class EvMore(object):
         # set up individual pages for different sessions
         height = max(
             4,
-            session.protocol_flags.get(
-                "SCREENHEIGHT", {0: settings.CLIENT_DEFAULT_HEIGHT}
-            )[0]
-            - 4,
+            session.protocol_flags.get("SCREENHEIGHT", {0: settings.CLIENT_DEFAULT_HEIGHT})[0] - 4,
         )
-        self.width = session.protocol_flags.get(
-            "SCREENWIDTH", {0: settings.CLIENT_DEFAULT_WIDTH}
-        )[0]
+        self.width = session.protocol_flags.get("SCREENWIDTH", {0: settings.CLIENT_DEFAULT_WIDTH})[
+            0
+        ]
         # always limit number of chars to 10 000 per page
         self.height = min(10000 // max(1, self.width), height)
 

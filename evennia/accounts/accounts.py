@@ -31,24 +31,17 @@ from evennia.comms.models import ChannelDB
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripthandler import ScriptHandler
 from evennia.server.models import ServerConfig
-from evennia.server.signals import (
-    SIGNAL_ACCOUNT_POST_CREATE,
-    SIGNAL_ACCOUNT_POST_LOGIN_FAIL,
-    SIGNAL_OBJECT_POST_PUPPET,
-    SIGNAL_OBJECT_POST_UNPUPPET,
-)
+from evennia.server.signals import (SIGNAL_ACCOUNT_POST_CREATE,
+                                    SIGNAL_ACCOUNT_POST_LOGIN_FAIL,
+                                    SIGNAL_OBJECT_POST_PUPPET,
+                                    SIGNAL_OBJECT_POST_UNPUPPET)
 from evennia.server.throttle import Throttle
 from evennia.typeclasses.attributes import ModelAttributeBackend, NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import class_from_module, create, logger
 from evennia.utils.optionhandler import OptionHandler
-from evennia.utils.utils import (
-    is_iter,
-    lazy_property,
-    make_iter,
-    to_str,
-    variable_from_module,
-)
+from evennia.utils.utils import (is_iter, lazy_property, make_iter, to_str,
+                                 variable_from_module)
 
 __all__ = ("DefaultAccount", "DefaultGuest")
 
@@ -282,7 +275,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
      > note that the following hooks are also found on Objects and are
        usually handled on the character level:
 
-     - at_init()
+     - at_post_load()
      - at_first_save()
      - at_access()
      - at_cmdset_get(**kwargs)
@@ -301,6 +294,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
      - at_post_create_character(character, **kwargs)
      - at_post_add_character(char)
      - at_post_remove_character(char)
+     - at_puppet_added(character, session=None, **kwargs)
+     - at_puppet_removed(character, session=None, **kwargs)
      - at_pre_channel_msg(message, channel, senders=None, **kwargs)
      - at_post_chnnel_msg(message, channel, senders=None, **kwargs)
 
@@ -390,6 +385,50 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    def at_puppet_added(self, character, session=None, **kwargs):
+        """
+        Called when a character enters this account's active puppet set.
+
+        Fires on first-attach only: when a previously-unpuppeted character
+        becomes puppeted by any session of this account. It does *not* fire
+        on additional sessions attaching to a character this account is
+        already puppeting (sharing in `MULTISESSION_MODE` 1/3, or session
+        takeover) — those are per-session events already covered by
+        `Object.at_post_puppet`. The semantics match set membership in
+        `get_all_puppets()`.
+
+        Args:
+            character (DefaultObject): The character newly entering the
+                puppet set.
+            session (Session, optional): The session that triggered the
+                attach. Useful for multi-session bookkeeping.
+            **kwargs: Reserved for future use.
+
+        Notes:
+            Pair with `at_puppet_removed` for puppet-set lifecycle.
+        """
+        pass
+
+    def at_puppet_removed(self, character, session=None, **kwargs):
+        """
+        Called when a character leaves this account's active puppet set.
+
+        Fires on last-detach only: when the final session puppeting a
+        character disconnects from it. It does *not* fire when one of
+        several sessions detaches but others remain attached. The
+        semantics match set membership in `get_all_puppets()`.
+
+        Args:
+            character (DefaultObject): The character leaving the puppet set.
+            session (Session, optional): The session that triggered the
+                detach.
+            **kwargs: Reserved for future use.
+
+        Notes:
+            Pair with `at_puppet_added` for puppet-set lifecycle.
+        """
+        pass
+
     def uses_screenreader(self, session=None):
         """
         Shortcut to determine if a session uses a screenreader. If no session given,
@@ -474,6 +513,10 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             # already puppeting this object
             self.msg(_("You are already puppeting this object."))
             return
+        # First-attach detection for the at_puppet_added hook. Captured
+        # before any takeover-unpuppet runs, so a session swap on a
+        # currently-puppeted character is not seen as a fresh attach.
+        was_already_owned = obj.account == self and bool(obj.sessions.count())
         if not obj.access(self, "puppet"):
             # no access
             self.msg(_("You don't have permission to puppet '{key}'.").format(key=obj.key))
@@ -548,6 +591,12 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # final hook
         obj.at_post_puppet()
         SIGNAL_OBJECT_POST_PUPPET.send(sender=obj, account=self, session=session)
+        if not was_already_owned:
+            # Puppet-set membership change; fires once per first-attach.
+            try:
+                self.at_puppet_added(obj, session=session)
+            except Exception:
+                logger.log_trace("at_puppet_added hook failed")
 
     def unpuppet_object(self, session):
         """
@@ -567,11 +616,18 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 # do the disconnect, but only if we are the last session to puppet
                 obj.at_pre_unpuppet()
                 obj.sessions.remove(session)
-                if not obj.sessions.count():
+                last_session = not obj.sessions.count()
+                if last_session:
                     del obj.account
                 obj.at_post_unpuppet(self, session=session)
                 obj.tags.remove("puppeted", category="account")
                 SIGNAL_OBJECT_POST_UNPUPPET.send(sender=obj, session=session, account=self)
+                if last_session:
+                    # Puppet-set membership change; fires once per last-detach.
+                    try:
+                        self.at_puppet_removed(obj, session=session)
+                    except Exception:
+                        logger.log_trace("at_puppet_removed hook failed")
             # Just to be sure we're always clear.
             session.puppet = None
             session.puid = None
@@ -1503,7 +1559,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         self.attributes.add("_playable_characters", [], lockstring=lockstring)
         self.attributes.add("_saved_protocol_flags", {}, lockstring=lockstring)
 
-    def at_init(self):
+    def at_post_load(self):
         """
         This is always called whenever this object is initiated --
         that is, whenever it its typeclass is cached from memory. This
@@ -1926,11 +1982,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             txt_characters = "You don't have a character yet. Use |wcharcreate|n."
         else:
             _max_chars = settings.MAX_NR_CHARACTERS
-            max_chars = (
-                "unlimited"
-                if self.is_superuser or _max_chars is None
-                else _max_chars
-            )
+            max_chars = "unlimited" if self.is_superuser or _max_chars is None else _max_chars
 
             char_strings = []
             for char in characters:

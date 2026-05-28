@@ -7,18 +7,13 @@ default ones in evennia core.
 
 """
 
-from evennia.contrib.base_systems.ingame_python.callbackhandler import CallbackHandler
-from evennia.contrib.base_systems.ingame_python.utils import (
-    phrase_event,
-    register_events,
-    time_event,
-)
-from evennia.objects.objects import (
-    DefaultCharacter,
-    DefaultExit,
-    DefaultObject,
-    DefaultRoom,
-)
+from evennia.contrib.base_systems.ingame_python.callbackhandler import \
+    CallbackHandler
+from evennia.contrib.base_systems.ingame_python.utils import (phrase_event,
+                                                              register_events,
+                                                              time_event)
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
 from evennia.utils.utils import inherits_from, lazy_property
 
 # Character help
@@ -650,7 +645,7 @@ class EventExit(DefaultExit):
         """Return the CallbackHandler."""
         return CallbackHandler(self)
 
-    def at_traverse(self, traversing_object, target_location, **kwargs):
+    def do_traverse(self, traversing_object, target_location, **kwargs):
         """
         This hook is responsible for handling the actual traversal,
         normally by calling
@@ -671,7 +666,7 @@ class EventExit(DefaultExit):
             if not allow:
                 return
 
-        super().at_traverse(traversing_object, target_location, **kwargs)
+        super().do_traverse(traversing_object, target_location, **kwargs)
 
         # After traversing
         if is_character:

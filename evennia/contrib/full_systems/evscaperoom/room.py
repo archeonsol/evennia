@@ -184,7 +184,7 @@ class EvscapeRoom(EvscaperoomObject, DefaultRoom):
 
     # Evennia hooks
 
-    def at_object_receive(self, moved_obj, source_location, move_type="move", **kwargs):
+    def at_post_arrive(self, moved_obj, source_location, move_type="move", **kwargs):
         """
         Called when an object arrives in the room. This can be used to
         sum up the situation, set tags etc.
@@ -194,10 +194,11 @@ class EvscapeRoom(EvscaperoomObject, DefaultRoom):
             self.log(f"JOIN: {moved_obj} joined room")
             self.state.character_enters(moved_obj)
 
-    def at_object_leave(self, moved_obj, target_location, move_type="move", **kwargs):
+    def at_pre_leave(self, moved_obj, target_location, move_type="move", **kwargs):
         """
-        Called when an object leaves the room; if this is a Character we need
-        to clean them up and move them to the menu state.
+        Called when an object is about to leave the room; if this is a
+        Character we need to clean them up and move them to the menu state.
+        The object is still in the room at this point.
 
         """
         if utils.inherits_from(moved_obj, "evennia.objects.objects.DefaultCharacter"):
@@ -206,6 +207,7 @@ class EvscapeRoom(EvscaperoomObject, DefaultRoom):
             # after this move there'll be no more characters in the room - delete the room!
             self.delete()
             # logger.log_info("DEBUG: Don't delete room when last player leaving")
+        return True
 
     def delete(self):
         """

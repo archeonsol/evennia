@@ -19,34 +19,23 @@ import evennia
 from evennia.commands import cmdset
 from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.objects.manager import ObjectManager
+from evennia.objects.mixins.appearance import AppearanceMixin
+from evennia.objects.mixins.lifecycle import LifecycleMixin
+from evennia.objects.mixins.messaging import MessagingMixin
+from evennia.objects.mixins.movement import MovementMixin
+from evennia.objects.mixins.search import SearchMixin
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripthandler import ScriptHandler
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.typeclasses.attributes import ModelAttributeBackend, NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import ansi, create, funcparser, logger, search
-from evennia.utils.multimatch import (
-    narrow_candidates,
-    parse_search_qualifiers,
-    resolve_multimatch_index,
-    try_autopick,
-)
-from evennia.utils.utils import (
-    class_from_module,
-    compress_whitespace,
-    dbref,
-    is_iter,
-    iter_to_str,
-    lazy_property,
-    make_iter,
-    to_str,
-    variable_from_module,
-)
-from evennia.objects.mixins.appearance import AppearanceMixin
-from evennia.objects.mixins.lifecycle import LifecycleMixin
-from evennia.objects.mixins.messaging import MessagingMixin
-from evennia.objects.mixins.movement import MovementMixin
-from evennia.objects.mixins.search import SearchMixin
+from evennia.utils.multimatch import (narrow_candidates,
+                                      parse_search_qualifiers,
+                                      resolve_multimatch_index, try_autopick)
+from evennia.utils.utils import (class_from_module, compress_whitespace, dbref,
+                                 is_iter, iter_to_str, lazy_property,
+                                 make_iter, to_str, variable_from_module)
 
 _INFLECT = inflect.engine()
 
@@ -62,6 +51,7 @@ def _sessid_max():
     # (excluding commas). Multisession modes 1 and 3 allow multiple sessions
     # per object; modes 0 and 2 allow only one.
     return 16 if settings.MULTISESSION_MODE in (1, 3) else 1
+
 
 # init the actor-stance funcparser for msg_contents
 _MSG_CONTENTS_PARSER = funcparser.FuncParser(funcparser.ACTOR_STANCE_CALLABLES)
@@ -338,7 +328,7 @@ class DefaultObject(
                             to their <home>, they don't need to be removed here.
      at_object_post_spawn() - called when object is spawned from a prototype or updated
                             by the spawner to apply prototype changes.
-     at_init()            - called whenever typeclass is cached from memory,
+     at_post_load()            - called whenever typeclass is cached from memory,
                             at least once every server restart/reload
      at_first_save()
      at_cmdset_get(**kwargs) - this is called just before the command handler
@@ -368,16 +358,16 @@ class DefaultObject(
                         after move, if obj.move_to() has quiet=False
      at_post_move(source_location)          - always called after a move has
                         been successfully performed.
-     at_pre_object_leave(leaving_object, destination, **kwargs)
-     at_object_leave(obj, target_location, move_type="move", **kwargs)
-     at_object_leave(obj, target_location)   - called when an object leaves
-                        this object in any fashion
-     at_pre_object_receive(obj, source_location)
-     at_object_receive(obj, source_location, move_type="move", **kwargs) - called when this object
-                       receives another object
-     at_post_move(source_location, move_type="move", **kwargs)
+     at_pre_leave(leaving_object, destination, **kwargs) - source room veto and
+                       pre-move side effects; return True to allow the move.
+     at_pre_arrive(arriving_object, source_location, **kwargs) - destination room
+                       veto and pre-move side effects.
+     at_post_leave(moved_obj, target_location, move_type="move", **kwargs) - source
+                       room notification after the object has left.
+     at_post_arrive(moved_obj, source_location, move_type="move", **kwargs) -
+                       destination room notification after the object has arrived.
 
-     at_traverse(traversing_object, target_location, **kwargs) - (exit-objects only)
+     do_traverse(traversing_object, target_location, **kwargs) - (exit-objects only)
                               handles all moving across the exit, including
                               calling the other exit hooks. Use super() to retain
                               the default functionality.
@@ -430,7 +420,7 @@ class DefaultObject(
     # populated by `return_appearance`
     appearance_template = """
 {header}
-|c{name}{extra_name_info}|n
+|c{name}{extra_name_info}|n{extra_state}
 {desc}
 {exits}
 {characters}

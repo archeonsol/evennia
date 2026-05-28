@@ -620,11 +620,11 @@ ENGINE_WORKER_BLOCK_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # --- Tier 1E: reload / startup scheduling ---
-# Batch cached at_init() calls (entities per reactor turn).
+# Batch cached at_post_load() calls (entities per reactor turn).
 AT_INIT_BATCH_SIZE = 50
-# Seconds between at_init batches (0 = next reactor tick only).
+# Seconds between at_post_load batches (0 = next reactor tick only).
 AT_INIT_BATCH_DELAY = 0
-# On @reload, defer the at_init burst to after portal session sync.
+# On @reload, defer the at_post_load burst to after portal session sync.
 AT_INIT_DEFER_ON_RELOAD = True
 # GLOBAL_SCRIPTS entries with start_priority="lazy" start after critical scripts.
 GLOBAL_SCRIPTS_DEFER_LAZY_START = True

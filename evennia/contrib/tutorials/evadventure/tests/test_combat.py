@@ -7,17 +7,16 @@ from unittest.mock import Mock, call, patch
 
 from evennia.utils import create
 from evennia.utils.ansi import strip_ansi
-from evennia.utils.test_resources import (
-    BaseEvenniaTest,
-    EvenniaCommandTestMixin,
-    EvenniaTestCase,
-)
+from evennia.utils.test_resources import (BaseEvenniaTest,
+                                          EvenniaCommandTestMixin,
+                                          EvenniaTestCase)
 
 from .. import combat_base, combat_turnbased, combat_twitch
 from ..characters import EvAdventureCharacter
 from ..enums import Ability, WieldLocation
 from ..npcs import EvAdventureMob
-from ..objects import EvAdventureConsumable, EvAdventureRunestone, EvAdventureWeapon
+from ..objects import (EvAdventureConsumable, EvAdventureRunestone,
+                       EvAdventureWeapon)
 from ..rooms import EvAdventureRoom
 
 

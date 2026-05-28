@@ -91,7 +91,7 @@ SIGNAL_HELPENTRY_POST_CREATE = Signal()
 SIGNAL_CHANNEL_POST_CREATE = Signal()
 
 # The sender is the exit used when traversing, as well as 'traverser', for the one traversing
-# Called just after at_traverse hook.
+# Called just after do_traverse hook.
 SIGNAL_EXIT_TRAVERSED = Signal()
 
 # Used as a generic event emitter. Use to make your own signals easily in one place!
@@ -105,26 +105,25 @@ SIGNALS_CUSTOM: dict[str, Signal] = defaultdict(Signal)
 # Django default signals (https://docs.djangoproject.com/en/4.1/topics/signals/)
 
 from django.core.signals import request_finished  # "             ends.
-from django.core.signals import request_started  # Sent when HTTP request begins.
-from django.db.backends.signals import (  # Sent when making initial connection to database
-    connection_created,
-)
-from django.db.models.signals import m2m_changed  # Sent when a ManyToManyField changes.
+from django.core.signals import \
+    request_started  # Sent when HTTP request begins.
+from django.db.backends.signals import \
+    connection_created  # Sent when making initial connection to database
+from django.db.models.signals import \
+    m2m_changed  # Sent when a ManyToManyField changes.
 from django.db.models.signals import post_delete  # after         "
 from django.db.models.signals import post_init  # end
 from django.db.models.signals import post_migrate  # after     "
 from django.db.models.signals import post_save  # after            "
-from django.db.models.signals import pre_delete  # Sent before an object is deleted.
-from django.db.models.signals import pre_migrate  # Sent before migration starts
-from django.db.models.signals import (
-    pre_save,  # Sent before a typeclass' .save is called.
-)
-from django.db.models.signals import (  # Sent at start of typeclass __init__ (before at_init)
-    pre_init,
-)
-from django.test.signals import (
-    setting_changed,  # Sent when setting changes from override
-)
-from django.test.signals import (
-    template_rendered,  # Sent when test system renders template
-)
+from django.db.models.signals import \
+    pre_delete  # Sent before an object is deleted.
+from django.db.models.signals import \
+    pre_migrate  # Sent before migration starts
+from django.db.models.signals import \
+    pre_save  # Sent before a typeclass' .save is called.
+from django.db.models.signals import \
+    pre_init  # Sent at start of typeclass __init__ (before at_post_load)
+from django.test.signals import \
+    setting_changed  # Sent when setting changes from override
+from django.test.signals import \
+    template_rendered  # Sent when test system renders template

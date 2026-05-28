@@ -7,7 +7,8 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.options import IS_POPUP_VAR
 from django.contrib.admin.utils import unquote
-from django.contrib.admin.widgets import FilteredSelectMultiple, ForeignKeyRawIdWidget
+from django.contrib.admin.widgets import (FilteredSelectMultiple,
+                                          ForeignKeyRawIdWidget)
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm

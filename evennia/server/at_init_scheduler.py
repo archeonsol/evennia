@@ -51,7 +51,7 @@ def run_cached_at_init_burst(mode: str) -> None:
         end = min(start + batch_size, len(entities))
         for entity in entities[start:end]:
             try:
-                entity.at_init()
+                entity.at_post_load()
             except Exception:
                 logger.log_trace("at_init_scheduler: entity.at_init failed")
         if end < len(entities):

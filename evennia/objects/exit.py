@@ -10,7 +10,7 @@ from django.utils.translation import gettext as _
 
 from evennia.commands import cmdset
 from evennia.objects.models import ObjectDB
-from evennia.objects.object import DefaultObject, _COMMAND_DEFAULT_CLASS
+from evennia.objects.object import _COMMAND_DEFAULT_CLASS, DefaultObject
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.utils import create, logger
 
@@ -31,7 +31,7 @@ class ExitCommand(_COMMAND_DEFAULT_CLASS):
 
         if self.obj.access(self.caller, "traverse"):
             # we may traverse the exit.
-            self.obj.at_traverse(self.caller, self.obj.destination)
+            self.obj.do_traverse(self.caller, self.obj.destination)
             SIGNAL_EXIT_TRAVERSED.send(sender=self.obj, traverser=self.caller)
         else:
             # exit is locked
@@ -257,7 +257,7 @@ class DefaultExit(DefaultObject):
             # we are resetting, or no exit-cmdset was set. Create one dynamically.
             self.cmdset.add_default(self.create_exit_cmdset(self), persistent=False)
 
-    def at_init(self):
+    def at_post_load(self):
         """
         This is called when this objects is re-loaded from cache. When
         that happens, we make sure to remove any old ExitCmdSet cmdset
@@ -266,10 +266,16 @@ class DefaultExit(DefaultObject):
         """
         self.cmdset.remove_default()
 
-    def at_traverse(self, traversing_object, target_location, **kwargs):
+    def do_traverse(self, traversing_object, target_location, **kwargs):
         """
         This implements the actual traversal. The traverse lock has
         already been checked (in the Exit command) at this point.
+
+        Calls `at_pre_traverse` first; if that returns False, the traverse
+        is aborted and `at_failed_traverse` is fired. On success the move
+        is performed and `at_post_traverse` is fired. This is normally the
+        method to override on Exit subclasses; for hook-style side effects
+        prefer `at_pre_traverse`, `at_post_traverse`, or `at_failed_traverse`.
 
         Args:
             traversing_object (DefaultObject): Object traversing us.
@@ -278,6 +284,9 @@ class DefaultExit(DefaultObject):
                 overriding the call (unused by default).
 
         """
+        if not self.at_pre_traverse(traversing_object, target_location, **kwargs):
+            self.at_failed_traverse(traversing_object)
+            return
         source_location = traversing_object.location
         if traversing_object.move_to(target_location, move_type="traverse", exit_obj=self):
             self.at_post_traverse(traversing_object, source_location)

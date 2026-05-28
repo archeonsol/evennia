@@ -28,6 +28,7 @@ from twisted.web.wsgi import WSGIResource
 
 from evennia.utils import logger
 
+
 class LockableThreadPool(threadpool.ThreadPool):
     """
     Threadpool that can be locked from accepting new requests.

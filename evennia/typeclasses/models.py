@@ -42,25 +42,18 @@ import evennia
 from evennia.locks.lockhandler import LockHandler
 from evennia.server.signals import SIGNAL_TYPED_OBJECT_POST_RENAME
 from evennia.typeclasses import managers
-from evennia.typeclasses.attributes import (
-    Attribute,
-    AttributeHandler,
-    AttributeProperty,
-    DbHolder,
-    InMemoryAttributeBackend,
-    ModelAttributeBackend,
-)
-from evennia.typeclasses.tags import (
-    AliasHandler,
-    PermissionHandler,
-    Tag,
-    TagCategoryProperty,
-    TagHandler,
-    TagProperty,
-)
-from evennia.utils.idmapper.models import SharedMemoryModel, SharedMemoryModelBase
+from evennia.typeclasses.attributes import (Attribute, AttributeHandler,
+                                            AttributeProperty, DbHolder,
+                                            InMemoryAttributeBackend,
+                                            ModelAttributeBackend)
+from evennia.typeclasses.tags import (AliasHandler, PermissionHandler, Tag,
+                                      TagCategoryProperty, TagHandler,
+                                      TagProperty)
+from evennia.utils.idmapper.models import (SharedMemoryModel,
+                                           SharedMemoryModelBase)
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import class_from_module, inherits_from, is_iter, lazy_property
+from evennia.utils.utils import (class_from_module, inherits_from, is_iter,
+                                 lazy_property)
 
 __all__ = ("TypedObject",)
 
@@ -174,6 +167,7 @@ class TypeclassBase(SharedMemoryModelBase):
         signals.pre_delete.connect(remove_attributes_on_delete, sender=new_class)
         try:
             from evennia.typeclasses.managers import TypeclassManager
+
             TypeclassManager._subclass_cache.clear()
         except ImportError:
             pass
@@ -436,6 +430,12 @@ class TypedObject(SharedMemoryModel):
     @key.setter
     def key(self, value):
         oldname = str(self.db_key)
+        if oldname == str(value):
+            # no-op; do not fire hooks or signals for an identity rename.
+            return
+        if not self.at_pre_rename(oldname, value):
+            # vetoed by hook
+            return
         self.db_key = value
         self.save(update_fields=["db_key"])
         self.at_rename(oldname, value)
@@ -538,10 +538,14 @@ class TypedObject(SharedMemoryModel):
     # Object manipulation methods
     #
 
-    def at_init(self):
+    def at_post_load(self):
         """
-        Called when this object is loaded into cache. This is  more reliable
-        than to override `__init__`.
+        Called when this object is loaded into the idmapper cache (which
+        happens on initial fetch from the database and after every server
+        reload). This is more reliable than to override `__init__`, since
+        the typeclass instance is rehydrated from cache rather than
+        constructed fresh. Despite the historical name `at_init`, this is
+        not the object-creation hook; for that see `at_object_creation`.
 
         """
         pass
@@ -751,9 +755,7 @@ class TypedObject(SharedMemoryModel):
             # check if we have a higher hierarchy position
             ppos = hierarchy.index(perm)
             return any(
-                True
-                for hpos, hperm in enumerate(hierarchy)
-                if hperm in perms and hpos > ppos
+                True for hpos, hperm in enumerate(hierarchy) if hperm in perms and hpos > ppos
             )
         # we ignore pluralization (english only)
         if perm.endswith("s"):
@@ -906,9 +908,26 @@ class TypedObject(SharedMemoryModel):
 
         return location_hint(self, looker) or ""
 
+    def at_pre_rename(self, oldname, newname):
+        """
+        Called before a rename is committed. Return `False` (or `None`)
+        to veto the rename; return `True` to allow it. Side effects
+        (validation, normalization, conflict checks, audit logs) can
+        run here while the object still has its old name.
+
+        Args:
+            oldname (str): The instance's current name.
+            newname (str): The proposed new name.
+
+        Returns:
+            bool: True to allow the rename, False to abort.
+
+        """
+        return True
+
     def at_rename(self, oldname, newname):
         """
-        This Hook is called by @name on a successful rename.
+        Called after a successful rename. The instance already holds the new name.
 
         Args:
             oldname (str): The instance's original name.

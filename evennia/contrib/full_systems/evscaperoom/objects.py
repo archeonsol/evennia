@@ -50,7 +50,8 @@ import re
 from evennia import DefaultObject
 from evennia.utils.utils import list_to_string, wrap
 
-from .utils import create_evscaperoom_object, parse_for_perspectives, parse_for_things
+from .utils import (create_evscaperoom_object, parse_for_perspectives,
+                    parse_for_things)
 
 
 class EvscaperoomObject(DefaultObject):

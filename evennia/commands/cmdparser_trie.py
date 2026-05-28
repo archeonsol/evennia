@@ -35,13 +35,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from django.conf import settings
 
-from evennia.commands.cmdparser import (
-    create_match,
-    try_multimatch_differentiators,
-    try_num_differentiators,
-)
-from evennia.utils.multimatch import resolve_multimatch_index
+from evennia.commands.cmdparser import (create_match,
+                                        try_multimatch_differentiators,
+                                        try_num_differentiators)
 from evennia.utils.logger import log_trace, mask_sensitive_input
+from evennia.utils.multimatch import resolve_multimatch_index
 
 # Re-export parser-neutral helpers from the linear cmdparser module so
 # downstream parser wrappers can import everything they need from

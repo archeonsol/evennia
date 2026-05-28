@@ -23,20 +23,14 @@ from twisted.internet import defer
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.server.portal import amp
-from evennia.server.signals import (
-    SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
-    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
-    SIGNAL_ACCOUNT_POST_LOGIN,
-    SIGNAL_ACCOUNT_POST_LOGOUT,
-)
+from evennia.server.signals import (SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
+                                    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
+                                    SIGNAL_ACCOUNT_POST_LOGIN,
+                                    SIGNAL_ACCOUNT_POST_LOGOUT)
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import (
-    callables_from_module,
-    class_from_module,
-    delay,
-    is_iter,
-    make_iter,
-)
+from evennia.utils.utils import (callables_from_module, class_from_module,
+                                 delay, is_iter, make_iter)
+
 
 def _send_admin_to_portal(session, **kwargs):
     amp_protocol = getattr(evennia.EVENNIA_SERVER_SERVICE, "amp_protocol", None)
@@ -525,7 +519,7 @@ class ServerSessionHandler(SessionHandler):
         session.at_login(account)
 
         # account init
-        account.at_init()
+        account.at_post_load()
 
         # Check if this is the first time the *account* logs in
         if account.db.FIRST_LOGIN:

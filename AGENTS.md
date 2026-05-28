@@ -37,4 +37,4 @@ Vendor-agnostic skills live in `.agents/skills/`. Vendor directories (`.claude/s
 - [Releases & Versioning](.agents/docs/releases.md) — when to cut a release, files to update, changelog + tag procedure
 - [CI/CD](.agents/docs/ci.md) — GitHub Actions workflows, test matrix, database configs, Docker, secrets
 - [GitHub Issues & PRs](.agents/docs/github.md) — listing, searching, and reviewing issues/PRs with `gh` CLI
-- [Hygiene Backlog](.agents/docs/hygiene-backlog.md) and [Future Ideas](FUTURE-IDEAS.md) — parked findings + deferred design directions; check before re-deriving
+- [Hygiene Backlog](.agents/docs/hygiene-backlog.md), [Future Ideas](FUTURE-IDEAS.md), [Engine Boundary Migration](.agents/docs/engine-boundary-migration.md) — parked findings, deferred design directions, and the upstream PR plan for engine/game boundary moves; check before re-deriving

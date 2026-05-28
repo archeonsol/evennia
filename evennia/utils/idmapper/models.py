@@ -322,11 +322,11 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
             cls.__dbclass__.__instance_cache__[pk] = instance
             if new:
                 try:
-                    # trigger the at_init hook only
+                    # trigger the at_post_load hook only
                     # at first initialization
-                    instance.at_init()
+                    instance.at_post_load()
                 except AttributeError:
-                    # The at_init hook is not assigned to all entities
+                    # The at_post_load hook is not assigned to all entities
                     pass
 
     @classmethod
@@ -658,8 +658,8 @@ def conditional_flush(max_rmem, force=False):
 
             actual_rmem = psutil.Process(os.getpid()).memory_info().rss / (1024.0 * 1024.0)
         else:
-            import sys
             import resource
+            import sys
 
             rusage = resource.getrusage(resource.RUSAGE_SELF)
             if sys.platform == "darwin":

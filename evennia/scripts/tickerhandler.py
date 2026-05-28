@@ -402,15 +402,25 @@ class TickerHandler(object):
         Schedule a deferred save on the next reactor tick.  Multiple mutations
         in the same tick are coalesced into a single DB write.
         """
-        if not getattr(self, "_save_scheduled", False):
-            self._save_scheduled = True
-            try:
-                from twisted.internet import reactor
+        if getattr(self, "_save_scheduled", False):
+            return
+        from django.conf import settings
 
-                reactor.callLater(0, self._do_scheduled_save)
-            except Exception:
-                # Reactor not running yet (e.g. during unit tests) — save now.
-                self.save()
+        if getattr(settings, "TEST_ENVIRONMENT", False):
+            # Trial runs each test on a stub reactor that never drains queued
+            # callLater()s; leaving one pending trips DirtyReactorAggregateError
+            # at teardown. Save synchronously in tests.
+            self.save()
+            return
+        self._save_scheduled = True
+        try:
+            from twisted.internet import reactor
+
+            reactor.callLater(0, self._do_scheduled_save)
+        except Exception:
+            # Reactor not running yet — save now.
+            self._save_scheduled = False
+            self.save()
 
     def _do_scheduled_save(self):
         self._save_scheduled = False

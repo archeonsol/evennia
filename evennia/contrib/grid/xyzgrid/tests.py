@@ -10,7 +10,8 @@ from unittest import mock
 from django.test import TestCase
 from parameterized import parameterized
 
-from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest
+from evennia.utils.test_resources import (BaseEvenniaCommandTest,
+                                          BaseEvenniaTest)
 
 from . import commands, xymap, xymap_legend, xyzgrid, xyzroom
 

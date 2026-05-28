@@ -94,7 +94,7 @@ class Mob(tut_objects.TutorialObject):
 
     """
 
-    def at_init(self):
+    def at_post_load(self):
         """
         When initialized from cache (after a server reboot), set up
         the AI state.

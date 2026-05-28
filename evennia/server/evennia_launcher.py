@@ -20,7 +20,8 @@ import shutil
 import signal
 import sys
 from argparse import ArgumentParser
-from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
+from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
+                        check_output)
 
 import django
 from django.core.management import execute_from_command_line

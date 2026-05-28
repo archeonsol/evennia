@@ -10,7 +10,8 @@ from django.test import override_settings
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest, TestCase
+from evennia.utils.test_resources import (BaseEvenniaCommandTest,
+                                          BaseEvenniaTest, TestCase)
 
 # Testing-command sets
 
@@ -1664,7 +1665,8 @@ class TestCmdAccessCache(BaseEvenniaTest):
 
     @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
-        from evennia.commands.cmd_access_cache import cached_cmd_access, invalidate_cmd_access_cache
+        from evennia.commands.cmd_access_cache import (
+            cached_cmd_access, invalidate_cmd_access_cache)
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -1911,7 +1913,8 @@ class TestFtfyNormalization(BaseEvenniaTest):
 # ----------------------------------------------------------------------------
 
 
-from evennia.commands.signals import on_cmdset_merge_error as _on_cmdset_merge_error
+from evennia.commands.signals import \
+    on_cmdset_merge_error as _on_cmdset_merge_error
 from evennia.commands.signals import on_command_error as _on_command_error
 from evennia.commands.signals import on_command_post as _on_command_post
 from evennia.commands.signals import on_command_pre as _on_command_pre
@@ -2178,7 +2181,8 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import begin_command_trace, end_command_trace
+        from evennia.utils.command_trace import (begin_command_trace,
+                                                 end_command_trace)
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2222,13 +2226,8 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation,
-    clear_location_cmdset_cache,
-    cmdset_generation,
-    get_cached_location_cmdsets,
-    make_cache_key,
-    set_cached_location_cmdsets,
-)
+    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
+    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2450,7 +2449,8 @@ class TestCmdsetPrefixAuditDrift(TestCase):
 
         if str(tools_dir) not in sys.path:
             sys.path.insert(0, str(tools_dir))
-        from cmdset_prefix_audit import _load_default_cmdset_classes, audit_cmdsets, format_markdown
+        from cmdset_prefix_audit import (_load_default_cmdset_classes,
+                                         audit_cmdsets, format_markdown)
 
         generated = format_markdown(audit_cmdsets(_load_default_cmdset_classes()))
         self.assertTrue(

@@ -242,7 +242,8 @@ def flush_all_dirty():
 
     pending_stats = count_pending_dirty()
     try:
-        from evennia.server.prometheus_metrics import observe_attribute_dirty_pending
+        from evennia.server.prometheus_metrics import \
+            observe_attribute_dirty_pending
 
         observe_attribute_dirty_pending(pending_stats["pending"])
     except Exception:
@@ -266,7 +267,8 @@ def flush_all_dirty():
         "pending": pending_stats["pending"],
     }
     try:
-        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
+        from evennia.typeclasses.attribute_metrics import \
+            record_attribute_flush_stats
 
         record_attribute_flush_stats(stats, duration_seconds=duration)
     except Exception:

@@ -2,12 +2,13 @@
 
 from collections import defaultdict
 
+import inflect
 from django.conf import settings
 from django.utils.translation import gettext as _
 
-import inflect
 from evennia.utils import ansi, logger
-from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
+from evennia.utils.utils import (compress_whitespace, is_iter, iter_to_str,
+                                 make_iter)
 
 _INFLECT = inflect.engine()
 
@@ -265,6 +266,28 @@ class AppearanceMixin:
         """
         return ""
 
+    def get_extra_display_state(self, looker, **kwargs):
+        """
+        Get extra free-form state content for this object. Called by `return_appearance`
+        and rendered via the `{extra_state}` template key, conventionally appended to
+        the name line.
+
+        Empty by default. Override to inject persistent character state visible in
+        looks: pose lines, AFK markers, mood, status effects, combat stance, etc.
+        The engine takes no opinion on storage; this is a pure display seam.
+
+        Args:
+            looker (DefaultObject): Object doing the looking.
+            **kwargs: Arbitrary data for use when overriding.
+        Returns:
+            str: The extra state content. Return `""` to render nothing. When
+            returning content, prefix it with a leading newline (e.g. `"\\n is
+            standing by the wall."`) if you want it on its own line below the
+            name; otherwise it will be appended directly to the name line.
+
+        """
+        return ""
+
     def format_appearance(self, appearance, looker, **kwargs):
         """
         Final processing of the entire appearance string. Called by `return_appearance`.
@@ -315,6 +338,7 @@ class AppearanceMixin:
             self.appearance_template.format(
                 name=self.get_display_name(looker, **kwargs),
                 extra_name_info=self.get_extra_display_name_info(looker, **kwargs),
+                extra_state=self.get_extra_display_state(looker, **kwargs),
                 desc=self.get_display_desc(looker, **kwargs),
                 header=self.get_display_header(looker, **kwargs),
                 footer=self.get_display_footer(looker, **kwargs),

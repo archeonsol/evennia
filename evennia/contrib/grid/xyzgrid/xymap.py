@@ -672,7 +672,8 @@ class XYMap:
         """
         global _XYZROOMCLASS
         if not _XYZROOMCLASS:
-            from evennia.contrib.grid.xyzgrid.xyzroom import XYZRoom as _XYZROOMCLASS
+            from evennia.contrib.grid.xyzgrid.xyzroom import \
+                XYZRoom as _XYZROOMCLASS
         x, y = xy
         wildcard = "*"
         spawned = []
