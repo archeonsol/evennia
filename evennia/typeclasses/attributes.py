@@ -673,6 +673,20 @@ class Attribute(IAttribute, SharedMemoryModel):
         "Define Django meta options"
 
         verbose_name = "Attribute"
+        # Composite indexes over (db_val_type, value_col). Every
+        # value-based query pins db_val_type via value_query_filter, so
+        # the discriminator-first composite lets the planner do an index
+        # range scan instead of a sequential table scan.
+        indexes = [
+            models.Index(
+                fields=["db_val_type", "db_int_val"],
+                name="attr_valtype_int_idx",
+            ),
+            models.Index(
+                fields=["db_val_type", "db_float_val"],
+                name="attr_valtype_float_idx",
+            ),
+        ]
 
     # Wrapper properties to easily set database fields. These are
     # @property decorators that allows to access these fields using
