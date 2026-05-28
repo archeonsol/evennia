@@ -47,7 +47,6 @@ class TestAttributes(BaseEvenniaTest):
         self.assertEqual(self.obj1.attributes.get("testattr"), value)
 
     @override_settings(TYPECLASS_AGGRESSIVE_CACHE=False)
-    @patch("evennia.typeclasses.attributes._TYPECLASS_AGGRESSIVE_CACHE", False)
     def test_attrhandler_nocache(self):
         key = "testattr"
         value = "test attr value "

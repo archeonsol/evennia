@@ -37,8 +37,6 @@ __all__ = (
     "CmdGrapevine2Chan",
     "CmdDiscord2Chan",
 )
-_DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
-
 # helper functions to make it easier to override the main CmdChannel
 # command and to keep the legacy addcom etc commands around.
 
@@ -777,7 +775,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             "locks",
             "description",
             align="l",
-            maxwidth=_DEFAULT_WIDTH,
+            maxwidth=settings.CLIENT_DEFAULT_WIDTH,
         )
         for chan in subscribed:
             locks = "-"
@@ -819,7 +817,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             "aliases",
             "my aliases",
             "description",
-            maxwidth=_DEFAULT_WIDTH,
+            maxwidth=settings.CLIENT_DEFAULT_WIDTH,
         )
         channels = subscribed + available
 
@@ -1529,7 +1527,7 @@ def _list_bots(cmd):
             "|wev-channel|n",
             "|wirc-channel|n",
             "|wSSL|n",
-            maxwidth=_DEFAULT_WIDTH,
+            maxwidth=settings.CLIENT_DEFAULT_WIDTH,
         )
         for ircbot in ircbots:
             ircinfo = "%s (%s:%s)" % (
@@ -1799,7 +1797,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
                     "|wev-channel",
                     "|wRSS feed URL|n",
                     border="cells",
-                    maxwidth=_DEFAULT_WIDTH,
+                    maxwidth=settings.CLIENT_DEFAULT_WIDTH,
                 )
                 for rssbot in rssbots:
                     table.add_row(
@@ -1894,7 +1892,7 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
                     "|wev-channel",
                     "|wgw-channel|n",
                     border="cells",
-                    maxwidth=_DEFAULT_WIDTH,
+                    maxwidth=settings.CLIENT_DEFAULT_WIDTH,
                 )
                 for gwbot in gwbots:
                     table.add_row(gwbot.id, gwbot.db.ev_channel, gwbot.db.grapevine_channel)
@@ -2039,7 +2037,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                     "|wEvennia|n",
                     "|wDiscord|n",
                     border="cells",
-                    maxwidth=_DEFAULT_WIDTH,
+                    maxwidth=settings.CLIENT_DEFAULT_WIDTH,
                 )
                 # iterate through the channel links
                 # load in the pretty names for the discord channels from cache
@@ -2085,7 +2083,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                     "|wEvennia|n",
                     "|wDiscord|n",
                     border="cells",
-                    maxwidth=_DEFAULT_WIDTH,
+                    maxwidth=settings.CLIENT_DEFAULT_WIDTH,
                 )
                 # iterate through the channel links
                 # load in the pretty names for the discord channels from cache

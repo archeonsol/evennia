@@ -85,7 +85,6 @@ LIST_APPEND_CHAR = "+"
 CHAR_TYPECLASS = settings.BASE_CHARACTER_TYPECLASS
 ROOM_TYPECLASS = settings.BASE_ROOM_TYPECLASS
 EXIT_TYPECLASS = settings.BASE_EXIT_TYPECLASS
-_DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
 
 _PROTOTYPE_PARENTS = None
 
@@ -2963,7 +2962,7 @@ class CmdExamine(ObjManipCommand):
             account_subs = obj.db_account_subscriptions.all()
             if account_subs:
                 return "\n  " + "\n  ".join(
-                    format_grid([sub.key for sub in account_subs], sep=" ", width=_DEFAULT_WIDTH)
+                    format_grid([sub.key for sub in account_subs], sep=" ", width=settings.CLIENT_DEFAULT_WIDTH)
                 )
 
     def format_channel_object_subs(self, obj):
@@ -2971,7 +2970,7 @@ class CmdExamine(ObjManipCommand):
             object_subs = obj.db_object_subscriptions.all()
             if object_subs:
                 return "\n  " + "\n  ".join(
-                    format_grid([sub.key for sub in object_subs], sep=" ", width=_DEFAULT_WIDTH)
+                    format_grid([sub.key for sub in object_subs], sep=" ", width=settings.CLIENT_DEFAULT_WIDTH)
                 )
 
     def get_formatted_obj_data(self, obj, current_cmdset):

@@ -287,13 +287,20 @@ class TestFuncParser(TestCase):
         """
         string = "$add(1, $add(1, $add(1, $eval(42))))"
 
-        with patch("evennia.utils.funcparser._MAX_NESTING", max_nest):
+        # max_nesting is now stored on the parser instance (resolved from
+        # settings.FUNCPARSER_MAX_NESTING at construction). Override directly
+        # on the existing instance for this assertion.
+        prev = self.parser.max_nesting
+        self.parser.max_nesting = max_nest
+        try:
             if ok:
                 ret = self.parser.parse(string, raise_errors=True)
                 self.assertEqual(ret, "45")
             else:
                 with self.assertRaises(funcparser.ParsingError):
                     self.parser.parse(string, raise_errors=True)
+        finally:
+            self.parser.max_nesting = prev
 
     def test_parse_underlying_exception(self):
         string = "test $add(1, 1) $raise()"

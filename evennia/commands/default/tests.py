@@ -622,18 +622,17 @@ class TestAccount(BaseEvenniaCommandTest):
         self.account.characters.add(self.char1)
         self.account.unpuppet_all()
 
-        with self.settings(MULTISESSION=multisession_mode):
-            # we need to patch the module header instead of settings
-            with patch("evennia.commands.default.account._MAX_NR_CHARACTERS", new=max_nr_chars):
-                with patch(
-                    "evennia.commands.default.account._AUTO_PUPPET_ON_LOGIN", new=auto_puppet
-                ):
-                    self.call(
-                        account.CmdOOCLook(),
-                        "",
-                        expected_result,
-                        caller=self.account,
-                    )
+        with self.settings(
+            MULTISESSION=multisession_mode,
+            MAX_NR_CHARACTERS=max_nr_chars,
+            AUTO_PUPPET_ON_LOGIN=auto_puppet,
+        ):
+            self.call(
+                account.CmdOOCLook(),
+                "",
+                expected_result,
+                caller=self.account,
+            )
 
     def test_ooc(self):
         self.call(account.CmdOOC(), "", "You go OOC.", caller=self.account)
