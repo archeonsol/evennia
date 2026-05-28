@@ -21,7 +21,6 @@ from django.conf import settings
 _PICKLE_REJECT_PREFIXES = (b"\x80", b"(", b"]", b"}")
 
 _SESSION_MAGIC = b"J1"
-_ADMIN_SESSION_SYNC = chr(8)
 
 _SUBJECT_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 
@@ -151,36 +150,45 @@ def _sanitize_admin_kwargs(kwargs: dict) -> dict:
     for k, v in kwargs.items():
         if not isinstance(k, str):
             raise TypeError("admin message kwargs keys must be str")
-        if (
-            k == "sessiondata"
-            and kwargs.get("operation") == _ADMIN_SESSION_SYNC
-            and isinstance(v, dict)
-        ):
-            # sessiondata: {int_sessid: {str: primitive}}
-            encoded: dict = {}
-            for sk, sv in v.items():
-                encoded[f"__si__:{sk}"] = sanitize_value(sv)
-            result[k] = encoded
+        if k == "sessiondata" and _is_sessiondata_map(v):
+            result[k] = _sanitize_sessiondata_map(v)
         else:
             result[k] = sanitize_value(v)
     return result
 
 
+def _is_sessiondata_map(value: Any) -> bool:
+    """Return True for ``{sessid: sessiondata}``, False for one sessiondata dict."""
+    return isinstance(value, dict) and all(isinstance(key, int) for key in value)
+
+
+def _sanitize_sessiondata_map(value: dict) -> dict:
+    encoded: dict = {}
+    for sk, sv in value.items():
+        encoded[f"__si__:{sk}"] = sanitize_value(sv)
+    return encoded
+
+
+def _restore_sessiondata_map(value: dict) -> dict:
+    restored: dict = {}
+    for sk, sv in value.items():
+        if sk.startswith("__si__:"):
+            restored[int(sk[7:])] = sv
+        else:
+            restored[int(sk)] = sv  # legacy: plain numeric string
+    return restored
+
+
 def _restore_admin_kwargs(kwargs: dict) -> dict:
     """Reverse _sanitize_admin_kwargs — convert __si__:N keys back to int."""
-    if (
-        kwargs.get("operation") == _ADMIN_SESSION_SYNC
-        and "sessiondata" in kwargs
-        and isinstance(kwargs["sessiondata"], dict)
-    ):
-        restored: dict = {}
-        for sk, sv in kwargs["sessiondata"].items():
-            if sk.startswith("__si__:"):
-                restored[int(sk[7:])] = sv
-            else:
-                restored[int(sk)] = sv  # legacy: plain numeric string
-        kwargs = dict(kwargs)
-        kwargs["sessiondata"] = restored
+    if "sessiondata" in kwargs and isinstance(kwargs["sessiondata"], dict):
+        sessiondata = kwargs["sessiondata"]
+        if sessiondata and all(
+            isinstance(key, str) and (key.startswith("__si__:") or key.isdigit())
+            for key in sessiondata
+        ):
+            kwargs = dict(kwargs)
+            kwargs["sessiondata"] = _restore_sessiondata_map(sessiondata)
     return kwargs
 
 
