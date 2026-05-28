@@ -7,9 +7,13 @@ from unittest.mock import MagicMock
 from django.test import override_settings
 from mock import patch
 
-from evennia.typeclasses.attributes import (Attribute, ModelAttributeBackend,
-                                            _classify_value, _mark_attr_dirty,
-                                            flush_all_dirty)
+from evennia.typeclasses.attributes import (
+    Attribute,
+    ModelAttributeBackend,
+    _classify_value,
+    _mark_attr_dirty,
+    flush_all_dirty,
+)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -225,8 +229,8 @@ class TestRedisAttrCache(BaseEvenniaTest):
             def scan_iter(self, match=None, count=None):
                 scanned.append((match, count))
                 # Yield two fake matching keys to confirm batching.
-                yield b"attr:v1:objectdb:1:hp:"
-                yield b"attr:v1:objectdb:1:__index__"
+                yield b"attr:v2:objectdb:1:hp:"
+                yield b"attr:v2:objectdb:1:__index__"
 
             def delete(self, *keys):
                 deleted.extend(keys)
@@ -236,10 +240,10 @@ class TestRedisAttrCache(BaseEvenniaTest):
             flush_cache()
 
         self.assertEqual(len(scanned), 1)
-        self.assertEqual(scanned[0][0], "attr:v1:*")
+        self.assertEqual(scanned[0][0], "attr:v2:*")
         self.assertEqual(
             deleted,
-            [b"attr:v1:objectdb:1:hp:", b"attr:v1:objectdb:1:__index__"],
+            [b"attr:v2:objectdb:1:hp:", b"attr:v2:objectdb:1:__index__"],
         )
 
     @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=False)

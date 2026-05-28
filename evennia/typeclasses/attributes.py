@@ -1436,25 +1436,46 @@ class ModelAttributeBackend(IAttributeBackend):
         _DIRTY_BACKENDS.add(self)
 
     def flush_dirty(self):
-        """Bulk-write all buffered attribute changes to DB."""
+        """Bulk-write all buffered attribute changes to DB.
+
+        Returns the list of attributes successfully written so subclasses
+        can act on the same set without re-snapshotting (which would race
+        concurrent ``do_update_attribute`` calls).
+
+        Failure handling: ``bulk_update`` runs *before* the dirty set is
+        cleared. If it raises (deadlock, connection drop, etc.), the
+        dirty entries stay queued and the backend stays in
+        ``_DIRTY_BACKENDS`` so the next tick retries. Only the entries
+        we successfully wrote are removed — concurrent dirty marks that
+        arrived during the flush survive.
+        """
         if not self._dirty_attrs:
-            return
+            return ()
         dirty = list(self._dirty_attrs)
-        self._dirty_attrs.clear()
-        _DIRTY_BACKENDS.discard(self)
-        self._attrclass.objects.bulk_update(
-            dirty,
-            [
-                "db_value",
-                "db_strvalue",
-                "db_category",
-                "db_lock_storage",
-                "db_val_type",
-                "db_int_val",
-                "db_float_val",
-                "db_str_val",
-            ],
-        )
+        try:
+            self._attrclass.objects.bulk_update(
+                dirty,
+                [
+                    "db_value",
+                    "db_strvalue",
+                    "db_category",
+                    "db_lock_storage",
+                    "db_val_type",
+                    "db_int_val",
+                    "db_float_val",
+                    "db_str_val",
+                ],
+            )
+        except Exception:
+            # Don't drop the dirty entries; let the next maintenance tick
+            # retry. Re-add ourselves to the global tracker in case a
+            # peer iteration removed us.
+            _DIRTY_BACKENDS.add(self)
+            raise
+        self._dirty_attrs.difference_update(dirty)
+        if not self._dirty_attrs:
+            _DIRTY_BACKENDS.discard(self)
+        return dirty
 
     def do_batch_finish(self, attr_objs):
         # Add new objects to m2m field all at once
