@@ -62,7 +62,8 @@ state = ON_DEMAND_HANDLER.get_stage("flowering", last_checked=plant.planted_time
 
 """
 
-import pickle
+import importlib
+import json
 
 from evennia.server.models import ServerConfig
 from evennia.utils import logger
@@ -373,6 +374,109 @@ class OnDemandTask:
             self.start_time = OnDemandTask.runtime() - self.stages_by_name[stage]
 
 
+def _func_to_path(func):
+    """Encode a callable as a dotted import path string, or None."""
+    if func is None:
+        return None
+    return f"{func.__module__}.{func.__qualname__}"
+
+
+def _path_to_func(path):
+    """
+    Restore a callable from a dotted import path.
+
+    Tries each possible module / attribute split from longest to shortest so
+    that class methods (e.g. ``pkg.mod.Cls.method``) are resolved correctly.
+    Returns None and logs a warning if the path cannot be resolved.
+    """
+    if path is None:
+        return None
+    parts = path.split(".")
+    for i in range(len(parts) - 1, 0, -1):
+        mod_path = ".".join(parts[:i])
+        attr_chain = parts[i:]
+        try:
+            obj = importlib.import_module(mod_path)
+            for attr in attr_chain:
+                obj = getattr(obj, attr)
+            if callable(obj):
+                return obj
+        except (ImportError, AttributeError):
+            continue
+    logger.log_warn(f"OnDemandHandler: could not restore stage function {path!r}; skipping")
+    return None
+
+
+def _task_to_dict(task):
+    """Serialize an OnDemandTask to a JSON-safe dict."""
+    stages_list = None
+    if task.stages:
+        stages_list = [
+            {"dt": dt, "name": name, "func": _func_to_path(func)}
+            for dt, (name, func) in task.stages.items()
+        ]
+    return {
+        "key": task.key,
+        "category": task.category,
+        "start_time": task.start_time,
+        "last_stage": task.last_stage,
+        "iterations": task.iterations,
+        "stages": stages_list,
+    }
+
+
+def _task_from_dict(data):
+    """Reconstruct an OnDemandTask from the dict produced by _task_to_dict."""
+    task = OnDemandTask.__new__(OnDemandTask)
+    task.key = data["key"]
+    task.category = data["category"]
+    task.start_time = data.get("start_time")
+    task.last_stage = data.get("last_stage")
+    task.iterations = data.get("iterations", 0)
+
+    raw_stages = data.get("stages")
+    if raw_stages:
+        # Rebuild in descending dt order to match OnDemandTask.__init__ convention.
+        stages = {}
+        for entry in sorted(raw_stages, key=lambda e: e["dt"], reverse=True):
+            func = _path_to_func(entry["func"])
+            stages[entry["dt"]] = (entry["name"], func)
+        task.stages = stages
+        task.stages_by_name = {name: dt for dt, (name, _) in stages.items()}
+    else:
+        task.stages = None
+        task.stages_by_name = None
+
+    return task
+
+
+def _tasks_to_json(tasks):
+    """Serialize the handler's tasks dict to a JSON string."""
+    entries = []
+    for (key, category), task in tasks.items():
+        entry = _task_to_dict(task)
+        # Ensure key/category come from the storage tuple, not the task attrs
+        # (they should be identical, but be defensive).
+        entry["_skey"] = key
+        entry["_scat"] = category
+        entries.append(entry)
+    return json.dumps({"v": 1, "tasks": entries}, separators=(",", ":"), ensure_ascii=False)
+
+
+def _tasks_from_json(json_str):
+    """Deserialize the handler's tasks dict from a JSON string."""
+    data = json.loads(json_str)
+    if not isinstance(data, dict) or data.get("v") != 1:
+        raise ValueError("unrecognized OnDemandHandler JSON version")
+    result = {}
+    for entry in data.get("tasks", []):
+        key = entry["_skey"]
+        category = entry["_scat"]
+        task = _task_from_dict(entry)
+        result[(key, category)] = task
+    return result
+
+
 class OnDemandHandler:
     """
     A singleton handler for managing on-demand state changes. Its main function is to persistently
@@ -393,7 +497,28 @@ class OnDemandHandler:
         This should be automatically called when Evennia starts.
 
         """
-        self.tasks = dict(ServerConfig.objects.conf(ONDEMAND_HANDLER_SAVE_NAME, default=dict))
+        raw = ServerConfig.objects.conf(ONDEMAND_HANDLER_SAVE_NAME, default=None)
+        if raw is None:
+            self.tasks = {}
+            return
+        if isinstance(raw, str):
+            # New JSON format (v1): safe to deserialize even if DB is compromised.
+            try:
+                self.tasks = _tasks_from_json(raw)
+            except Exception:
+                logger.log_trace("OnDemandHandler: failed to parse task JSON, starting empty")
+                self.tasks = {}
+        elif isinstance(raw, dict):
+            # Legacy pickle format (pre-JSON migration): accept in-place, will be re-saved
+            # as JSON on next shutdown.
+            logger.log_warn(
+                "OnDemandHandler: loading tasks from legacy pickle format — "
+                "will be re-saved as JSON on next shutdown"
+            )
+            self.tasks = raw
+        else:
+            logger.log_warn("OnDemandHandler: unrecognized task storage format, starting empty")
+            self.tasks = {}
 
     def save(self):
         """
@@ -401,25 +526,25 @@ class OnDemandHandler:
 
         """
         cleaned_tasks = {}
-        for key, category in list(self.tasks.keys()):
-            # in case an object was used for categories, and were since deleted, drop the task
+        for key_tuple, task in list(self.tasks.items()):
+            key, category = key_tuple
+            # Drop tasks whose category was a now-deleted DB object.
             if hasattr(category, "id") and category.id is None:
-                self.tasks.pop((key, category), None)
                 continue
-
-            task = self.tasks.get((key, category))
             try:
-                pickle.dumps(task)
+                cleaned_tasks[key_tuple] = task
             except Exception as err:
                 logger.log_trace(
-                    f"Error saving on-demand task {key}[{category}] (purging task): {err}"
+                    f"Error processing on-demand task {key}[{category}] (purging): {err}"
                 )
-                self.tasks.pop((key, category), None)
-                continue
-            cleaned_tasks[(key, category)] = task
 
         self.tasks = cleaned_tasks
-        ServerConfig.objects.conf(ONDEMAND_HANDLER_SAVE_NAME, self.tasks)
+        try:
+            json_str = _tasks_to_json(self.tasks)
+        except Exception:
+            logger.log_trace("OnDemandHandler: failed to serialize tasks to JSON; not saving")
+            return
+        ServerConfig.objects.conf(ONDEMAND_HANDLER_SAVE_NAME, json_str)
 
     def _build_key(self, key, category):
         """

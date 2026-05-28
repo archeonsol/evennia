@@ -1,10 +1,12 @@
 """
-Secure serialization for Portal <-> Server session traffic (Msg* AMP commands).
+Secure serialization for Portal <-> Server AMP traffic.
 
-Hot-path session I/O uses a strict JSON envelope. Pickle is reserved for Admin*
-sync payloads only (see ``evennia.server.portal.amp.dumps`` / ``loads``).
+Both session (Msg*) and admin (Admin*) messages use a strict JSON envelope.
+Pickle is no longer used on any AMP path.
 
-Wire format: ``J1`` + UTF-8 JSON ``[sessid, kwargs]`` with recursively sanitized values.
+Wire formats:
+  ``J1`` + UTF-8 JSON  — session messages (MsgPortal2Server / MsgServer2Portal)
+  ``A1`` + UTF-8 JSON  — admin messages  (AdminPortal2Server / AdminServer2Portal)
 """
 
 from __future__ import annotations
@@ -129,6 +131,89 @@ def unpack_session_message(data: bytes) -> Tuple[int, dict]:
             "refusing legacy pickle AMP session payload (enable AMP_SESSION_ACCEPT_LEGACY_PICKLE only for migration)"
         )
     raise ValueError("unrecognized AMP session payload format")
+
+
+_ADMIN_MAGIC = b"A1"
+
+
+def _sanitize_admin_kwargs(kwargs: dict) -> dict:
+    """
+    Sanitize kwargs for an Admin* AMP message.
+
+    Same rules as session kwargs, with one exception: the ``sessiondata``
+    field uses integer sessid keys at the top level.  Those are converted to
+    strings on the wire ("__si__:<N>") and restored on unpack.
+    """
+    if not isinstance(kwargs, dict):
+        raise TypeError("admin kwargs must be a dict")
+    result: dict = {}
+    for k, v in kwargs.items():
+        if not isinstance(k, str):
+            raise TypeError("admin message kwargs keys must be str")
+        if k == "sessiondata" and isinstance(v, dict):
+            # sessiondata: {int_sessid: {str: primitive}}
+            encoded: dict = {}
+            for sk, sv in v.items():
+                encoded[f"__si__:{sk}"] = sanitize_value(sv)
+            result[k] = encoded
+        else:
+            result[k] = sanitize_value(v)
+    return result
+
+
+def _restore_admin_kwargs(kwargs: dict) -> dict:
+    """Reverse _sanitize_admin_kwargs — convert __si__:N keys back to int."""
+    if "sessiondata" in kwargs and isinstance(kwargs["sessiondata"], dict):
+        restored: dict = {}
+        for sk, sv in kwargs["sessiondata"].items():
+            if sk.startswith("__si__:"):
+                restored[int(sk[7:])] = sv
+            else:
+                restored[int(sk)] = sv  # legacy: plain numeric string
+        kwargs = dict(kwargs)
+        kwargs["sessiondata"] = restored
+    return kwargs
+
+
+def pack_admin_message(sessid: int, kwargs: dict) -> bytes:
+    """Pack (sessid, kwargs) for Admin* AMP commands — JSON, no pickle."""
+    if not isinstance(sessid, int) or sessid < 0:
+        raise ValueError("admin sessid must be a non-negative int")
+    clean = _sanitize_admin_kwargs(kwargs)
+    body = json.dumps([sessid, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(body) > _MAX_PAYLOAD_BYTES:
+        raise ValueError("AMP admin payload exceeds max size")
+    return _ADMIN_MAGIC + body
+
+
+def unpack_admin_message(data: bytes) -> Tuple[int, dict]:
+    """Unpack Admin* wire bytes to (sessid, kwargs)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("packed_data must be bytes")
+    raw = bytes(data)
+    if raw.startswith(_ADMIN_MAGIC):
+        parsed = json.loads(raw[2:].decode("utf-8"))
+        if not isinstance(parsed, list) or len(parsed) != 2:
+            raise ValueError("invalid AMP admin JSON envelope")
+        sessid, kwargs = parsed[0], parsed[1]
+        if not isinstance(sessid, int) or sessid < 0:
+            raise ValueError("invalid sessid in AMP admin envelope")
+        if not isinstance(kwargs, dict):
+            raise ValueError("invalid kwargs in AMP admin envelope")
+        return sessid, _restore_admin_kwargs(kwargs)
+    # Legacy pickle fallback — only during rolling restart migration
+    if raw[:1] in _PICKLE_REJECT_PREFIXES:
+        if accept_legacy_session_pickle():
+            from evennia.server.portal import amp as _amp
+            msg = _amp.loads(raw)
+            if not isinstance(msg, (list, tuple)) or len(msg) != 2:
+                raise ValueError("legacy pickle admin message malformed")
+            return int(msg[0]), dict(msg[1])
+        raise ValueError(
+            "refusing legacy pickle AMP admin payload "
+            "(enable AMP_SESSION_ACCEPT_LEGACY_PICKLE only for migration)"
+        )
+    raise ValueError("unrecognized AMP admin payload format")
 
 
 def validate_event_subject(subject: str) -> str:

@@ -884,8 +884,6 @@ def _test():
     class TestObj(object):
         pass
 
-    import pdb
-
     obj1 = TestObj()
     obj2 = TestObj()
 
@@ -893,7 +891,6 @@ def _test():
     # obj1.lock_storage = "cmd:all();admin:id(1);listen:all();send:all()"
     obj1.lock_storage = "listen:perm(Developer)"
 
-    pdb.set_trace()
     obj1.locks = LockHandler(obj1)
     obj2.permissions.add("Developer")
     obj2.id = 4
