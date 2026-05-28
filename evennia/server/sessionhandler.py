@@ -38,15 +38,12 @@ from evennia.utils.utils import (
     make_iter,
 )
 
-_FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED = settings.FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED
-
-
 def _send_admin_to_portal(session, **kwargs):
     amp_protocol = getattr(evennia.EVENNIA_SERVER_SERVICE, "amp_protocol", None)
     if not amp_protocol:
         return defer.succeed(None)
     return amp_protocol.send_AdminServer2Portal(session, **kwargs)
-_BROADCAST_SERVER_RESTART_MESSAGES = settings.BROADCAST_SERVER_RESTART_MESSAGES
+
 
 # delayed imports
 _AccountDB = None
@@ -64,10 +61,6 @@ class DummySession(object):
 
 DUMMYSESSION = DummySession()
 
-_SERVERNAME = settings.SERVERNAME
-_MULTISESSION_MODE = settings.MULTISESSION_MODE
-_IDLE_TIMEOUT = settings.IDLE_TIMEOUT
-_DELAY_CMD_LOGINSTART = settings.DELAY_CMD_LOGINSTART
 _MODEL_MAP = None
 _FUNCPARSER = None
 
@@ -238,7 +231,7 @@ class SessionHandler(dict):
                 data = _utf8(data)
 
                 if (
-                    _FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED
+                    settings.FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED
                     and not raw
                     and isinstance(self, ServerSessionHandler)
                 ):
@@ -314,7 +307,7 @@ class ServerSessionHandler(SessionHandler):
 
         """
         super().__init__(*args, **kwargs)
-        evennia.server_data = {"servername": _SERVERNAME}
+        evennia.server_data = {"servername": settings.SERVERNAME}
         # will be set on psync
         self.portal_start_time = 0.0
         # per-session outbound message buffer for batching (sessid -> [kwargs, ...])
@@ -366,7 +359,7 @@ class ServerSessionHandler(SessionHandler):
 
         # show the first login command, may delay slightly to allow
         # the handshakes to finish.
-        delay(_DELAY_CMD_LOGINSTART, self._run_cmd_login, sess)
+        delay(settings.DELAY_CMD_LOGINSTART, self._run_cmd_login, sess)
 
     def portal_session_sync(self, portalsessiondata):
         """
@@ -422,7 +415,7 @@ class ServerSessionHandler(SessionHandler):
         # tell the server hook we synced
         evennia.EVENNIA_SERVER_SERVICE.at_post_portal_sync(mode)
         # announce the reconnection
-        if _BROADCAST_SERVER_RESTART_MESSAGES:
+        if settings.BROADCAST_SERVER_RESTART_MESSAGES:
             self.announce_all(_(" ... Server restarted."))
 
     def portal_disconnect(self, session):
@@ -541,7 +534,7 @@ class ServerSessionHandler(SessionHandler):
 
         account.at_pre_login()
 
-        if _MULTISESSION_MODE == 0:
+        if settings.MULTISESSION_MODE == 0:
             # disconnect all previous sessions.
             self.disconnect_duplicate_sessions(session)
 
@@ -695,8 +688,8 @@ class ServerSessionHandler(SessionHandler):
             session
             for session in self.values()
             if session.logged_in
-            and _IDLE_TIMEOUT > 0
-            and (tcurr - session.cmd_last) > _IDLE_TIMEOUT
+            and settings.IDLE_TIMEOUT > 0
+            and (tcurr - session.cmd_last) > settings.IDLE_TIMEOUT
         ):
             self.disconnect(session, reason=reason)
 
