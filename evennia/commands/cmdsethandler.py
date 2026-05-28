@@ -80,9 +80,6 @@ from evennia.utils import logger, utils
 __all__ = ("import_cmdset", "CmdSetHandler")
 
 _CACHED_CMDSETS = {}
-_CMDSET_PATHS = utils.make_iter(settings.CMDSET_PATHS)
-_IN_GAME_ERRORS = settings.IN_GAME_ERRORS
-_CMDSET_FALLBACKS = settings.CMDSET_FALLBACKS
 
 
 # Output strings
@@ -153,7 +150,9 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
 
     """
     python_paths = [path] + [
-        "%s.%s" % (prefix, path) for prefix in _CMDSET_PATHS if not path.startswith(prefix)
+        "%s.%s" % (prefix, path)
+        for prefix in utils.make_iter(settings.CMDSET_PATHS)
+        if not path.startswith(prefix)
     ]
     errstring = ""
     for python_path in python_paths:
@@ -201,7 +200,7 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
         except ImportError as err:
             logger.log_trace()
             errstring += _ERROR_CMDSET_IMPORT
-            if _IN_GAME_ERRORS:
+            if settings.IN_GAME_ERRORS:
                 errstring = errstring.format(
                     path=python_path, traceback=format_exc(), timestamp=logger.timeformat()
                 )
@@ -220,7 +219,7 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
         except SyntaxError as err:
             logger.log_trace()
             errstring += _ERROR_CMDSET_SYNTAXERROR
-            if _IN_GAME_ERRORS:
+            if settings.IN_GAME_ERRORS:
                 errstring = errstring.format(
                     path=python_path, traceback=format_exc(), timestamp=logger.timeformat()
                 )
@@ -232,7 +231,7 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
         except Exception as err:
             logger.log_trace()
             errstring += _ERROR_CMDSET_EXCEPTION
-            if _IN_GAME_ERRORS:
+            if settings.IN_GAME_ERRORS:
                 errstring = errstring.format(
                     path=python_path, traceback=format_exc(), timestamp=logger.timeformat()
                 )
@@ -381,13 +380,13 @@ class CmdSetHandler(object):
                         if cmdset:
                             if cmdset.key == "_CMDSET_ERROR":
                                 # If a cmdset fails to load, check if we have a fallback path to use
-                                fallback_path = _CMDSET_FALLBACKS.get(path, None)
+                                fallback_path = settings.CMDSET_FALLBACKS.get(path, None)
                                 if fallback_path:
                                     err = _ERROR_CMDSET_FALLBACK.format(
                                         path=path, fallback_path=fallback_path
                                     )
                                     logger.log_err(err)
-                                    if _IN_GAME_ERRORS:
+                                    if settings.IN_GAME_ERRORS:
                                         self.obj.msg(err)
                                     cmdset = self._import_cmdset(fallback_path)
                                 # If no cmdset is returned from the fallback, we can't go further
@@ -396,7 +395,7 @@ class CmdSetHandler(object):
                                         fallback_path=fallback_path
                                     )
                                     logger.log_err(err)
-                                    if _IN_GAME_ERRORS:
+                                    if settings.IN_GAME_ERRORS:
                                         self.obj.msg(err)
                                     continue
                             cmdset.persistent = cmdset.key != "_CMDSET_ERROR"
