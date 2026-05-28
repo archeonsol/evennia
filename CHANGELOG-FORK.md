@@ -36,6 +36,91 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.35 — Redis attr cache write-behind ordering (Phase 2)
+
+Closes a phantom-data window in the Redis L2 attribute cache. Previously,
+[`RedisCachedModelAttributeBackend.do_update_attribute`](evennia/typeclasses/redis_attr_cache.py)
+called `_cache_set` immediately after `super().do_update_attribute()`,
+which only marks the attr dirty for later `bulk_update`. A crash between
+that Redis publish and the next `flush_all_dirty` left Redis serving
+values PostgreSQL never received, persisting until TTL expiry (~1h).
+
+After this release the invariant is uniform: **Redis is never more
+current than PG**, regardless of write path.
+
+### Engine
+
+- [`evennia/typeclasses/redis_attr_cache.py`](evennia/typeclasses/redis_attr_cache.py):
+  removed the `do_update_attribute` override entirely. Redis is now
+  republished only from `flush_dirty`, which was already ordered
+  correctly (calls `super().flush_dirty()` first; re-raises on
+  `bulk_update` failure; only writes Redis for the exact attrs the
+  parent confirmed flushed). Same-process readers still see new values
+  immediately via the `AttributeHandler` in-process cache, which holds
+  the mutated `attr` instance directly. Cross-process readers see stale
+  Redis values until the next flush tick, matching the implicit PG
+  durability window.
+
+- [`evennia/typeclasses/redis_attr_cache.py`](evennia/typeclasses/redis_attr_cache.py):
+  added `invalidate_attrs(attrs)`. The orphan-dirty path
+  (`_flush_orphan_dirty` for direct `attr.value = X` writes) calls
+  `bulk_update` without going through any backend, so its writes would
+  otherwise leave Redis stale forever. `invalidate_attrs` groups the
+  flushed attrs by `db_model`, resolves owner pks via the through-table
+  per model, and drops the affected Redis keys in one round-trip. Best-
+  effort: no-op when Redis is disabled or unavailable.
+
+- [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py):
+  `_flush_orphan_dirty` now calls `invalidate_attrs(dirty)` after a
+  successful `bulk_update`.
+
+### Settings
+
+- [`evennia/settings_default.py`](evennia/settings_default.py):
+  `ATTRIBUTE_FLUSH_ON_MAINTENANCE` defaults from `False` to `True`.
+  With the publish-on-flush invariant in place, this caps cross-process
+  Redis staleness at the maintenance tick (~60s) rather than the
+  opportunistic `flush_if_pending` cadence (which depended on reads
+  triggering a flush). Existing deployments that disabled this for
+  perf reasons should set it explicitly in `settings.py`.
+
+### Tests
+
+- [`evennia/typeclasses/tests/test_attribute_fork.py`](evennia/typeclasses/tests/test_attribute_fork.py):
+  three new regressions:
+  - `test_update_does_not_publish_redis_before_flush` — handler-driven
+    update marks dirty without touching Redis; `flush_dirty` publishes.
+  - `test_flush_failure_does_not_publish_redis` — if `bulk_update`
+    raises, Redis is left untouched and entries stay queued for retry.
+  - `test_orphan_flush_invalidates_redis` — direct `attr.value = X`
+    triggers Redis drop via `invalidate_attrs` after the orphan flush.
+
+  `evennia.typeclasses` suite goes 55/55 green.
+
+### Migration
+
+No required changes for downstream games. Two behavior shifts to be
+aware of:
+
+1. Cross-process readers may briefly see a previous value for an
+   attribute that was just written in another process, up to the next
+   `flush_all_dirty` tick. Same-process readers are unaffected (they
+   see the mutated in-memory attr immediately).
+2. With `ATTRIBUTE_FLUSH_ON_MAINTENANCE` now defaulting `True`, the
+   server maintenance tick will batch-flush dirty attrs every ~60s.
+   Disable explicitly in `settings.py` if your deployment hand-tunes
+   flush cadence elsewhere.
+
+### Discovered (not fixed in this release)
+
+`_flush_orphan_dirty` removes attrs from `_ORPHAN_DIRTY_ATTRS` before
+calling `bulk_update`. If `bulk_update` raises, the dirty entries are
+lost rather than retried — same failure shape that backend `flush_dirty`
+was already hardened against. Captured as Phase 2b in
+[`.fleet-review/engine-cleanup-checklist.md`](.fleet-review/engine-cleanup-checklist.md).
+
+---
+
 ## 6.0.0+underspire.34 — Module-cached settings sweep (Phase 1)
 
 Engine-wide cleanup of the "module-level `_X = settings.Y` snapshot

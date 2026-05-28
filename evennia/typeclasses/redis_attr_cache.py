@@ -147,7 +147,20 @@ class _AttrConn:
 class RedisCachedModelAttributeBackend(ModelAttributeBackend):
     """
     ModelAttributeBackend with Redis L2 in front of PG reads.
-    Writes go through parent (write-behind to PG); Redis keys updated or dropped.
+
+    Write ordering: updates mark the attr dirty (deferred PG write) without
+    touching Redis. Redis is republished only by ``flush_dirty`` after
+    ``bulk_update`` succeeds, enforcing the invariant that Redis is never
+    more current than PG. This avoids a phantom-data window where a crash
+    between cache publish and PG flush would leave Redis serving values
+    PG never saw. Deletes drop Redis immediately (delete is a synchronous
+    PG op, not write-behind).
+
+    Same-process readers still see new values after ``do_update_attribute``
+    via the AttributeHandler's in-process cache (the mutated attr object
+    is the same instance). Cross-process readers see stale Redis values
+    until the next ``flush_all_dirty`` tick, which is the same window as
+    PG durability.
     """
 
     def _cache_set(self, key, category, attr, *, mark_missing=False, nx_only=False):
@@ -318,10 +331,6 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
         self._cache_set(key, category, attr)
         return attr
 
-    def do_update_attribute(self, attr, value, strvalue):
-        super().do_update_attribute(attr, value, strvalue)
-        self._cache_set(attr.db_key, attr.db_category, attr)
-
     def do_delete_attribute(self, attr):
         key, category = attr.db_key, attr.db_category
         super().do_delete_attribute(attr)
@@ -338,6 +347,65 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             if attr and attr.pk:
                 self._cache_set(attr.db_key, attr.db_category, attr)
         return flushed
+
+
+# Maps Attribute.db_model values to (app_label, model_name) for through-table
+# lookups. Owner classes all live under TypedObject and expose db_attributes
+# M2M; this lets invalidate_attrs() map orphan-flushed Attributes back to the
+# owner pk(s) needed to compose Redis keys.
+_OWNER_MODEL_LOOKUP = {
+    "objectdb": ("objects", "ObjectDB"),
+    "accountdb": ("accounts", "AccountDB"),
+    "scriptdb": ("scripts", "ScriptDB"),
+    "channeldb": ("comms", "ChannelDB"),
+}
+
+
+def invalidate_attrs(attrs) -> None:
+    """Drop Redis cache entries for the given Attributes.
+
+    Called by the orphan-flush path after a successful ``bulk_update`` so a
+    direct ``attr.value = X`` write (which bypasses backend.flush_dirty)
+    still invalidates Redis. Without this, cross-process readers would
+    serve stale cached values until TTL expiry even though PG was updated.
+
+    Best-effort: silent no-op when Redis is disabled, unavailable, or a
+    lookup fails. The next read repopulates Redis from PG.
+    """
+    if not _enabled() or not attrs:
+        return
+    r = _redis_conn()
+    if not r:
+        return
+    try:
+        from django.apps import apps
+
+        by_model: dict = {}
+        for attr in attrs:
+            if not attr or not getattr(attr, "pk", None):
+                continue
+            model = (getattr(attr, "db_model", "") or "").lower()
+            if model in _OWNER_MODEL_LOOKUP:
+                by_model.setdefault(model, []).append(attr)
+        keys_to_delete = []
+        for model, model_attrs in by_model.items():
+            app_label, class_name = _OWNER_MODEL_LOOKUP[model]
+            Owner = apps.get_model(app_label, class_name)
+            attr_by_pk = {a.pk: a for a in model_attrs}
+            through = Owner.db_attributes.through
+            owner_fk = f"{model}_id"
+            for owner_id, attr_id in through.objects.filter(
+                attribute_id__in=list(attr_by_pk.keys())
+            ).values_list(owner_fk, "attribute_id"):
+                attr = attr_by_pk.get(attr_id)
+                if attr:
+                    keys_to_delete.append(
+                        _redis_key(model, owner_id, attr.db_key, attr.db_category)
+                    )
+        if keys_to_delete:
+            r.delete(*keys_to_delete)
+    except Exception:
+        logger.log_trace("redis_attr_cache.invalidate_attrs")
 
 
 def flush_all_keys() -> int:

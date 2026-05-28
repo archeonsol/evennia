@@ -595,9 +595,11 @@ CMD_ACCESS_CACHE_ENABLED = False
 # Log attribute flush batch sizes every N global ticks (0 = off). Uses
 # evennia.typeclasses.attribute_metrics.maybe_log_flush_metrics.
 ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60
-# Safety net: also flush write-behind attrs every server_maintenance (60s).
-# Game ticks should still call flush_all_dirty() on their global tick.
-ATTRIBUTE_FLUSH_ON_MAINTENANCE = False
+# Flush write-behind attrs every server_maintenance (60s). Bounds cross-process
+# Redis staleness to the maintenance window since the Redis L2 cache only
+# republishes after a successful PG flush. Game ticks may also call
+# flush_all_dirty() on their global tick for finer cadence.
+ATTRIBUTE_FLUSH_ON_MAINTENANCE = True
 # Log a warning when flush_all_dirty() reports pending dirty rows above this (0 = off).
 ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD = 0
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).

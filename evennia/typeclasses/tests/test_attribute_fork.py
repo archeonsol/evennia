@@ -7,13 +7,9 @@ from unittest.mock import MagicMock
 from django.test import override_settings
 from mock import patch
 
-from evennia.typeclasses.attributes import (
-    Attribute,
-    ModelAttributeBackend,
-    _classify_value,
-    _mark_attr_dirty,
-    flush_all_dirty,
-)
+from evennia.typeclasses.attributes import (Attribute, ModelAttributeBackend,
+                                            _classify_value, _mark_attr_dirty,
+                                            flush_all_dirty)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -261,3 +257,178 @@ class TestRedisAttrCache(BaseEvenniaTest):
 
         with patch.object(redis_attr_cache, "_redis_conn", return_value=None):
             self.assertEqual(redis_attr_cache.flush_all_keys(), 0)
+
+    @override_settings(
+        ATTRIBUTE_REDIS_CACHE_ENABLED=True,
+        ATTRIBUTE_BACKEND_CLASS=(
+            "evennia.typeclasses.redis_attr_cache.RedisCachedModelAttributeBackend"
+        ),
+    )
+    def test_update_does_not_publish_redis_before_flush(self):
+        # Invariant: Redis is never more current than PG. ``do_update_attribute``
+        # marks the attr dirty without touching Redis; the publish happens in
+        # ``flush_dirty`` after ``bulk_update`` succeeds. This prevents
+        # phantom-data after a crash between cache write and PG flush.
+        from evennia.typeclasses import redis_attr_cache
+        from evennia.typeclasses.attributes import flush_all_dirty
+
+        calls = []
+
+        class FakeRedis:
+            def get(self, key):
+                return None
+
+            def set(self, *a, **k):
+                calls.append(("set", a, k))
+
+            def sadd(self, *a, **k):
+                calls.append(("sadd", a, k))
+
+            def srem(self, *a, **k):
+                calls.append(("srem", a, k))
+
+            def delete(self, *a, **k):
+                calls.append(("delete", a, k))
+
+            def expire(self, *a, **k):
+                pass
+
+            def exists(self, key):
+                return 0
+
+            def smembers(self, key):
+                return set()
+
+            def pipeline(self, transaction=False):
+                pipe_calls = calls
+
+                class _Pipe:
+                    def set(self, *a, **k):
+                        pipe_calls.append(("set", a, k))
+                        return self
+
+                    def sadd(self, *a, **k):
+                        pipe_calls.append(("sadd", a, k))
+                        return self
+
+                    def srem(self, *a, **k):
+                        pipe_calls.append(("srem", a, k))
+                        return self
+
+                    def delete(self, *a, **k):
+                        pipe_calls.append(("delete", a, k))
+                        return self
+
+                    def expire(self, *a, **k):
+                        return self
+
+                    def execute(self):
+                        return []
+
+                return _Pipe()
+
+        self.obj1.attributes.add("wb_redis", 1)
+        if "attributes" in self.obj1.__dict__:
+            del self.obj1.__dict__["attributes"]
+
+        with patch.object(redis_attr_cache, "_redis_conn", return_value=FakeRedis()):
+            backend = self.obj1.attributes.backend
+            attr = self.obj1.attributes.get("wb_redis", return_obj=True)
+            calls.clear()
+            backend.update_attribute(attr, 99, False)
+            self.assertEqual(calls, [], "do_update_attribute must not touch Redis pre-flush")
+            flush_all_dirty()
+            self.assertTrue(
+                any(op == "set" for op, _, _ in calls),
+                "flush_dirty should publish the new value to Redis",
+            )
+
+    @override_settings(
+        ATTRIBUTE_REDIS_CACHE_ENABLED=True,
+        ATTRIBUTE_BACKEND_CLASS=(
+            "evennia.typeclasses.redis_attr_cache.RedisCachedModelAttributeBackend"
+        ),
+    )
+    def test_flush_failure_does_not_publish_redis(self):
+        # If bulk_update raises, the parent re-raises before Redis publish.
+        # The dirty entries stay queued for retry, Redis is untouched, and
+        # readers continue to see whatever PG holds.
+        from evennia.typeclasses import redis_attr_cache
+        from evennia.typeclasses.attributes import flush_all_dirty
+
+        publish_calls = []
+
+        class FakeRedis:
+            def get(self, key):
+                return None
+
+            def exists(self, key):
+                return 0
+
+            def smembers(self, key):
+                return set()
+
+            def pipeline(self, transaction=False):
+                outer = publish_calls
+
+                class _Pipe:
+                    def set(self, *a, **k):
+                        outer.append(("set", a, k))
+                        return self
+
+                    def sadd(self, *a, **k):
+                        return self
+
+                    def expire(self, *a, **k):
+                        return self
+
+                    def execute(self):
+                        return []
+
+                return _Pipe()
+
+        self.obj1.attributes.add("wb_fail", 1)
+        if "attributes" in self.obj1.__dict__:
+            del self.obj1.__dict__["attributes"]
+
+        with patch.object(redis_attr_cache, "_redis_conn", return_value=FakeRedis()):
+            backend = self.obj1.attributes.backend
+            attr = self.obj1.attributes.get("wb_fail", return_obj=True)
+            backend.update_attribute(attr, 7, False)
+            publish_calls.clear()
+            with patch.object(Attribute.objects, "bulk_update", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    flush_all_dirty()
+            self.assertEqual(
+                publish_calls,
+                [],
+                "Redis must not be published when bulk_update fails",
+            )
+
+    @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=True)
+    def test_orphan_flush_invalidates_redis(self):
+        # Direct ``attr.value = X`` writes go through the orphan-dirty path,
+        # which calls ``bulk_update`` without touching any backend. Redis
+        # would otherwise serve the stale pre-write payload until TTL.
+        # invalidate_attrs() must drop the affected keys after the PG write.
+        from evennia.typeclasses import redis_attr_cache
+        from evennia.typeclasses.attributes import flush_all_dirty
+
+        deletes = []
+
+        class FakeRedis:
+            def delete(self, *keys):
+                deletes.extend(keys)
+                return len(keys)
+
+        self.obj1.attributes.add("orphan_redis", 1)
+        attr = Attribute.objects.filter(db_key="orphan_redis", db_model__iexact="objectdb").first()
+        self.assertIsNotNone(attr)
+        attr.value = 42  # orphan-dirty path
+
+        expected_key = redis_attr_cache._redis_key("objectdb", self.obj1.id, "orphan_redis", None)
+
+        with patch.object(redis_attr_cache, "_redis_conn", return_value=FakeRedis()):
+            flush_all_dirty()
+
+        self.assertIn(expected_key, deletes)
