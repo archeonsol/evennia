@@ -74,7 +74,10 @@ def _cmd_identity(cmd) -> Tuple:
 
 
 def _lookup_key(cmd, caller, session=None) -> Tuple:
-    sess_id = id(session) if session is not None else None
+    # session.sessid is the stable per-connection identifier; using id()
+    # risked aliasing if a Session was GC'd and a new one landed at the
+    # same address while the caller's ndb cache outlived it.
+    sess_id = getattr(session, "sessid", None) if session is not None else None
     return (_generation(caller), _cmd_identity(cmd), sess_id)
 
 

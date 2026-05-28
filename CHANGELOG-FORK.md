@@ -36,6 +36,146 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.32 — Cmdset cache invalidation, stale typeclass paths, `id()` cache keys
+
+Follow-up cleanup pass closing out the remaining fleet-review batches.
+No API surface change — downstream consumers should be able to bump
+straight from `.31` and run. No new migrations.
+
+Full test suite goes from 3 failing on `.31` to 2 (the last two are
+a wilderness contrib that's broken at import-time and one upstream
+test stale from `.29`'s `_runtime_config_row` optimization).
+
+### Engine — cmdset cache subsystem (A1, A2, A3, T2-7)
+
+- [`evennia/objects/mixins/movement.py`](evennia/objects/mixins/movement.py)
+  `MovementMixin.move_to`: after a successful move, bumps the
+  `_cmdset_generation` counter on both the source and destination
+  locations via `evennia.commands.location_cmdset_cache.bump_cmdset_generation`.
+  The location-cmdset cache key is keyed by location generation, so this
+  is what actually invalidates it when room contents change.
+- [`evennia/objects/mixins/lifecycle.py`](evennia/objects/mixins/lifecycle.py)
+  `LifecycleMixin.delete`: bumps the location's generation before
+  nulling `self.location`. Object deletion now invalidates the
+  containing room's cached cmdset set.
+
+  These two together fix the long-standing "after the first cache fill,
+  players entering a room see the original cmdset forever" bug —
+  `bump_cmdset_generation` was previously only fired on cmdset *stack*
+  mutations, not on the movements/lifecycle events that change what
+  the cache aggregates over.
+
+- [`evennia/commands/cmdhandler.py`](evennia/commands/cmdhandler.py)
+  Local-cmdset cache restructure. Now caches the filtered object list
+  (post-`access('call')` filter, the expensive per-caller work) instead
+  of the final `cmdset_stack` list. On each dispatch we re-run
+  `at_cmdset_get(caller=caller)` per object and re-read each object's
+  `cmdset.cmdset_stack`. `at_cmdset_get` is documented as a per-request
+  dynamic hook for game code that mutates the cmdset stack live; the
+  old cache silenced those mutations from the 2nd dispatch onward.
+- `cmdhandler.py` also shallow-copies the gathered csets before
+  applying the room-gather `duplicates` rule (treat `None` as `True`).
+  The previous in-place mutation on shared cset references raced
+  concurrent dispatches that interleaved through `yield` points in
+  the merge loop, occasionally leaking `duplicates=True` past the
+  intended restore. The restore loop is gone — copies are per-call,
+  nothing's shared with the next dispatch, originals stay `None`.
+- [`evennia/commands/cmdsethandler.py`](evennia/commands/cmdsethandler.py)
+  `_invalidate_cmd_access_caches` no longer swallows exceptions
+  silently; a failure here would leak stale permission decisions
+  (cached `cmd.access` results returning True for commands whose
+  cmdset was just revoked).
+
+### Engine — stale `evennia.objects.objects` typeclass paths
+
+After the underspire object-module refactor, `DefaultObject` and
+friends live at `evennia.objects.object.DefaultObject` (singular,
+since each class moved into its own module). The old
+`evennia.objects.objects` path remains only as a compatibility shim
+that re-exports the new classes. `__class__.__module__` always returns
+the new singular path.
+
+- [`evennia/locks/lockfuncs.py`](evennia/locks/lockfuncs.py): three
+  `utils.inherits_from` calls (in `perm`, `perm_above` via `perm`,
+  and `_to_account`) passed the stale plural string, making the
+  `DefaultObject` check unconditionally return False for puppeted
+  characters. Puppet/quell/perm-above lockfuncs all then routed
+  through the no-account branch and ignored the account's permissions
+  — including the security-relevant "puppet escalation prevention"
+  path. Updated to the new singular path.
+- [`evennia/objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py),
+  [`evennia/prototypes/tests.py`](evennia/prototypes/tests.py),
+  [`evennia/commands/default/tests.py`](evennia/commands/default/tests.py):
+  fixtures and assertions all updated. The spawner's
+  `prototype_from_object` normalises typeclass paths via
+  `class_from_module(...).__module__`, so it emits the new singular
+  form. The tests now match.
+
+### Engine — settings-blind regex caches
+
+- [`evennia/commands/cmdparser.py`](evennia/commands/cmdparser.py) and
+  [`evennia/objects/manager.py`](evennia/objects/manager.py) both
+  module-cached `re.compile(settings.SEARCH_MULTIMATCH_REGEX)` at
+  import time. Tests and downstream code using `@override_settings`
+  or runtime mutation could not affect the cached value. Both now go
+  through `evennia.utils.multimatch._multimatch_regex()` which compiles
+  freshly from current settings each call (already the pattern used
+  elsewhere in the multimatch module). Compile cost is negligible.
+
+### Engine — `id()` cache keys replaced with stable identifiers
+
+CPython recycles `id()` after GC. A freed object plus a freshly-allocated
+object at the same address would silently alias under any cache that
+used `id()` as part of its key — returning the prior object's result.
+
+- [`evennia/utils/display_name_cache.py`](evennia/utils/display_name_cache.py):
+  the per-looker ndb cache keyed on `(id(obj), id(looker), ...)`.
+  `looker` is already implicit in the per-looker ndb store, so removing
+  `id(looker)` from the key is a tidiness fix. `id(obj)` swapped for
+  `obj.pk` (falling back to `id(obj)` only for unsaved transient
+  objects, which can't outlive their dispatch anyway).
+- [`evennia/commands/cmd_access_cache.py`](evennia/commands/cmd_access_cache.py):
+  `id(session)` in the lookup key swapped for `session.sessid`.
+- [`evennia/locks/lockhandler.py`](evennia/locks/lockhandler.py): the
+  per-caller lock check cache keyed on `(id(self.obj), ..., id(session))`
+  for Command instances (which have no pk). Now keys on
+  `(class.__module__, class.__name__, cmd.obj.pk, ..., session.sessid)`.
+  Two Command instances of the same class bound to the same DB object
+  share lock decisions (which is correct — the lockstring is class-level
+  and `holds()`-style lockfuncs check the bound object). Commands without
+  a bound `cmd.obj` or sessions without `sessid` now bypass the cache
+  rather than aliasing on `id()`.
+
+### Tests
+
+- [`evennia/objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py)
+  `test_search_autopick`, `test_search_ordinal_last`,
+  `test_search_location_scope`: updated to expect the documented
+  `quiet=True` returns a list contract. The previous assertions
+  documented an alternate "autopick fires in quiet mode" contract
+  that conflicted with `test_search_by_tag_kwarg`'s also-pre-existing
+  expectation and that would have silently broken downstream callers
+  iterating quiet-mode results as a list. Autopick semantics are
+  preserved via the non-quiet path.
+- [`evennia/commands/tests.py`](evennia/commands/tests.py) removed
+  the stale `test_num_differentiators`. It exercised a suffix-N
+  regex form ("look me-3") that was removed when the counting
+  feature was reworked. `test_num_differentiators_hyphenated_names`
+  below covers the current prefix-N syntax.
+- [`evennia/typeclasses/tests/test_typeclasses.py`](evennia/typeclasses/tests/test_typeclasses.py):
+  one dotted-path string in `test_typeclass_search__inputs` still
+  pointed at the old single-module location of the test fixture
+  class (before `tests.py` was moved into the `tests/` package).
+  Updated to the new path.
+
+### Migration
+
+None. No schema changes, no settings changes, no API surface change.
+Downstream consumers should be able to bump from `.31` to `.32` and
+run directly.
+
+---
+
 ## 6.0.0+underspire.31 — Make `0020_remove_redundant_tag_index` tolerate phantom-applied history
 
 [`evennia/typeclasses/migrations/0020_remove_redundant_tag_index.py`](evennia/typeclasses/migrations/0020_remove_redundant_tag_index.py)
