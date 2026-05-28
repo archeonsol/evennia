@@ -135,7 +135,6 @@ from evennia.utils.logger import log_err, log_trace
 from evennia.utils.utils import class_from_module
 
 # Constants
-_MAX_TEXT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
 _CMD_NOMATCH = cmdhandler.CMD_NOMATCH
 _CMD_NOINPUT = cmdhandler.CMD_NOINPUT
 

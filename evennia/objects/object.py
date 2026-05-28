@@ -49,15 +49,19 @@ from evennia.objects.mixins.movement import MovementMixin
 from evennia.objects.mixins.search import SearchMixin
 
 _INFLECT = inflect.engine()
-_MULTISESSION_MODE = settings.MULTISESSION_MODE
 
 _ScriptDB = None
 _CMDHANDLER = None
 
 _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))
 _COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
-# the sessid_max is based on the length of the db_sessid csv field (excluding commas)
-_SESSID_MAX = 16 if _MULTISESSION_MODE in (1, 3) else 1
+
+
+def _sessid_max():
+    # The sessid_max is based on the length of the db_sessid csv field
+    # (excluding commas). Multisession modes 1 and 3 allow multiple sessions
+    # per object; modes 0 and 2 allow only one.
+    return 16 if settings.MULTISESSION_MODE in (1, 3) else 1
 
 # init the actor-stance funcparser for msg_contents
 _MSG_CONTENTS_PARSER = funcparser.FuncParser(funcparser.ACTOR_STANCE_CALLABLES)
@@ -155,7 +159,7 @@ class ObjectSessionHandler:
 
         sessid_cache = self._sessid_cache
         if sessid in evennia.SESSION_HANDLER and sessid not in sessid_cache:
-            if len(sessid_cache) >= _SESSID_MAX:
+            if len(sessid_cache) >= _sessid_max():
                 return
             sessid_cache.append(sessid)
             self.obj.db_sessid = ",".join(str(val) for val in sessid_cache)

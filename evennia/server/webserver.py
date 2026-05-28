@@ -28,10 +28,6 @@ from twisted.web.wsgi import WSGIResource
 
 from evennia.utils import logger
 
-_UPSTREAM_IPS = settings.UPSTREAM_IPS
-_DEBUG = settings.DEBUG
-
-
 class LockableThreadPool(threadpool.ThreadPool):
     """
     Threadpool that can be locked from accepting new requests.
@@ -75,7 +71,7 @@ class HTTPChannelWithXForwardedFor(http.HTTPChannel):
             req = self.requests[-1]
             client_ip, port = self.transport.client
             proxy_chain = req.getHeader("X-FORWARDED-FOR")
-            if proxy_chain and client_ip in _UPSTREAM_IPS:
+            if proxy_chain and client_ip in settings.UPSTREAM_IPS:
                 forwarded = proxy_chain.split(", ", 1)[CLIENT]
                 self.transport.client = (forwarded, port)
 
@@ -239,7 +235,7 @@ class Website(server.Site):
 
     def log(self, request):
         """Conditional logging"""
-        if _DEBUG:
+        if settings.DEBUG:
             server.Site.log(self, request)
 
 

@@ -29,8 +29,6 @@ from evennia.objects.models import ObjectDB
 from evennia.utils.evmenu import EvMenu
 from evennia.utils.utils import is_iter, string_partial_matching
 
-_MAX_NR_CHARACTERS = settings.MAX_NR_CHARACTERS
-
 try:
     _CHARGEN_MENU = settings.CHARGEN_MENU
 except AttributeError:
@@ -197,10 +195,11 @@ class ContribChargenAccount(DefaultAccount):
         if not characters:
             txt_characters = "You don't have a character yet."
         else:
+            _max_chars = settings.MAX_NR_CHARACTERS
             max_chars = (
                 "unlimited"
-                if self.is_superuser or _MAX_NR_CHARACTERS is None
-                else _MAX_NR_CHARACTERS
+                if self.is_superuser or _max_chars is None
+                else _max_chars
             )
 
             char_strings = []

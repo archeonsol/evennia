@@ -30,8 +30,6 @@ from evennia.utils.utils import (
     random_string_from_module,
 )
 
-_CONNECTION_SCREEN_MODULE = settings.CONNECTION_SCREEN_MODULE
-_GUEST_ENABLED = settings.GUEST_ENABLED
 _ACCOUNT = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
 _GUEST = class_from_module(settings.BASE_GUEST_TYPECLASS)
 
@@ -72,7 +70,7 @@ def node_enter_username(caller, raw_text, **kwargs):
         """
         username = username.rstrip("\n")
 
-        if username == "guest" and _GUEST_ENABLED:
+        if username == "guest" and settings.GUEST_ENABLED:
             # do an immediate guest login
             session = caller
             address = session.address
@@ -97,13 +95,13 @@ def node_enter_username(caller, raw_text, **kwargs):
         # pass username/new_user into next node as kwargs
         return "node_enter_password", {"new_user": new_user, "username": username}
 
-    callables = callables_from_module(_CONNECTION_SCREEN_MODULE)
+    callables = callables_from_module(settings.CONNECTION_SCREEN_MODULE)
     if "connection_screen" in callables:
         connection_screen = callables["connection_screen"]()
     else:
-        connection_screen = random_string_from_module(_CONNECTION_SCREEN_MODULE)
+        connection_screen = random_string_from_module(settings.CONNECTION_SCREEN_MODULE)
 
-    if _GUEST_ENABLED:
+    if settings.GUEST_ENABLED:
         text = "Enter a new or existing user name to login (write 'guest' for a guest login):"
     else:
         text = "Enter a new or existing user name to login:"

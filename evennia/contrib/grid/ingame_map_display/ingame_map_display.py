@@ -64,8 +64,15 @@ from django.conf import settings
 from evennia import CmdSet
 from evennia.commands.command import Command
 
-_BASIC_MAP_SIZE = settings.BASIC_MAP_SIZE if hasattr(settings, "BASIC_MAP_SIZE") else 2
-_MAX_MAP_SIZE = settings.BASIC_MAP_SIZE if hasattr(settings, "MAX_MAP_SIZE") else 10
+def _basic_map_size():
+    return getattr(settings, "BASIC_MAP_SIZE", 2)
+
+
+def _max_map_size():
+    # NB: original code keyed on BASIC_MAP_SIZE here too (probably a typo
+    # for MAX_MAP_SIZE), but kept the same behavior to avoid a silent
+    # behavior change. Inspect before retitling.
+    return getattr(settings, "BASIC_MAP_SIZE", 10) if hasattr(settings, "MAX_MAP_SIZE") else 10
 
 # _COMPASS_DIRECTIONS specifies which way to move the pointer on the x/y axes and what characters to use to depict the exits on the map.
 _COMPASS_DIRECTIONS = {
@@ -83,7 +90,7 @@ _COMPASS_DIRECTIONS = {
 
 
 class Map(object):
-    def __init__(self, caller, size=_BASIC_MAP_SIZE, location=None):
+    def __init__(self, caller, size=None, location=None):
         """
         Initializes the map.
 
@@ -94,6 +101,8 @@ class Map(object):
         """
         self.start_time = time.time()
         self.caller = caller
+        if size is None:
+            size = _basic_map_size()
         self.max_width = int(size * 2 + 1) * 5  # This must be an odd number
         self.max_length = int(size * 2 + 1) * 3  # This must be an odd number
         self.has_mapped = {}
@@ -304,8 +313,8 @@ class CmdMap(Command):
     key = "map"
 
     def func(self):
-        size = _BASIC_MAP_SIZE
-        max_size = _MAX_MAP_SIZE
+        size = _basic_map_size()
+        max_size = _max_map_size()
         if self.args.isnumeric():
             size = min(max_size, int(self.args))
 
