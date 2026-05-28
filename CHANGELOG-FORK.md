@@ -36,6 +36,109 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.33 — Tier 1 security/correctness fixes from fleet-review audit
+
+Targeted pass over the highest-signal findings from the fleet-review
+engine audit. Five concrete fixes plus a defense-in-depth invariant
+test. Touched-area test suites (`evennia.utils.tests.test_text2html`,
+`evennia.server.tests`, `evennia.web`, `evennia.events`) go 143/143
+green, including the previously stale `test__server_maintenance_reset`
+left over from `.29`'s `_runtime_config_row` optimization.
+
+### Security
+
+- [`evennia/server/evennia_launcher.py`](evennia/server/evennia_launcher.py)
+  `_check_database` move-existing-superuser confirmation prompt
+  replaces `eval(input("Continue [Y]/N: "))` with `input(...).strip()`.
+  The `eval` was a latent footgun (empty input would `SyntaxError`)
+  with no purpose at that prompt; the loop logic still works because
+  it operates on strings.
+
+- [`evennia/server/portal/amp.py`](evennia/server/portal/amp.py)
+  `AMPConnection.data_in` legacy pickle fallback is now gated on
+  `AMP_SESSION_ACCEPT_LEGACY_PICKLE`. The docstring already documented
+  this as the contract; previously the code accepted legacy pickle
+  unconditionally regardless of setting. Aligns admin-channel
+  behavior with the matching gate already in
+  [`amp_serde.accept_legacy_session_pickle`](evennia/server/amp_serde.py).
+
+- [`evennia/server/portal/amp.py`](evennia/server/portal/amp.py)
+  `receive_functioncall` allowlist is now fail-closed. Empty
+  `AMP_FUNCTIONCALL_MODULES` disables FunctionCall entirely (matching
+  the [`settings_default.py`](evennia/settings_default.py) docstring's
+  "an empty tuple disables FunctionCall entirely"); previously empty
+  meant "allow any module", which inverted the safer default. Vanilla
+  ships a populated tuple so this only affects deployments that
+  explicitly emptied the setting — those were relying on a fail-open
+  behavior bug.
+
+- [`evennia/server/portal/webclient.py`](evennia/server/portal/webclient.py)
+  `_send_text_legacy` adds a sharp warning comment on the
+  `client_raw=True` opt-out so a future contributor doesn't
+  accidentally route player-influenced content through it.
+  No behavior change.
+
+- [`evennia/utils/tests/test_text2html.py`](evennia/utils/tests/test_text2html.py)
+  New `test_parse_html_escapes_user_html` pins the XSS invariant
+  that the fleet-review audit had flagged. `parse_html` is the trust
+  boundary for the webclient (default_out plugin renders its output
+  via `.html()`/string concat), so raw `<`, `>`, `&` from upstream
+  text must always come out as entities before any tag generation.
+  This was already true via `re_string` → `sub_text` running first
+  in [`text2html.TextToHTMLparser.parse`](evennia/utils/text2html.py);
+  the test exists so a future refactor can't silently regress it.
+
+### Correctness
+
+- [`evennia/web/api/views.py`](evennia/web/api/views.py)
+  `ObjectDBViewSet.set_attribute` no longer treats falsy `db_value`
+  (`0`, `False`, `""`) as a delete request. Now keys deletion off
+  `value is None`, so REST clients can store legitimate zero/empty
+  values without them being silently removed.
+
+- [`evennia/events/bus.py`](evennia/events/bus.py)
+  `emit` stores `actor.dbref` (e.g. `"#42"`) instead of `str(actor)`
+  (which was usually the account/object name). The docstring already
+  advertised "stored as dbref string only"; this brings the code
+  into line so actor refs survive renames and remain stable for
+  audit joins.
+
+### Tests
+
+- [`evennia/server/tests/test_server.py`](evennia/server/tests/test_server.py)
+  `test__server_maintenance_reset` was asserting the pre-`.29`
+  contract (`conf("runtime", value)` called every tick). Since
+  `.29`'s `_runtime_config_row` optimization, the first maintenance
+  tick reads via `conf("runtime", default=0.0)` and subsequent ticks
+  persist directly to the cached `ServerConfig` row. Test updated to
+  match the new contract.
+
+### Migration notes
+
+- **REST clients**: any tooling that relies on PUT-ing
+  `{"db_value": 0}` or `{"db_value": ""}` to delete an attribute via
+  the REST API must now send no `db_value` field (or explicit `null`)
+  to delete. The old falsy-delete behavior was a bug.
+
+- **`AMP_FUNCTIONCALL_MODULES`**: if your `settings.py` explicitly
+  sets this to an empty tuple, FunctionCall is now disabled instead
+  of allowing any module. Restore the default by removing the
+  override or by populating it with `("evennia.server.portal.amp_server",
+  "evennia.server.amp_client")`.
+
+- **`AMP_SESSION_ACCEPT_LEGACY_PICKLE`**: if you have two processes
+  mid-rolling-restart with the legacy pickle wire format on the
+  *admin* channel (separate from the session channel which was
+  already gated), set this to `True` for the restart window. Vanilla
+  installs and any fully-upgraded fork are not affected.
+
+- **`GameEvent.actor_ref` format**: new event rows store dbrefs
+  (`"#42"`) instead of names. Old rows keep their existing format.
+  Anything that filters or joins on `actor_ref` will see mixed
+  formats across the changeover boundary.
+
+---
+
 ## 6.0.0+underspire.32 — Cmdset cache invalidation, stale typeclass paths, `id()` cache keys
 
 Follow-up cleanup pass closing out the remaining fleet-review batches.
