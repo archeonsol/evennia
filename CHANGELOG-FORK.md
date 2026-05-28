@@ -36,6 +36,159 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.34 — Module-cached settings sweep (Phase 1)
+
+Engine-wide cleanup of the "module-level `_X = settings.Y` snapshot
+at import time" anti-pattern. These snapshots silently broke
+`@override_settings` decorators (a class of tests was no-op'ing
+without anyone noticing) and runtime reloads of `settings.py`.
+
+After this release, behavioral settings are read via `settings.X`
+directly at the call site across the engine. Django caches
+`settings` attribute access internally, so the per-call cost is
+sub-microsecond and the readability gain (no hidden snapshot layer)
+is substantial. No `LazySetting` machinery was added; only revisit
+if a real perf regression appears.
+
+Touched-area test suites (`evennia.utils`, `evennia.server.tests`,
+`evennia.web`, `evennia.accounts`, `evennia.commands`,
+`evennia.typeclasses`, `evennia.events`, `evennia.help`) go
+1154/1154 green.
+
+### Engine — modules converted
+
+- [`evennia/server/sessionhandler.py`](evennia/server/sessionhandler.py):
+  six snapshots inlined — `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED`,
+  `BROADCAST_SERVER_RESTART_MESSAGES`, `SERVERNAME`, `MULTISESSION_MODE`,
+  `IDLE_TIMEOUT`, `DELAY_CMD_LOGINSTART`.
+
+- [`evennia/accounts/accounts.py`](evennia/accounts/accounts.py):
+  six snapshots — `MULTISESSION_MODE` (3 sites),
+  `AUTO_CREATE_CHARACTER_WITH_ACCOUNT`, `AUTO_PUPPET_ON_LOGIN`,
+  `MAX_NR_SIMULTANEOUS_PUPPETS`, `MAX_NR_CHARACTERS`, `CMDSET_ACCOUNT`.
+
+- [`evennia/accounts/bots.py`](evennia/accounts/bots.py):
+  five bot-enabled flags (`IRC_ENABLED`, `RSS_ENABLED`,
+  `GRAPEVINE_ENABLED`, `DISCORD_ENABLED` + token check) plus
+  removed an unused `_IDLE_TIMEOUT` snapshot.
+
+- [`evennia/commands/cmdhandler.py`](evennia/commands/cmdhandler.py)
+  + [`evennia/commands/cmdsethandler.py`](evennia/commands/cmdsethandler.py):
+  `IN_GAME_ERRORS` (multiple sites), `CMDSET_MERGE_CACHE_MAXSIZE`,
+  `CMDSET_FALLBACKS`, `CMDSET_PATHS`.
+
+- [`evennia/server/inputfuncs.py`](evennia/server/inputfuncs.py):
+  `IDLE_COMMAND` (tuple-shaping logic moved to a `_idle_commands()`
+  helper) and the `MXP_ENABLED and MXP_OUTGOING_ONLY` compound check.
+
+- [`evennia/server/portal/portalsessionhandler.py`](evennia/server/portal/portalsessionhandler.py):
+  `COMMAND_RATE_WARNING`, `MAX_CHAR_LIMIT_WARNING`.
+
+- [`evennia/utils/funcparser.py`](evennia/utils/funcparser.py):
+  `CLIENT_DEFAULT_WIDTH` (6 sites), `FUNCPARSER_MAX_NESTING`,
+  `FUNCPARSER_START_CHAR`, `FUNCPARSER_ESCAPE_CHAR`. Default args on
+  `FuncParser.__init__` changed from setting-snapshot defaults to
+  `None` with body resolution.
+
+  Also fixed a latent bug in this module: the max-nesting depth check
+  was reading the module constant directly, ignoring any custom
+  `max_nesting` passed to `__init__`. Now stored as
+  `self.max_nesting` and read at the depth check.
+
+- [`evennia/utils/evtable.py`](evennia/utils/evtable.py): `wrap()`
+  and `fill()` default-arg pattern changed to `width=None` with body
+  resolution (default args are evaluated at function-definition
+  time, so a default of `settings.CLIENT_DEFAULT_WIDTH` snapshots
+  at import).
+
+- [`evennia/utils/evmore.py`](evennia/utils/evmore.py),
+  [`evennia/utils/evmenu.py`](evennia/utils/evmenu.py),
+  [`evennia/utils/eveditor.py`](evennia/utils/eveditor.py),
+  [`evennia/utils/utils.py`](evennia/utils/utils.py): inlined
+  `CLIENT_DEFAULT_WIDTH`/`HEIGHT` and `SEARCH_MULTIMATCH_TEMPLATE`.
+  `evennia/utils/ansi.py` lost an unused `_COLOR_NO_DEFAULT`
+  snapshot.
+
+- [`evennia/typeclasses/tags.py`](evennia/typeclasses/tags.py)
+  + [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py):
+  `TYPECLASS_AGGRESSIVE_CACHE` (17+ sites across cache short-circuits).
+  Tests that flip this setting via `@override_settings` now actually
+  exercise both code paths.
+
+- [`evennia/typeclasses/models.py`](evennia/typeclasses/models.py):
+  `PERMISSION_HIERARCHY` (originally a `[p.lower() for p in ...]`
+  transform snapshotted at import) now rebuilds per call in
+  `check_permstring`. 5-element list, sub-microsecond, irrelevant
+  against the DB query already in the function.
+
+- [`evennia/commands/default/*`](evennia/commands/default/):
+  `MAX_NR_CHARACTERS`, `AUTO_PUPPET_ON_LOGIN`, `CLIENT_DEFAULT_WIDTH`
+  (9 sites across `comms.py`/`building.py`),
+  `BROADCAST_SERVER_RESTART_MESSAGES`.
+
+- [`evennia/objects/object.py`](evennia/objects/object.py):
+  `MULTISESSION_MODE` + the derived `_SESSID_MAX` constant. The
+  latter is now a `_sessid_max()` helper.
+
+- [`evennia/server/webserver.py`](evennia/server/webserver.py)
+  + [`evennia/server/portal/webclient.py`](evennia/server/portal/webclient.py)
+  + [`evennia/server/portal/webclient_ajax.py`](evennia/server/portal/webclient_ajax.py):
+  `UPSTREAM_IPS`, `DEBUG`, `SERVERNAME`.
+
+- [`evennia/help/filehelp.py`](evennia/help/filehelp.py):
+  `DEFAULT_HELP_CATEGORY`.
+
+- Contrib: `character_creator` (`MAX_NR_CHARACTERS`), `menu_login`
+  (`CONNECTION_SCREEN_MODULE`, `GUEST_ENABLED`), `building_menu`
+  (removed unused snapshot), `ingame_map_display` (`BASIC_MAP_SIZE`,
+  `MAX_MAP_SIZE` via helpers; default-arg pattern in `Map.__init__`
+  reworked).
+
+### Tests — patch sites updated
+
+Four existing tests had to monkey-patch the module-level snapshots to
+exercise overrides. They now use `self.settings(...)` /
+`@override_settings` as intended:
+
+- [`evennia/commands/default/tests.py`](evennia/commands/default/tests.py)
+  `test_ooc_look`: three nested `patch` blocks collapsed to one
+  `self.settings(...)`.
+- [`evennia/accounts/tests.py`](evennia/accounts/tests.py)
+  `test_puppet_success`: `patch` → `self.settings`.
+- [`evennia/typeclasses/tests/test_typeclasses.py`](evennia/typeclasses/tests/test_typeclasses.py)
+  `test_attrhandler_nocache`: dropped redundant module-constant
+  `patch`, kept `@override_settings`.
+- [`evennia/utils/tests/test_funcparser.py`](evennia/utils/tests/test_funcparser.py)
+  max-nesting test: now mutates `self.parser.max_nesting` directly
+  (matches the bug fix that moved this onto the instance).
+
+### Guideline
+
+The "read settings at the call site" pattern is documented in
+[`.agents/docs/code-style.md`](.agents/docs/code-style.md) under
+"Settings reads", with the rationale and the carve-out for true
+boot constants (paths, crypto issuer, encodings — eight remaining
+sites are deliberately left as import-time snapshots). No
+automated guard: catching this in review is enough.
+
+### Migration notes
+
+- **Downstream code that imports any of the removed `_X` module
+  constants** (e.g. `from evennia.accounts.accounts import _MULTISESSION_MODE`)
+  must read `from django.conf import settings; settings.X` instead.
+  Most consumers wouldn't import these since the underscore prefix
+  signals "private to module", but worth checking.
+- **`FuncParser` subclasses that overrode `_MAX_NESTING`** at module
+  level no longer affect the depth check. Override
+  `self.max_nesting` after `super().__init__()` instead, or pass
+  `max_nesting=N` to `__init__`.
+- **`_HELP_TEXT` width display in `eveditor.py`** is still
+  formatted at import time (the f-string in the help text is
+  cosmetic, not runtime-critical). Editor width math elsewhere
+  in the module now reads live.
+
+---
+
 ## 6.0.0+underspire.33 — Tier 1 security/correctness fixes from fleet-review audit
 
 Targeted pass over the highest-signal findings from the fleet-review
