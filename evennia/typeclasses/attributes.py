@@ -51,14 +51,20 @@ def value_query_filter(value, prefix=""):
     Primitive values bypass ``db_value`` (which stays NULL) and land in
     ``db_int_val`` / ``db_float_val`` / ``db_str_val``. Querying
     ``db_value=value`` for a primitive therefore never matches; this
-    helper returns the filter dict that does.
+    helper returns the filter dict that does. Every branch pins
+    ``db_val_type`` so a primitive search cannot collide with a JSON-
+    serialized container whose ``db_str_val`` text happens to match.
+
+    JSON-safe containers (list/dict, no tuples or other non-JSON types)
+    are matched by serializing the value the same way ``_classify_value``
+    does and comparing ``db_str_val`` under ``db_val_type='json'``.
 
     Args:
         value: The search value.
         prefix: Django ORM lookup prefix (e.g. ``"db_attributes__"``).
 
     Returns:
-        dict: A single-entry dict suitable for ``QuerySet.filter(**...)``.
+        dict: Filter kwargs suitable for ``QuerySet.filter(**...)``.
     """
     if value is None:
         return {f"{prefix}db_val_type": "none"}
@@ -66,11 +72,21 @@ def value_query_filter(value, prefix=""):
     if t is bool:
         return {f"{prefix}db_int_val": int(value), f"{prefix}db_val_type": "bool"}
     if t is int:
-        return {f"{prefix}db_int_val": value, f"{prefix}db_val_type": "int"}
+        if _BIGINT_MIN <= value <= _BIGINT_MAX:
+            return {f"{prefix}db_int_val": value, f"{prefix}db_val_type": "int"}
+        # Oversized ints live in the pickle column; match there.
+        return {f"{prefix}db_value": to_pickle(value)}
     if t is float:
-        return {f"{prefix}db_float_val": value}
+        return {f"{prefix}db_float_val": value, f"{prefix}db_val_type": "float"}
     if t is str:
-        return {f"{prefix}db_str_val": value}
+        return {f"{prefix}db_str_val": value, f"{prefix}db_val_type": "str"}
+    if type(value) in (list, dict) and _is_json_safe(value):
+        import json
+
+        return {
+            f"{prefix}db_str_val": json.dumps(value, ensure_ascii=False),
+            f"{prefix}db_val_type": "json",
+        }
     return {f"{prefix}db_value": value}
 
 
