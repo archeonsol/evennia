@@ -76,7 +76,7 @@ class TypeclassViewSetMixin(GeneralViewSetMixin):
                 handler = obj.nicks
             else:
                 handler = obj.attributes
-            if value:
+            if value is not None:
                 handler.add(key=key, value=value, category=category)
             else:
                 handler.remove(key=key, category=category)

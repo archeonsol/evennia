@@ -163,3 +163,17 @@ class TestText2Html(TestCase):
             "!"
             "</span>",
         )
+
+    def test_parse_html_escapes_user_html(self):
+        # parse_html is the trust boundary for the webclient: the default_out
+        # plugin renders this output via .html()/string concat, so any raw <,
+        # >, & from upstream text must come out as entities, never as live
+        # tags. (" and ' are only sensitive inside attribute values, and
+        # parse_html controls its own attribute construction.)
+        for src, needle in (
+            ("<script>alert(1)</script>", "<script>"),
+            ("<img src=x onerror=alert(1)>", "<img"),
+            ("a & b", "a & b"),
+        ):
+            out = text2html.parse_html(src)
+            self.assertNotIn(needle, out, f"parse_html leaked unescaped HTML for: {src!r}")

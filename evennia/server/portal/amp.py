@@ -542,7 +542,15 @@ class AMPMultiConnectionProtocol(amp.AMP):
         raw = bytes(packed_data)
         if raw[:2] in (b"A1", b"J1"):
             return loads_admin(raw)
-        # Legacy pickle — kept for rolling-restart compatibility only
+        # Legacy pickle path: gated on AMP_SESSION_ACCEPT_LEGACY_PICKLE so it stays
+        # off by default. Only enable transiently for rolling-restart migration.
+        from evennia.server.amp_serde import accept_legacy_session_pickle
+
+        if not accept_legacy_session_pickle():
+            raise ValueError(
+                "refusing legacy pickle AMP admin payload "
+                "(enable AMP_SESSION_ACCEPT_LEGACY_PICKLE only for migration)"
+            )
         return loads(packed_data)
 
     def broadcast(self, command, sessid, **kwargs):
@@ -621,9 +629,10 @@ class AMPMultiConnectionProtocol(amp.AMP):
         from django.conf import settings
 
         allowed = getattr(settings, "AMP_FUNCTIONCALL_MODULES", ())
-        if allowed and module not in allowed:
+        if module not in allowed:
             raise ValueError(
-                "FunctionCall denied: module '%s' is not in AMP_FUNCTIONCALL_MODULES." % module
+                "FunctionCall denied: module '%s' is not in AMP_FUNCTIONCALL_MODULES "
+                "(empty allowlist disables FunctionCall)." % module
             )
 
         args = loads(func_args)

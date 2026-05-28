@@ -42,7 +42,10 @@ class TestServer(TestCase):
 
             # flush cache
             self.server.server_maintenance()
-            mockconf.objects.conf.assert_called_with("runtime", 456)
+            # First maintenance tick reads stored runtime via conf("runtime", default=0.0).
+            # Subsequent ticks persist via the cached ServerConfig row (see
+            # service.server_maintenance), not via conf("runtime", value).
+            mockconf.objects.conf.assert_called_with("runtime", default=0.0)
 
     @override_settings(IDMAPPER_CACHE_MAXSIZE=1000)
     def test__server_maintenance_flush(self):
