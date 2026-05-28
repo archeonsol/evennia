@@ -473,45 +473,60 @@ def get_and_merge_cmdsets(
                     )
 
                     loc_cache_key = make_cache_key(caller, location)
-                    cached_cmdsets = get_cached_location_cmdsets(loc_cache_key)
-                    if cached_cmdsets is not None:
-                        return cached_cmdsets
-
-                    # Gather all cmdsets stored on objects in the room and
-                    # also in the caller's inventory and the location itself
-                    local_objlist = yield (
-                        location.contents_get(exclude=obj) + obj.contents_get() + [location]
-                    )
-                    local_objlist = [
-                        o
-                        for o in local_objlist
-                        if not o._is_deleted
-                        and o.access(caller, access_type="call", no_superuser_bypass=True)
-                    ]
+                    local_objlist = get_cached_location_cmdsets(loc_cache_key)
+                    if local_objlist is None:
+                        # Gather all cmdsets stored on objects in the room and
+                        # also in the caller's inventory and the location itself
+                        local_objlist = yield (
+                            location.contents_get(exclude=obj) + obj.contents_get() + [location]
+                        )
+                        local_objlist = [
+                            o
+                            for o in local_objlist
+                            if not o._is_deleted
+                            and o.access(caller, access_type="call", no_superuser_bypass=True)
+                        ]
+                        # the call-type lock is checked here, it makes sure an account
+                        # is not seeing e.g. the commands on a fellow account (which is
+                        # why no_superuser_bypass must be True). Result is cached so
+                        # repeat dispatches from the same caller in the same location
+                        # skip the contents_get DB queries and the access filter.
+                        set_cached_location_cmdsets(loc_cache_key, local_objlist)
+                    # at_cmdset_get is a documented dynamic hook; it MUST fire on
+                    # every dispatch (not just cache miss) so user code can mutate
+                    # the cmdset stack per-call. We re-read .cmdset_stack after
+                    # firing so the hook's mutations are honoured.
                     for lobj in local_objlist:
                         try:
-                            # call hook in case we need to do dynamic changing to cmdset
                             _GA(lobj, "at_cmdset_get")(caller=caller)
                         except Exception:
                             logger.log_trace()
-                    # the call-type lock is checked here, it makes sure an account
-                    # is not seeing e.g. the commands on a fellow account (which is why
-                    # the no_superuser_bypass must be True)
-                    local_obj_cmdsets = yield list(
+                    raw_obj_cmdsets = yield list(
                         chain.from_iterable(
                             lobj.cmdset.cmdset_stack
                             for lobj in local_objlist
                             if lobj.cmdset.current
                         )
                     )
-                    for cset in local_obj_cmdsets:
-                        # This is necessary for object sets, or we won't be able to
-                        # separate the command sets from each other in a busy room. We
-                        # only keep the setting if duplicates were set to False/True
-                        # explicitly.
-                        cset.old_duplicates = cset.duplicates
-                        cset.duplicates = True if cset.duplicates is None else cset.duplicates
-                    set_cached_location_cmdsets(loc_cache_key, local_obj_cmdsets)
+                    # Shallow-copy each cset before applying the room-gather
+                    # ``duplicates`` rule. The csets live on the objects
+                    # themselves and are shared across all dispatches; mutating
+                    # ``duplicates`` directly raced concurrent dispatches that
+                    # interleave through ``yield`` points in the merge loop.
+                    # Copies own their own attribute so callers don't share
+                    # state. Commands list is shared by reference (merge code
+                    # rebuilds lists, never mutates in place).
+                    local_obj_cmdsets = []
+                    for cset in raw_obj_cmdsets:
+                        cset_copy = copy(cset)
+                        # The room-gather merge rule: an unset (``None``)
+                        # ``duplicates`` is treated as True so commands from
+                        # multiple objects in the same room can coexist
+                        # ("two balls in a room"). Explicit True/False values
+                        # set by the cmdset author are preserved.
+                        if cset_copy.duplicates is None:
+                            cset_copy.duplicates = True
+                        local_obj_cmdsets.append(cset_copy)
                 return local_obj_cmdsets
             except Exception as exc:
                 _fire_cmdset_merge_error(caller, session, raw_string, exc)
@@ -616,8 +631,8 @@ def get_and_merge_cmdsets(
                     _CMDSET_MERGE_CACHE.popitem(last=False)
         else:
             cmdset = None
-        for cset in (cset for cset in local_obj_cmdsets if cset):
-            cset.duplicates = cset.old_duplicates
+        # Restore loop removed: ``local_obj_cmdsets`` are now shallow
+        # copies, so the duplicates mutation has no shared-state impact.
         # important - this syncs the CmdSetHandler's .current field with the
         # true current cmdset!
         # TODO - removed because this causes cmdset overlaps across sessions/accounts

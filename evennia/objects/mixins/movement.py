@@ -149,6 +149,19 @@ class MovementMixin:
             logerr(errtxt.format(err="location change"), err)
             return False
 
+        # Invalidate the location-cmdset cache for both sides: the set of
+        # commands available in each room depends on what objects are
+        # present, and the cache key is keyed by location generation.
+        try:
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+
+            if source_location is not None:
+                bump_cmdset_generation(source_location)
+            if destination is not None and destination is not source_location:
+                bump_cmdset_generation(destination)
+        except Exception:
+            logger.log_trace("move_to: cmdset-cache invalidation failed")
+
         if not quiet:
             # Tell the new room we are there.
             try:

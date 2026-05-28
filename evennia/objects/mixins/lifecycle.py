@@ -201,6 +201,16 @@ class LifecycleMixin:
         self.attributes.clear()
         self.nicks.clear()
         self.aliases.clear()
+        # Invalidate the location-cmdset cache before nulling the
+        # location: removing this object removes its cmdset from the
+        # room's available command pool.
+        try:
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+
+            if self.location is not None:
+                bump_cmdset_generation(self.location)
+        except Exception:
+            logger.log_trace("delete: cmdset-cache invalidation failed")
         self.location = None  # this updates contents_cache for our location
 
         # Perform the deletion of the object

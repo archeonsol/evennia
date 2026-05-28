@@ -605,7 +605,13 @@ class CmdSetHandler(object):
         self._invalidate_cmd_access_caches()
 
     def _invalidate_cmd_access_caches(self):
-        """Clear cmd.access caches for objects affected by cmdset stack changes."""
+        """Clear cmd.access caches for objects affected by cmdset stack changes.
+
+        Failures here would leak stale permission decisions: the
+        cmd_access_cache could keep returning True for commands whose
+        cmdset (and therefore lock) was just removed. Surface them
+        instead of swallowing silently.
+        """
         try:
             from evennia.commands.cmd_access_cache import invalidate_for_cmdset_owner
             from evennia.commands.location_cmdset_cache import bump_cmdset_generation
@@ -613,7 +619,12 @@ class CmdSetHandler(object):
             bump_cmdset_generation(self.obj)
             invalidate_for_cmdset_owner(self.obj)
         except Exception:
-            pass
+            from evennia.utils import logger
+
+            logger.log_trace(
+                "CmdSetHandler._invalidate_cmd_access_caches failed; "
+                "stale permission decisions may leak until next cmdset mutation"
+            )
 
     def has(self, cmdset, must_be_default=False):
         """
