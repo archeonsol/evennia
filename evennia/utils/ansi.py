@@ -129,8 +129,6 @@ ANSI_ESCAPES = ("{{", r"\\", r"\|\|")
 _PARSE_CACHE = OrderedDict()
 _PARSE_CACHE_SIZE = 10000
 
-_COLOR_NO_DEFAULT = settings.COLOR_NO_DEFAULT
-
 
 class ANSIParser(object):
     """

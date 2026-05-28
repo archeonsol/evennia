@@ -66,10 +66,6 @@ from evennia.utils.verb_conjugation.pronouns import pronoun_to_viewpoints
 
 # setup
 
-_CLIENT_DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
-_MAX_NESTING = settings.FUNCPARSER_MAX_NESTING
-_START_CHAR = settings.FUNCPARSER_START_CHAR
-_ESCAPE_CHAR = settings.FUNCPARSER_ESCAPE_CHAR
 _YOU_FORMAT_FUNCS = {
     "upper": str.upper,
     "lower": str.lower,
@@ -85,7 +81,7 @@ class _ParsedFunc:
 
     """
 
-    prefix: str = _START_CHAR
+    prefix: str = dataclasses.field(default_factory=lambda: settings.FUNCPARSER_START_CHAR)
     funcname: str = ""
     args: list = dataclasses.field(default_factory=list)
     kwargs: dict = dataclasses.field(default_factory=dict)
@@ -126,9 +122,9 @@ class FuncParser:
     def __init__(
         self,
         callables,
-        start_char=_START_CHAR,
-        escape_char=_ESCAPE_CHAR,
-        max_nesting=_MAX_NESTING,
+        start_char=None,
+        escape_char=None,
+        max_nesting=None,
         **default_kwargs,
     ):
         """
@@ -181,8 +177,15 @@ class FuncParser:
                     loaded_callables.update(callables_from_module(module_or_path))
         self.validate_callables(loaded_callables)
         self.callables = loaded_callables
-        self.escape_char = escape_char
-        self.start_char = start_char
+        self.escape_char = (
+            escape_char if escape_char is not None else settings.FUNCPARSER_ESCAPE_CHAR
+        )
+        self.start_char = (
+            start_char if start_char is not None else settings.FUNCPARSER_START_CHAR
+        )
+        self.max_nesting = (
+            max_nesting if max_nesting is not None else settings.FUNCPARSER_MAX_NESTING
+        )
         self.default_kwargs = default_kwargs
 
     def validate_callables(self, callables):
@@ -370,12 +373,12 @@ class FuncParser:
                 # start a new function definition (not escaped as $$)
                 if curr_func:
                     # we are starting a nested funcdef
-                    if len(callstack) >= _MAX_NESTING - 1:
+                    if len(callstack) >= self.max_nesting - 1:
                         # stack full - ignore this function
                         if raise_errors:
                             raise ParsingError(
                                 "Only allows for parsing nesting function defs "
-                                f"to a max depth of {_MAX_NESTING}."
+                                f"to a max depth of {self.max_nesting}."
                             )
                         infuncstr += char
                         continue
@@ -933,9 +936,9 @@ def funcparser_callable_pad(*args, **kwargs):
     text, *rest = args
     nrest = len(rest)
     try:
-        width = int(kwargs.get("width", rest[0] if nrest > 0 else _CLIENT_DEFAULT_WIDTH))
+        width = int(kwargs.get("width", rest[0] if nrest > 0 else settings.CLIENT_DEFAULT_WIDTH))
     except (TypeError, ValueError):
-        width = _CLIENT_DEFAULT_WIDTH
+        width = settings.CLIENT_DEFAULT_WIDTH
 
     align = kwargs.get("align", rest[1] if nrest > 1 else "c")
     fillchar = kwargs.get("fillchar", rest[2] if nrest > 2 else " ")
@@ -965,9 +968,9 @@ def funcparser_callable_crop(*args, **kwargs):
     text, *rest = args
     nrest = len(rest)
     try:
-        width = int(kwargs.get("width", rest[0] if nrest > 0 else _CLIENT_DEFAULT_WIDTH))
+        width = int(kwargs.get("width", rest[0] if nrest > 0 else settings.CLIENT_DEFAULT_WIDTH))
     except (TypeError, ValueError):
-        width = _CLIENT_DEFAULT_WIDTH
+        width = settings.CLIENT_DEFAULT_WIDTH
     suffix = kwargs.get("suffix", rest[1] if nrest > 1 else "[...]")
     return crop(str(text), width=width, suffix=str(suffix))
 
@@ -1011,9 +1014,9 @@ def funcparser_callable_justify(*args, **kwargs):
     text, *rest = args
     lrest = len(rest)
     try:
-        width = int(kwargs.get("width", rest[0] if lrest > 0 else _CLIENT_DEFAULT_WIDTH))
+        width = int(kwargs.get("width", rest[0] if lrest > 0 else settings.CLIENT_DEFAULT_WIDTH))
     except (TypeError, ValueError):
-        width = _CLIENT_DEFAULT_WIDTH
+        width = settings.CLIENT_DEFAULT_WIDTH
     align = str(kwargs.get("align", rest[1] if lrest > 1 else "f"))
     try:
         indent = int(kwargs.get("indent", rest[2] if lrest > 2 else 0))

@@ -33,14 +33,21 @@ from evennia.utils.utils import to_str
 BrowserSessionStore = importlib.import_module(settings.SESSION_ENGINE).SessionStore
 
 
-# always let "idle" work since we use this in the webclient
-_IDLE_COMMAND = settings.IDLE_COMMAND
-_IDLE_COMMAND = (_IDLE_COMMAND,) if _IDLE_COMMAND == "idle" else (_IDLE_COMMAND, "idle")
 _GA = object.__getattribute__
 _SA = object.__setattr__
 
 
-_STRIP_INCOMING_MXP = settings.MXP_ENABLED and settings.MXP_OUTGOING_ONLY
+def _idle_commands():
+    """Tuple of strings that count as the idle command.
+
+    Always includes "idle" because the webclient uses it; if the
+    configured IDLE_COMMAND is something other than "idle", both
+    are recognized.
+    """
+    cmd = settings.IDLE_COMMAND
+    return (cmd,) if cmd == "idle" else (cmd, "idle")
+
+
 _STRIP_MXP = None
 
 
@@ -50,7 +57,7 @@ def _NA(o):
 
 def _maybe_strip_incoming_mxp(txt):
     global _STRIP_MXP
-    if _STRIP_INCOMING_MXP:
+    if settings.MXP_ENABLED and settings.MXP_OUTGOING_ONLY:
         if not _STRIP_MXP:
             from evennia.utils.ansi import strip_mxp as _STRIP_MXP
         return _STRIP_MXP(txt)
@@ -86,7 +93,7 @@ def text(session, *args, **kwargs):
         return
     # this is treated as a command input
     # handle the 'idle' command
-    if txt.strip() in _IDLE_COMMAND:
+    if txt.strip() in _idle_commands():
         session.update_session_counters(idle=True)
         return
 
@@ -125,7 +132,7 @@ def bot_data_in(session, *args, **kwargs):
         return
     # this is treated as a command input
     # handle the 'idle' command
-    if txt.strip() in _IDLE_COMMAND:
+    if txt.strip() in _idle_commands():
         session.update_session_counters(idle=True)
         return
 
@@ -141,7 +148,7 @@ def echo(session, *args, **kwargs):
     """
     Echo test function
     """
-    if _STRIP_INCOMING_MXP:
+    if settings.MXP_ENABLED and settings.MXP_OUTGOING_ONLY:
         args = [_maybe_strip_incoming_mxp(str(arg)) for arg in args]
 
     session.data_out(text=f"Echo returns: {args}, {kwargs}")

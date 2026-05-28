@@ -15,14 +15,6 @@ from evennia.scripts.scripts import DefaultScript
 from evennia.utils import logger, search, utils
 from evennia.utils.ansi import strip_ansi
 
-_IDLE_TIMEOUT = settings.IDLE_TIMEOUT
-
-_IRC_ENABLED = settings.IRC_ENABLED
-_RSS_ENABLED = settings.RSS_ENABLED
-_GRAPEVINE_ENABLED = settings.GRAPEVINE_ENABLED
-_DISCORD_ENABLED = settings.DISCORD_ENABLED and hasattr(settings, "DISCORD_BOT_TOKEN")
-
-
 class BotStarter(DefaultScript):
     """
     This non-repeating script has the
@@ -160,7 +152,7 @@ class IRCBot(Bot):
             irc_ssl (bool): Indicates whether to use SSL connection.
 
         """
-        if not _IRC_ENABLED:
+        if not settings.IRC_ENABLED:
             # the bot was created, then IRC was turned off. We delete
             # ourselves (this will also kill the start script)
             self.delete()
@@ -391,7 +383,7 @@ class RSSBot(Bot):
             RuntimeError: If `ev_channel` does not exist.
 
         """
-        if not _RSS_ENABLED:
+        if not settings.RSS_ENABLED:
             # The bot was created, then RSS was turned off. Delete ourselves.
             self.delete()
             return
@@ -451,7 +443,7 @@ class GrapevineBot(Bot):
         Start by telling the portal to connect to the grapevine network.
 
         """
-        if not _GRAPEVINE_ENABLED:
+        if not settings.GRAPEVINE_ENABLED:
             self.delete()
             return
 
@@ -583,7 +575,7 @@ class DiscordBot(Bot):
         Tell the Discord protocol to connect.
 
         """
-        if not _DISCORD_ENABLED:
+        if not (settings.DISCORD_ENABLED and hasattr(settings, "DISCORD_BOT_TOKEN")):
             self.delete()
             return
 

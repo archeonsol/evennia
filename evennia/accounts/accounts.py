@@ -53,12 +53,6 @@ from evennia.utils.utils import (
 __all__ = ("DefaultAccount", "DefaultGuest")
 
 _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))
-_MULTISESSION_MODE = settings.MULTISESSION_MODE
-_AUTO_CREATE_CHARACTER_WITH_ACCOUNT = settings.AUTO_CREATE_CHARACTER_WITH_ACCOUNT
-_AUTO_PUPPET_ON_LOGIN = settings.AUTO_PUPPET_ON_LOGIN
-_MAX_NR_SIMULTANEOUS_PUPPETS = settings.MAX_NR_SIMULTANEOUS_PUPPETS
-_MAX_NR_CHARACTERS = settings.MAX_NR_CHARACTERS
-_CMDSET_ACCOUNT = settings.CMDSET_ACCOUNT
 _MUDINFO_CHANNEL = None
 _CONNECT_CHANNEL = None
 _CMDHANDLER = None
@@ -490,7 +484,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 if obj.sessions.count():
                     # we may take over another of our sessions
                     # output messages to the affected sessions
-                    if _MULTISESSION_MODE in (1, 3):
+                    if settings.MULTISESSION_MODE in (1, 3):
                         txt1 = _("Sharing |c{name}|n with another of your sessions.").format(
                             name=obj.name
                         )
@@ -522,17 +516,18 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # server kill or similar
 
         # check so we are not puppeting too much already
-        if _MAX_NR_SIMULTANEOUS_PUPPETS is not None:
+        max_puppets = settings.MAX_NR_SIMULTANEOUS_PUPPETS
+        if max_puppets is not None:
             already_puppeted = self.get_all_puppets()
             if (
                 not self.is_superuser
                 and not self.check_permstring("Developer")
                 and obj not in already_puppeted
-                and len(self.get_all_puppets()) >= _MAX_NR_SIMULTANEOUS_PUPPETS
+                and len(self.get_all_puppets()) >= max_puppets
             ):
                 self.msg(
                     _("You cannot control any more puppets (max {max_puppets})").format(
-                        max_puppets=_MAX_NR_SIMULTANEOUS_PUPPETS
+                        max_puppets=max_puppets
                     )
                 )
                 return
@@ -625,7 +620,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         """
         puppets = self.get_all_puppets()
-        if _MULTISESSION_MODE in (0, 1):
+        if settings.MULTISESSION_MODE in (0, 1):
             return puppets and puppets[0] or None
         return puppets
 
@@ -1114,7 +1109,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 else:
                     logger.log_err(f"Default channel '{chan_info}' is missing a 'key' field!")
 
-            if account and _AUTO_CREATE_CHARACTER_WITH_ACCOUNT:
+            if account and settings.AUTO_CREATE_CHARACTER_WITH_ACCOUNT:
                 # Auto-create a character to go with this account
 
                 character, errs = account.create_character(
@@ -1253,7 +1248,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         raw_string = self.nicks.nickreplace(
             raw_string, categories=("inputline", "channel"), include_account=False
         )
-        if not session and _MULTISESSION_MODE in (0, 1):
+        if not session and settings.MULTISESSION_MODE in (0, 1):
             # for these modes we use the first/only session
             sessions = self.sessions.get()
             session = sessions[0] if sessions else None
@@ -1493,7 +1488,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         self.locks.add(self.lockstring)
 
         # The ooc account cmdset
-        self.cmdset.add_default(_CMDSET_ACCOUNT, persistent=True)
+        self.cmdset.add_default(settings.CMDSET_ACCOUNT, persistent=True)
 
     def at_account_creation(self):
         """
@@ -1732,7 +1727,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             session.msg(logged_in={})
 
         self._send_to_connect_channel(_("|G{key} connected|n").format(key=self.key))
-        if _AUTO_PUPPET_ON_LOGIN:
+        if settings.AUTO_PUPPET_ON_LOGIN:
             # in this mode we try to auto-connect to our last connected object, if any
             try:
                 self.puppet_object(session, self.db._last_puppet)
@@ -1930,10 +1925,11 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if not characters:
             txt_characters = "You don't have a character yet. Use |wcharcreate|n."
         else:
+            _max_chars = settings.MAX_NR_CHARACTERS
             max_chars = (
                 "unlimited"
-                if self.is_superuser or _MAX_NR_CHARACTERS is None
-                else _MAX_NR_CHARACTERS
+                if self.is_superuser or _max_chars is None
+                else _max_chars
             )
 
             char_strings = []

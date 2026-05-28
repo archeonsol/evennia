@@ -38,7 +38,6 @@ _CLIENT_SESSIONS = utils.mod_import(settings.SESSION_ENGINE).SessionStore
 _RE_SCREENREADER_REGEX = re.compile(
     r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE
 )
-_SERVERNAME = settings.SERVERNAME
 _KEEPALIVE = 30  # how often to check keepalive
 
 
@@ -355,7 +354,7 @@ class AjaxWebClient(resource.Resource):
         remote_addr = ip_from_request(request)
 
         host_string = "%s (%s:%s)" % (
-            _SERVERNAME,
+            settings.SERVERNAME,
             request.getRequestHostname(),
             request.getHost().port,
         )

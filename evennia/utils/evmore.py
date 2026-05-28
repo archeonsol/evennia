@@ -52,10 +52,6 @@ from evennia.utils.utils import dedent, inherits_from, justify, make_iter
 _CMD_NOMATCH = cmdhandler.CMD_NOMATCH
 _CMD_NOINPUT = cmdhandler.CMD_NOINPUT
 
-# we need to use NAWS for this
-_SCREEN_WIDTH = settings.CLIENT_DEFAULT_WIDTH
-_SCREEN_HEIGHT = settings.CLIENT_DEFAULT_HEIGHT
-
 _EVTABLE = None
 
 _LBR = ANSIString("\n")
@@ -258,8 +254,16 @@ class EvMore(object):
         self._page_formatter = str
 
         # set up individual pages for different sessions
-        height = max(4, session.protocol_flags.get("SCREENHEIGHT", {0: _SCREEN_HEIGHT})[0] - 4)
-        self.width = session.protocol_flags.get("SCREENWIDTH", {0: _SCREEN_WIDTH})[0]
+        height = max(
+            4,
+            session.protocol_flags.get(
+                "SCREENHEIGHT", {0: settings.CLIENT_DEFAULT_HEIGHT}
+            )[0]
+            - 4,
+        )
+        self.width = session.protocol_flags.get(
+            "SCREENWIDTH", {0: settings.CLIENT_DEFAULT_WIDTH}
+        )[0]
         # always limit number of chars to 10 000 per page
         self.height = min(10000 // max(1, self.width), height)
 

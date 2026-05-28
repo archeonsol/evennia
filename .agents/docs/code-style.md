@@ -54,6 +54,44 @@ Carve-outs:
 
 The audit script at `.agents/tools/cmdset_prefix_audit.py` walks every default cmdset and emits an inventory; CI runs it in `--check` mode against `PHASE3_AUDIT.md` so drift surfaces at PR time.
 
+## Settings reads
+
+Read Django settings at the call site (`settings.X`), not via a
+module-level snapshot (`_X = settings.X`). Snapshots capture at
+import time, so `@override_settings` in tests becomes a silent no-op
+and runtime reloads don't land. Django caches `settings` access
+internally; the per-call cost is sub-microsecond.
+
+```python
+# bad — snapshotted at import
+_IDLE_TIMEOUT = settings.IDLE_TIMEOUT
+...
+if now - session.cmd_last > _IDLE_TIMEOUT:
+
+# good
+if now - session.cmd_last > settings.IDLE_TIMEOUT:
+```
+
+Same rule for transforms and for default args (which also evaluate
+at def-time):
+
+```python
+def wrap(text, width=None):
+    if width is None:
+        width = settings.CLIENT_DEFAULT_WIDTH
+```
+
+For non-trivial transforms, factor into a small helper that reads
+on each call: `def _permission_hierarchy(): return [p.lower() for p in settings.PERMISSION_HIERARCHY]`.
+
+**Carve-out: true boot constants** (`EVENNIA_DIR`, `GAME_DIR`,
+`CACHE_DIR`, `SSL_CERTIFICATE_ISSUER`, `ENCODINGS`) are immutable
+per-process and fine to snapshot. Narrow on purpose: when in doubt,
+read at the call site.
+
+Phase 1 of the engine cleanup (`+underspire.34`) swept the known
+sites. No automated guard; catching this in review is enough.
+
 ### Function/Method Docstrings
 
 Google-style with indented blocks:

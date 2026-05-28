@@ -80,9 +80,6 @@ from evennia.utils.utils import (
     variable_from_module,
 )
 
-_DEFAULT_HELP_CATEGORY = settings.DEFAULT_HELP_CATEGORY
-
-
 @dataclass
 class FileHelpEntry:
     """
@@ -230,7 +227,7 @@ class FileHelpStorageHandler:
         for dct in loaded_help_dicts:
             raw_key = dct.get("key")
             key = raw_key.lower().strip() if raw_key else ""
-            category = dct.get("category", _DEFAULT_HELP_CATEGORY).lower().strip()
+            category = dct.get("category", settings.DEFAULT_HELP_CATEGORY).lower().strip()
             aliases = list(dct.get("aliases", []))
             entrytext = dct.get("text", "")
             locks = dct.get("locks", "")

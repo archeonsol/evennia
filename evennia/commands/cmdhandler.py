@@ -55,8 +55,6 @@ from evennia.commands.signals import (
 from evennia.utils import logger, utils
 from evennia.utils.command_trace import get_trace_id
 
-_IN_GAME_ERRORS = settings.IN_GAME_ERRORS
-
 __all__ = ("cmdhandler", "InterruptCommand")
 _GA = object.__getattribute__
 # Cache mapping content-based fingerprint tuples to merged CmdSet results.
@@ -69,7 +67,6 @@ _GA = object.__getattribute__
 # Note: this cache holds strong references to the merged CmdSets (and
 # transitively to the cmd.obj / cmdsetobj stored in each fingerprint).
 _CMDSET_MERGE_CACHE = OrderedDict()
-_CMDSET_MERGE_CACHE_MAXSIZE = settings.CMDSET_MERGE_CACHE_MAXSIZE
 
 # tracks recursive calls by each caller
 # to avoid infinite loops (commands calling themselves)
@@ -168,7 +165,7 @@ def _msg_err(receiver, stringtuple, cmdid=None):
     Args:
         receiver (Object): object to get the error message.
         stringtuple (tuple): tuple with two strings - one for the
-            _IN_GAME_ERRORS mode (with the traceback) and one with the
+            IN_GAME_ERRORS mode (with the traceback) and one with the
             production string (with a timestamp) to be shown to the user.
 
     """
@@ -176,7 +173,7 @@ def _msg_err(receiver, stringtuple, cmdid=None):
     timestamp = logger.timeformat()
     tracestring = format_exc()
     logger.log_trace()
-    if _IN_GAME_ERRORS:
+    if settings.IN_GAME_ERRORS:
         out = string.format(
             traceback=tracestring, errmsg=stringtuple[0].strip(), timestamp=timestamp
         ).strip()
@@ -627,7 +624,7 @@ def get_and_merge_cmdsets(
                 cached_set.cmdsetobj = None
                 # cache; evict oldest entry if full
                 _CMDSET_MERGE_CACHE[mergehash] = cached_set
-                if len(_CMDSET_MERGE_CACHE) > _CMDSET_MERGE_CACHE_MAXSIZE:
+                if len(_CMDSET_MERGE_CACHE) > settings.CMDSET_MERGE_CACHE_MAXSIZE:
                     _CMDSET_MERGE_CACHE.popitem(last=False)
         else:
             cmdset = None

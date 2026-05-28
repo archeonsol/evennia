@@ -66,8 +66,6 @@ __all__ = ("TypedObject",)
 
 TICKER_HANDLER = None
 
-_PERMISSION_HIERARCHY = [p.lower() for p in settings.PERMISSION_HIERARCHY]
-_TYPECLASS_AGGRESSIVE_CACHE = settings.TYPECLASS_AGGRESSIVE_CACHE
 _GA = object.__getattribute__
 _SA = object.__setattr__
 
@@ -748,12 +746,13 @@ class TypedObject(SharedMemoryModel):
         if perm in perms:
             # simplest case - we have a direct match
             return True
-        if perm in _PERMISSION_HIERARCHY:
+        hierarchy = [p.lower() for p in settings.PERMISSION_HIERARCHY]
+        if perm in hierarchy:
             # check if we have a higher hierarchy position
-            ppos = _PERMISSION_HIERARCHY.index(perm)
+            ppos = hierarchy.index(perm)
             return any(
                 True
-                for hpos, hperm in enumerate(_PERMISSION_HIERARCHY)
+                for hpos, hperm in enumerate(hierarchy)
                 if hperm in perms and hpos > ppos
             )
         # we ignore pluralization (english only)

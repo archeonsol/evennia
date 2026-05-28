@@ -41,7 +41,6 @@ from django.conf import settings
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
-_UPSTREAM_IPS = settings.UPSTREAM_IPS
 
 # Status Code 1000: Normal Closure
 #   called when the connection was closed through JavaScript
@@ -248,12 +247,12 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
         client_address = self.transport.client
         client_address = client_address[0] if client_address else None
 
-        if client_address in _UPSTREAM_IPS and "x-forwarded-for" in self.http_headers:
+        if client_address in settings.UPSTREAM_IPS and "x-forwarded-for" in self.http_headers:
             addresses = [x.strip() for x in self.http_headers["x-forwarded-for"].split(",")]
             addresses.reverse()
 
             for addr in addresses:
-                if addr not in _UPSTREAM_IPS:
+                if addr not in settings.UPSTREAM_IPS:
                     client_address = addr
                     break
 
