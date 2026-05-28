@@ -742,7 +742,7 @@ class LockHandler:
             if accessing_obj.locks.lock_bypass and not no_superuser_bypass:
                 return True
         except AttributeError:
-            if no_superuser_bypass and (
+            if not no_superuser_bypass and (
                 (hasattr(accessing_obj, "is_superuser") and accessing_obj.is_superuser)
                 or (
                     utils.inherits_from(accessing_obj, evennia.DefaultObject)

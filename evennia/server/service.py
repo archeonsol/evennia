@@ -33,8 +33,9 @@ class EvenniaServerService(MultiService):
             d.addCallback(lambda _: defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True)))
         else:
             d = defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
-        d.addCallback(lambda _: reactor.stop())
-        reactor.callLater(1, d.callback, None)
+        d.addCallback(lambda _: reactor.stop() if reactor.running else None)
+        # Fallback: force-stop after 5 s in case the graceful shutdown hangs.
+        reactor.callLater(5, lambda: reactor.stop() if reactor.running else None)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -53,6 +54,7 @@ class EvenniaServerService(MultiService):
         self._flush_cache = None
         self._last_server_time_snapshot = 0
         self.maintenance_task = None
+        self._runtime_config_row = None  # cached ServerConfig row for "runtime"
 
         # Database-specific startup optimizations.
         self.sqlite3_prep()
@@ -91,6 +93,9 @@ class EvenniaServerService(MultiService):
             evennia.gametime.SERVER_RUNTIME = evennia.ServerConfig.objects.conf(
                 "runtime", default=0.0
             )
+            # Cache the ServerConfig row so subsequent ticks skip the filter query.
+            from evennia.server.models import ServerConfig as _SC
+            self._runtime_config_row, _ = _SC.objects.get_or_create(db_key="runtime")
             # self._last_server_time_snapshot is set unconditionally at the end
             # of this method; no separate assignment is needed here.
         else:
@@ -99,9 +104,15 @@ class EvenniaServerService(MultiService):
             evennia.gametime.SERVER_RUNTIME += now - self._last_server_time_snapshot
         self._last_server_time_snapshot = now
 
-        # update game time and save it across reloads
+        # update game time and save it across reloads — write directly to the
+        # cached row to avoid a filter query on every tick.
         evennia.gametime.SERVER_RUNTIME_LAST_UPDATED = now
-        evennia.ServerConfig.objects.conf("runtime", evennia.gametime.SERVER_RUNTIME)
+        if self._runtime_config_row is not None:
+            from evennia.utils.dbserialize import to_pickle
+            self._runtime_config_row.db_value = to_pickle(evennia.gametime.SERVER_RUNTIME)
+            self._runtime_config_row.save(update_fields=["db_value"])
+        else:
+            evennia.ServerConfig.objects.conf("runtime", evennia.gametime.SERVER_RUNTIME)
 
         if getattr(settings, "ATTRIBUTE_FLUSH_ON_MAINTENANCE", False):
             try:

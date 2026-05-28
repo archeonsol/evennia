@@ -432,7 +432,7 @@ class AttributeProperty:
         """
         attrhandler = getattr(instance, self.attrhandler_name)
         value = getattr(attrhandler, self.cached_default_name_template.format(key=self._key), None)
-        if not value:
+        if value is None:
             if callable(self._default):
                 value = self._default()
             else:
@@ -1526,7 +1526,7 @@ class AttributeHandler:
         ret = []
         category = category.strip().lower() if category is not None else None
         for keystr in make_iter(key):
-            keystr = key.strip().lower()
+            keystr = keystr.strip().lower()
             ret.extend(bool(attr) for attr in self.backend.get(keystr, category))
         return ret[0] if len(ret) == 1 else ret
 

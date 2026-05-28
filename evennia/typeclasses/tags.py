@@ -82,7 +82,8 @@ class Tag(models.Model):
 
         verbose_name = "Tag"
         unique_together = (("db_key", "db_category", "db_tagtype", "db_model"),)
-        indexes = [models.Index(fields=["db_key", "db_category", "db_tagtype", "db_model"])]
+        # No separate indexes entry needed: unique_together already creates a
+        # composite B-tree index on these four columns.
 
     def __lt__(self, other):
         return str(self) < str(other)

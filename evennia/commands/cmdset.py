@@ -612,6 +612,7 @@ class CmdSet(object, metaclass=_CmdSetMeta):
             commands = list(set(commands))
         self.commands = commands
         self._cached_fingerprint = None
+        self._contains_cache.clear()
 
     def remove(self, cmd, strict=False):
         """
@@ -655,6 +656,7 @@ class CmdSet(object, metaclass=_CmdSetMeta):
 
         if removed:
             self._cached_fingerprint = None
+            self._contains_cache.clear()
         elif strict:
             raise KeyError(f"Command {cmd.key!r} not found in cmdset {self.key!r}")
         return removed

@@ -120,7 +120,7 @@ class Ticker(object):
         self._to_add = []
         self._to_remove = []
         self._is_ticking = True
-        for store_key, (args, kwargs) in self.subscriptions.items():
+        for store_key, (args, kwargs) in list(self.subscriptions.items()):
             callback = yield kwargs.pop("_callback", "at_tick")
             obj = yield kwargs.pop("_obj", None)
             try:

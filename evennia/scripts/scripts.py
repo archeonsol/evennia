@@ -129,7 +129,9 @@ class ExtendedLoopingCall(LoopingCall):
         if self.running and self.interval > 0:
             total_runtime = self.clock.seconds() - self.starttime
             interval = self.start_delay or self.interval
-            return max(0, interval - (total_runtime % self.interval))
+            if interval <= 0:
+                return 0
+            return max(0, interval - (total_runtime % interval))
 
 
 class ScriptBase(ScriptDB, metaclass=TypeclassBase):
@@ -347,7 +349,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         self.db_paused_callcount = None
         self.db_manually_paused = False
 
-        self.save(update_fields=["db_is_active"])
+        self.save(update_fields=["db_is_active", "db_paused_time", "db_paused_callcount", "db_manually_paused"])
         if task_stopped:
             self.at_stop(**kwargs)
 
