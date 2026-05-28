@@ -54,6 +54,19 @@ def get_cached_location_cmdsets(key: tuple):
     hit = _CACHE.get(key)
     if hit is not None:
         _CACHE.move_to_end(key)
+        try:
+            from evennia.server.prometheus_metrics import record_location_cmdset_cache_hit
+
+            record_location_cmdset_cache_hit()
+        except Exception:
+            pass
+    else:
+        try:
+            from evennia.server.prometheus_metrics import record_location_cmdset_cache_miss
+
+            record_location_cmdset_cache_miss()
+        except Exception:
+            pass
     return hit
 
 

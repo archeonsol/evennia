@@ -22,6 +22,12 @@ ATTR_DIRTY_PENDING = None
 ATTR_FLUSH_DURATION_SECONDS = None
 CMD_ACCESS_CACHE_HIT_TOTAL = None
 CMD_ACCESS_CACHE_MISS_TOTAL = None
+LOCATION_CMDSET_CACHE_HIT_TOTAL = None
+LOCATION_CMDSET_CACHE_MISS_TOTAL = None
+CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL = None
+CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL = None
+REDIS_ATTR_CACHE_HIT_TOTAL = None
+REDIS_ATTR_CACHE_MISS_TOTAL = None
 
 _METRICS_READY = False
 
@@ -36,6 +42,9 @@ def _init_metrics() -> bool:
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_ORPHANTS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
     global CMD_ACCESS_CACHE_HIT_TOTAL, CMD_ACCESS_CACHE_MISS_TOTAL
+    global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
+    global CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL, CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL
+    global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
 
     if _METRICS_READY:
         return ATTR_FLUSH_TOTAL is not None
@@ -78,6 +87,30 @@ def _init_metrics() -> bool:
         "evennia_cmd_access_cache_miss_total",
         "cmd.access checks computed and stored in cache",
     )
+    LOCATION_CMDSET_CACHE_HIT_TOTAL = Counter(
+        "evennia_location_cmdset_cache_hit_total",
+        "Location cmdset lookups served from cache",
+    )
+    LOCATION_CMDSET_CACHE_MISS_TOTAL = Counter(
+        "evennia_location_cmdset_cache_miss_total",
+        "Location cmdset lookups recomputed (cache miss or eviction)",
+    )
+    CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL = Counter(
+        "evennia_channel_subscriber_cache_hit_total",
+        "Channel subscriber lookups served from Redis cache",
+    )
+    CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL = Counter(
+        "evennia_channel_subscriber_cache_miss_total",
+        "Channel subscriber lookups rebuilt from PG (cache empty or unavailable)",
+    )
+    REDIS_ATTR_CACHE_HIT_TOTAL = Counter(
+        "evennia_redis_attr_cache_hit_total",
+        "Attribute reads served from Redis L2 cache",
+    )
+    REDIS_ATTR_CACHE_MISS_TOTAL = Counter(
+        "evennia_redis_attr_cache_miss_total",
+        "Attribute reads that fell through to PG (cache miss or unavailable)",
+    )
     return True
 
 
@@ -114,6 +147,36 @@ def record_cmd_access_cache_hit() -> None:
 def record_cmd_access_cache_miss() -> None:
     if _init_metrics() and CMD_ACCESS_CACHE_MISS_TOTAL is not None:
         CMD_ACCESS_CACHE_MISS_TOTAL.inc()
+
+
+def record_location_cmdset_cache_hit() -> None:
+    if _init_metrics() and LOCATION_CMDSET_CACHE_HIT_TOTAL is not None:
+        LOCATION_CMDSET_CACHE_HIT_TOTAL.inc()
+
+
+def record_location_cmdset_cache_miss() -> None:
+    if _init_metrics() and LOCATION_CMDSET_CACHE_MISS_TOTAL is not None:
+        LOCATION_CMDSET_CACHE_MISS_TOTAL.inc()
+
+
+def record_channel_subscriber_cache_hit() -> None:
+    if _init_metrics() and CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL is not None:
+        CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL.inc()
+
+
+def record_channel_subscriber_cache_miss() -> None:
+    if _init_metrics() and CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL is not None:
+        CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL.inc()
+
+
+def record_redis_attr_cache_hit() -> None:
+    if _init_metrics() and REDIS_ATTR_CACHE_HIT_TOTAL is not None:
+        REDIS_ATTR_CACHE_HIT_TOTAL.inc()
+
+
+def record_redis_attr_cache_miss() -> None:
+    if _init_metrics() and REDIS_ATTR_CACHE_MISS_TOTAL is not None:
+        REDIS_ATTR_CACHE_MISS_TOTAL.inc()
 
 
 def observe_attribute_dirty_pending(pending: int) -> None:

@@ -36,6 +36,24 @@ def _redis_alias():
     return getattr(settings, "ATTRIBUTE_REDIS_CACHE_ALIAS", "attributes")
 
 
+def _record_hit() -> None:
+    try:
+        from evennia.server.prometheus_metrics import record_redis_attr_cache_hit
+
+        record_redis_attr_cache_hit()
+    except Exception:
+        pass
+
+
+def _record_miss() -> None:
+    try:
+        from evennia.server.prometheus_metrics import record_redis_attr_cache_miss
+
+        record_redis_attr_cache_miss()
+    except Exception:
+        pass
+
+
 def _redis_conn():
     global _last_redis_warn
     try:
@@ -272,6 +290,7 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             try:
                 raw = r.get(_redis_key(self._model, self._objid, key, category))
                 if raw is not None:
+                    _record_hit()
                     if raw == _MISSING_MARKER or (
                         isinstance(raw, bytes) and raw.decode() == _MISSING_MARKER
                     ):
@@ -283,6 +302,7 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             except Exception:
                 logger.log_trace("redis_attr_cache.query_key")
 
+        _record_miss()
         conn = super().query_key(key, category)
         # Use NX semantics: if a concurrent writer published a newer value
         # to Redis between our miss above and this fill, leave it alone.
@@ -301,10 +321,12 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             try:
                 keys = r.smembers(_category_index_key(self._model, self._objid, category))
                 if keys is not None:
+                    _record_hit()
                     return self._attrs_from_redis_keys(r, keys)
             except Exception:
                 logger.log_trace("redis_attr_cache.query_category")
 
+        _record_miss()
         attrs = super().query_category(category)
         self._warm_from_pg_list(attrs)
         return attrs
@@ -318,10 +340,12 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             try:
                 keys = r.smembers(_obj_index_key(self._model, self._objid))
                 if keys is not None:
+                    _record_hit()
                     return self._attrs_from_redis_keys(r, keys)
             except Exception:
                 logger.log_trace("redis_attr_cache.query_all")
 
+        _record_miss()
         attrs = super().query_all()
         self._warm_from_pg_list(attrs)
         return attrs

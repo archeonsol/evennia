@@ -36,6 +36,78 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.39 — Cache hit/miss metrics for the remaining three caches
+
+Closes the engine cleanup checklist. Adds Prometheus hit/miss counters
+to `location_cmdset_cache`, `channel_subscriber_cache`, and
+`redis_attr_cache`, matching the pattern already in place for
+`cmd_access_cache`. Operators can now answer "is this cache earning its
+keep" with data instead of intuition.
+
+No behavior change other than metric emission. All counters no-op when
+`prometheus_client` is unavailable or
+`ENGINE_PROMETHEUS_METRICS_ENABLED = False`.
+
+### Engine
+
+- [`evennia/server/prometheus_metrics.py`](evennia/server/prometheus_metrics.py):
+  added six counters and six `record_*` helpers (one hit + one miss
+  per cache). Registered on the default Prometheus registry inside
+  `_init_metrics` next to the existing `CMD_ACCESS_CACHE_*` pair.
+- [`evennia/commands/location_cmdset_cache.py`](evennia/commands/location_cmdset_cache.py):
+  `get_cached_location_cmdsets` records hit when `_CACHE.get(key)`
+  returns a value, miss otherwise. No-op when the cache is disabled.
+- [`evennia/comms/channel_subscriber_cache.py`](evennia/comms/channel_subscriber_cache.py):
+  `get_cached_subscribers` records hit when Redis already had the
+  channel key populated, miss when the key was absent and required
+  rebuild via `sync_channel_subscribers`. Redis-unavailable path
+  doesn't increment either counter (already covered by the
+  `redis unavailable` log line).
+- [`evennia/typeclasses/redis_attr_cache.py`](evennia/typeclasses/redis_attr_cache.py):
+  added local `_record_hit` / `_record_miss` helpers (so the three
+  call sites stay readable) and wired them into `query_key`,
+  `query_category`, and `query_all`. Hit counts include
+  `_MISSING_MARKER` lookups (a negative cache hit is still a hit
+  semantically). Misses count the PG fall-through path.
+
+### Docs
+
+- [`ENGINE.md`](ENGINE.md): listed the six new metric names under the
+  attribute write-behind metrics section. Grouped by cache and
+  conditioned on the matching `*_CACHE_ENABLED` setting.
+
+### Migration
+
+None. New counters appear on the `/metrics` endpoint automatically
+when `django-prometheus` is installed and engine metrics are enabled
+(the default).
+
+### Closes
+
+This release closes out the engine cleanup checklist that has been
+tracked under `.fleet-review/engine-cleanup-checklist.md`. The
+checklist file is being removed locally; the shipped record lives in
+this changelog. Final tally of the Tier 2 work:
+
+| Phase | Result | Release |
+|---|---|---|
+| 1 | Module-cached settings sweep | `+underspire.34` |
+| 2 | Redis attr cache write-behind ordering | `+underspire.35` |
+| 2b | Orphan-dirty flush retry on failure | `+underspire.38` |
+| 3 | `except Exception:` narrowing | Opportunistic (see hygiene-backlog) |
+| 4 | Cache layer unification | Dropped after research |
+| 5 | `display_name_cache` moves to game | `+underspire.36` |
+| 6 | Channel subscriber resolve batching + setting rename | `+underspire.37` |
+| (this) | Hit/miss metrics for remaining caches | `+underspire.39` |
+
+Phase 3 stays as opportunistic cleanup applied when touching
+surrounding code (the wider `except *: pass` audit is also tracked in
+[`.agents/docs/hygiene-backlog.md`](.agents/docs/hygiene-backlog.md)
+under "Deferred audits"). Nothing else from the checklist is
+outstanding.
+
+---
+
 ## 6.0.0+underspire.38 — Orphan-dirty flush retry on failure (Phase 2b)
 
 Closes the last item from the engine cleanup checklist. Fixes a silent
