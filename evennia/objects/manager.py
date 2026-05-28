@@ -25,10 +25,9 @@ _GA = object.__getattribute__
 # delayed import
 _ATTR = None
 
-_MULTIMATCH_REGEX = re.compile(settings.SEARCH_MULTIMATCH_REGEX, re.I + re.U)
-
 from evennia.utils.multimatch import (  # noqa: E402
     _get_multimatch_input_handler,
+    _multimatch_regex,
     resolve_multimatch_index,
 )
 
@@ -506,7 +505,7 @@ class ObjectDBManager(TypedObjectManager):
             if match_selector is not None:
                 matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
             else:
-                match_data = _MULTIMATCH_REGEX.match(str(searchdata))
+                match_data = _multimatch_regex().match(str(searchdata))
                 if match_data:
                     match_selector = int(match_data.group("number")) - 1
                     stripped_searchdata = match_data.group("name") + (

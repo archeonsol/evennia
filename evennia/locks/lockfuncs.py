@@ -29,7 +29,7 @@ _PERMISSION_HIERARCHY_PLURAL = [
 
 def _to_account(accessing_obj):
     "Helper function. Makes sure an accessing object is an account object"
-    if utils.inherits_from(accessing_obj, "evennia.objects.objects.DefaultObject"):
+    if utils.inherits_from(accessing_obj, "evennia.objects.object.DefaultObject"):
         # an object. Convert to account.
         accessing_obj = accessing_obj.account
     return accessing_obj
@@ -114,7 +114,7 @@ def perm(accessing_obj, accessed_obj, *args, **kwargs):
     is_quell = False
 
     account = (
-        utils.inherits_from(accessing_obj, "evennia.objects.objects.DefaultObject")
+        utils.inherits_from(accessing_obj, "evennia.objects.object.DefaultObject")
         and accessing_obj.account
     )
     # check object perms (note that accessing_obj could be an Account too)

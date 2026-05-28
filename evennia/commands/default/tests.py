@@ -1362,7 +1362,7 @@ class TestBuilding(BaseEvenniaCommandTest):
     def test_tunnel_exit_typeclass(self):
         self.call(
             building.CmdTunnel(),
-            "n:evennia.objects.objects.DefaultExit = TestRoom3",
+            "n:evennia.objects.exit.DefaultExit = TestRoom3",
             "Created room TestRoom3",
         )
 
@@ -1437,18 +1437,18 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdTypeclass(), "", "Usage: ")
         self.call(
             building.CmdTypeclass(),
-            "Obj = evennia.objects.objects.DefaultExit",
+            "Obj = evennia.objects.exit.DefaultExit",
             (
-                "Obj changed typeclass from evennia.objects.objects.DefaultObject "
-                "to evennia.objects.objects.DefaultExit."
+                "Obj changed typeclass from evennia.objects.object.DefaultObject "
+                "to evennia.objects.exit.DefaultExit."
             ),
         )
         self.call(
             building.CmdTypeclass(),
-            "Obj2 = evennia.objects.objects.DefaultExit",
+            "Obj2 = evennia.objects.exit.DefaultExit",
             (
-                "Obj2 changed typeclass from evennia.objects.objects.DefaultObject "
-                "to evennia.objects.objects.DefaultExit."
+                "Obj2 changed typeclass from evennia.objects.object.DefaultObject "
+                "to evennia.objects.exit.DefaultExit."
             ),
             cmdstring="swap",
             inputs=["yes"],
@@ -1457,32 +1457,32 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(
             building.CmdTypeclass(),
             "/show Obj",
-            "Obj's current typeclass is 'evennia.objects.objects.DefaultExit'",
+            "Obj's current typeclass is 'evennia.objects.exit.DefaultExit'",
         )
         self.call(
             building.CmdTypeclass(),
-            "Obj = evennia.objects.objects.DefaultExit",
+            "Obj = evennia.objects.exit.DefaultExit",
             (
-                "Obj already has the typeclass 'evennia.objects.objects.DefaultExit'. Use /force to"
+                "Obj already has the typeclass 'evennia.objects.exit.DefaultExit'. Use /force to"
                 " override."
             ),
         )
         self.call(
             building.CmdTypeclass(),
-            "/force Obj = evennia.objects.objects.DefaultExit",
+            "/force Obj = evennia.objects.exit.DefaultExit",
             "Obj updated its existing typeclass ",
         )
-        self.call(building.CmdTypeclass(), "Obj = evennia.objects.objects.DefaultObject")
+        self.call(building.CmdTypeclass(), "Obj = evennia.objects.object.DefaultObject")
         self.call(
             building.CmdTypeclass(),
             "/show Obj",
-            "Obj's current typeclass is 'evennia.objects.objects.DefaultObject'",
+            "Obj's current typeclass is 'evennia.objects.object.DefaultObject'",
         )
         self.call(
             building.CmdTypeclass(),
             "Obj",
             (
-                "Obj updated its existing typeclass (evennia.objects.objects.DefaultObject).\nOnly"
+                "Obj updated its existing typeclass (evennia.objects.object.DefaultObject).\nOnly"
                 " the at_object_creation hook was run (update mode). Attributes set before swap"
                 " were not removed\n(use `swap` or `type/reset` to clear all)."
             ),
@@ -1490,9 +1490,9 @@ class TestBuilding(BaseEvenniaCommandTest):
         )
         self.call(
             building.CmdTypeclass(),
-            "/reset/force Obj=evennia.objects.objects.DefaultObject",
+            "/reset/force Obj=evennia.objects.object.DefaultObject",
             (
-                "Obj updated its existing typeclass (evennia.objects.objects.DefaultObject).\nAll"
+                "Obj updated its existing typeclass (evennia.objects.object.DefaultObject).\nAll"
                 " object creation hooks were run. All old attributes where deleted before the swap."
             ),
             inputs=["yes"],
@@ -1519,7 +1519,7 @@ class TestBuilding(BaseEvenniaCommandTest):
                 building.CmdTypeclass(),
                 "/prototype Obj=testkey",
                 (
-                    "replaced_obj changed typeclass from evennia.objects.objects.DefaultObject to "
+                    "replaced_obj changed typeclass from evennia.objects.object.DefaultObject to "
                     "typeclasses.objects.Object.\nOnly the at_object_creation hook was run "
                     "(update mode). Attributes set before swap were not removed\n"
                     "(use `swap` or `type/reset` to clear all). Prototype 'replaced_obj' was "
@@ -1585,7 +1585,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         # Test multitype filtering
         with patch(
             "evennia.commands.default.building.CHAR_TYPECLASS",
-            "evennia.objects.objects.DefaultCharacter",
+            "evennia.objects.character.DefaultCharacter",
         ):
             self.call(building.CmdFind(), "/char/room Obj", "No Matches")
             self.call(building.CmdFind(), "/char/room/exit Char", "2 Matches")
@@ -1780,7 +1780,7 @@ class TestBuilding(BaseEvenniaCommandTest):
             building.CmdSpawn(),
             (
                 "/save {'prototype_key': 'testprot', 'key':'Test Char', "
-                "'typeclass':'evennia.objects.objects.DefaultCharacter'}"
+                "'typeclass':'evennia.objects.character.DefaultCharacter'}"
             ),
             "Saved prototype: testprot",
             inputs=["y"],
@@ -1790,7 +1790,7 @@ class TestBuilding(BaseEvenniaCommandTest):
             building.CmdSpawn(),
             (
                 "/save testprot2 = {'key':'Test Char', "
-                "'typeclass':'evennia.objects.objects.DefaultCharacter'}"
+                "'typeclass':'evennia.objects.character.DefaultCharacter'}"
             ),
             "(Replacing `prototype_key` in prototype with given key.)|Saved prototype: testprot2",
             inputs=["y"],
@@ -1801,7 +1801,7 @@ class TestBuilding(BaseEvenniaCommandTest):
 
         self.call(
             building.CmdSpawn(),
-            "/save {'key':'Test Char', 'typeclass':'evennia.objects.objects.DefaultCharacter'}",
+            "/save {'key':'Test Char', 'typeclass':'evennia.objects.character.DefaultCharacter'}",
             (
                 "A prototype_key must be given, either as `prototype_key = <prototype>` or as "
                 "a key 'prototype_key' inside the prototype structure."
@@ -1826,7 +1826,7 @@ class TestBuilding(BaseEvenniaCommandTest):
 
         self.call(
             building.CmdSpawn(),
-            "{'prototype_key':'GOBLIN', 'typeclass':'evennia.objects.objects.DefaultCharacter', "
+            "{'prototype_key':'GOBLIN', 'typeclass':'evennia.objects.character.DefaultCharacter', "
             "'key':'goblin', 'location':'%s'}" % spawnLoc.dbref,
             "Spawned goblin",
         )
@@ -1841,7 +1841,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         protlib.create_prototype(
             {
                 "key": "Ball",
-                "typeclass": "evennia.objects.objects.DefaultCharacter",
+                "typeclass": "evennia.objects.character.DefaultCharacter",
                 "prototype_key": "testball",
             }
         )

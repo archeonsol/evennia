@@ -26,7 +26,7 @@ _PROTPARENTS = {
     "NOBODY": {},
     "GOBLIN": {
         "prototype_key": "GOBLIN",
-        "typeclass": "evennia.objects.objects.DefaultObject",
+        "typeclass": "evennia.objects.object.DefaultObject",
         "key": "goblin grunt",
         "health": lambda: randint(1, 1),
         "resists": ["cold", "poison"],
@@ -49,7 +49,7 @@ _PROTPARENTS = {
         "prototype_parent": ("GOBLIN_WIZARD", "ARCHWIZARD"),
     },
     "ISSUE2908": {
-        "typeclass": "evennia.objects.objects.DefaultObject",
+        "typeclass": "evennia.objects.object.DefaultObject",
         "key": "testobject_isse2909",
         "location": "$choice($objlist(",
     },
@@ -61,7 +61,7 @@ class TestSpawner(BaseEvenniaTest):
         super().setUp()
         self.prot1 = {
             "prototype_key": "testprototype",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
         }
 
     def test_spawn_from_prot(self):
@@ -130,7 +130,7 @@ class TestUtils(BaseEvenniaTest):
                 "prototype_locks": "spawn:all();edit:all()",
                 "prototype_tags": [],
                 "tags": [("foo", None, None)],
-                "typeclass": "evennia.objects.objects.DefaultObject",
+                "typeclass": "evennia.objects.object.DefaultObject",
             },
             new_prot,
         )
@@ -195,7 +195,7 @@ class TestUtils(BaseEvenniaTest):
                 "prototype_locks": "spawn:all();edit:all()",
                 "prototype_tags": [],
                 "tags": [("footag", "foocategory", None)],
-                "typeclass": "evennia.objects.objects.DefaultObject",
+                "typeclass": "evennia.objects.object.DefaultObject",
             },
         )
 
@@ -229,7 +229,7 @@ class TestUtils(BaseEvenniaTest):
                 "prototype_locks": "spawn:all();edit:all()",
                 "prototype_tags": [],
                 "test": "testval_changed",
-                "typeclass": "evennia.objects.objects.DefaultObject",
+                "typeclass": "evennia.objects.object.DefaultObject",
             },
         )
 
@@ -293,8 +293,8 @@ class TestUtils(BaseEvenniaTest):
                 },
                 "key": ("Obj", "Obj", "KEEP"),
                 "typeclass": (
-                    "evennia.objects.objects.DefaultObject",
-                    "evennia.objects.objects.DefaultObject",
+                    "evennia.objects.object.DefaultObject",
+                    "evennia.objects.object.DefaultObject",
                     "KEEP",
                 ),
                 "aliases": {"foo": ("foo", None, "REMOVE")},
@@ -365,7 +365,7 @@ class TestUtils(BaseEvenniaTest):
                 "prototype_key": Something,
                 "prototype_locks": "spawn:all();edit:all()",
                 "prototype_tags": [],
-                "typeclass": "evennia.objects.objects.DefaultObject",
+                "typeclass": "evennia.objects.object.DefaultObject",
             },
             new_prot,
         )
@@ -408,7 +408,7 @@ class TestProtLib(BaseEvenniaTest):
 
         prot_with_locks = {
             "prototype_key": "test_prot_with_locks",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
             "prototype_locks": "spawn:perm(Builder);edit:perm(Admin)",
         }
         homogenized = protlib.homogenize_prototype(prot_with_locks)
@@ -427,7 +427,7 @@ class TestProtLib(BaseEvenniaTest):
 
         prot_without_locks = {
             "prototype_key": "test_prot_without_locks",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
         }
         homogenized = protlib.homogenize_prototype(prot_without_locks)
         self.assertEqual(
@@ -544,7 +544,7 @@ class TestMenuModule(BaseEvenniaTest):
 
         self.test_prot = {
             "prototype_key": "test_prot",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
             "prototype_locks": "edit:all();spawn:all()",
         }
 
@@ -626,7 +626,7 @@ class TestMenuModule(BaseEvenniaTest):
             #     caller, 'test_prot'),
             #     "|cprototype key:|n test_prot, |ctags:|n None, |clocks:|n edit:all();spawn:all() "
             #     "\n|cdesc:|n None \n|cprototype:|n "
-            #     "{\n  'typeclass': 'evennia.objects.objects.DefaultObject', \n}")
+            #     "{\n  'typeclass': 'evennia.objects.object.DefaultObject', \n}")
 
         with mock.patch(
             "evennia.prototypes.menus.protlib.search_prototype",
@@ -642,7 +642,7 @@ class TestMenuModule(BaseEvenniaTest):
                 "prototype_key": "test_prot",
                 "prototype_locks": "edit:all();spawn:all()",
                 "prototype_parent": "goblin",
-                "typeclass": "evennia.objects.objects.DefaultObject",
+                "typeclass": "evennia.objects.object.DefaultObject",
             },
         )
 
@@ -654,7 +654,7 @@ class TestMenuModule(BaseEvenniaTest):
             self.assertEqual(olc_menus._all_typeclasses(caller), ["bar", "foo"])
 
         self.assertEqual(
-            olc_menus._typeclass_select(caller, "evennia.objects.objects.DefaultObject"), None
+            olc_menus._typeclass_select(caller, "evennia.objects.object.DefaultObject"), None
         )
         # prototype_parent should be popped off here
         self.assertEqual(
@@ -663,7 +663,7 @@ class TestMenuModule(BaseEvenniaTest):
                 "prototype_key": "test_prot",
                 "prototype_locks": "edit:all();spawn:all()",
                 "prototype_parent": "goblin",
-                "typeclass": "evennia.objects.objects.DefaultObject",
+                "typeclass": "evennia.objects.object.DefaultObject",
             },
         )
 
@@ -741,7 +741,7 @@ class TestMenuModule(BaseEvenniaTest):
             self.assertEqual(olc_menus._spawn(caller, prototype=self.test_prot), Something)
         obj = caller.contents[0]
 
-        self.assertEqual(obj.typeclass_path, "evennia.objects.objects.DefaultObject")
+        self.assertEqual(obj.typeclass_path, "evennia.objects.object.DefaultObject")
         self.assertEqual(
             obj.tags.get(category=spawner.PROTOTYPE_TAG_CATEGORY), self.test_prot["prototype_key"]
         )
@@ -1004,7 +1004,7 @@ class Test2474(BaseEvenniaTest):
 
     prototypes = {
         "WEAPON": {
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
             "key": "Weapon",
             "desc": "A generic blade.",
             "magic": False,
@@ -1046,7 +1046,7 @@ class TestPartialTagAttributes(BaseEvenniaTest):
         super().setUp()
         self.prot = {
             "prototype_key": "rock",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
             "key": "a rock",
             "tags": [("quantity", "groupable")],  # missing data field
             "attrs": [("quantity", 1)],  # missing category and lock fields
@@ -1069,7 +1069,7 @@ class TestIssue2908(BaseEvenniaTest):
 
         prot = {
             "prototype_key": "rock",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
             "key": "a rock",
             "location": "$choice($objlist(beach,category=zone,type=tag))",
         }
@@ -1095,7 +1095,7 @@ class TestIssue3824(BaseEvenniaTest):
         # Create prototype using all search callables
         prot = {
             "prototype_key": "test_search_callables",
-            "typeclass": "evennia.objects.objects.DefaultObject",
+            "typeclass": "evennia.objects.object.DefaultObject",
             "key": "test object",
             "attr_obj": f"$obj({self.obj1.dbref})",
             "attr_search": "$search(Char)",

@@ -307,19 +307,21 @@ class TestObjectManager(BaseEvenniaTest):
 
     def test_get_objs_with_key_and_typeclass(self):
         query = ObjectDB.objects.get_objs_with_key_and_typeclass(
-            "Char", "evennia.objects.objects.DefaultCharacter"
+            "Char", "evennia.objects.character.DefaultCharacter"
         )
         self.assertEqual(list(query), [self.char1])
         query = ObjectDB.objects.get_objs_with_key_and_typeclass(
-            "Char", "evennia.objects.objects.DefaultObject"
+            "Char", "evennia.objects.object.DefaultObject"
         )
         self.assertFalse(query)
         query = ObjectDB.objects.get_objs_with_key_and_typeclass(
-            "NotFound", "evennia.objects.objects.DefaultCharacter"
+            "NotFound", "evennia.objects.character.DefaultCharacter"
         )
         self.assertFalse(query)
         query = ObjectDB.objects.get_objs_with_key_and_typeclass(
-            "Char", "evennia.objects.objects.DefaultCharacter", candidates=[self.char1, self.char2]
+            "Char",
+            "evennia.objects.character.DefaultCharacter",
+            candidates=[self.char1, self.char2],
         )
         self.assertEqual(list(query), [self.char1])
 
@@ -327,7 +329,7 @@ class TestObjectManager(BaseEvenniaTest):
         query = ObjectDB.objects.get_objs_with_key_or_alias("Char")
         self.assertEqual(list(query), [self.char1])
         query = ObjectDB.objects.get_objs_with_key_or_alias(
-            "Char", typeclasses="evennia.objects.objects.DefaultObject"
+            "Char", typeclasses="evennia.objects.object.DefaultObject"
         )
         self.assertEqual(list(query), [])
         query = ObjectDB.objects.get_objs_with_key_or_alias(
@@ -345,7 +347,7 @@ class TestObjectManager(BaseEvenniaTest):
         self.assertEqual(list(query), list(ObjectDB.objects.all().order_by("id")))
 
         query = ObjectDB.objects.get_objs_with_key_or_alias(
-            "", exact=False, typeclasses="evennia.objects.objects.DefaultCharacter"
+            "", exact=False, typeclasses="evennia.objects.character.DefaultCharacter"
         )
         self.assertEqual(list(query), [self.char1, self.char2])
 
@@ -387,7 +389,7 @@ class TestObjectManager(BaseEvenniaTest):
             "",
             exact=False,
             tags=[("test tag", None)],
-            typeclass="evennia.objects.objects.DefaultCharacter",
+            typeclass="evennia.objects.character.DefaultCharacter",
         )
         self.assertEqual(list(query), [self.char1])
 

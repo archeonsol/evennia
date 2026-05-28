@@ -11,9 +11,11 @@ import re
 from django.conf import settings
 
 from evennia.utils.logger import log_trace, mask_sensitive_input
-from evennia.utils.multimatch import parse_multimatch_input, resolve_multimatch_index
-
-_MULTIMATCH_REGEX = re.compile(settings.SEARCH_MULTIMATCH_REGEX, re.I + re.U)
+from evennia.utils.multimatch import (
+    _multimatch_regex,
+    parse_multimatch_input,
+    resolve_multimatch_index,
+)
 
 
 def create_match(cmdname, string, cmdobj, raw_cmdname):
@@ -80,7 +82,7 @@ def try_multimatch_differentiators(raw_string):
     selector, new_raw_string = parse_multimatch_input(raw_string)
     if selector is not None:
         return selector, new_raw_string
-    num_ref_match = _MULTIMATCH_REGEX.match(raw_string)
+    num_ref_match = _multimatch_regex().match(raw_string)
     if num_ref_match:
         mindex = int(num_ref_match.group("number")) - 1
         new_raw_string = num_ref_match.group("name") + (num_ref_match.group("args") or "")
