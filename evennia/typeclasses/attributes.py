@@ -174,6 +174,15 @@ def _flush_orphan_dirty():
         _ORPHAN_DIRTY_ATTRS.discard(attr)
     if dirty:
         Attribute.objects.bulk_update(dirty, _DIRTY_ATTR_UPDATE_FIELDS)
+        # Orphan path bypasses backend.flush_dirty, so Redis L2 entries for
+        # these attrs are now stale. Best-effort invalidation; the cache
+        # module no-ops if Redis is disabled or unavailable.
+        try:
+            from evennia.typeclasses.redis_attr_cache import invalidate_attrs
+
+            invalidate_attrs(dirty)
+        except Exception:
+            pass
 
 
 def count_pending_dirty():
@@ -225,7 +234,8 @@ def flush_all_dirty():
 
     pending_stats = count_pending_dirty()
     try:
-        from evennia.server.prometheus_metrics import observe_attribute_dirty_pending
+        from evennia.server.prometheus_metrics import \
+            observe_attribute_dirty_pending
 
         observe_attribute_dirty_pending(pending_stats["pending"])
     except Exception:
@@ -249,7 +259,8 @@ def flush_all_dirty():
         "pending": pending_stats["pending"],
     }
     try:
-        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
+        from evennia.typeclasses.attribute_metrics import \
+            record_attribute_flush_stats
 
         record_attribute_flush_stats(stats, duration_seconds=duration)
     except Exception:
