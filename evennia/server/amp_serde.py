@@ -21,7 +21,6 @@ from django.conf import settings
 _PICKLE_REJECT_PREFIXES = (b"\x80", b"(", b"]", b"}")
 
 _SESSION_MAGIC = b"J1"
-_ADMIN_SESSION_SYNC = chr(8)
 
 _SUBJECT_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 
@@ -151,36 +150,71 @@ def _sanitize_admin_kwargs(kwargs: dict) -> dict:
     for k, v in kwargs.items():
         if not isinstance(k, str):
             raise TypeError("admin message kwargs keys must be str")
-        if (
-            k == "sessiondata"
-            and kwargs.get("operation") == _ADMIN_SESSION_SYNC
-            and isinstance(v, dict)
-        ):
-            # sessiondata: {int_sessid: {str: primitive}}
-            encoded: dict = {}
-            for sk, sv in v.items():
-                encoded[f"__si__:{sk}"] = sanitize_value(sv)
-            result[k] = encoded
+        if k == "sessiondata" and isinstance(v, dict):
+            result[k] = _sanitize_admin_sessiondata(v)
         else:
             result[k] = sanitize_value(v)
     return result
 
 
+def _is_sessiondata_map(value: Any) -> bool:
+    """Return True for ``{sessid: sessiondata}``, False for one sessiondata dict."""
+    return isinstance(value, dict) and all(_is_int_key(key) for key in value)
+
+
+def _is_int_key(key: Any) -> bool:
+    return isinstance(key, int) or (isinstance(key, str) and key.isdigit())
+
+
+def _sanitize_admin_sessiondata(value: dict, *, depth: int = 0, sessid_map: bool | None = None) -> dict:
+    if depth > _max_depth():
+        raise ValueError("AMP admin sessiondata exceeds max nesting depth")
+    if len(value) > _MAX_DICT_KEYS:
+        raise ValueError("AMP admin sessiondata dict exceeds max keys")
+
+    if sessid_map is None:
+        sessid_map = _is_sessiondata_map(value)
+
+    encoded: dict = {}
+    for key, val in value.items():
+        if sessid_map:
+            if not _is_int_key(key):
+                raise TypeError("AMP admin sessiondata map keys must be int-like")
+            clean_key = f"__si__:{key}"
+        elif isinstance(key, str):
+            clean_key = key
+        elif isinstance(key, int):
+            clean_key = f"__ki__:{key}"
+        else:
+            raise TypeError("AMP admin sessiondata dict keys must be str or int")
+
+        if isinstance(val, dict):
+            encoded[clean_key] = _sanitize_admin_sessiondata(
+                val, depth=depth + 1, sessid_map=False
+            )
+        else:
+            encoded[clean_key] = sanitize_value(val, depth=depth + 1)
+    return encoded
+
+
+def _restore_admin_sessiondata(value: dict) -> dict:
+    restored: dict = {}
+    for key, val in value.items():
+        if key.startswith("__si__:"):
+            clean_key = int(key[7:])
+        elif key.startswith("__ki__:"):
+            clean_key = int(key[7:])
+        else:
+            clean_key = key
+        restored[clean_key] = _restore_admin_sessiondata(val) if isinstance(val, dict) else val
+    return restored
+
+
 def _restore_admin_kwargs(kwargs: dict) -> dict:
     """Reverse _sanitize_admin_kwargs — convert __si__:N keys back to int."""
-    if (
-        kwargs.get("operation") == _ADMIN_SESSION_SYNC
-        and "sessiondata" in kwargs
-        and isinstance(kwargs["sessiondata"], dict)
-    ):
-        restored: dict = {}
-        for sk, sv in kwargs["sessiondata"].items():
-            if sk.startswith("__si__:"):
-                restored[int(sk[7:])] = sv
-            else:
-                restored[int(sk)] = sv  # legacy: plain numeric string
+    if "sessiondata" in kwargs and isinstance(kwargs["sessiondata"], dict):
         kwargs = dict(kwargs)
-        kwargs["sessiondata"] = restored
+        kwargs["sessiondata"] = _restore_admin_sessiondata(kwargs["sessiondata"])
     return kwargs
 
 
