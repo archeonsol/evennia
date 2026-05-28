@@ -18,8 +18,6 @@ from django.db.models import Q
 from evennia.locks.lockfuncs import perm as perm_lockfunc
 from evennia.utils.utils import make_iter, to_str
 
-_TYPECLASS_AGGRESSIVE_CACHE = settings.TYPECLASS_AGGRESSIVE_CACHE
-
 # ------------------------------------------------------------
 #
 # Tags
@@ -337,7 +335,7 @@ class TagHandler(object):
         Cache all tags of this object.
 
         """
-        if not _TYPECLASS_AGGRESSIVE_CACHE:
+        if not settings.TYPECLASS_AGGRESSIVE_CACHE:
             return
         tags = self._query_all()
         self._cache = dict(
@@ -380,7 +378,7 @@ class TagHandler(object):
         category = category.strip().lower() if category else None
         if key:
             cachekey = "%s-%s" % (key, category)
-            tag = _TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(cachekey, None)
+            tag = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(cachekey, None)
             if tag and (not hasattr(tag, "pk") or tag.pk is None):
                 # clear out Tags deleted from elsewhere. We must search this anew.
                 tag = None
@@ -402,7 +400,7 @@ class TagHandler(object):
                 )
                 if conn:
                     tag = conn[0].tag
-                    if _TYPECLASS_AGGRESSIVE_CACHE:
+                    if settings.TYPECLASS_AGGRESSIVE_CACHE:
                         self._cache[cachekey] = tag
                     return [tag]
         else:
@@ -410,7 +408,7 @@ class TagHandler(object):
             # assume the cache to be complete unless we have queried
             # for this category before
             catkey = "-%s" % category
-            if _TYPECLASS_AGGRESSIVE_CACHE and catkey in self._catcache:
+            if settings.TYPECLASS_AGGRESSIVE_CACHE and catkey in self._catcache:
                 return [tag for key, tag in self._cache.items() if key.endswith(catkey)]
             else:
                 # we have to query to make this category up-date in the cache
@@ -426,7 +424,7 @@ class TagHandler(object):
                     .through.objects.select_related("tag")
                     .filter(**query)
                 ]
-                if _TYPECLASS_AGGRESSIVE_CACHE:
+                if settings.TYPECLASS_AGGRESSIVE_CACHE:
                     for tag in tags:
                         cachekey = "%s-%s" % (tag.db_key, category)
                         self._cache[cachekey] = tag
@@ -445,7 +443,7 @@ class TagHandler(object):
             tag_obj (tag): The newly saved tag
 
         """
-        if not _TYPECLASS_AGGRESSIVE_CACHE:
+        if not settings.TYPECLASS_AGGRESSIVE_CACHE:
             return
         if not key:  # don't allow an empty key in cache
             return
@@ -691,7 +689,7 @@ class TagHandler(object):
                 `return_key_and_category` is set.
 
         """
-        if _TYPECLASS_AGGRESSIVE_CACHE:
+        if settings.TYPECLASS_AGGRESSIVE_CACHE:
             if not self._cache_complete:
                 self._fullcache()
             tags = sorted(self._cache.values())
