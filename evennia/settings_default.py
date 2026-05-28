@@ -653,7 +653,7 @@ JOB_QUEUE_DRAIN_EVERY_N_TICKS = 10
 JOB_QUEUE_DRAIN_MAX_JOBS = 5
 # Redis SET index for channel subscribers (PG M2M remains source of truth).
 CHANNEL_SUBSCRIBER_CACHE_ENABLED = True
-CHANNEL_SUBSCRIBER_CACHE_REDIS_ALIAS = "default"
+CHANNEL_SUBSCRIBER_CACHE_ALIAS = "default"
 # PostgreSQL connection defaults (apply via evennia.server.database_postgres.apply_postgres_engine_defaults).
 ENGINE_DATABASE_CONN_MAX_AGE = 600
 ENGINE_DATABASE_CONN_HEALTH_CHECKS = True

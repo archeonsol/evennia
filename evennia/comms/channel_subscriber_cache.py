@@ -22,7 +22,7 @@ def _enabled() -> bool:
 
 
 def _redis_alias() -> str:
-    return getattr(settings, "CHANNEL_SUBSCRIBER_CACHE_REDIS_ALIAS", "default")
+    return getattr(settings, "CHANNEL_SUBSCRIBER_CACHE_ALIAS", "default")
 
 
 def _redis_conn():
@@ -138,24 +138,45 @@ def clear_channel(channel) -> None:
 
 
 def _resolve_refs(refs: Iterable[str]) -> List:
+    """Resolve a batch of ``kind:pk`` refs to model instances in one query per kind.
+
+    Stale refs (pk no longer in DB) are silently skipped, matching the prior
+    per-ref ``DoesNotExist`` swallow. Input order is preserved.
+    """
     from evennia.accounts.models import AccountDB
     from evennia.objects.models import ObjectDB
 
-    out = []
+    parsed = []
+    account_pks = []
+    object_pks = []
     for ref in refs:
         kind, pk = _parse_ref(ref)
         if not pk:
             continue
+        parsed.append((kind, pk))
+        if kind == "a":
+            account_pks.append(pk)
+        elif kind == "o":
+            object_pks.append(pk)
+
+    accounts = {}
+    objects = {}
+    if account_pks:
         try:
-            if kind == "a":
-                obj = AccountDB.objects.get(id=pk)
-            elif kind == "o":
-                obj = ObjectDB.objects.get(id=pk)
-            else:
-                continue
-            out.append(obj)
+            accounts = {a.pk: a for a in AccountDB.objects.filter(pk__in=account_pks)}
         except Exception:
-            continue
+            logger.log_trace("channel_subscriber_cache: account bulk-resolve failed")
+    if object_pks:
+        try:
+            objects = {o.pk: o for o in ObjectDB.objects.filter(pk__in=object_pks)}
+        except Exception:
+            logger.log_trace("channel_subscriber_cache: object bulk-resolve failed")
+
+    out = []
+    for kind, pk in parsed:
+        obj = accounts.get(pk) if kind == "a" else objects.get(pk) if kind == "o" else None
+        if obj is not None:
+            out.append(obj)
     return out
 
 

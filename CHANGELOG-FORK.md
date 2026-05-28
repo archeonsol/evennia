@@ -36,6 +36,61 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.37 — Channel subscriber resolve batching + setting rename (Phase 6)
+
+Closes out the engine cleanup checklist's lingering items on the
+`channel_subscriber_cache` surface.
+
+### Engine
+
+- [`evennia/comms/channel_subscriber_cache.py`](evennia/comms/channel_subscriber_cache.py):
+  `_resolve_refs` now batches PG lookups. Previously the function
+  looped `AccountDB.objects.get(id=pk)` / `ObjectDB.objects.get(id=pk)`
+  once per ref, so a broadcast to N online subscribers cost N PG
+  round-trips even on a Redis cache hit. The function now groups refs
+  by kind, runs one `filter(pk__in=...)` per kind (max two queries
+  total regardless of subscriber count), then replays the input order
+  to preserve the prior return-order contract. Stale refs (pk no
+  longer in DB) are silently skipped exactly as before. Bulk-resolve
+  failure is now `log_trace`'d once per kind instead of swallowed
+  silently per ref.
+
+### Settings
+
+- [`evennia/settings_default.py`](evennia/settings_default.py):
+  renamed `CHANNEL_SUBSCRIBER_CACHE_REDIS_ALIAS` to
+  `CHANNEL_SUBSCRIBER_CACHE_ALIAS`. The redundant `REDIS_` qualifier in
+  the suffix was the one real inconsistency across the cache settings
+  surface (the cache module's name already implies Redis as the
+  backing store, the way `ATTRIBUTE_REDIS_CACHE_ALIAS` doesn't need a
+  second `_REDIS_`). All other cache settings already follow a
+  consistent `<PREFIX>_CACHE_<KNOB>` shape.
+
+### Migration
+
+Downstream games using `CHANNEL_SUBSCRIBER_CACHE_REDIS_ALIAS` in
+`settings.py` must rename it to `CHANNEL_SUBSCRIBER_CACHE_ALIAS`. No
+deprecation shim — coordinate with this release. Default value
+unchanged (`"default"`).
+
+### Tests
+
+`evennia.comms` test suite (8 tests) passes.
+
+### Closes
+
+This is the last item from
+[`.fleet-review/engine-cleanup-checklist.md`](.fleet-review/engine-cleanup-checklist.md)
+worth addressing now. Remaining work on the checklist is Phase 2b
+(orphan-flush retry on failure, still queued) and Phase 3 (`except
+Exception:` narrowing, opportunistic). Phase 4 (cache unification)
+stays dropped; Phase 5 shipped in `.36`. A deferred follow-up
+(hit/miss metrics for the four engine caches that lack them) is
+noted in Phase 6 of the checklist but isn't scheduled — reopen when
+there's a concrete cache question worth measuring.
+
+---
+
 ## 6.0.0+underspire.36 — Display-name cache moves to game (Phase 5)
 
 Removes `evennia.utils.display_name_cache` from the engine. The cache
