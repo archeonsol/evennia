@@ -1534,7 +1534,7 @@ def check_database(always_return=False):
             res = ""
             while res.upper() != "Y":
                 # ask for permission
-                res = eval(input("Continue [Y]/N: "))
+                res = input("Continue [Y]/N: ").strip()
                 if res.upper() == "N":
                     sys.exit()
                 elif not res:

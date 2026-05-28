@@ -79,7 +79,8 @@ def emit(
     actor_ref = ""
     if actor is not None:
         try:
-            actor_ref = str(actor)
+            # Prefer stable dbref (e.g. "#42") over __str__ (often the mutable name).
+            actor_ref = getattr(actor, "dbref", None) or str(actor)
         except Exception:
             actor_ref = ""
 

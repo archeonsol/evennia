@@ -515,6 +515,12 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
         cmd = "prompt" if prompt else "text"
         if raw:
             if client_raw:
+                # client_raw=True bypasses both ANSI->HTML conversion and HTML
+                # escaping. The webclient's default_out plugin renders text via
+                # jQuery .html()/string concat, so any unescaped <, >, & here
+                # becomes live DOM. Only set this for content that is already
+                # known-safe HTML produced by trusted server code, never for
+                # anything that touches player input.
                 args[0] = text
             else:
                 args[0] = html_lib.escape(text)
