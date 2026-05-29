@@ -13,6 +13,7 @@ from evennia.objects.models import ObjectDB
 from evennia.objects.object import _COMMAND_DEFAULT_CLASS, DefaultObject
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.utils import create, logger
+from evennia.utils.utils import is_veto
 
 
 class ExitCommand(_COMMAND_DEFAULT_CLASS):
@@ -284,7 +285,7 @@ class DefaultExit(DefaultObject):
                 overriding the call (unused by default).
 
         """
-        if not self.at_pre_traverse(traversing_object, target_location, **kwargs):
+        if is_veto(self.at_pre_traverse(traversing_object, target_location, **kwargs)):
             self.at_failed_traverse(traversing_object)
             return
         source_location = traversing_object.location

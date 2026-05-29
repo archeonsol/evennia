@@ -63,6 +63,88 @@ _SA = object.__setattr__
 _DA = object.__delattr__
 
 
+def is_veto(result):
+    """Return True if a pre-hook return value should veto the operation.
+
+    Rule: a return value vetoes when it is **falsy AND not None**.
+
+    - `False`, `0`, `""`, `[]`, `()` veto (explicit falsy).
+    - `None` does NOT veto (treated as "no opinion / allow").
+    - `True` and other truthy values do not veto.
+
+    The carve-out for `None` is deliberate: forgetting `return True` at the
+    end of a pre-hook override is the most common authoring mistake, and
+    under the older "any falsy vetoes" rule it silently blocked the
+    operation the override was supposed to be a notification for. Treating
+    an implicit `None` as "no opinion" makes side-effect-only overrides
+    safe by default; an author who actually wants to veto must say so
+    explicitly with `return False`.
+
+    This is the canonical veto check used by every veto-capable pre-hook
+    in the engine (`at_pre_move`, `at_pre_leave`, `at_pre_arrive`,
+    `at_pre_traverse`, `at_pre_rename`, `at_pre_get`, `at_pre_drop`,
+    `at_pre_give`, `at_pre_puppet`). Use it at call sites that gate an
+    operation on a hook's return value.
+
+    For transform-style pre-hooks (`at_pre_say`, `at_pre_msg`,
+    `at_pre_channel_msg`) the analogous helper is `resolve_transform`,
+    which applies the same None-means-no-opinion principle to hooks that
+    return data rather than a vote.
+
+    Other exceptions, which use neither rule:
+
+    - Command pre-hooks `at_pre_parse` and `at_pre_cmd` use the inverse
+      convention (truthy aborts) and predate these rules.
+    - Lifecycle pre-hooks `at_pre_unpuppet` and `at_pre_login` are pure
+      notifications; their return value is ignored. These run during
+      session teardown / login where vetoing would strand state.
+
+    Args:
+        result: The return value of a pre-hook call.
+
+    Returns:
+        bool: True if the operation should be aborted, False if it should
+        proceed.
+
+    """
+    return result is not None and not result
+
+
+def resolve_transform(result, original):
+    """Resolve a transform-style pre-hook return value into the final value.
+
+    Rule, symmetric with `is_veto`:
+
+    - `None` means "no opinion": the override didn't return anything
+      meaningful, so `original` is used unchanged.
+    - Any non-None falsy value (`False`, `""`, `[]`, `()`) is returned
+      as-is, which downstream callers interpret as "abort" via their
+      existing `if not result: return` check.
+    - Any truthy value is returned as-is and replaces `original`.
+
+    This closes the symmetric footgun to `is_veto` for transform hooks:
+    forgetting to return the message at the end of an override that did
+    side effects no longer silently aborts every operation. An author who
+    wants to abort must say so explicitly with `return False` (or
+    `return ""`).
+
+    Canonical helper for transform pre-hooks
+    (`at_pre_say`, `at_pre_msg`, `at_pre_channel_msg`). Use at call sites
+    that pass a value through a hook for possible modification.
+
+    Args:
+        result: The return value of the pre-hook call.
+        original: The value to fall back to if `result` is `None`.
+
+    Returns:
+        The hook's transformed value, the original value (when the hook
+        returned `None`), or a non-None falsy value (which downstream
+        treats as an abort signal).
+
+    """
+    return original if result is None else result
+
+
 def is_iter(obj):
     """
     Checks if an object behaves iterably.

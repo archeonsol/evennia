@@ -40,8 +40,8 @@ from evennia.typeclasses.attributes import ModelAttributeBackend, NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import class_from_module, create, logger
 from evennia.utils.optionhandler import OptionHandler
-from evennia.utils.utils import (is_iter, lazy_property, make_iter, to_str,
-                                 variable_from_module)
+from evennia.utils.utils import (is_iter, is_veto, lazy_property, make_iter,
+                                 to_str, variable_from_module)
 
 __all__ = ("DefaultAccount", "DefaultGuest")
 
@@ -575,8 +575,10 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 )
                 return
 
-        # do the puppeting
-        obj.at_pre_puppet(self, session=session)
+        # do the puppeting. at_pre_puppet may veto by returning False (or
+        # other non-None falsy); None / True allow the attach.
+        if is_veto(obj.at_pre_puppet(self, session=session)):
+            return
         # used to track in case of crash so we can clean up later
         obj.tags.add("puppeted", category="account")
 
@@ -1316,8 +1318,23 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
     def at_pre_channel_msg(self, message, channel, senders=None, **kwargs):
         """
         Called by the Channel just before passing a message into `channel_msg`.
-        This allows for tweak messages per-user and also to abort the
-        receive on the receiver-level.
+        Allows tweaking the message per-recipient and aborting the receive
+        on the receiver-level.
+
+        **Transform hook with the symmetric None-rule (see
+        `evennia.utils.utils.resolve_transform`).** This is a transform
+        hook: it returns the (possibly modified) message string.
+
+        Return rule:
+
+        - Return a non-empty string to replace the message for this recipient.
+        - Return `False` (or `""`) to explicitly abort the receive for this
+          recipient.
+        - Return `None` (including the implicit return from a side-effect-
+          only override) to use the original `message` unchanged. **This is
+          a `+underspire.41` change**: previously `None` aborted the
+          receive, which silently dropped every channel message for any
+          recipient whose override forgot the explicit `return message`.
 
         Args:
             message (str): The message sent to the channel.
@@ -1330,9 +1347,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 prefix will not be added (`[channelname]: ` by default)
 
         Returns:
-            str or None: Allows for customizing the message for this recipient.
-                If returning `None` (or `False`) message-receiving is aborted.
-                The returning string will be passed into `self.channel_msg`.
+            str, False, or None: The (possibly modified) message string,
+            `False`/empty to abort the receive, `None` to fall back to
+            the original message.
 
         Notes:
             This support posing/emotes by starting channel-send with : or ;.
@@ -1710,6 +1727,11 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         Called every time the user logs in, just before the actual
         login-state is set.
+
+        **Not vetoable.** Return value is ignored. Authentication has
+        already succeeded by this point; this hook exists for pre-login
+        side effects (state warming, audit logs), not gating. Block at
+        the authenticate stage if you need to refuse a login.
 
         Args:
             **kwargs (dict): Arbitrary, optional arguments for users

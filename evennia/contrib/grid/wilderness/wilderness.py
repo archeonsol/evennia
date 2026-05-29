@@ -127,6 +127,7 @@ from evennia import (DefaultExit, DefaultRoom, DefaultScript, create_object,
                      create_script)
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils import inherits_from
+from evennia.utils.utils import is_veto
 
 
 def create_wilderness(name="default", mapprovider=None, preserve_items=False):
@@ -703,7 +704,7 @@ class WildernessExit(DefaultExit):
         ):
             return False
 
-        if not traversing_object.at_pre_move(None):
+        if is_veto(traversing_object.at_pre_move(None)):
             return False
         traversing_object.location.msg_contents(
             "{} leaves to {}".format(traversing_object.key, new_coordinates),

@@ -36,6 +36,159 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.41 — Universal veto rule + transform rule for pre-hooks
+
+Mid-bundle correction landed between `+underspire.40` (engine/game
+boundary migration Bundle 1) and Bundle 2. Closes a footgun the Bundle 1
+rename sweep exposed: the existing veto convention (`if not result:`)
+silently blocked an operation any time an override forgot the explicit
+`return True`. The contrib sweep in `+underspire.40` had to add
+`return True` to three former `at_object_leave` bodies to keep them
+working as `at_pre_leave` overrides. Same footgun lurks for transform
+hooks (`at_pre_say`, `at_pre_msg`, `at_pre_channel_msg`) in a different
+shape.
+
+`+underspire.41` adopts two canonical rules across every pre-hook in
+the engine and updates every call site to match.
+
+### Engine — new helpers
+
+- [`evennia/utils/utils.py`](evennia/utils/utils.py):
+  **`is_veto(result)`**. Canonical check for veto-capable pre-hooks.
+  Returns `True` if the hook return should abort. Rule: **falsy AND not
+  None vetoes**. `False`, `0`, `""`, `[]`, `()` veto. `None` does NOT
+  veto (treated as "no opinion / allow"). The carve-out for `None` is
+  the footgun fix: forgetting `return True` no longer silently blocks.
+- [`evennia/utils/utils.py`](evennia/utils/utils.py):
+  **`resolve_transform(result, original)`**. Canonical resolver for
+  transform-style pre-hooks. Returns the hook's transformed value, or
+  `original` when the hook returned `None`, or the non-None falsy as-is
+  (so the caller's existing `if not result: return` check still aborts
+  cleanly). Symmetric closure of the same footgun for transform hooks.
+
+### Engine — vetoable pre-hooks (all updated to `is_veto` rule)
+
+`at_pre_move`, `at_pre_leave`, `at_pre_arrive` in
+[`movement.py`](evennia/objects/mixins/movement.py); `at_pre_traverse`
+in [`exit.py`](evennia/objects/exit.py); `at_pre_rename` in
+[`typeclasses/models.py`](evennia/typeclasses/models.py); `at_pre_get`,
+`at_pre_drop`, `at_pre_give` in
+[`appearance.py`](evennia/objects/mixins/appearance.py). Docstrings
+rewritten to spell out the new rule and link `is_veto`.
+
+**New vetoable hook**: `at_pre_puppet` is now veto-capable. Previously
+the engine called it for notification only and ignored the return.
+[`evennia/accounts/accounts.py`](evennia/accounts/accounts.py)
+`puppet_object` now checks `is_veto(obj.at_pre_puppet(...))` and bails
+silently on veto (the override is expected to `account.msg(...)` an
+explanation before returning `False`). Replaces the existing
+"subclass `puppet_object` to gate puppeting" pattern with a clean hook.
+
+### Engine — transform pre-hooks (all updated to `resolve_transform` rule)
+
+`at_pre_say` in
+[`appearance.py`](evennia/objects/mixins/appearance.py); `at_pre_msg`
+in [`comms/comms.py`](evennia/comms/comms.py); `at_pre_channel_msg` in
+[`accounts/accounts.py`](evennia/accounts/accounts.py). Call sites in
+[`commands/default/general.py`](evennia/commands/default/general.py)
+(say + whisper) and
+[`comms/comms.py`](evennia/comms/comms.py) (channel send) wrap the
+hook call with `resolve_transform(hook_result, original_message)`,
+preserving the existing `if not message: abort` check downstream.
+
+Docstrings rewritten to document the new contract:
+
+- Non-empty string replaces the message.
+- `False` or `""` aborts.
+- `None` falls back to the original message (was: abort).
+
+### Engine — non-vetoable pre-hooks (documented as exceptions)
+
+`at_pre_unpuppet` in
+[`lifecycle.py`](evennia/objects/mixins/lifecycle.py) and
+`at_pre_login` in
+[`accounts/accounts.py`](evennia/accounts/accounts.py) explicitly
+document that the return value is ignored. These run during session
+teardown / login where vetoing would strand state between the engine
+and the underlying transport.
+
+### Engine — command pre-hooks (documented as exceptions, inverted convention)
+
+`at_pre_parse` and `at_pre_cmd` in
+[`commands/command.py`](evennia/commands/command.py) keep the inverted
+"truthy aborts" convention they shipped with under
+`+underspire.2`/`+underspire.4`. Docstrings now call out the exception
+explicitly so it doesn't read as a bug against the universal rule. The
+truthy return is a useful error code / message that the cmdhandler
+propagates back to the caller; that semantic predates this rule and is
+worth preserving.
+
+### Contrib sweep
+
+Call sites in
+[`game_systems/containers/containers.py`](evennia/contrib/game_systems/containers/containers.py)
+(plus the container-internal `at_pre_get_from` /
+`at_pre_put_in` hooks),
+[`game_systems/storage/storage.py`](evennia/contrib/game_systems/storage/storage.py),
+[`grid/wilderness/wilderness.py`](evennia/contrib/grid/wilderness/wilderness.py),
+and [`tutorials/evadventure/commands.py`](evennia/contrib/tutorials/evadventure/commands.py)
+updated from the old `if not hook(...)` pattern (or the inverse
+`if hook(...)` in storage) to `is_veto(hook(...))`.
+
+Stale docstrings in
+[`turnbattle/tb_basic.py`](evennia/contrib/game_systems/turnbattle/tb_basic.py),
+[`turnbattle/tb_range.py`](evennia/contrib/game_systems/turnbattle/tb_range.py),
+[`containers.py`](evennia/contrib/game_systems/containers/containers.py),
+and [`ingame_python/typeclasses.py`](evennia/contrib/base_systems/ingame_python/typeclasses.py)
+swept to reference the new rule.
+
+The `ingame_python` `at_pre_say` override in
+[`typeclasses.py`](evennia/contrib/base_systems/ingame_python/typeclasses.py)
+previously used `return` (bare, returns `None`) to mean "abort this
+say." Under `+underspire.41` that would silently fall through to the
+original message. Changed to `return False` on both abort paths.
+
+### Tests
+
+- [`evennia/utils/tests/test_utils.py`](evennia/utils/tests/test_utils.py):
+  `TestIsVeto` (8 cases) and `TestResolveTransform` (5 cases) covering
+  every value class against the rule.
+- [`evennia/objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py):
+  `TestVetoRule` (8 cases) — implicit `None` allows for every veto hook;
+  explicit `False` blocks; `0` also blocks (defensive). `TestAtPrePuppetVeto`
+  (2 cases) — `False` blocks puppet attach, `None` allows.
+  `TestTransformHookNoneRule` (3 cases) — `at_pre_say` with `None` uses
+  original speech; with `False` aborts; with a string replaces.
+
+### Migration — downstream sweep required
+
+Lock-step fork must audit two behavior deltas. Both are silent failures:
+your tests pass, your overrides run, behavior is quietly wrong.
+
+**Delta 1 — veto hooks: implicit `None` now allows (was: blocked).**
+Re-audit every override of `at_pre_move`, `at_pre_leave`, `at_pre_arrive`,
+`at_pre_traverse`, `at_pre_rename`, `at_pre_get`, `at_pre_drop`,
+`at_pre_give`, and `at_pre_puppet` (newly vetoable!). Branches that
+returned `None` to abort under `+underspire.40` now allow. Change those
+paths to `return False`.
+
+**Delta 2 — transform hooks: `None` now falls back to original (was:
+abort).** Re-audit every override of `at_pre_say`, `at_pre_msg`,
+`at_pre_channel_msg`. Branches that `return` (bare) or `return None`
+to abort now silently let the original message through. Change those
+paths to `return False` or `return ""`.
+
+**Delta 3 — bool-return audit (pre-existing latent bug).** Any
+transform-hook override that does `return True` (or any non-string
+truthy) puts a bool into the downstream message slot, causing a
+confusing crash. Always existed; .41 docstrings make the misreading
+more likely. Grep at migration time.
+
+A full migration addendum has been issued to the downstream agent
+alongside this release with the exact greps and case analysis.
+
+---
+
 ## 6.0.0+underspire.40 — Engine/game boundary migration, Bundle 1 (hooks + naming sweep)
 
 First batch of the upstream-PR sequencing tracked in

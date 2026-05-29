@@ -30,7 +30,7 @@ To install, add the `EvAdventureCmdSet` from this module to the default characte
 
 from evennia import CmdSet, Command, InterruptCommand
 from evennia.utils.evmenu import EvMenu
-from evennia.utils.utils import inherits_from
+from evennia.utils.utils import inherits_from, is_veto
 
 from .enums import WieldLocation
 from .equipment import EquipmentError
@@ -358,7 +358,7 @@ class CmdGive(EvAdventureCommand):
             return
 
         # testing hook
-        if not item.at_pre_give(caller, receiver):
+        if is_veto(item.at_pre_give(caller, receiver)):
             return
 
         # before we start menus, we must check so either part is not already in a menu,

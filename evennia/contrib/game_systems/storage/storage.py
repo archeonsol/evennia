@@ -2,6 +2,7 @@ from evennia import CmdSet
 from evennia.commands.command import Command
 from evennia.utils import list_to_string
 from evennia.utils.search import search_object_by_tag
+from evennia.utils.utils import is_veto
 
 SHARED_TAG_PREFIX = "shared"
 
@@ -65,7 +66,7 @@ class CmdStore(StorageCommand):
         We first check at_pre_move before setting the location to None, in case
         anything should stymie its movement.
         """
-        if obj.at_pre_move(caller.location):
+        if not is_veto(obj.at_pre_move(caller.location)):
             obj.tags.add(self.object_tag, self.storage_location_id)
             obj.location = None
             caller.msg(f"You store {obj.get_display_name(caller)} here.")
@@ -99,7 +100,7 @@ class CmdRetrieve(StorageCommand):
         if not obj:
             return
 
-        if obj.at_pre_move(caller):
+        if not is_veto(obj.at_pre_move(caller)):
             obj.tags.remove(self.object_tag, self.storage_location_id)
             caller.msg(f"You retrieve {obj.get_display_name(caller)}.")
         else:

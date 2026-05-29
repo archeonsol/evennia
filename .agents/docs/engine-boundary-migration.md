@@ -11,6 +11,52 @@ from scratch, it belongs in the engine. Reference precedent:
 `get_display_name` seam it sat on stayed engine-side. Bundle 1 items
 are the closest analogs.
 
+## Bundle 1.5: `.41` — universal veto rule + transform rule
+
+Mid-bundle correction landed before continuing to Bundle 2. The Bundle 1
+rename sweep exposed a footgun: every veto-capable pre-hook treated any
+falsy return (including the implicit `None` from a side-effect-only
+override) as "abort." This caused the contrib sweep to need three
+`return True` insertions on hook bodies that previously worked.
+
+Fixes:
+
+- **`is_veto(result)`** in `evennia/utils/utils.py`. Canonical rule for
+  veto-capable pre-hooks: only non-None falsy values (`False`, `0`,
+  `""`, etc.) abort. `None` allows. Used by every veto-capable pre-hook
+  call site in the engine.
+- **`resolve_transform(result, original)`** alongside. Symmetric rule
+  for transform-style pre-hooks (`at_pre_say`, `at_pre_msg`,
+  `at_pre_channel_msg`): `None` from the hook falls back to `original`;
+  non-None falsy aborts; truthy replaces.
+- **`at_pre_puppet` is now vetoable.** Previously notification-only.
+  Override and return `False` to block a puppet attach.
+- **Non-vetoable pre-hooks explicitly documented**: `at_pre_unpuppet`
+  and `at_pre_login`. Return value is ignored; raise if you genuinely
+  need to abort.
+- **Command pre-hooks documented as exceptions**: `at_pre_parse` and
+  `at_pre_cmd` use the inverted convention (truthy aborts) and predate
+  the unified rule.
+
+Engine sweep updated every call site that gates on a pre-hook return,
+plus contrib call sites in containers, storage, wilderness, and
+evadventure. Contrib docstrings referencing the stale "False/None
+aborts" contract are updated.
+
+Downstream impact: addendum prompt shipped alongside the release. The
+two silent risks to audit on the game side are:
+
+1. Any veto-hook override with multiple `return None` paths used to
+   abort under the old rule. Those paths now allow; switch to
+   `return False`.
+2. Any transform-hook override that explicitly `return None` to abort.
+   Those now fall through to the original message; switch to
+   `return False` or `return ""`.
+
+Plus: pre-existing latent bug — any `return True` (or other non-string
+truthy) from a transform hook puts a bool into the downstream message
+slot and produces a confusing crash. Audit at migration time.
+
 ## Bundle 1: `.39` — additive seams + hook-naming sweep
 
 Release note covers the new hooks AND the renames. Downstream is
