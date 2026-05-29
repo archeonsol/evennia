@@ -263,7 +263,7 @@ class CmdReport(ReportCmdBase):
     report_type = "player"
     require_target = True
     # Opt into the engine pre-parse normalisation so self.caller is the
-    # Account regardless of puppet state (see CMDSET_REFACTOR.md §Phase 2).
+    # Account regardless of puppet state.
     account_command_caller = True
 
 

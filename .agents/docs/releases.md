@@ -42,9 +42,8 @@ Sections by area (e.g. `### Engine`, `### Migration`, `### Performance`,
   behavior delta. Link with markdown so the changelog is browsable.
 - **Migration notes** for any required downstream changes (setting
   rename/removal, API surface change, breaking renames). For engine
-  refactors that also have a [`CMDSET_MIGRATION.md`](../../CMDSET_MIGRATION.md)
-  or similar dedicated migration doc, reference it from the changelog
-  rather than duplicating.
+  refactors with a dedicated migration doc, reference it from the
+  changelog rather than duplicating.
 - **Perf numbers** if the change is performance-relevant (added cache,
   changed parser, etc.). Include both the synthetic baseline and the
   expected real-world impact.

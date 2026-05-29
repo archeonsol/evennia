@@ -9,8 +9,7 @@ These commands subclass ``evennia.commands.command.AccountCommand``,
 which carries ``account_command_caller = True``. The cmdhandler
 normalises ``self.caller`` to the Account, ``self.account`` to the
 same, and ``self.character`` to the puppet for ``self.session`` (or
-``None`` when OOC) before any hook runs. See ``CMDSET_REFACTOR.md``
-§Phase 2 for the engine contract.
+``None`` when OOC) before any hook runs.
 
 Note that under MULTISESSION_MODE > 2, Account commands should use
 self.msg() and similar methods to reroute returns to the correct

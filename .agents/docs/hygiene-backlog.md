@@ -25,9 +25,15 @@ additions" by stance but still public, tested, shipping. Either
 survivors-and-why doc + maintenance, or deprecation window. Limbo
 isn't an answer.
 
-**F14.** Refactor-doc archive pattern. Yellow. CMDSET_REFACTOR.md,
-CMDSET_MIGRATION.md, PHASE3_AUDIT.md live at repo root post-refactor;
-mostly archaeology, some load-bearing (F7 cites §8). Archive subdir.
+**F14.** Refactor-doc archive pattern. Resolved. `CMDSET_REFACTOR.md`,
+`CMDSET_MIGRATION.md`, and `PHASE3_AUDIT.md` deleted; living contracts
+extracted to [`command-system.md`](command-system.md). The audit's
+CI-drift test was tautological (refresh-the-snapshot, not enforce-a-
+belief), so it went with the file. IC/OOC convention is enforced by
+review per [`code-style.md`](code-style.md). Pattern for future
+refactors: planning doc lives at repo root during the refactor,
+contracts move to `.agents/docs/` on completion, planning doc gets
+deleted (history stays in `CHANGELOG-FORK.md` and git).
 
 **F15.** Cache-addition discipline. Green. Seven caches added, zero
 removed. Policy: next cache lands with invalidation-contract docstring
@@ -38,15 +44,25 @@ removed. Policy: next cache lands with invalidation-contract docstring
 the newmoo `engine-16-adopt-contribs` PR merges (most contrib doc rot
 dies with the moved modules first).
 
-**F7.** CMDSET_REFACTOR §8 items. Yellow. Three verifications:
-account-cmd access cache hit-rate / invalidation walk under Phase 2
-(`cmd_access_cache.py:136-143`); `arg_regex` deprecation candidate
-count; EvMore "q" re-test post-prefix-strip.
+**F7.** Cmdset refactor open verifications. Yellow. Three items
+parked from the retired `CMDSET_REFACTOR.md §8`:
+(a) account-cmd access cache: confirm hit rate is reasonable under
+the Phase 2 `AccountCommand` caller assignment, and that
+`_invalidate_cmd_access_caches` (`cmd_access_cache.py:136-143`)
+correctly walks to puppeted characters when an account-level cmdset
+changes;
+(b) `arg_regex` deprecation candidate count: now that token-boundary
+matching is default, audit how many engine commands still need
+`arg_regex` as an escape hatch — if none, deprecate;
+(c) EvMore "q" re-test: confirm the sys-cmd dedup fix in
+`cmdset.py:530` plus prefix-strip removal didn't reopen the multi-match
+that originally motivated the dedup.
 
-**F16.** Belief-coverage tests. Green. Only `cmdset_prefix_audit.py`
-enforces a belief via CI; lane-2 opt-out, model patterns, cache
-contracts live as prose. Add prefix-audit-style checks for beliefs
-that admit mechanical enforcement.
+**F16.** Belief-coverage tests. Green. No beliefs currently enforced
+via CI (the cmdset prefix audit was retired under F14 as tautological).
+Lane-2 opt-out, model patterns, cache contracts live as prose. When a
+belief is mechanically checkable as a rule (not a snapshot diff),
+consider a CI test; otherwise trust review.
 
 **F17.** `@patch("dotted.path")` audit. Yellow. Path-based patches
 break on relocation; `+underspire.16` partner rewrote 14 sites in one

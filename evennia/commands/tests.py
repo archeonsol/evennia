@@ -3,7 +3,7 @@ Unit testing for the Command system itself.
 
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
@@ -2427,55 +2427,6 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
 
 
 # ----------------------------------------------------------------------------
-# Phase 3 recon: cmdset prefix audit drift check
-# ----------------------------------------------------------------------------
-
-
-class TestCmdsetPrefixAuditDrift(TestCase):
-    """Fail loudly when the committed PHASE3_AUDIT.md no longer matches
-    the live default cmdsets. The script at
-    ``.agents/tools/cmdset_prefix_audit.py`` regenerates the manifest;
-    this test is the CI wedge that catches drift in either direction
-    (new commands snuck in, keys renamed, aliases changed).
-    """
-
-    def test_manifest_matches_live_cmdsets(self):
-        import sys
-        from pathlib import Path
-
-        repo_root = Path(__file__).resolve().parents[2]
-        tools_dir = repo_root / ".agents" / "tools"
-        manifest = repo_root / "PHASE3_AUDIT.md"
-
-        if str(tools_dir) not in sys.path:
-            sys.path.insert(0, str(tools_dir))
-        from cmdset_prefix_audit import (_load_default_cmdset_classes,
-                                         audit_cmdsets, format_markdown)
-
-        generated = format_markdown(audit_cmdsets(_load_default_cmdset_classes()))
-        self.assertTrue(
-            manifest.exists(),
-            f"{manifest} missing; regenerate with cmdset_prefix_audit.py --write",
-        )
-        committed = manifest.read_text()
-        if committed != generated:
-            import difflib
-
-            diff = "".join(
-                difflib.unified_diff(
-                    committed.splitlines(keepends=True),
-                    generated.splitlines(keepends=True),
-                    fromfile="PHASE3_AUDIT.md (committed)",
-                    tofile="(regenerated)",
-                )
-            )
-            self.fail(
-                "PHASE3_AUDIT.md is out of date. Regenerate with\n"
-                "  .agents/tools/cmdset_prefix_audit.py --write\n\n" + diff
-            )
-
-
-# ----------------------------------------------------------------------------
 # Phase 3 step 4: token-boundary matching semantics
 # ----------------------------------------------------------------------------
 
@@ -3024,3 +2975,47 @@ class TestPosePassthroughIntegration(TwistedTestCase, BaseEvenniaTest):
 
         d.addCallback(_check)
         return d
+
+
+class TestCmdsetMergeWarmup(BaseEvenniaTest):
+    """Cmdset merge cache warmup wires the same merge machinery a real
+    command would, eagerly, so the first typed command after login or reload
+    doesn't pay the cold-merge latency."""
+
+    def test_schedule_for_character_no_sessions_is_noop(self):
+        from evennia.commands import cmdset_merge_warmup
+
+        with (
+            patch.object(self.char1.sessions, "count", return_value=0),
+            patch.object(cmdset_merge_warmup, "delay") as delay_mock,
+        ):
+            cmdset_merge_warmup.schedule_cmdset_merge_warmup_for_character(self.char1)
+        delay_mock.assert_not_called()
+
+    def test_schedule_for_character_with_sessions_defers(self):
+        from evennia.commands import cmdset_merge_warmup
+
+        with (
+            patch.object(self.char1.sessions, "count", return_value=1),
+            patch.object(cmdset_merge_warmup, "delay") as delay_mock,
+        ):
+            cmdset_merge_warmup.schedule_cmdset_merge_warmup_for_character(self.char1)
+        delay_mock.assert_called_once()
+        self.assertEqual(delay_mock.call_args.args[0], 0)
+
+    def test_warm_all_skips_non_puppeted(self):
+        from evennia.commands import cmdset_merge_warmup
+
+        unpuppeted = MagicMock()
+        unpuppeted.logged_in = True
+        unpuppeted.puppet = None
+        fake_handler = MagicMock()
+        fake_handler.get_sessions.return_value = [unpuppeted]
+        with (
+            patch("evennia.SESSION_HANDLER", fake_handler),
+            patch.object(
+                cmdset_merge_warmup, "warm_cmdset_merge_for_session"
+            ) as warm_mock,
+        ):
+            cmdset_merge_warmup.warm_all_logged_in_puppet_sessions()
+        warm_mock.assert_not_called()

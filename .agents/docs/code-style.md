@@ -38,7 +38,7 @@ Longer documentation.
 
 ## Command Naming
 
-Command keys follow a strict IC/OOC convention. The `@` prefix is **load-bearing**: post-Phase-3 (Phase 3 of the cmdset refactor, tracked in `CMDSET_REFACTOR.md`), `@open` and `open` are different commands. `CMD_IGNORE_PREFIXES` is gone, so the prefix can no longer be silently stripped at parse time.
+Command keys follow a strict IC/OOC convention. The `@` prefix is **load-bearing**: `@open` and `open` are different commands. `CMD_IGNORE_PREFIXES` is gone, so the prefix can no longer be silently stripped at parse time. See [command-system.md](command-system.md) for the matching contract.
 
 Rule:
 
@@ -52,7 +52,7 @@ Carve-outs:
 - **Chat channel commands stay unprefixed.** Named channels auto-generate their command from `channel.key` (e.g. `ooc`, `public`) and bypass the convention because typing `@ooc` constantly is hostile. The meta channel-manager command itself is `@channel`.
 - Aliases follow the same rule as the key. If the key is `@perm`, all aliases must start with `@`.
 
-The audit script at `.agents/tools/cmdset_prefix_audit.py` walks every default cmdset and emits an inventory; CI runs it in `--check` mode against `PHASE3_AUDIT.md` so drift surfaces at PR time.
+Enforced by review, not CI.
 
 ## Settings reads
 
