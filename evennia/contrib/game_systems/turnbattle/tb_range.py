@@ -525,7 +525,7 @@ class TBRangeObject(DefaultObject):
             shoulddrop (bool): If the object should be dropped or not.
 
         Notes:
-            If this method returns False/None, the dropping is cancelled
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts the drop; `None`/`True` allow it.
             before it is even started.
 
         """
@@ -570,7 +570,7 @@ class TBRangeObject(DefaultObject):
             shouldget (bool): If the object should be gotten or not.
 
         Notes:
-            If this method returns False/None, the getting is cancelled
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts the get; `None`/`True` allow it.
             before it is even started.
         """
         # Restrictions for getting in combat
@@ -625,7 +625,7 @@ class TBRangeObject(DefaultObject):
             shouldgive (bool): If the object should be given or not.
 
         Notes:
-            If this method returns False/None, the giving is cancelled
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts the give; `None`/`True` allow it.
             before it is even started.
 
         """

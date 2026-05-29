@@ -53,7 +53,7 @@ from evennia.utils.idmapper.models import (SharedMemoryModel,
                                            SharedMemoryModelBase)
 from evennia.utils.logger import log_trace
 from evennia.utils.utils import (class_from_module, inherits_from, is_iter,
-                                 lazy_property)
+                                 is_veto, lazy_property)
 
 __all__ = ("TypedObject",)
 
@@ -433,8 +433,7 @@ class TypedObject(SharedMemoryModel):
         if oldname == str(value):
             # no-op; do not fire hooks or signals for an identity rename.
             return
-        if not self.at_pre_rename(oldname, value):
-            # vetoed by hook
+        if is_veto(self.at_pre_rename(oldname, value)):
             return
         self.db_key = value
         self.save(update_fields=["db_key"])
@@ -910,17 +909,21 @@ class TypedObject(SharedMemoryModel):
 
     def at_pre_rename(self, oldname, newname):
         """
-        Called before a rename is committed. Return `False` (or `None`)
-        to veto the rename; return `True` to allow it. Side effects
-        (validation, normalization, conflict checks, audit logs) can
-        run here while the object still has its old name.
+        Called before a rename is committed. Side effects (validation,
+        normalization, conflict checks, audit logs) can run here while
+        the object still has its old name.
+
+        Veto rule: return `False` (or any non-None falsy value) to abort
+        the rename. Return `True`, `None`, or any other truthy value to
+        allow it. See `evennia.utils.utils.is_veto` for the canonical rule.
 
         Args:
             oldname (str): The instance's current name.
             newname (str): The proposed new name.
 
         Returns:
-            bool: True to allow the rename, False to abort.
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the rename.
 
         """
         return True

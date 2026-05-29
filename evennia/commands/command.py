@@ -452,9 +452,13 @@ class Command(metaclass=CommandMeta):
     def at_pre_parse(self):
         """Hook called before ``self.parse()``.
 
-        If this hook returns anything truthy, the command sequence is
-        aborted (no ``parse``, no ``at_pre_cmd``, no ``func``,
-        no ``at_post_cmd``).
+        **Exception to the universal veto rule (inverted convention).**
+        Returning anything **truthy** aborts the command sequence (no
+        ``parse``, no ``at_pre_cmd``, no ``func``, no ``at_post_cmd``).
+        Returning ``None`` or any falsy value lets the command proceed.
+        This convention predates the engine-wide `is_veto` rule and is
+        intentionally inverted because the truthy return value is often a
+        useful error code or message that the cmdhandler propagates.
 
         Renamed from ``at_pre_cmd`` in ``6.0.0+underspire.2`` so the
         name reflects when it runs.
@@ -464,9 +468,11 @@ class Command(metaclass=CommandMeta):
     def at_pre_cmd(self):
         """Hook called after ``self.parse()``, before ``self.func()``.
 
-        If this hook returns anything truthy, the command is aborted
-        after parse but before ``func`` runs (``at_post_cmd`` is still
-        skipped).
+        **Exception to the universal veto rule (inverted convention).**
+        Returning anything **truthy** aborts the command after parse but
+        before ``func`` runs (``at_post_cmd`` is still skipped). Returning
+        ``None`` or any falsy value lets the command proceed. See
+        ``at_pre_parse`` for the rationale.
 
         Preferred home for post-parse, pre-dispatch logic: input
         validation that needs ``self.args`` / ``self.switches`` /

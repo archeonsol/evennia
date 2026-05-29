@@ -36,6 +36,7 @@ from django.conf import settings
 from evennia import AttributeProperty, CmdSet, DefaultObject
 from evennia.commands.default.general import CmdDrop, CmdGet, CmdLook
 from evennia.utils import class_from_module
+from evennia.utils.utils import is_veto
 
 # establish the right inheritance for container objects
 _BASE_OBJECT_TYPECLASS = class_from_module(settings.BASE_OBJECT_TYPECLASS, DefaultObject)
@@ -76,7 +77,8 @@ class ContribContainer(_BASE_OBJECT_TYPECLASS):
             boolean: Whether the object `target` should be gotten or not.
 
         Notes:
-            If this method returns False/None, the getting is cancelled before it is even started.
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts
+            the get; `None`/`True` allow it.
         """
         return True
 
@@ -92,8 +94,9 @@ class ContribContainer(_BASE_OBJECT_TYPECLASS):
             boolean: Whether the object `target` should be put down or not.
 
         Notes:
-            If this method returns False/None, the putting is cancelled before it is even started.
-            To add more complex capacity checks, modify this method on your child typeclass.
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts
+            the put; `None`/`True` allow it. To add more complex capacity
+            checks, modify this method on your child typeclass.
         """
         # check if we're already at capacity
         if len(self.contents) >= self.capacity:
@@ -194,7 +197,7 @@ class CmdContainerGet(CmdGet):
             return
 
         # check if this object can be gotten
-        if not obj.access(caller, "get") or not obj.at_pre_get(caller):
+        if not obj.access(caller, "get") or is_veto(obj.at_pre_get(caller)):
             if obj.db.get_err_msg:
                 self.msg(obj.db.get_err_msg)
             else:
@@ -202,7 +205,7 @@ class CmdContainerGet(CmdGet):
             return
 
         # calling possible at_pre_get_from hook on location
-        if hasattr(location, "at_pre_get_from") and not location.at_pre_get_from(caller, obj):
+        if hasattr(location, "at_pre_get_from") and is_veto(location.at_pre_get_from(caller, obj)):
             self.msg("You can't get that.")
             return
 
@@ -271,12 +274,12 @@ class CmdPut(CmdDrop):
             return
 
         # Call the object script's at_pre_drop() method.
-        if not obj.at_pre_drop(caller):
+        if is_veto(obj.at_pre_drop(caller)):
             self.msg("You can't put that down.")
             return
 
         # Call the container's possible at_pre_put_in method.
-        if hasattr(container, "at_pre_put_in") and not container.at_pre_put_in(caller, obj):
+        if hasattr(container, "at_pre_put_in") and is_veto(container.at_pre_put_in(caller, obj)):
             self.msg("You can't put that there.")
             return
 

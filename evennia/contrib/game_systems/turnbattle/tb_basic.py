@@ -335,7 +335,7 @@ class TBBasicCharacter(DefaultCharacter):
             shouldmove (bool): If we should move or not.
 
         Notes:
-            If this method returns False/None, the move is cancelled
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts the move; `None`/`True` allow it.
             before it is even started.
 
         """

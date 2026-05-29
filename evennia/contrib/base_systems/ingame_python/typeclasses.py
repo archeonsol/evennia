@@ -308,7 +308,7 @@ class EventCharacter(DefaultCharacter):
             shouldmove (bool): If we should move or not.
 
         Notes:
-            If this method returns False/None, the move is cancelled
+            Veto rule (see `evennia.utils.utils.is_veto`): `False` aborts the move; `None`/`True` allow it.
             before it is even started.
 
         """
@@ -420,22 +420,23 @@ class EventCharacter(DefaultCharacter):
         """
         Before the object says something.
 
-        This hook is by default used by the 'say' and 'whisper'
-        commands as used by this command it is called before the text
-        is said/whispered and can be used to customize the outgoing
-        text from the object. Returning `None` aborts the command.
+        Transform hook (see `evennia.utils.utils.resolve_transform`):
+        return a string to replace the spoken text, return `False`/`""`
+        to abort the say, return `None` to use the original message
+        unchanged.
 
         Args:
             message (str): The suggested say/whisper text spoken by self.
         Keyword Args:
-            whisper (bool): If True, this is a whisper rather than
-                a say. This is sent by the whisper command by default.
-                Other verbal commands could use this hook in similar
-                ways.
+            whisper (bool): If True, this is a whisper rather than a say.
+                Sent by the whisper command by default. Other verbal
+                commands could use this hook in similar ways.
             receiver (Object): If set, this is a target for the say/whisper.
 
         Returns:
-            message (str): The (possibly modified) text to be spoken.
+            str, False, or None: The (possibly modified) text to be
+            spoken, `False`/empty to abort, `None` to fall back to the
+            original message.
 
         """
         # First, try the location
@@ -449,7 +450,7 @@ class EventCharacter(DefaultCharacter):
             allow = location.callbacks.call("can_say", self, location, message, parameters=message)
             message = location.callbacks.get_variable("message")
             if not allow or not message:
-                return
+                return False
 
             # Browse all the room's other characters
             for obj in location.contents:
@@ -461,7 +462,7 @@ class EventCharacter(DefaultCharacter):
                 allow = obj.callbacks.call("can_say", self, obj, message, parameters=message)
                 message = obj.callbacks.get_variable("message")
                 if not allow or not message:
-                    return
+                    return False
 
         return message
 

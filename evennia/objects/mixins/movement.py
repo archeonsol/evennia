@@ -6,7 +6,7 @@ from django.utils.translation import gettext as _
 from evennia.objects.models import ObjectDB
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.utils import logger
-from evennia.utils.utils import make_iter
+from evennia.utils.utils import is_veto, make_iter
 
 
 class MovementMixin:
@@ -61,9 +61,9 @@ class MovementMixin:
 
         The `DefaultObject` hooks called (if `move_hooks=True`) are, in order:
 
-        1. `self.at_pre_move(destination)` (abort if return False)
-        2. `source_location.at_pre_leave(self, destination)` (abort if return False)
-        3. `destination.at_pre_arrive(self, source_location)` (abort if return False)
+        1. `self.at_pre_move(destination)` (veto rule: see `is_veto`)
+        2. `source_location.at_pre_leave(self, destination)` (veto rule)
+        3. `destination.at_pre_arrive(self, source_location)` (veto rule)
         4. `self.announce_move_from(destination)`
         5. (move happens here)
         6. `self.announce_move_to(source_location)`
@@ -71,8 +71,14 @@ class MovementMixin:
         8. `destination.at_post_arrive(self, source_location)`
         9. `self.at_post_move(source_location)`
 
-        `at_post_leave` and `at_post_arrive` are unordered relative to each other;
-        both fire before mover-side `at_post_move`.
+        Veto-capable pre-hooks follow the universal rule in
+        `evennia.utils.utils.is_veto`: returning `False` (or any non-None
+        falsy value) aborts the move; `None` is treated as "no opinion"
+        and allows the move. Implicit `None` from a side-effect-only
+        override does NOT veto.
+
+        `at_post_leave` and `at_post_arrive` are unordered relative to
+        each other; both fire before mover-side `at_post_move`.
 
         """
 
@@ -101,19 +107,22 @@ class MovementMixin:
         # Save the old location
         source_location = self.location
 
-        # Before the move, call pre-hooks
+        # Before the move, call pre-hooks. Veto semantics use is_veto():
+        # only an explicit non-None falsy return aborts the move. None
+        # (the implicit return of an override that forgot the explicit
+        # `return True`) is treated as "no opinion / allow".
         if move_hooks:
             # check if we are okay to move
             try:
-                if not self.at_pre_move(destination, move_type=move_type, **kwargs):
+                if is_veto(self.at_pre_move(destination, move_type=move_type, **kwargs)):
                     return False
             except Exception as err:
                 logerr(errtxt.format(err="at_pre_move()"), err)
                 return False
             # check if source location lets us go
             try:
-                if source_location and not source_location.at_pre_leave(
-                    self, destination, move_type=move_type, **kwargs
+                if source_location and is_veto(
+                    source_location.at_pre_leave(self, destination, move_type=move_type, **kwargs)
                 ):
                     return False
             except Exception as err:
@@ -121,8 +130,8 @@ class MovementMixin:
                 return False
             # check if destination accepts us
             try:
-                if destination and not destination.at_pre_arrive(
-                    self, source_location, move_type=move_type, **kwargs
+                if destination and is_veto(
+                    destination.at_pre_arrive(self, source_location, move_type=move_type, **kwargs)
                 ):
                     return False
             except Exception as err:
@@ -251,24 +260,23 @@ class MovementMixin:
 
     def at_pre_move(self, destination, move_type="move", **kwargs):
         """
-        Called just before starting to move this object to
-        destination. Return False to abort move.
+        Called just before starting to move this object to destination.
+
+        Veto rule: return `False` (or any non-None falsy value) to abort.
+        Return `True`, `None`, or any other truthy value to allow the move.
+        See `evennia.utils.utils.is_veto` for the canonical rule.
 
         Args:
-            destination (DefaultObject): The object we are moving to
+            destination (DefaultObject): The object we are moving to.
             move_type (str): The type of move. "give", "traverse", etc.
-                This is an arbitrary string provided to obj.move_to().
-                Useful for altering messages or altering logic depending
-                on the kind of movement.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+                Arbitrary string provided to `obj.move_to()`. Useful for
+                altering messages or logic depending on the kind of move.
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
         Returns:
-            bool: If we should move or not.
-
-        Notes:
-            If this method returns `False` or `None`, the move is cancelled
-            before it is even started.
+            bool or None: `False` (or non-None falsy) to abort the move,
+            otherwise allow it.
 
         """
         return True
@@ -276,46 +284,48 @@ class MovementMixin:
     def at_pre_leave(self, leaving_object, destination, **kwargs):
         """
         Called on this object just before another object that is currently
-        'inside' it leaves. Return `False` (or `None`) to abort the move.
-        This is also the place for side effects that need to run while
-        `leaving_object` is still considered present here: returning `True`
-        at the end of an override allows the move to proceed.
+        'inside' it leaves. Also the place for side effects that need to run
+        while `leaving_object` is still considered present here.
+
+        Veto rule: return `False` (or any non-None falsy value) to abort.
+        Return `True`, `None`, or any other truthy value to allow the move.
+        Implicit `None` from a side-effect-only override does NOT veto;
+        the move proceeds. See `evennia.utils.utils.is_veto` for the rule.
 
         Args:
             leaving_object (DefaultObject): The object that is about to leave.
             destination (DefaultObject): Where the object is going to.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
-        Returns:
-            bool: If `leaving_object` should be allowed to leave or not.
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
-        Notes:
-            If this method returns `False` or `None`, the move is canceled
-            before it even started.
+        Returns:
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the move.
 
         """
         return True
 
     def at_pre_arrive(self, arriving_object, source_location, **kwargs):
         """
-        Called on this object just before it receives another object. If this
-        method returns `False` (or `None`), the move is aborted and the moved
-        entity remains where it was. This is also the place for side effects
-        that need to run before `arriving_object` is placed here.
+        Called on this object just before it receives another object. Also
+        the place for side effects that need to run before `arriving_object`
+        is placed here.
+
+        Veto rule: return `False` (or any non-None falsy value) to abort.
+        Return `True`, `None`, or any other truthy value to allow the move.
+        Implicit `None` from a side-effect-only override does NOT veto.
+        See `evennia.utils.utils.is_veto` for the canonical rule.
 
         Args:
             arriving_object (DefaultObject): The object moving into this one.
-            source_location (DefaultObject): Where `arriving_object` came from.
-                Note that this could be `None`.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            source_location (DefaultObject): Where `arriving_object` came
+                from. May be `None`.
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
         Returns:
-            bool: If `False`, abort move and `arriving_object` remains where it was.
-
-        Notes:
-            If this method returns `False` or `None`, the move is canceled
-            before it even started.
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the move.
 
         """
         return True
@@ -537,18 +547,22 @@ class MovementMixin:
 
     def at_pre_traverse(self, traversing_object, target_location, **kwargs):
         """
-        Called by `do_traverse` before the move is attempted. Return False
-        (or None) to abort the traverse; `at_failed_traverse` will then
-        fire instead. Return True to allow the move to proceed.
+        Called by `do_traverse` before the move is attempted.
+
+        Veto rule: return `False` (or any non-None falsy value) to abort
+        the traverse; `at_failed_traverse` then fires instead. Return
+        `True`, `None`, or any other truthy value to allow the move.
+        See `evennia.utils.utils.is_veto` for the canonical rule.
 
         Args:
             traversing_object (DefaultObject): Object attempting to traverse.
             target_location (DefaultObject): Where the object would go.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
         Returns:
-            bool: True to allow the traverse, False to abort.
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the traverse.
 
         """
         return True

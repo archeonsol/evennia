@@ -25,6 +25,57 @@ class TestIsIter(TestCase):
         self.assertEqual(False, utils.is_iter("This is not an iterable"))
 
 
+class TestIsVeto(TestCase):
+    """is_veto: falsy vetoes, EXCEPT None which allows."""
+
+    def test_none_does_not_veto(self):
+        # The footgun fix: forgetting `return True` no longer blocks.
+        self.assertFalse(utils.is_veto(None))
+
+    def test_true_does_not_veto(self):
+        self.assertFalse(utils.is_veto(True))
+
+    def test_false_vetoes(self):
+        self.assertTrue(utils.is_veto(False))
+
+    def test_zero_vetoes(self):
+        self.assertTrue(utils.is_veto(0))
+
+    def test_empty_string_vetoes(self):
+        self.assertTrue(utils.is_veto(""))
+
+    def test_empty_list_vetoes(self):
+        self.assertTrue(utils.is_veto([]))
+
+    def test_empty_dict_vetoes(self):
+        self.assertTrue(utils.is_veto({}))
+
+    def test_truthy_values_do_not_veto(self):
+        for value in (1, "ok", [0], {"k": "v"}, object()):
+            self.assertFalse(utils.is_veto(value), f"{value!r} should not veto")
+
+
+class TestResolveTransform(TestCase):
+    """resolve_transform: None falls back to original; other values pass through."""
+
+    def test_none_returns_original(self):
+        self.assertEqual("original", utils.resolve_transform(None, "original"))
+
+    def test_truthy_replaces(self):
+        self.assertEqual("new", utils.resolve_transform("new", "original"))
+
+    def test_false_passes_through_as_abort_signal(self):
+        # False is returned as-is so the caller's `if not result: abort`
+        # check fires.
+        self.assertEqual(False, utils.resolve_transform(False, "original"))
+
+    def test_empty_string_passes_through_as_abort_signal(self):
+        self.assertEqual("", utils.resolve_transform("", "original"))
+
+    def test_zero_passes_through(self):
+        self.assertEqual(0, utils.resolve_transform(0, 99))
+
+
 class TestCrop(TestCase):
     def test_crop(self):
         # No text, return no text

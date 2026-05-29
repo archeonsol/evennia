@@ -14,7 +14,7 @@ from evennia.comms.models import ChannelDB
 from evennia.objects.objects import DefaultObject
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import create, logger
-from evennia.utils.utils import inherits_from, make_iter
+from evennia.utils.utils import inherits_from, make_iter, resolve_transform
 
 
 class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
@@ -577,9 +577,23 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
     def at_pre_msg(self, message, **kwargs):
         """
-        Called before the starting of sending the message to a receiver. This
-        is called before any hooks on the receiver itself. If this returns
-        None/False, the sending will be aborted.
+        Called before the starting of sending the message to a receiver.
+        Fires before any hooks on the receiver itself.
+
+        **Transform hook with the symmetric None-rule (see
+        `evennia.utils.utils.resolve_transform`).** This is a transform
+        hook: it returns the (possibly modified) message string.
+
+        Return rule:
+
+        - Return a non-empty string to replace the outgoing message.
+        - Return `False` (or `""`) to explicitly abort the send.
+        - Return `None` (including the implicit return from a side-effect-
+          only override) to use the original `message` unchanged. **This
+          is a `+underspire.41` change**: previously `None` aborted, which
+          silently killed every channel send from an override that forgot
+          the explicit `return message`. Authors who want to abort must
+          now say so with `return False` or `return ""`.
 
         Args:
             message (str): The message to send.
@@ -587,8 +601,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
                 `senders`.
 
         Returns:
-            str, False or None: Any custom changes made to the message. If
-                falsy, no message will be sent.
+            str, False, or None: The (possibly modified) message string,
+            `False`/empty to abort, `None` to fall back to the original
+            message.
 
         """
         return message
@@ -612,8 +627,12 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         Notes:
             The call hook calling sequence is:
 
-            - `msg = channel.at_pre_msg(message, **kwargs)` (aborts for all if return None)
-            - `msg = receiver.at_pre_channel_msg(msg, channel, **kwargs)` (aborts for receiver if return None)
+            - `msg = channel.at_pre_msg(message, **kwargs)` (transform rule:
+              non-empty string replaces; `False`/`""` aborts for all;
+              `None` falls back to the original message)
+            - `msg = receiver.at_pre_channel_msg(msg, channel, **kwargs)`
+              (transform rule: aborts for this receiver on `False`/`""`;
+              `None` falls back to the message passed in)
             - `receiver.at_channel_msg(msg, channel, **kwargs)`
             - `receiver.at_post_channel_msg(msg, channel, **kwargs)``
             Called after all receivers are processed:
@@ -642,17 +661,21 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
         send_kwargs = {"senders": senders, "bypass_mute": bypass_mute, **kwargs}
 
-        # pre-send hook
-        message = self.at_pre_msg(message, **send_kwargs)
-        if message in (None, False):
+        # pre-send hook. Transform rule (see utils.resolve_transform):
+        # None from the hook means "use the original message"; non-None
+        # falsy aborts the send; truthy replaces.
+        message = resolve_transform(self.at_pre_msg(message, **send_kwargs), message)
+        if not message:
             return
 
         for receiver in receivers:
             # send to each individual subscriber
 
             try:
-                recv_message = receiver.at_pre_channel_msg(message, self, **send_kwargs)
-                if recv_message in (None, False):
+                recv_message = resolve_transform(
+                    receiver.at_pre_channel_msg(message, self, **send_kwargs), message
+                )
+                if not recv_message:
                     continue
 
                 receiver.channel_msg(recv_message, self, **send_kwargs)

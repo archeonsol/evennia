@@ -463,7 +463,7 @@ class CmdGet(NumberedTargetCommand):
                     self.msg("You can't get that.")
                 return
             # calling at_pre_get hook method
-            if not obj.at_pre_get(caller):
+            if utils.is_veto(obj.at_pre_get(caller)):
                 return
 
         moved = []
@@ -523,7 +523,7 @@ class CmdDrop(NumberedTargetCommand):
         # if any objects fail the drop permission check, cancel the drop
         for obj in objs:
             # Call the object's at_pre_drop() method.
-            if not obj.at_pre_drop(caller):
+            if utils.is_veto(obj.at_pre_drop(caller)):
                 return
 
         # do the actual dropping
@@ -592,7 +592,7 @@ class CmdGive(NumberedTargetCommand):
         # if any of the objects aren't allowed to be given, cancel the give
         for obj in to_give:
             # calling at_pre_give hook method
-            if not obj.at_pre_give(caller, target):
+            if utils.is_veto(obj.at_pre_give(caller, target)):
                 return
 
         # do the actual moving
@@ -666,8 +666,11 @@ class CmdSay(COMMAND_DEFAULT_CLASS):
 
         speech = self.args
 
-        # Calling the at_pre_say hook on the character
-        speech = caller.at_pre_say(speech)
+        # Calling the at_pre_say hook on the character. Transform rule
+        # (see utils.resolve_transform): None from the hook means "use the
+        # original speech unchanged"; non-None falsy aborts; truthy
+        # replaces.
+        speech = utils.resolve_transform(caller.at_pre_say(speech), speech)
 
         # If speech is empty, stop here
         if not speech:
@@ -711,8 +714,14 @@ class CmdWhisper(COMMAND_DEFAULT_CLASS):
         if not speech or not receivers:
             return
 
-        # Call a hook to change the speech before whispering
-        speech = caller.at_pre_say(speech, whisper=True, receivers=receivers)
+        # Call a hook to change the speech before whispering. None means
+        # "use original"; non-None falsy aborts; truthy replaces. See
+        # utils.resolve_transform.
+        speech = utils.resolve_transform(
+            caller.at_pre_say(speech, whisper=True, receivers=receivers), speech
+        )
+        if not speech:
+            return
 
         # no need for self-message if we are whispering to ourselves (for some reason)
         msg_self = None if caller in receivers else True

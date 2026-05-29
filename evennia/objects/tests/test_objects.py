@@ -1070,3 +1070,139 @@ class TestAtPostLoadRename(BaseEvenniaTest):
         # The hook is defined; the rename did not silently drop it.
         self.assertTrue(callable(getattr(self.obj1, "at_post_load", None)))
         self.assertFalse(hasattr(type(self.obj1), "at_init"))
+
+
+class TestVetoRule(BaseEvenniaTest):
+    """is_veto: implicit None allows; explicit False (and other non-None
+    falsy) vetoes. Applied across every vetoable pre-hook in the engine.
+    """
+
+    def test_at_pre_move_none_allows(self):
+        # Regression for the implicit-None footgun: an override that does
+        # side effects and forgets `return True` should not block the move.
+        with patch.object(type(self.char1), "at_pre_move", return_value=None):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertTrue(ok)
+        self.assertEqual(self.char1.location, self.room2)
+
+    def test_at_pre_move_false_vetoes(self):
+        with patch.object(type(self.char1), "at_pre_move", return_value=False):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertFalse(ok)
+        self.assertEqual(self.char1.location, self.room1)
+
+    def test_at_pre_leave_none_allows(self):
+        with patch.object(type(self.room1), "at_pre_leave", return_value=None):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertTrue(ok)
+
+    def test_at_pre_arrive_none_allows(self):
+        with patch.object(type(self.room2), "at_pre_arrive", return_value=None):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertTrue(ok)
+
+    def test_at_pre_traverse_none_allows(self):
+        with patch.object(type(self.exit), "at_pre_traverse", return_value=None):
+            self.exit.do_traverse(self.char1, self.room2)
+        self.assertEqual(self.char1.location, self.room2)
+
+    def test_at_pre_rename_none_allows(self):
+        with patch.object(type(self.obj1), "at_pre_rename", return_value=None):
+            self.obj1.key = "renamed_via_none"
+        self.assertEqual(self.obj1.key, "renamed_via_none")
+
+    def test_at_pre_rename_false_vetoes(self):
+        old = self.obj1.key
+        with patch.object(type(self.obj1), "at_pre_rename", return_value=False):
+            self.obj1.key = "should_not_apply"
+        self.assertEqual(self.obj1.key, old)
+
+    def test_at_pre_move_zero_vetoes(self):
+        # Defensive coverage: a botched expression returning 0 should
+        # block, not silently allow.
+        with patch.object(type(self.char1), "at_pre_move", return_value=0):
+            ok = self.char1.move_to(self.room2, quiet=True)
+        self.assertFalse(ok)
+
+
+class TestAtPrePuppetVeto(BaseEvenniaTest):
+    """at_pre_puppet is now vetoable: False blocks the puppet attach."""
+
+    def test_false_blocks_puppet(self):
+        # Detach the fixture session first, then re-attempt with a vetoing
+        # at_pre_puppet override on the character. Restore location
+        # because at_post_unpuppet clears it and we're skipping the
+        # location-restoration logic in DefaultCharacter.at_pre_puppet.
+        self.account.unpuppet_object(self.session)
+        self.char1.location = self.room1
+        with patch.object(type(self.char1), "at_pre_puppet", return_value=False):
+            self.account.puppet_object(self.session, self.char1)
+        # Puppet did not attach; session has no puppet, char has no account.
+        self.assertIsNone(self.session.puppet)
+        self.assertIsNone(self.char1.account)
+
+    def test_none_allows_puppet(self):
+        self.account.unpuppet_object(self.session)
+        self.char1.location = self.room1
+        with patch.object(type(self.char1), "at_pre_puppet", return_value=None):
+            self.account.puppet_object(self.session, self.char1)
+        self.assertEqual(self.session.puppet, self.char1)
+
+
+class TestTransformHookNoneRule(BaseEvenniaTest):
+    """C-class transform hooks: None means "use original"; non-None falsy
+    aborts; truthy replaces. Regression for the symmetric footgun fix.
+    """
+
+    def test_at_pre_say_none_uses_original(self):
+        # An override that does side effects and forgets to return the
+        # message must NOT silently kill the say.
+        from evennia.commands.default.general import CmdSay
+
+        spoken = []
+        original_at_say = type(self.char1).at_say
+
+        def capture_say(self, speech, **kwargs):
+            spoken.append(speech)
+            return original_at_say(self, speech, **kwargs)
+
+        with (
+            patch.object(type(self.char1), "at_pre_say", return_value=None),
+            patch.object(type(self.char1), "at_say", capture_say),
+        ):
+            cmd = CmdSay()
+            cmd.caller = self.char1
+            cmd.args = "hello world"
+            cmd.func()
+        self.assertEqual(spoken, ["hello world"])
+
+    def test_at_pre_say_false_aborts(self):
+        from evennia.commands.default.general import CmdSay
+
+        with (
+            patch.object(type(self.char1), "at_pre_say", return_value=False),
+            patch.object(type(self.char1), "at_say") as say_mock,
+        ):
+            cmd = CmdSay()
+            cmd.caller = self.char1
+            cmd.args = "hello world"
+            cmd.func()
+        say_mock.assert_not_called()
+
+    def test_at_pre_say_truthy_replaces(self):
+        from evennia.commands.default.general import CmdSay
+
+        spoken = []
+
+        def at_say_spy(self, speech, **kwargs):
+            spoken.append(speech)
+
+        with (
+            patch.object(type(self.char1), "at_pre_say", return_value="REWRITTEN"),
+            patch.object(type(self.char1), "at_say", at_say_spy),
+        ):
+            cmd = CmdSay()
+            cmd.caller = self.char1
+            cmd.args = "original"
+            cmd.func()
+        self.assertEqual(spoken, ["REWRITTEN"])

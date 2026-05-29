@@ -436,14 +436,24 @@ class LifecycleMixin:
 
     def at_pre_puppet(self, account, session=None, **kwargs):
         """
-        Called just before an Account connects to this object to puppet
-        it.
+        Called just before an Account connects to this object to puppet it.
+
+        Veto rule: return `False` (or any non-None falsy value) to abort
+        the puppet attach; the session will be left unpuppeted with no
+        engine-side error message (the override should `account.msg(...)`
+        an explanation before returning). Return `True`, `None`, or any
+        other truthy value to allow the attach. See
+        `evennia.utils.utils.is_veto` for the canonical rule.
 
         Args:
-            account (DefaultAccount): This is the connecting account.
+            account (DefaultAccount): The connecting account.
             session (Session): Session controlling the connection.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
+
+        Returns:
+            bool or None: `False` (or non-None falsy) to abort the puppet,
+            otherwise allow it.
 
         """
         pass
@@ -467,12 +477,18 @@ class LifecycleMixin:
 
     def at_pre_unpuppet(self, **kwargs):
         """
-        Called just before beginning to un-connect a puppeting from
-        this Account.
+        Called just before beginning to un-connect a puppeting from this
+        Account.
+
+        **Not vetoable.** Return value is ignored. Unpuppet runs during
+        session disconnect and server shutdown paths; blocking it would
+        strand state between the engine and the underlying transport.
+        Raise if you genuinely need to abort, but expect the caller's
+        cleanup path to handle the exception.
 
         Args:
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
         Notes:
             You can use `self.account` and `self.sessions.get()` to get
             account and sessions at this point; the last entry in the

@@ -483,17 +483,19 @@ class AppearanceMixin:
         Called by the default `get` command before this object has been
         picked up.
 
+        Veto rule: return `False` (or any non-None falsy value) to abort
+        the pickup. Return `True`, `None`, or any other truthy value to
+        allow it. See `evennia.utils.utils.is_veto` for the canonical rule.
+
         Args:
             getter (DefaultObject): The object about to get this object.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
         Returns:
-            bool: If the object should be gotten or not.
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the pickup.
 
-        Notes:
-            If this method returns False/None, the getting is cancelled
-            before it is even started.
         """
         return True
 
@@ -522,18 +524,19 @@ class AppearanceMixin:
         Called by the default `give` command before this object has been
         given.
 
+        Veto rule: return `False` (or any non-None falsy value) to abort
+        the give. Return `True`, `None`, or any other truthy value to allow
+        it. See `evennia.utils.utils.is_veto` for the canonical rule.
+
         Args:
             giver (DefaultObject): The object about to give this object.
             getter (DefaultObject): The object about to get this object.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
         Returns:
-            shouldgive (bool): If the object should be given or not.
-
-        Notes:
-            If this method returns `False` or `None`, the giving is cancelled
-            before it is even started.
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the give.
 
         """
         return True
@@ -564,17 +567,18 @@ class AppearanceMixin:
         Called by the default `drop` command before this object has been
         dropped.
 
+        Veto rule: return `False` (or any non-None falsy value) to abort
+        the drop. Return `True`, `None`, or any other truthy value to allow
+        it. See `evennia.utils.utils.is_veto` for the canonical rule.
+
         Args:
             dropper (DefaultObject): The object which will drop this object.
-            **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+            **kwargs: Arbitrary, optional arguments for users overriding
+                the call (unused by default).
 
         Returns:
-            bool: If the object should be dropped or not.
-
-        Notes:
-            If this method returns `False` or `None`, the dropping is cancelled
-            before it is even started.
+            bool or None: `False` (or non-None falsy) to abort, otherwise
+            allow the drop.
 
         """
         if not self.access(dropper, "drop", default=False):
@@ -606,23 +610,35 @@ class AppearanceMixin:
         """
         Before the object says something.
 
-        This hook is by default used by the 'say' and 'whisper'
-        commands as used by this command it is called before the text
-        is said/whispered and can be used to customize the outgoing
-        text from the object. Returning `None` aborts the command.
+        **Transform hook with the symmetric None-rule (see
+        `evennia.utils.utils.resolve_transform`).** This is a transform
+        hook, not a veto hook: it returns the (possibly modified) text
+        that will actually be spoken.
+
+        Return rule:
+
+        - Return a non-empty string to replace the spoken text.
+        - Return `False` (or `""`) to explicitly abort the say.
+        - Return `None` (including the implicit return from a side-effect-
+          only override) to use the original `message` unchanged. **This
+          is a `+underspire.41` change**: previously `None` aborted, which
+          silently killed every say from an override that forgot the
+          explicit `return message`. Authors who want to abort must now
+          say so with `return False` or `return ""`.
 
         Args:
             message (str): The suggested say/whisper text spoken by self.
         Keyword Args:
-            whisper (bool): If True, this is a whisper rather than
-                a say. This is sent by the whisper command by default.
-                Other verbal commands could use this hook in similar
-                ways.
-            receivers (DefaultObject or iterable): If set, this is the target or targets for the
-                say/whisper.
+            whisper (bool): If True, this is a whisper rather than a say.
+                Sent by the whisper command by default. Other verbal
+                commands could use this hook in similar ways.
+            receivers (DefaultObject or iterable): If set, this is the
+                target or targets for the say/whisper.
 
         Returns:
-            str: The (possibly modified) text to be spoken.
+            str, False, or None: The (possibly modified) text to be
+            spoken, `False`/empty to abort, `None` to fall back to the
+            original message.
 
         """
         return message

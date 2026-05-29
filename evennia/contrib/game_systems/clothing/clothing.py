@@ -319,12 +319,11 @@ class ContribClothing(DefaultObject):
 
     def at_pre_move(self, destination, **kwargs):
         """
-        Called just before starting to move this object to
-        destination. Return False to abort move.
+        Called just before starting to move this object to destination.
 
-        Notes:
-            If this method returns False/None, the move is cancelled
-            before it is even started.
+        Veto rule (see `evennia.utils.utils.is_veto`): return `False`
+        to abort the move. `None`/`True` allow it.
+
         """
         # Covered clothing cannot be removed, dropped, or otherwise relocated
         if self.db.covered_by:
