@@ -175,13 +175,16 @@ class TestGeneral(BaseEvenniaCommandTest):
         )
 
     def test_say(self):
-        self.call(general.CmdSay(), "Testing", 'You say, "Testing"')
+        # Empty default template from get_say_template_self -> at_say echoes
+        # nothing to the speaker. The command still runs (no error).
+        self.call(general.CmdSay(), "Testing", "")
 
     def test_whisper(self):
+        # Empty default template from get_say_template_self -> no self echo.
         self.call(
             general.CmdWhisper(),
             "Obj = Testing",
-            'You whisper to Obj, "Testing"',
+            "",
             caller=self.char2,
         )
 
@@ -589,7 +592,7 @@ class TestAdmin(BaseEvenniaCommandTest):
         self.call(
             admin.CmdForce(),
             "Char2=say test",
-            'Char2 says, "test"|You have forced Char2 to: say test',
+            "You have forced Char2 to: say test",
         )
 
 

@@ -593,6 +593,17 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # final hook
         obj.at_post_puppet()
         SIGNAL_OBJECT_POST_PUPPET.send(sender=obj, account=self, session=session)
+
+        # Prime the cmdset merge cache so the first typed command does not pay
+        # the cold-merge latency. See evennia.commands.cmdset_merge_warmup.
+        from evennia.commands.cmdset_merge_warmup import \
+            schedule_cmdset_merge_warmup_for_character
+
+        try:
+            schedule_cmdset_merge_warmup_for_character(obj)
+        except Exception:
+            logger.log_trace("cmdset merge warmup scheduling failed")
+
         if not was_already_owned:
             # Puppet-set membership change; fires once per first-attach.
             try:

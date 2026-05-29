@@ -11,103 +11,29 @@ from scratch, it belongs in the engine. Reference precedent:
 `get_display_name` seam it sat on stayed engine-side. Bundle 1 items
 are the closest analogs.
 
-## Bundle 1.5: `.41` — universal veto rule + transform rule
+## Shipped bundles
 
-Mid-bundle correction landed before continuing to Bundle 2. The Bundle 1
-rename sweep exposed a footgun: every veto-capable pre-hook treated any
-falsy return (including the implicit `None` from a side-effect-only
-override) as "abort." This caused the contrib sweep to need three
-`return True` insertions on hook bodies that previously worked.
+History compressed to pointers once a bundle has landed. The changelog
+entries in [`CHANGELOG-FORK.md`](../../CHANGELOG-FORK.md) are the source
+of truth for what each bundle actually contained.
 
-Fixes:
-
-- **`is_veto(result)`** in `evennia/utils/utils.py`. Canonical rule for
-  veto-capable pre-hooks: only non-None falsy values (`False`, `0`,
-  `""`, etc.) abort. `None` allows. Used by every veto-capable pre-hook
-  call site in the engine.
-- **`resolve_transform(result, original)`** alongside. Symmetric rule
-  for transform-style pre-hooks (`at_pre_say`, `at_pre_msg`,
-  `at_pre_channel_msg`): `None` from the hook falls back to `original`;
-  non-None falsy aborts; truthy replaces.
-- **`at_pre_puppet` is now vetoable.** Previously notification-only.
-  Override and return `False` to block a puppet attach.
-- **Non-vetoable pre-hooks explicitly documented**: `at_pre_unpuppet`
-  and `at_pre_login`. Return value is ignored; raise if you genuinely
-  need to abort.
-- **Command pre-hooks documented as exceptions**: `at_pre_parse` and
-  `at_pre_cmd` use the inverted convention (truthy aborts) and predate
-  the unified rule.
-
-Engine sweep updated every call site that gates on a pre-hook return,
-plus contrib call sites in containers, storage, wilderness, and
-evadventure. Contrib docstrings referencing the stale "False/None
-aborts" contract are updated.
-
-Downstream impact: addendum prompt shipped alongside the release. The
-two silent risks to audit on the game side are:
-
-1. Any veto-hook override with multiple `return None` paths used to
-   abort under the old rule. Those paths now allow; switch to
-   `return False`.
-2. Any transform-hook override that explicitly `return None` to abort.
-   Those now fall through to the original message; switch to
-   `return False` or `return ""`.
-
-Plus: pre-existing latent bug — any `return True` (or other non-string
-truthy) from a transform hook puts a bool into the downstream message
-slot and produces a confusing crash. Audit at migration time.
-
-## Bundle 1: `.39` — additive seams + hook-naming sweep
-
-Release note covers the new hooks AND the renames. Downstream is
-lock-step so deprecation cycles are skipped; aliases are not added.
-
-1. **`at_puppet_added(char)` / `at_puppet_removed(char)` on `DefaultAccount`.**
-   Empty hooks called from the existing puppet/unpuppet path on
-   first-attach / last-detach. Unblocks multi-puppet relays without
-   monkey-patching.
-2. **`get_extra_display_state(looker) -> ""` on the appearance mixin.**
-   Called from `return_appearance` via the `{extra_state}` template
-   key, appended to the name line. Stub returns `""`; overrides return
-   content with a leading newline if they want it on its own line.
-   Unlocks pose, AFK, mood, combat stance, status flags.
-3. **`get_default_lockstring()` on `DefaultCharacter`.** Already landed
-   in the fork via `LifecycleMixin.get_default_lockstring` and per-type
-   overrides. The literal `lockstring` class attr on `DefaultCharacter`
-   is now dead code; cleanup is a separate trivial PR.
-4. **Movement hook rename + new `at_post_leave`.** Renames:
-   `at_pre_object_leave` → `at_pre_leave`,
-   `at_pre_object_receive` → `at_pre_arrive`,
-   `at_object_receive` → `at_post_arrive`. Drops `at_object_leave` (its
-   pre-move side-effect semantics now belong in `at_pre_leave`, which
-   must return `True` to allow). Adds `at_post_leave` firing on the
-   source after the location change. Ordering: `at_post_leave` and
-   `at_post_arrive` unordered relative to each other; both fire before
-   mover-side `at_post_move`. Downstream sweep required: rename every
-   override of the old four hooks; for old `at_object_leave` bodies,
-   either rename to `at_pre_leave` and append `return True`, or rename
-   to `at_post_leave` if the side effects do not depend on the object
-   still being in the room.
-5. **`at_init` → `at_post_load` on every typeclass.** The historical
-   name suggested object creation; it actually fires on idmapper cache
-   load. Rename on `TypedObject`, `DefaultObject`, `DefaultAccount`,
-   `DefaultBot`, `DefaultScript`, `DefaultChannel`, `DefaultExit`. All
-   call sites updated. Downstream sweep required: rename every override
-   of `at_init` to `at_post_load`.
-6. **Add `at_pre_rename(oldname, newname)` to `TypedObject`.** Returns
-   `True` by default; return `False` to veto. Fired before the rename
-   commits, giving games a place for reserved-name checks, conflict
-   resolution, audit logs, or normalization without overriding the
-   `key` setter. Identity renames (`oldname == newname`) now no-op and
-   skip both hooks.
-7. **Traverse refactor.** Renames `at_traverse` (the implementation
-   method) to `do_traverse` on `DefaultObject` and `DefaultExit`, since
-   it performs the move rather than firing as a notification. Adds
-   `at_pre_traverse(traversing_object, target_location)` with veto
-   semantics on `DefaultObject`; `do_traverse` calls it first and
-   routes to `at_failed_traverse` on `False`. `at_post_traverse` and
-   `at_failed_traverse` are unchanged. Downstream sweep required:
-   rename every override of `at_traverse` to `do_traverse`.
+- **Bundle 1 — `+underspire.40`.** Additive seams + hook-naming sweep:
+  `at_puppet_added` / `at_puppet_removed`, `get_extra_display_state`,
+  `at_pre_rename`, movement hook renames + `at_post_leave`,
+  `at_init` → `at_post_load`, traverse refactor (`at_traverse` →
+  `do_traverse` + new `at_pre_traverse`).
+- **Bundle 1.5 — `+underspire.41`.** Universal veto rule and transform
+  rule across every pre-hook. Adds `is_veto(result)` and
+  `resolve_transform(result, original)` in `evennia/utils/utils.py`;
+  makes `at_pre_puppet` veto-capable; documents `at_pre_unpuppet` /
+  `at_pre_login` / `at_pre_parse` / `at_pre_cmd` as exceptions.
+- **Bundle 2 — `+underspire.42`.** Three appearance/perf items:
+  overridable `at_say` template hooks
+  (`get_say_template_self`/`_location`/`_receivers` → `""`),
+  `get_content_group_label(group, looker) → ""` driving the
+  `Characters:` / `You see:` prefixes, cmdset merge cache warmup module
+  at `evennia/commands/cmdset_merge_warmup.py` wired into
+  `puppet_object` and the post-reload `at_post_portal_sync` hook.
 
 ## Separate issue, not bundled
 
@@ -115,19 +41,7 @@ lock-step so deprecation cycles are skipped; aliases are not added.
 re-attaches a puppet without firing `at_pre_puppet`, leaving the
 cmdset stack empty. File standalone with a focused repro.
 
-## Bundle 2: `.40` — minor stock break, release-noted
-
-5. **Empty `at_say` / `at_whisper` default templates.** Replace literal
-   English templates in `objects/mixins/appearance.py` with `return ""`.
-   Real games override wholesale.
-6. **`get_content_group_label(group) -> ""` on the appearance mixin.**
-   Replace hardcoded `"Characters"` / `"You see"` labels.
-   `get_display_characters` / `get_display_things` skip empty groups.
-7. **Cmdset merge cache warmup hook.** Pure performance utility, opt-in.
-   Primes the cmdset merge cache on login/reload. Lands in
-   `evennia/commands/` or as an opt-in startup helper.
-
-## Bundle 3: `.41` — design-led
+## Bundle 3: `.43+` — design-led
 
 8. **`Conjugator` seam (Language strategy).** Prerequisite for 9. RFC.
    `Conjugator` protocol with `conjugate(word, person, tense)` and
@@ -186,11 +100,12 @@ opinions (defaults are allowed to be opinionated).
 
 | Release | Items |
 |---|---|
-| `.39` | 1, 2, 3, 4 |
+| `.40` | 1, 2, 3, 4 (Bundle 1) |
+| `.41` | universal veto/transform rule (Bundle 1.5) |
+| `.42` | 5, 6, 7 (Bundle 2, shipped) |
 | any | `at_sync` bug, filed separately |
-| `.40` | 5, 6, 7 |
-| `.41` | 8, then 9, 10, 11 |
-| `.42+` | 12, 13, 14 |
+| `.43+` | 8, then 9, 10, 11 (Bundle 3) |
+| later | 12, 13, 14 (Bundle 4) |
 | Policy | `bump_*_generation` decision |
 | 6.1+ | deferred items |
 

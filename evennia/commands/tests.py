@@ -3013,9 +3013,7 @@ class TestCmdsetMergeWarmup(BaseEvenniaTest):
         fake_handler.get_sessions.return_value = [unpuppeted]
         with (
             patch("evennia.SESSION_HANDLER", fake_handler),
-            patch.object(
-                cmdset_merge_warmup, "warm_cmdset_merge_for_session"
-            ) as warm_mock,
+            patch.object(cmdset_merge_warmup, "warm_cmdset_merge_for_session") as warm_mock,
         ):
             cmdset_merge_warmup.warm_all_logged_in_puppet_sessions()
         warm_mock.assert_not_called()
