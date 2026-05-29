@@ -36,6 +36,142 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.42 — Engine/game boundary migration Bundle 2
+
+Three items from the engine/game boundary migration plan
+([`engine-boundary-migration.md`](.agents/docs/engine-boundary-migration.md)).
+Lock-step with downstream; no deprecation aliases. Stock cosmetic
+break: `say` and `whisper` no longer broadcast English templates by
+default, and room `look` output drops the `Characters:` / `You see:`
+prefixes. Real games override the new hooks (or already overrode
+`at_say` / `get_display_*` wholesale) and feel no change.
+
+### Engine — `at_say` template hooks
+
+[`evennia/objects/mixins/appearance.py`](evennia/objects/mixins/appearance.py)
+gains three overridable methods on `AppearanceMixin`:
+
+- `get_say_template_self(whisper=False, **kwargs) -> ""`
+- `get_say_template_location(whisper=False, **kwargs) -> ""`
+- `get_say_template_receivers(whisper=False, **kwargs) -> ""`
+
+All default empty. `at_say` sources its `msg_self`, `msg_location`, and
+`msg_receivers` defaults through the hooks; the existing
+`if msg_self:` / `if msg_location:` / `if receivers and msg_receivers:`
+guards short-circuit on empty so no `msg`/`msg_contents` call is made.
+The literal English templates (`'{self} say, "..."'`,
+`'{object} says, "..."'`, the whisper variants) are removed from the
+engine body.
+
+The opinion (English phrasing, vocative comma, quote styling) was the
+only game-shaped piece of `at_say`. The broadcast machinery
+(mapping substitution, `type=say`/`type=whisper` markers, exclude-list
+handling for `msg_contents`) is generic and stays in the engine, so
+overrides reuse it rather than re-implementing it.
+
+`at_pre_say` is unchanged; the Bundle 1.5 transform-rule contract
+remains the authoritative pre-hook surface.
+
+### Engine — `get_content_group_label` hook
+
+[`evennia/objects/mixins/appearance.py`](evennia/objects/mixins/appearance.py)
+gains `get_content_group_label(group, looker, **kwargs) -> ""`.
+
+`get_display_characters` calls it with `group="characters"`;
+`get_display_things` with `group="things"`. When the hook returns `""`
+(stock default), the helpers render the names without a prefix. When
+the content group is empty, the helpers return `""` outright so
+`format_appearance` collapses cleanly with no orphan blank line — the
+same pattern as the `{extra_state}` fix in
+[`+underspire.40`](#600underspire40---engine-boundary-migration-bundle-1).
+
+Stock `look` therefore drops the `Characters:` and `You see:` lines.
+Override returning a non-empty label restores the old prefix.
+`clothing` and `tutorial_world` already build their own labels and are
+unaffected.
+
+### Engine — Cmdset merge cache warmup
+
+New module: [`evennia/commands/cmdset_merge_warmup.py`](evennia/commands/cmdset_merge_warmup.py).
+Public surface:
+
+- `warm_cmdset_merge_for_session(session)` — runs
+  `generate_cmdset_providers` + `get_and_merge_cmdsets` for one session,
+  no command parse, no NOINPUT message.
+- `schedule_cmdset_merge_warmup_for_character(character)` — defers to
+  the next reactor tick and warms every session puppeting the character.
+- `warm_all_logged_in_puppet_sessions()` — warms every logged-in,
+  puppeted session in `SESSION_HANDLER`.
+
+Always on; no setting. Wired into two call sites:
+
+- [`evennia/accounts/accounts.py`](evennia/accounts/accounts.py)
+  `puppet_object` invokes
+  `schedule_cmdset_merge_warmup_for_character(obj)` after
+  `at_post_puppet` and the `SIGNAL_OBJECT_POST_PUPPET` signal.
+- [`evennia/server/service.py`](evennia/server/service.py)
+  `at_post_portal_sync` invokes `warm_all_logged_in_puppet_sessions()`
+  when `mode == "reload"`.
+
+The original downstream module used bare `except: pass` at every
+boundary; the engine version replaces those with `logger.log_trace` so
+real failures surface in logs. The perf claim is about perception, not
+throughput: users tolerate a multi-second pause at login or after a
+reload (those are moments where a pause reads as normal), but the
+same pause on the first typed command reads as a hung server. The
+warmup eats the merge cost during the tolerable window.
+
+### Contrib
+
+[`evennia/contrib/base_systems/ingame_python/typeclasses.py`](evennia/contrib/base_systems/ingame_python/typeclasses.py)
+`EventCharacter` overrides the three new template hooks to restore the
+old English templates, so its `at_say` body's `super().at_say(...)`
+call continues to broadcast. The contrib's behavior is unchanged from
+`+underspire.41`.
+
+### Tests
+
+[`evennia/objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py):
+
+- `TestSayTemplateHooks` — stock `at_say` broadcasts nothing;
+  overrides on each template hook restore the corresponding send.
+- `TestContentGroupLabel` — stock characters/things sections omit the
+  prefix; override restores `Characters:`; empty group returns `""`
+  with no orphan whitespace.
+
+[`evennia/commands/tests.py`](evennia/commands/tests.py)
+`TestCmdsetMergeWarmup` covers the warmup entry points: no-sessions
+noop, with-sessions deferral via `delay(0, ...)`, and the skip path
+for non-puppeted sessions.
+
+[`evennia/commands/default/tests.py`](evennia/commands/default/tests.py)
+`test_say`, `test_whisper`, and `test_force` updated to assert the new
+empty-default broadcast (the cmd still runs without error, but no
+speech reaches self/location/receivers absent an override).
+
+### Migration notes for downstream
+
+- Any local `at_say` override that calls `super().at_say(...)` and
+  relied on the engine's English templates must override the three new
+  hooks (recommended) or pass its own `msg_self`/`msg_location`/
+  `msg_receivers` to `super().at_say(...)` explicitly. Overriding the
+  hooks is one screenful and preserves the engine's broadcast
+  machinery; overriding `at_say` wholesale is the legacy path.
+- Any local `get_display_characters` / `get_display_things` override
+  that relied on the engine's `Characters:` / `You see:` prefixes
+  being present must inject its own prefix via `get_content_group_label`
+  (recommended) or hardcode the label string in the override.
+- The downstream `world/cmdset_merge_warmup.py` module is now redundant.
+  Remove it and the two call sites
+  (`server/conf/at_server_startstop.py` post-reload, and the per-puppet
+  scheduling call in the character typeclass's `at_post_puppet`).
+  Engine wiring fires both automatically.
+
+A downstream migration prompt covering the audit checklist will be
+shipped alongside the tag.
+
+---
+
 ## 6.0.0+underspire.41 — Universal veto rule + transform rule for pre-hooks
 
 Mid-bundle correction landed between `+underspire.40` (engine/game
