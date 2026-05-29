@@ -205,6 +205,29 @@ class AppearanceMixin:
         e = _("Exits")
         return f"|w{e}:|n {exit_names}" if exit_names else ""
 
+    def get_content_group_label(self, group, looker, **kwargs):
+        """
+        Return the prefix label for a content group in `return_appearance`.
+
+        Empty by default. Override to inject language-specific labels like
+        "Characters" or "You see". When this returns `""` for a group, the
+        corresponding `get_display_*` method renders the names without a prefix
+        (and emits no orphan blank line when the group is empty).
+
+        Args:
+            group (str): Content group key. Built-in groups: `"characters"`
+                (passed by `get_display_characters`), `"things"` (passed by
+                `get_display_things`). Custom subclasses may pass other group
+                keys from their own helpers.
+            looker (DefaultObject): Object doing the looking.
+            **kwargs: Arbitrary data forwarded from the caller.
+        Returns:
+            str: The label text without trailing colon or color codes. Return
+            `""` to suppress the prefix entirely.
+
+        """
+        return ""
+
     def get_display_characters(self, looker, **kwargs):
         """
         Get the 'characters' component of the object description. Called by `return_appearance`.
@@ -222,8 +245,10 @@ class AppearanceMixin:
         character_names = iter_to_str(
             (char.get_display_name(looker, **kwargs) for char in characters), endsep=_(", and")
         )
-        c = _("Characters")
-        return f"|w{c}:|n {character_names}" if character_names else ""
+        if not character_names:
+            return ""
+        label = self.get_content_group_label("characters", looker, **kwargs)
+        return f"|w{label}:|n {character_names}" if label else character_names
 
     def get_display_things(self, looker, **kwargs):
         """
@@ -250,8 +275,10 @@ class AppearanceMixin:
             singular, plural = thing.get_numbered_name(nthings, looker, key=thingname)
             thing_names.append(singular if nthings == 1 else plural)
         thing_names = iter_to_str(thing_names, endsep=_(", and"))
-        s = _("You see")
-        return f"|w{s}:|n {thing_names}" if thing_names else ""
+        if not thing_names:
+            return ""
+        label = self.get_content_group_label("things", looker, **kwargs)
+        return f"|w{label}:|n {thing_names}" if label else thing_names
 
     def get_display_footer(self, looker, **kwargs):
         """
@@ -646,6 +673,64 @@ class AppearanceMixin:
     # deprecated
     at_before_say = at_pre_say
 
+    def get_say_template_self(self, whisper=False, **kwargs):
+        """
+        Return the template used to echo the speaker's own say/whisper back to them.
+
+        Empty by default. Override to inject the language-specific template. Used
+        as the default value for the `msg_self=True` branch of `at_say`. Receives
+        the same kwargs as `at_say`.
+
+        Substitution keys supported in the returned template: `{self}`,
+        `{object}`, `{location}`, `{receiver}`, `{all_receivers}`, `{speech}`.
+
+        Args:
+            whisper (bool): If True, this is a whisper rather than a say.
+            **kwargs: Arbitrary data forwarded from `at_say`.
+        Returns:
+            str: The template string. Return `""` to suppress the self echo.
+
+        """
+        return ""
+
+    def get_say_template_location(self, whisper=False, **kwargs):
+        """
+        Return the template broadcast to the speaker's location for a say.
+
+        Empty by default. Override to inject the language-specific template. Not
+        used for whispers (whispers do not broadcast to the location). Substitution
+        keys: `{self}`, `{object}`, `{location}`, `{all_receivers}`, `{receiver}`,
+        `{speech}`.
+
+        Args:
+            whisper (bool): Whisper flag, included for symmetry. The default
+                `at_say` never uses this template when `whisper=True`.
+            **kwargs: Arbitrary data forwarded from `at_say`.
+        Returns:
+            str: The template string. Return `""` to suppress the location broadcast.
+
+        """
+        return ""
+
+    def get_say_template_receivers(self, whisper=False, **kwargs):
+        """
+        Return the template for individual receivers of a say/whisper.
+
+        Empty by default. Override to inject the language-specific template. For
+        whispers this is the standard way the whisper reaches its target; for
+        says, this only fires if `receivers` is explicitly set. Substitution
+        keys: `{self}`, `{object}`, `{location}`, `{receiver}`, `{all_receivers}`,
+        `{speech}`.
+
+        Args:
+            whisper (bool): If True, this is a whisper rather than a say.
+            **kwargs: Arbitrary data forwarded from `at_say`.
+        Returns:
+            str: The template string. Return `""` to suppress the per-receiver send.
+
+        """
+        return ""
+
     def at_say(
         self,
         message,
@@ -701,21 +786,21 @@ class AppearanceMixin:
             - {location}: the location where object is.
 
         """
-        msg_type = "say"
-        if kwargs.get("whisper", False):
-            # whisper mode
-            msg_type = "whisper"
-            msg_self = (
-                _('{self} whisper to {all_receivers}, "|n{speech}|n"')
-                if msg_self is True
-                else msg_self
-            )
-            msg_receivers = msg_receivers or _('{object} whispers: "|n{speech}|n"')
+        whisper = bool(kwargs.pop("whisper", False))
+        msg_type = "whisper" if whisper else "say"
+        if whisper:
+            if msg_self is True:
+                msg_self = self.get_say_template_self(whisper=True, **kwargs)
+            if not msg_receivers:
+                msg_receivers = self.get_say_template_receivers(whisper=True, **kwargs)
             msg_location = None
         else:
-            msg_self = _('{self} say, "|n{speech}|n"') if msg_self is True else msg_self
-            msg_location = msg_location or _('{object} says, "{speech}"')
-            msg_receivers = msg_receivers or message
+            if msg_self is True:
+                msg_self = self.get_say_template_self(whisper=False, **kwargs)
+            if not msg_location:
+                msg_location = self.get_say_template_location(whisper=False, **kwargs)
+            if not msg_receivers:
+                msg_receivers = self.get_say_template_receivers(whisper=False, **kwargs)
 
         custom_mapping = kwargs.get("mapping", {})
         receivers = make_iter(receivers) if receivers else None

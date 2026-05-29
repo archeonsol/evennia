@@ -771,6 +771,19 @@ class EvenniaServerService(MultiService):
         # delete the temporary setting
         evennia.ServerConfig.objects.conf("server_restart_mode", delete=True)
 
+        # Prime the cmdset merge cache for every already-puppeted session so
+        # the first typed command after reload does not pay the cold merge.
+        if mode == "reload":
+            from evennia.commands.cmdset_merge_warmup import \
+                warm_all_logged_in_puppet_sessions
+
+            try:
+                warm_all_logged_in_puppet_sessions()
+            except Exception:
+                from evennia.utils import logger
+
+                logger.log_trace("cmdset merge warmup on reload failed")
+
     def at_server_reload_stop(self):
         """
         This is called only time the server stops before a reload.

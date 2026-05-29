@@ -7,6 +7,8 @@ default ones in evennia core.
 
 """
 
+from django.utils.translation import gettext as _
+
 from evennia.contrib.base_systems.ingame_python.callbackhandler import \
     CallbackHandler
 from evennia.contrib.base_systems.ingame_python.utils import (phrase_event,
@@ -415,6 +417,21 @@ class EventCharacter(DefaultCharacter):
             location.callbacks.call("unpuppeted_in", self, location)
 
         super().at_pre_unpuppet()
+
+    def get_say_template_self(self, whisper=False, **kwargs):
+        if whisper:
+            return _('{self} whisper to {all_receivers}, "|n{speech}|n"')
+        return _('{self} say, "|n{speech}|n"')
+
+    def get_say_template_location(self, whisper=False, **kwargs):
+        if whisper:
+            return ""
+        return _('{object} says, "{speech}"')
+
+    def get_say_template_receivers(self, whisper=False, **kwargs):
+        if whisper:
+            return _('{object} whispers: "|n{speech}|n"')
+        return ""
 
     def at_pre_say(self, message, **kwargs):
         """

@@ -1206,3 +1206,98 @@ class TestTransformHookNoneRule(BaseEvenniaTest):
             cmd.args = "original"
             cmd.func()
         self.assertEqual(spoken, ["REWRITTEN"])
+
+
+class TestContentGroupLabel(BaseEvenniaTest):
+    """get_content_group_label drives the 'Characters:' / 'You see:' prefixes.
+    Stock returns '' so the prefix is suppressed; overrides restore opinionated
+    labels.
+    """
+
+    def test_stock_characters_has_no_prefix(self):
+        self.char2.location = self.room1
+        out = strip_ansi(self.room1.get_display_characters(self.char1))
+        self.assertNotIn("Characters:", out)
+        self.assertIn(self.char2.name, out)
+
+    def test_stock_things_has_no_prefix(self):
+        self.obj1.location = self.room1
+        out = strip_ansi(self.room1.get_display_things(self.char1))
+        self.assertNotIn("You see:", out)
+
+    def test_override_label_restores_prefix(self):
+        self.char2.location = self.room1
+        with patch.object(
+            type(self.room1),
+            "get_content_group_label",
+            return_value="Characters",
+        ):
+            out = strip_ansi(self.room1.get_display_characters(self.char1))
+        self.assertIn("Characters:", out)
+
+    def test_empty_group_returns_empty_string(self):
+        # No characters present besides looker -> empty result with no orphan
+        # whitespace from a stale label.
+        for char in list(self.room1.contents):
+            if char is not self.char1:
+                char.location = None
+        self.assertEqual(self.room1.get_display_characters(self.char1), "")
+
+
+class TestSayTemplateHooks(BaseEvenniaTest):
+    """Stock at_say templates are empty by default; overrides on the three
+    template hooks restore opinionated language without re-implementing the
+    broadcast machinery.
+    """
+
+    def test_stock_say_broadcasts_nothing(self):
+        with (
+            patch.object(self.char1, "msg") as self_msg,
+            patch.object(self.room1, "msg_contents") as loc_msg,
+        ):
+            self.char1.location = self.room1
+            self.char1.at_say("hello", msg_self=True)
+        self_msg.assert_not_called()
+        loc_msg.assert_not_called()
+
+    def test_self_template_override_echoes(self):
+        with (
+            patch.object(
+                type(self.char1),
+                "get_say_template_self",
+                return_value='You say, "{speech}"',
+            ),
+            patch.object(self.char1, "msg") as self_msg,
+        ):
+            self.char1.at_say("hi", msg_self=True)
+        self_msg.assert_called_once()
+        text = self_msg.call_args.kwargs.get("text") or self_msg.call_args.args[0]
+        if isinstance(text, tuple):
+            text = text[0]
+        self.assertEqual(text, 'You say, "hi"')
+
+    def test_location_template_override_broadcasts(self):
+        self.char1.location = self.room1
+        with (
+            patch.object(
+                type(self.char1),
+                "get_say_template_location",
+                return_value='{object} says, "{speech}"',
+            ),
+            patch.object(self.room1, "msg_contents") as loc_msg,
+        ):
+            self.char1.at_say("hi")
+        loc_msg.assert_called_once()
+
+    def test_whisper_receiver_template_override(self):
+        from unittest.mock import MagicMock
+
+        receiver = MagicMock()
+        receiver.get_display_name.return_value = "Target"
+        with patch.object(
+            type(self.char1),
+            "get_say_template_receivers",
+            return_value='{object} whispers: "{speech}"',
+        ):
+            self.char1.at_say("secret", receivers=[receiver], whisper=True)
+        receiver.msg.assert_called_once()
