@@ -1039,7 +1039,7 @@ class TestAtPreRename(BaseEvenniaTest):
         same = self.obj1.key
         with (
             patch.object(type(self.obj1), "at_pre_rename") as pre,
-            patch.object(type(self.obj1), "at_rename") as post,
+            patch.object(type(self.obj1), "at_post_rename") as post,
         ):
             self.obj1.key = same
             pre.assert_not_called()

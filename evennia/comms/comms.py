@@ -119,11 +119,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
     channel_msg_nick_pattern = r"{alias}\s*?|{alias}\s+?(?P<arg1>.+?)"
     channel_msg_nick_replacement = "@channel {channelname} = $1"
 
-    def at_first_save(self):
+    def at_first_save(self, **kwargs):
         """
         Called by the typeclass system the very first time the channel
         is saved to the database. Generally, don't overload this but
         the hooks called by this method.
+
+        Args:
+            **kwargs (dict): Arbitrary, optional arguments for users
+                overriding the call (unused by default).
 
         """
         self.basetype_setup()
@@ -633,7 +637,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             - `msg = receiver.at_pre_channel_msg(msg, channel, **kwargs)`
               (transform rule: aborts for this receiver on `False`/`""`;
               `None` falls back to the message passed in)
-            - `receiver.at_channel_msg(msg, channel, **kwargs)`
+            - `receiver.channel_msg(msg, channel, **kwargs)`
             - `receiver.at_post_channel_msg(msg, channel, **kwargs)``
             Called after all receivers are processed:
             - `channel.at_post_all_msg(message, **kwargs)`

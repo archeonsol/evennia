@@ -243,13 +243,17 @@ class LifecycleMixin:
         self.at_post_access(result, accessing_obj, access_type, **kwargs)
         return result
 
-    def at_first_save(self):
+    def at_first_save(self, **kwargs):
         """
         This is called by the typeclass system whenever an instance of
         this class is saved for the first time. It is a generic hook
         for calling the startup hooks for the various game entities.
         When overloading you generally don't overload this but
         overload the hooks called by this method.
+
+        Args:
+            **kwargs (dict): Arbitrary, optional arguments for users
+                overriding the call (unused by default).
 
         """
         self.basetype_setup()
@@ -506,7 +510,7 @@ class LifecycleMixin:
         """
         pass
 
-    def at_post_unpuppet(self, account=None, session=None, **kwargs):
+    def at_post_unpuppet(self, account, session=None, **kwargs):
         """
         Called just after the Account successfully disconnected from
         this object, severing all connections.

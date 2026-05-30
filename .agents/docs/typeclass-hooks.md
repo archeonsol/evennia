@@ -45,7 +45,7 @@ does not match its behavior.
 |---|---|---|---|---|
 | `at_pre_<event>` | Veto gate, fires before the operation. | Falsy-not-None aborts; `None`/`True`/truthy allows. | Public override. | `at_pre_move`, `at_pre_puppet`, `at_pre_say` |
 | `at_post_<event>` | Notification, fires after the operation completed (or after the relevant phase). | Ignored. | Public override; engine never reads the return. | `at_post_move`, `at_post_puppet`, `at_post_arrive` |
-| `at_<event>` (no pre/post) | Lifecycle mutator or composite action hook. State and contract are per-hook; see §2 for the firing event and §3 for return contract. | Mixed. Some return content (e.g. `at_look`); most return `None`. | Mostly public override; a few are engine-internal coordination points (e.g. `at_first_save`, `at_post_load`). | `at_object_creation`, `at_first_save`, `at_say`, `at_look`, `at_desc`, `at_rename` |
+| `at_<event>` (no pre/post) | Lifecycle mutator or composite action hook. State and contract are per-hook; see §2 for the firing event and §3 for return contract. | Mixed. Some return content (e.g. `at_look`); most return `None`. | Mostly public override; a few are engine-internal coordination points (e.g. `at_first_save`, `at_post_load`). | `at_object_creation`, `at_first_save`, `at_say`, `at_look`, `at_desc` |
 | `at_failed_<event>` | Branch fired when the matching `at_pre_<event>` vetoed (or the operation otherwise failed). | Ignored. | Public override. | `at_failed_traverse`, `at_failed_login` |
 | `get_display_<part>` | Content provider for a named slot of `return_appearance`. | Returns a string (the rendered slot). | Public override; this is the primary customization surface for appearance. | `get_display_name`, `get_display_desc`, `get_display_exits`, `get_display_things` |
 | `get_<other>` | State query or configuration provider. Reads state, never mutates. | Returns a value; type per hook. | Public override for query hooks; some are internal plumbing (e.g. `get_cmdset_providers`). | `get_numbered_name`, `get_search_candidates`, `get_default_lockstring`, `get_log_filename` |
@@ -99,10 +99,10 @@ prefix as deprecated for new hooks.
 
 **`at_<noun>_added` / `at_<noun>_removed`**: set-membership
 notifications. Today this shape appears only on Account
-(`at_puppet_added`, `at_puppet_removed`, `at_post_add_character`,
-`at_post_remove_character`); the `at_post_*` variant is the
-character-relationship form, the `_added`/`_removed` variant is the
-puppet-set form. See §2.7 and §6.
+(`at_puppet_added`, `at_puppet_removed`, `at_character_added`,
+`at_character_removed`); the `at_character_*` pair tracks the
+persistent characters-list, the `at_puppet_*` pair tracks the live
+puppet-set. See §2.7 and §2.15.
 
 ### Aliases preserved for compatibility
 
@@ -234,19 +234,22 @@ override of `delete()`.
 
 Driver: `TypedObject.key` setter and the `@name` command. The
 typeclass exposes both halves on `TypedObject`
-(typeclasses/models.py:910), with `at_rename` separately re-defined
+(typeclasses/models.py:910), with `at_post_rename` separately re-defined
 on `AppearanceMixin` (mixins/appearance.py:907).
 
 ```
 rename_caller
   └─ obj.at_pre_rename(oldname, newname)  ─── falsy-not-None?  ─→ abort
   ├─ obj.key = newname   (db_key write; post_save fires)
-  └─ obj.at_rename(oldname, newname)
+  └─ obj.at_post_rename(oldname, newname)
 ```
 
-`at_rename` is defined twice (TypedObject and AppearanceMixin) with
-identical signatures. MRO resolves to `AppearanceMixin.at_rename`
-for `DefaultObject` and descendants. See §6.
+`at_post_rename` is defined twice with identical signatures
+(`TypedObject.at_post_rename` is a stub; `AppearanceMixin.at_post_rename`
+clears plural aliases set by `get_numbered_name`). MRO resolves to
+the mixin for `DefaultObject` and descendants; the base version
+serves Account/Channel/Script (which have no plural aliases to
+clear). Renamed from `at_rename` in the R-bucket cleanup.
 
 ### 2.5 Move
 
@@ -714,7 +717,7 @@ create_account(...)
        └─ permissions.batch_add(...)
 
 account.set_password(new_password)
-  └─ account.at_password_change()                 [stub by default]
+  └─ account.at_post_password_change()            [stub by default]
 
 account.create_character(...)
   └─ create_object(...)
@@ -729,24 +732,25 @@ position and semantics. The Account does NOT have an
 "locks set" and `init_evennia_properties`. See §6.
 
 `PlayableCharactersList` (accounts.py:155, :167) is a custom list
-type that fires `at_post_add_character` / `at_post_remove_character`
+type that fires `at_character_added` / `at_character_removed`
 when items are appended/removed:
 
 ```
 account.characters.append(char)
-  └─ account.at_post_add_character(char)
+  └─ account.at_character_added(char)
 
 account.characters.remove(char)
-  └─ account.at_post_remove_character(char)
+  └─ account.at_character_removed(char)
 ```
 
 These are DIFFERENT from `at_puppet_added` / `at_puppet_removed`
-(§2.7, §2.8). The pair `at_post_add_character` / `at_post_remove_character`
+(§2.7, §2.8). The pair `at_character_added` / `at_character_removed`
 fires on the persistent characters list ("which characters does this
 account have access to"); the pair `at_puppet_added` /
 `at_puppet_removed` fires on the live puppet set ("which characters
-is this account currently controlling"). The four hooks share a
-naming convention but track orthogonal state.
+is this account currently controlling"). All four hooks now share
+the `at_<set>_added` / `at_<set>_removed` convention (renamed in
+the R-bucket cleanup).
 
 ### 2.16 Account msg routing
 
@@ -1156,7 +1160,7 @@ register the current shape verbatim.
 ### Cross-class hook split
 
 - **Rename hooks** (§2.4): `at_pre_rename` defined on `TypedObject`
-  (typeclasses/models.py:910), `at_rename` defined on BOTH
+  (typeclasses/models.py:910), `at_post_rename` defined on BOTH
   `TypedObject` (models.py:931) and `AppearanceMixin`
   (appearance.py:907). MRO resolves to the mixin for Objects, the
   base for everything else. Two implementations of the same hook
@@ -1170,7 +1174,7 @@ register the current shape verbatim.
 ### Set-membership vs lifecycle pair naming
 
 - **`at_puppet_added` / `at_puppet_removed`** (§2.7, §2.8) vs
-  **`at_post_add_character` / `at_post_remove_character`** (§2.15):
+  **`at_character_added` / `at_character_removed`** (§2.15):
   parallel concepts (set-membership change notifications) named
   with two different conventions on the same class. Either pick
   `at_<set>_added` / `at_<set>_removed` everywhere or
@@ -1194,15 +1198,17 @@ rename-only changes land as one engine + game commit. Buckets:
 | ~~`at_script_delete`~~ | Renamed → `at_pre_delete` (Script version). Shipped. | |
 | ~~`at_access`~~ | Renamed → `at_post_access`. Shipped. | |
 | ~~`at_get` / `at_give` / `at_drop`~~ | Renamed → `at_post_get` / `at_post_give` / `at_post_drop`. Shipped. | |
-| `at_first_save` signature drift | Add `**kwargs` to `LifecycleMixin`, `DefaultAccount`, `DefaultChannel` versions. | Matches Script signature; allows future extension without re-touching every site. |
-| `at_post_unpuppet` positional clarity | Make signature `(self, account, session=None, **kwargs)` (drop the `account=None` default). | Call site always passes account positionally; default exists only because nobody noticed. |
-| `at_channel_msg` docstring | Fix `Channel.msg` docstring (comms.py:636) to name `channel_msg`, not `at_channel_msg`. | Docstring lie. |
+| ~~`at_first_save` signature drift~~ | Added `**kwargs` to `LifecycleMixin`, `DefaultAccount`, `DefaultChannel`. Shipped. | |
+| ~~`at_post_unpuppet` positional clarity~~ | Signature now `(self, account, session=None, **kwargs)` (dropped `account=None` default). Shipped. | |
+| ~~`at_channel_msg` docstring~~ | Fixed `Channel.msg` docstring (comms.py:636 → `channel_msg`). Shipped. | |
 | `at_post_arrive`/`at_post_move` at first placement | Doc-only. Update §2.1 in this doc with a "first-placement skips pre/leave" note (already present). No code change. | Already documented; flag as resolved. |
 | `get_display_name` / `get_self_pronoun` fan-out in `at_say` | Doc-only. The per-perspective fan-out is intentional; flag the perf contract in the override-discipline table. | Already in §4.5. |
 | `move_to` swallows hook errors | Doc-only. Behavior is intentional. | Already in §2.5 and §4.2. |
 | `puppet_object` swallows `at_puppet_added` errors | Doc-only. Behavior is intentional. | Already in §2.7. |
-| `at_rename` double-definition | Delete `TypedObject.at_rename` (typeclasses/models.py:931); keep `AppearanceMixin.at_rename`. | The TypedObject version is unreachable for Object/Character because MRO resolves to the mixin. Account/Channel/Script never call `at_rename` today, so removal is safe. Verify by grep before deleting. |
-| `at_puppet_added` / `at_puppet_removed` vs `at_post_add_character` / `at_post_remove_character` | Rename the character-list pair → `at_character_added` / `at_character_removed`. | Aligns the two pairs on the `at_<set>_added/removed` convention. The puppet pair already uses it. |
+| ~~`at_rename` double-definition~~ | Not a duplicate. `TypedObject.at_post_rename` is a stub (used by Account/Channel/Script); `AppearanceMixin.at_post_rename` clears plural aliases (used by Object/Character). Both renamed from `at_rename` in the rename-cleanup pass. Shipped. | The §7 triage initially assumed both were stubs and proposed deleting one; correction made in commit. |
+| ~~`at_puppet_added` / `at_puppet_removed` vs `at_post_add_character` / `at_post_remove_character`~~ | Renamed character-list pair → `at_character_added` / `at_character_removed`. Shipped. | Both pairs now use the `at_<set>_added/removed` convention. |
+| ~~`at_rename` → `at_post_rename`~~ (extra) | Renamed (both definitions). Shipped. | Notification with clear ordering; deserves `at_post_*` prefix. |
+| ~~`at_password_change` → `at_post_password_change`~~ (extra) | Renamed. Shipped. | Same. |
 
 ### Bucket S: semantic fix
 
@@ -1244,7 +1250,7 @@ which was reclassified to H.
 ### Suggested execution order
 
 1. **D bucket first** (one PR). Smallest blast radius; clears noise from the surface before any renames. Pre-deletion grep across the game tree.
-2. **R bucket as one PR per file or one PR total.** Pure mechanical renames + signature additions; easy to review. Hold off on the `at_rename` double-definition removal until you've grepped for engine-side and game-side callers (low risk but worth confirming).
+2. **R bucket as one PR per file or one PR total.** Pure mechanical renames + signature additions; easy to review. Shipped in three commits (veto pre-hook renames, notification renames, cleanup grab-bag).
 3. **S bucket selectively**:
    - `at_first_login` reorder + the `at_pre_unpuppet` / `at_pre_login` veto honoring can go together as a "promise-keeping" PR.
    - `at_msg_send`/`at_msg_receive` redesign waits until H1 has touched message routing.

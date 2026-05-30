@@ -295,7 +295,7 @@ class DefaultCharacter(DefaultObject):
 
         self.location.for_contents(message, exclude=[self], from_obj=self)
 
-    def at_post_unpuppet(self, account=None, session=None, **kwargs):
+    def at_post_unpuppet(self, account, session=None, **kwargs):
         """
         We stove away the character when the account goes ooc/logs off,
         otherwise the character object will remain in the room also

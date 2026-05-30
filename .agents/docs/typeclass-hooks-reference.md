@@ -113,11 +113,11 @@ anything (typically `None`).
 | `at_post_unpuppet` | `LifecycleMixin` / `Character` | mixins/lifecycle.py:509; character.py:298 | |
 | `at_puppet_added` | `DefaultAccount` | accounts/accounts.py:388 | First-attach notification. |
 | `at_puppet_removed` | `DefaultAccount` | accounts/accounts.py:412 | Last-detach notification. |
-| `at_post_add_character` | `DefaultAccount` | accounts/accounts.py:366 | Characters-list mutation. |
-| `at_post_remove_character` | `DefaultAccount` | accounts/accounts.py:377 | Characters-list mutation. |
+| `at_character_added` | `DefaultAccount` | accounts/accounts.py:366 | Characters-list mutation. |
+| `at_character_removed` | `DefaultAccount` | accounts/accounts.py:377 | Characters-list mutation. |
 | `at_post_create_character` | `DefaultAccount` | accounts/accounts.py:1042 | Per character-creation event. |
 | `at_account_creation` | `DefaultAccount` | accounts/accounts.py:1577 | |
-| `at_password_change` | `DefaultAccount` | accounts/accounts.py:1726 | |
+| `at_post_password_change` | `DefaultAccount` | accounts/accounts.py:1730 | |
 | `at_first_login` | `DefaultAccount` | accounts/accounts.py:1711 | Fires BEFORE `at_pre_login`. See main doc §6. |
 | `at_pre_login` | `DefaultAccount` | accounts/accounts.py:1737 | Return ignored despite `at_pre_*` name. See main doc §6. |
 | `at_post_login` | `DefaultAccount` / `DefaultGuest` | accounts/accounts.py:1793, :2143 | |
@@ -127,7 +127,7 @@ anything (typically `None`).
 | `at_post_get` / `at_post_give` / `at_post_drop` | `AppearanceMixin` | mixins/appearance.py:540, :582, :627 | Notifications. |
 | `at_say` | `AppearanceMixin` | mixins/appearance.py:763 | Side-effect; emits via `msg`/`msg_contents`. |
 | `at_desc` | `AppearanceMixin` | mixins/appearance.py:504 | Notification. May delete `self`. |
-| `at_rename` | `TypedObject` / `AppearanceMixin` | typeclasses/models.py:931; appearance.py:907 | Two definitions; MRO resolves to mixin for Objects. |
+| `at_post_rename` | `TypedObject` / `AppearanceMixin` | typeclasses/models.py:931; appearance.py:833 | Two definitions serve distinct purposes: base is a stub for Account/Channel/Script; mixin override clears Object plural aliases. MRO resolves to mixin for Objects. |
 | `at_post_access` | `LifecycleMixin` / `DefaultAccount` | mixins/lifecycle.py:542; accounts.py:1655 | Notification; the access decision is already made. |
 | `at_post_channel_msg` | `DefaultAccount` | accounts/accounts.py:1411 | |
 | `at_channel_creation` | `DefaultChannel` | comms/comms.py:166 | |
@@ -273,9 +273,9 @@ Three categories per hook:
 | `at_pre_login` | Public override (NOTIFICATION despite name) | Return ignored. | Misshapen; see main doc §6. |
 | `at_post_login` | Public override | Default `DefaultGuest` override calls `disconnect` after a delay; the `DefaultAccount` default is "send last-login message and welcome screen". | If overriding for a guest subclass, preserve the cleanup-on-disconnect path. |
 | `at_failed_login` | Public override | None engine-side. | |
-| `at_password_change` | Public override | None engine-side. | Audit/log point. |
+| `at_post_password_change` | Public override | None engine-side. | Audit/log point. |
 | `at_post_create_character` | Public override | None engine-side. | |
-| `at_post_add_character` / `at_post_remove_character` | Public override | Fired by `PlayableCharactersList`. | Distinct from `at_puppet_added`; see §2.7 vs §2.15. |
+| `at_character_added` / `at_character_removed` | Public override | Fired by `PlayableCharactersList`. | Distinct from `at_puppet_added`; see §2.7 vs §2.15. |
 | `at_look` (Account) | Public override | OOC character picker. Different contract from Object `at_look`. | |
 | `at_msg_send` / `at_msg_receive` (Account) | Public override (veto-on-falsy) | See §4.5. | |
 
@@ -414,7 +414,7 @@ None of these have hooks.
 | Hook | object state |
 |---|---|
 | `at_pre_rename(oldname, newname)` | object still has old key; `db_key` not yet written. |
-| `at_rename(oldname, newname)` | object has new key (instance attribute set); `db_key` written and `post_save` signal already fired (which does NOT re-fire `at_first_save` because `created=False`). |
+| `at_post_rename(oldname, newname)` | object has new key (instance attribute set); `db_key` written and `post_save` signal already fired (which does NOT re-fire `at_first_save` because `created=False`). |
 
 ### 5.5 Move
 

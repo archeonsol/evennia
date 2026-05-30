@@ -830,7 +830,7 @@ class AppearanceMixin:
                 mapping=location_mapping,
             )
 
-    def at_rename(self, oldname, newname):
+    def at_post_rename(self, oldname, newname):
         """
         This Hook is called by @name on a successful rename.
 

@@ -422,7 +422,7 @@ class TypedObject(SharedMemoryModel):
 
     name = property(__name_get, __name_set, __name_del)
 
-    # key property (overrides's the idmapper's db_key for the at_rename hook)
+    # key property (overrides's the idmapper's db_key for the at_post_rename hook)
     @property
     def key(self):
         return self.db_key
@@ -437,7 +437,7 @@ class TypedObject(SharedMemoryModel):
             return
         self.db_key = value
         self.save(update_fields=["db_key"])
-        self.at_rename(oldname, value)
+        self.at_post_rename(oldname, value)
         SIGNAL_TYPED_OBJECT_POST_RENAME.send(sender=self, old_key=oldname, new_key=value)
 
     @property
@@ -928,7 +928,7 @@ class TypedObject(SharedMemoryModel):
         """
         return True
 
-    def at_rename(self, oldname, newname):
+    def at_post_rename(self, oldname, newname):
         """
         Called after a successful rename. The instance already holds the new name.
 

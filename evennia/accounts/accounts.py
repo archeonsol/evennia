@@ -152,7 +152,7 @@ class CharactersHandler:
         self._clean()
         if character not in self.owner.db._playable_characters:
             self.owner.db._playable_characters.append(character)
-            self.owner.at_post_add_character(character)
+            self.owner.at_character_added(character)
 
     def remove(self, character: "DefaultCharacter"):
         """
@@ -164,7 +164,7 @@ class CharactersHandler:
         self._clean()
         if character in self.owner.db._playable_characters:
             self.owner.db._playable_characters.remove(character)
-            self.owner.at_post_remove_character(character)
+            self.owner.at_character_removed(character)
 
     def all(self) -> list["DefaultCharacter"]:
         """
@@ -279,7 +279,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
      - at_first_save()
      - at_post_access()
      - at_cmdset_get(**kwargs)
-     - at_password_change(**kwargs)
+     - at_post_password_change(**kwargs)
      - at_first_login()
      - at_pre_login()
      - at_post_login(session=None)
@@ -292,8 +292,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
      - at_server_shutdown()
      - at_look(target=None, session=None, **kwargs)
      - at_post_create_character(character, **kwargs)
-     - at_post_add_character(char)
-     - at_post_remove_character(char)
+     - at_character_added(char)
+     - at_character_removed(char)
      - at_puppet_added(character, session=None, **kwargs)
      - at_puppet_removed(character, session=None, **kwargs)
      - at_pre_channel_msg(message, channel, senders=None, **kwargs)
@@ -363,7 +363,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         return {"account": self}
 
-    def at_post_add_character(self, character: "DefaultCharacter"):
+    def at_character_added(self, character: "DefaultCharacter"):
         """
         Called after a character is added to this account's list of playable characters.
 
@@ -374,7 +374,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
-    def at_post_remove_character(self, character: "DefaultCharacter"):
+    def at_character_removed(self, character: "DefaultCharacter"):
         """
         Called after a character is removed from this account's list of playable characters.
 
@@ -935,7 +935,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
     def set_password(self, password, **kwargs):
         """
-        Applies the given password to the account. Logs and triggers the `at_password_change` hook.
+        Applies the given password to the account. Logs and triggers the `at_post_password_change` hook.
 
         Args:
             password (str): Password to set.
@@ -948,7 +948,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         super().set_password(password)
         logger.log_sec(f"Password successfully changed for {self}.")
-        self.at_password_change()
+        self.at_post_password_change()
 
     def get_character_slots(self) -> typing.Optional[int]:
         """
@@ -1606,11 +1606,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
     # and have some things that should be done regardless of which
     # character is currently connected to this account.
 
-    def at_first_save(self):
+    def at_first_save(self, **kwargs):
         """
         This is a generic hook called by Evennia when this object is
         saved to the database the very first time.  You generally
         don't override this method but the hooks called by it.
+
+        Args:
+            **kwargs (dict): Arbitrary, optional arguments for users
+                overriding the call (unused by default).
 
         """
         self.basetype_setup()
@@ -1723,7 +1727,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
-    def at_password_change(self, **kwargs):
+    def at_post_password_change(self, **kwargs):
         """
         Called after a successful password set/modify.
 

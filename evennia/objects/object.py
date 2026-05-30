@@ -398,7 +398,7 @@ class DefaultObject(
 
      at_look(target, **kwargs)
      at_desc(looker=None)
-     at_rename(oldname, newname)
+     at_post_rename(oldname, newname)
 
 
     """
