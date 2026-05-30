@@ -204,19 +204,6 @@ class ServerSession(_BASE_SESSION_CLASS):
 
     get_character = get_puppet
 
-    def get_puppet_or_account(self):
-        """
-        Get puppet or account.
-
-        Returns:
-            controller (Object or Account): The puppet if one exists,
-                otherwise return the account.
-
-        """
-        if self.logged_in:
-            return self.puppet if self.puppet else self.account
-        return None
-
     def log(self, message, channel=True):
         """
         Emits session info to the appropriate outputs and info channels.
