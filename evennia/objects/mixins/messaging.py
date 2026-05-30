@@ -3,6 +3,7 @@
 from django.conf import settings
 from django.utils.translation import gettext as _
 
+from evennia.hooks import hook
 from evennia.utils import funcparser, logger
 from evennia.utils.utils import is_iter, make_iter, to_str
 
@@ -135,6 +136,15 @@ class MessagingMixin:
         for obj in contents:
             func(obj, **kwargs)
 
+    @hook(
+        event="msg_contents",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("MessagingMixin.msg_contents",),
+        notes="Resolves the recipient set for a msg_contents broadcast.",
+    )
     def get_message_recipients(self, exclude=None):
         """
         Objects that receive ``msg_contents`` broadcasts from this location.

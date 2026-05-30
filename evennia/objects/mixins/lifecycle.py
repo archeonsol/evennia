@@ -13,6 +13,15 @@ _ScriptDB = None
 class LifecycleMixin:
     """Mixin providing lifecycle-related methods for DefaultObject."""
 
+    @hook(
+        event="lockstring",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("DefaultObject.create",),
+        notes="Per-class default lockstring used during basetype_setup.",
+    )
     @classmethod
     def get_default_lockstring(
         cls, account: "DefaultAccount" = None, caller: "DefaultObject" = None, **kwargs
@@ -146,6 +155,15 @@ class LifecycleMixin:
         self.at_object_post_copy(new_obj, **kwargs)
         return new_obj
 
+    @hook(
+        event="copy",
+        phase="post",
+        actor="source",
+        returns="ignored",
+        discipline="public",
+        fires_from=("LifecycleMixin.copy",),
+        notes="Fires on the SOURCE object (not the new copy).",
+    )
     def at_object_post_copy(self, new_obj, **kwargs):
         """
         Called by DefaultObject.copy(). Meant to be overloaded. In case there's extra data not
@@ -244,6 +262,15 @@ class LifecycleMixin:
         self.at_post_access(result, accessing_obj, access_type, **kwargs)
         return result
 
+    @hook(
+        event="creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="internal",
+        fires_from=(),
+        notes="Driven by Django post_save signal (created=True). Override at_object_creation instead.",
+    )
     def at_first_save(self, **kwargs):
         """
         This is called by the typeclass system whenever an instance of
@@ -361,6 +388,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="object_creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("LifecycleMixin.at_first_save",),
+        notes="One-shot creation hook. Fires once per object via at_first_save.",
+    )
     def at_object_creation(self):
         """
         Called once, when this object is first created. This is the
@@ -369,6 +405,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="object_creation",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("LifecycleMixin.at_first_save",),
+        notes="Fires after at_object_creation, lets game-side code run final setup.",
+    )
     def at_object_post_creation(self):
         """
         Called once, when this object is first created and after any attributes, tags, etc.
@@ -378,6 +423,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="object_delete",
+        phase="pre",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=("LifecycleMixin.delete",),
+        notes="Return False to abort delete().",
+    )
     def at_pre_delete(self):
         """
         Called just before the database object is persistently
@@ -387,6 +441,15 @@ class LifecycleMixin:
         """
         return True
 
+    @hook(
+        event="prototype_spawn",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Spawner-only. Fires when an object is created via a prototype, after at_object_creation.",
+    )
     def at_prototype_spawn(self, prototype=None):
         """
         Called when this object is spawned or updated from a prototype, after all other
@@ -397,6 +460,16 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="cache_load",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("SharedMemoryModel.__init__",),
+        state_cache_state="rehydrated",
+        notes="Stub override of TypedObject.at_post_load. Fires on every cache load; overrides must be idempotent.",
+    )
     def at_post_load(self):
         """
         This is always called whenever this object is initiated --
@@ -408,6 +481,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("CmdSetHandler.get",),
+        notes="Last-second mutation of the merged cmdset. See command-system.md.",
+    )
     def at_cmdset_get(self, **kwargs):
         """
         Called just before cmdsets on this object are requested by the
@@ -425,6 +507,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("CmdSetHandler._get_cmdsets",),
+        notes="Returns the per-class cmdset stack as (current, cmdsets). See command-system.md.",
+    )
     def get_cmdsets(self, caller, current, **kwargs):
         """
         Called by the CommandHandler to get a list of cmdsets to merge.
@@ -480,6 +571,18 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="puppet",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=(
+            "DefaultAccount.puppet_object",
+            "ServerSession.at_sync",
+        ),
+        notes="Reattach path fires with reattach=True kwarg.",
+    )
     def at_post_puppet(self, **kwargs):
         """
         Called just after puppeting has been completed and all
@@ -505,6 +608,15 @@ class LifecycleMixin:
         self.msg(_("You become |w{key}|n.").format(key=self.key))
         self.account.db._last_puppet = self
 
+    @hook(
+        event="unpuppet",
+        phase="pre",
+        actor="target",
+        returns="veto",
+        discipline="public",
+        fires_from=("DefaultAccount.unpuppet_object",),
+        notes="Veto aborts detach. Puppet stays attached; session.puppet/puid stay set.",
+    )
     def at_pre_unpuppet(self, **kwargs):
         """
         Called just before beginning to un-connect a puppeting from this
@@ -528,6 +640,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="unpuppet",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultAccount.unpuppet_object",),
+        notes="Fires after the session detaches. session.puppet/puid have been cleared.",
+    )
     def at_post_unpuppet(self, account, session=None, **kwargs):
         """
         Called just after the Account successfully disconnected from
@@ -545,6 +666,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires from EvenniaServerService.shutdown on reload-style stops.",
+    )
     def at_server_reload(self):
         """
         This hook is called whenever the server is shutting down for
@@ -554,6 +684,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires from EvenniaServerService.shutdown on full-shutdown stops.",
+    )
     def at_server_shutdown(self):
         """
         This hook is called whenever the server is fully shut down (i.e. not for a restart).
@@ -561,6 +700,15 @@ class LifecycleMixin:
         """
         pass
 
+    @hook(
+        event="access_check",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=("LockHandler.check",),
+        notes="Fires after a lock check resolves. Gets the result and the accessing object.",
+    )
     def at_post_access(self, result, accessing_obj, access_type, **kwargs):
         """
         This is called with the result of an access call, along with

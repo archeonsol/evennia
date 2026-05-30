@@ -6,8 +6,10 @@ import inflect
 from django.conf import settings
 from django.utils.translation import gettext as _
 
+from evennia.hooks import hook
 from evennia.utils import ansi, logger
-from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
+from evennia.utils.utils import (compress_whitespace, is_iter, iter_to_str,
+                                 make_iter)
 
 _INFLECT = inflect.engine()
 
@@ -46,6 +48,15 @@ class AppearanceMixin:
 
     # name and return_appearance hooks
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Per-looker formatted name. Most-overridden hook in the surface (122+ call sites).",
+    )
     def get_display_name(self, looker=None, **kwargs):
         """
         Displays the name of the object in a viewer-aware manner.
@@ -64,6 +75,15 @@ class AppearanceMixin:
         """
         return self.name
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Injected next to the display name; empty default.",
+    )
     def get_extra_display_name_info(self, looker=None, **kwargs):
         """
         Adds any extra display information to the object's name. By default this is is the
@@ -84,6 +104,15 @@ class AppearanceMixin:
             return f"(#{self.id})"
         return ""
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.get_display_things",),
+        notes="Returns (singular, plural) tuple. Used for stacking in get_display_things.",
+    )
     def get_numbered_name(self, count, looker, **kwargs):
         """
         Return the numbered (singular, plural) forms of this object's key. This is by default called
@@ -145,6 +174,15 @@ class AppearanceMixin:
 
         return singular, plural
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Header slot; empty default.",
+    )
     def get_display_header(self, looker, **kwargs):
         """
         Get the 'header' component of the object description. Called by `return_appearance`.
@@ -158,6 +196,15 @@ class AppearanceMixin:
         """
         return ""
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Reads desc attribute by default.",
+    )
     def get_display_desc(self, looker, **kwargs):
         """
         Get the 'desc' component of the object description. Called by `return_appearance`.
@@ -171,6 +218,15 @@ class AppearanceMixin:
         """
         return self.db.desc or self.default_description
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Rendered exits block.",
+    )
     def get_display_exits(self, looker, **kwargs):
         """
         Get the 'exits' component of the object description. Called by `return_appearance`.
@@ -212,6 +268,18 @@ class AppearanceMixin:
         label = self.get_content_group_label("exits", looker, **kwargs)
         return f"|w{label}:|n {exit_names}" if label else exit_names
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=(
+            "AppearanceMixin.get_display_characters",
+            "AppearanceMixin.get_display_things",
+        ),
+        notes="Per-group label injected into the rendered listings.",
+    )
     def get_content_group_label(self, group, looker, **kwargs):
         """
         Return the prefix label for a content group in `return_appearance`.
@@ -235,6 +303,15 @@ class AppearanceMixin:
         """
         return ""
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Rendered characters block.",
+    )
     def get_display_characters(self, looker, **kwargs):
         """
         Get the 'characters' component of the object description. Called by `return_appearance`.
@@ -258,6 +335,15 @@ class AppearanceMixin:
         label = self.get_content_group_label("characters", looker, **kwargs)
         return f"|w{label}:|n {character_names}" if label else character_names
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Rendered things block with get_numbered_name stacking.",
+    )
     def get_display_things(self, looker, **kwargs):
         """
         Get the 'things' component of the object description. Called by `return_appearance`.
@@ -288,6 +374,15 @@ class AppearanceMixin:
         label = self.get_content_group_label("things", looker, **kwargs)
         return f"|w{label}:|n {thing_names}" if label else thing_names
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Footer slot; empty default.",
+    )
     def get_display_footer(self, looker, **kwargs):
         """
         Get the 'footer' component of the object description. Called by `return_appearance`.
@@ -301,6 +396,15 @@ class AppearanceMixin:
         """
         return ""
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.return_appearance",),
+        notes="Injected into the {extra_state} template slot.",
+    )
     def get_extra_display_state(self, looker, **kwargs):
         """
         Get extra free-form state content for this object. Called by `return_appearance`
@@ -337,6 +441,15 @@ class AppearanceMixin:
         """
         return compress_whitespace(appearance).strip()
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_look",),
+        notes="Composite renderer. Joins get_display_* providers via appearance_template.",
+    )
     def return_appearance(self, looker, **kwargs):
         """
         Main callback used by 'look' for the object to describe itself.
@@ -385,6 +498,15 @@ class AppearanceMixin:
             **kwargs,
         )
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Composite. Returns the description; caller messages it. Fires at_desc on target as a side effect.",
+    )
     def at_look(self, target, **kwargs):
         """
         Called when this object performs a look. It allows to
@@ -427,6 +549,15 @@ class AppearanceMixin:
 
         return description
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_look",),
+        notes="Notification that looker is examining target. Name suggests no event but it's the 'looked-at' notify hook.",
+    )
     def at_desc(self, looker=None, **kwargs):
         """
         This is called whenever someone looks at this object.
@@ -439,6 +570,15 @@ class AppearanceMixin:
         """
         pass
 
+    @hook(
+        event="get",
+        phase="pre",
+        actor="target",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Veto aborts the get. Move does not run.",
+    )
     def at_pre_get(self, getter, **kwargs):
         """
         Called by the default `get` command before this object has been
@@ -463,6 +603,15 @@ class AppearanceMixin:
     # deprecated
     at_before_get = at_pre_get
 
+    @hook(
+        event="get",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after the get-induced move commits.",
+    )
     def at_post_get(self, getter, **kwargs):
         """
         Called by the default `get` command when this object has been
@@ -480,6 +629,15 @@ class AppearanceMixin:
         """
         pass
 
+    @hook(
+        event="give",
+        phase="pre",
+        actor="target",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Veto aborts the give. Move does not run.",
+    )
     def at_pre_give(self, giver, getter, **kwargs):
         """
         Called by the default `give` command before this object has been
@@ -505,6 +663,15 @@ class AppearanceMixin:
     # deprecated
     at_before_give = at_pre_give
 
+    @hook(
+        event="give",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after the give-induced move commits.",
+    )
     def at_post_give(self, giver, getter, **kwargs):
         """
         Called by the default `give` command when this object has been
@@ -523,6 +690,15 @@ class AppearanceMixin:
         """
         pass
 
+    @hook(
+        event="drop",
+        phase="pre",
+        actor="target",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Veto aborts the drop. Move does not run.",
+    )
     def at_pre_drop(self, dropper, **kwargs):
         """
         Called by the default `drop` command before this object has been
@@ -550,6 +726,15 @@ class AppearanceMixin:
     # deprecated
     at_before_drop = at_pre_drop
 
+    @hook(
+        event="drop",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after the drop-induced move commits.",
+    )
     def at_post_drop(self, dropper, **kwargs):
         """
         Called by the default `drop` command when this object has been
@@ -567,6 +752,15 @@ class AppearanceMixin:
         """
         pass
 
+    @hook(
+        event="say",
+        phase="pre",
+        actor="self",
+        returns="transform",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_say",),
+        notes="Transform contract with symmetric None-rule. Non-empty string replaces; False/empty aborts; None falls back to original.",
+    )
     def at_pre_say(self, message, **kwargs):
         """
         Before the object says something.
@@ -607,6 +801,15 @@ class AppearanceMixin:
     # deprecated
     at_before_say = at_pre_say
 
+    @hook(
+        event="say",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_say",),
+        notes="str.format-ready template for the speaker's self-echo.",
+    )
     def get_say_template_self(self, whisper=False, **kwargs):
         """
         Return the template used to echo the speaker's own say/whisper back to them.
@@ -627,6 +830,15 @@ class AppearanceMixin:
         """
         return ""
 
+    @hook(
+        event="say",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_say",),
+        notes="Template for the location broadcast.",
+    )
     def get_say_template_location(self, whisper=False, **kwargs):
         """
         Return the template broadcast to the speaker's location for a say.
@@ -646,6 +858,15 @@ class AppearanceMixin:
         """
         return ""
 
+    @hook(
+        event="say",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_say",),
+        notes="Template for per-receiver delivery (whispers, directed says).",
+    )
     def get_say_template_receivers(self, whisper=False, **kwargs):
         """
         Return the template for individual receivers of a say/whisper.
@@ -665,6 +886,15 @@ class AppearanceMixin:
         """
         return ""
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Pronoun from the looker's perspective. Default returns 'You' when looker is self.",
+    )
     def get_self_pronoun(self, looker, **kwargs):
         """
         Return the self-reference pronoun for this object as seen by `looker`.
@@ -686,6 +916,15 @@ class AppearanceMixin:
         """
         return _("You")
 
+    @hook(
+        event="say",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Composite action: fires at_pre_say, formats via templates, sends to self/location/receivers.",
+    )
     def at_say(
         self,
         message,
@@ -830,6 +1069,10 @@ class AppearanceMixin:
                 mapping=location_mapping,
             )
 
+    @hook(
+        extends="TypedObject.at_post_rename",
+        notes="Clears the Object's plural-aliases cache after a rename.",
+    )
     def at_post_rename(self, oldname, newname):
         """
         This Hook is called by @name on a successful rename.

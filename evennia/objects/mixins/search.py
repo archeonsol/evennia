@@ -4,6 +4,7 @@ from django.conf import settings
 from django.utils.translation import gettext as _
 
 import evennia
+from evennia.hooks import hook
 from evennia.utils import search as _search_utils
 from evennia.utils.multimatch import (narrow_candidates,
                                       parse_search_qualifiers,
@@ -16,6 +17,15 @@ _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 
 class SearchMixin:
     """Mixin providing search-related methods for DefaultObject."""
 
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("DefaultObject.search",),
+        notes="Search-pipeline stage 1: rewrite the raw search string (nick replacement etc).",
+    )
     def get_search_query_replacement(self, searchdata, **kwargs):
         """
         This method is called by the search method to allow for direct
@@ -35,6 +45,15 @@ class SearchMixin:
             )
         return searchdata
 
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
+        returns="conditional",
+        discipline="public",
+        fires_from=("DefaultObject.search",),
+        notes="Search-pipeline stage 2: short-circuit returns (me/self/here). Returns (should_return, result).",
+    )
     def get_search_direct_match(self, searchdata, **kwargs):
         """
         This method is called by the search method to allow for direct
@@ -61,6 +80,15 @@ class SearchMixin:
                     return global_search or self.location in candidates, self.location
         return False, searchdata
 
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("DefaultObject.search",),
+        notes="Search-pipeline stage 3: compute candidate set (location/contents-aware).",
+    )
     def get_search_candidates(self, searchdata, **kwargs):
         """
         Helper for the `.search` method. Get the candidates for a search. Also the `candidates`
@@ -118,6 +146,15 @@ class SearchMixin:
                 candidates.append(self)
         return candidates
 
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("DefaultObject.search",),
+        notes="Search-pipeline stage 4: actual ObjectDB query. Returns queryset/iterable.",
+    )
     def get_search_result(
         self,
         searchdata,
@@ -159,6 +196,15 @@ class SearchMixin:
             tags=tags,
         )
 
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
+        returns="conditional",
+        discipline="public",
+        fires_from=("DefaultObject.search",),
+        notes="Search-pipeline stage 5: collapse duplicate matches into stacks. Returns (stacked, results).",
+    )
     def get_stacked_results(self, results, **kwargs):
         """
         This method is called by the search method to allow for handling of multi-match

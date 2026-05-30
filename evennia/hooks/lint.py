@@ -87,11 +87,17 @@ def _is_hook_name(name):
     return any(name.startswith(p) for p in _HOOK_NAME_PREFIXES)
 
 
+def _unwrap(attr):
+    if isinstance(attr, (classmethod, staticmethod)):
+        return attr.__func__
+    return attr
+
+
 def _has_inherited_spec(cls, name):
     """True if any ancestor's same-name method carries ``__evennia_hook__``."""
     for ancestor in cls.__mro__[1:]:
         attr = ancestor.__dict__.get(name)
-        if attr is not None and hasattr(attr, "__evennia_hook__"):
+        if attr is not None and hasattr(_unwrap(attr), "__evennia_hook__"):
             return True
     return False
 
@@ -125,9 +131,10 @@ def _check_class(cls):
     for name, attr in cls.__dict__.items():
         if not _is_hook_name(name):
             continue
-        if not callable(attr):
+        unwrapped = _unwrap(attr)
+        if not callable(unwrapped):
             continue
-        if hasattr(attr, "__evennia_hook__"):
+        if hasattr(unwrapped, "__evennia_hook__"):
             continue
         if _has_inherited_spec(cls, name):
             continue

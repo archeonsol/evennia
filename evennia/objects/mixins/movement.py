@@ -3,6 +3,7 @@
 from django.conf import settings
 from django.utils.translation import gettext as _
 
+from evennia.hooks import hook
 from evennia.objects.models import ObjectDB
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.utils import logger
@@ -258,6 +259,15 @@ class MovementMixin:
                     obj.msg(_("This place should not exist ... contact an admin."))
             obj.move_to(home, move_type="teleport")
 
+    @hook(
+        event="move",
+        phase="pre",
+        actor="mover",
+        returns="veto",
+        discipline="public",
+        fires_from=("MovementMixin.move_to",),
+        notes="Fires on the mover. Veto aborts: no mover-side or location-side post-hooks fire.",
+    )
     def at_pre_move(self, destination, move_type="move", **kwargs):
         """
         Called just before starting to move this object to destination.
@@ -281,6 +291,15 @@ class MovementMixin:
         """
         return True
 
+    @hook(
+        event="move",
+        phase="pre",
+        actor="source",
+        returns="veto",
+        discipline="public",
+        fires_from=("MovementMixin.move_to",),
+        notes="Fires on the source location. Veto aborts after at_pre_move passes.",
+    )
     def at_pre_leave(self, leaving_object, destination, **kwargs):
         """
         Called on this object just before another object that is currently
@@ -305,6 +324,15 @@ class MovementMixin:
         """
         return True
 
+    @hook(
+        event="move",
+        phase="pre",
+        actor="destination",
+        returns="veto",
+        discipline="public",
+        fires_from=("MovementMixin.move_to",),
+        notes="Fires on the destination. Veto aborts after at_pre_move and at_pre_leave pass.",
+    )
     def at_pre_arrive(self, arriving_object, source_location, **kwargs):
         """
         Called on this object just before it receives another object. Also
@@ -462,6 +490,15 @@ class MovementMixin:
             (string, {"type": move_type}), exclude=(self,), from_obj=self, mapping=mapping
         )
 
+    @hook(
+        event="move",
+        phase="post",
+        actor="mover",
+        returns="ignored",
+        discipline="public",
+        fires_from=("MovementMixin.move_to",),
+        notes="Fires on the mover after location-side post-hooks.",
+    )
     def at_post_move(self, source_location, move_type="move", **kwargs):
         """
         Called after move has completed, regardless of quiet mode or
@@ -483,6 +520,15 @@ class MovementMixin:
     # deprecated
     at_after_move = at_post_move
 
+    @hook(
+        event="move",
+        phase="post",
+        actor="source",
+        returns="ignored",
+        discipline="public",
+        fires_from=("MovementMixin.move_to",),
+        notes="Fires on the source location after the move commits.",
+    )
     def at_post_leave(self, moved_obj, target_location, move_type="move", **kwargs):
         """
         Called after an object has left from inside this object. At this
@@ -505,6 +551,15 @@ class MovementMixin:
         """
         pass
 
+    @hook(
+        event="move",
+        phase="post",
+        actor="destination",
+        returns="ignored",
+        discipline="public",
+        fires_from=("MovementMixin.move_to",),
+        notes="Fires on the destination after the move commits.",
+    )
     def at_post_arrive(self, moved_obj, source_location, move_type="move", **kwargs):
         """
         Called after an object has been moved into this object. At this
@@ -545,6 +600,15 @@ class MovementMixin:
         """
         pass
 
+    @hook(
+        event="traverse",
+        phase="pre",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=("DefaultExit.at_traverse",),
+        notes="Fires on the exit. Veto fires at_failed_traverse; move chain does NOT fire.",
+    )
     def at_pre_traverse(self, traversing_object, target_location, **kwargs):
         """
         Called by `do_traverse` before the move is attempted.
@@ -567,6 +631,15 @@ class MovementMixin:
         """
         return True
 
+    @hook(
+        event="traverse",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultExit.at_traverse",),
+        notes="Fires on the exit after the move chain has completed.",
+    )
     def at_post_traverse(self, traversing_object, source_location, **kwargs):
         """
         Called just after an object successfully used this object to
@@ -587,6 +660,15 @@ class MovementMixin:
     # deprecated
     at_after_traverse = at_post_traverse
 
+    @hook(
+        event="traverse",
+        phase="failed",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultExit.at_traverse",),
+        notes="Fires on the exit when at_pre_traverse vetoes.",
+    )
     def at_failed_traverse(self, traversing_object, **kwargs):
         """
         This is called if an object fails to traverse this object for

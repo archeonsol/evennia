@@ -43,14 +43,20 @@ def hook(**fields):
             already registered (duplicate decoration).
     """
 
-    def _wrap(func):
+    def _wrap(func_or_descriptor):
+        # Unwrap classmethod/staticmethod so the spec lives on the underlying
+        # function. The returned object is still the original descriptor, so
+        # @classmethod / @staticmethod can appear above OR below @hook.
+        real_func = func_or_descriptor
+        if isinstance(real_func, (classmethod, staticmethod)):
+            real_func = real_func.__func__
         spec = HookSpec(**fields)
-        qualname = func.__qualname__
+        qualname = real_func.__qualname__
         if qualname in _REGISTRY:
             raise ValueError(f"hook already registered: {qualname}")
         _REGISTRY[qualname] = spec
-        func.__evennia_hook__ = spec
-        return func
+        real_func.__evennia_hook__ = spec
+        return func_or_descriptor
 
     return _wrap
 
