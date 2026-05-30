@@ -92,7 +92,7 @@ class Script(DefaultScript):
       at_pause()
       at_stop() - Called as the script object is stopped and is about to be
                   removed from the game, e.g. because is_valid() returned False.
-      at_script_delete()
+      at_pre_delete()
       at_server_reload() - Called when server reloads. Can be used to
                   save temporary variables you want should survive a reload.
       at_server_shutdown() - called at a full server shutdown.

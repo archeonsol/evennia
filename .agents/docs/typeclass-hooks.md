@@ -207,7 +207,7 @@ Driver: `LifecycleMixin.delete()` (mixins/lifecycle.py:159).
 
 ```
 obj.delete()
-  ├─ obj.at_object_delete()  ─── returns False?  [veto]  ─→ abort
+  ├─ obj.at_pre_delete()  ─── returns False?  [veto]  ─→ abort
   │
   ├─ msg + unpuppet all sessions
   ├─ remove from account.characters
@@ -220,10 +220,11 @@ obj.delete()
   └─ super().delete()       (Django delete; `post_delete` signals fire)
 ```
 
-`at_object_delete` is a veto hook by behavior (returning `False`
-aborts) but is named `at_<event>` rather than `at_pre_delete`. The
+`at_pre_delete` is a veto hook (returning `False` aborts). The
 default returns `True`, matching the "non-None truthy allows" rule
-from `is_veto`. See §6.
+from `is_veto`. (Renamed from `at_object_delete` in the R-bucket
+cleanup; the old name was inconsistent with the `at_pre_*`
+convention.)
 
 No `at_post_delete` hook exists on the typeclass; downstream
 notification rides Django's `post_delete` signal or a manual
@@ -871,15 +872,15 @@ Delete:
 
 ```
 script.delete()
-  ├─ script.at_script_delete()       ─── False?  ─→ abort
+  ├─ script.at_pre_delete()          ─── False?  ─→ abort
   ├─ _stop_task()                    (without firing at_stop;
   │                                   delete bypasses the stop hook)
   └─ super().delete()
 ```
 
-`at_script_delete` mirrors `at_object_delete` (§2.3) in naming
-inconsistency: the name suggests post-event, but it is a veto pre-hook.
-See §6.
+`Script.at_pre_delete` (same name as `Object.at_pre_delete` (§2.3);
+they coexist on different classes) is a veto pre-hook. Renamed in
+the R-bucket cleanup from `at_script_delete`.
 
 `at_start` is the resume hook AS WELL as the initial-start hook;
 there is no separate `at_resume`. After a server reload, persistent
@@ -1022,12 +1023,8 @@ register the current shape verbatim.
 
 ### Naming / semantics mismatches
 
-- **`at_object_delete`** (§2.3) is a veto pre-hook (returning
-  `False` aborts) but is named without the `at_pre_` prefix. Should
-  be `at_pre_delete`. The `at_<event>` form should be a notification
-  or composite, not a veto.
-- **`at_script_delete`** (§2.19) has the same shape mismatch as
-  `at_object_delete`.
+- ~~**`at_object_delete`**~~: renamed to `at_pre_delete` (R-bucket).
+- ~~**`at_script_delete`**~~: renamed to `at_pre_delete` (R-bucket).
 - **`at_pre_unpuppet`** (§2.8) has the `at_pre_*` name but the
   engine never honors its return value as a veto. Either the engine
   should consult `is_veto` on its return (matching the prefix) or
@@ -1197,8 +1194,8 @@ rename-only changes land as one engine + game commit. Buckets:
 
 | Entry | Action | Notes |
 |---|---|---|
-| `at_object_delete` | Rename → `at_pre_delete`. | Default returns True; veto contract preserved. |
-| `at_script_delete` | Rename → `at_pre_delete` (Script version). | Same. |
+| ~~`at_object_delete`~~ | Renamed → `at_pre_delete`. Shipped. | |
+| ~~`at_script_delete`~~ | Renamed → `at_pre_delete` (Script version). Shipped. | |
 | `at_access` | Rename → `at_post_access`. | Notification, not composite. Two definitions (Object and Account); rename both. |
 | `at_get` / `at_give` / `at_drop` | Rename → `at_post_get` / `at_post_give` / `at_post_drop`. | Pre/post symmetry with existing `at_pre_*` halves. |
 | `at_first_save` signature drift | Add `**kwargs` to `LifecycleMixin`, `DefaultAccount`, `DefaultChannel` versions. | Matches Script signature; allows future extension without re-touching every site. |

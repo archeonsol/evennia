@@ -506,16 +506,16 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
 
     def delete(self):
         """
-        Delete the Script. Normally stops any timer task. This fires at_script_delete before
+        Delete the Script. Normally stops any timer task. This fires at_pre_delete before
         deletion.
 
         Returns:
             bool: If deletion was successful or not. Only time this can fail would be if
-                the script was already previously deleted, or `at_script_delete` returns
+                the script was already previously deleted, or `at_pre_delete` returns
                 False.
 
         """
-        if not self.pk or not self.at_script_delete():
+        if not self.pk or not self.at_pre_delete():
             return False
 
         self._stop_task()
@@ -545,7 +545,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         pass
 
-    def at_script_delete(self):
+    def at_pre_delete(self):
         """
         Called when script is deleted, before the script timer stops.
 
@@ -785,7 +785,7 @@ class DefaultScript(ScriptBase):
       at_pause()
       at_stop() - Called as the script object is stopped and is about to be
                   removed from the game, e.g. because is_valid() returned False.
-      at_script_delete()
+      at_pre_delete()
       at_server_reload() - Called when server reloads. Can be used to
                   save temporary variables you want should survive a reload.
       at_server_shutdown() - called at a full server shutdown.
@@ -887,7 +887,7 @@ class DefaultScript(ScriptBase):
         """
         pass
 
-    def at_script_delete(self):
+    def at_pre_delete(self):
         """
         Called when the Script is deleted, before stopping the timer.
 

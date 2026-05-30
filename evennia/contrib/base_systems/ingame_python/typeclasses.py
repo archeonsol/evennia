@@ -363,7 +363,7 @@ class EventCharacter(DefaultCharacter):
             ]:
                 present.callbacks.call("greet", present, self)
 
-    def at_object_delete(self):
+    def at_pre_delete(self):
         """
         Called just before the database object is permanently
         delete()d from the database. If this method returns False,
@@ -926,7 +926,7 @@ class EventRoom(DefaultRoom):
         """Return the CallbackHandler."""
         return CallbackHandler(self)
 
-    def at_object_delete(self):
+    def at_pre_delete(self):
         """
         Called just before the database object is permanently
         delete()d from the database. If this method returns False,

@@ -126,7 +126,7 @@ class Object(ObjectParent, DefaultObject):
 
      at_object_creation() - only called once, when object is first created.
                             Object customizations go here.
-     at_object_delete() - called just before deleting an object. If returning
+     at_pre_delete() - called just before deleting an object. If returning
                             False, deletion is aborted. Note that all objects
                             inside a deleted object are automatically moved
                             to their <home>, they don't need to be removed here.

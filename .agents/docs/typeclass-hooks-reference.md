@@ -43,6 +43,7 @@ Hook returns a value evaluated by `is_veto`
 | `at_pre_give` | `AppearanceMixin` | mixins/appearance.py:557 | Abort the give. Move does not run. | |
 | `at_pre_drop` | `AppearanceMixin` | mixins/appearance.py:600 | Abort the drop. Move does not run. | |
 | `at_pre_rename` | `TypedObject` | typeclasses/models.py:910 | Abort the rename. `db_key` is not written. | |
+| `at_pre_delete` | `LifecycleMixin` (Object), `DefaultScript` | mixins/lifecycle.py:376; scripts/scripts.py:548, :890 | Returning `False` aborts `delete()`. Default returns `True`. | |
 
 ### 3.2 Veto event-hooks (misshapen naming)
 
@@ -52,8 +53,6 @@ follow-up tracked in §6 of the main doc.
 
 | Hook | Class | Where | Veto effect | Misshapen |
 |---|---|---|---|---|
-| `at_object_delete` | `LifecycleMixin` | mixins/lifecycle.py:376 | Returning `False` aborts `delete()`. Default returns `True`. | ✓ |
-| `at_script_delete` | `DefaultScript` | scripts/scripts.py:548 (mixin), :890 (DefaultScript override) | Returning `False` aborts `delete()`. Default returns `True`. | ✓ |
 | `at_msg_send` | `DefaultAccount` | accounts/accounts.py:1907 | Falsy-not-None aborts the send. | ✓ |
 | `at_msg_receive` | `DefaultAccount` | accounts/accounts.py:1877 | Falsy-not-None aborts delivery. | ✓ |
 | `at_idmapper_flush` | `TypedObject` | typeclasses/models.py:501 | `True` allows the cache flush; `False` declines (object stays cached). Default returns `False` when non-persistent attrs would be lost. | ✓ |
@@ -203,7 +202,7 @@ Three categories per hook:
 | `basetype_setup` / `basetype_posthook_setup` | Internal | Run from `at_first_save`. Set engine-required state (locks, cmdsets). | Override at your own risk; only for classes that redefine "what kind of object is this". |
 | `at_post_load` | Public override | None directly; engine fires this to let games initialize cache-load state. | Safe. Idempotent: fires on every cache load, not just first-load. |
 | `at_idmapper_flush` | Internal | Controls cache eviction. Returning `False` keeps the object cached. | Default carefully handles the non-persistent-attribute case. Custom overrides risk memory leaks or stale state. |
-| `at_object_delete` / `at_script_delete` | Mixed | Engine consults return value for veto. Game side may add cleanup. | When overriding, return `True` to allow deletion (or `False` to veto). Default returns `True`. |
+| `at_pre_delete` (Object and Script) | Mixed | Engine consults return value for veto. Game side may add cleanup. | When overriding, return `True` to allow deletion (or `False` to veto). Default returns `True`. |
 | `at_object_post_copy` | Public override | None. | Safe. |
 
 ### 4.2 Movement and traversal
@@ -297,7 +296,7 @@ Three categories per hook:
 | `at_script_creation` | Public override | None engine-side. Customization point. |
 | `at_first_save` (Script) | Internal | Drives creation chain. |
 | `at_start` / `at_repeat` / `at_pause` / `at_stop` | Public override | Timer lifecycle. Distinguish reload-pause (`manual_pause=False`) from user-pause. |
-| `at_script_delete` | Mixed | Veto-on-False; default returns True. |
+| `at_pre_delete` (Script) | Mixed | Veto-on-False; default returns True. |
 | `at_server_reload` / `at_server_shutdown` / `at_server_start` | Public override | Server lifecycle. |
 | `is_valid` | Public override | Consulted before each `at_repeat`; False stops the timer. |
 
@@ -401,9 +400,9 @@ multiple times across the object's lifetime; "first ever load" and
 
 | Hook | PK? | db row? | typeclass init? | location attached? | cache state | mid-tx? |
 |---|---|---|---|---|---|---|
-| `at_object_delete` | yes | yes | yes | yes (still in old location) | rehydrated | YES (deletion partway through; `delete()` has not yet detached sessions, cleared exits, or nulled the location) |
+| `at_pre_delete` | yes | yes | yes | yes (still in old location) | rehydrated | YES (deletion partway through; `delete()` has not yet detached sessions, cleared exits, or nulled the location) |
 
-After `at_object_delete` returns truthy, the rest of `delete()`
+After `at_pre_delete` returns truthy, the rest of `delete()`
 runs in this order: msg sessions, unpuppet, remove from
 `account.characters`, null `db_account` / `db_home`, delete owned
 scripts, `clear_exits`, `clear_contents`, clear attributes / nicks
@@ -479,7 +478,7 @@ sets or neither.
 | `at_repeat` | timer interval has elapsed; `is_valid()` returned True. |
 | `at_pause` | timer about to be paused. `manual_pause=False` indicates reload-pause. |
 | `at_stop` | timer about to be stopped (not fired on `delete()`). |
-| `at_script_delete` | full state; deletion pending on truthy return. |
+| `at_pre_delete` (Script) | full state; deletion pending on truthy return. |
 | `at_server_reload` / `at_server_shutdown` | reload/shutdown in progress; persist any non-persistent state here. |
 | `at_server_start` | post-startup; the script may or may not have an active timer. |
 

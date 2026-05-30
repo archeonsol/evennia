@@ -170,7 +170,7 @@ class LifecycleMixin:
         if not _ScriptDB:
             from evennia.scripts.models import ScriptDB as _ScriptDB
 
-        if not self.pk or not self.at_object_delete():
+        if not self.pk or not self.at_pre_delete():
             # This object has already been deleted,
             # or the pre-delete check return False
             return False
@@ -373,7 +373,7 @@ class LifecycleMixin:
         """
         pass
 
-    def at_object_delete(self):
+    def at_pre_delete(self):
         """
         Called just before the database object is persistently
         delete()d from the database. If this method returns False,
