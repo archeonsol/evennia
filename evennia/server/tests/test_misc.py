@@ -142,3 +142,64 @@ class TestServerSessionAttributeLifecycle(BaseEvenniaTest):
             any(ref() is not None for ref in refs),
             "ServerSession instances should be collectable after AttributeHandler use.",
         )
+
+
+class TestAtSyncFiresPuppetHooks(BaseEvenniaTest):
+    """`ServerSession.at_sync` fires `at_pre_puppet` / `at_post_puppet` on
+    re-attach (via `reattach=True`) so non-persistent cmdset state the game
+    stacks in the puppet path rebuilds after a server reload.
+
+    Pre-`underspire.43` `at_sync` silently re-bound `session.puppet` without
+    firing any hooks, leaving the cmdset stack empty for any character that
+    builds its merged stack in `at_post_puppet`.
+    """
+
+    def test_reattach_fires_pre_and_post_puppet_with_reattach_kwarg(self):
+        from unittest.mock import patch
+
+        sess = ServerSession()
+        sess.init_session("telnet", "127.0.0.1", sessionhandler=None)
+        sess.logged_in = True
+        sess.account = self.account
+        sess.puid = self.char1.id
+
+        with (
+            patch.object(type(self.char1), "at_pre_puppet", return_value=None) as pre,
+            patch.object(type(self.char1), "at_post_puppet") as post,
+        ):
+            sess.at_sync()
+
+        pre.assert_called_once()
+        self.assertEqual(pre.call_args.kwargs.get("reattach"), True)
+        self.assertIs(pre.call_args.kwargs.get("session"), sess)
+        post.assert_called_once()
+        self.assertEqual(post.call_args.kwargs.get("reattach"), True)
+        self.assertIs(sess.puppet, self.char1)
+
+    def test_pre_puppet_veto_aborts_reattach(self):
+        from unittest.mock import patch
+
+        sess = ServerSession()
+        sess.init_session("telnet", "127.0.0.1", sessionhandler=None)
+        sess.logged_in = True
+        sess.account = self.account
+        sess.puid = self.char1.id
+
+        with (
+            patch.object(type(self.char1), "at_pre_puppet", return_value=False),
+            patch.object(type(self.char1), "at_post_puppet") as post,
+        ):
+            sess.at_sync()
+
+        post.assert_not_called()
+        self.assertIsNone(sess.puppet)
+        self.assertIsNone(sess.puid)
+
+    def test_reattach_default_post_puppet_suppresses_echo(self):
+        # `reattach=True` short-circuits the default at_post_puppet body so
+        # a server reload does not spam every connected puppet.
+        from unittest.mock import patch
+
+        with patch.object(self.char1, "msg") as msg:
+            self.char1.at_post_puppet(reattach=True)
+        msg.assert_not_called()

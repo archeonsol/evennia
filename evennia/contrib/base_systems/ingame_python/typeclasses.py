@@ -376,7 +376,7 @@ class EventCharacter(DefaultCharacter):
         self.callbacks.call("delete", self)
         return True
 
-    def at_post_puppet(self):
+    def at_post_puppet(self, **kwargs):
         """
         Called just after puppeting has been completed and all
         Account<->Object links have been established.
@@ -388,7 +388,7 @@ class EventCharacter(DefaultCharacter):
             puppeting this Object.
 
         """
-        super().at_post_puppet()
+        super().at_post_puppet(**kwargs)
 
         self.callbacks.call("puppeted", self)
 

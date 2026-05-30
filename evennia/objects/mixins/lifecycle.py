@@ -465,13 +465,21 @@ class LifecycleMixin:
 
         Args:
             **kwargs: Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+                overriding the call. The engine passes `reattach=True`
+                when the call originates from `ServerSession.at_sync`
+                on server reload (the session is re-binding to a
+                puppet it already controlled before the reload, not
+                puppeting fresh). Default behavior swallows the
+                user-visible echo in that case so reloads don't spam
+                every connected player.
         Notes:
             You can use `self.account` and `self.sessions.get()` to get account and sessions at this
             point; the last entry in the list from `self.sessions.get()` is the latest Session
             puppeting this Object.
 
         """
+        if kwargs.get("reattach"):
+            return
         self.msg(_("You become |w{key}|n.").format(key=self.key))
         self.account.db._last_puppet = self
 

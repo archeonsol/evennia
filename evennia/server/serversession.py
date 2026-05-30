@@ -18,7 +18,8 @@ from evennia.scripts.monitorhandler import MONITOR_HANDLER
 from evennia.typeclasses.attributes import (AttributeHandler, DbHolder,
                                             InMemoryAttributeBackend)
 from evennia.utils import logger
-from evennia.utils.utils import class_from_module, lazy_property, make_iter
+from evennia.utils.utils import (class_from_module, is_veto, lazy_property,
+                                 make_iter)
 
 _GA = object.__getattribute__
 _SA = object.__setattr__
@@ -114,16 +115,27 @@ class ServerSession(_BASE_SESSION_CLASS):
 
         if self.puid:
             # reconnect puppet (puid is only set if we are coming
-            # back from a server reload). This does all the steps
-            # done in the default @ic command but without any
-            # hooks, echoes or access checks.
+            # back from a server reload). Skips access checks (the
+            # session was already authenticated pre-reload) but fires
+            # at_pre_puppet / at_post_puppet with reattach=True so any
+            # non-persistent cmdset state the game stacks in
+            # at_post_puppet rebuilds. Default echoes are suppressed
+            # by the reattach kwarg in DefaultObject / DefaultCharacter
+            # at_post_puppet.
             obj = _ObjectDB.objects.get(id=self.puid)
+            if is_veto(obj.at_pre_puppet(self.account, session=self, reattach=True)):
+                # Veto leaves the session unpuppeted; the override is
+                # responsible for any user-visible explanation.
+                self.puid = None
+                self.puppet = None
+                return
             obj.sessions.add(self)
             obj.account = self.account
             self.puid = obj.id
             self.puppet = obj
             # obj.scripts.validate()
             obj.locks.cache_lock_bypass(obj)
+            obj.at_post_puppet(reattach=True)
 
     def at_login(self, account):
         """
