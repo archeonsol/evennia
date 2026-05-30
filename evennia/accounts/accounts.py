@@ -28,6 +28,7 @@ from evennia.accounts.manager import AccountManager
 from evennia.accounts.models import AccountDB
 from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.comms.models import ChannelDB
+from evennia.hooks import hook
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripthandler import ScriptHandler
 from evennia.server.models import ServerConfig
@@ -350,6 +351,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
     def characters(self):
         return CharactersHandler(self)
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="internal",
+        fires_from=(),
+        notes="Returns dict[str, CmdSetProvider]. Account version: includes self.",
+    )
     def get_cmdset_providers(self) -> dict[str, "CmdSetProvider"]:
         """
         Overrideable method which returns a dictionary of every kind of object which
@@ -363,6 +373,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         return {"account": self}
 
+    @hook(
+        event="character_membership",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Notification: character added to the persistent characters-list.",
+    )
     def at_character_added(self, character: "DefaultCharacter"):
         """
         Called after a character is added to this account's list of playable characters.
@@ -374,6 +393,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="character_membership",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Notification: character removed from the persistent characters-list.",
+    )
     def at_character_removed(self, character: "DefaultCharacter"):
         """
         Called after a character is removed from this account's list of playable characters.
@@ -385,6 +413,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="puppet_membership",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultAccount.puppet_object",),
+        notes="Notification: puppet added to the live puppet-set. Errors here are swallowed by puppet_object.",
+    )
     def at_puppet_added(self, character, session=None, **kwargs):
         """
         Called when a character enters this account's active puppet set.
@@ -409,6 +446,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="puppet_membership",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultAccount.unpuppet_object",),
+        notes="Notification: puppet removed from the live puppet-set.",
+    )
     def at_puppet_removed(self, character, session=None, **kwargs):
         """
         Called when a character leaves this account's active puppet set.
@@ -445,6 +491,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 session.protocol_flags.get("SCREENREADER") for session in self.sessions.all()
             )
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Account override of AppearanceMixin's get_extra_display_name_info.",
+    )
     def get_extra_display_name_info(self, looker, **kwargs):
         """
         Used in .get_display_name() to provide extra information to the looker. We split this
@@ -655,6 +710,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         self.unpuppet_object(self.sessions.all())
 
+    @hook(
+        event="account_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns the puppet attached to the given session, or None.",
+    )
     def get_puppet(self, session):
         """
         Get an object puppeted by this session through this account. This is
@@ -670,6 +734,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         return session.puppet if session else None
 
+    @hook(
+        event="account_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns all currently puppeted characters on the account.",
+    )
     def get_all_puppets(self):
         """
         Get all currently puppeted objects.
@@ -731,6 +804,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         return False
 
     @classmethod
+    @hook(
+        event="account_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns Django username validators. Override to relax/tighten allowed names.",
+    )
     def get_username_validators(
         cls, validator_config=getattr(settings, "AUTH_USERNAME_VALIDATORS", [])
     ):
@@ -953,6 +1035,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         logger.log_sec(f"Password successfully changed for {self}.")
         self.at_post_password_change()
 
+    @hook(
+        event="account_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns the max number of characters this account may have. None = unlimited.",
+    )
     def get_character_slots(self) -> typing.Optional[int]:
         """
         Returns the number of character slots this account has, or
@@ -967,6 +1058,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         return settings.MAX_NR_CHARACTERS
 
+    @hook(
+        event="account_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns remaining character slots. None = unlimited.",
+    )
     def get_available_character_slots(self) -> typing.Optional[int]:
         """
         Returns the number of character slots this account has available, or None if
@@ -1042,6 +1142,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         return character, errs
 
+    @hook(
+        event="character_creation",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after a character is created and attached to the account.",
+    )
     def at_post_create_character(self, character, **kwargs):
         """
         An overloadable hook method that allows for further customization of newly created characters.
@@ -1329,6 +1438,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
     # channel receive hooks
 
+    @hook(
+        event="channel_msg",
+        phase="pre",
+        actor="self",
+        returns="transform",
+        discipline="public",
+        fires_from=("DefaultChannel.msg",),
+        notes="Receiver-side transform: non-empty string replaces, False/empty aborts for this receiver, None falls back.",
+    )
     def at_pre_channel_msg(self, message, channel, senders=None, **kwargs):
         """
         Called by the Channel just before passing a message into `channel_msg`.
@@ -1411,6 +1529,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             options={"from_channel": channel.id},
         )
 
+    @hook(
+        event="channel_msg",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultChannel.msg",),
+        notes="Receiver-side post-delivery hook.",
+    )
     def at_post_channel_msg(self, message, channel, senders=None, **kwargs):
         """
         Called by `self.channel_msg` after message was received.
@@ -1577,6 +1704,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # The ooc account cmdset
         self.cmdset.add_default(settings.CMDSET_ACCOUNT, persistent=True)
 
+    @hook(
+        event="account_creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultAccount.at_first_save",),
+        notes="One-shot account creation. Fires once via at_first_save.",
+    )
     def at_account_creation(self):
         """
         This is called once, the very first time the account is created
@@ -1609,6 +1745,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
     # and have some things that should be done regardless of which
     # character is currently connected to this account.
 
+    @hook(
+        event="creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="internal",
+        fires_from=(),
+        notes="Driven by Django post_save signal (created=True). Override at_account_creation instead.",
+    )
     def at_first_save(self, **kwargs):
         """
         This is a generic hook called by Evennia when this object is
@@ -1659,6 +1804,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         self.permissions.batch_add(*permissions)
 
+    @hook(
+        event="access_check",
+        phase="post",
+        actor="target",
+        returns="ignored",
+        discipline="public",
+        fires_from=("LockHandler.check",),
+        notes="Account override of LifecycleMixin.at_post_access.",
+    )
     def at_post_access(self, result, accessing_obj, access_type, **kwargs):
         """
         This is triggered after an access-call on this Account has
@@ -1684,6 +1838,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Account-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get.",
+    )
     def at_cmdset_get(self, **kwargs):
         """
         Called just before cmdsets on this object are requested by the
@@ -1701,6 +1864,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Account-side cmdset stack. Mirrors LifecycleMixin.get_cmdsets.",
+    )
     def get_cmdsets(self, caller, current, **kwargs):
         """
         Called by the CommandHandler to get a list of cmdsets to merge.
@@ -1715,6 +1887,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         return self.cmdset.current, list(self.cmdset.cmdset_stack)
 
+    @hook(
+        event="login",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultAccount.at_pre_login",),
+        notes="One-shot first-login hook. Fires once via at_pre_login when last_login is unset.",
+    )
     def at_first_login(self, **kwargs):
         """
         Called the very first time this account logs into the game.
@@ -1730,6 +1911,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="password_change",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after a successful password change.",
+    )
     def at_post_password_change(self, **kwargs):
         """
         Called after a successful password set/modify.
@@ -1741,6 +1931,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="login",
+        phase="pre",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Veto disconnects the session ('Login refused.'). Fires at_first_login on the first successful login.",
+    )
     def at_pre_login(self, **kwargs):
         """
         Called every time the user logs in, just before the actual
@@ -1797,6 +1996,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if _CONNECT_CHANNEL:
             _CONNECT_CHANNEL.msg(f"[{now}]: {message}")
 
+    @hook(
+        event="login",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after the login completes and the session is fully attached.",
+    )
     def at_post_login(self, session=None, **kwargs):
         """
         Called at the end of the login process, just before letting
@@ -1836,6 +2044,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             # screen. We execute look on the account.
             self.msg(self.at_look(target=self.characters, session=session), session=session)
 
+    @hook(
+        event="login",
+        phase="failed",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires when authentication or at_pre_login rejects a login attempt.",
+    )
     def at_failed_login(self, session, **kwargs):
         """
         Called by the login process if a user account is targeted correctly
@@ -1849,6 +2066,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="disconnect",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Account-side disconnect hook.",
+    )
     def at_disconnect(self, reason=None, **kwargs):
         """
         Called just before user is disconnected.
@@ -1866,6 +2092,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             _("|R{key} disconnected{reason}|n").format(key=self.key, reason=reason)
         )
 
+    @hook(
+        event="disconnect",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires after disconnect completes. No messaging here; session is gone.",
+    )
     def at_post_disconnect(self, **kwargs):
         """
         This is called *after* disconnection is complete. No messages
@@ -1881,6 +2116,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="msg",
+        phase="composite",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Misshapen veto: at_<event> name. Falsy-not-None aborts delivery.",
+    )
     def at_msg_receive(self, text=None, from_obj=None, **kwargs):
         """
         This hook is called whenever someone sends a message to this
@@ -1911,6 +2155,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         return True
 
+    @hook(
+        event="msg",
+        phase="composite",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Misshapen veto: at_<event> name. Falsy-not-None aborts the send.",
+    )
     def at_msg_send(self, text=None, to_obj=None, **kwargs):
         """
         This is a hook that is called when *this* object sends a
@@ -1931,6 +2184,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Account-side reload hook. Fires from EvenniaServerService.shutdown on reload-style stops.",
+    )
     def at_server_reload(self):
         """
         This hook is called whenever the server is shutting down for
@@ -1940,6 +2202,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Account-side shutdown hook. Fires from EvenniaServerService.shutdown on full-shutdown stops.",
+    )
     def at_server_shutdown(self):
         """
         This hook is called whenever the server is shutting down fully
@@ -1965,6 +2236,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 --------------------------------------------------------------------
 """.strip()
 
+    @hook(
+        event="ooc_look",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="H1e: distinct from Object.at_look. Account.at_look is the OOC character picker.",
+    )
     def at_look(self, target=None, session=None, **kwargs):
         """
         Called when this object executes a look. It allows to customize

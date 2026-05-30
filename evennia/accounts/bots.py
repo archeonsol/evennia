@@ -11,6 +11,7 @@ from django.utils.translation import gettext as _
 
 import evennia
 from evennia.accounts.accounts import DefaultAccount
+from evennia.hooks import hook
 from evennia.scripts.scripts import DefaultScript
 from evennia.utils import logger, search, utils
 from evennia.utils.ansi import strip_ansi
@@ -199,6 +200,15 @@ class IRCBot(Bot):
         "Shortcut here or we can end up in infinite loop"
         pass
 
+    @hook(
+        event="irc",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="IRCBot-specific: returns the nicklist of the connected channel.",
+    )
     def get_nicklist(self, caller):
         """
         Retrive the nick list from the connected channel.

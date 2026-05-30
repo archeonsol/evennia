@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.comms.models import ChannelDB
+from evennia.hooks import hook
 from evennia.scripts.monitorhandler import MONITOR_HANDLER
 from evennia.typeclasses.attributes import (AttributeHandler, DbHolder,
                                             InMemoryAttributeBackend)
@@ -69,6 +70,15 @@ class ServerSession(_BASE_SESSION_CLASS):
 
     cmdset_storage = property(__cmdset_storage_get, __cmdset_storage_set)
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="internal",
+        fires_from=(),
+        notes="Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider].",
+    )
     def get_cmdset_providers(self) -> dict[str, "CmdSetProvider"]:
         """
         Overrideable method which returns a dictionary of every kind of object which
@@ -92,6 +102,15 @@ class ServerSession(_BASE_SESSION_CLASS):
     def id(self):
         return self.sessid
 
+    @hook(
+        event="session_sync",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires when the session is re-synced (e.g. after a server reload). Reattaches the puppet.",
+    )
     def at_sync(self):
         """
         This is called whenever a session has been resynced with the
@@ -137,6 +156,15 @@ class ServerSession(_BASE_SESSION_CLASS):
             obj.locks.cache_lock_bypass(obj)
             obj.at_post_puppet(reattach=True)
 
+    @hook(
+        event="login",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Session-side login hook. Updates last_login on the account.",
+    )
     def at_login(self, account):
         """
         Hook called by sessionhandler when the session becomes authenticated.
@@ -161,6 +189,15 @@ class ServerSession(_BASE_SESSION_CLASS):
         # add the session-level cmdset
         self.cmdset = CmdSetHandler(self, True)
 
+    @hook(
+        event="disconnect",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Session-side disconnect hook.",
+    )
     def at_disconnect(self, reason=None):
         """
         Hook called by sessionhandler when disconnecting this session.
@@ -182,6 +219,15 @@ class ServerSession(_BASE_SESSION_CLASS):
             # session
             MONITOR_HANDLER.remove(account, "_saved_webclient_options", self.sessid)
 
+    @hook(
+        event="session_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns the Account attached to this session.",
+    )
     def get_account(self):
         """
         Get the account associated with this session
@@ -192,6 +238,15 @@ class ServerSession(_BASE_SESSION_CLASS):
         """
         return self.account if self.logged_in else None
 
+    @hook(
+        event="session_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns the puppet (Object) attached to this session.",
+    )
     def get_puppet(self):
         """
         Get the in-game character associated with this session.
@@ -223,6 +278,15 @@ class ServerSession(_BASE_SESSION_CLASS):
                 logger.log_trace()
         logger.log_info(message)
 
+    @hook(
+        event="session_query",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns (width, height) of the client's reported screen.",
+    )
     def get_client_size(self):
         """
         Return eventual eventual width and height reported by the
@@ -393,6 +457,15 @@ class ServerSession(_BASE_SESSION_CLASS):
 
     # Dummy API hooks for use during non-loggedin operation
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Session-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get.",
+    )
     def at_cmdset_get(self, **kwargs):
         """
         Called just before cmdsets on this object are requested by the
@@ -410,6 +483,15 @@ class ServerSession(_BASE_SESSION_CLASS):
         """
         pass
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Session-side cmdset stack. Mirrors LifecycleMixin.get_cmdsets.",
+    )
     def get_cmdsets(self, caller, current, **kwargs):
         """
         Called by the CommandHandler to get a list of cmdsets to merge.
@@ -484,6 +566,15 @@ class ServerSession(_BASE_SESSION_CLASS):
         """
         return True
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Session-side display name (for logging / admin tools).",
+    )
     def get_display_name(self, *args, **kwargs):
         if self.puppet:
             return self.puppet.get_display_name(*args, **kwargs)

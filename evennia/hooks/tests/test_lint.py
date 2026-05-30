@@ -145,9 +145,13 @@ class PilotIntegrationTest(EvenniaTestCase):
         flagged = [f for f in findings if "at_pre_puppet" in f.message]
         self.assertEqual(flagged, [])
 
-    def test_engine_lint_surfaces_many_missing(self):
-        # H1c hasn't run yet; expect MANY undecorated engine hooks.
-        # Once H1c lands this should drop to zero (or near-zero).
+    def test_engine_lint_is_clean(self):
+        # H1c has completed; every engine hook is registered or
+        # inherits silently. Lint should return zero findings.
         findings = lint()
-        missing = [f for f in findings if f.code == "MISSING_DECORATOR"]
-        self.assertGreater(len(missing), 10)
+        self.assertEqual(
+            findings,
+            [],
+            "expected clean lint; got:\n"
+            + "\n".join(f"  [{f.code}] {f.message}" for f in findings),
+        )

@@ -78,7 +78,15 @@ def _engine_class_set(bases):
     for base in bases:
         _walk(base)
 
-    return [c for c in seen if (c.__module__ or "").startswith("evennia.")]
+    # Contrib and game-template classes are game-shaped, not engine.
+    # They opt in to registration but lint does not require it.
+    excluded_prefixes = ("evennia.contrib.", "evennia.game_template.")
+    return [
+        c
+        for c in seen
+        if (c.__module__ or "").startswith("evennia.")
+        and not any((c.__module__ or "").startswith(p) for p in excluded_prefixes)
+    ]
 
 
 def _is_hook_name(name):
