@@ -16,6 +16,13 @@ Shipped bundles, rejected items, deferred work, and plugin-future
 inhabitants live in
 [`engine-boundary-migration-archive.md`](engine-boundary-migration-archive.md).
 
+Engine-wide architectural target (two-layer engine, render/deliver,
+lock objects, hook registry, etc.) lives in
+[`engine-api-architecture.md`](engine-api-architecture.md). That doc
+is gated on Underspire launch as the API-freeze deadline; this doc is
+boundary work that feeds into it. Cross-references called out per
+item where they apply.
+
 ## Language-agnostic position (post-Bundle 2)
 
 Engine stays language-agnostic by *declining to ship defaults*, not by
@@ -26,13 +33,6 @@ item; drop pose/emote upstreaming (former Bundle 3 content goes to
 plugin-future); `get_numbered_name`'s English pluralization is no
 longer "not a violation," it's plugin-future cleanup.
 
-## Separate issue, tracked here as pointer
-
-**`at_sync` reload path bug.** On session re-attach, `at_sync`
-silently re-attaches a puppet without firing `at_pre_puppet`, leaving
-the cmdset stack empty. Filed standalone; listed here so the migration
-plan is self-contained.
-
 ## Execution order
 
 Items are grouped by phase. Within a phase, sub-items can land in
@@ -41,53 +41,7 @@ picked up, not here.
 
 ### Phase A: near-term polish (no structural dependencies)
 
-Small, cheap wins. Land in any order. None of these require deeper
-design work.
-
-**A1. Bundle 2.x: language-agnostic polish.** Ships with Phase A as
-`.43`. Same template-or-hook pattern as Bundle 2.
-
-- `get_display_exits` label: route `_("Exits")` through the existing
-  `get_content_group_label("exits", looker)` hook.
-- `{self}` self-pronoun: `at_say` mapping hardcodes `_("You")`. Add
-  a `get_self_pronoun(looker)` hook (method, not class attr) so
-  viewer-aware variation stays open without re-plumbing later.
-- List joiner: three `iter_to_str(..., endsep=_(", and"))` sites.
-  Class attr `list_endsep` is sufficient; no plausible viewer-aware
-  variation for list joining.
-
-Other English content in adjacent code (arrival/departure strings,
-channel echo template, `get_numbered_name` pluralization) is handled
-opportunistically as it's touched, not as a Phase A audit. The
-Bundle 2-style seam pattern is the template; future touches use it.
-
-**A2. Flat API hygiene (`evennia/__init__.py`).** Pure plumbing, no
-semantic change.
-
-- Replace the triple-declaration pattern (top-level `= None` + `global`
-  in `_init` + import in `_init`) with module-level `__getattr__`
-  (PEP 562): each export declared once in a registry mapping name to
-  `"module:attr"`, lazy-loaded on first access.
-- Add an explicit `__all__` so the surface is declared rather than
-  discovered via container `.help`.
-- Keep portal-vs-server gating; isolate it so it doesn't multiply the
-  declaration sites.
-- Bootstrap-edge-case risk: any code path that imports
-  `from evennia import X` before Django setup will trigger lazy load
-  too early. Existing `_init()` runs after Django setup, so today's
-  callers should be safe; if CI surfaces a bootstrap path that breaks,
-  fall back to option b (registry-driven explicit `_init()`).
-
-**A3. `bump_*_generation` hooks: keep with invalidation contract.**
-Zero engine callers outside contrib; only known consumer is the fork.
-Decision: keep the hook, add a docstring stating the invalidation
-contract (when callers must fire it, what cache invariants it
-guarantees). Any game with viewer-aware display names plus cached
-lookups would want it; removing it would be a churn cost when someone
-needs it again.
-
-**A4. `at_sync` reload bug.** Pointer to the standalone issue. Listed
-under near-term so it doesn't fall off the radar.
+Shipped as `+underspire.43`. See the archive entry for what landed.
 
 ### Phase B: foundation (gates Phase C)
 
@@ -98,7 +52,10 @@ ships.
 
 **B1. Typeclass hooks taxonomy and contract doc.** Write the
 typeclass-side equivalent of [`command-system.md`](command-system.md).
-At minimum the doc must define:
+Design predecessor to **H1** (hook registry) in
+[`engine-api-architecture.md`](engine-api-architecture.md): this doc
+defines the contract, H1 makes it executable. Schema choices here
+inform H1's decorator surface. At minimum the doc must define:
 
 - Naming taxonomy. Today's `at_*` covers vetoes (`at_pre_move`),
   notifications (`at_post_move`), one-shot mutators
@@ -160,7 +117,10 @@ declare account-scoped, character-scoped, or both at definition time;
 quell behavior falls out automatically from the scope declaration
 rather than being computed per callsite. Old Bundle 3's helper and
 resolver become migration tactics on the way to this, not the
-endpoint.
+endpoint. Superseded in turn by **L1** in
+[`engine-api-architecture.md`](engine-api-architecture.md) (lock
+objects + permission algebra); when picking up D1, build it as the
+migration path toward L1 rather than a separate intermediate.
 
 **D2. Multi-puppet first-class shape.** Supersedes old Bundle 4's
 multi-puppet relay item. Slot primitives (P1/P2/P3 in the fork) and
@@ -191,8 +151,7 @@ Batch the hook with Bundle 1-style work if possible.
 | `.40` | shipped | Bundle 1 (items 1, 2, 3, 4) |
 | `.41` | shipped | Bundle 1.5 universal veto/transform rule |
 | `.42` | shipped | Bundle 2 (items 5, 6, 7) |
-| `.43` | A | A1 language polish + A2 flat API hygiene + A3 `bump_*_generation` doc |
-| separate | A | A4 `at_sync` bug (filed standalone) |
+| `.43` | shipped | Phase A (A1 language polish + A2 flat API hygiene + A3 `bump_*_generation` doc + A4 `at_sync` reattach hooks) |
 | `.44+` | B | B1 hooks taxonomy + contract doc (gates C) |
 | `.45+` | C | C1 identity model (gates D) |
 | later | D | D1 permission scope declaration |
