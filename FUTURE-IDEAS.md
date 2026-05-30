@@ -159,6 +159,41 @@ Dogfood case: convert `grid/xyzgrid` to the plugin shape as proof.
 
 ---
 
+## Appearance-template slot registry
+
+`AppearanceMixin.appearance_template` is a `str.format` string with
+named slots (`{name}`, `{desc}`, `{exits}`, `{characters}`, `{things}`,
+`{header}`, `{footer}`, `{extra_state}`). Each slot is filled by a
+matching `get_display_<slot>` provider hook. The coupling is
+convention-only: adding a slot today means editing the template string
+AND adding a `get_display_<slot>` method AND remembering they have to
+agree. There is no registry, no validation that every slot has a
+provider (or vice versa), and no introspection surface for "what slots
+exist."
+
+Rough shape if picked up: a `@template_slot(name=..., provider=...)`
+decorator (or a class-level `slots = {...}` declaration) that registers
+each slot with its provider, lints at startup that template and
+providers agree, and lets game code add new slots without monkey-patching
+the template string. Doc generation could then enumerate the slot
+surface alongside the other appearance hooks.
+
+Deferred from **H1** (hook registry) to keep H1's scope on the hook
+surface itself. The template-slot coupling is a config-registry
+problem orthogonal to hook registration: H1 declares what `at_*` /
+`get_*` / `return_*` methods exist; this would declare what
+`appearance_template` slots exist. Same family of solution (decorator +
+startup lint + doc generation), different metadata. Pick this up after
+H1 lands, when the registry pattern is proven and the second instance
+is justified rather than speculative.
+
+Cross-refs: H1 entry in
+[`engine-api-architecture.md`](.agents/docs/engine-api-architecture.md);
+appearance-mixin §2.10 and §3.3 in
+[`Typeclass-Hooks.md`](docs/source/Components/Typeclass-Hooks.md).
+
+---
+
 ## Contrib extraction methodology
 
 Operational lessons from `+underspire.16`. Applies to future similar
