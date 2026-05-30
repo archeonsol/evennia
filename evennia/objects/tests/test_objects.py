@@ -126,14 +126,15 @@ class DefaultObjectTest(BaseEvenniaTest):
         DefaultExit.create("north", self.room1, self.room2, account=self.account)
         DefaultExit.create("aperture", self.room1, self.room2, account=self.account)
 
-        # in creation order
+        # in creation order; stock get_content_group_label("exits") returns ""
+        # so no "Exits:" prefix ships engine-side
         exits = strip_ansi(self.room1.get_display_exits(self.char1))
-        self.assertEqual(exits, "Exits: out, south, portal, north, and aperture")
+        self.assertEqual(exits, "out, south, portal, north, and aperture")
 
         # in specified order with unspecified exits alpbabetically on the end
         exit_order = ("north", "south", "out")
         exits = strip_ansi(self.room1.get_display_exits(self.char1, exit_order=exit_order))
-        self.assertEqual(exits, "Exits: north, south, out, aperture, and portal")
+        self.assertEqual(exits, "north, south, out, aperture, and portal")
 
     def test_urls(self):
         "Make sure objects are returning URLs"
@@ -1301,3 +1302,103 @@ class TestSayTemplateHooks(BaseEvenniaTest):
         ):
             self.char1.at_say("secret", receivers=[receiver], whisper=True)
         receiver.msg.assert_called_once()
+
+
+class TestExitsContentGroupLabel(BaseEvenniaTest):
+    """`get_display_exits` routes its prefix through `get_content_group_label`.
+    Stock returns "" so no "Exits:" label ships engine-side; overrides
+    restore an opinionated prefix without re-implementing the renderer.
+    """
+
+    def test_stock_exits_has_no_prefix(self):
+        DefaultExit.create("south", self.room1, self.room2, account=self.account)
+        out = strip_ansi(self.room1.get_display_exits(self.char1))
+        self.assertNotIn("Exits:", out)
+        self.assertIn("south", out)
+
+    def test_override_label_restores_prefix(self):
+        DefaultExit.create("south", self.room1, self.room2, account=self.account)
+        with patch.object(
+            type(self.room1),
+            "get_content_group_label",
+            return_value="Exits",
+        ):
+            out = strip_ansi(self.room1.get_display_exits(self.char1))
+        self.assertIn("Exits:", out)
+
+    def test_empty_exits_returns_empty_string(self):
+        # room2 has no exits in BaseEvenniaTest setup
+        self.assertEqual(self.room2.get_display_exits(self.char1), "")
+
+
+class TestSelfPronounHook(BaseEvenniaTest):
+    """`{self}` in at_say mappings is resolved via `get_self_pronoun(looker)`."""
+
+    def test_stock_self_pronoun_is_you(self):
+        self.assertEqual(self.char1.get_self_pronoun(self.char1), "You")
+
+    def test_self_echo_uses_pronoun_hook(self):
+        with (
+            patch.object(
+                type(self.char1),
+                "get_say_template_self",
+                return_value='{self} say, "{speech}"',
+            ),
+            patch.object(
+                type(self.char1),
+                "get_self_pronoun",
+                return_value="Ye",
+            ),
+            patch.object(self.char1, "msg") as self_msg,
+        ):
+            self.char1.at_say("ahoy", msg_self=True)
+        text = self_msg.call_args.kwargs.get("text") or self_msg.call_args.args[0]
+        if isinstance(text, tuple):
+            text = text[0]
+        self.assertEqual(text, 'Ye say, "ahoy"')
+
+    def test_pronoun_hook_receives_per_receiver_looker(self):
+        from unittest.mock import MagicMock
+
+        seen = []
+
+        def fake_pronoun(self, looker, **kwargs):
+            seen.append(looker)
+            return "Y"
+
+        receiver_a = MagicMock()
+        receiver_a.get_display_name.return_value = "A"
+        receiver_b = MagicMock()
+        receiver_b.get_display_name.return_value = "B"
+        with (
+            patch.object(type(self.char1), "get_self_pronoun", fake_pronoun),
+            patch.object(
+                type(self.char1),
+                "get_say_template_receivers",
+                return_value="{self} hears",
+            ),
+        ):
+            self.char1.at_say("x", receivers=[receiver_a, receiver_b], whisper=True)
+        # self pronoun resolved once per receiver, with that receiver as looker
+        self.assertEqual(seen, [receiver_a, receiver_b])
+
+
+class TestListEndsep(BaseEvenniaTest):
+    """`list_endsep` class attr controls the trailing joiner used by the
+    three appearance-mixin content-group helpers (exits, characters, things).
+    """
+
+    def test_default_endsep_used_for_exits(self):
+        # iter_to_str only emits ", and" with >= 3 items
+        DefaultExit.create("south", self.room1, self.room2, account=self.account)
+        DefaultExit.create("north", self.room1, self.room2, account=self.account)
+        out = strip_ansi(self.room1.get_display_exits(self.char1))
+        self.assertIn(", and ", out)
+
+    def test_override_endsep_used_for_exits(self):
+        DefaultExit.create("south", self.room1, self.room2, account=self.account)
+        DefaultExit.create("north", self.room1, self.room2, account=self.account)
+        with patch.object(type(self.room1), "list_endsep", " | "):
+            out = strip_ansi(self.room1.get_display_exits(self.char1))
+        self.assertIn(" | ", out)
+        self.assertNotIn(", and ", out)

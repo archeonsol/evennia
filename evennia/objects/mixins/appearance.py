@@ -7,14 +7,19 @@ from django.conf import settings
 from django.utils.translation import gettext as _
 
 from evennia.utils import ansi, logger
-from evennia.utils.utils import (compress_whitespace, is_iter, iter_to_str,
-                                 make_iter)
+from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
 
 _INFLECT = inflect.engine()
 
 
 class AppearanceMixin:
     """Mixin providing appearance and look-related methods for DefaultObject."""
+
+    list_endsep = _(", and")
+    """Trailing joiner used by `iter_to_str` for content-group lists (exits,
+    characters, things). Class attribute rather than a hook because list joining
+    has no plausible viewer-aware variation; override on the subclass to swap
+    the language-specific connector."""
 
     def filter_visible(self, obj_list, looker, **kwargs):
         """
@@ -201,9 +206,11 @@ class AppearanceMixin:
 
         exits = self.filter_visible(self.contents_get(content_type="exit"), looker, **kwargs)
         exit_names = (exi.get_display_name(looker, **kwargs) for exi in exits)
-        exit_names = iter_to_str(_sort_exit_names(exit_names), endsep=_(", and"))
-        e = _("Exits")
-        return f"|w{e}:|n {exit_names}" if exit_names else ""
+        exit_names = iter_to_str(_sort_exit_names(exit_names), endsep=self.list_endsep)
+        if not exit_names:
+            return ""
+        label = self.get_content_group_label("exits", looker, **kwargs)
+        return f"|w{label}:|n {exit_names}" if label else exit_names
 
     def get_content_group_label(self, group, looker, **kwargs):
         """
@@ -243,7 +250,8 @@ class AppearanceMixin:
             self.contents_get(content_type="character"), looker, **kwargs
         )
         character_names = iter_to_str(
-            (char.get_display_name(looker, **kwargs) for char in characters), endsep=_(", and")
+            (char.get_display_name(looker, **kwargs) for char in characters),
+            endsep=self.list_endsep,
         )
         if not character_names:
             return ""
@@ -274,7 +282,7 @@ class AppearanceMixin:
             thing = thinglist[0]
             singular, plural = thing.get_numbered_name(nthings, looker, key=thingname)
             thing_names.append(singular if nthings == 1 else plural)
-        thing_names = iter_to_str(thing_names, endsep=_(", and"))
+        thing_names = iter_to_str(thing_names, endsep=self.list_endsep)
         if not thing_names:
             return ""
         label = self.get_content_group_label("things", looker, **kwargs)
@@ -731,6 +739,27 @@ class AppearanceMixin:
         """
         return ""
 
+    def get_self_pronoun(self, looker, **kwargs):
+        """
+        Return the self-reference pronoun for this object as seen by `looker`.
+
+        Used by `at_say` to substitute the `{self}` template marker. Default is
+        the English `_("You")`. Override to inject viewer-aware variation
+        (third-person narration, alternate-language pronoun selection,
+        gendered or rank-prefixed forms, etc.).
+
+        Args:
+            looker (DefaultObject): The recipient of the rendered text. May
+                be `self` (echo branch), an individual receiver (whisper /
+                directed-say branch), or the speaker's location (room
+                broadcast branch).
+            **kwargs: Arbitrary data forwarded from `at_say`.
+        Returns:
+            str: The pronoun to substitute for `{self}`.
+
+        """
+        return _("You")
+
     def at_say(
         self,
         message,
@@ -776,7 +805,10 @@ class AppearanceMixin:
 
             Supported markers by default:
 
-            - {self}: text to self-reference with (default 'You')
+            - {self}: text to self-reference with, resolved through
+              `get_self_pronoun(looker)` (default 'You'); the looker is the
+              recipient of the message (echo: self, whisper/directed-say:
+              the receiver, room broadcast: the location)
             - {speech}: the text spoken/whispered by self.
             - {object}: the object speaking.
             - {receiver}: replaced with a single receiver only for strings meant for a specific
@@ -808,7 +840,7 @@ class AppearanceMixin:
 
         if msg_self:
             self_mapping = {
-                "self": _("You"),
+                "self": self.get_self_pronoun(self, **kwargs),
                 "object": self.get_display_name(self),
                 "location": location.get_display_name(self) if location else None,
                 "receiver": None,
@@ -824,7 +856,7 @@ class AppearanceMixin:
 
         if receivers and msg_receivers:
             receiver_mapping = {
-                "self": _("You"),
+                "self": None,
                 "object": None,
                 "location": None,
                 "receiver": None,
@@ -833,6 +865,7 @@ class AppearanceMixin:
             }
             for receiver in make_iter(receivers):
                 individual_mapping = {
+                    "self": self.get_self_pronoun(receiver, **kwargs),
                     "object": self.get_display_name(receiver),
                     "location": location.get_display_name(receiver),
                     "receiver": receiver.get_display_name(receiver),
@@ -851,7 +884,7 @@ class AppearanceMixin:
 
         if self.location and msg_location:
             location_mapping = {
-                "self": _("You"),
+                "self": self.get_self_pronoun(self.location, **kwargs),
                 "object": self,
                 "location": location,
                 "all_receivers": ", ".join(str(recv) for recv in receivers) if receivers else None,

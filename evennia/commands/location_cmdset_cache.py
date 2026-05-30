@@ -28,8 +28,43 @@ def cmdset_generation(obj) -> int:
 
 
 def bump_cmdset_generation(obj) -> None:
-    """
-    Increment generation on ``obj`` and its location (room cmdset sources).
+    """Invalidate location-cmdset cache entries keyed off ``obj``.
+
+    Increments the ``_cmdset_generation`` counter on ``obj`` and (if any)
+    its location. ``make_cache_key`` mixes both counters into every cache
+    key, so any future lookup for the same caller/location pair misses
+    after a bump.
+
+    **Invalidation contract.** Callers must fire this hook whenever a
+    change could affect which cmdsets a future cmd-merge would resolve
+    for objects sharing ``obj``'s location:
+
+    - cmdset stack mutations on ``obj`` itself (add/remove/replace on
+      its `CmdSetHandler`).
+    - movement into or out of a location: the source room loses an
+      exit/inhabitant, the destination gains one. The engine's default
+      move primitive does this at both endpoints.
+
+    The guarantees in exchange:
+
+    - any cached merge result keyed against the *old* generation will be
+      bypassed on subsequent lookups.
+    - cached entries are not eagerly evicted; stale rows remain until
+      the LRU evicts them or the cache is explicitly cleared. Memory is
+      bounded by ``LOCATION_CMDSET_CACHE_MAXSIZE``.
+
+    **Intended consumers.** Any game that pairs viewer-aware display
+    names or per-caller permission filtering with cached cmdset
+    lookups. The fork-side ``underspire`` game is today's only known
+    consumer, but the engine ships the seam so downstream consumers
+    don't have to monkey-patch the merge path to keep their cache
+    coherent.
+
+    Args:
+        obj: The object whose cmdset stack changed. Ignored when falsy
+            or lacking an ``ndb`` attribute (covers the bootstrap window
+            before a typeclass is fully attached).
+
     """
     if not obj or not hasattr(obj, "ndb"):
         return

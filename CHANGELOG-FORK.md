@@ -36,6 +36,167 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.43 — Engine/game boundary migration Phase A
+
+Phase A of the engine/game boundary migration plan
+([`engine-boundary-migration.md`](.agents/docs/engine-boundary-migration.md)).
+Four small items bundled in one release: language-agnostic polish on
+`AppearanceMixin`, lazy flat-API plumbing in `evennia/__init__.py`,
+invalidation-contract docstring on `bump_cmdset_generation`, and a fix
+for the `at_sync` reattach bug (puppet hooks now fire on server
+reload). Lock-step with downstream; no deprecation aliases.
+
+### Engine — A1 language-agnostic polish
+
+Three remaining hardcoded-English sites in
+[`evennia/objects/mixins/appearance.py`](evennia/objects/mixins/appearance.py)
+move behind the same seam pattern Bundle 2 used.
+
+- `get_display_exits` no longer hardcodes the `_("Exits")` prefix.
+  The label now routes through the existing
+  `get_content_group_label("exits", looker)` hook (default `""`), and
+  the helper drops the prefix entirely when the hook returns empty
+  (same `if not exit_names: return ""` short-circuit
+  `get_display_characters` / `get_display_things` already use). Stock
+  `look` therefore no longer prints `Exits: ...`; overrides returning
+  a non-empty label restore the old prefix.
+- New `get_self_pronoun(looker, **kwargs)` method replaces the three
+  hardcoded `_("You")` substitutions in `at_say`'s self/receiver/
+  location mappings. Default still returns `_("You")`, but the
+  per-receiver branch now resolves the pronoun inside the loop with
+  the receiver as `looker`, opening viewer-aware variation without
+  another round of plumbing.
+- New `list_endsep` class attribute (default `_(", and")`) replaces
+  the three `iter_to_str(..., endsep=_(", and"))` call sites in
+  `get_display_exits`, `get_display_characters`, and
+  `get_display_things`. Class attribute is sufficient because list
+  joining has no plausible viewer-aware variation.
+
+The Bundle 2 audit items (movement broadcasts, channel echo,
+`get_numbered_name` English pluralization) are deferred to
+opportunistic work-as-touched; the Bundle 2 / Phase A seam pattern is
+the template for future touches.
+
+**Migration:** games that relied on the stock `Exits:` prefix should
+override `get_content_group_label("exits", looker)` to return
+`"Exits"` (or whatever language string they want). No other action
+required.
+
+### Engine — A2 lazy flat-API hygiene
+
+[`evennia/__init__.py`](evennia/__init__.py) replaces the
+triple-declaration pattern (top-level `X = None`, `global X` in
+`_init`, `from .y import X` in `_init`) with a single registry plus
+PEP 562 module-level `__getattr__`:
+
+- `_LAZY_EXPORTS` maps each pure-import name to a `"module:attr"`
+  spec. Submodule entries are spelled `".utils.ansi:"` (empty attr).
+  Resolution happens on first attribute access; the resolved value is
+  cached back into module globals so subsequent access is a plain
+  dict lookup.
+- `_INIT_POPULATED` lists the names that can't be expressed as pure
+  imports: dynamic container instances (`managers`, `default_cmds`,
+  `syscmdkeys`) and portal-vs-server boot state (`SESSION_HANDLER`,
+  `GLOBAL_SCRIPTS`, `EVENNIA_*_SERVICE`, etc.). Those stay `None`
+  until `_init` runs.
+- Explicit `__all__` (union of both, sorted) declares the public
+  flat-API surface so `from evennia import *` and the `DOCSTRING`
+  enumeration both work from a single declared list rather than a
+  `globals()` scan.
+
+`_init` shrinks from 60+ globals + imports to just the dynamic
+container construction and portal/server gating it actually needs.
+
+**Bootstrap-edge-case risk:** code paths that touch the flat API
+before Django setup will now trigger lazy load (and surface
+`ImproperlyConfigured`) instead of receiving the historical `None`
+sentinel. Today's callers all run after `_init`, so this should be
+safe. The engine-boundary doc notes the fallback (registry-driven
+explicit `_init`) if CI surfaces a violator.
+
+The dead `inputhandler = None` top-level declaration (never assigned
+in `_init`, no in-tree consumer) is dropped.
+
+### Engine — A3 `bump_cmdset_generation` invalidation contract
+
+[`evennia/commands/location_cmdset_cache.py`](evennia/commands/location_cmdset_cache.py)
+keeps the hook (no engine callers outside its own cache, but the only
+known external consumer would otherwise have to monkey-patch the
+merge path to keep its viewer-aware display-name cache coherent) and
+adds an explicit docstring covering:
+
+- when callers must fire it (any cmdset stack mutation or location
+  move on objects that share a room),
+- what the cache machinery guarantees in exchange (stale rows
+  bypassed on subsequent lookups; not eagerly evicted; bounded by
+  `LOCATION_CMDSET_CACHE_MAXSIZE`),
+- who the intended consumers are (anyone pairing per-caller
+  display/permission filtering with cached cmdset lookups, fork-side
+  game today).
+
+A test (`TestLocationCmdsetCache.test_bump_cmdset_generation_docstring_describes_contract`)
+pins the docstring so it can't silently rot in a future cleanup pass.
+
+### Engine — A4 `at_sync` reattach fires puppet hooks
+
+Pre-existing bug:
+[`evennia/server/serversession.py`](evennia/server/serversession.py)'s
+`at_sync` re-bound `session.puppet` after a server reload (the
+`puid` path) without firing `at_pre_puppet` or `at_post_puppet`. Any
+non-persistent state the game built in the puppet path — most
+visibly the merged cmdset stack — was lost on every reload.
+
+`at_sync` now calls `obj.at_pre_puppet(account, session=self,
+reattach=True)` (a veto clears `puid`/`puppet` and skips the
+reattach) and then `obj.at_post_puppet(reattach=True)` after the
+connection state is wired.
+
+Default `at_post_puppet` in both
+[`evennia/objects/mixins/lifecycle.py`](evennia/objects/mixins/lifecycle.py)
+and [`evennia/objects/character.py`](evennia/objects/character.py)
+short-circuits on `kwargs.get("reattach")` so the per-puppet
+"You become X" echo, look output, and "X has entered the game" room
+broadcast don't fire on every reload. Game-side overrides receive the
+same kwarg and can decide what to skip.
+
+Contrib fix:
+[`evennia/contrib/base_systems/ingame_python/typeclasses.py`](evennia/contrib/base_systems/ingame_python/typeclasses.py)'s
+`Character.at_post_puppet` signature gains `**kwargs` to accept the
+new keyword; behavior unchanged. The contrib's events still fire on
+reattach; gating them on `reattach=True` is a contrib decision.
+
+Fix is deliberately minimal; Phase C (identity model) will reshape
+this territory and a larger refactor now risks being undone.
+
+**Migration:** games that override `at_post_puppet` and want to skip
+their own reattach-time work should branch on
+`kwargs.get("reattach")`. Existing overrides without the branch
+behave as before, just firing one extra time per server reload.
+
+### Tests
+
+- New
+  [`evennia/objects/tests/test_objects.py::TestExitsContentGroupLabel`](evennia/objects/tests/test_objects.py),
+  `TestSelfPronounHook`, `TestListEndsep` — cover the A1 hooks at
+  stock and overridden values.
+- Updated `test_exit_order` to reflect the no-prefix default.
+- Updated
+  [`evennia/contrib/tutorials/evadventure/tests/test_rooms.py`](evennia/contrib/tutorials/evadventure/tests/test_rooms.py)
+  for the same.
+- New
+  [`evennia/server/tests/test_flat_api.py`](evennia/server/tests/test_flat_api.py) —
+  every lazy export resolves; resolution caches; `__all__` matches
+  the union of `_LAZY_EXPORTS` and `_INIT_POPULATED`; unknown names
+  raise `AttributeError`.
+- New `TestLocationCmdsetCache.test_bump_cmdset_generation_docstring_describes_contract`
+  in [`evennia/commands/tests.py`](evennia/commands/tests.py).
+- New
+  [`evennia/server/tests/test_misc.py::TestAtSyncFiresPuppetHooks`](evennia/server/tests/test_misc.py) —
+  reattach fires hooks with `reattach=True`; veto aborts the
+  reattach; default `at_post_puppet` suppresses echo on reattach.
+
+---
+
 ## 6.0.0+underspire.42 — Engine/game boundary migration Bundle 2
 
 Three items from the engine/game boundary migration plan

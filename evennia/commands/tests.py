@@ -2251,6 +2251,14 @@ class TestLocationCmdsetCache(BaseEvenniaTest):
         set_cached_location_cmdsets(key, sentinel)
         self.assertIs(get_cached_location_cmdsets(key), sentinel)
 
+    def test_bump_cmdset_generation_docstring_describes_contract(self):
+        # The hook is the public invalidation contract for downstream
+        # caches built on the same generation counter. Make sure the
+        # contract docstring stays attached.
+        doc = bump_cmdset_generation.__doc__ or ""
+        self.assertIn("invalidation contract", doc.lower())
+        self.assertIn("intended consumers", doc.lower())
+
 
 # ----------------------------------------------------------------------------
 # Tests for AccountCommand caller normalisation (Phase 2 step 2,

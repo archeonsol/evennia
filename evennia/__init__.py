@@ -17,7 +17,7 @@ See www.evennia.com for full documentation.
 
 """
 
-import evennia
+import importlib
 
 # docstring header
 
@@ -30,94 +30,137 @@ Flat-API shortcut names:
 {}
 """
 
-# Delayed loading of properties
+# ---------------------------------------------------------------------------
+# Lazy export registry.
+#
+# Each entry maps a public attribute on the `evennia` module to a
+# `"module:attr"` spec. The module path may be relative (leading ".") and is
+# resolved via `importlib.import_module(path, __name__)`. When the attr part
+# is empty (e.g. `".server.signals"`), the imported module itself is bound.
+#
+# Resolution happens lazily on first attribute access via PEP 562
+# `__getattr__`. Each resolved value is cached back into module globals, so
+# subsequent access is a plain dict lookup with no overhead.
+#
+# Entries that cannot be expressed as pure imports (dynamic instances built in
+# `_init`, or values populated by the portal/server boot gating) are not in
+# the registry; they are set directly by `_init` and live alongside the lazy
+# entries in `__all__`.
+# ---------------------------------------------------------------------------
 
-# Typeclasses
+_LAZY_EXPORTS = {
+    # Typeclasses
+    "DefaultAccount": ".accounts.accounts:DefaultAccount",
+    "DefaultGuest": ".accounts.accounts:DefaultGuest",
+    "DefaultObject": ".objects.objects:DefaultObject",
+    "DefaultCharacter": ".objects.objects:DefaultCharacter",
+    "DefaultRoom": ".objects.objects:DefaultRoom",
+    "DefaultExit": ".objects.objects:DefaultExit",
+    "DefaultChannel": ".comms.comms:DefaultChannel",
+    "DefaultScript": ".scripts.scripts:DefaultScript",
+    # Database models
+    "ObjectDB": ".objects.models:ObjectDB",
+    "AccountDB": ".accounts.models:AccountDB",
+    "ScriptDB": ".scripts.models:ScriptDB",
+    "ChannelDB": ".comms.models:ChannelDB",
+    "Msg": ".comms.models:Msg",
+    "ServerConfig": ".server.models:ServerConfig",
+    # Properties
+    "AttributeProperty": ".typeclasses.attributes:AttributeProperty",
+    "TagProperty": ".typeclasses.tags:TagProperty",
+    "TagCategoryProperty": ".typeclasses.tags:TagCategoryProperty",
+    # commands
+    "Command": ".commands.command:Command",
+    "CmdSet": ".commands.cmdset:CmdSet",
+    "InterruptCommand": ".commands.command:InterruptCommand",
+    # search functions
+    "search_object": ".utils.search:search_object",
+    "search_script": ".utils.search:search_script",
+    "search_account": ".utils.search:search_account",
+    "search_channel": ".utils.search:search_channel",
+    "search_message": ".utils.search:search_message",
+    "search_help": ".utils.search:search_help",
+    "search_tag": ".utils.search:search_tag",
+    # create functions
+    "create_object": ".utils.create:create_object",
+    "create_script": ".utils.create:create_script",
+    "create_account": ".utils.create:create_account",
+    "create_channel": ".utils.create:create_channel",
+    "create_message": ".utils.create:create_message",
+    "create_help_entry": ".utils.create:create_help_entry",
+    # utilities (submodules surface as module objects)
+    "settings": "django.conf:settings",
+    "lockfuncs": ".locks:lockfuncs",
+    "logger": ".utils.logger:",
+    "gametime": ".utils.gametime:",
+    "ansi": ".utils.ansi:",
+    "spawn": ".prototypes.spawner:spawn",
+    "contrib": ".contrib:",
+    "EvMenu": ".utils.evmenu:EvMenu",
+    "EvTable": ".utils.evtable:EvTable",
+    "EvForm": ".utils.evform:EvForm",
+    "EvEditor": ".utils.eveditor:EvEditor",
+    "EvMore": ".utils.evmore:EvMore",
+    "ANSIString": ".utils.ansi:ANSIString",
+    "signals": ".server.signals:",
+    "FuncParser": ".utils.funcparser:FuncParser",
+    "OnDemandTask": ".scripts.ondemandhandler:OnDemandTask",
+    # Handlers (singletons exposed as module attributes)
+    "TASK_HANDLER": ".scripts.taskhandler:TASK_HANDLER",
+    "TICKER_HANDLER": ".scripts.tickerhandler:TICKER_HANDLER",
+    "MONITOR_HANDLER": ".scripts.monitorhandler:MONITOR_HANDLER",
+    "ON_DEMAND_HANDLER": ".scripts.ondemandhandler:ON_DEMAND_HANDLER",
+}
 
-DefaultAccount = None
-DefaultGuest = None
-DefaultObject = None
-DefaultCharacter = None
-DefaultRoom = None
-DefaultExit = None
-DefaultChannel = None
-DefaultScript = None
+# Names populated by `_init` rather than by lazy import (dynamic instances or
+# values that depend on portal-vs-server boot mode). Each starts as `None` so
+# pre-init access returns the historical sentinel value rather than raising.
+_INIT_POPULATED = (
+    "managers",
+    "default_cmds",
+    "syscmdkeys",
+    "SESSION_HANDLER",
+    "PORTAL_SESSION_HANDLER",
+    "SERVER_SESSION_HANDLER",
+    "GLOBAL_SCRIPTS",
+    "OPTION_CLASSES",
+    "PROCESS_ID",
+    "TWISTED_APPLICATION",
+    "EVENNIA_PORTAL_SERVICE",
+    "EVENNIA_SERVER_SERVICE",
+)
 
-# Database models
-ObjectDB = None
-AccountDB = None
-ScriptDB = None
-ChannelDB = None
-Msg = None
-ServerConfig = None
+for _name in _INIT_POPULATED:
+    globals()[_name] = None
+del _name
 
-# Properties
-AttributeProperty = None
-TagProperty = None
-TagCategoryProperty = None
+PORTAL_MODE = False
 
-# commands
-Command = None
-CmdSet = None
-default_cmds = None
-syscmdkeys = None
-InterruptCommand = None
+__all__ = sorted(set(_LAZY_EXPORTS) | set(_INIT_POPULATED) | {"PORTAL_MODE"})
 
-# search functions
-search_object = None
-search_script = None
-search_account = None
-search_channel = None
-search_message = None
-search_help = None
-search_tag = None
 
-# create functions
-create_object = None
-create_script = None
-create_account = None
-create_channel = None
-create_message = None
-create_help_entry = None
+def __getattr__(name):
+    """Lazily resolve a flat-API export on first attribute access.
 
-# utilities
-settings = None
-lockfuncs = None
-inputhandler = None
-logger = None
-gametime = None
-ansi = None
-spawn = None
-managers = None
-contrib = None
-EvMenu = None
-EvTable = None
-EvForm = None
-EvEditor = None
-EvMore = None
-ANSIString = None
-signals = None
-FuncParser = None
-OnDemandTask = None
+    The registry is consulted only for names that aren't already bound on
+    the module (Python's attribute lookup only falls through to
+    `__getattr__` for missing names). After resolution the value is cached
+    in module globals so subsequent access is a plain dict lookup.
 
-# Handlers
-SESSION_HANDLER = None
-PORTAL_SESSION_HANDLER = None
-SERVER_SESSION_HANDLER = None
-TASK_HANDLER = None
-TICKER_HANDLER = None
-MONITOR_HANDLER = None
-ON_DEMAND_HANDLER = None
+    Raises:
+        AttributeError: if `name` is not in the registry. This preserves the
+            "module has no attribute" contract for unknown names.
 
-# Containers
-GLOBAL_SCRIPTS = None
-OPTION_CLASSES = None
-
-PROCESS_ID = None
-
-TWISTED_APPLICATION = None
-EVENNIA_PORTAL_SERVICE = None
-EVENNIA_SERVER_SERVICE = None
+    """
+    try:
+        spec = _LAZY_EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_path, _, attr = spec.partition(":")
+    module = importlib.import_module(module_path, __name__)
+    value = getattr(module, attr) if attr else module
+    globals()[name] = value
+    return value
 
 
 def _create_version():
@@ -152,96 +195,46 @@ del _create_version
 
 _LOADED = False
 
-PORTAL_MODE = False
-
 
 def _init(portal_mode=False):
     """
     This function is called automatically by the launcher only after
     Evennia has fully initialized all its models. It sets up the API
     in a safe environment where all models are available already.
+
+    The lazy `__getattr__` registry handles pure-import exports on first
+    access; this function still runs to construct the dynamic container
+    instances (`managers`, `default_cmds`, `syscmdkeys`) and to wire up
+    the portal-vs-server boot state (session handlers, Twisted service).
+
     """
     global _LOADED
     if _LOADED:
         return
     _LOADED = True
-    global DefaultAccount, DefaultObject, DefaultGuest, DefaultCharacter
-    global DefaultRoom, DefaultExit, DefaultChannel, DefaultScript
-    global ObjectDB, AccountDB, ScriptDB, ChannelDB, Msg
-    global Command, CmdSet, default_cmds, syscmdkeys, InterruptCommand
-    global search_object, search_script, search_account, search_channel
-    global search_help, search_tag, search_message
-    global create_object, create_script, create_account, create_channel
-    global create_message, create_help_entry, OnDemandTask
-    global signals
-    global settings, lockfuncs, logger, utils, gametime, ansi, spawn, managers
-    global contrib, TICKER_HANDLER, MONITOR_HANDLER, SESSION_HANDLER, PROCESS_ID
-    global TASK_HANDLER, PORTAL_SESSION_HANDLER, SERVER_SESSION_HANDLER, ON_DEMAND_HANDLER
-    global GLOBAL_SCRIPTS, OPTION_CLASSES, EVENNIA_PORTAL_SERVICE, EVENNIA_SERVER_SERVICE, TWISTED_APPLICATION
-    global EvMenu, EvTable, EvForm, EvMore, EvEditor
-    global ANSIString, FuncParser
-    global AttributeProperty, TagProperty, TagCategoryProperty, ServerConfig
+    global managers, default_cmds, syscmdkeys
+    global SESSION_HANDLER, PORTAL_SESSION_HANDLER, SERVER_SESSION_HANDLER
+    global PROCESS_ID, TWISTED_APPLICATION
+    global EVENNIA_PORTAL_SERVICE, EVENNIA_SERVER_SERVICE
+    global GLOBAL_SCRIPTS, OPTION_CLASSES
     global PORTAL_MODE
     PORTAL_MODE = portal_mode
 
-    # Parent typeclasses
-    # utilities
     import os
 
     from django.conf import settings
 
-    from . import contrib
-    from .accounts.accounts import DefaultAccount, DefaultGuest
-    from .accounts.models import AccountDB
-    from .commands.cmdset import CmdSet
-    from .commands.command import Command, InterruptCommand
-    from .comms.comms import DefaultChannel
-    from .comms.models import ChannelDB, Msg
-    from .locks import lockfuncs
-    from .objects.models import ObjectDB
-    from .objects.objects import (DefaultCharacter, DefaultExit, DefaultObject,
-                                  DefaultRoom)
-    from .prototypes.spawner import spawn
-    from .scripts.models import ScriptDB
-    from .scripts.monitorhandler import MONITOR_HANDLER
-    from .scripts.ondemandhandler import ON_DEMAND_HANDLER, OnDemandTask
-    from .scripts.scripts import DefaultScript
-    from .scripts.taskhandler import TASK_HANDLER
-    from .scripts.tickerhandler import TICKER_HANDLER
-    from .server import signals
-    from .server.models import ServerConfig
-    from .typeclasses.attributes import AttributeProperty
-    from .typeclasses.tags import TagCategoryProperty, TagProperty
-    from .utils import ansi, class_from_module, gametime, logger
-    from .utils.ansi import ANSIString
+    from .utils.utils import class_from_module
 
     if not PORTAL_MODE:
-        # containers
+        # containers (server-only)
         from .utils.containers import GLOBAL_SCRIPTS, OPTION_CLASSES
-
-    # create functions
-    from .utils.create import (create_account, create_channel,
-                               create_help_entry, create_message,
-                               create_object, create_script)
-    from .utils.eveditor import EvEditor
-    from .utils.evform import EvForm
-    from .utils.evmenu import EvMenu
-    from .utils.evmore import EvMore
-    from .utils.evtable import EvTable
-    from .utils.funcparser import FuncParser
-    # search functions
-    from .utils.search import (search_account, search_channel, search_help,
-                               search_message, search_object, search_script,
-                               search_tag)
-    from .utils.utils import class_from_module
 
     PROCESS_ID = os.getpid()
 
     from twisted.application.service import Application
 
     TWISTED_APPLICATION = Application("Evennia")
-
-    _evennia_service_class = None
 
     if portal_mode:
         # Set up the PortalSessionHandler
@@ -250,7 +243,7 @@ def _init(portal_mode=False):
         portal_sess_handler_class = class_from_module(settings.PORTAL_SESSION_HANDLER_CLASS)
         portalsessionhandler.PORTAL_SESSIONS = portal_sess_handler_class()
         SESSION_HANDLER = portalsessionhandler.PORTAL_SESSIONS
-        evennia.PORTAL_SESSION_HANDLER = evennia.SESSION_HANDLER
+        PORTAL_SESSION_HANDLER = SESSION_HANDLER
         _evennia_service_class = class_from_module(settings.EVENNIA_PORTAL_SERVICE_CLASS)
         EVENNIA_PORTAL_SERVICE = _evennia_service_class()
         EVENNIA_PORTAL_SERVICE.setServiceParent(TWISTED_APPLICATION)
@@ -362,9 +355,17 @@ def _init(portal_mode=False):
                 cmdlist = utils.variable_from_module(module, module.__all__)
                 self.__dict__.update(dict([(c.__name__, c) for c in cmdlist]))
 
-            from .commands.default import (account, admin, batchprocess,
-                                           building, comms, general, help,
-                                           system, unloggedin)
+            from .commands.default import (
+                account,
+                admin,
+                batchprocess,
+                building,
+                comms,
+                general,
+                help,
+                system,
+                unloggedin,
+            )
 
             add_cmds(admin)
             add_cmds(building)
@@ -467,13 +468,5 @@ def set_trace(term_size=(140, 80), debugger="auto"):
         dbg.set_trace()
 
 
-# initialize the doc string
-global __doc__
-__doc__ = DOCSTRING.format(
-    "\n- "
-    + "\n- ".join(
-        f"evennia.{key}"
-        for key in sorted(globals())
-        if not key.startswith("_") and key not in ("DOCSTRING",)
-    )
-)
+# initialize the doc string from the declared public surface
+__doc__ = DOCSTRING.format("\n- " + "\n- ".join(f"evennia.{key}" for key in __all__))

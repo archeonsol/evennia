@@ -268,7 +268,11 @@ class DefaultCharacter(DefaultObject):
 
         Args:
             **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+                overriding the call. The engine passes `reattach=True`
+                when the call originates from `ServerSession.at_sync`
+                on server reload; in that case the per-puppet "you
+                become / has entered the game" echo and re-look are
+                skipped (the user did not actually leave or re-arrive).
         Notes:
 
             You can use `self.account` and `self.sessions.get()` to get
@@ -277,6 +281,8 @@ class DefaultCharacter(DefaultObject):
             puppeting this Object.
 
         """
+        if kwargs.get("reattach"):
+            return
         self.account.db._last_puppet = self
         self.msg(_("\nYou become |c{name}|n.\n").format(name=self.key))
         self.msg((self.at_look(self.location), {"type": "look"}), options=None)
