@@ -1,25 +1,20 @@
 # Engine/game boundary migration
 
-Plan for pushing fork-owned infrastructure upstream into Evennia core
-and trimming engine code that belongs game-side. Items are ordered by
-implementation sequence.
+Plan for pushing fork-owned infrastructure upstream into Evennia core,
+trimming engine code that belongs game-side, and getting the engine
+API into a consistent, stable shape. Items are ordered by execution
+sequence; per-item design happens when the item is picked up, not
+here.
 
 Framing test (see [`FUTURE-IDEAS.md`](../../FUTURE-IDEAS.md)): if a
 hypothetical second consumer could not reasonably re-implement this
 from scratch, it belongs in the engine. Reference precedent:
 `display_name_cache` moved game-side in `underspire.36`; the
-`get_display_name` seam it sat on stayed engine-side. Bundle 1 items
-are the closest analogs.
+`get_display_name` seam it sat on stayed engine-side.
 
 Shipped bundles, rejected items, deferred work, and plugin-future
 inhabitants live in
 [`engine-boundary-migration-archive.md`](engine-boundary-migration-archive.md).
-
-## Separate issue, not bundled
-
-**`at_sync` reload path bug.** On session re-attach, `at_sync` silently
-re-attaches a puppet without firing `at_pre_puppet`, leaving the
-cmdset stack empty. File standalone with a focused repro.
 
 ## Language-agnostic position (post-Bundle 2)
 
@@ -27,74 +22,184 @@ Engine stays language-agnostic by *declining to ship defaults*, not by
 abstracting language as a strategy protocol. Empty-default hooks
 engine-side, opinion downstream. Opinionated language content lives in
 a future language plugin. Consequences: drop the `Conjugator` strategy
-item; drop pose/emote upstreaming (Bundle 3 → plugin-future);
-`get_numbered_name`'s English pluralization is no longer "not a
-violation," it's plugin-future cleanup.
+item; drop pose/emote upstreaming (former Bundle 3 content goes to
+plugin-future); `get_numbered_name`'s English pluralization is no
+longer "not a violation," it's plugin-future cleanup.
 
-## Bundle 2.x: language-agnostic polish
+## Separate issue, tracked here as pointer
 
-Same template-or-hook pattern as Bundle 2. Ship as `.42.1` or fold
-into Bundle 3's first commit.
+**`at_sync` reload path bug.** On session re-attach, `at_sync`
+silently re-attaches a puppet without firing `at_pre_puppet`, leaving
+the cmdset stack empty. Filed standalone; listed here so the migration
+plan is self-contained.
 
-- A. `get_display_exits` label — route `_("Exits")` through
-  `get_content_group_label("exits", looker)`.
-- B. `{self}` self-pronoun — `at_say` mapping hardcodes `_("You")`; add
-  `get_self_pronoun(looker)` hook or `self_pronoun` class attr.
-- C. List joiner — three `iter_to_str(..., endsep=_(", and"))` sites;
-  class attr `list_endsep` is cheapest.
+## Execution order
 
-Audits before scoping (may become D/E/F):
+Items are grouped by phase. Within a phase, sub-items can land in
+parallel unless a dependency is named. Each item gets full design when
+picked up, not here.
 
-- D. Hardcoded arrival/departure strings in `at_post_move` /
-  `at_post_arrive` / `at_post_leave`.
-- E. Channel echo template on `DefaultChannel`.
-- F. `get_numbered_name` `pluralize` / `article_for` hooks (likely
-  plugin-future).
+### Phase A: near-term polish (no structural dependencies)
 
-## Bundle 3: `.43+` — permissions discipline
+Small, cheap wins. Land in any order. None of these require deeper
+design work.
 
-10. **Quell-aware permstring helper.** Documented "check permstring
-    respecting quell" helper. Stopgap so the trap closes even if 11 slips.
-11. **`check_permstring` scope resolver.** RFC. Spec covers: quelled
-    accounts resolve at the puppet's effective level; account vs
-    character scope per built-in perm; migration for overriders.
+**A1. Bundle 2.x: language-agnostic polish.** Ships with Phase A as
+`.43`. Same template-or-hook pattern as Bundle 2.
 
-## Bundle 4: later — largest moves
+- `get_display_exits` label: route `_("Exits")` through the existing
+  `get_content_group_label("exits", looker)` hook.
+- `{self}` self-pronoun: `at_say` mapping hardcodes `_("You")`. Add
+  a `get_self_pronoun(looker)` hook (method, not class attr) so
+  viewer-aware variation stays open without re-plumbing later.
+- List joiner: three `iter_to_str(..., endsep=_(", and"))` sites.
+  Class attr `list_endsep` is sufficient; no plausible viewer-aware
+  variation for list joining.
 
-12. **Follow / escort / shadow commands.** Blocked on 4. Move upstream
-    as default commands. Mover-side invariant: mover is in destination
-    before followers are scheduled. No cross-room ordering needed.
-13. **Multi-puppet relay + slot primitives.** Blocked on 1. Session
-    relay and P1/P2/P3 slot machinery. Death/incapacitation gates stay
-    game-side behind try/import. Relay reads only the puppet markers
-    set at slot assignment; survives a future `PuppetPolicy` cleanly.
-14. **Scene / IC broadcast helpers.** Blocked on 2 and a
-    `room_ic_viewers` typeclass hook. Batch the hook with Bundle 1 if
-    possible.
+Other English content in adjacent code (arrival/departure strings,
+channel echo template, `get_numbered_name` pluralization) is handled
+opportunistically as it's touched, not as a Phase A audit. The
+Bundle 2-style seam pattern is the template; future touches use it.
 
-## Policy call required (not a move)
+**A2. Flat API hygiene (`evennia/__init__.py`).** Pure plumbing, no
+semantic change.
 
-**`bump_*_generation` hooks.** Zero engine callers outside contrib;
-only known consumer is the fork. Keep as documented forward-looking
-seam (any game with viewer-aware display names plus cached lookups
-would want them) or remove as unconsumed. Recommend keep with an
-invalidation-contract comment. Upstream call.
+- Replace the triple-declaration pattern (top-level `= None` + `global`
+  in `_init` + import in `_init`) with module-level `__getattr__`
+  (PEP 562): each export declared once in a registry mapping name to
+  `"module:attr"`, lazy-loaded on first access.
+- Add an explicit `__all__` so the surface is declared rather than
+  discovered via container `.help`.
+- Keep portal-vs-server gating; isolate it so it doesn't multiply the
+  declaration sites.
+- Bootstrap-edge-case risk: any code path that imports
+  `from evennia import X` before Django setup will trigger lazy load
+  too early. Existing `_init()` runs after Django setup, so today's
+  callers should be safe; if CI surfaces a bootstrap path that breaks,
+  fall back to option b (registry-driven explicit `_init()`).
+
+**A3. `bump_*_generation` hooks: keep with invalidation contract.**
+Zero engine callers outside contrib; only known consumer is the fork.
+Decision: keep the hook, add a docstring stating the invalidation
+contract (when callers must fire it, what cache invariants it
+guarantees). Any game with viewer-aware display names plus cached
+lookups would want it; removing it would be a churn cost when someone
+needs it again.
+
+**A4. `at_sync` reload bug.** Pointer to the standalone issue. Listed
+under near-term so it doesn't fall off the radar.
+
+### Phase B: foundation (gates Phase C)
+
+Pure documentation work, but load-bearing. The act of writing the
+contract will surface misshapen hooks early and give the structural
+phases a fixed target to honor. Phase C does not start until Phase B
+ships.
+
+**B1. Typeclass hooks taxonomy and contract doc.** Write the
+typeclass-side equivalent of [`command-system.md`](command-system.md).
+At minimum the doc must define:
+
+- Naming taxonomy. Today's `at_*` covers vetoes (`at_pre_move`),
+  notifications (`at_post_move`), one-shot mutators
+  (`at_object_creation`), and renderers (`return_appearance`) with no
+  way to tell which is which from the name. `get_*` covers content
+  providers but is also used for state queries. Define which prefix
+  means what; flag hooks that violate.
+- Calling order. For each lifecycle event (creation, move, puppet,
+  unpuppet, delete, appearance, say, etc.) document the exact hook
+  sequence, who fires whom, and which hooks can short-circuit the
+  chain.
+- Return-value contracts. Which hooks veto by returning False, which
+  return content, which are pure side-effect.
+- Override discipline. Which hooks are designed for game-side
+  override; which are engine-internal and overriding them is
+  unsupported.
+- Object-state-at-firing. For each lifecycle hook
+  (`at_init`, `at_object_creation`, `at_first_save`, etc.) document
+  whether the object is freshly constructed, loaded from cache,
+  persisted, or mid-transaction. This is the load-bearing part of
+  resolving typeclass/model coupling ambiguity; the rest of that
+  coupling is either an Evennia feature or a test-tooling problem,
+  not a boundary issue.
+- Misshapen hooks list. As a side effect of writing the doc, the
+  hooks that don't fit the taxonomy get flagged for Phase C or
+  earlier cleanup.
+
+### Phase C: keystone structural change
+
+Single item, but the largest move in the plan. Everything in Phase D
+is downstream of this and should not start until it lands.
+
+**C1. Unified actor/context abstraction.** Working name deliberately
+ambiguous; pick during design. Goal: one object answering "who is
+acting, on what, with what authority," unifying session, account,
+puppet, and effective permissions. Once landed:
+
+- `self.caller` ambiguity in commands collapses (the object always
+  exposes session/account/puppet explicitly).
+- `AccountCommand` split can be retired or reframed as a routing
+  hint.
+- Permission scope (Phase D) has a place to live.
+- Multi-puppet shape (Phase D) has a place to live.
+
+Design questions to resolve when picked up: is this a wrapper around
+the existing trio or a replacement, what does the migration story
+look like for existing game code, does it touch the cmdset merge or
+just the command entry point.
+
+### Phase D: downstream of identity
+
+Both items presuppose Phase C. Old Bundle 3 and Bundle 4 items are
+absorbed and reframed here; their original scope is preserved in the
+archive.
+
+**D1. Permission scope declaration.** Supersedes old Bundle 3 (quell-
+aware permstring helper + `check_permstring` scope resolver). Perms
+declare account-scoped, character-scoped, or both at definition time;
+quell behavior falls out automatically from the scope declaration
+rather than being computed per callsite. Old Bundle 3's helper and
+resolver become migration tactics on the way to this, not the
+endpoint.
+
+**D2. Multi-puppet first-class shape.** Supersedes old Bundle 4's
+multi-puppet relay item. Slot primitives (P1/P2/P3 in the fork) and
+session relay become engine concepts rather than game-side
+workarounds. The fork's relay reads only puppet markers set at slot
+assignment, so it survives this cleanly. Death/incapacitation gates
+stay game-side behind try/import; the engine ships the policy
+*shape*, not the policy *content*.
+
+### Phase E: independent of identity, can land any time after Phase B
+
+Both items have no Phase C dependency. They can run in parallel with
+Phase C/D once the hooks contract (B1) is written.
+
+**E1. Follow / escort / shadow commands.** Move upstream as default
+commands. Blocked on shipped move primitives (Bundle 1).
+Mover-side invariant: mover is in destination before followers are
+scheduled. No cross-room ordering needed.
+
+**E2. Scene / IC broadcast helpers.** Blocked on shipped appearance
+primitives (Bundle 2) and a new `room_ic_viewers` typeclass hook.
+Batch the hook with Bundle 1-style work if possible.
 
 ## Sequencing summary
 
-| Release | Items |
-|---|---|
-| `.40` | 1, 2, 3, 4 (Bundle 1, shipped) |
-| `.41` | universal veto/transform rule (Bundle 1.5, shipped) |
-| `.42` | 5, 6, 7 (Bundle 2, shipped) |
-| `.42.1` | A, B, C (language-agnostic polish) |
-| any | `at_sync` bug, filed separately |
-| `.43+` | 10, 11 (Bundle 3, permissions discipline) |
-| later | 12, 13, 14 (Bundle 4) |
-| Policy | `bump_*_generation` decision |
-| plugin | English language pack (former item 9, `get_numbered_name`) |
-| 6.1+ | deferred items |
+| Release | Phase | Items |
+|---|---|---|
+| `.40` | shipped | Bundle 1 (items 1, 2, 3, 4) |
+| `.41` | shipped | Bundle 1.5 universal veto/transform rule |
+| `.42` | shipped | Bundle 2 (items 5, 6, 7) |
+| `.43` | A | A1 language polish + A2 flat API hygiene + A3 `bump_*_generation` doc |
+| separate | A | A4 `at_sync` bug (filed standalone) |
+| `.44+` | B | B1 hooks taxonomy + contract doc (gates C) |
+| `.45+` | C | C1 identity model (gates D) |
+| later | D | D1 permission scope declaration |
+| later | D | D2 multi-puppet first-class shape |
+| later | E | E1 follow / escort / shadow |
+| later | E | E2 scene / IC broadcast helpers |
 
-Hardest push from the downstream side: items 1, 2, 5, 11. These touch
-the largest amount of fork code today and are the closest analogs to
-the `display_name_cache` move.
+Hardest push from the downstream side: B1 (it forces the contract to
+be written down), C1 (largest structural move), and D1/D2 (touch the
+most fork code, closest analogs to the `display_name_cache` move).
