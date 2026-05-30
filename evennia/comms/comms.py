@@ -11,6 +11,7 @@ from django.utils.text import slugify
 
 from evennia.comms.managers import ChannelManager
 from evennia.comms.models import ChannelDB
+from evennia.hooks import hook
 from evennia.objects.objects import DefaultObject
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import create, logger
@@ -119,6 +120,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
     channel_msg_nick_pattern = r"{alias}\s*?|{alias}\s+?(?P<arg1>.+?)"
     channel_msg_nick_replacement = "@channel {channelname} = $1"
 
+    @hook(
+        event="creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="internal",
+        fires_from=(),
+        notes="Driven by Django post_save signal (created=True). Override at_channel_creation instead.",
+    )
     def at_first_save(self, **kwargs):
         """
         Called by the typeclass system the very first time the channel
@@ -167,6 +177,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         log_file = self.get_log_filename()
         logger.rotate_log_file(log_file, num_lines_to_append=0)
 
+    @hook(
+        event="channel_creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultChannel.at_first_save",),
+        notes="One-shot creation hook. Fires once per channel via at_first_save.",
+    )
     def at_channel_creation(self):
         """
         Called once, when the channel is first created.
@@ -178,6 +197,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
     _log_file = None
 
+    @hook(
+        event="channel_log",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("DefaultChannel.basetype_setup",),
+        notes="Returns the log filename used for channel history.",
+    )
     def get_log_filename(self):
         """
         File name to use for channel log.
@@ -579,6 +607,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         msg_nick_pattern = cls.channel_msg_nick_pattern.format(alias=alias)
         user.nicks.remove(msg_nick_pattern, category="inputline", **kwargs)
 
+    @hook(
+        event="channel_msg",
+        phase="pre",
+        actor="self",
+        returns="transform",
+        discipline="public",
+        fires_from=("DefaultChannel.msg",),
+        notes="Transform contract with symmetric None-rule. Non-empty string replaces; False/empty aborts; None falls back to original.",
+    )
     def at_pre_msg(self, message, **kwargs):
         """
         Called before the starting of sending the message to a receiver.
@@ -692,6 +729,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         # post-send hook
         self.at_post_msg(message, **send_kwargs)
 
+    @hook(
+        event="channel_msg",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultChannel.msg",),
+        notes="Fires once after all receivers processed. Conventional spot for logging.",
+    )
     def at_post_msg(self, message, **kwargs):
         """
         This is called after sending to *all* valid recipients. It is normally

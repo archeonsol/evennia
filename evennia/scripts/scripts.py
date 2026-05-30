@@ -9,6 +9,7 @@ from django.utils.translation import gettext as _
 from twisted.internet.defer import Deferred, maybeDeferred
 from twisted.internet.task import LoopingCall
 
+from evennia.hooks import hook
 from evennia.scripts.manager import ScriptManager
 from evennia.scripts.models import ScriptDB
 from evennia.typeclasses.models import TypeclassBase
@@ -151,6 +152,10 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
     def __repr__(self):
         return str(self)
 
+    @hook(
+        extends="TypedObject.at_idmapper_flush",
+        notes="Pauses any LoopingCall before allowing the flush.",
+    )
     def at_idmapper_flush(self):
         """
         If we're flushing this object, make sure the LoopingCall is gone too.
@@ -432,6 +437,15 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
 
     # Access methods / hooks
 
+    @hook(
+        event="creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="internal",
+        fires_from=(),
+        notes="Driven by Django post_save signal (created=True). Override at_script_creation instead.",
+    )
     def at_first_save(self, **kwargs):
         """
         This is called after very first time this object is saved.
@@ -538,6 +552,15 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="script_creation",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("ScriptBase.at_first_save",),
+        notes="One-shot creation hook. Fires once per script via at_first_save.",
+    )
     def at_script_creation(self):
         """
         Should be overridden in child.
@@ -545,6 +568,15 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="script_delete",
+        phase="pre",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=("ScriptBase.delete",),
+        notes="Return False to abort delete().",
+    )
     def at_pre_delete(self):
         """
         Called when script is deleted, before the script timer stops.
@@ -562,6 +594,15 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         return True
 
+    @hook(
+        event="script_timer",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fires on every interval tick after start(). is_valid()=False stops further repeats.",
+    )
     def at_repeat(self, **kwargs):
         """
         Called repeatedly every `interval` seconds, once `.start()` has
@@ -574,12 +615,39 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         pass
 
+    @hook(
+        event="script_timer",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("ScriptBase._start_task",),
+        notes="Fires when the timer starts or resumes from pause.",
+    )
     def at_start(self, **kwargs):
         pass
 
+    @hook(
+        event="script_timer",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("ScriptBase._pause_task",),
+        notes="Fires when the timer pauses (manual or server reload).",
+    )
     def at_pause(self, **kwargs):
         pass
 
+    @hook(
+        event="script_timer",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("ScriptBase._stop_task",),
+        notes="Fires when the timer stops permanently.",
+    )
     def at_stop(self, **kwargs):
         pass
 
@@ -897,6 +965,15 @@ class DefaultScript(ScriptBase):
         """
         return True
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fired from EvenniaServerService.shutdown on reload-style stops; persist non-persistent state here.",
+    )
     def at_server_reload(self):
         """
         This hook is called whenever the server is shutting down for
@@ -906,6 +983,15 @@ class DefaultScript(ScriptBase):
         """
         pass
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fired from EvenniaServerService.shutdown on full-shutdown stops.",
+    )
     def at_server_shutdown(self):
         """
         This hook is called whenever the server is shutting down fully
@@ -913,6 +999,15 @@ class DefaultScript(ScriptBase):
         """
         pass
 
+    @hook(
+        event="server_lifecycle",
+        phase="composite",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Fired from EvenniaServerService.run_init_hooks. Use for timer-less startup setup.",
+    )
     def at_server_start(self):
         """
         This hook is called after the server has started. It can be used to add

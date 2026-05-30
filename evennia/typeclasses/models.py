@@ -39,6 +39,7 @@ from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 import evennia
+from evennia.hooks import hook
 from evennia.locks.lockhandler import LockHandler
 from evennia.server.signals import SIGNAL_TYPED_OBJECT_POST_RENAME
 from evennia.typeclasses import managers
@@ -498,6 +499,15 @@ class TypedObject(SharedMemoryModel):
 
     dbref = property(__dbref_get, __dbref_set, __dbref_del)
 
+    @hook(
+        event="idmapper_flush",
+        phase="composite",
+        actor="self",
+        returns="veto",
+        discipline="internal",
+        fires_from=("SharedMemoryModel.flush_cached_instance",),
+        notes="Misshapen: at_<event> name with veto contract. Return False keeps the object cached.",
+    )
     def at_idmapper_flush(self):
         """
         This is called when the idmapper cache is flushed and
@@ -537,6 +547,16 @@ class TypedObject(SharedMemoryModel):
     # Object manipulation methods
     #
 
+    @hook(
+        event="cache_load",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("SharedMemoryModel.__init__",),
+        state_cache_state="rehydrated",
+        notes="Fires on every cache load, not just first-load. Overrides must be idempotent.",
+    )
     def at_post_load(self):
         """
         Called when this object is loaded into the idmapper cache (which
@@ -857,6 +877,15 @@ class TypedObject(SharedMemoryModel):
         "Stop accidental deletion."
         raise Exception("Cannot delete the ndb object!")
 
+    @hook(
+        event="display",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="TypedObject stub. AppearanceMixin override is the canonical override surface (122+ call sites).",
+    )
     def get_display_name(self, looker, **kwargs):
         """
         Displays the name of the object in a viewer-aware manner.
@@ -883,6 +912,15 @@ class TypedObject(SharedMemoryModel):
             return "{}(#{})".format(self.name, self.id)
         return self.name
 
+    @hook(
+        event="multimatch",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Consumed by evennia.utils.multimatch and evennia.utils.utils.multimatch helpers.",
+    )
     def get_extra_info(self, looker, **kwargs):
         """
         Used when an object is in a list of ambiguous objects as an
@@ -907,6 +945,15 @@ class TypedObject(SharedMemoryModel):
 
         return location_hint(self, looker) or ""
 
+    @hook(
+        event="rename",
+        phase="pre",
+        actor="self",
+        returns="veto",
+        discipline="public",
+        fires_from=(),
+        notes="Fires from the key setter. db_key is not yet written at firing.",
+    )
     def at_pre_rename(self, oldname, newname):
         """
         Called before a rename is committed. Side effects (validation,
@@ -928,6 +975,15 @@ class TypedObject(SharedMemoryModel):
         """
         return True
 
+    @hook(
+        event="rename",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="db_key written; post_save signal already fired. AppearanceMixin override clears plural aliases for Objects.",
+    )
     def at_post_rename(self, oldname, newname):
         """
         Called after a successful rename. The instance already holds the new name.

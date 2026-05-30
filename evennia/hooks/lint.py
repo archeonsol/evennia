@@ -97,15 +97,21 @@ def _has_inherited_spec(cls, name):
 
 
 def _resolve_fires_from(path):
-    """Resolve a ``"Class.method"`` string against the engine class set.
+    """Resolve a ``"Class.method"`` string to a callable.
 
-    Falls back to module-walking if needed. Returns the callable or
+    Searches the engine class set first, then ancestors of those classes
+    (to reach parents like ``SharedMemoryModel`` that fire hooks but
+    are not themselves registered bases). Returns the callable or
     ``None`` if unresolved.
     """
     class_name, _, method_name = path.partition(".")
     if not method_name:
         return None
+    candidates = set()
     for cls in _engine_class_set(_load_engine_bases()):
+        candidates.add(cls)
+        candidates.update(cls.__mro__)
+    for cls in candidates:
         if cls.__name__ == class_name:
             method = getattr(cls, method_name, None)
             if callable(method):
