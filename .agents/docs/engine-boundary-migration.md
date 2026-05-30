@@ -43,12 +43,12 @@ picked up, not here.
 
 Shipped as `+underspire.43`. See the archive entry for what landed.
 
-### Phase B: foundation (gates Phase C)
+### Phase B: foundation (typeclass hooks taxonomy)
 
 Pure documentation work, but load-bearing. The act of writing the
-contract will surface misshapen hooks early and give the structural
-phases a fixed target to honor. Phase C does not start until Phase B
-ships.
+contract will surface misshapen hooks early and give later items
+(both in this doc and in the architecture doc) a fixed target to
+honor.
 
 **B1. Typeclass hooks taxonomy and contract doc.** Write the
 typeclass-side equivalent of [`command-system.md`](command-system.md).
@@ -80,72 +80,29 @@ inform H1's decorator surface. At minimum the doc must define:
   coupling is either an Evennia feature or a test-tooling problem,
   not a boundary issue.
 - Misshapen hooks list. As a side effect of writing the doc, the
-  hooks that don't fit the taxonomy get flagged for Phase C or
-  earlier cleanup.
+  hooks that don't fit the taxonomy get flagged for cleanup before
+  they get registered via H1 (the architecture doc's hook registry).
 
-### Phase C: keystone structural change
+### Phase C: upstream consumer-facing items
 
-Single item, but the largest move in the plan. Everything in Phase D
-is downstream of this and should not start until it lands.
+Boundary items that take fork-owned commands and helpers and move
+them upstream as default engine surface. Both consume substrate from
+the architecture doc; coordinate timing with whatever's ahead of them
+there.
 
-**C1. Unified actor/context abstraction.** Working name deliberately
-ambiguous; pick during design. Goal: one object answering "who is
-acting, on what, with what authority," unifying session, account,
-puppet, and effective permissions. Substrate for **L1** (actor
-argument to `check`) and **R1** (viewer argument to `render`) in
-[`engine-api-architecture.md`](engine-api-architecture.md); both can
-start scoping before C1 lands but depend on its shape. Once landed:
-
-- `self.caller` ambiguity in commands collapses (the object always
-  exposes session/account/puppet explicitly).
-- `AccountCommand` split can be retired or reframed as a routing
-  hint.
-- Permission scope (Phase D) has a place to live.
-- Multi-puppet shape (Phase D) has a place to live.
-
-Design questions to resolve when picked up: is this a wrapper around
-the existing trio or a replacement, what does the migration story
-look like for existing game code, does it touch the cmdset merge or
-just the command entry point.
-
-### Phase D: downstream of identity
-
-Both items presuppose Phase C. Old Bundle 3 and Bundle 4 items are
-absorbed and reframed here; their original scope is preserved in the
-archive.
-
-**D1. Permission scope declaration.** Supersedes old Bundle 3 (quell-
-aware permstring helper + `check_permstring` scope resolver). Perms
-declare account-scoped, character-scoped, or both at definition time;
-quell behavior falls out automatically from the scope declaration
-rather than being computed per callsite. Old Bundle 3's helper and
-resolver become migration tactics on the way to this, not the
-endpoint. Superseded in turn by **L1** in
-[`engine-api-architecture.md`](engine-api-architecture.md) (lock
-objects + permission algebra); when picking up D1, build it as the
-migration path toward L1 rather than a separate intermediate.
-
-**D2. Multi-puppet first-class shape.** Supersedes old Bundle 4's
-multi-puppet relay item. Slot primitives (P1/P2/P3 in the fork) and
-session relay become engine concepts rather than game-side
-workarounds. The fork's relay reads only puppet markers set at slot
-assignment, so it survives this cleanly. Death/incapacitation gates
-stay game-side behind try/import; the engine ships the policy
-*shape*, not the policy *content*.
-
-### Phase E: independent of identity, can land any time after Phase B
-
-Both items have no Phase C dependency. They can run in parallel with
-Phase C/D once the hooks contract (B1) is written.
-
-**E1. Follow / escort / shadow commands.** Move upstream as default
-commands. Blocked on shipped move primitives (Bundle 1).
+**C1. Follow / escort / shadow commands.** Move upstream as default
+commands. Blocked on shipped move primitives (Bundle 1, shipped).
 Mover-side invariant: mover is in destination before followers are
-scheduled. No cross-room ordering needed.
+scheduled. No cross-room ordering needed. Coordinate with **M1**
+(composable move) in the architecture doc; ideally these commands
+target the new Move builder rather than the legacy `move_to`
+signature.
 
-**E2. Scene / IC broadcast helpers.** Blocked on shipped appearance
-primitives (Bundle 2) and a new `room_ic_viewers` typeclass hook.
-Batch the hook with Bundle 1-style work if possible.
+**C2. Scene / IC broadcast helpers.** Blocked on shipped appearance
+primitives (Bundle 2, shipped) and a new `room_ic_viewers` typeclass
+hook. Coordinate with **R1** (display pipeline) in the architecture
+doc; ideally these helpers consume RenderNode rather than reaching
+into pre-formatted text.
 
 ## Sequencing summary
 
@@ -155,13 +112,13 @@ Batch the hook with Bundle 1-style work if possible.
 | `.41` | shipped | Bundle 1.5 universal veto/transform rule |
 | `.42` | shipped | Bundle 2 (items 5, 6, 7) |
 | `.43` | shipped | Phase A (A1 language polish + A2 flat API hygiene + A3 `bump_*_generation` doc + A4 `at_sync` reattach hooks) |
-| `.44+` | B | B1 hooks taxonomy + contract doc (gates C) |
-| `.45+` | C | C1 identity model (gates D) |
-| later | D | D1 permission scope declaration |
-| later | D | D2 multi-puppet first-class shape |
-| later | E | E1 follow / escort / shadow |
-| later | E | E2 scene / IC broadcast helpers |
+| `.44+` | B | B1 hooks taxonomy + contract doc |
+| later | C | C1 follow / escort / shadow |
+| later | C | C2 scene / IC broadcast helpers |
 
-Hardest push from the downstream side: B1 (it forces the contract to
-be written down), C1 (largest structural move), and D1/D2 (touch the
-most fork code, closest analogs to the `display_name_cache` move).
+Items previously listed here as Phase C (identity model), Phase D1
+(permission scope), and Phase D2 (multi-puppet shape) have been
+moved to [`engine-api-architecture.md`](engine-api-architecture.md)
+as **I1**, **L1** (which subsumed D1), and **I2** respectively. They
+are substrate work, not boundary work. Original scope preserved in
+the archive.
