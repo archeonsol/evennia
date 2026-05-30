@@ -29,7 +29,7 @@ from evennia.server.signals import (SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
                                     SIGNAL_ACCOUNT_POST_LOGOUT)
 from evennia.utils.logger import log_trace
 from evennia.utils.utils import (callables_from_module, class_from_module,
-                                 delay, is_iter, make_iter)
+                                 delay, is_iter, is_veto, make_iter)
 
 
 def _send_admin_to_portal(session, **kwargs):
@@ -521,12 +521,23 @@ class ServerSessionHandler(SessionHandler):
         # account init
         account.at_post_load()
 
-        # Check if this is the first time the *account* logs in
+        # at_pre_login may veto by returning False (or other non-None falsy);
+        # None / True allow the login. On veto the session is disconnected;
+        # the override is responsible for messaging the reason. Failed auth
+        # is signaled separately via at_failed_login, so a veto here is a
+        # deliberate refusal (banned account, IP block, etc.).
+        if is_veto(account.at_pre_login()):
+            self.disconnect(session, reason="Login refused.")
+            # If this was the only session for the account, undo is_connected.
+            if not self.sessions_from_account(account):
+                account.is_connected = False
+            return
+
+        # Check if this is the first time the *account* logs in. Fires AFTER
+        # at_pre_login so a vetoed login does not consume the FIRST_LOGIN flag.
         if account.db.FIRST_LOGIN:
             account.at_first_login()
             del account.db.FIRST_LOGIN
-
-        account.at_pre_login()
 
         if settings.MULTISESSION_MODE == 0:
             # disconnect all previous sessions.

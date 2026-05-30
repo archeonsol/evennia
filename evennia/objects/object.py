@@ -326,7 +326,7 @@ class DefaultObject(
                             False, deletion is aborted. Note that all objects
                             inside a deleted object are automatically moved
                             to their <home>, they don't need to be removed here.
-     at_object_post_spawn() - called when object is spawned from a prototype or updated
+     at_prototype_spawn() - called when object is spawned from a prototype or updated
                             by the spawner to apply prototype changes.
      at_post_load()            - called whenever typeclass is cached from memory,
                             at least once every server restart/reload

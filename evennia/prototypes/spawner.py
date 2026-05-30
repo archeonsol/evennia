@@ -800,7 +800,7 @@ def batch_update_objects_with_prototype(
         if do_save:
             changed += 1
             obj.save()
-            if spawn_hook := getattr(obj, "at_object_post_spawn", None):
+            if spawn_hook := getattr(obj, "at_prototype_spawn", None):
                 spawn_hook(prototype=new_prototype)
 
     return changed
@@ -869,7 +869,7 @@ def batch_create_object(*objparams):
             if code:
                 exec(code, {}, {"evennia": evennia, "obj": obj})
         # run the spawned hook
-        if spawn_hook := getattr(obj, "at_object_post_spawn", None):
+        if spawn_hook := getattr(obj, "at_prototype_spawn", None):
             spawn_hook()
         objs.append(obj)
     return objs

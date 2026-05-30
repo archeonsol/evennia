@@ -386,7 +386,7 @@ class LifecycleMixin:
         """
         return True
 
-    def at_object_post_spawn(self, prototype=None):
+    def at_prototype_spawn(self, prototype=None):
         """
         Called when this object is spawned or updated from a prototype, after all other
         hooks have been run.

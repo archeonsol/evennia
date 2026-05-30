@@ -38,6 +38,8 @@ Hook returns a value evaluated by `is_veto`
 | `at_pre_arrive` | `MovementMixin` | mixins/movement.py:308 | Abort the move. Both mover-side and source-side pre-hooks already passed; no further hooks fire. | |
 | `at_pre_traverse` | `MovementMixin` | mixins/movement.py:548 | Abort traversal. `at_failed_traverse` fires on the exit. Move chain does NOT fire. | |
 | `at_pre_puppet` | `LifecycleMixin` | mixins/lifecycle.py:437 | Abort puppet attach. Session is left unpuppeted. Engine emits no message. | |
+| `at_pre_unpuppet` | `LifecycleMixin` | mixins/lifecycle.py:486 | Abort detach. Puppet stays attached; session.puppet/puid stay set. Engine emits no message. | |
+| `at_pre_login` | `DefaultAccount` | accounts/accounts.py:1737 | Disconnect the session (`SessionHandler.disconnect` with reason "Login refused."). Engine emits no message. | |
 | `at_pre_say` | `AppearanceMixin` | mixins/appearance.py:644 | See §3.5 (transform variant). | |
 | `at_pre_get` | `AppearanceMixin` | mixins/appearance.py:516 | Abort the get. Move does not run. | |
 | `at_pre_give` | `AppearanceMixin` | mixins/appearance.py:557 | Abort the give. Move does not run. | |
@@ -99,7 +101,7 @@ anything (typically `None`).
 | `at_first_save` | `LifecycleMixin` / `DefaultAccount` / `DefaultChannel` / `DefaultScript` | various | One-shot init driver. Override the inner `at_<noun>_creation` hooks instead. |
 | `at_object_creation` | `LifecycleMixin` | mixins/lifecycle.py:359 | |
 | `at_object_post_creation` | `LifecycleMixin` | mixins/lifecycle.py:367 | |
-| `at_object_post_spawn` | `LifecycleMixin` | mixins/lifecycle.py:385 | Spawner-only; see §2.1. |
+| `at_prototype_spawn` | `LifecycleMixin` | mixins/lifecycle.py:389 | Spawner-only; see §2.1. |
 | `at_object_post_copy` | `LifecycleMixin` | mixins/lifecycle.py:148 | Fired on the SOURCE, not the new copy. |
 | `at_post_load` | multiple | various | Cache-load hook. |
 | `at_idmapper_flush` | `TypedObject` | typeclasses/models.py:501 | LISTED IN §3.2 (return IS consulted); included here only by name to remind readers it's the exception. |
@@ -109,7 +111,6 @@ anything (typically `None`).
 | `at_post_traverse` | `MovementMixin` | mixins/movement.py:570 | |
 | `at_failed_traverse` | `MovementMixin` (default) / `DefaultExit` (override) | mixins/movement.py:590; exit.py:302 | Default Exit override messages `"You cannot go there."`. |
 | `at_post_puppet` | `LifecycleMixin` / `Character` | mixins/lifecycle.py:461; character.py:264 | Character override emits default echoes (suppressed on `reattach=True`). |
-| `at_pre_unpuppet` | `LifecycleMixin` | mixins/lifecycle.py:486 | Return ignored despite `at_pre_*` name. See main doc §6. |
 | `at_post_unpuppet` | `LifecycleMixin` / `Character` | mixins/lifecycle.py:509; character.py:298 | |
 | `at_puppet_added` | `DefaultAccount` | accounts/accounts.py:388 | First-attach notification. |
 | `at_puppet_removed` | `DefaultAccount` | accounts/accounts.py:412 | Last-detach notification. |
@@ -118,8 +119,7 @@ anything (typically `None`).
 | `at_post_create_character` | `DefaultAccount` | accounts/accounts.py:1042 | Per character-creation event. |
 | `at_account_creation` | `DefaultAccount` | accounts/accounts.py:1577 | |
 | `at_post_password_change` | `DefaultAccount` | accounts/accounts.py:1730 | |
-| `at_first_login` | `DefaultAccount` | accounts/accounts.py:1711 | Fires BEFORE `at_pre_login`. See main doc §6. |
-| `at_pre_login` | `DefaultAccount` | accounts/accounts.py:1737 | Return ignored despite `at_pre_*` name. See main doc §6. |
+| `at_first_login` | `DefaultAccount` | accounts/accounts.py:1711 | Fires after `at_pre_login` veto passes; only on accounts whose FIRST_LOGIN flag is set. |
 | `at_post_login` | `DefaultAccount` / `DefaultGuest` | accounts/accounts.py:1793, :2143 | |
 | `at_failed_login` | `DefaultAccount` | accounts/accounts.py:1832 | |
 | `at_disconnect` | `DefaultAccount` / `ServerSession` | accounts/accounts.py:1845; serversession.py:164 | |
@@ -197,7 +197,7 @@ Three categories per hook:
 |---|---|---|---|
 | `at_object_creation` / `at_account_creation` / `at_channel_creation` / `at_script_creation` | Public override | Engine reads no state from this; pure customization point. | Safe. Don't call `super()` if you want full replacement of defaults; in practice, do call super to pick up base setup. |
 | `at_object_post_creation` | Public override | Same. Sees `_createdict`-supplied attrs. | Safe. |
-| `at_object_post_spawn` | Public override | Spawner reads no return value. | Spawner-only fire path; see §2.1. |
+| `at_prototype_spawn` | Public override | Spawner reads no return value. | Spawner-only fire path; see §2.1. |
 | `at_first_save` | Internal | Drives the entire creation chain. Overriding it without calling super skips `basetype_setup`, `init_evennia_properties`, the `_createdict` application, and the public-override hooks above. | Override `at_object_creation` etc., not this. |
 | `basetype_setup` / `basetype_posthook_setup` | Internal | Run from `at_first_save`. Set engine-required state (locks, cmdsets). | Override at your own risk; only for classes that redefine "what kind of object is this". |
 | `at_post_load` | Public override | None directly; engine fires this to let games initialize cache-load state. | Safe. Idempotent: fires on every cache load, not just first-load. |
@@ -220,7 +220,7 @@ Three categories per hook:
 |---|---|---|---|
 | `at_pre_puppet` | Public override (veto) | Engine: aborts attach if vetoed. Game: typical use is permission / state check. | The reattach path (§2.9) passes `reattach=True`; overrides that block on game-state may want to allow reattach. |
 | `at_post_puppet` | Public override | Character override emits entry message and rebuilds channels. The reattach path suppresses this via `reattach=True`. | When overriding `Character.at_post_puppet`, call super or replicate the channel rebuild yourself. |
-| `at_pre_unpuppet` | Public override (NOTIFICATION despite name) | Return is ignored. | Misshapen; see main doc §6. |
+| `at_pre_unpuppet` | Public override (veto) | Engine: aborts detach if vetoed. | On veto, session.puppet/puid stay set; the unpuppet call is a no-op for that session. Override messages the user before vetoing. |
 | `at_post_unpuppet` | Public override | Character override emits exit message and rebuilds channels. | |
 | `at_puppet_added` / `at_puppet_removed` | Public override | Engine: nothing. | Set-membership semantics; fires once per first-attach / last-detach. |
 | `at_login` (Session) | Internal | Drives session init (cmdset, conn_time, etc.). | Override discouraged; use `at_pre_login` / `at_post_login` on Account instead. |
@@ -269,8 +269,8 @@ Three categories per hook:
 | Hook | Discipline | What depends | Notes |
 |---|---|---|---|
 | `at_account_creation` | Public override | None engine-side. | Mirrors `at_object_creation`. |
-| `at_first_login` | Public override | Fires once per account, on the very first login. Cleared from `db.FIRST_LOGIN`. | Misshapen ordering; see main doc §6. |
-| `at_pre_login` | Public override (NOTIFICATION despite name) | Return ignored. | Misshapen; see main doc §6. |
+| `at_first_login` | Public override | Fires once per account, on the very first login. Cleared from `db.FIRST_LOGIN`. Fires AFTER `at_pre_login` so a vetoed login does not consume the flag. | |
+| `at_pre_login` | Public override (veto) | Engine: aborts login and disconnects the session if vetoed. | On veto, session is disconnected with reason "Login refused." and `account.is_connected` is reset if no other sessions remain. Override messages the user before vetoing. Failed auth is signaled via `at_failed_login` instead. |
 | `at_post_login` | Public override | Default `DefaultGuest` override calls `disconnect` after a delay; the `DefaultAccount` default is "send last-login message and welcome screen". | If overriding for a guest subclass, preserve the cleanup-on-disconnect path. |
 | `at_failed_login` | Public override | None engine-side. | |
 | `at_post_password_change` | Public override | None engine-side. | Audit/log point. |
@@ -354,14 +354,14 @@ completed and the object has a pk.
 | `basetype_setup` | yes | yes | yes | yes (if create-helper used) | no | from `_createdict` only if applied; not yet at this point | fresh | no |
 | `at_object_creation` | yes | yes | yes | yes | no (this IS one of the post-creation hooks) | no (location not yet applied from `_createdict`) | fresh | YES (locks added; attributes/tags about to be batch-added; location about to be assigned) |
 | `at_object_post_creation` | yes | yes | yes | yes (about to be deleted) | yes (`at_object_creation` already fired; `_createdict` already applied; location set if supplied) | yes (location set from `_createdict` if any) | fresh | mostly no; `_createdict` cleanup happens right after this returns |
-| `at_object_post_spawn` | yes | yes | yes | no (already cleaned up) | yes (full creation chain complete) | yes | fresh | no |
+| `at_prototype_spawn` | yes | yes | yes | no (already cleaned up) | yes (full creation chain complete) | yes | fresh | no |
 
 Notes:
 
 - `at_object_creation` runs BEFORE `_createdict` is applied. Code in
   `at_object_creation` cannot read kwargs/tags/attributes supplied
   via `create_object(...)`. To see those, override
-  `at_object_post_creation` or `at_object_post_spawn`.
+  `at_object_post_creation` or `at_prototype_spawn`.
 - The `init_evennia_properties()` call between `at_object_creation`
   and `_createdict` application sets up Attribute/Tag descriptors.
   Before this call, `obj.db.foo` reads will work (Attribute Manager
@@ -442,7 +442,7 @@ sets or neither.
 | `at_post_puppet` (fresh attach) | `obj.account = account`; `obj.sessions` contains session; `puppeted` tag set; locks re-cached | session.puppet = obj; session.puid = obj.id | account knows about the puppet via tags/sessions |
 | `at_pre_puppet` (reattach, §2.9) | session.puid was pre-set from reload; obj loaded fresh from DB | session.account already set | account state restored from cache |
 | `at_post_puppet` (reattach) | obj.sessions contains session; obj.account = self.account; locks re-cached | session.puppet = obj | same |
-| `at_pre_unpuppet` | obj.account = account; obj.sessions contains session | session.puppet = obj | same |
+| `at_pre_unpuppet` | obj.account = account; obj.sessions contains session | session.puppet = obj | same. On veto: session.puppet/puid stay set, detach is skipped. |
 | `at_post_unpuppet` | obj.sessions no longer contains session; if last session, `obj.account` is deleted; `puppeted` tag still present (removed after this hook returns) | session.puppet still set (cleared right after) | same |
 | `at_puppet_added` | full attach state (after `at_post_puppet`) | same | account.characters and puppet set both reflect membership |
 | `at_puppet_removed` | full detach state (after `at_post_unpuppet`) and the puppet tag has been removed; if last session, `obj.account` is gone | session.puppet = None; session.puid = None | account state reflects puppet removal |
@@ -453,8 +453,8 @@ sets or neither.
 |---|---|---|
 | `session.at_login(account)` | account.is_connected = True | session being primed; cmdset_storage about to be set |
 | `at_post_load` (account) | freshly cached (or already cached) | session logged_in not yet flagged |
-| `at_first_login` | `db.FIRST_LOGIN` still True at entry; deleted right after | session not yet logged_in (it's flagged True after `at_pre_login`) |
-| `at_pre_login` | account ready; `last_login` updated by `at_login` | session not yet logged_in |
+| `at_pre_login` | account.is_connected = True; account.at_post_load already ran; `last_login` updated by `session.at_login`. On veto: session is disconnected and `is_connected` may be reset. | not yet logged_in |
+| `at_first_login` | (only reached if at_pre_login didn't veto) `db.FIRST_LOGIN` still True at entry; deleted right after | not yet logged_in (flagged True after the FIRST_LOGIN block) |
 | `at_post_login` | account fully connected; session.logged_in = True; portal sync already done | full login state |
 | `at_failed_login` | NOT in the login flow above; called from the auth path on credential rejection | session is not associated with the account at this point |
 

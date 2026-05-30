@@ -626,8 +626,11 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         for session in make_iter(session):
             obj = session.puppet
             if obj:
-                # do the disconnect, but only if we are the last session to puppet
-                obj.at_pre_unpuppet()
+                # at_pre_unpuppet may veto by returning False (or other non-None
+                # falsy); None / True allow the detach. Veto leaves the puppet
+                # attached; the override is responsible for messaging the caller.
+                if is_veto(obj.at_pre_unpuppet()):
+                    continue
                 obj.sessions.remove(session)
                 last_session = not obj.sessions.count()
                 if last_session:

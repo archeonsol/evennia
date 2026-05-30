@@ -153,7 +153,7 @@ post_save(created=True)
 ```
 
 After `at_first_save` returns, `evennia/prototypes/spawner.py` may
-call `obj.at_object_post_spawn(prototype=...)` if the object was
+call `obj.at_prototype_spawn(prototype=...)` if the object was
 created via the spawner (spawner.py:803 and :872; two call sites,
 covering spawn-new and update-existing paths).
 
@@ -168,8 +168,9 @@ Notes:
   Objects created without a location skip the move chain entirely.
   These calls fire `at_post_arrive` and `at_post_move` only; the
   `at_pre_*` / `at_post_leave` halves are skipped on first placement.
-- `at_object_post_spawn` is spawner-specific. Objects created with
-  `evennia.create_object` directly do NOT fire it. See §6.
+- `at_prototype_spawn` is spawner-specific. Objects created with
+  `evennia.create_object` directly do NOT fire it. The name (renamed
+  from `at_object_post_spawn` in the S-bucket cleanup) reflects this.
 
 ### 2.2 Object load / idmapper cache rehydration
 
@@ -395,7 +396,8 @@ unpuppet_object(session)
   for session in iter(session):
     obj = session.puppet
     if obj:
-      obj.at_pre_unpuppet()
+      if is_veto(obj.at_pre_unpuppet()):
+        continue                          # veto: leave puppet attached
       obj.sessions.remove(session)
       last_session = (obj.sessions.count() == 0)
       if last_session: del obj.account
@@ -408,9 +410,10 @@ unpuppet_object(session)
     session.puid = None
 ```
 
-`at_pre_unpuppet` has the `at_pre_*` name but the engine does NOT
-honor its return value as a veto; the call is unconditionally
-followed by detach. See §6.
+`at_pre_unpuppet` honors the veto contract (S-bucket fix). On veto
+the puppet stays attached, session.puppet/puid are NOT cleared, and
+no engine message is emitted; the override is responsible for
+messaging the caller before vetoing.
 
 `at_puppet_removed` fires on LAST-detach, mirroring
 `at_puppet_added`'s FIRST-attach semantics.
@@ -675,10 +678,13 @@ sessionhandler.login(session, account)
   │     ├─ session.cmdset_storage = CMDSET_SESSION
   │     └─ session.cmdset = CmdSetHandler(session, True)
   ├─ account.at_post_load()
+  ├─ if is_veto(account.at_pre_login()):
+  │     self.disconnect(session, reason="Login refused.")
+  │     if no other sessions for account: account.is_connected = False
+  │     return
   ├─ if account.db.FIRST_LOGIN:
   │     account.at_first_login()
   │     del account.db.FIRST_LOGIN
-  ├─ account.at_pre_login()             [no veto contract; see §6]
   ├─ MULTISESSION_MODE==0: disconnect duplicate sessions
   ├─ session.logged_in = True
   ├─ portal AMP sync
@@ -687,15 +693,18 @@ sessionhandler.login(session, account)
   └─ SIGNAL_ACCOUNT_POST_LOGIN.send(...)
 ```
 
-Ordering quirks:
+Notes:
 
-- `at_first_login` fires BEFORE `at_pre_login`. The name suggests
-  "first login", which it is, but readers expect `at_pre_*` to fire
-  before any `at_<event>` for the same event. Documented at
-  accounts.py:1714. See §6.
-- `at_pre_login` is named `at_pre_*` but does not honor a veto
-  return; the engine ignores its return value and proceeds to
-  `at_post_login` unconditionally. See §6.
+- `at_pre_login` honors the veto contract (S-bucket fix). On veto
+  the session is disconnected via `sessionhandler.disconnect(session,
+  reason="Login refused.")`; the override is responsible for
+  messaging the user before vetoing. `account.is_connected` is reset
+  to False if this was the only session. Failed auth uses
+  `at_failed_login` instead (retry-friendly); a veto here is a
+  deliberate refusal (banned, locked, IP block).
+- `at_first_login` fires AFTER `at_pre_login` (S-bucket reorder).
+  This means a vetoed login does NOT consume the FIRST_LOGIN flag;
+  the next successful login will fire `at_first_login` instead.
 - `at_post_load` here is NOT the cache-load hook (§2.2): same name,
   separately overridden on `DefaultAccount` (accounts.py:1590) as a
   stub. Sharing the name is intentional (it's the same idmapper
@@ -1029,19 +1038,9 @@ register the current shape verbatim.
 
 - ~~**`at_object_delete`**~~: renamed to `at_pre_delete` (R-bucket).
 - ~~**`at_script_delete`**~~: renamed to `at_pre_delete` (R-bucket).
-- **`at_pre_unpuppet`** (§2.8) has the `at_pre_*` name but the
-  engine never honors its return value as a veto. Either the engine
-  should consult `is_veto` on its return (matching the prefix) or
-  the hook should be renamed `at_unpuppet` to clarify it is a
-  notification.
-- **`at_pre_login`** (§2.14) is named `at_pre_*` but its return
-  value is ignored. Same fix as `at_pre_unpuppet`: honor the veto
-  or rename.
-- **`at_first_login`** (§2.14) fires BEFORE `at_pre_login` despite
-  conventional ordering (`at_pre_*` before any `at_<event>` for
-  the same event-family). Either rename to make the order obvious
-  (`at_account_first_login`?) or rewrite the call sequence so
-  `at_pre_login` truly leads.
+- ~~**`at_pre_unpuppet`**~~: now honors veto (S-bucket fix). Falsy-not-None aborts detach.
+- ~~**`at_pre_login`**~~: now honors veto (S-bucket fix). Falsy-not-None disconnects the session.
+- ~~**`at_first_login`**~~: now fires AFTER `at_pre_login` (S-bucket reorder). FIRST_LOGIN flag is preserved across vetoed logins.
 - ~~**`at_access`**~~: renamed to `at_post_access` (R-bucket).
 - **`at_desc`** (§2.13) is named as if it were a post-event hook
   for setting a description, but it fires on every look. Either
@@ -1118,12 +1117,8 @@ register the current shape verbatim.
 
 ### Conditional / partial fire
 
-- **`at_object_post_spawn`** (§2.1): fires only when the spawner
-  creates/updates the object. Objects created via
-  `evennia.create_object` directly do NOT fire it. The naming
-  doesn't suggest the spawner-only constraint. Either rename
-  (`at_prototype_spawn`?) or also fire from `create_object` for
-  consistency.
+- ~~**`at_object_post_spawn`**~~: renamed to `at_prototype_spawn`
+  (S-bucket). Spawner-only fire path is now reflected in the name.
 - **`at_post_arrive` / `at_post_move` at first placement** (§2.1):
   these fire ONLY when `_createdict` supplies a location at
   creation time. The pre/leave halves of the move chain are
@@ -1214,11 +1209,11 @@ rename-only changes land as one engine + game commit. Buckets:
 
 | Entry | Action | Notes |
 |---|---|---|
-| `at_pre_unpuppet` | Honor the veto: `Account.unpuppet_object` should `is_veto`-check its return and abort detach. | The name already promises this. Game-side overrides currently see returns ignored; honoring the promise is what overriders expect. |
-| `at_pre_login` | Honor the veto: `SessionHandler.login` should `is_veto`-check its return and abort. Decide what happens on abort (drop connection? send to OOC?). | Less clear-cut than `at_pre_unpuppet`; needs a call about login-abort UX before implementing. |
-| `at_first_login` ordering | Move the call AFTER `at_pre_login`. | Today: `at_first_login` → `at_pre_login` → `at_post_login`. Target: `at_pre_login` → `at_first_login` → `at_post_login`. The "first time" semantic is preserved (still gated on `db.FIRST_LOGIN`), but the ordering finally matches the prefix convention. |
+| ~~`at_pre_unpuppet`~~ | Honors veto in `Account.unpuppet_object`. Shipped. | On veto, skips detach AND skips clearing session.puppet/puid; iteration moves to next session. |
+| ~~`at_pre_login`~~ | Honors veto in `SessionHandler.login`. Shipped. | Veto disconnects the session via `self.disconnect(session, reason="Login refused.")`; if no other sessions remain, resets `account.is_connected = False`. Override messages the user. |
+| ~~`at_first_login` ordering~~ | Now fires AFTER `at_pre_login`. Shipped. | FIRST_LOGIN flag preserved across vetoed logins. |
 | `at_msg_send` / `at_msg_receive` route | Rename + extend to Object. Today: Account-only, named without `at_pre_*`. Target: `at_pre_msg_out` (on sender) and `at_pre_msg_in` (on recipient), defined on both `DefaultObject` and `DefaultAccount`. Same veto-on-falsy contract. | Touching both account.msg and object.msg; medium churn. Punt to immediately after H1 if H1 wants to redefine message routing anyway. |
-| `at_object_post_spawn` spawner-only fire | Rename → `at_prototype_spawn`. Don't extend to `create_object`. | The hook's semantic IS "after the spawner did its work"; widening it confuses the meaning. Rename clarifies. |
+| ~~`at_object_post_spawn` spawner-only fire~~ | Renamed → `at_prototype_spawn`. Shipped. | |
 | `at_start` is also resume | Add `at_resume(**kwargs)`. Default body in `DefaultScript` calls `self.at_start(**kwargs)` so existing overrides still fire. Documented as: "override `at_resume` for resume-only logic; override `at_start` for initial-start-only logic; the default chains them." | Optional. If nobody currently distinguishes the two cases in this fork, leave alone. |
 | `at_pause(manual_pause=...)` flag | Leave alone. Splitting into separate hooks (`at_pause_manual` / `at_pause_reload`) doubles the override surface for a binary signal. Doc the flag clearly. | Doc-only; reclassify to R. |
 | `at_say` `msg_self` bool-or-string | Split parameter. `msg_self: bool` controls echo; `msg_self_template: str | None` overrides the template. Default behavior preserved. | Touches `at_say` signature; coordinate with overriders in the game. |
