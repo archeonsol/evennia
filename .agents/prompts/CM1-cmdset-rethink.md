@@ -32,7 +32,7 @@ after I1; treat it accordingly.
 
 1. Read the architecture doc CM1 item.
 2. Read the cmdset-related sections of
-   [`typeclass-hooks.md`](../docs/typeclass-hooks.md) (B1's output).
+   [`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md) (B1's output).
 3. Read [`command-system.md`](../docs/command-system.md) for the
    current cmdset contracts.
 4. Study the current cmdset implementation thoroughly. Understand

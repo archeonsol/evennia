@@ -23,9 +23,9 @@ some on room, some on both. No registry, no discovery, no signature
 contract. Game devs grep the engine to find hooks.
 
 B1 shipped two doc artifacts: the prose contract
-([`typeclass-hooks.md`](../docs/typeclass-hooks.md)) and the
+([`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md)) and the
 reference tables
-([`typeclass-hooks-reference.md`](../docs/typeclass-hooks-reference.md)).
+([`Typeclass-Hooks-Reference.md`](../../docs/source/Components/Typeclass-Hooks-Reference.md)).
 H1 turns those into runtime data.
 
 ## Approach
@@ -76,9 +76,9 @@ H1 turns those into runtime data.
 
 ## Existing code to study
 
-- [`typeclass-hooks.md`](../docs/typeclass-hooks.md) — B1's
+- [`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md) — B1's
   taxonomy and contracts.
-- [`typeclass-hooks-reference.md`](../docs/typeclass-hooks-reference.md)
+- [`Typeclass-Hooks-Reference.md`](../../docs/source/Components/Typeclass-Hooks-Reference.md)
   — B1's reference tables.
 - `evennia/objects/objects.py`, `evennia/accounts/accounts.py`,
   `evennia/scripts/scripts.py`, `evennia/comms/comms.py` — hook

@@ -11,6 +11,8 @@ These are base pieces used to make an Evennia game. Most are long-lived and are 
 Portal-And-Server.md
 Sessions.md
 Typeclasses.md
+Typeclass-Hooks.md
+Typeclass-Hooks-Reference.md
 Accounts.md
 Objects.md
 Characters.md

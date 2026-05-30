@@ -51,9 +51,9 @@ contract will surface misshapen hooks early and give later items
 honor.
 
 **B1. Typeclass hooks taxonomy and contract doc.** Shipped. See
-[`typeclass-hooks.md`](typeclass-hooks.md) for taxonomy, calling
+[`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md) for taxonomy, calling
 order per lifecycle event, and the misshapen-hooks list;
-[`typeclass-hooks-reference.md`](typeclass-hooks-reference.md) for
+[`Typeclass-Hooks-Reference.md`](../../docs/source/Components/Typeclass-Hooks-Reference.md) for
 return-value contracts, override discipline, and
 object-state-at-firing tables. Design predecessor to **H1** (hook
 registry) in

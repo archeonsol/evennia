@@ -38,7 +38,7 @@ implementation begins.
 2. Read the existing identity machinery: ServerSession, AccountDB,
    ObjectDB.puppet, the session-proxy, AccountCommand.
 3. Read [AGENTS.md](../../AGENTS.md) and
-   [`typeclass-hooks.md`](../docs/typeclass-hooks.md) (B1's output;
+   [`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md) (B1's output;
    the hook contracts your Actor will interact with).
 4. **Write a design proposal.** This should be a real doc (1-2
    pages), not a paragraph. Cover the questions below in detail.

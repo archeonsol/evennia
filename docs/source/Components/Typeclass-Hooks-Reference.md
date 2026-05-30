@@ -1,7 +1,7 @@
 # Typeclass Hooks Reference
 
 Companion reference tables for
-[`typeclass-hooks.md`](typeclass-hooks.md). Three sections:
+[`Typeclass-Hooks.md`](./Typeclass-Hooks.md). Three sections:
 
 - §3 return-value contracts
 - §4 override discipline

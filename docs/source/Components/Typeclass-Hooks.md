@@ -1,10 +1,10 @@
 # Typeclass Hooks Contracts
 
 Runtime contracts for the typeclass hook surface. Sibling to
-[`command-system.md`](command-system.md), which covers cmdset / command
+[`command-system.md`](../../../.agents/docs/command-system.md), which covers cmdset / command
 hooks. Companion reference tables (return contracts, override
 discipline, object-state-at-firing) live in
-[`typeclass-hooks-reference.md`](typeclass-hooks-reference.md).
+[`Typeclass-Hooks-Reference.md`](./Typeclass-Hooks-Reference.md).
 
 Scope: `DefaultObject`, `DefaultCharacter`, `DefaultRoom`,
 `DefaultExit`, `DefaultAccount` (+ `DefaultGuest`), `DefaultChannel`,
@@ -126,7 +126,7 @@ the canonical name to avoid surprises.
 Per-event subsections. Each documents the hook sequence, short-circuit
 rules, and cross-actor dispatch (mover / source / destination, or
 account / session / puppet). State-at-firing details live in §5 of
-[`typeclass-hooks-reference.md`](typeclass-hooks-reference.md); return
+[`Typeclass-Hooks-Reference.md`](./Typeclass-Hooks-Reference.md); return
 contracts in §3, override discipline in §4.
 
 ### 2.1 Object creation (`DefaultObject`)
@@ -942,7 +942,7 @@ cache eviction; see §6.
 
 `at_cmdset_get`, `get_cmdsets`, `get_cmdset_providers` participate
 in cmdset assembly. The hook order is owned by
-[`command-system.md`](command-system.md); see that doc for
+[`command-system.md`](../../../.agents/docs/command-system.md); see that doc for
 `at_pre_parse`, `at_pre_cmd`, `at_post_cmd`, the AccountCommand
 normalization table, and merge-cache invariants.
 

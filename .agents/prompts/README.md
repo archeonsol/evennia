@@ -62,6 +62,6 @@ Mark status at the top of each prompt as work progresses:
   fork/engine boundary work (different doc, different scope).
 - [Engine Long-Horizon Sketch](../docs/engine-long-horizon.md) —
   Level 3 sketch (post-Level 2; not parallelizable yet).
-- [Typeclass Hooks Contracts](../docs/typeclass-hooks.md) +
-  [Reference Tables](../docs/typeclass-hooks-reference.md) — B1's
+- [Typeclass Hooks Contracts](../../docs/source/Components/Typeclass-Hooks.md) +
+  [Reference Tables](../../docs/source/Components/Typeclass-Hooks-Reference.md) — B1's
   output; consumed by H1, M1, R1, CM1.

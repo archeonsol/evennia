@@ -24,7 +24,7 @@ at_post_move" have to know which kwargs disable what.
 
 1. Read the architecture doc M1 item.
 2. Read the move-event section of
-   [`typeclass-hooks.md`](../docs/typeclass-hooks.md) (B1's output)
+   [`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md) (B1's output)
    for the hook contracts your builder will fire.
 3. Read [AGENTS.md](../../AGENTS.md).
 4. Propose a design covering the questions below.
@@ -64,7 +64,7 @@ at_post_move" have to know which kwargs disable what.
 - `evennia/objects/objects.py` — `DefaultObject.move_to` and its
   hook chain.
 - Move-event section in
-  [`typeclass-hooks.md`](../docs/typeclass-hooks.md).
+  [`Typeclass-Hooks.md`](../../docs/source/Components/Typeclass-Hooks.md).
 - Engine call sites for `move_to` (grep) — the migration surface.
 - `evennia/commands/default/general.py` and others — game-side-ish
   callers in default commands.
