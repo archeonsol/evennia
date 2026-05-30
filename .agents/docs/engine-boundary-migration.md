@@ -11,29 +11,9 @@ from scratch, it belongs in the engine. Reference precedent:
 `get_display_name` seam it sat on stayed engine-side. Bundle 1 items
 are the closest analogs.
 
-## Shipped bundles
-
-History compressed to pointers once a bundle has landed. The changelog
-entries in [`CHANGELOG-FORK.md`](../../CHANGELOG-FORK.md) are the source
-of truth for what each bundle actually contained.
-
-- **Bundle 1 — `+underspire.40`.** Additive seams + hook-naming sweep:
-  `at_puppet_added` / `at_puppet_removed`, `get_extra_display_state`,
-  `at_pre_rename`, movement hook renames + `at_post_leave`,
-  `at_init` → `at_post_load`, traverse refactor (`at_traverse` →
-  `do_traverse` + new `at_pre_traverse`).
-- **Bundle 1.5 — `+underspire.41`.** Universal veto rule and transform
-  rule across every pre-hook. Adds `is_veto(result)` and
-  `resolve_transform(result, original)` in `evennia/utils/utils.py`;
-  makes `at_pre_puppet` veto-capable; documents `at_pre_unpuppet` /
-  `at_pre_login` / `at_pre_parse` / `at_pre_cmd` as exceptions.
-- **Bundle 2 — `+underspire.42`.** Three appearance/perf items:
-  overridable `at_say` template hooks
-  (`get_say_template_self`/`_location`/`_receivers` → `""`),
-  `get_content_group_label(group, looker) → ""` driving the
-  `Characters:` / `You see:` prefixes, cmdset merge cache warmup module
-  at `evennia/commands/cmdset_merge_warmup.py` wired into
-  `puppet_object` and the post-reload `at_post_portal_sync` hook.
+Shipped bundles, rejected items, deferred work, and plugin-future
+inhabitants live in
+[`engine-boundary-migration-archive.md`](engine-boundary-migration-archive.md).
 
 ## Separate issue, not bundled
 
@@ -41,23 +21,45 @@ of truth for what each bundle actually contained.
 re-attaches a puppet without firing `at_pre_puppet`, leaving the
 cmdset stack empty. File standalone with a focused repro.
 
-## Bundle 3: `.43+` — design-led
+## Language-agnostic position (post-Bundle 2)
 
-8. **`Conjugator` seam (Language strategy).** Prerequisite for 9. RFC.
-   `Conjugator` protocol with `conjugate(word, person, tense)` and
-   `EnglishConjugator` default; settings-selectable. Without this,
-   moving pose/emote upstream imports English rules into core.
-9. **Pose / emote / looc primitives.** Blocked on 8. Move `CmdPose` /
-   `CmdEmote` / `CmdLooc` plus emote machinery (conjugation,
-   target-aware "you" substitution) as a default cmdset overlay. Pairs
-   with hook 2 for persistent pose display.
+Engine stays language-agnostic by *declining to ship defaults*, not by
+abstracting language as a strategy protocol. Empty-default hooks
+engine-side, opinion downstream. Opinionated language content lives in
+a future language plugin. Consequences: drop the `Conjugator` strategy
+item; drop pose/emote upstreaming (Bundle 3 → plugin-future);
+`get_numbered_name`'s English pluralization is no longer "not a
+violation," it's plugin-future cleanup.
+
+## Bundle 2.x: language-agnostic polish
+
+Same template-or-hook pattern as Bundle 2. Ship as `.42.1` or fold
+into Bundle 3's first commit.
+
+- A. `get_display_exits` label — route `_("Exits")` through
+  `get_content_group_label("exits", looker)`.
+- B. `{self}` self-pronoun — `at_say` mapping hardcodes `_("You")`; add
+  `get_self_pronoun(looker)` hook or `self_pronoun` class attr.
+- C. List joiner — three `iter_to_str(..., endsep=_(", and"))` sites;
+  class attr `list_endsep` is cheapest.
+
+Audits before scoping (may become D/E/F):
+
+- D. Hardcoded arrival/departure strings in `at_post_move` /
+  `at_post_arrive` / `at_post_leave`.
+- E. Channel echo template on `DefaultChannel`.
+- F. `get_numbered_name` `pluralize` / `article_for` hooks (likely
+  plugin-future).
+
+## Bundle 3: `.43+` — permissions discipline
+
 10. **Quell-aware permstring helper.** Documented "check permstring
     respecting quell" helper. Stopgap so the trap closes even if 11 slips.
 11. **`check_permstring` scope resolver.** RFC. Spec covers: quelled
     accounts resolve at the puppet's effective level; account vs
     character scope per built-in perm; migration for overriders.
 
-## Bundle 4: `.42+` — largest moves
+## Bundle 4: later — largest moves
 
 12. **Follow / escort / shadow commands.** Blocked on 4. Move upstream
     as default commands. Mover-side invariant: mover is in destination
@@ -78,35 +80,19 @@ seam (any game with viewer-aware display names plus cached lookups
 would want them) or remove as unconsumed. Recommend keep with an
 invalidation-contract comment. Upstream call.
 
-## Deferred
-
-`PuppetPolicy` strategy replacing `MULTISESSION_MODE` (6.1 RFC,
-subsumes mode-branching in Account/Session); channel subscription
-mixin (wait until `.37` batching beds in); heap scheduler as engine
-utility (ship as utility module if at all); observability helpers
-(open question whether engine should expose any metrics surface);
-engine cache invalidation coordinator (too tightly coupled, needs
-generic abstraction first); cmdset audit dev tool (low priority).
-
-## Rejected as not actually violations
-
-`_content_types` taxonomy (entangled); `get_numbered_name` English
-pluralization (real bias, no meaningful engine cost);
-`MULTISESSION_MODE` matrix as a removal target (reframed as a
-half-built version of item 13); `CmdPose` / `CmdHome` / default cmdset
-opinions (defaults are allowed to be opinionated).
-
 ## Sequencing summary
 
 | Release | Items |
 |---|---|
-| `.40` | 1, 2, 3, 4 (Bundle 1) |
-| `.41` | universal veto/transform rule (Bundle 1.5) |
+| `.40` | 1, 2, 3, 4 (Bundle 1, shipped) |
+| `.41` | universal veto/transform rule (Bundle 1.5, shipped) |
 | `.42` | 5, 6, 7 (Bundle 2, shipped) |
+| `.42.1` | A, B, C (language-agnostic polish) |
 | any | `at_sync` bug, filed separately |
-| `.43+` | 8, then 9, 10, 11 (Bundle 3) |
+| `.43+` | 10, 11 (Bundle 3, permissions discipline) |
 | later | 12, 13, 14 (Bundle 4) |
 | Policy | `bump_*_generation` decision |
+| plugin | English language pack (former item 9, `get_numbered_name`) |
 | 6.1+ | deferred items |
 
 Hardest push from the downstream side: items 1, 2, 5, 11. These touch
