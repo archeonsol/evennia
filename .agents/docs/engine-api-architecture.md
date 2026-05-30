@@ -175,23 +175,125 @@ endpoint.
 
 ### H1. Hook registry
 
-Executable form of migration B1.
+Executable form of migration B1. Design locked after B1 shipped; this
+entry is the spec future-us implements against.
 
 - Problem: hook signatures inconsistent. Some return values matter,
   some don't. Some take `**kwargs`, some don't. Some fire on actor,
   some on room, some on both. No registry, no discovery, no signature
   contract. Game devs grep the engine.
-- Target: every public hook registered with declared signature,
-  return contract, call site. `engine.hooks.for_event("move")` lists
-  what fires. Decorator-driven; introspection generates docs.
-  Registry-not-decorated hooks rejected at startup.
-- Sequencing note: hooks B1 classifies as misshapen should be
-  rewritten before registration. Registering a misshapen signature
-  via H1 bakes the broken shape into the registry; better to fix
-  first.
-- Churn: medium.
-- Dependencies: migration B1 (the taxonomy that informs the
-  registry's schema).
+- Target: every public engine hook declared with `@hook(...)`. Startup
+  walks `evennia/*` typeclasses, lints that every `at_*` / `get_*` /
+  `return_*` method on registered base classes has the decorator (or
+  inherits a registered one), and rejects unregistered ones. Warn-only
+  during rollout, hard-fail once complete.
+- Churn: medium (~108 decorators + registry/lint plumbing + doc
+  generator).
+- Dependencies: B1 (shipped) for the taxonomy that informs the
+  schema.
+
+**Enforcement scope.** Engine-only. Game-side overrides inherit
+registration silently. Game-side novel hooks (e.g. game-specific
+`at_buff_applied`) are not required to register.
+
+**Dispatch mode.** Direct. The engine still calls
+`obj.at_pre_move(...)` etc. The registry is descriptive + validating
+metadata, not a dispatcher. Indirect `hooks.fire(...)` is explicitly
+rejected; that would be a much bigger rewrite.
+
+**Schema.** The `@hook` decorator carries:
+
+```python
+@hook(
+    event="puppet",            # canonical event family
+    phase="pre",               # pre | post | composite | failed
+    actor="target",            # self | mover | source | destination | target | ...
+    returns="veto",            # veto | transform | content | ignored | conditional
+    discipline="public",       # public | internal | mixed
+    fires_from=("DefaultAccount.puppet_object",
+                "ServerSession.at_sync"),
+    # structured state-at-firing fields, all optional:
+    state_pk=True,
+    state_db_row=True,
+    state_init_done=True,
+    state_location_set=None,
+    state_cache_state="rehydrated",  # fresh | rehydrated | n/a
+    state_mid_transaction=False,
+    notes="Reattach path fires with reattach=True kwarg.",
+)
+def at_pre_puppet(self, account, session=None, **kwargs): ...
+```
+
+`fires_from` uses `Class.method` strings (cheap, resolvable at import).
+Lint verifies each string resolves to a real callable.
+
+Override registration is silent inheritance by default. Overrides may
+optionally use `@hook(extends="LifecycleMixin.at_pre_puppet",
+notes="...")` to declare a deltas-only registration when the override
+has behavior worth recording (e.g. reattach suppression on
+`Character.at_post_puppet`).
+
+**API surface** (flat-API export at `evennia.hooks`):
+
+- `hooks.for_event(event_name) -> list[HookSpec]`
+- `hooks.describe(class_or_method) -> HookSpec | None`
+- `hooks.list_all() -> list[HookSpec]`
+- `hooks.lint() -> list[LintFinding]`
+- `hooks.generate_docs(format="markdown") -> str`
+
+**Sub-phases.**
+
+- **H1a.** Schema + decorator infrastructure. New `evennia/hooks/`
+  package: `__init__.py`, `registry.py`, `specs.py`. `HookSpec`
+  dataclass. `@hook(...)` decorator attaching `__evennia_hook__` and
+  registering in a module-level dict. Flat-API export. Apply to one
+  hook end-to-end (e.g. `LifecycleMixin.at_pre_puppet`) to validate
+  the schema. Tests for registration, lookup, invariants.
+- **H1b.** Lint module + startup hook. `hooks.lint()` walks every
+  subclass of registered base classes, finds `at_*` / `get_*` /
+  `return_*` methods, checks each has `__evennia_hook__` directly or
+  inherited. Validates `fires_from` paths resolve, `phase` matches
+  name pattern, default body return type matches declared `returns`.
+  Wired into server startup, warn-only during H1c rollout.
+- **H1c.** Register every engine hook, class by class. One commit per
+  typeclass (or small cluster). Order: simplest first
+  (`DefaultScript`, `DefaultChannel`), then `DefaultObject` +
+  `AppearanceMixin`, then `DefaultAccount`, finally `ServerSession`.
+  Source of truth: B1 enumeration in `Typeclass-Hooks.md`.
+- **H1d.** Doc generator. `evennia.hooks.generate_docs()` emits
+  markdown for the §3 return-contract tables, §4 override-discipline
+  tables, §5 state-at-firing tables, and event-grouped calling-order
+  summaries. Published docs (`Typeclass-Hooks.md`,
+  `Typeclass-Hooks-Reference.md`) get `<!-- generated:start -->` /
+  `<!-- generated:end -->` markers around those tables. §6 misshapen
+  list becomes lint output instead of hand-curated. §1 taxonomy, §2
+  prose, §7 triage history stay hand-written.
+- **H1e.** H-bucket forced decisions (§7 of `Typeclass-Hooks.md`).
+  Resolved as side effects of H1c registration:
+  - `at_desc`: register as `event="look", phase="composite",
+    actor="target"`. Misleading name stays; registry tells you when
+    it fires.
+  - `return_appearance`: register as `event="look",
+    phase="composite", returns="content"`. The `return_*` prefix
+    loses meaning once registry is the source of truth.
+  - Post-creation asymmetry: `DefaultAccount` / `DefaultChannel` /
+    `DefaultScript` get stub `at_*_post_creation` methods so
+    registration is symmetric. Three empty methods.
+  - `at_look` overload: register as different events.
+    `Object.at_look` is `event="look"`. `Account.at_look` becomes
+    `event="ooc_look"`. Forces the distinction.
+  - `get_return_exit` (D-bucket reclassified to H): register as
+    `event="exit_pair", phase="composite", returns="content",
+    discipline="public"`. It has tests; killing it later is a
+    separate decision.
+
+**Out of scope for H1.**
+
+- `appearance_template` slot ↔ provider coupling. Separate
+  config-registry problem, deferred (see `FUTURE-IDEAS.md`).
+- Cmdset hooks. Already documented in `command-system.md`; stay
+  there.
+- Web / protocol hooks. W1, post-launch.
 
 ### M1. Composable `move_to`
 
