@@ -71,5 +71,7 @@ def list_all():
 
 
 def lint():
-    """Return lint findings for the registry. H1b populates this; H1a returns []."""
-    return []
+    """Return all lint findings against the engine class set. See ``hooks.lint``."""
+    from .lint import lint as _lint
+
+    return _lint()
