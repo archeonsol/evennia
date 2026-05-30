@@ -124,11 +124,11 @@ anything (typically `None`).
 | `at_failed_login` | `DefaultAccount` | accounts/accounts.py:1832 | |
 | `at_disconnect` | `DefaultAccount` / `ServerSession` | accounts/accounts.py:1845; serversession.py:164 | |
 | `at_post_disconnect` | `DefaultAccount` / `DefaultGuest` | accounts/accounts.py:1862, :2167 | |
-| `at_get` / `at_give` / `at_drop` | `AppearanceMixin` | mixins/appearance.py:540, :582, :627 | Notifications. Naming inconsistency in main doc §6. |
+| `at_post_get` / `at_post_give` / `at_post_drop` | `AppearanceMixin` | mixins/appearance.py:540, :582, :627 | Notifications. |
 | `at_say` | `AppearanceMixin` | mixins/appearance.py:763 | Side-effect; emits via `msg`/`msg_contents`. |
 | `at_desc` | `AppearanceMixin` | mixins/appearance.py:504 | Notification. May delete `self`. |
 | `at_rename` | `TypedObject` / `AppearanceMixin` | typeclasses/models.py:931; appearance.py:907 | Two definitions; MRO resolves to mixin for Objects. |
-| `at_access` | `LifecycleMixin` / `DefaultAccount` | mixins/lifecycle.py:542; accounts.py:1655 | Notification; the access decision is already made. |
+| `at_post_access` | `LifecycleMixin` / `DefaultAccount` | mixins/lifecycle.py:542; accounts.py:1655 | Notification; the access decision is already made. |
 | `at_post_channel_msg` | `DefaultAccount` | accounts/accounts.py:1411 | |
 | `at_channel_creation` | `DefaultChannel` | comms/comms.py:166 | |
 | `at_post_msg` | `DefaultChannel` | comms/comms.py:691 | |
@@ -261,7 +261,7 @@ Three categories per hook:
 | Hook | Discipline | What depends | Notes |
 |---|---|---|---|
 | `at_pre_get` / `at_pre_give` / `at_pre_drop` | Public override (veto) | Engine consults return. | The pre-side veto is the right place for game-side restrictions. |
-| `at_get` / `at_give` / `at_drop` | Public override (notification, misshapen naming) | Engine: nothing. | Naming inconsistency; see main doc §6. |
+| `at_post_get` / `at_post_give` / `at_post_drop` | Public override (notification) | Engine: nothing. | |
 | `at_rename` / `at_pre_rename` | Public override | `at_pre_rename` vetoes; `at_rename` notifies. Two definitions of `at_rename` exist; MRO matters. | When overriding for an Object, override the mixin version (`AppearanceMixin.at_rename`). |
 
 ### 4.7 Account-side lifecycle and login
@@ -314,7 +314,7 @@ Three categories per hook:
 | `at_cmdset_get` | Public override | Last-second mutation of an object's merged cmdset. Cross-ref `command-system.md`. |
 | `get_cmdsets` | Public override | Returns the per-class cmdset stack. Cross-ref `command-system.md`. |
 | `get_cmdset_providers` | Internal | Duck-typed by cmdhandler. Override only if you understand the session-proxy contract (`command-system.md`). |
-| `at_access` | Public override (notification) | Engine: nothing (return ignored). | Audit point. |
+| `at_post_access` | Public override (notification) | Engine: nothing (return ignored). | Audit point. |
 | `get_default_lockstring` | Public override | Consumed by `basetype_setup`. |
 
 ### 4.12 Server-side scripts and the `at_server_*` hooks

@@ -223,8 +223,8 @@ class CmdContainerGet(CmdGet):
                 caller.location.msg_contents(
                     f"$You() $conj(get) {singular} from {container_name}.", from_obj=caller
                 )
-            # calling at_get hook method
-            obj.at_get(caller)
+            # calling at_post_get hook method
+            obj.at_post_get(caller)
 
 
 class CmdPut(CmdDrop):
@@ -292,8 +292,8 @@ class CmdPut(CmdDrop):
             caller.location.msg_contents(
                 f"$You() $conj(put) {obj_name} in {container_name}.", from_obj=caller
             )
-            # Call the object script's at_drop() method.
-            obj.at_drop(caller)
+            # Call the object script's at_post_drop() method.
+            obj.at_post_drop(caller)
 
 
 class ContainerCmdSet(CmdSet):

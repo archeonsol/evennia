@@ -620,21 +620,21 @@ Three matching pre/post pairs on `AppearanceMixin`:
 getter.get(obj):
   obj.at_pre_get(getter)      ─── falsy-not-None? abort
   (call site moves obj into getter via move_to; §2.5)
-  obj.at_get(getter)
+  obj.at_post_get(getter)
 ```
 
 ```
 giver.give(obj, getter):
   obj.at_pre_give(giver, getter)   ─── falsy-not-None? abort
   (call site moves obj into getter via move_to)
-  obj.at_give(giver, getter)
+  obj.at_post_give(giver, getter)
 ```
 
 ```
 dropper.drop(obj):
   obj.at_pre_drop(dropper)         ─── falsy-not-None? abort
   (call site moves obj out of dropper, typically to dropper.location)
-  obj.at_drop(dropper)
+  obj.at_post_drop(dropper)
 ```
 
 All six hooks are public override points. The fork's default
@@ -961,18 +961,18 @@ Driver: `LifecycleMixin.access()` (mixins/lifecycle.py:221).
 obj.access(accessing_obj, access_type, default, no_superuser_bypass, **kwargs)
   ├─ result = super().access(accessing_obj, access_type, ...)
   │     (TypedObject.access; consults lock handler)
-  ├─ obj.at_access(result, accessing_obj, access_type, **kwargs)
-  │     [LifecycleMixin.at_access; mixins/lifecycle.py:542]
+  ├─ obj.at_post_access(result, accessing_obj, access_type, **kwargs)
+  │     [LifecycleMixin.at_post_access; mixins/lifecycle.py:542]
   └─ return result
 ```
 
-`at_access` fires after the lock result is computed and BEFORE
+`at_post_access` fires after the lock result is computed and BEFORE
 `access()` returns. Its return value is ignored (so it cannot
 change the access decision); it's a notification hook for logging,
-trace, or analytics. See §6 for the naming concern (the prefix
-suggests pre/post but it is strictly post).
+trace, or analytics. (Renamed from `at_access` in the R-bucket
+cleanup.)
 
-Account `at_access` (accounts.py:1655) is the analog for
+Account `at_post_access` (accounts.py:1655) is the analog for
 account-side access checks.
 
 ### 2.23 Search pipeline
@@ -1038,18 +1038,14 @@ register the current shape verbatim.
   the same event-family). Either rename to make the order obvious
   (`at_account_first_login`?) or rewrite the call sequence so
   `at_pre_login` truly leads.
-- **`at_access`** (§2.22) is a post-event notification; the prefix
-  `at_<event>` without `pre`/`post` reads as composite/lifecycle.
-  Rename to `at_post_access`.
+- ~~**`at_access`**~~: renamed to `at_post_access` (R-bucket).
 - **`at_desc`** (§2.13) is named as if it were a post-event hook
   for setting a description, but it fires on every look. Either
   rename (`at_being_looked_at`?) or move the look-time semantics
   into `at_look` / `return_appearance`.
-- **`at_get` / `at_give` / `at_drop`** (§2.12) lack the `at_post_`
-  prefix despite being notifications. The pre-hooks are correctly
-  `at_pre_get` / `at_pre_give` / `at_pre_drop`. Renaming to
-  `at_post_get` / `at_post_give` / `at_post_drop` would make the
-  pairs symmetric.
+- ~~**`at_get` / `at_give` / `at_drop`**~~: renamed to
+  `at_post_get` / `at_post_give` / `at_post_drop` (R-bucket). Pairs
+  now symmetric with `at_pre_get` / `at_pre_give` / `at_pre_drop`.
 - **`at_msg_send` / `at_msg_receive`** (§2.16) are veto-on-falsy
   hooks named without the `at_pre_*` prefix despite firing before
   send/delivery. The send/receive pair is a route, not a pre/post
@@ -1196,8 +1192,8 @@ rename-only changes land as one engine + game commit. Buckets:
 |---|---|---|
 | ~~`at_object_delete`~~ | Renamed → `at_pre_delete`. Shipped. | |
 | ~~`at_script_delete`~~ | Renamed → `at_pre_delete` (Script version). Shipped. | |
-| `at_access` | Rename → `at_post_access`. | Notification, not composite. Two definitions (Object and Account); rename both. |
-| `at_get` / `at_give` / `at_drop` | Rename → `at_post_get` / `at_post_give` / `at_post_drop`. | Pre/post symmetry with existing `at_pre_*` halves. |
+| ~~`at_access`~~ | Renamed → `at_post_access`. Shipped. | |
+| ~~`at_get` / `at_give` / `at_drop`~~ | Renamed → `at_post_get` / `at_post_give` / `at_post_drop`. Shipped. | |
 | `at_first_save` signature drift | Add `**kwargs` to `LifecycleMixin`, `DefaultAccount`, `DefaultChannel` versions. | Matches Script signature; allows future extension without re-touching every site. |
 | `at_post_unpuppet` positional clarity | Make signature `(self, account, session=None, **kwargs)` (drop the `account=None` default). | Call site always passes account positionally; default exists only because nobody noticed. |
 | `at_channel_msg` docstring | Fix `Channel.msg` docstring (comms.py:636) to name `channel_msg`, not `at_channel_msg`. | Docstring lie. |

@@ -750,7 +750,7 @@ class EventObject(DefaultObject):
         """Return the CallbackHandler."""
         return CallbackHandler(self)
 
-    def at_get(self, getter, **kwargs):
+    def at_post_get(self, getter, **kwargs):
         """
         Called by the default `get` command when this object has been
         picked up.
@@ -763,10 +763,10 @@ class EventObject(DefaultObject):
             permissions for that.
 
         """
-        super().at_get(getter, **kwargs)
+        super().at_post_get(getter, **kwargs)
         self.callbacks.call("get", getter, self)
 
-    def at_drop(self, dropper, **kwargs):
+    def at_post_drop(self, dropper, **kwargs):
         """
         Called by the default `drop` command when this object has been
         dropped.
@@ -779,7 +779,7 @@ class EventObject(DefaultObject):
             permissions from that.
 
         """
-        super().at_drop(dropper, **kwargs)
+        super().at_post_drop(dropper, **kwargs)
         self.callbacks.call("drop", dropper, self)
 
 

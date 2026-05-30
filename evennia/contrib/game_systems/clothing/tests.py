@@ -155,7 +155,7 @@ class TestClothingFunc(BaseEvenniaTest):
         self.assertFalse(self.test_hat.db.worn)
 
         self.test_hat.db.worn = True
-        self.test_hat.at_get(self.wearer)
+        self.test_hat.at_post_get(self.wearer)
         self.assertFalse(self.test_hat.db.worn)
 
         self.test_hat.db.covered_by = self.test_shirt

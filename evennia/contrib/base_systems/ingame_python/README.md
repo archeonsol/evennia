@@ -50,7 +50,7 @@ To see the system in context, when an object is picked up (using the default
 `get` command), a specific event is fired:
 
 1. The event "get" is set on objects (on the `Object` typeclass).
-2. When using the "get" command to pick up an object, this object's `at_get`
+2. When using the "get" command to pick up an object, this object's `at_post_get`
    hook is called.
 3. A modified hook of DefaultObject is set by the event system.  This hook will
    execute (or call) the "get" event on this object.

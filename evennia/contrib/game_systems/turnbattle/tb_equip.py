@@ -275,7 +275,7 @@ class TBEWeapon(DefaultObject):
             "weapon"  # Single word for weapon - I.E. "dagger", "staff", "scimitar"
         )
 
-    def at_drop(self, dropper):
+    def at_post_drop(self, dropper):
         """
         Stop being wielded if dropped.
         """
@@ -283,7 +283,7 @@ class TBEWeapon(DefaultObject):
             dropper.db.wielded_weapon = None
             dropper.location.msg_contents("%s stops wielding %s." % (dropper, self))
 
-    def at_give(self, giver, getter):
+    def at_post_give(self, giver, getter):
         """
         Stop being wielded if given.
         """
@@ -316,7 +316,7 @@ class TBEArmor(DefaultObject):
             return False
         return True
 
-    def at_drop(self, dropper):
+    def at_post_drop(self, dropper):
         """
         Stop being wielded if dropped.
         """
@@ -333,7 +333,7 @@ class TBEArmor(DefaultObject):
             return False
         return True
 
-    def at_give(self, giver, getter):
+    def at_post_give(self, giver, getter):
         """
         Stop being wielded if given.
         """

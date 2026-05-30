@@ -535,7 +535,7 @@ class TBRangeObject(DefaultObject):
             return False
         return True
 
-    def at_drop(self, dropper):
+    def at_post_drop(self, dropper):
         """
         Called by the default `drop` command when this object has been
         dropped.
@@ -583,7 +583,7 @@ class TBRangeObject(DefaultObject):
                 return False
         return True
 
-    def at_get(self, getter):
+    def at_post_get(self, getter):
         """
         Called by the default `get` command when this object has been
         picked up.
@@ -641,7 +641,7 @@ class TBRangeObject(DefaultObject):
                 return False
         return True
 
-    def at_give(self, giver, getter):
+    def at_post_give(self, giver, getter):
         """
         Called by the default `give` command when this object has been
         given.

@@ -471,8 +471,8 @@ class CmdGet(NumberedTargetCommand):
         for obj in objs:
             if obj.move_to(caller, quiet=True, move_type="get"):
                 moved.append(obj)
-                # calling at_get hook method
-                obj.at_get(caller)
+                # calling at_post_get hook method
+                obj.at_post_get(caller)
 
         if not moved:
             # none of the objects were successfully moved
@@ -531,8 +531,8 @@ class CmdDrop(NumberedTargetCommand):
         for obj in objs:
             if obj.move_to(caller.location, quiet=True, move_type="drop"):
                 moved.append(obj)
-                # Call the object's at_drop() method.
-                obj.at_drop(caller)
+                # Call the object's at_post_drop() method.
+                obj.at_post_drop(caller)
 
         if not moved:
             # none of the objects were successfully moved
@@ -600,8 +600,8 @@ class CmdGive(NumberedTargetCommand):
         for obj in to_give:
             if obj.move_to(target, quiet=True, move_type="give"):
                 moved.append(obj)
-                # Call the object's at_give() method.
-                obj.at_give(caller, target)
+                # Call the object's at_post_give() method.
+                obj.at_post_give(caller, target)
 
         if not moved:
             caller.msg(f"You could not give that to {target.get_display_name(caller)}.")

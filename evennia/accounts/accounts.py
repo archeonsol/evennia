@@ -277,7 +277,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
      - at_post_load()
      - at_first_save()
-     - at_access()
+     - at_post_access()
      - at_cmdset_get(**kwargs)
      - at_password_change(**kwargs)
      - at_first_login()
@@ -1523,7 +1523,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             lock bypassing. Be careful with this one.
 
         Keyword Args:
-          kwargs (any): Passed to the at_access hook along with the result.
+          kwargs (any): Passed to the at_post_access hook along with the result.
 
         Returns:
             result (bool): Result of access check.
@@ -1535,7 +1535,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             default=default,
             no_superuser_bypass=no_superuser_bypass,
         )
-        self.at_access(result, accessing_obj, access_type, **kwargs)
+        self.at_post_access(result, accessing_obj, access_type, **kwargs)
         return result
 
     @property
@@ -1652,7 +1652,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         self.permissions.batch_add(*permissions)
 
-    def at_access(self, result, accessing_obj, access_type, **kwargs):
+    def at_post_access(self, result, accessing_obj, access_type, **kwargs):
         """
         This is triggered after an access-call on this Account has
             completed.

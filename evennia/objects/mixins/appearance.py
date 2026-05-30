@@ -463,7 +463,7 @@ class AppearanceMixin:
     # deprecated
     at_before_get = at_pre_get
 
-    def at_get(self, getter, **kwargs):
+    def at_post_get(self, getter, **kwargs):
         """
         Called by the default `get` command when this object has been
         picked up.
@@ -505,7 +505,7 @@ class AppearanceMixin:
     # deprecated
     at_before_give = at_pre_give
 
-    def at_give(self, giver, getter, **kwargs):
+    def at_post_give(self, giver, getter, **kwargs):
         """
         Called by the default `give` command when this object has been
         given.
@@ -550,7 +550,7 @@ class AppearanceMixin:
     # deprecated
     at_before_drop = at_pre_drop
 
-    def at_drop(self, dropper, **kwargs):
+    def at_post_drop(self, dropper, **kwargs):
         """
         Called by the default `drop` command when this object has been
         dropped.

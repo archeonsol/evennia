@@ -231,7 +231,7 @@ class LifecycleMixin:
           default (bool, optional): What to return if no lock of access_type was found.
           no_superuser_bypass (bool, optional): If `True`, don't skip
             lock check for superuser (be careful with this one).
-          **kwargs: Passed on to the at_access hook along with the result of the access check.
+          **kwargs: Passed on to the at_post_access hook along with the result of the access check.
 
         """
         result = super().access(
@@ -240,7 +240,7 @@ class LifecycleMixin:
             default=default,
             no_superuser_bypass=no_superuser_bypass,
         )
-        self.at_access(result, accessing_obj, access_type, **kwargs)
+        self.at_post_access(result, accessing_obj, access_type, **kwargs)
         return result
 
     def at_first_save(self):
@@ -539,7 +539,7 @@ class LifecycleMixin:
         """
         pass
 
-    def at_access(self, result, accessing_obj, access_type, **kwargs):
+    def at_post_access(self, result, accessing_obj, access_type, **kwargs):
         """
         This is called with the result of an access call, along with
         any kwargs used for that call. The return of this method does

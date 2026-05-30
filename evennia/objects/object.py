@@ -346,7 +346,7 @@ class DefaultObject(
      at_server_reload()   - called before server is reloaded
      at_server_shutdown() - called just before server is fully shut down
 
-     at_access(result, accessing_obj, access_type) - called with the result
+     at_post_access(result, accessing_obj, access_type) - called with the result
                             of a lock access check on this object. Return value
                             does not affect check result.
 
@@ -387,12 +387,12 @@ class DefaultObject(
      at_desc(looker=None)      - called by 'look' whenever the
                                  appearance is requested.
      at_pre_get(getter, **kwargs)
-     at_get(getter)            - called after object has been picked up.
+     at_post_get(getter)            - called after object has been picked up.
                                  Does not stop pickup.
      at_pre_give(giver, getter, **kwargs)
-     at_give(giver, getter, **kwargs)
+     at_post_give(giver, getter, **kwargs)
      at_pre_drop(dropper, **kwargs)
-     at_drop(dropper, **kwargs)          - called when this object has been dropped.
+     at_post_drop(dropper, **kwargs)          - called when this object has been dropped.
      at_pre_say(speaker, message, **kwargs)
      at_say(message, msg_self=None, msg_location=None, receivers=None, msg_receivers=None, **kwargs)
 

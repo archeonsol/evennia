@@ -309,7 +309,7 @@ class ContribClothing(DefaultObject):
                 remove_message += f", revealing {iter_to_str(uncovered_list)}"
             wearer.location.msg_contents(remove_message + ".", from_obj=wearer)
 
-    def at_get(self, getter):
+    def at_post_get(self, getter):
         """
         Makes absolutely sure clothes aren't already set as 'worn'
         when they're picked up, in case they've somehow had their
