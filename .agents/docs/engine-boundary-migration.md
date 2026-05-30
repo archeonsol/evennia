@@ -91,7 +91,10 @@ is downstream of this and should not start until it lands.
 **C1. Unified actor/context abstraction.** Working name deliberately
 ambiguous; pick during design. Goal: one object answering "who is
 acting, on what, with what authority," unifying session, account,
-puppet, and effective permissions. Once landed:
+puppet, and effective permissions. Substrate for **L1** (actor
+argument to `check`) and **R1** (viewer argument to `render`) in
+[`engine-api-architecture.md`](engine-api-architecture.md); both can
+start scoping before C1 lands but depend on its shape. Once landed:
 
 - `self.caller` ambiguity in commands collapses (the object always
   exposes session/account/puppet explicitly).

@@ -38,3 +38,5 @@ Vendor-agnostic skills live in `.agents/skills/`. Vendor directories (`.claude/s
 - [CI/CD](.agents/docs/ci.md) — GitHub Actions workflows, test matrix, database configs, Docker, secrets
 - [GitHub Issues & PRs](.agents/docs/github.md) — listing, searching, and reviewing issues/PRs with `gh` CLI
 - [Hygiene Backlog](.agents/docs/hygiene-backlog.md), [Future Ideas](FUTURE-IDEAS.md), [Engine Boundary Migration](.agents/docs/engine-boundary-migration.md) (history + disposed items in [archive](.agents/docs/engine-boundary-migration-archive.md)) — parked findings, deferred design directions, and the upstream PR plan for engine/game boundary moves; check before re-deriving
+- [Engine API Architecture](.agents/docs/engine-api-architecture.md) — two-layer engine target, render/deliver pipeline, lock objects, hook registry, etc. Gated on Underspire launch as API-freeze deadline. Companion to the boundary migration doc.
+- [Engine Long-Horizon Sketch](.agents/docs/engine-long-horizon.md) — speculative 2.0-scale items (typeclass decoupling, headless mode, package split). Sketch-level, not committed; exists so Level 2 decisions don't close off Level 3 paths.
