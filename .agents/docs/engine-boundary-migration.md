@@ -50,12 +50,19 @@ contract will surface misshapen hooks early and give later items
 (both in this doc and in the architecture doc) a fixed target to
 honor.
 
-**B1. Typeclass hooks taxonomy and contract doc.** Write the
-typeclass-side equivalent of [`command-system.md`](command-system.md).
-Design predecessor to **H1** (hook registry) in
-[`engine-api-architecture.md`](engine-api-architecture.md): this doc
-defines the contract, H1 makes it executable. Schema choices here
-inform H1's decorator surface. At minimum the doc must define:
+**B1. Typeclass hooks taxonomy and contract doc.** Shipped. See
+[`typeclass-hooks.md`](typeclass-hooks.md) for taxonomy, calling
+order per lifecycle event, and the misshapen-hooks list;
+[`typeclass-hooks-reference.md`](typeclass-hooks-reference.md) for
+return-value contracts, override discipline, and
+object-state-at-firing tables. Design predecessor to **H1** (hook
+registry) in
+[`engine-api-architecture.md`](engine-api-architecture.md): the
+typeclass doc defines the contract, H1 makes it executable. The
+misshapen-hooks list in §6 of the typeclass doc is the Phase C / H1
+cleanup input.
+
+Original scope (preserved for archive):
 
 - Naming taxonomy. Today's `at_*` covers vetoes (`at_pre_move`),
   notifications (`at_post_move`), one-shot mutators
@@ -112,7 +119,7 @@ into pre-formatted text.
 | `.41` | shipped | Bundle 1.5 universal veto/transform rule |
 | `.42` | shipped | Bundle 2 (items 5, 6, 7) |
 | `.43` | shipped | Phase A (A1 language polish + A2 flat API hygiene + A3 `bump_*_generation` doc + A4 `at_sync` reattach hooks) |
-| `.44+` | B | B1 hooks taxonomy + contract doc |
+| `.44+` | shipped | B1 hooks taxonomy + contract doc |
 | later | C | C1 follow / escort / shadow |
 | later | C | C2 scene / IC broadcast helpers |
 
