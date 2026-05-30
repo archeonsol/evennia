@@ -1,0 +1,67 @@
+# Prompts: Level 2 architecture work
+
+Self-contained prompts for picking up Level 2 architecture items in a
+fresh agent context. Each prompt assumes no prior conversation
+history: drop it into a new context and the agent has everything
+needed to start.
+
+## How to use
+
+1. Pick a prompt from the list below.
+2. Open a fresh agent context.
+3. Paste the prompt content as the initial message.
+4. The agent proposes a design first, gets review, then implements.
+
+## Prompts in this folder
+
+Currently parallel-startable (no unresolved dependencies):
+
+**No dependencies on anything not yet shipped:**
+
+- [Q1: search Result type](Q1-search-result-type.md) — small.
+  Replace `caller.search` shape soup.
+- [C2: cmdset introspector](C2-cmdset-introspector.md) — small.
+  `account.explain_cmd("look")`.
+- [S1: settings as typed objects](S1-settings-objects.md) — medium.
+- [AS1: sync/async commitment](AS1-sync-async-commitment.md) —
+  medium. Direction + helpers.
+- [A1: typed attribute descriptors](A1-attribute-descriptors.md) —
+  large.
+- [I1: actor abstraction](I1-actor-abstraction.md) — largest.
+  Substrate; unblocks L1, I2, R1.
+
+**Unblocked by B1 (typeclass hooks taxonomy doc, shipped):**
+
+- [H1: hook registry](H1-hook-registry.md) — medium. Executable
+  form of B1.
+- [M1: composable move_to](M1-composable-move.md) — medium. Builder
+  replaces kwargs-as-API.
+- [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces
+  merge-time-and-cached with simpler model; supersedes C2 as the
+  endpoint.
+
+Each prompt invites the agent to propose a design before
+implementing. The user reviews the design before the agent starts
+coding. This is approach (a) from the prompt-design discussion: don't
+commit to a design in the prompt, let the executing agent propose one
+cold and iterate with the user.
+
+## Status convention
+
+Mark status at the top of each prompt as work progresses:
+
+- `Status: todo` (default)
+- `Status: in-progress`
+- `Status: shipped (commit SHA)`
+
+## Cross-references
+
+- [Engine API Architecture](../docs/engine-api-architecture.md) —
+  Level 2 target; canonical definition of every item here.
+- [Engine Boundary Migration](../docs/engine-boundary-migration.md) —
+  fork/engine boundary work (different doc, different scope).
+- [Engine Long-Horizon Sketch](../docs/engine-long-horizon.md) —
+  Level 3 sketch (post-Level 2; not parallelizable yet).
+- [Typeclass Hooks Contracts](../docs/typeclass-hooks.md) +
+  [Reference Tables](../docs/typeclass-hooks-reference.md) — B1's
+  output; consumed by H1, M1, R1, CM1.
