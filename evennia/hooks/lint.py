@@ -102,13 +102,25 @@ def _has_inherited_spec(cls, name):
     return False
 
 
+# Handler classes that fire hooks but are neither typeclasses nor
+# typeclass ancestors. Listed here so fires_from strings like
+# "CmdSetHandler.get" resolve cleanly without forcing a full
+# module-walk during lint.
+_AUX_HANDLER_PATHS = (
+    "evennia.commands.cmdsethandler:CmdSetHandler",
+    "evennia.locks.lockhandler:LockHandler",
+    "evennia.server.serversession:ServerSession",
+    "evennia.server.service:EvenniaServerService",
+)
+
+
 def _resolve_fires_from(path):
     """Resolve a ``"Class.method"`` string to a callable.
 
     Searches the engine class set first, then ancestors of those classes
     (to reach parents like ``SharedMemoryModel`` that fire hooks but
-    are not themselves registered bases). Returns the callable or
-    ``None`` if unresolved.
+    are not themselves registered bases), then a small set of known
+    handler classes. Returns the callable or ``None`` if unresolved.
     """
     class_name, _, method_name = path.partition(".")
     if not method_name:
@@ -117,6 +129,10 @@ def _resolve_fires_from(path):
     for cls in _engine_class_set(_load_engine_bases()):
         candidates.add(cls)
         candidates.update(cls.__mro__)
+    for aux_path in _AUX_HANDLER_PATHS:
+        cls = _resolve(aux_path)
+        if cls is not None:
+            candidates.add(cls)
     for cls in candidates:
         if cls.__name__ == class_name:
             method = getattr(cls, method_name, None)
@@ -133,6 +149,13 @@ def _check_class(cls):
             continue
         unwrapped = _unwrap(attr)
         if not callable(unwrapped):
+            continue
+        # Skip class-level aliases: `foo = some_other_function` rebinds an
+        # existing function whose qualname ends with a different method
+        # name. Not a new method definition; lint the original definition
+        # instead.
+        qualname = getattr(unwrapped, "__qualname__", "")
+        if qualname and not qualname.endswith(f".{name}"):
             continue
         if hasattr(unwrapped, "__evennia_hook__"):
             continue

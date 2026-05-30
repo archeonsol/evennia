@@ -18,6 +18,7 @@ from django.utils.translation import gettext as _
 import evennia
 from evennia.commands import cmdset
 from evennia.commands.cmdsethandler import CmdSetHandler
+from evennia.hooks import hook
 from evennia.objects.manager import ObjectManager
 from evennia.objects.mixins.appearance import AppearanceMixin
 from evennia.objects.mixins.lifecycle import LifecycleMixin
@@ -464,6 +465,15 @@ class DefaultObject(
         """True if this object has an associated account (online or offline)."""
         return bool(self.account)
 
+    @hook(
+        event="cmdset",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="internal",
+        fires_from=(),
+        notes="Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider]. See command-system.md.",
+    )
     def get_cmdset_providers(self) -> dict[str, "CmdSetProvider"]:
         """
         Overrideable method which returns a dictionary of every kind of object which

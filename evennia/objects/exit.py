@@ -9,6 +9,7 @@ import typing
 from django.utils.translation import gettext as _
 
 from evennia.commands import cmdset
+from evennia.hooks import hook
 from evennia.objects.models import ObjectDB
 from evennia.objects.object import _COMMAND_DEFAULT_CLASS, DefaultObject
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
@@ -258,6 +259,10 @@ class DefaultExit(DefaultObject):
             # we are resetting, or no exit-cmdset was set. Create one dynamically.
             self.cmdset.add_default(self.create_exit_cmdset(self), persistent=False)
 
+    @hook(
+        extends="LifecycleMixin.at_post_load",
+        notes="Clears the return-exit cache on every cache load.",
+    )
     def at_post_load(self):
         """
         This is called when this objects is re-loaded from cache. When
@@ -299,6 +304,10 @@ class DefaultExit(DefaultObject):
                 # No shorthand error message. Call hook.
                 self.at_failed_traverse(traversing_object)
 
+    @hook(
+        extends="MovementMixin.at_failed_traverse",
+        notes="DefaultExit messages 'You cannot go there.' to the would-be traverser.",
+    )
     def at_failed_traverse(self, traversing_object, **kwargs):
         """
         Overloads the default hook to implement a simple default error message.
@@ -316,6 +325,15 @@ class DefaultExit(DefaultObject):
         """
         traversing_object.msg(_("You cannot go there."))
 
+    @hook(
+        event="exit_pair",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Returns the return-exit (or queryset if return_all). H1e: reclassified from D to H bucket; has tests, retain.",
+    )
     def get_return_exit(self, return_all=False):
         """
         Get the exits that pair with this one in its destination room

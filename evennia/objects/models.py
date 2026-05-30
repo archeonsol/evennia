@@ -21,6 +21,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import validate_comma_separated_integer_list
 from django.db import models
 
+from evennia.hooks import hook
 from evennia.objects.manager import ObjectDBManager
 from evennia.typeclasses.models import TypedObject
 from evennia.utils import logger
@@ -381,6 +382,15 @@ class ObjectDB(TypedObject):
         instance._loaded_location_id = instance.db_location_id
         return instance
 
+    @hook(
+        event="location_save",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="internal",
+        fires_from=("ObjectDB.save",),
+        notes="Engine-internal: fires after db_location is saved. Reconciles the contents cache.",
+    )
     def at_db_location_postsave(self, new):
         """
         This is called automatically after the location field was

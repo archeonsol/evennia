@@ -606,7 +606,7 @@ class MovementMixin:
         actor="self",
         returns="veto",
         discipline="public",
-        fires_from=("DefaultExit.at_traverse",),
+        fires_from=("DefaultExit.do_traverse",),
         notes="Fires on the exit. Veto fires at_failed_traverse; move chain does NOT fire.",
     )
     def at_pre_traverse(self, traversing_object, target_location, **kwargs):
@@ -637,7 +637,7 @@ class MovementMixin:
         actor="self",
         returns="ignored",
         discipline="public",
-        fires_from=("DefaultExit.at_traverse",),
+        fires_from=("DefaultExit.do_traverse",),
         notes="Fires on the exit after the move chain has completed.",
     )
     def at_post_traverse(self, traversing_object, source_location, **kwargs):
@@ -666,7 +666,7 @@ class MovementMixin:
         actor="self",
         returns="ignored",
         discipline="public",
-        fires_from=("DefaultExit.at_traverse",),
+        fires_from=("DefaultExit.do_traverse",),
         notes="Fires on the exit when at_pre_traverse vetoes.",
     )
     def at_failed_traverse(self, traversing_object, **kwargs):

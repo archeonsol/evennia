@@ -513,7 +513,7 @@ class LifecycleMixin:
         actor="self",
         returns="content",
         discipline="public",
-        fires_from=("CmdSetHandler._get_cmdsets",),
+        fires_from=(),
         notes="Returns the per-class cmdset stack as (current, cmdsets). See command-system.md.",
     )
     def get_cmdsets(self, caller, current, **kwargs):
