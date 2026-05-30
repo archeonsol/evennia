@@ -3,6 +3,7 @@
 from django.conf import settings
 from django.utils.translation import gettext as _
 
+from evennia.hooks import hook
 from evennia.utils import create, logger
 from evennia.utils.utils import make_iter
 
@@ -438,6 +439,23 @@ class LifecycleMixin:
         """
         return self.cmdset.current, list(self.cmdset.cmdset_stack)
 
+    @hook(
+        event="puppet",
+        phase="pre",
+        actor="target",
+        returns="veto",
+        discipline="public",
+        fires_from=(
+            "DefaultAccount.puppet_object",
+            "ServerSession.at_sync",
+        ),
+        state_pk=True,
+        state_db_row=True,
+        state_init_done=True,
+        state_cache_state="rehydrated",
+        state_mid_transaction=False,
+        notes="Reattach path fires with reattach=True kwarg.",
+    )
     def at_pre_puppet(self, account, session=None, **kwargs):
         """
         Called just before an Account connects to this object to puppet it.

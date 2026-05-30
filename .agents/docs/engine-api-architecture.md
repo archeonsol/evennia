@@ -194,7 +194,11 @@ entry is the spec future-us implements against.
 
 **Enforcement scope.** Engine-only. Game-side overrides inherit
 registration silently. Game-side novel hooks (e.g. game-specific
-`at_buff_applied`) are not required to register.
+`at_buff_applied`) are not required to register. Lookup mirrors
+enforcement: `describe(method)` reads the `__evennia_hook__` attribute
+directly. Game-side overrides that redefine the method without `@hook`
+return `None`; the inherited spec is recoverable by inspecting the
+parent class explicitly.
 
 **Dispatch mode.** Direct. The engine still calls
 `obj.at_pre_move(...)` etc. The registry is descriptive + validating

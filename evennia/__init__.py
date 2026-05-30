@@ -103,6 +103,7 @@ _LAZY_EXPORTS = {
     "EvMore": ".utils.evmore:EvMore",
     "ANSIString": ".utils.ansi:ANSIString",
     "signals": ".server.signals:",
+    "hooks": ".hooks:",
     "FuncParser": ".utils.funcparser:FuncParser",
     "OnDemandTask": ".scripts.ondemandhandler:OnDemandTask",
     # Handlers (singletons exposed as module attributes)
