@@ -63,6 +63,7 @@ class EvenniaServerService(MultiService):
         self._flush_cache = None
         self._last_server_time_snapshot = 0
         self.maintenance_task = None
+        self.stall_watchdog = None
         self._runtime_config_row = None  # cached ServerConfig row for "runtime"
         self._shutdown_deferred = None
         self._shutdown_in_progress = False
@@ -92,8 +93,7 @@ class EvenniaServerService(MultiService):
         the server needs to do. It is called every minute.
         """
         if not self._flush_cache:
-            from evennia.utils.idmapper.models import \
-                conditional_flush as _FLUSH_CACHE
+            from evennia.utils.idmapper.models import conditional_flush as _FLUSH_CACHE
 
             self._flush_cache = _FLUSH_CACHE
 
@@ -131,8 +131,7 @@ class EvenniaServerService(MultiService):
 
         if getattr(settings, "ATTRIBUTE_FLUSH_ON_MAINTENANCE", False):
             try:
-                from evennia.typeclasses.attribute_metrics import \
-                    maybe_log_flush_metrics
+                from evennia.typeclasses.attribute_metrics import maybe_log_flush_metrics
                 from evennia.typeclasses.attributes import flush_all_dirty
 
                 stats = flush_all_dirty()
@@ -233,8 +232,7 @@ class EvenniaServerService(MultiService):
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
-            from evennia.server.game_index_client.service import \
-                EvenniaGameIndexService
+            from evennia.server.game_index_client.service import EvenniaGameIndexService
 
             egi_service = EvenniaGameIndexService()
             egi_service.setServiceParent(self)
@@ -287,10 +285,13 @@ class EvenniaServerService(MultiService):
     def register_webserver(self):
         # Start a django-compatible webserver.
 
-        from evennia.server.webserver import (DjangoWebRoot,
-                                              LockableThreadPool,
-                                              PrivateStaticRoot, Website,
-                                              WSGIWebServer)
+        from evennia.server.webserver import (
+            DjangoWebRoot,
+            LockableThreadPool,
+            PrivateStaticRoot,
+            Website,
+            WSGIWebServer,
+        )
 
         # start a thread pool and define the root url (/) as a wsgi resource
         # recognized by Django
@@ -518,6 +519,12 @@ class EvenniaServerService(MultiService):
         self.maintenance_task = LoopingCall(self.server_maintenance)
         self.maintenance_task.start(60, now=True)  # call every minute
 
+        # start the reactor-stall watchdog (no-op if REACTOR_STALL_WARNING_MS is 0)
+        from evennia.utils.reactor_watchdog import ReactorStallWatchdog
+
+        self.stall_watchdog = ReactorStallWatchdog()
+        self.stall_watchdog.start()
+
         # update eventual changed defaults
         self.update_defaults()
 
@@ -660,6 +667,10 @@ class EvenniaServerService(MultiService):
             evennia.ServerConfig.objects.conf("server_restart_mode", "reset")
             self.at_server_cold_stop()
 
+        # stop the reactor-stall watchdog before teardown
+        if self.stall_watchdog is not None:
+            self.stall_watchdog.stop()
+
         # tickerhandler state should always be saved.
         from evennia.scripts.tickerhandler import TICKER_HANDLER
 
@@ -781,8 +792,7 @@ class EvenniaServerService(MultiService):
         # Prime the cmdset merge cache for every already-puppeted session so
         # the first typed command after reload does not pay the cold merge.
         if mode == "reload":
-            from evennia.commands.cmdset_merge_warmup import \
-                warm_all_logged_in_puppet_sessions
+            from evennia.commands.cmdset_merge_warmup import warm_all_logged_in_puppet_sessions
 
             try:
                 warm_all_logged_in_puppet_sessions()

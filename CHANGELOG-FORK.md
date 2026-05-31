@@ -25,6 +25,102 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.50 — AS1: sync-by-default + threaded I/O helpers
+
+Settles the sync/async direction (AS1): the game stays synchronous by
+default, with a small blessed surface for pushing blocking I/O off the
+Twisted reactor thread, plus a watchdog that finds the sites that still
+block. No new dependencies (Twisted's reactor thread pool already exists).
+
+### Engine — AS1 Phase 0: `evennia.utils.defer`
+
+New module [`evennia/utils/defer.py`](evennia/utils/defer.py), the one
+blessed way to run blocking, game-state-free I/O off the reactor:
+
+- `in_thread(fn, *args, **kwargs) -> Deferred` — run `fn` in the reactor
+  thread pool; the returned Deferred's callbacks run on the reactor thread.
+- `background(fn, *args, on_error=None, **kwargs) -> None` — fire-and-forget
+  `in_thread`. On failure, calls `on_error(failure)` on the reactor thread
+  if given, else logs via the engine logger. Never swallows the error.
+- `threaded(fn)` — decorator; calling the wrapped fn returns an `in_thread`
+  Deferred.
+
+The module and per-function docstrings state the **threading-safety
+contract**: the worker callable may do only stdlib/network I/O and pure
+computation and must return plain data; it must not touch game objects
+(`.db`/`.ndb`, typeclass attrs, `obj.msg`, manager queries, idmapper-cached
+instances). All game-object interaction happens in the reactor-thread
+callback. They also state the hook-return boundary: this makes "do blocking
+work, then deliver a result later" safe (commands, scripts, jobs, webhooks),
+but does **not** make blocking I/O safe inside a hook that must return a
+value synchronously (`at_pre_move`, lock functions); for those, do not
+block — precompute, cache, or restructure.
+
+### Engine — AS1 Phase 1: reactor-stall watchdog
+
+New module
+[`evennia/utils/reactor_watchdog.py`](evennia/utils/reactor_watchdog.py): a
+low-overhead `LoopingCall` that logs exactly one warning when a single
+reactor turn blocks longer than `REACTOR_STALL_WARNING_MS` (new setting,
+default `200`; `0` disables). Because the tick runs on the reactor thread it
+cannot fire during a block and fires late once the block clears; the
+measured lateness is the stall. Wired into `EvenniaServerService`: started
+after the maintenance task, stopped on shutdown. Coarse by design — it
+reports the stall duration but cannot name the culprit (the blocking call
+has already returned by the time the late tick fires); it is a worklist
+generator, not a profiler.
+
+### Migration — `worker_pool` removed, superseded by `defer`
+
+**Breaking for any downstream importing `evennia.utils.worker_pool`.** The
+module had no live callers in the engine and duplicated the `deferToThread`
+wrapper that `defer` now owns as the single blessed surface.
+
+- Deleted `evennia/utils/worker_pool.py` and its test. Replace
+  `worker_pool.defer_to_worker(fn, callback=, errback=)` with
+  `defer.in_thread(fn).addCallbacks(...)`; `schedule_on_reactor` is no
+  longer needed (callbacks already run on the reactor — return plain data
+  from the worker and act on it in the callback).
+- Removed settings `ENGINE_WORKER_POOL_ENABLED` and
+  `ENGINE_WORKER_BLOCK_WARN_MS`. The latter's in-thread timing warning
+  measured the wrong thing (long worker-thread time is expected when
+  offloading); the reactor-stall watchdog is the correct instrument.
+- [`ENGINE.md`](ENGINE.md) and the
+  [`evennia/jobs/queue.py`](evennia/jobs/queue.py) docstring now point at
+  `evennia.utils.defer`.
+
+**Engine pin:** `evennia.utils.defer` is a new importable symbol. Bump
+`EVENNIA_REF` to a tag containing this release before any downstream code
+imports it (the downstream blocking-site migration is AS1 Phase 2, tracked
+separately).
+
+### Migration — `process_pending_jobs` threading contract corrected
+
+[`evennia/jobs/queue.py`](evennia/jobs/queue.py) `process_pending_jobs`
+previously documented draining jobs "in the worker thread pool" via
+`in_thread`. That is unsafe: job handlers that touch game objects would race
+the reactor through the non-concurrency-safe idmapper/typeclass layer. The
+docstring now states the correct model (matching `ENGINE.md`): drain on the
+reactor thread (the global tick, gated by `JOB_QUEUE_DRAIN_EVERY_N_TICKS`),
+where handlers may touch game objects freely, and any blocking I/O inside a
+handler must itself offload via `evennia.utils.defer`. Contract-only change;
+no behavior change. Downstream consumers wiring the drain or registering
+handlers must confirm the drain runs on the reactor (not a worker) and audit
+each handler for inline blocking I/O.
+
+### Tests
+
+- [`evennia/utils/tests/test_defer.py`](evennia/utils/tests/test_defer.py)
+  (7): worker runs off the reactor thread and the callback on it (real
+  thread-identity assertions via a per-test reactor pool drained with
+  `runUntilCurrent`), kwargs forwarding, decorator returns a Deferred, and
+  `background`'s error-routing / default-logging / no-propagation contract.
+- [`evennia/utils/tests/test_reactor_watchdog.py`](evennia/utils/tests/test_reactor_watchdog.py)
+  (5): over-threshold block warns exactly once, sub-threshold jitter never
+  warns, threshold defaults to the setting, and the disabled/start/stop
+  lifecycle behaves.
+- Full `evennia.server.tests` suite (67) green with the watchdog wiring.
+
 ## 6.0.0+underspire.49 — BREAKING: remove prototype `exec` key (F20)
 
 Removes the `exec` prototype key, which ran arbitrary Python at spawn

@@ -613,11 +613,11 @@ LOCATION_CMDSET_CACHE_MAXSIZE = 512
 LOCK_CHECK_CACHE_ENABLED = True
 # at_look: prefetch all attributes on target before return_appearance.
 LOOK_ATTR_PREFETCH_ENABLED = True
-# --- Tier 1D: off-reactor workers + command trace ---
-# Run heavy work via evennia.utils.worker_pool.defer_to_worker (thread pool).
-ENGINE_WORKER_POOL_ENABLED = True
-# Log when a worker job took unusually long in-thread (ms; 0 = off).
-ENGINE_WORKER_BLOCK_WARN_MS = 50
+# --- Tier 1D: command trace ---
+# Run blocking I/O off the reactor via evennia.utils.defer (in_thread/background).
+# Warn when a single reactor turn blocks longer than this (ms; 0 = disabled).
+# Instruments blocking sites that should move off-reactor via evennia.utils.defer.
+REACTOR_STALL_WARNING_MS = 200
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # --- Tier 1E: reload / startup scheduling ---

@@ -39,7 +39,7 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 
 ### Tier 1D–E (ops / startup)
 
-- **`defer_to_worker`**: `evennia.utils.worker_pool` — thread offload for Whoosh, search rebuild, HTTP, etc.
+- **`defer`**: `evennia.utils.defer` — `in_thread` / `background` / `threaded`, thread offload for Whoosh, search rebuild, HTTP, etc.
 - **Command trace**: `evennia.utils.command_trace` + `COMMAND_TRACE_ENABLED` — `trace_id` per command for structured logs
 - **Batched `at_init`**: `evennia.server.at_init_scheduler` — `AT_INIT_BATCH_SIZE`, `AT_INIT_DEFER_ON_RELOAD`
 - **GLOBAL_SCRIPTS tiers**: `start_priority: "lazy"` defers non-critical script starts across reactor ticks
