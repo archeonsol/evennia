@@ -140,15 +140,38 @@ to bundle them.
 - All existing tests pass.
 - PR description summarizes the design.
 
-**For closing out the boundary-migration program:**
+**For closing out the boundary-migration program** (after both C1 and
+C2 ship):
 
-- Both C1 and C2 shipped.
-- Update [`engine-boundary-migration.md`](../docs/engine-boundary-migration.md)
-  to mark C1 and C2 as shipped.
-- Ask the user whether to fold the doc's residual content (framing
-  test, settled policies, reclassification note) into the archive
-  and delete the live doc, or restructure differently. Don't delete
-  the doc without confirming.
+The live boundary-migration doc has three nuggets of ongoing
+reference value that outlast the work program:
+
+1. The **framing test** ("if a hypothetical second consumer could
+   not reasonably re-implement this from scratch, it belongs in the
+   engine"). Referenced from `FUTURE-IDEAS.md`.
+2. The **settled language-agnostic policy** (engine declines to ship
+   defaults; opinion downstream).
+3. The **reclassification note** (Phase C/D items became I1/L1/I2 in
+   the architecture doc).
+
+Do this cleanup as a final commit after C1+C2 ship:
+
+- Move those three nuggets into
+  [`engine-boundary-migration-archive.md`](../docs/engine-boundary-migration-archive.md)
+  as a new top section ("Settled policies and framing") above the
+  existing historical content. The archive becomes the canonical
+  home for both boundary history and settled boundary policy.
+- Delete the live
+  [`engine-boundary-migration.md`](../docs/engine-boundary-migration.md).
+- Update [`AGENTS.md`](../../AGENTS.md) Docs section: the line that
+  references both the live doc and the archive should collapse to a
+  single archive reference; description updates to cover "history +
+  settled policies."
+- Verify `FUTURE-IDEAS.md`'s reference to the framing test still
+  resolves (update the link target if needed).
+
+Do not skip this cleanup; leaving the live doc as a stub after the
+program closes invites confusion.
 
 ## Repo conventions
 
@@ -161,5 +184,6 @@ See [AGENTS.md](../../AGENTS.md).
 - Adding new hooks beyond `room_ic_viewers` (scope creep).
 - Bundling C1 and C2 into one PR (they're independent; separate PRs
   are easier to review).
-- Deleting the live boundary-migration doc without explicit
-  confirmation on where its residual content lands.
+- Skipping the doc cleanup at the end (folding nuggets into archive,
+  deleting live doc, updating AGENTS.md). The plan is pre-approved;
+  just execute it.
