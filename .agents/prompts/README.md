@@ -33,12 +33,20 @@ Currently parallel-startable (no unresolved dependencies):
 **Unblocked by B1 (typeclass hooks taxonomy doc, shipped):**
 
 - [H1: hook registry](H1-hook-registry.md) — medium. Executable
-  form of B1.
+  form of B1. **Shipped as `+underspire.44`.**
 - [M1: composable move_to](M1-composable-move.md) — medium. Builder
   replaces kwargs-as-API.
 - [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces
   merge-time-and-cached with simpler model; supersedes C2 as the
   endpoint.
+
+**Boundary work (depends on architecture-doc substrate):**
+
+- [C1 + C2: boundary work finalization](C1-C2-boundary-finalization.md)
+  — small. Last two items in
+  [`engine-boundary-migration.md`](../docs/engine-boundary-migration.md).
+  C1 depends on M1; C2 depends on R1. Prompt includes a dependency
+  check to confirm path before starting.
 
 Each prompt invites the agent to propose a design before
 implementing. The user reviews the design before the agent starts
