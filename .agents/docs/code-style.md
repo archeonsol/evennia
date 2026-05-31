@@ -54,6 +54,10 @@ Carve-outs:
 
 Enforced by review, not CI.
 
+## Refactor planning docs
+
+Multi-step refactor planning docs (e.g. `CMDSET_REFACTOR.md`) live at the repo root during the refactor. On completion, living contracts (rules future code must follow) move into `.agents/docs/` next to the subsystem doc; the planning doc gets deleted. History stays in `CHANGELOG-FORK.md` and git.
+
 ## Settings reads
 
 Read Django settings at the call site (`settings.X`), not via a
@@ -81,16 +85,12 @@ def wrap(text, width=None):
         width = settings.CLIENT_DEFAULT_WIDTH
 ```
 
-For non-trivial transforms, factor into a small helper that reads
-on each call: `def _permission_hierarchy(): return [p.lower() for p in settings.PERMISSION_HIERARCHY]`.
+For non-trivial transforms, factor into a small helper that reads on each call: `def _permission_hierarchy(): return [p.lower() for p in settings.PERMISSION_HIERARCHY]`.
 
 **Carve-out: true boot constants** (`EVENNIA_DIR`, `GAME_DIR`,
 `CACHE_DIR`, `SSL_CERTIFICATE_ISSUER`, `ENCODINGS`) are immutable
 per-process and fine to snapshot. Narrow on purpose: when in doubt,
 read at the call site.
-
-Phase 1 of the engine cleanup (`+underspire.34`) swept the known
-sites. No automated guard; catching this in review is enough.
 
 ### Function/Method Docstrings
 

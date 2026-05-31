@@ -10,6 +10,8 @@ The engine/game line: if a hypothetical second consumer could not reasonably re-
 
 See [FUTURE-IDEAS.md](../../FUTURE-IDEAS.md) for the three-lane breakdown (infrastructure / opinionated defaults / game) and the direction signals for carving out or pulling in.
 
+Belief enforcement: most beliefs in this doc live as prose and are enforced by review. Promote one to a CI test only when it's mechanically checkable as a rule, not as a snapshot diff. Snapshot-shaped tests (refresh-the-snapshot when it fails) re-encode the current state rather than enforcing the belief; they were retired in the cmdset prefix audit and shouldn't come back.
+
 ## Think in Python, not SQL
 
 The typeclass system is the right primitive for entity behavior: developers work with Python classes, not database schemas. New entity types come from subclassing, not new tables. Attributes (`db` handler) store arbitrary per-object data without schema changes.
@@ -39,6 +41,8 @@ The lock system denies access by default. Everything is inaccessible unless expl
 Mutable game state lives on objects. Handlers (Attributes, Tags, Locks, Scripts, Commands) attach directly to objects so state and behavior travel together. The idmapper cache guarantees instance identity per DB object so on-object state is reliable.
 
 The fork runs external caches for *derived* state (lock cache, cmd-access cache, display-name cache, location-cmdset cache, trie cache, write-behind attrs, redis attr cache). Caches earn their place with a documented invalidation contract: what fills it, what invalidates it, the upper bound on stale reads. They never hold authoritative state; they accelerate access to authoritative state that still lives on objects.
+
+Cache-addition discipline: seven caches added, zero removed so far. The next cache lands with the invalidation-contract docstring above plus a changelog note defending why every existing cache still earns its place. If that defense is hard to write, the new cache probably isn't earning its place either.
 
 Reference data (prototypes, registries, YAML lookups, constants) is not state and is not subject to this belief. A registry of "what is a rock" earns the registry pattern when key-based lookup is what callers actually want. Reach for it freely.
 

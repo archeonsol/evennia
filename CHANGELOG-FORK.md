@@ -18,18 +18,7 @@ current git rev appended.
 work this way?") comes from the original detail; compression destroys it.
 Git history and `grep` cover any browsing needs.
 
-**Rotation policy: by upstream major, not by file size.** When the upstream
-base bumps (e.g. `6.0.0` → `6.1.0` and the first `6.1.0+underspire.1`
-ships), move the entire previous-major block (`6.0.x+underspire.*`) into
-`CHANGELOG-FORK-6.0.x.md` next to this file, then start this file fresh
-with the new major's first entry. The boundary is natural; the archive
-file stays grep-able and never goes stale.
-
-Mid-major rotation by date or size is a fallback only if a single major
-balloons past ~3000 lines before its successor ships — at that point a
-dated archive (e.g. `CHANGELOG-FORK-2026H1.md`) is acceptable. As of
-`+underspire.14`, the file is ~1100 lines and well inside the comfortable
-range, so no archival action is pending.
+**Rotation policy: by upstream major, not by file size.** When this document hits 1000 lines, delete old entries until it is under the limit again.
 
 See [`.agents/docs/releases.md`](.agents/docs/releases.md) for the
 matching release procedure.

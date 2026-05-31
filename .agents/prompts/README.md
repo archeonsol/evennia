@@ -62,6 +62,36 @@ Mark status at the top of each prompt as work progresses:
 - `Status: in-progress`
 - `Status: shipped (commit SHA)`
 
+## Hygiene prompts
+
+Smaller, more focused items than the Level 2 architecture work
+above. Each one is independent; pick whichever has appetite.
+F-numbers are stable IDs carried over from the retired hygiene
+backlog.
+
+**Discussion-first** (a policy decision before any edits):
+
+- [F13: contribs half-policy](F13-contribs-policy.md)
+- [F18: unused engine handlers](F18-unused-engine-handlers.md)
+- [F20: prototype `exec` key](F20-prototype-exec-key.md)
+
+**Mechanical / verification:**
+
+- [F3: doc rot sweep in `docs/source/`](F3-doc-rot-sweep.md) —
+  gated on a newmoo PR.
+- [F6: `CMD_*` → `COMMAND_*` settings rename](F6-cmd-command-settings-rename.md)
+- [F7: cmdset refactor open verifications](F7-cmdset-refactor-verifications.md)
+- [F8: cache invalidation contracts](F8-cache-invalidation-contracts.md)
+- [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md)
+- [F19: unused Django apps](F19-unused-django-apps.md)
+- [F21: dead `_menutree` branch in fieldfill](F21-dead-menutree-branch.md)
+
+**Audit (read before acting):**
+
+- [F9: big modules audit](F9-big-modules-audit.md)
+- [audits-deferred](audits-deferred.md) — umbrella list of named
+  audits without enough signal to start yet.
+
 ## Cross-references
 
 - [Engine API Architecture](../docs/engine-api-architecture.md) —
