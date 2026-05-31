@@ -55,7 +55,7 @@ that fans out to both caches and to any future caller-permission cache.
 Migrate the two known call sites. **Behavior-neutral on existing paths;
 adds a single seam that future callers can use.**
 
-### F-3 (M): redis-attr TTL is 60× the actual staleness bound
+### F-3 (M, shipped writeup): redis-attr TTL is 60× the actual staleness bound
 
 Maintenance loop ticks every 60s ([`server/service.py:519`](../../evennia/server/service.py#L519)),
 and `ATTRIBUTE_FLUSH_ON_MAINTENANCE` defaults on, so cross-process
@@ -74,9 +74,25 @@ The audit can't tell which without grepping every Redis-write path for
 and `flush_dirty` republish?" If there are, TTL stays. If there aren't,
 TTL could go to a much smaller number (5-10 min) and surface bugs faster.
 
-**Proposal.** Read the redis-attr write paths and produce a yes/no
-answer in a follow-up commit message; don't change the TTL value
-without that evidence.
+**Conclusion (after writeup).** TTL is **load-bearing**, keep it. Three
+real escape paths exist:
+
+1. `_cache_drop_object` is defined but no caller — owner deletion does
+   not proactively flush the per-owner Redis index.
+2. `Script.delete()` does **not** call `self.attributes.clear()`, unlike
+   ObjectDB/AccountDB/ChannelDB. Every deleted Script leaks its
+   attribute keys to TTL (see F-8).
+3. Any downstream typeclass override of `delete()` that skips
+   `attributes.clear()` leaks the same way.
+
+Without TTL, Redis would grow unboundedly with stale keys. The 3600s
+default is generous; lowering to 600s would surface escape-path bugs
+~6× faster but the cost of an escape is small (a few KB of stale keys
+per deleted owner) and bug-surfacing isn't urgent. Keeping 3600s and
+documenting *why* in the cache docstring is the right shape.
+
+Findings surfaced during this writeup are tracked as F-8 (Script.delete
+fix) and F-9 (pre_delete receiver for `_cache_drop_object`).
 
 ### F-4 (H, shipped): channel-subscriber cache has no Account/Object-delete hook
 
@@ -142,6 +158,41 @@ in front of it on the hot path and produces almost all the hits.
 **Proposal.** One paragraph in the lock-check cache docstring noting the
 cmd-parse path is fronted by cmd-access (when enabled). **Doc-only.**
 
+### F-8 (M): `Script.delete()` doesn't call `attributes.clear()` — leaks Redis attr keys
+
+ObjectDB, AccountDB, and ChannelDB all call `self.attributes.clear()`
+in their custom `delete()` before `super().delete()`, which routes per-attr
+through `do_delete_attribute` → `_cache_drop`. **`Script.delete()` does
+not** (`scripts.py:540-556`), so every deleted Script leaves its Redis
+attribute keys orphaned until TTL.
+
+Surfaced while writing F-3.
+
+**Proposal.** Add `self.attributes.clear()` before `super().delete()` in
+`Script.delete`. Trivial one-liner. Test: delete a Script with at least
+one attribute; assert `_cache_drop` ran for that attribute (or, with a
+fake redis, assert the delete pipeline got called).
+
+### F-9 (M): no `pre_delete` receiver wires `_cache_drop_object` — owner deletion is per-attr instead of per-owner
+
+`_cache_drop_object` exists on `RedisCachedModelAttributeBackend` but no
+caller invokes it. Today owner deletion (when it works) clears Redis
+one attribute at a time via `attributes.clear()` → N `_cache_drop`
+calls → N Redis round-trips. The single per-owner drop would be one
+round-trip per delete and also covers downstream typeclasses that
+override `delete()` without calling `attributes.clear()` (and Script
+until F-8 lands).
+
+Same shape as F-4 for the channel-subscriber cache: a `pre_delete`
+receiver on the four owner classes (ObjectDB, AccountDB, ScriptDB,
+ChannelDB) that calls the per-owner cache drop. Surfaced while
+writing F-3.
+
+**Proposal.** Add `pre_delete` receiver in `evennia/typeclasses/models.py`
+(or wherever TypedObject lives) that builds a transient backend from
+`(model, obj.pk)` and calls `_cache_drop_object`. Mirrors the F-4 wiring
+pattern (catch-all receiver bails on first hasattr check).
+
 ## Items considered and dropped
 
 - **Unify location-cmdset and trie cache as "two views on the same merged
@@ -164,4 +215,6 @@ If you want to do these in dependency order:
 3. **F-6** (cmd-access default decision) — needs your call before any
    code change.
 4. **F-3** (TTL audit) — write-up only; decide if TTL stays after.
-5. **F-1, F-5, F-7** — doc-only batch; can bundle into one commit.
+5. **F-8** (Script.delete fix) and **F-9** (pre_delete receiver) — surfaced
+   during F-3; each its own commit + test.
+6. **F-1, F-5, F-7** — doc-only batch; can bundle into one commit.

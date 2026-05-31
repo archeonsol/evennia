@@ -26,7 +26,15 @@ Cache contract:
   - ``flush_all_keys`` — wired into ``idmapper.flush_cache`` for test
     teardown, the ``@reload/flush`` admin command, and ``post_migrate``.
   - TTL expiry (``ATTRIBUTE_REDIS_CACHE_TTL``, default 3600s) bounds any
-    key that escapes the invalidation paths above.
+    key that escapes the invalidation paths above. The TTL is
+    **load-bearing for owner deletion**: typeclass ``delete()`` paths
+    that don't call ``attributes.clear()`` (and any downstream typeclass
+    override that skips it) leave the per-attribute Redis keys
+    orphaned, and the Phase-2 cache does not currently wire a
+    ``pre_delete`` receiver on the four owner classes (see
+    ``_cache_drop_object`` — defined but no callers). Without TTL,
+    Redis would grow unboundedly with stale keys from every deleted
+    owner.
 
 - **Staleness bound:** cross-process readers see stale values for at most
   one ``flush_all_dirty`` tick (same window as PG durability), bounded
@@ -68,8 +76,7 @@ def _redis_alias():
 
 def _record_hit() -> None:
     try:
-        from evennia.server.prometheus_metrics import \
-            record_redis_attr_cache_hit
+        from evennia.server.prometheus_metrics import record_redis_attr_cache_hit
 
         record_redis_attr_cache_hit()
     except Exception:
@@ -78,8 +85,7 @@ def _record_hit() -> None:
 
 def _record_miss() -> None:
     try:
-        from evennia.server.prometheus_metrics import \
-            record_redis_attr_cache_miss
+        from evennia.server.prometheus_metrics import record_redis_attr_cache_miss
 
         record_redis_attr_cache_miss()
     except Exception:
