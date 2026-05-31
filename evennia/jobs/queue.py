@@ -116,7 +116,7 @@ def _enqueue_db(record: dict) -> None:
 def process_pending_jobs(*, max_jobs: int = 10) -> int:
     """
     Drain up to ``max_jobs`` jobs in the worker thread pool.
-    Call from reactor via ``defer_to_worker`` + ``schedule_on_reactor`` for follow-up.
+    Call from reactor via ``evennia.utils.defer.in_thread`` for follow-up.
     Returns count processed.
     """
     if not _enabled():
