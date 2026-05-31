@@ -98,6 +98,25 @@ class TestInThread(_RealPoolMixin, BaseEvenniaTestCase):
         self._drain_until(done)
         self.assertEqual(box["result"], 12)
 
+    def test_db_connections_cleaned_around_worker_on_worker_thread(self):
+        main_ident = threading.get_ident()
+        calls = []
+        done = threading.Event()
+
+        def worker():
+            return "x"
+
+        # close_old_connections must run before and after the worker, both in
+        # the worker thread, so a pooled thread never reuses a stale connection.
+        with patch.object(
+            defer, "close_old_connections", lambda: calls.append(threading.get_ident())
+        ):
+            defer.in_thread(worker).addCallback(lambda r: done.set())
+            self._drain_until(done)
+
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(ident != main_ident for ident in calls))
+
 
 class TestThreaded(_RealPoolMixin, BaseEvenniaTestCase):
     """`threaded` decorator turns a call into an `in_thread` Deferred."""

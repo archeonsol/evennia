@@ -14,16 +14,21 @@ The callable you pass to `in_thread` / `background` / `threaded` runs in a
 *worker thread*, not on the reactor thread. In that worker it may do only:
 
 - stdlib and network I/O (``requests``, ``socket``, file reads, subprocess);
+- direct Django ORM queries on plain (non-typeclass) models. The helper runs
+  ``close_old_connections()`` around the worker, so ORM use in the pool does
+  not accumulate or reuse stale connections (no "server has gone away");
 - pure computation.
 
-and it must return plain data (str / bytes / int / dict / list of primitives).
+and it must return plain data (str / bytes / int / dict / list of primitives) —
+convert ORM results to primitives before returning, rather than handing back
+live model instances whose lazy fields would load on the reactor thread.
 
 It must NOT touch game state in any way: no ``.db`` / ``.ndb`` access, no
-typeclass attributes, no ``obj.msg(...)``, no manager/ORM queries through
-typeclasses, no mutation of shared game state, no idmapper-cached instances.
-Django's ORM is per-thread-connection safe, but Evennia's typeclass + idmapper
-layer is not designed for concurrent access; treat all game-object access as
-reactor-thread-only.
+typeclass attributes, no ``obj.msg(...)``, no queries through typeclass
+managers, no mutation of shared game state, no idmapper-cached instances.
+Django's ORM is per-thread-connection safe (and the helper keeps those
+connections clean), but Evennia's typeclass + idmapper layer is not designed
+for concurrent access; treat all game-object access as reactor-thread-only.
 
 All game-object interaction happens *after* the worker returns, in the
 Deferred's callback, which Twisted runs back on the reactor thread::
@@ -55,20 +60,42 @@ Precompute, cache, or restructure so the I/O happens in a deferrable context.
 
 from functools import wraps
 
+from django.db import close_old_connections
 from twisted.internet import threads
 from twisted.internet.defer import Deferred
 
 from evennia.utils import logger
 
 
+def _run_with_db_hygiene(fn, args, kwargs):
+    """
+    Worker-thread entry point: run `fn` with Django connection hygiene.
+
+    Runs in the reactor thread pool. ``close_old_connections`` is called before
+    and after `fn` so a pooled worker thread never reuses a stale DB connection
+    or leaves one open between jobs. Respects ``CONN_MAX_AGE`` (persistent
+    connections are kept until they age out). Cheap and harmless for workers
+    that never touch the ORM.
+    """
+    close_old_connections()
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        close_old_connections()
+
+
 def in_thread(fn, *args, **kwargs) -> Deferred:
     """
     Run a blocking, game-state-free callable in the reactor thread pool.
 
+    Django connection hygiene is handled for you: `fn` may make direct ORM
+    queries on plain (non-typeclass) models without leaking or reusing stale
+    pool connections (see the module docstring's threading-safety contract).
+
     Args:
         fn (callable): The callable to run in a worker thread. It must obey the
-            threading-safety contract (see module docstring): pure I/O and
-            computation only, returns plain data, touches no game objects.
+            threading-safety contract (see module docstring): I/O, plain ORM,
+            and computation only; returns plain data; touches no game objects.
         *args: Positional arguments passed to `fn`.
         **kwargs: Keyword arguments passed to `fn`.
 
@@ -78,7 +105,7 @@ def in_thread(fn, *args, **kwargs) -> Deferred:
             objects safely.
 
     """
-    return threads.deferToThread(fn, *args, **kwargs)
+    return threads.deferToThread(_run_with_db_hygiene, fn, args, kwargs)
 
 
 def background(fn, *args, on_error=None, **kwargs) -> None:
