@@ -76,7 +76,6 @@ backlog.
   gated on a newmoo PR.
 - [F6: `CMD_*` → `COMMAND_*` settings rename](F6-cmd-command-settings-rename.md)
 - [F7: cmdset refactor open verifications](F7-cmdset-refactor-verifications.md)
-- [F8: cache invalidation contracts](F8-cache-invalidation-contracts.md)
 - [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md)
 - [F19: unused Django apps](F19-unused-django-apps.md)
 - [F21: dead `_menutree` branch in fieldfill](F21-dead-menutree-branch.md)
