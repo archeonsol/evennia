@@ -1804,6 +1804,25 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         self.permissions.batch_add(*permissions)
 
+        self.at_account_post_creation()
+
+    @hook(
+        event="account_creation",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultAccount.at_first_save",),
+        notes="Fires after at_account_creation and _createdict processing. Symmetric to at_object_post_creation.",
+    )
+    def at_account_post_creation(self):
+        """
+        Called once, after `at_account_creation`, _createdict processing, and
+        permissions setup. Override for game-side initialization that needs
+        to run after all engine-side creation steps complete.
+        """
+        pass
+
     @hook(
         event="access_check",
         phase="post",

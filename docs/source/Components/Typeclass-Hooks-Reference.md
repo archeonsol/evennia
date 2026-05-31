@@ -280,6 +280,7 @@ the authoritative roster.
 | `at_post_give` | `AppearanceMixin` | target | Fires after the give-induced move commits. |
 | `at_say` | `AppearanceMixin` | self | Composite action: fires at_pre_say, formats via templates, sends to self/location/receivers. |
 | `at_account_creation` | `DefaultAccount` | self | One-shot account creation. Fires once via at_first_save. |
+| `at_account_post_creation` | `DefaultAccount` | self | Fires after at_account_creation and _createdict processing. Symmetric to at_object_post_creation. |
 | `at_character_added` | `DefaultAccount` | self | Notification: character added to the persistent characters-list. |
 | `at_character_removed` | `DefaultAccount` | self | Notification: character removed from the persistent characters-list. |
 | `at_cmdset_get` | `DefaultAccount` | self | Account-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get. |
@@ -298,6 +299,7 @@ the authoritative roster.
 | `at_server_reload` | `DefaultAccount` | self | Account-side reload hook. Fires from EvenniaServerService.shutdown on reload-style stops. |
 | `at_server_shutdown` | `DefaultAccount` | self | Account-side shutdown hook. Fires from EvenniaServerService.shutdown on full-shutdown stops. |
 | `at_channel_creation` | `DefaultChannel` | self | One-shot creation hook. Fires once per channel via at_first_save. |
+| `at_channel_post_creation` | `DefaultChannel` | self | Fires after at_channel_creation and _createdict processing. Symmetric to at_object_post_creation. |
 | `at_first_save` | `DefaultChannel` | self | Driven by Django post_save signal (created=True). Override at_channel_creation instead. |
 | `at_post_msg` | `DefaultChannel` | self | Fires once after all receivers processed. Conventional spot for logging. |
 | `at_server_reload` | `DefaultScript` | self | Fired from EvenniaServerService.shutdown on reload-style stops; persist non-persistent state here. |
@@ -325,6 +327,7 @@ the authoritative roster.
 | `at_pause` | `ScriptBase` | self | Fires when the timer pauses (manual or server reload). |
 | `at_repeat` | `ScriptBase` | self | Fires on every interval tick after start(). is_valid()=False stops further repeats. |
 | `at_script_creation` | `ScriptBase` | self | One-shot creation hook. Fires once per script via at_first_save. |
+| `at_script_post_creation` | `ScriptBase` | self | Fires after at_script_creation and _createdict processing. Symmetric to at_object_post_creation. |
 | `at_start` | `ScriptBase` | self | Fires when the timer starts or resumes from pause. |
 | `at_stop` | `ScriptBase` | self | Fires when the timer stops permanently. |
 | `at_cmdset_get` | `ServerSession` | self | Session-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get. |

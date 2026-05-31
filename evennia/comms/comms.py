@@ -167,6 +167,25 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             if cdict.get("attrs"):
                 self.attributes.batch_add(*cdict["attrs"])
 
+        self.at_channel_post_creation()
+
+    @hook(
+        event="channel_creation",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("DefaultChannel.at_first_save",),
+        notes="Fires after at_channel_creation and _createdict processing. Symmetric to at_object_post_creation.",
+    )
+    def at_channel_post_creation(self):
+        """
+        Called once, after `at_channel_creation` and _createdict processing.
+        Override for game-side initialization that needs to run after all
+        engine-side creation steps complete.
+        """
+        pass
+
     def basetype_setup(self):
         # Default locks keep channels open for all players. Override this in a
         # game-specific DefaultChannel subclass to restrict send/listen for

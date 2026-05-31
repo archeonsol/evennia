@@ -241,9 +241,15 @@ def lint(classes=None):
 def warn_at_startup():
     """Run ``lint()`` and write findings to the twisted logger.
 
-    Warn-only during H1c rollout. Called from
-    ``ServerService.run_init_hooks``. Safe to call before all engine
-    classes are imported; missed classes get linted on the next boot.
+    Warn-only by design: an engine documentation issue should never
+    block a game from booting. Strict enforcement lives in
+    ``evennia.hooks.tests.test_lint.PilotIntegrationTest.test_engine_lint_is_clean``,
+    which fires during ``evennia test`` and fails CI if any engine hook
+    is undecorated, has unresolved fires_from, or mismatches its phase.
+
+    Called from ``ServerService.run_init_hooks``. Safe to call before
+    all engine classes are imported; classes that load later are
+    linted on the next boot.
     """
     from evennia.utils import logger
 

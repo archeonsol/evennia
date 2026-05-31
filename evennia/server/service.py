@@ -505,7 +505,10 @@ class EvenniaServerService(MultiService):
             mode (str): One of shutdown, reload or reset
 
         """
-        # validate the hook registry (warn-only during H1c rollout)
+        # warn on hook-registry lint findings. Warn-only by design;
+        # strict enforcement lives in the test suite
+        # (test_engine_lint_is_clean) so an engine documentation issue
+        # cannot block a game from booting.
         from evennia.hooks.lint import warn_at_startup as _hook_lint
         from evennia.typeclasses.models import TypedObject
 

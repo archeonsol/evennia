@@ -518,6 +518,25 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
                 # autostart the script
                 self._start_task(force_restart=True)
 
+        self.at_script_post_creation()
+
+    @hook(
+        event="script_creation",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=("ScriptBase.at_first_save",),
+        notes="Fires after at_script_creation and _createdict processing. Symmetric to at_object_post_creation.",
+    )
+    def at_script_post_creation(self):
+        """
+        Called once, after `at_script_creation` and _createdict processing.
+        Override for game-side initialization that needs to run after all
+        engine-side creation steps complete.
+        """
+        pass
+
     def delete(self):
         """
         Delete the Script. Normally stops any timer task. This fires at_pre_delete before
