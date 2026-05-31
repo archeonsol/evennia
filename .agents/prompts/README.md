@@ -18,8 +18,6 @@ Currently parallel-startable (no unresolved dependencies):
 
 **No dependencies on anything not yet shipped:**
 
-- [C2: cmdset introspector](C2-cmdset-introspector.md) — small.
-  `account.explain_cmd("look")`.
 - [AS1: sync/async commitment](AS1-sync-async-commitment.md) —
   medium. Direction + helpers.
 - [A1: typed attribute descriptors](A1-attribute-descriptors.md) —
@@ -32,8 +30,8 @@ Currently parallel-startable (no unresolved dependencies):
 - [M1: composable move_to](M1-composable-move.md) — medium. Builder
   replaces kwargs-as-API.
 - [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces
-  merge-time-and-cached with simpler model; supersedes C2 as the
-  endpoint.
+  merge-time-and-cached with a simpler model; bakes introspection
+  in from the start.
 
 **Boundary work (depends on architecture-doc substrate):**
 

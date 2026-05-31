@@ -10,8 +10,10 @@ recompute on each command lookup) or merge-time with drastically
 fewer knobs and explicit contracts. Design open; pick during the
 work.
 
-Supersedes C2 (cmdset introspector) as the endpoint. C2 makes the
-current model survivable; CM1 makes it good.
+A standalone introspector (`account.explain_cmd("look")`) was
+considered as a survival tool for the current model and dropped —
+CM1 should bake introspection into the new model rather than ship
+throwaway debug machinery for the old one.
 
 ## Background
 
@@ -60,9 +62,10 @@ after I1; treat it accordingly.
 - **Backward compatibility.** Game-side cmdsets target current API.
   Migration story: automatic, scripted, manual rewrite? How big is
   the break?
-- **Coordination with C2.** Does C2's introspector API stay
-  relevant after CM1, or get superseded? Design CM1's debuggability
-  in from the start.
+- **Built-in debuggability.** "If I type X right now, exactly which
+  command fires and why?" must be cheap to answer in the new model.
+  Bake the trace surface (winning cmdset, priority, suppressed
+  collisions, lock results) into the design — don't bolt it on later.
 - **Hook integration.** Cmdset assembly fires hooks per B1's
   contract. Honor those; flag any that need to change.
 - **Performance.** Current cache exists for performance. If you
@@ -106,7 +109,6 @@ after I1; treat it accordingly.
 - All existing tests pass (with possible exceptions for tests that
   test the old model's knobs explicitly; coordinate with user).
 - Architecture doc CM1 entry updated.
-- C2 entry updated to note relationship (superseded? still useful?).
 - PR description summarizes design and links the proposal.
 
 ## Repo conventions
@@ -118,6 +120,5 @@ See [AGENTS.md](../../AGENTS.md).
 - Breaking changes to game-side cmdsets without a migration story.
 - Removing knobs that are widely used in practice (audit before
   removing).
-- Coordination with C2 if it's in progress in parallel.
 - Touching cmdhandler beyond the cmdset boundary.
 - Scope creep into command-side changes.

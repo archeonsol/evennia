@@ -122,19 +122,6 @@ Two-layer split landed on engine side:
   `at_search_result` hook signature is unchanged.
 - Symmetric treatment on `DefaultAccount.search` / `search_for`.
 
-### C2. CmdSet introspector
-
-Survival tool for the current cmdset model; superseded by CM1 as the
-endpoint.
-
-- Problem: priority + duplicates + merge type + key collision +
-  cmdset stacks is hard to reason about. No built-in "if I type X
-  right now, here is exactly which command fires and why."
-- Target: `account.explain_cmd("look")` returns which cmdset, what
-  priority, which collisions were suppressed, which locks gated it.
-- Churn: small.
-- Dependencies: none.
-
 ### A1. Typed attribute descriptors
 
 - Problem: `.db.foo` vs `.attributes.add/get` vs `.ndb.foo` vs
@@ -377,13 +364,13 @@ The keystone.
 
 ### CM1. CmdSet rethink
 
-Supersedes C2 as the endpoint.
-
 - Problem: merge-time-and-cached cmdset model is genuinely hard to
-  reason about. C2 makes it debuggable; that's a survival aid, not
-  a fix. The model itself has too many footguns (priority,
-  duplicates, merge type, key collisions, cache invalidation bugs
-  like `at_sync`).
+  reason about. Too many footguns (priority, duplicates, merge type,
+  key collisions, cache invalidation bugs like `at_sync`). A standalone
+  cmdset introspector was considered (small survival tool exposing
+  "if I type X now, exactly which command fires and why") but
+  dropped — CM1 should bake introspection into the new model rather
+  than ship throwaway debug machinery for the old one.
 - Target: simpler model. Either query-time evaluation (no merge step,
   no cache, recompute on each command lookup) or merge-time with
   drastically fewer knobs and explicit contracts. Design open; pick
@@ -443,7 +430,7 @@ principle. Items in the same row can run in parallel.
 
 | Order | Items | Notes |
 |---|---|---|
-| Start now (alongside migration A shipped) | I1, C2, A1, AS1 | No dependencies; start when capacity allows |
+| Start now (alongside migration A shipped) | I1, A1, AS1 | No dependencies; start when capacity allows |
 | After migration B1 (hooks taxonomy doc) | H1, M1 | Need hook contract |
 | After I1 | L1, I2 | Need actor substrate |
 | After B1 + I1 | R1 | Needs both hook contract and actor-as-viewer |
