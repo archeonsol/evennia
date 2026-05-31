@@ -615,6 +615,9 @@ LOCK_CHECK_CACHE_ENABLED = True
 LOOK_ATTR_PREFETCH_ENABLED = True
 # --- Tier 1D: command trace ---
 # Run blocking I/O off the reactor via evennia.utils.defer (in_thread/background).
+# Warn when a single reactor turn blocks longer than this (ms; 0 = disabled).
+# Instruments blocking sites that should move off-reactor via evennia.utils.defer.
+REACTOR_STALL_WARNING_MS = 200
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # --- Tier 1E: reload / startup scheduling ---
