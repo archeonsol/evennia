@@ -35,7 +35,7 @@ one-paragraph note at that hook ("downstream caches may key on this; fire
 it on any change to the display name") with a cross-reference to the
 core-beliefs cache-discipline rule. **Doc-only, no behavior change.**
 
-### F-2 (H): paired lock-cache + cmd-access invalidation is a footgun
+### F-2 (H, shipped): paired lock-cache + cmd-access invalidation is a footgun
 
 Every permission-mutating call site has to remember to fire **both**
 `invalidate_lock_cache(caller)` and `invalidate_cmd_access_cache(caller)`.
@@ -78,7 +78,7 @@ TTL could go to a much smaller number (5-10 min) and surface bugs faster.
 answer in a follow-up commit message; don't change the TTL value
 without that evidence.
 
-### F-4 (H): channel-subscriber cache has no Account/Object-delete hook
+### F-4 (H, shipped): channel-subscriber cache has no Account/Object-delete hook
 
 `channel_subscriber_cache` invalidates on subscribe/unsubscribe/clear-channel
 and self-heals on `ObjectDoesNotExist` in `get_cached_subscribers`. There

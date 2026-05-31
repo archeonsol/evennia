@@ -21,6 +21,7 @@ necessary to easily be able to delete connections on the fly).
 
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import pre_delete
 from django.utils import timezone
 
 from evennia.comms import managers
@@ -748,3 +749,28 @@ class ChannelDB(TypedObject):
     @lazy_property
     def subscriptions(self):
         return SubscriptionHandler(self)
+
+
+def _drop_channel_subscriber_cache_on_delete(sender, instance, **kwargs):
+    """pre_delete receiver: drop a deleted entity's ref from every channel index.
+
+    Catch-all: bails immediately when the instance is not a subscribable
+    entity (no ``account_subscription_set`` or ``object_subscription_set``
+    reverse manager). The reverse managers are still intact at pre_delete
+    time, so the helper can enumerate every channel the entity was on
+    before Django cascades remove the through-rows.
+    """
+    if not hasattr(instance, "account_subscription_set") and not hasattr(
+        instance, "object_subscription_set"
+    ):
+        return
+    from evennia.comms.channel_subscriber_cache import \
+        remove_subscriber_from_all_channels
+
+    remove_subscriber_from_all_channels(instance)
+
+
+pre_delete.connect(
+    _drop_channel_subscriber_cache_on_delete,
+    dispatch_uid="evennia.comms.channel_subscriber_cache.pre_delete",
+)

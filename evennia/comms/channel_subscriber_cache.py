@@ -164,6 +164,56 @@ def clear_channel(channel) -> None:
         logger.log_trace("channel_subscriber_cache: clear failed")
 
 
+def remove_subscriber_from_all_channels(entity) -> None:
+    """Drop ``entity``'s subscriber ref from every channel's Redis index.
+
+    Called from a ``pre_delete`` receiver on AccountDB and ObjectDB so a
+    deleted entity does not leak stale ``a:<pk>`` / ``o:<pk>`` refs into
+    every channel it subscribed to. Without this, each channel only
+    self-heals on its next fan-out (``get_cached_subscribers`` trips
+    ``ObjectDoesNotExist`` and triggers a single-channel resync), so
+    stale refs accumulate in proportion to subscription count times
+    death rate.
+
+    Best-effort: silent no-op when the cache is disabled, Redis is
+    unavailable, the entity has no subscriber ref (untyped instance),
+    or the subscription read fails.
+
+    Args:
+        entity: The AccountDB or ObjectDB instance being deleted. Read
+            via the ``account_subscription_set`` / ``object_subscription_set``
+            reverse managers, which are still intact at ``pre_delete`` time.
+    """
+    if not _enabled() or entity is None:
+        return
+    ref = _member_ref(entity)
+    if not ref:
+        return
+    r = _redis_conn()
+    if not r:
+        return
+    channels = []
+    try:
+        account_subs = getattr(entity, "account_subscription_set", None)
+        object_subs = getattr(entity, "object_subscription_set", None)
+        if account_subs is not None:
+            channels.extend(account_subs.all())
+        if object_subs is not None:
+            channels.extend(object_subs.all())
+    except Exception:
+        logger.log_trace("channel_subscriber_cache: subscription read failed")
+        return
+    if not channels:
+        return
+    try:
+        pipe = r.pipeline()
+        for channel in channels:
+            pipe.srem(_channel_key(channel.id), ref)
+        pipe.execute()
+    except Exception:
+        logger.log_trace("channel_subscriber_cache: bulk remove failed")
+
+
 def _resolve_refs(refs: Iterable[str]) -> List:
     """Resolve a batch of ``kind:pk`` refs to model instances in one query per kind.
 
