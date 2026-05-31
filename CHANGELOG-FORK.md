@@ -25,6 +25,51 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.47 — settings: rename `CMD_ACCESS_CACHE_ENABLED` (F6)
+
+Single-symbol breaking rename. All other settings in the command layer
+use the `COMMAND_*` prefix (`COMMAND_PARSER`, `COMMAND_RATE_WARNING`,
+`COMMAND_TRACE_ENABLED`, etc.); this one straggler used `CMD_*` and has
+been brought into line.
+
+### Engine — `CMD_ACCESS_CACHE_ENABLED` → `COMMAND_ACCESS_CACHE_ENABLED`
+
+- [`evennia/settings_default.py`](evennia/settings_default.py) — default declaration.
+- [`evennia/commands/cmd_access_cache.py`](evennia/commands/cmd_access_cache.py) — read site + module docstring.
+- [`evennia/commands/cmdparser.py`](evennia/commands/cmdparser.py), [`evennia/commands/cmdparser_trie.py`](evennia/commands/cmdparser_trie.py) — read sites.
+- [`evennia/commands/tests.py`](evennia/commands/tests.py) — `@override_settings` decorators.
+- [`ENGINE.md`](ENGINE.md) — references.
+
+### Migration
+
+Breaking for any downstream that referenced the old name. Default is
+unchanged (`True`), so games that never set this explicitly need no
+action.
+
+**1. `server/conf/settings.py`** — if you pinned the value, rename:
+
+```python
+# before
+CMD_ACCESS_CACHE_ENABLED = False
+# after
+COMMAND_ACCESS_CACHE_ENABLED = False
+```
+
+**2. Tests** — rename any `@override_settings(CMD_ACCESS_CACHE_ENABLED=...)`
+decorators in the game's test suite to `COMMAND_ACCESS_CACHE_ENABLED`.
+Django silently accepts unknown setting names in `override_settings`, so
+these will not raise; they just stop affecting the cache. Grep your
+game tree:
+
+```sh
+grep -rn CMD_ACCESS_CACHE_ENABLED .
+```
+
+**3. Comments / docs** — same grep catches stale references in
+docstrings, comments, or README snippets.
+
+No data migration; no DB changes; no restart sequencing.
+
 ## 6.0.0+underspire.46 — F8 cache audit
 
 End-to-end pass over the seven derived-state caches the fork carries:

@@ -49,7 +49,7 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 - Write-behind attributes with `flush_all_dirty()` on the global tick
 - Typed attribute columns (`db_int_val`, `db_str_val`, …)
 - Optional Redis L2 attribute backend (`RedisCachedModelAttributeBackend`)
-- Command access cache (`CMD_ACCESS_CACHE_ENABLED`, `evennia.commands.cmd_access_cache`)
+- Command access cache (`COMMAND_ACCESS_CACHE_ENABLED`, `evennia.commands.cmd_access_cache`)
 - Flush metrics / Prometheus (`evennia.typeclasses.attribute_metrics`)
 - Optional maintenance safety flush (`ATTRIBUTE_FLUSH_ON_MAINTENANCE`)
 
@@ -64,7 +64,7 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
    - `evennia_attribute_flush_total`, `evennia_attribute_flush_backends_total`, `evennia_attribute_flush_orphans_total`
    - `evennia_attribute_dirty_pending` (gauge, pre-flush backlog)
    - `evennia_attribute_flush_duration_seconds` (histogram)
-   - `evennia_cmd_access_cache_hit_total`, `evennia_cmd_access_cache_miss_total` (when `CMD_ACCESS_CACHE_ENABLED`)
+   - `evennia_cmd_access_cache_hit_total`, `evennia_cmd_access_cache_miss_total` (when `COMMAND_ACCESS_CACHE_ENABLED`)
    - `evennia_location_cmdset_cache_hit_total`, `evennia_location_cmdset_cache_miss_total` (when `LOCATION_CMDSET_CACHE_ENABLED`)
    - `evennia_channel_subscriber_cache_hit_total`, `evennia_channel_subscriber_cache_miss_total` (when `CHANNEL_SUBSCRIBER_CACHE_ENABLED` and Redis reachable)
    - `evennia_redis_attr_cache_hit_total`, `evennia_redis_attr_cache_miss_total` (when `ATTRIBUTE_REDIS_CACHE_ENABLED`)

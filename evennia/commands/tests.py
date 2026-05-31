@@ -10,8 +10,11 @@ from django.test import override_settings
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import (BaseEvenniaCommandTest,
-                                          BaseEvenniaTest, TestCase)
+from evennia.utils.test_resources import (
+    BaseEvenniaCommandTest,
+    BaseEvenniaTest,
+    TestCase,
+)
 
 # Testing-command sets
 
@@ -1652,7 +1655,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
         self.char1.ndb._cmd_access_cache = {}
         self.char1.ndb._cmd_access_cache_gen = 0
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_cache_hit_avoids_second_access_call(self):
         from evennia.commands.cmd_access_cache import cached_cmd_access
 
@@ -1663,10 +1666,12 @@ class TestCmdAccessCache(BaseEvenniaTest):
             self.assertTrue(cached_cmd_access(cmd, self.char1))
             self.assertEqual(mock_access.call_count, 1)
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
         from evennia.commands.cmd_access_cache import (
-            cached_cmd_access, invalidate_cmd_access_cache)
+            cached_cmd_access,
+            invalidate_cmd_access_cache,
+        )
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -1675,7 +1680,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
             cached_cmd_access(cmd, self.char1)
             self.assertEqual(mock_access.call_count, 2)
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_cmdset_add_invalidates_caller(self):
         from evennia.commands import cmd_access_cache
         from evennia.commands.cmdset import CmdSet
@@ -1694,7 +1699,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
             wrapped(cmd, self.char1)
             self.assertEqual(wrapped.call_count, 2)
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=False)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=False)
     def test_disabled_uses_access_directly(self):
         from evennia.commands.cmd_access_cache import cached_cmd_access
 
@@ -1704,7 +1709,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
             cached_cmd_access(cmd, self.char1)
             self.assertEqual(mock_access.call_count, 2)
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_cmdparser_with_cache_enabled(self):
         from evennia.commands.cmdset import CmdSet
 
@@ -1725,7 +1730,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
 class TestCmdAccessCacheBypassOnAccessOverride(BaseEvenniaTest):
     """Commands that override .access() bypass the cache (F-6 auto-skip)."""
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_overriding_access_bypasses_cache(self):
         from evennia.commands.cmd_access_cache import cached_cmd_access
 
@@ -1740,7 +1745,7 @@ class TestCmdAccessCacheBypassOnAccessOverride(BaseEvenniaTest):
             cached_cmd_access(cmd, self.char1)
         self.assertEqual(mock_access.call_count, 2)
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_inherited_override_bypasses_cache(self):
         """Override two classes up still bypasses (the is-check sees the inherited fn)."""
         from evennia.commands.cmd_access_cache import cached_cmd_access
@@ -1759,7 +1764,7 @@ class TestCmdAccessCacheBypassOnAccessOverride(BaseEvenniaTest):
             cached_cmd_access(cmd, self.char1)
         self.assertEqual(mock_access.call_count, 2)
 
-    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_base_access_still_cached(self):
         """Stock Command.access subclasses (no override) still get cached."""
         from evennia.commands.cmd_access_cache import cached_cmd_access
@@ -2011,8 +2016,7 @@ class TestFtfyNormalization(BaseEvenniaTest):
 # ----------------------------------------------------------------------------
 
 
-from evennia.commands.signals import \
-    on_cmdset_merge_error as _on_cmdset_merge_error
+from evennia.commands.signals import on_cmdset_merge_error as _on_cmdset_merge_error
 from evennia.commands.signals import on_command_error as _on_command_error
 from evennia.commands.signals import on_command_post as _on_command_post
 from evennia.commands.signals import on_command_pre as _on_command_pre
@@ -2279,8 +2283,7 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import (begin_command_trace,
-                                                 end_command_trace)
+        from evennia.utils.command_trace import begin_command_trace, end_command_trace
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2324,8 +2327,13 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
-    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
+    bump_cmdset_generation,
+    clear_location_cmdset_cache,
+    cmdset_generation,
+    get_cached_location_cmdsets,
+    make_cache_key,
+    set_cached_location_cmdsets,
+)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2621,7 +2629,7 @@ class TestPermissionsChangedSignal(BaseEvenniaCommandTest):
     def _prime_cache(self, caller):
         # Put something in the cache so we can detect invalidation by its
         # absence. Don't go through cached_cmd_access — the cache there
-        # only populates when CMD_ACCESS_CACHE_ENABLED is True.
+        # only populates when COMMAND_ACCESS_CACHE_ENABLED is True.
         caller.ndb._cmd_access_cache = {("sentinel",): True}
         caller.ndb._cmd_access_cache_gen = 7
 

@@ -1,7 +1,7 @@
 """
 Per-caller cache for ``Command.access(caller, "cmd")`` during command parsing.
 
-Enabled with ``CMD_ACCESS_CACHE_ENABLED`` in settings (default on). Commands
+Enabled with ``COMMAND_ACCESS_CACHE_ENABLED`` in settings (default on). Commands
 whose class overrides ``Command.access`` are bypassed automatically (see
 ``_command_uses_base_access``) because an override may consult runtime
 state outside the cache key's reach. Results live on
@@ -39,7 +39,7 @@ _GEN_ATTR = "_cmd_access_cache_gen"
 
 
 def _enabled() -> bool:
-    return bool(getattr(settings, "CMD_ACCESS_CACHE_ENABLED", False))
+    return bool(getattr(settings, "COMMAND_ACCESS_CACHE_ENABLED", False))
 
 
 def _generation(caller) -> int:
@@ -134,8 +134,7 @@ def cached_cmd_access(cmd, caller, session=None) -> bool:
     key = _lookup_key(cmd, caller, session=session)
     if key in cache:
         try:
-            from evennia.server.prometheus_metrics import \
-                record_cmd_access_cache_hit
+            from evennia.server.prometheus_metrics import record_cmd_access_cache_hit
 
             record_cmd_access_cache_hit()
         except Exception:
@@ -145,8 +144,7 @@ def cached_cmd_access(cmd, caller, session=None) -> bool:
     allowed = cmd.access(caller, "cmd", session=session)
     cache[key] = allowed
     try:
-        from evennia.server.prometheus_metrics import \
-            record_cmd_access_cache_miss
+        from evennia.server.prometheus_metrics import record_cmd_access_cache_miss
 
         record_cmd_access_cache_miss()
     except Exception:

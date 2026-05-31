@@ -391,7 +391,7 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
         if match_selector is not None:
             matches.extend(trie_build_matches(new_raw_string, cmdset))
 
-    if getattr(settings, "CMD_ACCESS_CACHE_ENABLED", False):
+    if getattr(settings, "COMMAND_ACCESS_CACHE_ENABLED", False):
         from evennia.commands.cmd_access_cache import cached_cmd_access
 
         matches = [
