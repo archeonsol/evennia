@@ -158,7 +158,7 @@ in front of it on the hot path and produces almost all the hits.
 **Proposal.** One paragraph in the lock-check cache docstring noting the
 cmd-parse path is fronted by cmd-access (when enabled). **Doc-only.**
 
-### F-8 (M): `Script.delete()` doesn't call `attributes.clear()` — leaks Redis attr keys
+### F-8 (M, shipped): `Script.delete()` doesn't call `attributes.clear()` — leaks Redis attr keys
 
 ObjectDB, AccountDB, and ChannelDB all call `self.attributes.clear()`
 in their custom `delete()` before `super().delete()`, which routes per-attr

@@ -552,6 +552,10 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             return False
 
         self._stop_task()
+        # Match ObjectDB/AccountDB/ChannelDB: route attribute removal through
+        # the AttributeHandler so backend invalidation (Redis L2) fires
+        # per-attr rather than leaving keys orphaned until TTL expiry.
+        self.attributes.clear()
         super().delete()
         return True
 
