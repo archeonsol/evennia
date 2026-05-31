@@ -71,8 +71,8 @@ class Account(DefaultAccount):
      - msg(text=None, from_obj=None, session=None, options=None, **kwargs)
      - execute_cmd(raw_string)
      - search(searchdata, return_puppet=False, search_object=False, typeclass=None,
-                      nofound_string=None, multimatch_string=None, use_nicks=True,
-                      quiet=False, **kwargs)
+                      not_found=None, ambiguous=None, use_nicks=True, **kwargs)
+     - search_for(searchdata, search_object=False, typeclass=None, use_nicks=True, **kwargs)
      - is_typeclass(typeclass, exact=False)
      - swap_typeclass(new_typeclass, clean_attributes=False, no_default=True)
      - access(accessing_obj, access_type='read', default=False, no_superuser_bypass=False, **kwargs)

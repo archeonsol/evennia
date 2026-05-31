@@ -79,11 +79,13 @@ class Object(ObjectParent, DefaultObject):
      get_search_result(searchdata, attribute_name=None, typeclass=None,
                        candidates=None, exact=False, use_dbref=None, tags=None, **kwargs)
      get_stacked_result(results, **kwargs)
-     handle_search_results(searchdata, results, **kwargs)
+     search_for(searchdata, global_search=False, use_nicks=True, typeclass=None,
+                location=None, attribute_name=None, exact=False, candidates=None,
+                use_locks=True, use_dbref=None, tags=None, stacked=0)
      search(searchdata, global_search=False, use_nicks=True, typeclass=None,
-            location=None, attribute_name=None, quiet=False, exact=False,
-            candidates=None, use_locks=True, nofound_string=None,
-            multimatch_string=None, use_dbref=None, tags=None, stacked=0)
+            location=None, attribute_name=None, exact=False, candidates=None,
+            use_locks=True, not_found=None, ambiguous=None, use_dbref=None,
+            tags=None, stacked=0)
      search_account(searchdata, quiet=False)
      execute_cmd(raw_string, session=None, **kwargs))
      msg(text=None, from_obj=None, session=None, options=None, **kwargs)

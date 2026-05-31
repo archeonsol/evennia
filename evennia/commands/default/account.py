@@ -297,10 +297,17 @@ class CmdIC(AccountCommand):
                     # from playable_characters here - this allows builders to puppet objects
                     # with the same name as their playable chars should it be necessary
                     # (by going to the same location).
+                    from evennia.objects.search_result import Ambiguous, Found
+
+                    puppet_result = session.puppet.search_for(self.args)
+                    if isinstance(puppet_result, Found):
+                        local_chars = [puppet_result.obj]
+                    elif isinstance(puppet_result, Ambiguous):
+                        local_chars = puppet_result.candidates
+                    else:
+                        local_chars = []
                     character_candidates = [
-                        char
-                        for char in session.puppet.search(self.args, quiet=True)
-                        if char.access(account, "puppet")
+                        char for char in local_chars if char.access(account, "puppet")
                     ]
                 if not character_candidates:
                     # fall back to global search only if Builder+ has no

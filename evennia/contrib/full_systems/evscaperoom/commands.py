@@ -152,19 +152,20 @@ class CmdEvscapeRoom(Command):
         if required is False:
             return None, query
 
-        matches = self.caller.search(query, quiet=True)
+        from evennia.objects.search_result import Ambiguous, Found
 
-        if not matches or len(matches) > 1:
-            if required:
-                if not query:
-                    self.caller.msg("You must give an argument.")
-                else:
-                    _AT_SEARCH_RESULT(matches, self.caller, query=query)
-                raise InterruptCommand
+        result = self.caller.search_for(query)
+
+        if isinstance(result, Found):
+            return result.obj, None
+        if required:
+            if not query:
+                self.caller.msg("You must give an argument.")
             else:
-                return None, query
-        else:
-            return matches[0], None
+                matches = result.candidates if isinstance(result, Ambiguous) else []
+                _AT_SEARCH_RESULT(matches, self.caller, query=query)
+            raise InterruptCommand
+        return None, query
 
     def parse(self):
         """
@@ -418,9 +419,11 @@ class CmdEmote(Command):
                         nameobj = self.caller
                         self_refer = True
                     else:
-                        match = self.caller.search(name, quiet=True)
-                        if len(match) == 1:
-                            nameobj = match[0]
+                        from evennia.objects.search_result import Found
+
+                        match = self.caller.search_for(name)
+                        if isinstance(match, Found):
+                            nameobj = match.obj
                 if nameobj:
                     if target == nameobj:
                         part = f"{self_clr}{nameobj.get_display_name(target)}|n"

@@ -40,9 +40,8 @@ because it touches a public setting.
 ## Scope boundary
 
 - **In scope**: this one setting and any direct consumers.
-- **Out of scope**: broader settings hygiene (see S1 for the
-  long-term typed-settings work); other prefix inconsistencies
-  if you find them while grepping (file separately).
+- **Out of scope**: broader settings hygiene; other prefix
+  inconsistencies if you find them while grepping (file separately).
 
 ## Existing code to study
 

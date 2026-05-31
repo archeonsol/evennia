@@ -3,6 +3,7 @@ from mock import MagicMock, patch
 from evennia.objects.models import ObjectDB
 from evennia.objects.objects import (DefaultCharacter, DefaultExit,
                                      DefaultObject, DefaultRoom)
+from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.typeclasses.tags import (AliasProperty, PermissionProperty,
                                       TagCategoryProperty, TagProperty)
@@ -157,58 +158,52 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertEqual(self.char1.search("co", stacked=2), None)
 
     def test_search_ordinal_last(self):
-        """first/last/other multimatch input resolves to one object.
-
-        ``quiet=True`` always returns a list per the documented search()
-        contract; the selector narrows the list to one entry.
-        """
+        """first/last/other multimatch input resolves to one object via search_for."""
         a = DefaultObject.create("gem", location=self.room1)[0]
         b = DefaultObject.create("gem", location=self.room1)[0]
         c = DefaultObject.create("gem", location=self.room1)[0]
-        self.assertEqual(self.char1.search("first gem", quiet=True), [a])
-        self.assertEqual(self.char1.search("last gem", quiet=True), [c])
+        self.assertEqual(self.char1.search_for("first gem"), Found(obj=a))
+        self.assertEqual(self.char1.search_for("last gem"), Found(obj=c))
         d = DefaultObject.create("orb", location=self.room1)[0]
         e = DefaultObject.create("orb", location=self.room1)[0]
-        self.assertEqual(self.char1.search("other orb", quiet=True), [e])
-        # Without quiet, autopick + selector collapse to a single object;
-        # "other gem" is invalid against 3 gems and resolves to None.
+        self.assertEqual(self.char1.search_for("other orb"), Found(obj=e))
+        # "other gem" is invalid against 3 gems → Ambiguous with invalid_other
+        result = self.char1.search_for("other gem")
+        self.assertIsInstance(result, Ambiguous)
+        self.assertTrue(result.invalid_other)
+        # sugar .search() emits prompt and returns None
         self.assertIsNone(self.char1.search("other gem"))
 
     def test_search_location_scope(self):
-        """my/here narrow candidates before matching.
-
-        ``quiet=True`` returns a list per contract; the scope qualifier
-        narrowed the candidate pool before matching.
-        """
+        """my/here narrow candidates before matching."""
         room_gem = DefaultObject.create("gem", location=self.room1)[0]
         inv_gem = DefaultObject.create("gem", location=self.char1)[0]
-        self.assertEqual(self.char1.search("here gem", quiet=True), [room_gem])
-        self.assertEqual(self.char1.search("my gem", quiet=True), [inv_gem])
+        self.assertEqual(self.char1.search_for("here gem"), Found(obj=room_gem))
+        self.assertEqual(self.char1.search_for("my gem"), Found(obj=inv_gem))
 
     def test_search_autopick(self):
-        """Auto-pick collapses single-bucket results when not in ``quiet`` mode.
-
-        ``quiet=True`` always returns a list per the search() contract.
-        Autopick only fires for the non-quiet path (caller hasn't taken
-        on responsibility for disambiguation).
-        """
+        """Auto-pick collapses single-bucket results."""
         only_room = DefaultObject.create("pebble", location=self.room1)[0]
-        # quiet: list of one
-        self.assertEqual(self.char1.search("pebble", quiet=True), [only_room])
-        # non-quiet: autopick the single match
+        # single match: Found
+        self.assertEqual(self.char1.search_for("pebble"), Found(obj=only_room))
+        # sugar returns the object directly
         self.assertEqual(self.char1.search("pebble"), only_room)
 
         DefaultObject.create("pebble", location=self.room1)
-        # quiet: list of two (multi-match, autopick doesn't help)
-        self.assertEqual(len(self.char1.search("pebble", quiet=True)), 2)
+        # multi-match without qualifier → Ambiguous (autopick can't help across same bucket)
+        result = self.char1.search_for("pebble")
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(len(result.candidates), 2)
 
         inv_pebble = DefaultObject.create("pebble", location=self.char1)[0]
         DefaultObject.create("pebble", location=self.char1)
-        # "my pebble" narrows to inventory (2 pebbles); quiet returns the list
-        self.assertEqual(len(self.char1.search("my pebble", quiet=True)), 2)
+        # "my pebble" narrows to inventory (2 pebbles) → Ambiguous
+        result = self.char1.search_for("my pebble")
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(len(result.candidates), 2)
 
     def test_search_plural_form(self):
-        """Test searching for plural form of objects"""
+        """Plural-form searches return all matches as Ambiguous candidates."""
         coin1 = DefaultObject.create("coin", location=self.room1)[0]
         coin2 = DefaultObject.create("coin", location=self.room1)[0]
         coin3 = DefaultObject.create("coin", location=self.room1)[0]
@@ -217,8 +212,12 @@ class DefaultObjectTest(BaseEvenniaTest):
         coin2.get_numbered_name(3, self.char1)
         coin3.get_numbered_name(4, self.char1)
 
-        self.assertEqual(self.char1.search("coin", quiet=True), [coin1, coin2, coin3])
-        self.assertEqual(self.char1.search("coins", quiet=True), [coin1, coin2, coin3])
+        result = self.char1.search_for("coin")
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(result.candidates, [coin1, coin2, coin3])
+        result = self.char1.search_for("coins")
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(result.candidates, [coin1, coin2, coin3])
 
     def test_get_default_lockstring_base(self):
         pattern = (
@@ -235,11 +234,13 @@ class DefaultObjectTest(BaseEvenniaTest):
 
         self.obj1.tags.add("plugh", category="adventure")
 
-        self.assertEqual(self.char1.search("Obj", quiet=True), [self.obj1])
+        self.assertEqual(self.char1.search_for("Obj"), Found(obj=self.obj1))
         # should not find a match
-        self.assertEqual(self.char1.search("Dummy", quiet=True), [])
+        self.assertIsInstance(self.char1.search_for("Dummy"), NotFound)
         # should still not find a match
-        self.assertEqual(self.char1.search("Dummy", tags=[("plugh", "adventure")], quiet=True), [])
+        self.assertIsInstance(
+            self.char1.search_for("Dummy", tags=[("plugh", "adventure")]), NotFound
+        )
 
         self.assertEqual(list(search.search_object("Dummy", tags=[("plugh", "adventure")])), [])
         self.assertEqual(

@@ -510,8 +510,8 @@ class CmdDrop(NumberedTargetCommand):
         objs = caller.search(
             self.args,
             location=caller,
-            nofound_string=f"You aren't carrying {self.args}.",
-            multimatch_string=f"You carry more than one {self.args}:",
+            not_found=f"You aren't carrying {self.args}.",
+            ambiguous=f"You carry more than one {self.args}:",
             stacked=self.number,
         )
         if not objs:
@@ -569,8 +569,8 @@ class CmdGive(NumberedTargetCommand):
         to_give = caller.search(
             self.lhs,
             location=caller,
-            nofound_string=f"You aren't carrying {self.lhs}.",
-            multimatch_string=f"You carry more than one {self.lhs}:",
+            not_found=f"You aren't carrying {self.lhs}.",
+            ambiguous=f"You carry more than one {self.lhs}:",
             stacked=self.number,
         )
         if not to_give:

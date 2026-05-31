@@ -254,8 +254,8 @@ class CmdPut(CmdDrop):
         obj = caller.search(
             self.lhs,
             location=caller,
-            nofound_string=f"You aren't carrying {self.args}.",
-            multimatch_string=f"You carry more than one {self.args}:",
+            not_found=f"You aren't carrying {self.args}.",
+            ambiguous=f"You carry more than one {self.args}:",
         )
         if not obj:
             return

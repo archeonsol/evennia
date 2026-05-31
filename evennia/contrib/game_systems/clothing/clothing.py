@@ -443,8 +443,11 @@ class CmdWear(Command):
             return
         if not self.rhs:
             # check if the whole string is an object
-            clothing = self.caller.search(self.lhs, candidates=self.caller.contents, quiet=True)
-            if not clothing:
+            from evennia.objects.search_result import (Ambiguous, Found,
+                                                       NotFound)
+
+            initial = self.caller.search_for(self.lhs, candidates=self.caller.contents)
+            if isinstance(initial, NotFound):
                 # split out the first word as the object and the rest as the wearstyle
                 argslist = self.lhs.split()
                 self.lhs = argslist[0]
@@ -452,7 +455,8 @@ class CmdWear(Command):
                 clothing = self.caller.search(self.lhs, candidates=self.caller.contents)
             else:
                 # pass the result through the search-result hook
-                clothing = at_search_result(clothing, self.caller, self.lhs)
+                matches = [initial.obj] if isinstance(initial, Found) else initial.candidates
+                clothing = at_search_result(matches, self.caller, self.lhs)
 
         else:
             # it had an explicit separator - just do a normal search for the lhs

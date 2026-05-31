@@ -15,6 +15,7 @@ from evennia.commands.cmdhandler import (generate_cmdset_providers,
                                          get_and_merge_cmdsets)
 from evennia.locks.lockhandler import LockException
 from evennia.objects.models import ObjectDB
+from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.prototypes import menus as olc_menus
 from evennia.prototypes import prototypes as protlib
 from evennia.prototypes import spawner
@@ -1263,13 +1264,14 @@ class CmdLink(COMMAND_DEFAULT_CLASS):
         object_name = self.lhs
 
         # try to search locally first
-        results = caller.search(object_name, quiet=True)
-        if len(results) > 1:  # local results was a multimatch. Inform them to be more specific
+        local = caller.search_for(object_name)
+        if isinstance(local, Ambiguous):
+            # local results was a multimatch. Inform them to be more specific
             _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))
-            return _AT_SEARCH_RESULT(results, caller, query=object_name)
-        elif len(results) == 1:  # A unique local match
-            obj = results[0]
-        else:  # No matches. Search globally
+            return _AT_SEARCH_RESULT(local.candidates, caller, query=object_name)
+        elif isinstance(local, Found):
+            obj = local.obj
+        else:  # NotFound. Search globally
             obj = caller.search(object_name, global_search=True)
             if not obj:
                 return
@@ -1562,13 +1564,13 @@ class CmdOpen(ObjManipCommand):
         # check if this exit object already exists at the location.
         # we need to ignore errors (so no automatic feedback)since we
         # have to know the result of the search to decide what to do.
-        exit_obj = caller.search(exit_name, location=location, quiet=True, exact=True)
-        if len(exit_obj) > 1:
+        result = caller.search_for(exit_name, location=location, exact=True)
+        if isinstance(result, Ambiguous):
             # give error message and return
             caller.search(exit_name, location=location, exact=True)
             return None
-        if exit_obj:
-            exit_obj = exit_obj[0]
+        if isinstance(result, Found):
+            exit_obj = result.obj
             if not exit_obj.destination:
                 # we are trying to link a non-exit
                 caller.msg(
@@ -2272,8 +2274,8 @@ class CmdTypeclass(COMMAND_DEFAULT_CLASS):
 
         if "show" in self.switches or "examine" in self.switches:
             oquery = self.lhs
-            obj = caller.search(oquery, quiet=True)
-            if not obj:
+            initial = caller.search_for(oquery)
+            if isinstance(initial, NotFound):
                 # no object found to examine, see if it's a typeclass-path instead
                 tclasses = get_all_typeclasses()
                 matches = [
@@ -3295,8 +3297,9 @@ class CmdFind(COMMAND_DEFAULT_CLASS):
 
         if is_dbref or is_account:
             if is_dbref:
-                # a dbref search
-                result = caller.search(searchstring, global_search=True, quiet=True)
+                # a dbref search (returns 0 or 1 match by definition)
+                dbref_result = caller.search_for(searchstring, global_search=True)
+                result = [dbref_result.obj] if isinstance(dbref_result, Found) else []
                 string = "|wExact dbref match|n(#%i-#%i%s):" % (low, high, restrictions)
             else:
                 # an account search
@@ -3621,8 +3624,13 @@ class CmdScripts(COMMAND_DEFAULT_CLASS):
 
         # find script or object to operate on
         scripts = self._search_script() if self.typeclass_query else None
-        objects = caller.search(self.obj_query, quiet=True) if self.obj_query else None
-        obj = objects[0] if objects else None
+        obj = None
+        if self.obj_query:
+            obj_result = caller.search_for(self.obj_query)
+            if isinstance(obj_result, Found):
+                obj = obj_result.obj
+            elif isinstance(obj_result, Ambiguous):
+                obj = obj_result.candidates[0]
 
         if not self.switches:
             # creation / view mode
@@ -4062,11 +4070,13 @@ class CmdTag(COMMAND_DEFAULT_CLASS):
         if self.rhs:
             # = is found; command args are of the form obj = tag
             # first search locally, then global
-            obj = self.caller.search(self.lhs, quiet=True)
-            if not obj:
-                obj = self.caller.search(self.lhs, global_search=True)
+            local = self.caller.search_for(self.lhs)
+            if isinstance(local, Found):
+                obj = local.obj
+            elif isinstance(local, Ambiguous):
+                obj = local.candidates[0]
             else:
-                obj = obj[0]
+                obj = self.caller.search(self.lhs, global_search=True)
             if not obj:
                 return
             tag = self.rhs
@@ -4084,11 +4094,13 @@ class CmdTag(COMMAND_DEFAULT_CLASS):
         else:
             # no = found - list tags on object
             # first search locally, then global
-            obj = self.caller.search(self.args, quiet=True)
-            if not obj:
-                obj = self.caller.search(self.args, global_search=True)
+            local = self.caller.search_for(self.args)
+            if isinstance(local, Found):
+                obj = local.obj
+            elif isinstance(local, Ambiguous):
+                obj = local.candidates[0]
             else:
-                obj = obj[0]
+                obj = self.caller.search(self.args, global_search=True)
             if not obj:
                 return
             tagtuples = obj.tags.all(return_key_and_category=True)

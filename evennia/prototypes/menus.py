@@ -463,8 +463,11 @@ def _search_object(caller):
 
     if is_dbref or is_account:
         if is_dbref:
-            # a dbref search
-            results = caller.search(searchstring, global_search=True, quiet=True)
+            # a dbref search (returns 0 or 1 match by definition)
+            from evennia.objects.search_result import Found
+
+            dbref_result = caller.search_for(searchstring, global_search=True)
+            results = [dbref_result.obj] if isinstance(dbref_result, Found) else []
         else:
             # an account search
             searchstring = searchstring.lstrip("*")

@@ -18,11 +18,8 @@ Currently parallel-startable (no unresolved dependencies):
 
 **No dependencies on anything not yet shipped:**
 
-- [Q1: search Result type](Q1-search-result-type.md) — small.
-  Replace `caller.search` shape soup.
 - [C2: cmdset introspector](C2-cmdset-introspector.md) — small.
   `account.explain_cmd("look")`.
-- [S1: settings as typed objects](S1-settings-objects.md) — medium.
 - [AS1: sync/async commitment](AS1-sync-async-commitment.md) —
   medium. Direction + helpers.
 - [A1: typed attribute descriptors](A1-attribute-descriptors.md) —
@@ -32,8 +29,6 @@ Currently parallel-startable (no unresolved dependencies):
 
 **Unblocked by B1 (typeclass hooks taxonomy doc, shipped):**
 
-- [H1: hook registry](H1-hook-registry.md) — medium. Executable
-  form of B1. **Shipped as `+underspire.44`.**
 - [M1: composable move_to](M1-composable-move.md) — medium. Builder
   replaces kwargs-as-API.
 - [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces

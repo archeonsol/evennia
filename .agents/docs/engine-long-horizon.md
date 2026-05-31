@@ -194,11 +194,11 @@ implemented in Level 2, the descriptor interface should be
 backend-agnostic so Level 3 can add others without redesigning the
 descriptors.
 
-**Settings as objects (S1) should support non-Django config sources.**
-Same reasoning. If settings objects know how to read from a Django
-settings module, that's fine; they shouldn't *require* one. A
-headless mode that loads settings from a dict or a TOML file should
-be possible without rewriting the settings layer.
+**If a settings-layer rework is ever taken on, it should support
+non-Django config sources.** S1 (typed settings objects) was dropped
+as not worth the churn, but the principle still applies to any
+future revisit: a headless mode that loads settings from a dict or a
+TOML file should be possible without rewriting the settings layer.
 
 The summary: Level 2 should design typed primitives that *operate on*
 the existing typeclass+Django substrate without *being part of* it.

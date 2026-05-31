@@ -1386,10 +1386,14 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
                     # a number to specify a historic page
                     number = int(target)
                 elif message:
-                    target_obj = self.caller.search(target, quiet=True)
-                    if target_obj:
-                        # a proper target
-                        targets = [target_obj[0]]
+                    from evennia.objects.search_result import Ambiguous, Found
+
+                    target_obj = self.caller.search_for(target)
+                    if isinstance(target_obj, Found):
+                        targets = [target_obj.obj]
+                        message = message[0].strip()
+                    elif isinstance(target_obj, Ambiguous):
+                        targets = [target_obj.candidates[0]]
                         message = message[0].strip()
                     else:
                         # a message with a space in it - use the original args

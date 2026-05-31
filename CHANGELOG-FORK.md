@@ -25,6 +25,122 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.45 — Q1 typed search result
+
+Splits `caller.search` / `Account.search` into a typed primitive plus a
+thin sugar wrapper, eliminating the single-or-list-or-None return-shape
+soup. The primitive `search_for(...)` returns a typed `SearchResult`
+variant (`Found`, `Ambiguous`, or `NotFound`); the sugar `search(...)`
+calls it, emits the default disambiguation prompt on miss, and returns
+`Object | None`. The `quiet=True` mode is gone — callers that want raw
+control use `search_for()` and pattern-match. Also drops the long-stale
+S1 (typed-settings) prompt from the architecture-doc backlog.
+
+### Engine — typed search result
+
+New module [`evennia/objects/search_result.py`](evennia/objects/search_result.py):
+
+- `Found(obj, stack=None)` — truthy. Carries the matched object, plus a
+  `stack` list when `stacked=N` collapsed identical matches.
+- `Ambiguous(candidates, search_string, invalid_other=False)` — falsy.
+  Carries the candidate list and the original query. `invalid_other`
+  flags the "other <name>" selector against a non-two match count.
+- `NotFound(search_string)` — falsy. Carries the original query.
+
+All three are frozen dataclasses subclassing `SearchResult`; Python
+pattern matching narrows cleanly.
+
+### Engine — `DefaultObject.search` split
+
+[`evennia/objects/mixins/search.py`](evennia/objects/mixins/search.py)
+now exposes two methods:
+
+- `search_for(searchdata, ...)` — runs the full pipeline (nick replace,
+  qualifier parse, candidate compute, "me"/"here" short-circuit, DB
+  query, lock filter, selector narrowing, autopick, stack collapse) and
+  returns a `SearchResult`. No side effects.
+- `search(searchdata, ...)` — sugar over `search_for`. Returns the
+  matched object (or the stack list when stacked), or `None` when the
+  result is `Ambiguous` / `NotFound` (with the prompt emitted via
+  `settings.SEARCH_AT_RESULT`).
+
+The pipeline helper hooks (`get_search_query_replacement`,
+`get_search_direct_match`, `get_search_candidates`, `get_search_result`,
+`get_stacked_results`) are unchanged — same names, same signatures,
+still `@hook(event="search", ...)`. The internal collapse helper
+`handle_search_results` is removed (folded into `search_for`).
+
+**Migration (engine API):**
+
+- `quiet=True` is removed. Callers that used it migrate to
+  `search_for()` and pattern-match on the variant.
+- `nofound_string` → `not_found`; `multimatch_string` → `ambiguous` on
+  `.search()`.
+- The `at_search_result` hook (the `SEARCH_AT_RESULT` setting target)
+  still takes the old kwarg names (`nofound_string`,
+  `multimatch_string`). The sugar layer translates. Games that override
+  the hook need no changes.
+
+### Engine — `DefaultAccount.search` split
+
+[`evennia/accounts/accounts.py`](evennia/accounts/accounts.py) gets the
+same treatment: `Account.search_for(...)` returns the shared
+`SearchResult` type (parameterized on `AccountDB` matches when
+`search_object=False`, `ObjectDB` matches otherwise); `Account.search`
+becomes a thin sugar wrapper with the renamed kwargs and the
+`return_puppet` collapse preserved.
+
+### Engine — call-site migration
+
+All 11 engine-side `quiet=True` call sites migrated to the typed API:
+
+- [`evennia/commands/default/building.py`](evennia/commands/default/building.py):
+  link, exit-create, examine, script-search, tag commands.
+- [`evennia/commands/default/comms.py`](evennia/commands/default/comms.py): page command target resolution.
+- [`evennia/commands/default/account.py`](evennia/commands/default/account.py): `@ic` candidate gathering.
+- [`evennia/prototypes/menus.py`](evennia/prototypes/menus.py): OLC dbref search.
+- [`evennia/contrib/full_systems/evscaperoom/commands.py`](evennia/contrib/full_systems/evscaperoom/commands.py): command target resolution.
+- [`evennia/contrib/game_systems/clothing/clothing.py`](evennia/contrib/game_systems/clothing/clothing.py): wear-style fallback.
+
+Kwarg renames (`nofound_string`/`multimatch_string` →
+`not_found`/`ambiguous`) applied at:
+
+- [`evennia/commands/default/general.py`](evennia/commands/default/general.py): `drop`, `give`.
+- [`evennia/contrib/game_systems/containers/containers.py`](evennia/contrib/game_systems/containers/containers.py): container target.
+
+Stub docstrings in [`evennia/objects/object.py`](evennia/objects/object.py)
+and [`evennia/game_template/typeclasses/`](evennia/game_template/typeclasses/)
+updated to reflect the new method signatures.
+
+**Migration (game-side):** any game calling `caller.search(quiet=True)`
+must move to `caller.search_for(...)` and pattern-match. Any game
+passing `nofound_string=` / `multimatch_string=` must rename to
+`not_found=` / `ambiguous=`. Game-side `at_search_result` overrides do
+not need to change.
+
+### Tests
+
+- New [`evennia/objects/tests/test_search_result.py`](evennia/objects/tests/test_search_result.py)
+  — 11 pure unit tests over truthiness, fields, pattern matching, equality.
+- Updated 5 search tests in
+  [`evennia/objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py)
+  to assert `Found` / `Ambiguous` / `NotFound` shapes via `search_for`.
+- Full `evennia.objects` (98), `evennia.commands` / `evennia.accounts`
+  / `evennia.prototypes` (346), and affected contrib (22) suites pass.
+
+### Docs — backlog
+
+- S1 (typed settings objects) dropped from
+  [`engine-api-architecture.md`](.agents/docs/engine-api-architecture.md)
+  after a design pass: ~290 settings + ~1000 read sites for modest
+  gain, with `OptionHandler` already covering the per-account
+  cosmetic-preference use case. Note preserved in the doc explaining
+  why a future revisit (if any) should not redo the full framework.
+- Q1 marked shipped; the prompt at `.agents/prompts/Q1-search-result-type.md`
+  and the dropped `.agents/prompts/S1-settings-objects.md` removed.
+
+---
+
 ## 6.0.0+underspire.44 — H1 hook registry
 
 Ships [`evennia.hooks`](evennia/hooks/__init__.py), a descriptive

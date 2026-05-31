@@ -5,6 +5,8 @@ from django.utils.translation import gettext as _
 
 import evennia
 from evennia.hooks import hook
+from evennia.objects.search_result import (Ambiguous, Found, NotFound,
+                                           SearchResult)
 from evennia.utils import search as _search_utils
 from evennia.utils.multimatch import (narrow_candidates,
                                       parse_search_qualifiers,
@@ -251,46 +253,7 @@ class SearchMixin:
 
         return False, results
 
-    def handle_search_results(self, searchdata, results, **kwargs):
-        """
-        This method is called by the search method to allow for handling of the final search result.
-
-        Args:
-            searchdata (str): The original search criterion (potentially modified by
-                `get_search_query_replacement`).
-            results (list): The list of results from the search.
-            **kwargs (any): These are the same as passed to the `search` method.
-
-        Returns:
-            Object, None or list: Normally this is a single object, but if `quiet=True` it should be
-            a list.  If quiet=False and we have to handle a no/multi-match error (directly messaging
-            the user), this should return `None`.
-
-        """
-        if kwargs.get("quiet"):
-            # don't care about no/multi-match errors, just return list of whatever we have
-            return list(results)
-
-        results = list(results)
-
-        if not kwargs.get("_search_had_qualifier"):
-            picked = try_autopick(results, self)
-            if picked is not None:
-                return picked
-
-        nofound_string = kwargs.get("nofound_string")
-        multimatch_string = kwargs.get("multimatch_string")
-
-        return _AT_SEARCH_RESULT(
-            results,
-            self,
-            query=searchdata,
-            nofound_string=nofound_string,
-            multimatch_string=multimatch_string,
-            invalid_other=kwargs.get("invalid_other", False),
-        )
-
-    def search(
+    def search_for(
         self,
         searchdata,
         global_search=False,
@@ -298,104 +261,42 @@ class SearchMixin:
         typeclass=None,
         location=None,
         attribute_name=None,
-        quiet=False,
         exact=False,
         candidates=None,
         use_locks=True,
-        nofound_string=None,
-        multimatch_string=None,
         use_dbref=None,
         tags=None,
         stacked=0,
     ):
         """
-        Returns an Object matching a search string/condition
+        Run the search pipeline and return a typed `SearchResult`.
 
-        Perform a standard object search in the database, handling
-        multiple results and lack thereof gracefully. By default, only
-        objects in the current `location` of `self` or its inventory are searched for.
+        This is the primitive: it never emits messages. The result is one of
+        `Found`, `Ambiguous`, or `NotFound` (see `evennia.objects.search_result`).
+
+        For the common "find one or fail with a default prompt" case, use
+        `.search()` instead, which wraps this and emits the default
+        disambiguation/not-found prompt via `settings.SEARCH_AT_RESULT`.
 
         Args:
-            searchdata (str or obj): Primary search criterion. Will be matched
-                against `object.key` (with `object.aliases` second) unless
-                the keyword attribute_name specifies otherwise.
-
-                Special keywords:
-
-                - `#<num>`: search by unique dbref. This is always a global search.
-                - `me,self`: self-reference to this object
-                - Ordinal disambiguation: `first <string>`, `second <string>`, `last <string>`,
-                  `other <string>` (two matches only), or `<num>-<string>` per
-                  `settings.SEARCH_MULTIMATCH_REGEX`.
-                - Location scope: `my <string>`, `here <string>`, `worn <string>` (see
-                  `settings.SEARCH_MULTIMATCH_LOCATION_PREFIXES`).
-
-            global_search (bool): Search all objects globally. This overrules 'location' data.
-            use_nicks (bool): Use nickname-replace (nicktype "object") on `searchdata`.
-            typeclass (str or Typeclass, or list of either): Limit search only
-                to `Objects` with this typeclass. May be a list of typeclasses
-                for a broader search.
-            location (Object or list): Specify a location or multiple locations
-                to search. Note that this is used to query the *contents* of a
-                location and will not match for the location itself -
-                if you want that, don't set this or use `candidates` to specify
-                exactly which objects should be searched. If this nor candidates are
-                given, candidates will include caller's inventory, current location and
-                all objects in the current location.
-            attribute_name (str): Define which property to search. If set, no
-                key+alias search will be performed. This can be used
-                to search database fields (db_ will be automatically
-                prepended), and if that fails, it will try to return
-                objects having Attributes with this name and value
-                equal to searchdata. A special use is to search for
-                "key" here if you want to do a key-search without
-                including aliases.
-            quiet (bool): don't display default error messages - this tells the
-                search method that the user wants to handle all errors
-                themselves. It also changes the return value type, see
-                below.
-            exact (bool): if unset (default) - prefers to match to beginning of
-                string rather than not matching at all. If set, requires
-                exact matching of entire string.
-            candidates (list of objects): this is an optional custom list of objects
-                to search (filter) between. It is ignored if `global_search`
-                is given. If not set, this list will automatically be defined
-                to include the location, the contents of location and the
-                caller's contents (inventory).
-            use_locks (bool): If True (default) - removes search results which
-                fail the "search" lock.
-            nofound_string (str):  optional custom string for not-found error message.
-            multimatch_string (str): optional custom string for multimatch error header.
-            use_dbref (bool or None, optional): If `True`, allow to enter e.g. a query "#123"
-                to find an object (globally) by its database-id 123. If `False`, the string "#123"
-                will be treated like a normal string. If `None` (default), the ability to query by
-                #dbref is turned on if `self` has the permission 'Builder' and is turned off
-                otherwise.
-            tags (list or tuple): Find objects matching one or more Tags. This should be one or
-                more tag definitions on the form `tagname` or `(tagname, tagcategory)`.
-            stacked (int, optional): If > 0, multimatches will be analyzed to determine if they
-                only contains identical objects; these are then assumed 'stacked' and no multi-match
-                error will be generated, instead `stacked` number of matches will be returned as a
-                list. If `stacked` is larger than number of matches, returns that number of matches.
-                If the found stack is a mix of objects, return None and handle the multi-match error
-                depending on the value of `quiet`.
+            searchdata (str or obj): See `.search` for full details on this and
+                all filter arguments.
+            global_search, use_nicks, typeclass, location, attribute_name,
+            exact, candidates, use_locks, use_dbref, tags, stacked: See
+                `.search` for full descriptions.
 
         Returns:
-            Object, None or list: Will return an `Object` or `None` if `quiet=False`. Will return
-            a `list` with 0, 1 or more matches if `quiet=True`. If `stacked` is a positive integer,
-            this list may contain all stacked identical matches.
-
-        Notes:
-            To find Accounts, use eg. `evennia.account_search`. If
-            `quiet=False`, error messages will be handled by
-            `settings.SEARCH_AT_RESULT` and echoed automatically (on
-            error, return will be `None`). If `quiet=True`, the error
-            messaging is assumed to be handled by the caller.
+            SearchResult: One of `Found(obj[, stack])`, `Ambiguous(candidates,
+            search_string[, invalid_other])`, or `NotFound(search_string)`.
 
         """
-        # store input kwargs for sub-methods (this must be done first in this method)
+        original_searchdata = searchdata
+
+        # store input kwargs for sub-methods (this must be done first)
         input_kwargs = {
-            key: value for key, value in locals().items() if key not in ("self", "searchdata")
+            key: value
+            for key, value in locals().items()
+            if key not in ("self", "searchdata", "original_searchdata")
         }
 
         # replace incoming searchdata string with a potentially modified version
@@ -411,13 +312,11 @@ class SearchMixin:
         candidates = self.get_search_candidates(searchdata, **input_kwargs)
 
         # handle special input strings, like "me" or "here".
-        # we also want to include the identified candidates here instead of input, to account for defaults
-        should_return, searchdata = self.get_search_direct_match(
+        should_return, direct = self.get_search_direct_match(
             searchdata, **(input_kwargs | {"candidates": candidates})
         )
         if should_return:
-            # we got an actual result, return it immediately
-            return [searchdata] if quiet else searchdata
+            return Found(obj=direct)
 
         # if use_dbref is None, we use a lock to determine if dbref search is allowed
         use_dbref = (
@@ -448,25 +347,156 @@ class SearchMixin:
         # filter out objects we are not allowed to search
         if use_locks:
             results = [x for x in list(results) if x.access(self, "search", default=True)]
+        else:
+            results = list(results)
 
+        # apply ordinal selector ("first", "2-sword", etc.)
+        invalid_other = False
         selector = input_kwargs.get("_search_selector")
         if selector is not None:
             nresults = len(results)
             if selector == "other" and nresults != 2:
-                input_kwargs["invalid_other"] = True
+                invalid_other = True
             else:
                 idx = resolve_multimatch_index(selector, nresults)
                 if idx is not None:
                     results = [results[idx]]
 
-        # handle stacked objects
+        # handle stacked objects (multiple identical matches collapsed to a stack)
         is_stacked, results = self.get_stacked_results(results, **input_kwargs)
         if is_stacked:
-            # we have a stacked result, return it immediately (a list)
-            return results
+            return Found(obj=results[0], stack=results)
 
-        # handle the end (unstacked) results, returning a single object, a list or None
-        return self.handle_search_results(searchdata, results, **input_kwargs)
+        # collapse to typed result
+        if not results:
+            return NotFound(search_string=original_searchdata)
+
+        had_qualifier = input_kwargs.get("_search_had_qualifier")
+        if len(results) > 1 and not had_qualifier:
+            picked = try_autopick(results, self)
+            if picked is not None:
+                return Found(obj=picked)
+
+        if len(results) == 1:
+            return Found(obj=results[0])
+
+        return Ambiguous(
+            candidates=results,
+            search_string=original_searchdata,
+            invalid_other=invalid_other,
+        )
+
+    def search(
+        self,
+        searchdata,
+        global_search=False,
+        use_nicks=True,
+        typeclass=None,
+        location=None,
+        attribute_name=None,
+        exact=False,
+        candidates=None,
+        use_locks=True,
+        not_found=None,
+        ambiguous=None,
+        use_dbref=None,
+        tags=None,
+        stacked=0,
+    ):
+        """
+        Search for an object and return it (or None on failure).
+
+        Convenience wrapper around `.search_for()`. On `Found`, returns the
+        matched object (or the stack list if `stacked` was set and matched).
+        On `Ambiguous` or `NotFound`, emits the default error/disambiguation
+        prompt via `settings.SEARCH_AT_RESULT` and returns `None`.
+
+        Callers that want to handle ambiguity or no-match themselves (without
+        the default prompt) should call `.search_for()` and pattern-match on
+        the typed result.
+
+        Args:
+            searchdata (str or obj): Primary search criterion. Will be matched
+                against `object.key` (with `object.aliases` second) unless
+                the keyword attribute_name specifies otherwise.
+
+                Special keywords:
+
+                - `#<num>`: search by unique dbref. This is always a global search.
+                - `me,self`: self-reference to this object
+                - Ordinal disambiguation: `first <string>`, `second <string>`, `last <string>`,
+                  `other <string>` (two matches only), or `<num>-<string>` per
+                  `settings.SEARCH_MULTIMATCH_REGEX`.
+                - Location scope: `my <string>`, `here <string>`, `worn <string>` (see
+                  `settings.SEARCH_MULTIMATCH_LOCATION_PREFIXES`).
+
+            global_search (bool): Search all objects globally. This overrules 'location' data.
+            use_nicks (bool): Use nickname-replace (nicktype "object") on `searchdata`.
+            typeclass (str or Typeclass, or list of either): Limit search only
+                to `Objects` with this typeclass. May be a list of typeclasses
+                for a broader search.
+            location (Object or list): Specify a location or multiple locations
+                to search. Note that this is used to query the *contents* of a
+                location and will not match for the location itself -
+                if you want that, don't set this or use `candidates` to specify
+                exactly which objects should be searched. If this nor candidates are
+                given, candidates will include caller's inventory, current location and
+                all objects in the current location.
+            attribute_name (str): Define which property to search. If set, no
+                key+alias search will be performed.
+            exact (bool): If unset (default) - prefers to match to beginning of
+                string rather than not matching at all. If set, requires
+                exact matching of entire string.
+            candidates (list of objects): Optional custom list of objects
+                to search (filter) between. Ignored if `global_search` is given.
+            use_locks (bool): If True (default), removes search results which
+                fail the "search" lock.
+            not_found (str): Optional custom string for the not-found prompt.
+            ambiguous (str): Optional custom string for the multimatch prompt header.
+            use_dbref (bool or None, optional): If `True`, allow dbref queries like "#123".
+                If `None` (default), turned on for Builders, off otherwise.
+            tags (list or tuple): Find objects matching one or more Tags. Each is
+                `tagname` or `(tagname, tagcategory)`.
+            stacked (int, optional): If > 0, multimatches of identical objects collapse
+                into a stack of up to `stacked` items. Returned as a list in that case.
+
+        Returns:
+            Object, list, or None: The matched object on a unique match; a list
+            of stacked identical objects when `stacked > 0` matched; or `None`
+            on no/multi-match (with the prompt emitted via `SEARCH_AT_RESULT`).
+
+        Notes:
+            To find Accounts, use eg. `evennia.account_search`.
+
+        """
+        result = self.search_for(
+            searchdata,
+            global_search=global_search,
+            use_nicks=use_nicks,
+            typeclass=typeclass,
+            location=location,
+            attribute_name=attribute_name,
+            exact=exact,
+            candidates=candidates,
+            use_locks=use_locks,
+            use_dbref=use_dbref,
+            tags=tags,
+            stacked=stacked,
+        )
+
+        if isinstance(result, Found):
+            return result.stack if result.stack is not None else result.obj
+
+        matches = result.candidates if isinstance(result, Ambiguous) else []
+        return _AT_SEARCH_RESULT(
+            matches,
+            self,
+            query=result.search_string,
+            nofound_string=not_found,
+            multimatch_string=ambiguous,
+            invalid_other=isinstance(result, Ambiguous) and result.invalid_other,
+            _search_had_qualifier=True,
+        )
 
     def search_account(self, searchdata, quiet=False):
         """

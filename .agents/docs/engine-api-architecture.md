@@ -104,17 +104,23 @@ boundary.
 - Dependencies: none structural; benefits from B1 (hook signatures
   reference actor cleanly).
 
-### Q1. `search` Result type
+### Q1. `search` Result type — shipped
 
-- Problem: `caller.search` returns single / list / None depending on
-  flags and matches, and bakes disambiguation prompts into the
-  engine.
-- Target: `Found | Ambiguous | NotFound` Result type. Pattern-match
-  at call site. Disambiguation prompts become a top-layer convenience
-  built on Result, not an engine concern. Old return shapes available
-  through a sugar method but deprecated.
-- Churn: small.
-- Dependencies: none.
+Two-layer split landed on engine side:
+
+- `caller.search_for(...) → Found | Ambiguous | NotFound` (no side
+  effects; pure typed result). Types live in
+  `evennia/objects/search_result.py`.
+- `caller.search(...) → Object | None` (sugar over `search_for`,
+  emits default prompt via `SEARCH_AT_RESULT`). Returns a single
+  shape: an object on a unique match (or a list on `stacked > 0`),
+  `None` otherwise.
+- `quiet` removed from `.search()`; callers that need raw control use
+  `.search_for()` and pattern-match.
+- `nofound_string`/`multimatch_string` kwargs renamed to
+  `not_found`/`ambiguous` on `.search()` and `Account.search()`. The
+  `at_search_result` hook signature is unchanged.
+- Symmetric treatment on `DefaultAccount.search` / `search_for`.
 
 ### C2. CmdSet introspector
 
@@ -143,16 +149,19 @@ endpoint.
 - Churn: large.
 - Dependencies: none structural.
 
-### S1. Settings as typed objects
+### S1. Settings as typed objects — dropped
 
-- Problem: `MULTISESSION_MODE`, `IDLE_TIMEOUT`, `DEFAULT_HOME` read
-  deep in the runtime as global magic constants. Not overridable
-  per-account, not validated, not introspectable.
-- Target: all engine settings are typed objects with validation,
-  introspection, and scoping (global / per-account / per-puppet where
-  it makes sense). Plain-constant access deprecated.
-- Churn: medium.
-- Dependencies: none structural.
+Dropped 2026-05-30 after a design pass. The original target (typed
+class hierarchy, validation, introspection, per-account/per-puppet
+scoping) would have churned ~290 settings and ~1000 read sites for
+modest gain: most engine settings are server config where scoping
+makes no sense, `OptionHandler` already covers per-account cosmetic
+preferences, and the handful of settings that might want runtime
+scoping (`IDLE_TIMEOUT` etc.) don't justify the framework. If a
+concrete need surfaces, prefer a narrow per-account override
+mechanism for the specific settings that want it, not a 290-setting
+migration. Validation/introspection wins are achievable from a flat
+metadata dict without a class hierarchy.
 
 ### AS1. Sync/async commitment
 
@@ -434,7 +443,7 @@ principle. Items in the same row can run in parallel.
 
 | Order | Items | Notes |
 |---|---|---|
-| Start now (alongside migration A shipped) | I1, Q1, C2, A1, S1, AS1 | No dependencies; start when capacity allows |
+| Start now (alongside migration A shipped) | I1, C2, A1, AS1 | No dependencies; start when capacity allows |
 | After migration B1 (hooks taxonomy doc) | H1, M1 | Need hook contract |
 | After I1 | L1, I2 | Need actor substrate |
 | After B1 + I1 | R1 | Needs both hook contract and actor-as-viewer |

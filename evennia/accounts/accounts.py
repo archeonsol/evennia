@@ -235,8 +235,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
      - msg(text=None, from_obj=None, session=None, options=None, **kwargs)
      - execute_cmd(raw_string)
      - search(searchdata, return_puppet=False, search_object=False, typeclass=None,
-                      nofound_string=None, multimatch_string=None, use_nicks=True,
-                      quiet=False, **kwargs)
+                      not_found=None, ambiguous=None, use_nicks=True, **kwargs)
+     - search_for(searchdata, search_object=False, typeclass=None, use_nicks=True, **kwargs)
      - is_typeclass(typeclass, exact=False)
      - swap_typeclass(new_typeclass, clean_attributes=False, no_default=True)
      - access(accessing_obj, access_type='read', default=False, no_superuser_bypass=False, **kwargs)
@@ -1555,87 +1555,125 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
     # search method
 
+    def search_for(
+        self,
+        searchdata,
+        search_object=False,
+        typeclass=None,
+        use_nicks=True,
+        **kwargs,
+    ):
+        """
+        Run the account search pipeline and return a typed `SearchResult`.
+
+        This is the primitive: it never emits messages. The result is one of
+        `Found`, `Ambiguous`, or `NotFound` (see `evennia.objects.search_result`).
+
+        For the common "find one or fail with a default prompt" case, use
+        `.search()` instead.
+
+        Args:
+            searchdata (str or int): The Account's key or dbref. The strings
+                "me"/"self" (with optional "*" prefix) short-circuit to `self`.
+            search_object (bool): Search for Objects instead of Accounts.
+            typeclass: Limit the search to this typeclass.
+            use_nicks (bool): Use account-level nick replacement.
+
+        Returns:
+            SearchResult: One of `Found(obj)`, `Ambiguous(candidates,
+            search_string)`, or `NotFound(search_string)`.
+
+        """
+        from evennia.objects.search_result import Ambiguous, Found, NotFound
+
+        original_searchdata = searchdata
+
+        if isinstance(searchdata, str):
+            if searchdata.lower() in ("me", "*me", "self", "*self"):
+                return Found(obj=self)
+            if use_nicks:
+                searchdata = self.nicks.nickreplace(
+                    searchdata, categories=("account",), include_account=False
+                )
+
+        if search_object:
+            matches = list(ObjectDB.objects.object_search(searchdata, typeclass=typeclass))
+        else:
+            matches = list(AccountDB.objects.account_search(searchdata, typeclass=typeclass))
+
+        if not matches:
+            return NotFound(search_string=original_searchdata)
+        if len(matches) == 1:
+            return Found(obj=matches[0])
+        return Ambiguous(candidates=matches, search_string=original_searchdata)
+
     def search(
         self,
         searchdata,
         return_puppet=False,
         search_object=False,
         typeclass=None,
-        nofound_string=None,
-        multimatch_string=None,
+        not_found=None,
+        ambiguous=None,
         use_nicks=True,
-        quiet=False,
         **kwargs,
     ):
         """
-        This is similar to `DefaultObject.search` but defaults to searching
-        for Accounts only.
+        Search for an Account (or Object) and return it (or None on failure).
+
+        Convenience wrapper around `.search_for()`. On `Found`, returns the
+        matched account/object (or its puppet if `return_puppet=True`). On
+        `Ambiguous` or `NotFound`, emits the default prompt via
+        `settings.SEARCH_AT_RESULT` and returns `None`.
 
         Args:
             searchdata (str or int): Search criterion, the Account's
                 key or dbref to search for.
-            return_puppet (bool, optional): Instructs the method to
-                return matches as the object the Account controls rather
-                than the Account itself (or None) if nothing is puppeted).
+            return_puppet (bool, optional): Return the puppet of the matched
+                Account rather than the Account itself (or None if not puppeted).
             search_object (bool, optional): Search for Objects instead of
-                Accounts. This is used by e.g. the @examine command when
-                wanting to examine Objects while OOC.
+                Accounts. Used e.g. by `@examine` when OOC.
             typeclass (Account typeclass, optional): Limit the search
-                only to this particular typeclass. This can be used to
-                limit to specific account typeclasses or to limit the search
-                to a particular Object typeclass if `search_object` is True.
-            nofound_string (str, optional): A one-time error message
-                to echo if `searchdata` leads to no matches. If not given,
-                will fall back to the default handler.
-            multimatch_string (str, optional): A one-time error
-                message to echo if `searchdata` leads to multiple matches.
-                If not given, will fall back to the default handler.
+                to this particular typeclass.
+            not_found (str, optional): Custom not-found prompt.
+            ambiguous (str, optional): Custom multimatch prompt header.
             use_nicks (bool, optional): Use account-level nick replacement.
-            quiet (bool, optional): If set, will not show any error to the user,
-                and will also lead to returning a list of matches.
 
-        Return:
-            match (Account, Object or None): A single Account or Object match.
-            list: If `quiet=True` this is a list of 0, 1 or more Account or Object matches.
+        Returns:
+            Account, Object or None: A single match (or its puppet if
+            `return_puppet=True`), or None when no/multi-match.
 
         Notes:
-            Extra keywords are ignored, but are allowed in call in
-            order to make API more consistent with
-            objects.objects.DefaultObject.search.
+            Extra keywords are ignored, allowed for API consistency with
+            `DefaultObject.search`.
 
         """
-        # handle me, self and *me, *self
-        if isinstance(searchdata, str):
-            # handle wrapping of common terms
-            if searchdata.lower() in ("me", "*me", "self", "*self"):
-                return [self] if quiet else self
+        from evennia.objects.search_result import Ambiguous, Found
 
-        searchdata = self.nicks.nickreplace(
-            searchdata, categories=("account",), include_account=False
+        result = self.search_for(
+            searchdata,
+            search_object=search_object,
+            typeclass=typeclass,
+            use_nicks=use_nicks,
         )
-        if search_object:
-            matches = ObjectDB.objects.object_search(searchdata, typeclass=typeclass)
-        else:
-            matches = AccountDB.objects.account_search(searchdata, typeclass=typeclass)
 
-        if quiet:
-            matches = list(matches)
+        if isinstance(result, Found):
+            match = result.obj
             if return_puppet:
-                matches = [match.puppet for match in matches]
-        else:
-            matches = _AT_SEARCH_RESULT(
-                matches,
-                self,
-                query=searchdata,
-                nofound_string=nofound_string,
-                multimatch_string=multimatch_string,
-            )
-            if matches and return_puppet:
                 try:
-                    matches = matches.puppet
+                    return match.puppet
                 except AttributeError:
                     return None
-        return matches
+            return match
+
+        matches = result.candidates if isinstance(result, Ambiguous) else []
+        return _AT_SEARCH_RESULT(
+            matches,
+            self,
+            query=result.search_string,
+            nofound_string=not_found,
+            multimatch_string=ambiguous,
+        )
 
     def access(
         self, accessing_obj, access_type="read", default=False, no_superuser_bypass=False, **kwargs
