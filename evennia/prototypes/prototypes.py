@@ -87,6 +87,17 @@ def homogenize_prototype(prototype, custom_keys=None):
     if not prototype or isinstance(prototype, str):
         return prototype
 
+    if "exec" in prototype:
+        # The 'exec' key (arbitrary Python run at spawn time) was removed for
+        # security reasons. Spawn-time logic belongs on the typeclass.
+        raise RuntimeError(
+            _(
+                "The prototype 'exec' key has been removed. Move spawn-time logic to "
+                "typeclass hooks instead: at_object_creation (runs once on first "
+                "creation), at_init (every load), or at_prototype_spawn (every spawn)."
+            )
+        )
+
     reserved = _PROTOTYPE_RESERVED_KEYS + (custom_keys or ())
 
     # correct cases of setting None for certain values

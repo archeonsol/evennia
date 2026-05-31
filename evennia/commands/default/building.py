@@ -4282,14 +4282,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
             return
 
         if expect == dict:
-            # an actual prototype. Block 'exec' for non-Developer staff:
-            # spawner.py still runs prototype 'exec' strings via exec() at
-            # spawn time (see prototypes/spawner.py), so this gate is the
-            # privilege barrier, not a hygiene comment. Removing exec
-            # support entirely is tracked separately.
-            if "exec" in prototype and not self.caller.check_permstring("Developer"):
-                self.msg("Spawn aborted: You are not allowed to use the 'exec' prototype key.")
-                return
+            # an actual prototype
             try:
                 # we homogenize the prototype first, to be more lenient with free-form
                 protlib.validate_prototype(protlib.homogenize_prototype(prototype))

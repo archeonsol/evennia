@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.49 — BREAKING: remove prototype `exec` key (F20)
+
+Removes the `exec` prototype key, which ran arbitrary Python at spawn
+time. Spawn-time logic now belongs exclusively on the typeclass.
+
+### Engine — F20: drop prototype `exec` support
+
+**Breaking for downstream prototype authors who used `exec:`.** The key
+is gone. Migrate inline code to typeclass hooks: `at_object_creation`
+(once, on first creation), `at_init` (every load), or `at_prototype_spawn`
+(every spawn, already called by the spawner right where `exec` used to run).
+
+What changed:
+
+- `prototypes/spawner.py`: removed the `exec()` call in
+  `batch_create_object`, the `exec`/`execs` plumbing in `spawn()`, the
+  `execs` element of the per-object param tuple (now a 7-tuple), and the
+  two `exec`-skip branches in the prototype-diff apply path. Dropped the
+  now-unused `import evennia` (it only existed for the exec namespace).
+- `prototypes/prototypes.py`: `homogenize_prototype` now raises
+  `RuntimeError` with a migration message if a prototype contains `exec`,
+  instead of silently turning it into a stray attribute named `"exec"`.
+- `commands/default/building.py`: removed the Developer-only gate on the
+  `exec` key in `@spawn` (its only reason to exist is gone; the
+  `homogenize_prototype` rejection now produces a clean in-game error).
+
+Note: through the public `spawn()` API and in-game `@spawn`, the `exec`
+key was already effectively dead. Both homogenize prototypes first, which
+routed the unreserved `exec` key into `attrs` before the spawn-time
+`pop("exec")` could see it. Only direct `batch_create_object` callers
+passing a pre-built param tuple ever triggered the `exec()`.
+
 ## 6.0.0+underspire.48 — cleanup: dead `_menutree` branch (F21) + cmdset verifications (F7)
 
 Bundled cleanup. F21 removes one dead conditional in `fieldfill`. F7

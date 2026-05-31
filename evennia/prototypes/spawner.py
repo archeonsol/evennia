@@ -55,11 +55,6 @@ Possible keywords are:
     permissions (str, list or callable, optional): which permissions for spawned object to have
     locks (str or callable, optional): lock-string for the spawned object
     aliases (str, list or callable, optional): Aliases for the spawned object
-    exec (str or callable, optional): this is a string of python code to execute or a list of such
-        codes.  This can be used e.g. to trigger custom handlers on the object. The execution
-        namespace contains 'evennia' for the library and 'obj'. All default spawn commands limit
-        this functionality to Developer/superusers. Usually it's better to use callables or
-        prototypefuncs instead of this.
     tags (str, tuple, list or callable, optional): string or list of strings or tuples
         `(tagstr, category)`. Plain strings will be result in tags with no category (default tags).
     attrs (tuple, list or callable, optional): tuple or list of tuples of Attributes to add. This
@@ -139,7 +134,6 @@ import time
 from django.conf import settings
 from django.utils.translation import gettext as _
 
-import evennia
 from evennia.objects.models import ObjectDB
 from evennia.prototypes import prototypes as protlib
 from evennia.prototypes.prototypes import (PROTOTYPE_TAG_CATEGORY,
@@ -757,9 +751,6 @@ def batch_update_objects_with_prototype(
                                 for akey, aval, acategory, alocks in val
                             )
                         )
-                    elif key == "exec":
-                        # we don't auto-rerun exec statements, it would be huge security risk!
-                        pass
                     else:
                         obj.attributes.add(key, _init(val, value_to_obj))
                 elif directive == "REMOVE":
@@ -785,9 +776,6 @@ def batch_update_objects_with_prototype(
                         obj.tags.clear()
                     elif key == "attrs":
                         obj.attributes.clear()
-                    elif key == "exec":
-                        # we don't auto-rerun exec statements, it would be huge security risk!
-                        pass
                     else:
                         obj.attributes.remove(key)
         except Exception:
@@ -827,18 +815,9 @@ def batch_create_object(*objparams):
                     adding with `new_obj.attributes.batch_add(*attributes)`.
                 - `tags` (list): list of tuples `(key, category)` for adding
                     with `new_obj.tags.batch_add(*tags)`.
-                - `execs` (list): Code strings to execute together with the creation
-                    of each object. They will be executed with `evennia` and `obj`
-                        (the newly created object) available in the namespace. Execution
-                        will happend after all other properties have been assigned and
-                        is intended for calling custom handlers etc.
 
     Returns:
         objects (list): A list of created objects
-
-    Notes:
-        The `exec` list will execute arbitrary python code so don't allow this to be available to
-        unprivileged users!
 
     """
 
@@ -864,10 +843,6 @@ def batch_create_object(*objparams):
         }
         # this triggers all hooks
         obj.save()
-        # run eventual extra code
-        for code in objparam[7]:
-            if code:
-                exec(code, {}, {"evennia": evennia, "obj": obj})
         # run the spawned hook
         if spawn_hook := getattr(obj, "at_prototype_spawn", None):
             spawn_hook()
@@ -1008,9 +983,6 @@ def spawn(*prototypes, caller=None, **kwargs):
             # we make sure to add a tag identifying which prototype created this object
             tags.append((prototype_key, PROTOTYPE_TAG_CATEGORY))
 
-        val = prot.pop("exec", "")
-        execs = init_spawn_value(val, make_iter, **init_spawn_kwargs)
-
         # extract ndb assignments
         nattributes = dict(
             (
@@ -1064,7 +1036,6 @@ def spawn(*prototypes, caller=None, **kwargs):
                 nattributes,
                 attributes,
                 tags,
-                execs,
             )
         )
 
