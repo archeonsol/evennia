@@ -115,9 +115,22 @@ def _enqueue_db(record: dict) -> None:
 
 def process_pending_jobs(*, max_jobs: int = 10) -> int:
     """
-    Drain up to ``max_jobs`` jobs in the worker thread pool.
-    Call from reactor via ``evennia.utils.defer.in_thread`` for follow-up.
-    Returns count processed.
+    Drain up to ``max_jobs`` pending jobs, running each handler inline.
+
+    Call this on the reactor thread (e.g. the global tick / maintenance loop,
+    gated by ``JOB_QUEUE_DRAIN_EVERY_N_TICKS``). Job handlers run on the reactor
+    thread and may therefore touch game objects freely. Do NOT drain this from a
+    worker thread (``evennia.utils.defer.in_thread`` / ``deferToThread``): the
+    typeclass + idmapper layer is not concurrency-safe, so a handler touching
+    ``.db`` / typeclasses / ``obj.msg`` off the reactor would race game state.
+
+    Keep handlers light. A handler that needs blocking I/O (HTTP webhook, search
+    rebuild) must offload just that part via ``evennia.utils.defer.in_thread`` /
+    ``background`` and deliver the result back in the reactor-thread callback,
+    rather than blocking here. Dequeue itself is plain ORM and is safe on either
+    thread.
+
+    Returns the count of jobs processed.
     """
     if not _enabled():
         return 0
