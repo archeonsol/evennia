@@ -457,3 +457,71 @@ class TestRedisAttrCache(BaseEvenniaTest):
             flush_all_dirty()
 
         self.assertIn(expected_key, deletes)
+
+
+class TestRedisAttrCacheOwnerDelete(BaseEvenniaTest):
+    """F-9: pre_delete on owner classes drops Redis keys in one round-trip."""
+
+    @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=True)
+    def test_object_delete_calls_drop_owner_keys(self):
+        from evennia.typeclasses import redis_attr_cache
+
+        pre_delete_id = self.obj1.id
+        with patch.object(redis_attr_cache, "drop_owner_keys") as drop:
+            self.obj1.delete()
+
+        # The receiver fires for the deleted instance with model='objectdb'.
+        self.assertTrue(
+            any(call.args == ("objectdb", pre_delete_id) for call in drop.call_args_list),
+            f"drop_owner_keys not called with ('objectdb', {pre_delete_id}); got "
+            f"{drop.call_args_list!r}",
+        )
+
+    @override_settings(ATTRIBUTE_REDIS_CACHE_ENABLED=True)
+    def test_drop_owner_keys_issues_single_delete(self):
+        """The helper sends one DEL for index + all attribute keys it knows."""
+        from evennia.typeclasses import redis_attr_cache
+
+        attr_key = redis_attr_cache._redis_key("objectdb", 42, "hp", None)
+        index_key = redis_attr_cache._obj_index_key("objectdb", 42)
+
+        deletes = []
+
+        class FakeRedis:
+            def smembers(self, key):
+                if key == index_key:
+                    return [attr_key.encode()]
+                return []
+
+            def delete(self, *keys):
+                deletes.append(tuple(keys))
+                return len(keys)
+
+        with patch.object(redis_attr_cache, "_redis_conn", return_value=FakeRedis()):
+            redis_attr_cache.drop_owner_keys("objectdb", 42)
+
+        # Single DEL with both the attr key and the index key together.
+        self.assertEqual(len(deletes), 1)
+        self.assertIn(attr_key, deletes[0])
+        self.assertIn(index_key, deletes[0])
+
+    def test_non_owner_delete_skipped(self):
+        """pre_delete on non-owner dbmodels bails before reaching the helper."""
+        from unittest.mock import MagicMock
+
+        from evennia.typeclasses import models as tc_models
+
+        # Stand-in for a non-owner dbclass; receiver should bail on the
+        # model-name check without touching the helper.
+        class _FakeMsg:
+            pass
+
+        unrelated = MagicMock()
+        unrelated.__dbclass__ = _FakeMsg
+        unrelated.pk = 1
+
+        with patch("evennia.typeclasses.redis_attr_cache.drop_owner_keys") as drop:
+            tc_models._drop_redis_attr_keys_on_owner_delete(
+                sender=type(unrelated), instance=unrelated
+            )
+        drop.assert_not_called()

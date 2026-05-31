@@ -76,7 +76,8 @@ def _redis_alias():
 
 def _record_hit() -> None:
     try:
-        from evennia.server.prometheus_metrics import record_redis_attr_cache_hit
+        from evennia.server.prometheus_metrics import \
+            record_redis_attr_cache_hit
 
         record_redis_attr_cache_hit()
     except Exception:
@@ -85,7 +86,8 @@ def _record_hit() -> None:
 
 def _record_miss() -> None:
     try:
-        from evennia.server.prometheus_metrics import record_redis_attr_cache_miss
+        from evennia.server.prometheus_metrics import \
+            record_redis_attr_cache_miss
 
         record_redis_attr_cache_miss()
     except Exception:
@@ -275,21 +277,7 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             logger.log_trace("redis_attr_cache._cache_drop")
 
     def _cache_drop_object(self):
-        r = _redis_conn()
-        if not r:
-            return
-        try:
-            index_key = _obj_index_key(self._model, self._objid)
-            keys = _decode_redis_keys(list(r.smembers(index_key) or []))
-            to_delete = list(keys)
-            to_delete.append(index_key)
-            # drop category indexes (pattern scan is expensive; track via object index only)
-            if keys:
-                r.delete(*to_delete)
-            else:
-                r.delete(index_key)
-        except Exception:
-            logger.log_trace("redis_attr_cache._cache_drop_object")
+        drop_owner_keys(self._model, self._objid)
 
     def _index_populated(self, r) -> bool:
         try:
@@ -409,6 +397,43 @@ class RedisCachedModelAttributeBackend(ModelAttributeBackend):
             if attr and attr.pk:
                 self._cache_set(attr.db_key, attr.db_category, attr)
         return flushed
+
+
+def drop_owner_keys(model: str, obj_id) -> None:
+    """Drop every Redis key associated with one owner (one round-trip).
+
+    Hot path for owner deletion: ``ObjectDB/AccountDB/ScriptDB/ChannelDB``
+    pre_delete fires this so the per-owner index plus every attribute key
+    listed in it goes in a single ``DEL``, rather than waiting for the TTL
+    (default 3600s) to reclaim them.
+
+    Best-effort: silent no-op when the cache is disabled, Redis is
+    unavailable, or the owner has no cached keys.
+
+    Args:
+        model: Lowercased Django model name as it appears in
+            ``Attribute.db_model`` (e.g. ``"objectdb"``).
+        obj_id: The deleted owner's primary key.
+    """
+    if not _enabled() or obj_id is None:
+        return
+    r = _redis_conn()
+    if not r:
+        return
+    try:
+        index_key = _obj_index_key(model, obj_id)
+        keys = _decode_redis_keys(list(r.smembers(index_key) or []))
+        to_delete = list(keys)
+        to_delete.append(index_key)
+        # Category indexes are not tracked per-owner; the per-attr keys above
+        # are enough to free the bulk of the storage, and category indexes
+        # expire on their own TTL.
+        if keys:
+            r.delete(*to_delete)
+        else:
+            r.delete(index_key)
+    except Exception:
+        logger.log_trace("redis_attr_cache.drop_owner_keys")
 
 
 # Maps Attribute.db_model values to (app_label, model_name) for through-table

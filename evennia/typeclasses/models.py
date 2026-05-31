@@ -1203,3 +1203,40 @@ class TypedObject(SharedMemoryModel):
 
     # Used by Django Sites/Admin
     get_absolute_url = web_get_detail_url
+
+
+_REDIS_ATTR_OWNER_MODELS = ("objectdb", "accountdb", "scriptdb", "channeldb")
+
+
+def _drop_redis_attr_keys_on_owner_delete(sender, instance, **kwargs):
+    """pre_delete receiver: drop a deleted owner's Redis attribute keys in one round-trip.
+
+    Catch-all receiver bails on instances that aren't one of the four
+    attribute-owning model classes. For those, calls the per-owner
+    helper so the index + every attribute key listed in it disappears
+    in a single Redis ``DEL`` instead of waiting for TTL expiry (or N
+    per-attr ``_cache_drop`` round-trips via ``attributes.clear()``).
+
+    Reads the underlying db-model name via ``__dbclass__`` rather than
+    ``_meta.model_name`` because Evennia's typeclass metaclass leaves
+    ``_meta.model_name`` pointing at the typeclass (e.g.
+    ``"defaultcharacter"``), not the dbmodel (``"objectdb"``).
+    """
+    dbclass = getattr(instance, "__dbclass__", None)
+    if dbclass is None:
+        return
+    model_name = dbclass.__name__.lower()
+    if model_name not in _REDIS_ATTR_OWNER_MODELS:
+        return
+    pk = getattr(instance, "pk", None)
+    if pk is None:
+        return
+    from evennia.typeclasses.redis_attr_cache import drop_owner_keys
+
+    drop_owner_keys(model_name, pk)
+
+
+signals.pre_delete.connect(
+    _drop_redis_attr_keys_on_owner_delete,
+    dispatch_uid="evennia.typeclasses.redis_attr_cache.pre_delete",
+)

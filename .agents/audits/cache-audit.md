@@ -173,7 +173,7 @@ Surfaced while writing F-3.
 one attribute; assert `_cache_drop` ran for that attribute (or, with a
 fake redis, assert the delete pipeline got called).
 
-### F-9 (M): no `pre_delete` receiver wires `_cache_drop_object` — owner deletion is per-attr instead of per-owner
+### F-9 (M, shipped): no `pre_delete` receiver wires `_cache_drop_object` — owner deletion is per-attr instead of per-owner
 
 `_cache_drop_object` exists on `RedisCachedModelAttributeBackend` but no
 caller invokes it. Today owner deletion (when it works) clears Redis
