@@ -25,6 +25,222 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.46 — F8 cache audit
+
+End-to-end pass over the seven derived-state caches the fork carries:
+location-cmdset, cmd-access, trie, redis-attr, channel-subscriber
+(folded into the seven as an eighth), lock-check, and write-behind.
+Step 1 wrote the invalidation contract at every cache home. Step 2
+audited side-by-side and shipped all nine findings (F-1 through F-9):
+two helpers consolidating fan-out, three `pre_delete` receivers wiring
+proactive cleanup, one default flip (`CMD_ACCESS_CACHE_ENABLED`), two
+real bug fixes, and four doc-only seams.
+
+Working notes are in
+[`.agents/audits/cache-audit.md`](.agents/audits/cache-audit.md)
+(transient — slated for deletion once the audit context is no longer
+useful for reference).
+
+### Engine — cache invalidation contracts (step 1)
+
+Every cache module now carries a **Fills on / Invalidates on /
+Staleness bound** docstring so the next contributor doesn't have to
+re-derive the invariants from the call sites:
+
+- [`evennia/commands/location_cmdset_cache.py`](evennia/commands/location_cmdset_cache.py) — module docstring.
+- [`evennia/commands/cmd_access_cache.py`](evennia/commands/cmd_access_cache.py) — module docstring.
+- [`evennia/commands/cmdparser_trie.py`](evennia/commands/cmdparser_trie.py) — module docstring (appended).
+- [`evennia/typeclasses/redis_attr_cache.py`](evennia/typeclasses/redis_attr_cache.py) — module docstring.
+- [`evennia/comms/channel_subscriber_cache.py`](evennia/comms/channel_subscriber_cache.py) — module docstring.
+- [`evennia/locks/lockhandler.py`](evennia/locks/lockhandler.py) — `invalidate_lock_cache` docstring.
+- [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py) — block comment above `_DIRTY_BACKENDS`.
+
+### Engine — `invalidate_caller_access(*targets)` helper (F-2)
+
+Every permission-mutating call site used to fire both
+`invalidate_cmd_access_cache(target)` and `invalidate_lock_cache(target)`
+manually, a paired-invalidation footgun for any future engine path.
+New single seam in
+[`evennia/commands/cmd_access_cache.py`](evennia/commands/cmd_access_cache.py):
+
+- Variadic; `None` targets silently skipped so optional puppets need
+  no guard (`invalidate_caller_access(account, puppet)`).
+- Fans out to every engine-owned per-caller access cache in the order
+  a subsequent check needs to see fresh state.
+- Migrated call sites:
+  [`evennia/commands/default/account.py`](evennia/commands/default/account.py)
+  (`@quell` / `@unquell`),
+  [`evennia/commands/default/admin.py`](evennia/commands/default/admin.py) (`@perm`).
+- The `permissions_changed` signal contract in
+  [`evennia/commands/signals.py`](evennia/commands/signals.py) now names
+  the helper as the required pre-fire step. Future engine-owned
+  per-caller access caches are added inside the helper, not at every
+  call site.
+
+### Engine — channel-subscriber `pre_delete` (F-4)
+
+Deleting an `AccountDB` or `ObjectDB` used to leak the entity's
+`a:<pk>` / `o:<pk>` ref into every channel subscriber-set it was on,
+self-healing only when each channel was independently fan-out-queried
+and `get_cached_subscribers` tripped `ObjectDoesNotExist`. Stale refs
+accumulated in proportion to subscription count × death rate.
+
+- New helper
+  [`channel_subscriber_cache.remove_subscriber_from_all_channels`](evennia/comms/channel_subscriber_cache.py):
+  reads the entity's `account_subscription_set` /
+  `object_subscription_set` reverse managers (still intact at
+  `pre_delete` time) and `SREM`s the ref from every channel's Redis
+  set in one pipeline.
+- Receiver wired in
+  [`evennia/comms/models.py`](evennia/comms/models.py); catch-all
+  `pre_delete` that bails on a single `hasattr` check, so overhead on
+  unrelated model deletes is one attribute lookup.
+
+### Engine — `CMD_ACCESS_CACHE_ENABLED` default on + override auto-skip (F-6)
+
+Resolves the historical asymmetry where the cmd-access cache defaulted
+off while the lock-check cache defaulted on — both landed in the same
+"core overhaul" commit with no documented reason for the split.
+
+- [`evennia/settings_default.py`](evennia/settings_default.py):
+  `CMD_ACCESS_CACHE_ENABLED` flipped from `False` to `True`. Settings
+  comment updated to point at `invalidate_caller_access` and the
+  override-skip below.
+- [`evennia/commands/cmd_access_cache.py`](evennia/commands/cmd_access_cache.py):
+  new `_command_uses_base_access(cmd)` check (lazy-loads
+  `Command.access` once, compares `type(cmd).access is Command.access`).
+  Commands whose class overrides `.access()` (directly or via an
+  inherited subclass) are auto-skipped — mirrors the existing
+  `"match" in type(cmd).__dict__` fast-path skip in
+  `cmdparser_trie._try_fast_match_exact`. Stock Command.access just
+  delegates to LockHandler, so its result is pure-function-of-cached-state
+  and safe to cache; overrides may consult time, randomness, or ad-hoc
+  DB queries that the cache key cannot see.
+
+**Migration:** games with Command classes that override
+`Command.access` are auto-skipped, so no opt-out is needed. Games that
+want the prior default-off behavior can set
+`CMD_ACCESS_CACHE_ENABLED = False` in their settings.
+
+### Fix — `Script.delete()` attribute cleanup (F-8)
+
+`ObjectDB`, `AccountDB`, and `ChannelDB` all called
+`self.attributes.clear()` in their custom `delete()` before
+`super().delete()`. `Script.delete()` did not, so every deleted
+`Script` left its `Attribute` rows orphaned in PG (the Django M2M
+cascade only removed the through-row) and its Redis L2 keys orphaned
+until TTL expiry. Surfaced while writing the F-3 redis TTL audit.
+
+[`evennia/scripts/scripts.py`](evennia/scripts/scripts.py): adds the
+missing `self.attributes.clear()` call. **Behavior change:** deleted
+Scripts now also delete their `Attribute` rows. Test in
+[`evennia/scripts/tests.py`](evennia/scripts/tests.py)
+(`TestScriptDB.test_delete_routes_attributes_through_handler`)
+verifies and guards against regression.
+
+### Engine — redis-attr `pre_delete` (F-9)
+
+`_cache_drop_object` existed on `RedisCachedModelAttributeBackend`
+but no caller invoked it. Owner deletion either left the per-owner
+Redis index orphaned until TTL (3600s) or — when typeclass `delete()`
+called `attributes.clear()` — issued N per-attr Redis round-trips
+instead of one per-owner `DEL`.
+
+- New module-level helper
+  [`redis_attr_cache.drop_owner_keys(model, obj_id)`](evennia/typeclasses/redis_attr_cache.py)
+  promoted from the method body. The method now delegates to it.
+- Receiver wired in
+  [`evennia/typeclasses/models.py`](evennia/typeclasses/models.py) for
+  the four owner dbmodels (`ObjectDB` / `AccountDB` / `ScriptDB` /
+  `ChannelDB`). Reads the dbmodel name via `instance.__dbclass__`
+  rather than `instance._meta.model_name`, because Evennia's typeclass
+  metaclass leaves `_meta.model_name` pointing at the typeclass (e.g.
+  `"defaultcharacter"`), not the dbmodel (`"objectdb"`).
+- Also covers downstream typeclasses that override `delete()` without
+  calling `attributes.clear()` — the receiver fires regardless of
+  whether the override remembers per-attr cleanup.
+
+### Engine — display-name seam note (F-1)
+
+The display-name cache moved game-side in `+underspire.36`; the engine
+seam is `AppearanceMixin.get_display_name`. Nothing in-tree documented
+this. [`evennia/objects/mixins/appearance.py`](evennia/objects/mixins/appearance.py)
+now carries a Notes paragraph: engine code mutating state that affects
+the returned name (visibility flag flips, identity reveals,
+format-context changes) must fire an existing hook the game-side cache
+can subscribe to, or expose a dedicated signal, rather than relying on
+the cache to guess.
+
+### Engine — trie cheap-key footgun audit (F-5)
+
+The trie's two-tier cache (cheap key + structural signature) doesn't
+detect in-place mutation of a Command's `key` / `aliases` on a *reused*
+cmdset object. The footgun was already documented; the audit asked
+whether any in-tree caller actually hits it.
+
+Result: zero live callers. The mutation API
+(`Command.set_key` / `set_aliases`) is invoked only from
+`evmenu._update_aliases`, which is itself reachable solely from two
+**commented-out** invocation sites
+([`evennia/utils/evmenu.py:403`](evennia/utils/evmenu.py),
+[`evennia/utils/evmenu.py:430`](evennia/utils/evmenu.py)).
+[`evennia/commands/cmdparser_trie.py`](evennia/commands/cmdparser_trie.py)
+docstring records the audit outcome.
+
+### Engine — lock-cache layering note (F-7)
+
+`invalidate_lock_cache` docstring in
+[`evennia/locks/lockhandler.py`](evennia/locks/lockhandler.py) picks up
+a Layering paragraph: on the cmd-parse hot path the lock-check cache
+is fronted by `cmd_access_cache` (default on since F-6), so most
+lock-cache hits land on non-cmd-parse paths (visibility, traversal,
+contrib code). Contributors benchmarking lock-cache effectiveness need
+to know cmd-access absorbs the dispatch-path hits.
+
+### Engine — redis-attr TTL is load-bearing (F-3)
+
+Cross-process attribute staleness is bounded by the 60s
+maintenance-loop flush tick, not by the 3600s
+`ATTRIBUTE_REDIS_CACHE_TTL`. Audit traced every Redis write/invalidation
+path and found three escape routes the TTL covers:
+
+1. `_cache_drop_object` was defined but no caller invoked it
+   (resolved in F-9, this release).
+2. `Script.delete()` did not call `self.attributes.clear()`
+   (resolved in F-8, this release).
+3. Downstream typeclass overrides of `delete()` that skip
+   `attributes.clear()` leak the same way (mitigated by F-9's
+   catch-all receiver).
+
+TTL stays. Without it, Redis would grow unboundedly with stale keys.
+Module docstring in
+[`evennia/typeclasses/redis_attr_cache.py`](evennia/typeclasses/redis_attr_cache.py)
+documents the load-bearing role so the value is not lowered or removed
+on a future read.
+
+### Settings changes
+
+| Setting | Old | New |
+|---|---|---|
+| `CMD_ACCESS_CACHE_ENABLED` | `False` | `True` |
+
+### Tests
+
+- [`evennia/commands/tests.py`](evennia/commands/tests.py):
+  `TestInvalidateCallerAccess` (4 tests) and
+  `TestCmdAccessCacheBypassOnAccessOverride` (3 tests).
+- [`evennia/comms/tests.py`](evennia/comms/tests.py):
+  `TestRemoveSubscriberFromAllChannels` (5 tests) including end-to-end
+  pre_delete signal coverage.
+- [`evennia/typeclasses/tests/test_attribute_fork.py`](evennia/typeclasses/tests/test_attribute_fork.py):
+  `TestRedisAttrCacheOwnerDelete` (3 tests).
+- [`evennia/scripts/tests.py`](evennia/scripts/tests.py):
+  `TestScriptDB.test_delete_routes_attributes_through_handler` (1 test).
+- Full `evennia.typeclasses` + `evennia.scripts` + `evennia.comms` +
+  `evennia.commands` (414 tests) pass with the default flip.
+
+---
+
 ## 6.0.0+underspire.45 — Q1 typed search result
 
 Splits `caller.search` / `Account.search` into a typed primitive plus a
