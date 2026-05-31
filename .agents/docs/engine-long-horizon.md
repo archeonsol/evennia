@@ -185,14 +185,15 @@ boundary, headless mode is straightforward. If render output gets
 flattened to strings in the middle of the pipeline somewhere, headless
 mode is a partial rewrite.
 
-**Don't let typed-attribute descriptors assume Django storage.** A1
-in the architecture doc proposes descriptors as the canonical
-attribute API. Descriptors should pick a backend at construction
-time, with Django-backed storage being one option among several
-(in-memory, JSON file, custom). Even if no other backend is
-implemented in Level 2, the descriptor interface should be
-backend-agnostic so Level 3 can add others without redesigning the
-descriptors.
+**Don't let any new attribute primitive assume Django storage.** A1
+in the architecture doc revisits the attribute storage model;
+whatever it introduces (typed descriptors, a component bag, or
+nothing) must keep storage backend-agnostic. Any primitive should
+pick a backend at construction time, with Django-backed storage being
+one option among several (in-memory, JSON file, custom). Even if no
+other backend is implemented in Level 2, the interface should be
+backend-agnostic so Level 3 (and an eventual ECS-style store) can add
+others without a redesign.
 
 **If a settings-layer rework is ever taken on, it should support
 non-Django config sources.** S1 (typed settings objects) was dropped

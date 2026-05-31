@@ -46,8 +46,8 @@ than reaching into pre-formatted text.
   for pre-hooks.
 - **Bundle 2** (`+underspire.42`) — items 5-7 (empty-template
   `at_say`, content-group label hook, cmdset merge warmup).
-- **Phase A** (`+underspire.43`) — A1 language polish, A2 flat API
-  hygiene, A3 `bump_*_generation` invalidation contract, A4
+- **Phase A** (`+underspire.43`) — PA1 language polish, PA2 flat API
+  hygiene, PA3 `bump_*_generation` invalidation contract, PA4
   `at_sync` reattach hooks.
 - **Phase B / B1** (shipped alongside `+underspire.44`) — typeclass
   hooks taxonomy and contract doc. See

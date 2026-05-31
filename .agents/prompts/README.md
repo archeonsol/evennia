@@ -20,8 +20,9 @@ Currently parallel-startable (no unresolved dependencies):
 
 - [AS1: sync/async commitment](AS1-sync-async-commitment.md) —
   medium. Direction + helpers.
-- [A1: typed attribute descriptors](A1-attribute-descriptors.md) —
-  large.
+- [A1: attribute storage model](A1-attribute-descriptors.md) —
+  large, exploratory. Direction not yet committed (typed descriptors
+  are one candidate, not the foregone answer).
 - [I1: actor abstraction](I1-actor-abstraction.md) — largest.
   Substrate; unblocks L1, I2, R1.
 

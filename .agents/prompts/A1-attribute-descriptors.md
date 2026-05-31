@@ -1,6 +1,6 @@
 # A1: attribute storage model
 
-Status: todo (exploratory — direction not yet committed)
+Status: todo (exploratory; direction not yet committed)
 
 ## Goal
 
@@ -55,7 +55,7 @@ along those axes, plus persistence (persistent / transient) and scope
 - `.ndb` / `NAttributeProperty`: transient, zero DB cost.
 - `ServerConfig` / module vars / `Script`: global singleton state, one
   row (or zero) instead of per-object attributes.
-- **Batched-blob handler pattern** (prior art — see below): N related
+- **Batched-blob handler pattern** (prior art, see below): N related
   values collapsed into a single Attribute holding a dict, so a whole
   subsystem is one row, one query, one write.
 - Raw Django fields / models: real columns, SQL-queryable, indexable,
@@ -76,7 +76,7 @@ These are not "alternative storage APIs." They are the proven move for
 hot, grouped per-object state: trade per-field granularity for one
 row. Any A1 design should treat this pattern as a serious candidate for
 a first-class engine primitive, and should explain why descriptors
-(which are *more* granular — one row per field) would or would not make
+(which are *more* granular, one row per field) would or would not make
 the row-count problem worse.
 
 ### The ECS horizon (name it, probably don't build it)
@@ -85,8 +85,8 @@ The ambitious end-state is an ECS-style component store: state lives in
 typed components, stored column-wise / contiguously, queryable and
 iterable in bulk. That would address both costs at once and is the
 natural home for game logic that iterates "all entities with component
-X." It is also a **massive** change — effectively a second storage
-substrate beside the typeclass+Attribute model — and almost certainly
+X." It is also a **massive** change: effectively a second storage
+substrate beside the typeclass+Attribute model, and almost certainly
 too large for this item. Name it as the long horizon so the A1 design
 does not foreclose it (keep any new primitive backend-agnostic per the
 discipline in [`engine-long-horizon.md`](../docs/engine-long-horizon.md)),
@@ -104,14 +104,14 @@ framework.
    batched-blob prior art (ask the user to point at the trait/buff
    handlers).
 3. Read [AGENTS.md](../../AGENTS.md) and the downstream
-   `docs/performance.md` storage-primitive guidance (ask the user) —
-   it already encodes which primitive to use when, and for what
+   `docs/performance.md` storage-primitive guidance (ask the user).
+   It already encodes which primitive to use when, and for what
    reason.
 4. **Characterize the actual cost.** Where does query volume
    concentrate? Cold-load fan-out, attribute-by-value lookups, or
    write amplification? Each has a different fix and only one is a
    storage-shape change. The fork already carries a redis attr cache
-   and a write-behind cache — establish what they already mitigate
+   and a write-behind cache; establish what they already mitigate
    before proposing anything new.
 5. **Write a recommendation**, not a foregone design. Cover the
    questions below. It is legitimate to recommend "document the
@@ -142,7 +142,7 @@ framework.
   ergonomic way to back selected typed state with real indexed
   columns without dropping out of the typeclass model? What would that
   look like?
-- **Typed descriptors — still worth it, and for what?** If recommended,
+- **Typed descriptors: still worth it, and for what?** If recommended,
   what do they buy that `AttributeProperty` doesn't (schema, defaults,
   validation, a migration story)? Be explicit that they don't help
   query volume, and where they'd make it worse.

@@ -122,18 +122,27 @@ Two-layer split landed on engine side:
   `at_search_result` hook signature is unchanged.
 - Symmetric treatment on `DefaultAccount.search` / `search_for`.
 
-### A1. Typed attribute descriptors
+### A1. Attribute storage model
 
 - Problem: `.db.foo` vs `.attributes.add/get` vs `.ndb.foo` vs
   `.tags` vs `.aliases` vs `.nattributes` vs raw Django fields vs
-  `ServerConfig`. Performance and semantics differ, no schema, no
-  migrations. Every serious game writes a typed wrapper.
-- Target: typed descriptors are the canonical attribute API. `class
-  Char: hp = IntAttr(default=100, persist=True, cache="memory")`.
-  Engine internals migrate to descriptors. Other storage mechanisms
-  remain as sugar but are deprecated for new code; documentation
-  steers everyone to descriptors. One canonical answer (P3).
-- Churn: large.
+  `ServerConfig`. The driving cost is performance and queryability,
+  not just ergonomics: "everything is an Attribute" means one row per
+  value (query volume scales with field count) and pickled values
+  that can't be filtered in SQL. The several mechanisms are a taxonomy
+  of performance profiles, each solving a real problem; no schema, no
+  migrations across any of them.
+- Target: **direction reopened; exploratory.** The earlier framing
+  ("typed descriptors are the canonical API; one canonical answer,
+  P3") prejudged the answer. Typed descriptors are now one candidate
+  among several (batched-blob component bags, a queryable-column
+  escape hatch, an ECS horizon), to be chosen by a cost analysis
+  rather than assumed. "Document the taxonomy and build little" is a
+  legitimate outcome. See the
+  [exploratory prompt](../prompts/A1-attribute-descriptors.md) for the
+  full reframing.
+- Churn: large (if a substrate is built); small (if the outcome is
+  documentation + promoting an existing pattern).
 - Dependencies: none structural.
 
 ### S1. Settings as typed objects — dropped

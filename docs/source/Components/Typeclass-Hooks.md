@@ -428,7 +428,7 @@ Driver: `SessionHandler` after a server reload. Each session whose
 portal connection survived is re-synced via
 `ServerSession.at_sync()` (serversession.py:95).
 
-Phase A item A4 corrected the order to fire the puppet hooks so
+Phase A item PA4 corrected the order to fire the puppet hooks so
 non-persistent cmdset state rebuilds. Both
 `at_pre_puppet` and `at_post_puppet` fire with `reattach=True`.
 
