@@ -22,7 +22,7 @@ in):
 Graded `H` (likely worth doing), `M` (worth discussing), `L` (doc-only
 caveat). Each links to the originating signal.
 
-### F-1 (L): display-name cache lives game-side; engine seam is undocumented
+### F-1 (L, shipped): display-name cache lives game-side; engine seam is undocumented
 
 The `+underspire.36` change moved display-name caching out of the engine.
 The engine still exposes whatever hook the game cache attaches to, but
@@ -114,7 +114,7 @@ Implementation: iterate channels the entity subscribes to (DB read once)
 and SREM the ref from each. Test: delete an account, assert no `a:<pk>`
 ref remains in any channel's Redis set.
 
-### F-5 (L): trie cheap-key in-place-mutation footgun
+### F-5 (L, shipped): trie cheap-key in-place-mutation footgun
 
 The trie's two-tier cache (`(len, sum(id))` followed by structural
 signature) does **not** detect in-place mutation of a cached command's
@@ -141,7 +141,7 @@ classes might do non-cacheable work in `access`)? If yes, the prompt-level
 docstring should say so. If no, flip the default and add a settings note.
 **Decision-only, no code change in step 1 of this finding.**
 
-### F-7 (M): no cross-cache layering doc — lock-check cache is partly redundant under cmd-access
+### F-7 (M, shipped): no cross-cache layering doc — lock-check cache is partly redundant under cmd-access
 
 When `CMD_ACCESS_CACHE_ENABLED=True`, the cmd-parse hot path goes
 `cached_cmd_access` → `cmd.access(caller, "cmd")` → `LockHandler.check`.

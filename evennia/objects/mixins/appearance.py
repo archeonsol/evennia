@@ -8,8 +8,7 @@ from django.utils.translation import gettext as _
 
 from evennia.hooks import hook
 from evennia.utils import ansi, logger
-from evennia.utils.utils import (compress_whitespace, is_iter, iter_to_str,
-                                 make_iter)
+from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
 
 _INFLECT = inflect.engine()
 
@@ -71,6 +70,17 @@ class AppearanceMixin:
         Notes:
             This function can be extended to change how object names appear to users in character,
             but it does not change an object's keys or aliases when searching.
+
+            This hook is a known cache seam: downstream games may attach a
+            display-name cache keyed on ``(target, looker)`` that wraps this
+            return value (the engine no longer ships such a cache itself).
+            Any engine code that mutates state affecting the returned name
+            (visibility flag flips, identity reveals, format-context
+            changes) must give downstream caches a way to invalidate — fire
+            an existing hook the game-side cache can subscribe to, or
+            expose a dedicated signal — rather than relying on the cache
+            to guess. See ``.agents/audits/cache-audit.md`` (F-1) for the
+            audit context.
 
         """
         return self.name

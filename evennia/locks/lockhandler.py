@@ -202,6 +202,13 @@ def invalidate_lock_cache(accessing_obj) -> None:
       decision *without* changing the lockstring is possible — and then
       only via the caller's external state, which the explicit invalidation
       call covers).
+
+    Layering note: on the cmd-parse hot path this cache is fronted by
+    ``evennia.commands.cmd_access_cache`` (default on since F-6). A
+    cmd-access hit short-circuits before any ``LockHandler.check`` call,
+    so most lock-cache hits land on non-cmd-parse paths (visibility,
+    traversal, contrib code). When benchmarking lock-cache effectiveness
+    keep in mind cmd-access likely absorbs the dispatch-path hits.
     """
     if accessing_obj and hasattr(accessing_obj, "ndb"):
         try:
