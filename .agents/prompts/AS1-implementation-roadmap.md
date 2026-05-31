@@ -1,6 +1,9 @@
 # AS1 Implementation Roadmap: sync-by-default + threaded I/O helpers
 
-Status: design / pre-implementation. Branch: `as1-sync-async`.
+Status: engine shipped in `6.0.0+underspire.50` (Phase 0 `1a804aea0`,
+worker_pool removal `fedcf2a47`, Phase 1 watchdog `6060f8b74`, jobs
+docstring `9ab664c49`). Phase 2 (downstream blocking-site migration) is
+pending in the game repo. Branch: `as1-sync-async`.
 
 Replaces the open-ended `AS1-sync-async-commitment.md` exploration with a
 decided direction and an implementation plan. The prompt remains the

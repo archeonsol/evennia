@@ -1,6 +1,9 @@
 # AS1: sync/async commitment
 
-Status: todo
+Status: shipped (engine) in `6.0.0+underspire.50`. Direction settled as
+Option 1 (sync-by-default + threaded I/O helpers); see
+[AS1-implementation-roadmap.md](AS1-implementation-roadmap.md) for the
+committed design and commit SHAs. Phase 2 (downstream migration) pending.
 
 ## Goal
 

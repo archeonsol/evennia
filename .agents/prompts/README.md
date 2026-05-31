@@ -18,19 +18,26 @@ Currently parallel-startable (no unresolved dependencies):
 
 **No dependencies on anything not yet shipped:**
 
-- [AS1: sync/async commitment](AS1-sync-async-commitment.md) —
-  medium. Direction + helpers.
 - [A1: attribute storage model](A1-attribute-descriptors.md) —
   large, exploratory. Direction not yet committed (typed descriptors
   are one candidate, not the foregone answer).
 - [I1: actor abstraction](I1-actor-abstraction.md) — largest.
   Substrate; unblocks L1, I2, R1.
 
+**Shipped:**
+
+- [AS1: sync/async commitment](AS1-sync-async-commitment.md) — engine
+  shipped in `6.0.0+underspire.50` (`evennia.utils.defer` + reactor-stall
+  watchdog). Phase 2 (downstream blocking-site migration) is game-repo
+  work, tracked there. Settles the rule-body contract CM1 builds on.
+
 **Unblocked by B1 (typeclass hooks taxonomy doc, shipped):**
 
 - [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces
   merge-time-and-cached with a simpler model; bakes introspection
-  in from the start.
+  in from the start. Rule-body sync/async contract now settled by AS1
+  (`carry_out`/`report` may defer via `evennia.utils.defer`; `check`
+  must not block).
 
 **Boundary work (depends on architecture-doc substrate):**
 
