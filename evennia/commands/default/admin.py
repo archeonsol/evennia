@@ -10,9 +10,8 @@ import time
 from django.conf import settings
 
 import evennia
-from evennia.commands.cmd_access_cache import invalidate_cmd_access_cache
+from evennia.commands.cmd_access_cache import invalidate_caller_access
 from evennia.commands.signals import permissions_changed
-from evennia.locks.lockhandler import invalidate_lock_cache
 from evennia.server.models import ServerConfig
 from evennia.utils import class_from_module, evtable, logger, search
 
@@ -546,13 +545,12 @@ class CmdPerm(COMMAND_DEFAULT_CLASS):
                         f"Permissions Added: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
                     )
 
-        # Engine owns the cmd_access and lock caches; flush them for the
-        # mutated entity before any downstream listener observes the new
+        # Engine owns the per-caller access caches; flush them via the
+        # single seam before any downstream listener observes the new
         # permission state, then fan out the signal. Subscribers that
         # invalidate their own derived caches see consistent engine state.
         if added or removed:
-            invalidate_cmd_access_cache(obj)
-            invalidate_lock_cache(obj)
+            invalidate_caller_access(obj)
             permissions_changed.send_robust(
                 sender=type(self),
                 target=obj,

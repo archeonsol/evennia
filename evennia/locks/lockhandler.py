@@ -178,7 +178,31 @@ _LOCK_CACHE_MISS = object()  # sentinel for ndb lock cache lookups
 
 
 def invalidate_lock_cache(accessing_obj) -> None:
-    """Clear per-caller lock check cache (e.g. after permission changes)."""
+    """Clear per-caller lock check cache (e.g. after permission changes).
+
+    Cache contract for the per-caller ``ndb._lock_cache`` populated inside
+    :meth:`LockHandler._check`; gated by ``LOCK_CHECK_CACHE_ENABLED``
+    (default on):
+
+    - **Fills on:** first :meth:`LockHandler.check` for a *cacheable* target.
+      Only Commands are cached (``self.obj`` has no pk but its bound
+      ``cmd.obj`` does); DB objects are deliberately excluded because their
+      lockstrings can mutate at runtime. Key components: command class
+      module + name, bound object pk, ``access_type``, ``no_superuser_bypass``,
+      the current lockstring, and ``session.sessid``. The lockstring is
+      part of the key, so an in-place lockstring change naturally invalidates
+      every cached row that referenced the old text.
+    - **Invalidates on:** ``invalidate_lock_cache(caller)`` — explicit drop
+      when ``caller``'s permissions, tags, or other lock-evaluable state
+      change. Drops the whole per-caller dict; the next check repopulates
+      lazily. The cache also dies with ``caller.ndb`` on reload.
+    - **Staleness bound:** zero after explicit invalidation. Without one, the
+      cache survives until reload, but the cacheability rules above bound
+      the risk surface to Commands (the only case where mutating the lock
+      decision *without* changing the lockstring is possible — and then
+      only via the caller's external state, which the explicit invalidation
+      call covers).
+    """
     if accessing_obj and hasattr(accessing_obj, "ndb"):
         try:
             del accessing_obj.ndb._lock_cache

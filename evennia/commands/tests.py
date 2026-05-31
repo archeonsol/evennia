@@ -1722,6 +1722,54 @@ class TestCmdAccessCache(BaseEvenniaTest):
         self.assertEqual(matches[0][0], "saytest")
 
 
+class TestInvalidateCallerAccess(BaseEvenniaTest):
+    """Tests for cmd_access_cache.invalidate_caller_access fan-out."""
+
+    def test_calls_both_inner_invalidations_for_single_target(self):
+        from evennia.commands import cmd_access_cache
+        from evennia.locks import lockhandler
+
+        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
+            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
+                cmd_access_cache.invalidate_caller_access(self.char1)
+        cmd_inv.assert_called_once_with(self.char1)
+        lock_inv.assert_called_once_with(self.char1)
+
+    def test_multi_target_invalidates_each(self):
+        from evennia.commands import cmd_access_cache
+        from evennia.locks import lockhandler
+
+        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
+            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
+                cmd_access_cache.invalidate_caller_access(self.char1, self.account)
+        self.assertEqual(cmd_inv.call_count, 2)
+        self.assertEqual(lock_inv.call_count, 2)
+        cmd_inv.assert_any_call(self.char1)
+        cmd_inv.assert_any_call(self.account)
+        lock_inv.assert_any_call(self.char1)
+        lock_inv.assert_any_call(self.account)
+
+    def test_none_targets_skipped(self):
+        from evennia.commands import cmd_access_cache
+        from evennia.locks import lockhandler
+
+        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
+            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
+                cmd_access_cache.invalidate_caller_access(self.char1, None)
+        cmd_inv.assert_called_once_with(self.char1)
+        lock_inv.assert_called_once_with(self.char1)
+
+    def test_zero_targets_is_noop(self):
+        from evennia.commands import cmd_access_cache
+        from evennia.locks import lockhandler
+
+        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
+            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
+                cmd_access_cache.invalidate_caller_access()
+        cmd_inv.assert_not_called()
+        lock_inv.assert_not_called()
+
+
 # ----------------------------------------------------------------------------
 # Phase 2 step 1: at_pre_cmd → at_pre_parse rename + post-parse at_pre_cmd
 # ----------------------------------------------------------------------------

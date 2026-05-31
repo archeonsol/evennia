@@ -1,7 +1,25 @@
 """
 Cache location-sourced cmdsets gathered during command merge.
 
-Invalidated via ``_cmdset_generation`` counters bumped on cmdset stack changes.
+Cache contract:
+
+- **Fills on:** ``set_cached_location_cmdsets(key, cmdsets)`` after a
+  successful gather of the location's contribution to a caller's merged
+  cmdset. Keyed by ``(location pk, location generation, caller pk,
+  caller generation)`` so the same key is unreachable once either side's
+  generation counter advances. Bounded LRU; max size
+  ``LOCATION_CMDSET_CACHE_MAXSIZE`` (default 512).
+- **Invalidates on:** ``bump_cmdset_generation(obj)`` — fired when the
+  cmdset stack on ``obj`` changes (add/remove/replace on its
+  ``CmdSetHandler``) or when an object moves between locations (both
+  endpoints bumped by the engine's default move primitive). The counter
+  bump makes all prior cache keys unreachable rather than evicting rows
+  eagerly; the LRU eventually reclaims them.
+- **Staleness bound:** zero. A lookup after a bump is keyed off the new
+  generation and misses; the cache cannot serve a result from before the
+  triggering change.
+
+Disable via ``LOCATION_CMDSET_CACHE_ENABLED = False``.
 """
 
 from __future__ import annotations

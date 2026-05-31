@@ -1,8 +1,35 @@
 """
 Redis-backed channel subscriber index for fast online fan-out.
 
-PostgreSQL M2M subscriptions remain source of truth; Redis is a denormalized cache
-rebuilt on subscribe/unsubscribe and used for ``Channel.msg`` recipient gathering.
+PostgreSQL M2M subscriptions remain source of truth; Redis is a denormalized
+cache used for ``Channel.msg`` recipient gathering. Disable via
+``CHANNEL_SUBSCRIBER_CACHE_ENABLED = False``.
+
+Cache contract:
+
+- **Fills on:**
+
+  - ``sync_channel_subscribers(channel)`` — full rebuild from DB inside a
+    MULTI/EXEC ``DELETE + SADD`` so a concurrent ``add_subscriber`` /
+    ``remove_subscriber`` between the DB read and cache rewrite is not
+    silently lost. Triggered on the first ``get_cached_subscribers`` lookup
+    against a channel with no Redis key, and again when a stale ref's
+    owner is missing from PG.
+  - ``add_subscriber(channel, entity)`` — incremental SADD on subscribe.
+
+- **Invalidates on:**
+
+  - ``remove_subscriber(channel, entity)`` — incremental SREM on unsubscribe.
+  - ``clear_channel(channel)`` — explicit drop.
+  - Implicit: a ``get_cached_subscribers`` call that resolves a ref whose
+    owner no longer exists triggers ``sync_channel_subscribers`` to rebuild
+    the set from PG truth.
+
+- **Staleness bound:** zero for in-process subscribe / unsubscribe (the
+  SADD/SREM lands before the call returns). Cross-process subscribe /
+  unsubscribe is visible at the next ``sync_channel_subscribers`` rebuild;
+  references to deleted entities are filtered on resolve, so visible
+  staleness is bounded by the detect-and-resync round-trip.
 """
 
 from __future__ import annotations

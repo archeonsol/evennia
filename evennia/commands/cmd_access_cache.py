@@ -1,14 +1,28 @@
 """
 Per-caller cache for ``Command.access(caller, "cmd")`` during command parsing.
 
-Enabled with ``CMD_ACCESS_CACHE_ENABLED`` in settings. Results are stored on
-``caller.ndb`` and keyed by a generation counter plus command identity and
-optional session id (when lockfuncs use the session).
+Enabled with ``CMD_ACCESS_CACHE_ENABLED`` in settings (default off). Results
+live on ``caller.ndb._cmd_access_cache`` so a reload clears the cache.
 
-Invalidate automatically when cmdsets change on the owning object (and related
-objects such as room contents or exit locations). Call
-``invalidate_cmd_access_cache(caller)`` when permissions or locks change without
-a cmdset update.
+Cache contract:
+
+- **Fills on:** first ``cached_cmd_access(cmd, caller, session)`` lookup for a
+  given key, storing ``True``/``False``. Key components: per-caller generation
+  counter, command identity (path when present, else module/class/key tuple),
+  and ``session.sessid`` (``id()`` would alias after Session GC).
+- **Invalidates on:**
+
+  - ``invalidate_cmd_access_cache(caller)`` — explicit drop when permissions,
+    tags, or locks on ``caller`` change without an associated cmdset update.
+  - ``invalidate_for_cmdset_owner(obj)`` — fired by the cmdset-change signal.
+    Invalidates ``obj`` directly, plus every co-resident object (for exit
+    cmdsets merged from room contents and room-like containers) and every
+    puppeted character (for account cmdset changes).
+
+  Both paths bump the per-caller generation counter so prior keys become
+  unreachable, then drop the cache dict.
+- **Staleness bound:** zero after either invalidation. The cache is per-caller
+  ``ndb`` so a reload also clears it.
 """
 
 from __future__ import annotations
@@ -113,6 +127,40 @@ def cached_cmd_access(cmd, caller, session=None) -> bool:
     except Exception:
         pass
     return allowed
+
+
+def invalidate_caller_access(*targets) -> None:
+    """Invalidate all engine-owned per-caller access caches for ``targets``.
+
+    Single seam for callers that mutate a target's effective permissions
+    (``@perm``, ``@quell``, future engine paths). Fans out to every
+    engine-owned cache that keys on per-caller access decisions, in the
+    order they need to be invalidated for a subsequent access check to
+    see fresh state. Today that is:
+
+    - ``invalidate_cmd_access_cache(target)``
+    - :func:`evennia.locks.lockhandler.invalidate_lock_cache(target)`
+
+    Future engine-owned caller-access caches must be added here so
+    callers keep using one seam instead of remembering an N-of-M
+    fan-out. Call this *before* firing any signal whose subscribers
+    may observe an access check, so subscribers see consistent state
+    (the ``permissions_changed`` signal contract relies on this
+    ordering).
+
+    Args:
+        *targets: Objects, Accounts, or other lock-evaluable entities
+            whose access caches should be dropped. ``None`` entries are
+            silently skipped so callers can pass an optional puppet
+            without a guard (``invalidate_caller_access(account, puppet)``).
+    """
+    from evennia.locks.lockhandler import invalidate_lock_cache
+
+    for target in targets:
+        if target is None:
+            continue
+        invalidate_cmd_access_cache(target)
+        invalidate_lock_cache(target)
 
 
 def invalidate_for_cmdset_owner(obj) -> None:

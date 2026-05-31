@@ -72,9 +72,14 @@ to remain forward-compatible):
 ``permissions_changed``
     Fired by engine commands that mutate effective permissions, after the
     mutation lands and after the engine's own cache invalidation runs. The
-    engine invalidates ``cmd_access_cache`` and ``lock_cache`` for the
-    affected entity *before* firing, so subscribers observe consistent
-    state. Sender is the concrete Command class (``CmdPerm``, ``CmdQuell``).
+    engine calls
+    :func:`evennia.commands.cmd_access_cache.invalidate_caller_access` for
+    the affected entity *before* firing, which fans out to every
+    engine-owned per-caller access cache (``cmd_access_cache``,
+    ``lock_cache``) so subscribers observe consistent state. New engine
+    paths that mutate effective permissions must call the same helper
+    before firing this signal. Sender is the concrete Command class
+    (``CmdPerm``, ``CmdQuell``).
 
     - ``target``: the mutated entity. For ``@perm`` this is the Object or
       Account whose permission list changed; for ``@quell`` this is the

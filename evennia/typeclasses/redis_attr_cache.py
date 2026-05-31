@@ -1,8 +1,38 @@
 """
 Redis L2 cache for ModelAttributeBackend (Phase 2).
 
-PostgreSQL remains source of truth. On Redis failure, all operations fall back to PG.
-Cache hits hydrate Attribute instances from JSON without a database round-trip.
+PostgreSQL remains source of truth. On Redis failure, all operations fall back
+to PG. Cache hits hydrate Attribute instances from JSON without a database
+round-trip.
+
+Cache contract:
+
+- **Fills on:**
+
+  - ``query_key`` / ``query_category`` / ``query_all`` after a PG read on
+    cache miss (NX-only writes so a concurrent fresher value is not
+    overwritten with the stale snapshot we just pulled).
+  - ``do_create_attribute`` immediately after PG insert.
+  - ``flush_dirty`` for every Attribute the backend just bulk-updated
+    to PG (Redis is never republished before PG commit, which preserves
+    the invariant that Redis is never more current than PG).
+
+- **Invalidates on:**
+
+  - ``do_delete_attribute`` — synchronous drop after PG delete.
+  - ``invalidate_attrs(attrs)`` — called from the orphan-flush path after
+    ``_flush_orphan_dirty`` writes to PG; covers the ``attr.value = X``
+    write path that bypasses ``backend.flush_dirty``.
+  - ``flush_all_keys`` — wired into ``idmapper.flush_cache`` for test
+    teardown, the ``@reload/flush`` admin command, and ``post_migrate``.
+  - TTL expiry (``ATTRIBUTE_REDIS_CACHE_TTL``, default 3600s) bounds any
+    key that escapes the invalidation paths above.
+
+- **Staleness bound:** cross-process readers see stale values for at most
+  one ``flush_all_dirty`` tick (same window as PG durability), bounded
+  further by the TTL. Same-process readers see new values immediately via
+  the AttributeHandler's in-process cache (the mutated attr is the same
+  instance).
 """
 
 from __future__ import annotations

@@ -27,9 +27,27 @@ from evennia.utils.idmapper.models import SharedMemoryModel
 from evennia.utils.picklefield import PickledObjectField
 from evennia.utils.utils import is_iter, lazy_property, make_iter, to_str
 
-# Write-behind registry: backends with unflushed dirty attrs
+# Write-behind cache for Attribute mutations.
+#
+# Cache contract:
+#
+# - Fills on: ``ModelAttributeBackend.do_update_attribute`` registers the
+#   backend in ``_DIRTY_BACKENDS`` and adds the attr to the backend's
+#   ``_dirty_attrs`` set. Writes that bypass the backend (the ``.value``
+#   setter, ``lock_storage`` mutations) land in ``_ORPHAN_DIRTY_ATTRS``
+#   via ``_mark_attr_dirty``.
+# - Invalidates on: ``flush_all_dirty()`` ticked by the server maintenance
+#   script (interval governed by ``ATTRIBUTE_FLUSH_*`` settings) and
+#   ``flush_if_pending()`` called opportunistically before ORM filters on
+#   Attribute columns. A successful ``bulk_update`` removes attrs from the
+#   dirty sets; on raise, entries stay queued and the next tick retries.
+#   Orphan flush then calls ``invalidate_attrs`` to drop matching Redis L2
+#   keys so cross-process readers don't keep serving the pre-flush snapshot.
+# - Staleness bound: cross-process readers see stale PG until the next
+#   ``flush_all_dirty`` tick. Same-process readers see new values
+#   immediately because the mutated Attribute is the same in-memory
+#   instance the AttributeHandler already holds.
 _DIRTY_BACKENDS: "weakref.WeakSet" = weakref.WeakSet()
-# Attrs mutated via .value setter / lock_storage (bypass backend dirty set)
 _ORPHAN_DIRTY_ATTRS: "weakref.WeakSet" = weakref.WeakSet()
 _DIRTY_ATTR_UPDATE_FIELDS = [
     "db_value",

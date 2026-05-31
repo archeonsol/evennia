@@ -23,6 +23,21 @@ The trie is cached on the merged cmdset and invalidated whenever any
 command's key, alias list, or ``is_exit`` flag changes, so reused merge-cache
 cmdsets cannot get stuck with a stale trie.
 
+Cache contract (per-cmdset trie attached as ``_trie_command_trie``):
+
+- **Fills on:** first ``trie_build_matches`` call against a cmdset, after a
+  cheap-key (``len(commands) + sum(id(c) for c in commands)``) miss followed
+  by a structural-signature (``(key, sorted(aliases), is_exit)`` per command)
+  miss. The two-tier check keeps the common reuse case cheap.
+- **Invalidates on:** cheap-key change (commands added or removed) followed
+  by signature change (any cmd's key, aliases, or ``is_exit`` flag mutated).
+  In production the merge path produces a new cmdset object on any cmd
+  change, which has no cached trie attribute and rebuilds from scratch.
+- **Staleness bound:** zero under the production rebuild flow. The one
+  caveat: in-place alias mutation on a *reused* cmdset object is not
+  detected by the cheap key alone — callers must
+  ``del cmdset._trie_command_trie`` to force a rebuild.
+
 Opt-out: set ``settings.COMMAND_PARSER`` to
 ``"evennia.commands.cmdparser.cmdparser"`` to fall back to the linear
 build_matches parser (kept for backward compatibility).

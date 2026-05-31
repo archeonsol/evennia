@@ -23,10 +23,9 @@ from codecs import lookup as codecs_lookup
 from django.conf import settings
 
 import evennia
-from evennia.commands.cmd_access_cache import invalidate_cmd_access_cache
+from evennia.commands.cmd_access_cache import invalidate_caller_access
 from evennia.commands.command import AccountCommand
 from evennia.commands.signals import permissions_changed
-from evennia.locks.lockhandler import invalidate_lock_cache
 from evennia.utils import create, logger, search, utils
 
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
@@ -1027,16 +1026,12 @@ class CmdQuell(AccountCommand):
         self._recache_locks(account)
 
         # Quell flips the effective permission stack without changing the
-        # raw permission list. Invalidate cmd_access and lock caches for
-        # the account *and* the active puppet so character-level access
+        # raw permission list. Invalidate engine access caches for the
+        # account *and* the active puppet so character-level access
         # checks see the new effective perms, then fire the signal.
         if mutated:
             puppet = self.session.puppet if self.session else None
-            invalidate_cmd_access_cache(account)
-            invalidate_lock_cache(account)
-            if puppet is not None:
-                invalidate_cmd_access_cache(puppet)
-                invalidate_lock_cache(puppet)
+            invalidate_caller_access(account, puppet)
             permissions_changed.send_robust(
                 sender=type(self),
                 target=account,
