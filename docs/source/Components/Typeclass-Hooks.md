@@ -1175,6 +1175,26 @@ register the current shape verbatim.
   `at_<set>_added` / `at_<set>_removed` everywhere or
   `at_post_add_<noun>` / `at_post_remove_<noun>` everywhere.
 
+### Generated index
+
+The following tables are produced from the registry by
+`python -m evennia.hooks.docs --write`. PHASE_MISMATCH entries are
+lint output; self-flagged entries pull from spec `notes` fields.
+
+<!-- hooks-gen:start misshapen -->
+### Phase / name mismatches (lint)
+
+_None: every `at_pre_*` / `at_post_*` / `at_failed_*` name matches its declared phase._
+
+### Self-flagged in spec notes
+
+| Hook | Note |
+|---|---|
+| `DefaultAccount.at_msg_receive` | Misshapen veto: at_<event> name. Falsy-not-None aborts delivery. |
+| `DefaultAccount.at_msg_send` | Misshapen veto: at_<event> name. Falsy-not-None aborts the send. |
+| `TypedObject.at_idmapper_flush` | Misshapen: at_<event> name with veto contract. Return False keeps the object cached. |
+<!-- hooks-gen:end -->
+
 ## §7. Cleanup triage
 
 Disposition for each §6 entry. Single-fork, no deprecation cycle:

@@ -183,6 +183,165 @@ pre/post pattern.
 | `get_puppet_or_account` | `ServerSession` | serversession.py:207 | `Object` or `Account` | No callers; see main doc §6. |
 | `get_return_exit` | `DefaultExit` | objects/exit.py:319 | `Exit` or queryset | No callers; see main doc §6. |
 
+### 3.7 Complete registry index (generated)
+
+The following table is produced from the registry by
+`python -m evennia.hooks.docs --write`. It groups every registered
+engine hook by declared `returns` contract. Curated subsections 3.1
+through 3.6 cover the same ground with more nuance; this index is
+the authoritative roster.
+
+<!-- hooks-gen:start return-contracts -->
+### Veto (`returns="veto"`)
+
+| Hook | Class | Actor | Veto effect |
+|---|---|---|---|
+| `at_pre_drop` | `AppearanceMixin` | target | Veto aborts the drop. Move does not run. |
+| `at_pre_get` | `AppearanceMixin` | target | Veto aborts the get. Move does not run. |
+| `at_pre_give` | `AppearanceMixin` | target | Veto aborts the give. Move does not run. |
+| `at_msg_receive` | `DefaultAccount` | self | Misshapen veto: at_<event> name. Falsy-not-None aborts delivery. |
+| `at_msg_send` | `DefaultAccount` | self | Misshapen veto: at_<event> name. Falsy-not-None aborts the send. |
+| `at_pre_login` | `DefaultAccount` | self | Veto disconnects the session ('Login refused.'). Fires at_first_login on the first successful login. |
+| `at_pre_delete` | `LifecycleMixin` | self | Return False to abort delete(). |
+| `at_pre_puppet` | `LifecycleMixin` | target | Reattach path fires with reattach=True kwarg. |
+| `at_pre_unpuppet` | `LifecycleMixin` | target | Veto aborts detach. Puppet stays attached; session.puppet/puid stay set. |
+| `at_pre_arrive` | `MovementMixin` | destination | Fires on the destination. Veto aborts after at_pre_move and at_pre_leave pass. |
+| `at_pre_leave` | `MovementMixin` | source | Fires on the source location. Veto aborts after at_pre_move passes. |
+| `at_pre_move` | `MovementMixin` | mover | Fires on the mover. Veto aborts: no mover-side or location-side post-hooks fire. |
+| `at_pre_traverse` | `MovementMixin` | self | Fires on the exit. Veto fires at_failed_traverse; move chain does NOT fire. |
+| `at_pre_delete` | `ScriptBase` | self | Return False to abort delete(). |
+| `at_idmapper_flush` | `TypedObject` | self | Misshapen: at_<event> name with veto contract. Return False keeps the object cached. |
+| `at_pre_rename` | `TypedObject` | self | Fires from the key setter. db_key is not yet written at firing. |
+
+### Transform (`returns="transform"`)
+
+| Hook | Class | Actor | Transform effect |
+|---|---|---|---|
+| `at_pre_say` | `AppearanceMixin` | self | Transform contract with symmetric None-rule. Non-empty string replaces; False/empty aborts; None falls back to original. |
+| `at_pre_channel_msg` | `DefaultAccount` | self | Receiver-side transform: non-empty string replaces, False/empty aborts for this receiver, None falls back. |
+| `at_pre_msg` | `DefaultChannel` | self | Transform contract with symmetric None-rule. Non-empty string replaces; False/empty aborts; None falls back to original. |
+
+### Content (`returns="content"`)
+
+| Hook | Class | Actor | Returns |
+|---|---|---|---|
+| `at_look` | `AppearanceMixin` | self | Composite. Returns the description; caller messages it. Fires at_desc on target as a side effect. |
+| `get_content_group_label` | `AppearanceMixin` | target | Per-group label injected into the rendered listings. |
+| `get_display_characters` | `AppearanceMixin` | target | Rendered characters block. |
+| `get_display_desc` | `AppearanceMixin` | target | Reads desc attribute by default. |
+| `get_display_exits` | `AppearanceMixin` | target | Rendered exits block. |
+| `get_display_footer` | `AppearanceMixin` | target | Footer slot; empty default. |
+| `get_display_header` | `AppearanceMixin` | target | Header slot; empty default. |
+| `get_display_name` | `AppearanceMixin` | target | Per-looker formatted name. Most-overridden hook in the surface (122+ call sites). |
+| `get_display_things` | `AppearanceMixin` | target | Rendered things block with get_numbered_name stacking. |
+| `get_extra_display_name_info` | `AppearanceMixin` | target | Injected next to the display name; empty default. |
+| `get_extra_display_state` | `AppearanceMixin` | target | Injected into the {extra_state} template slot. |
+| `get_numbered_name` | `AppearanceMixin` | target | Returns (singular, plural) tuple. Used for stacking in get_display_things. |
+| `get_say_template_location` | `AppearanceMixin` | self | Template for the location broadcast. |
+| `get_say_template_receivers` | `AppearanceMixin` | self | Template for per-receiver delivery (whispers, directed says). |
+| `get_say_template_self` | `AppearanceMixin` | self | str.format-ready template for the speaker's self-echo. |
+| `get_self_pronoun` | `AppearanceMixin` | target | Pronoun from the looker's perspective. Default returns 'You' when looker is self. |
+| `return_appearance` | `AppearanceMixin` | target | Composite renderer. Joins get_display_* providers via appearance_template. |
+| `at_look` | `DefaultAccount` | self | H1e: distinct from Object.at_look. Account.at_look is the OOC character picker. |
+| `get_all_puppets` | `DefaultAccount` | self | Returns all currently puppeted characters on the account. |
+| `get_available_character_slots` | `DefaultAccount` | self | Returns remaining character slots. None = unlimited. |
+| `get_character_slots` | `DefaultAccount` | self | Returns the max number of characters this account may have. None = unlimited. |
+| `get_cmdset_providers` | `DefaultAccount` | self | Returns dict[str, CmdSetProvider]. Account version: includes self. |
+| `get_cmdsets` | `DefaultAccount` | self | Account-side cmdset stack. Mirrors LifecycleMixin.get_cmdsets. |
+| `get_extra_display_name_info` | `DefaultAccount` | target | Account override of AppearanceMixin's get_extra_display_name_info. |
+| `get_puppet` | `DefaultAccount` | self | Returns the puppet attached to the given session, or None. |
+| `get_username_validators` | `DefaultAccount` | self | Returns Django username validators. Override to relax/tighten allowed names. |
+| `get_log_filename` | `DefaultChannel` | self | Returns the log filename used for channel history. |
+| `get_return_exit` | `DefaultExit` | self | Returns the return-exit (or queryset if return_all). H1e: reclassified from D to H bucket; has tests, retain. |
+| `get_cmdset_providers` | `DefaultObject` | self | Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider]. See command-system.md. |
+| `get_nicklist` | `IRCBot` | self | IRCBot-specific: returns the nicklist of the connected channel. |
+| `get_cmdsets` | `LifecycleMixin` | self | Returns the per-class cmdset stack as (current, cmdsets). See command-system.md. |
+| `get_default_lockstring` | `LifecycleMixin` | self | Per-class default lockstring used during basetype_setup. |
+| `get_message_recipients` | `MessagingMixin` | self | Resolves the recipient set for a msg_contents broadcast. |
+| `get_search_candidates` | `SearchMixin` | self | Search-pipeline stage 3: compute candidate set (location/contents-aware). |
+| `get_search_query_replacement` | `SearchMixin` | self | Search-pipeline stage 1: rewrite the raw search string (nick replacement etc). |
+| `get_search_result` | `SearchMixin` | self | Search-pipeline stage 4: actual ObjectDB query. Returns queryset/iterable. |
+| `get_account` | `ServerSession` | self | Returns the Account attached to this session. |
+| `get_client_size` | `ServerSession` | self | Returns (width, height) of the client's reported screen. |
+| `get_cmdset_providers` | `ServerSession` | self | Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider]. |
+| `get_cmdsets` | `ServerSession` | self | Session-side cmdset stack. Mirrors LifecycleMixin.get_cmdsets. |
+| `get_display_name` | `ServerSession` | target | Session-side display name (for logging / admin tools). |
+| `get_puppet` | `ServerSession` | self | Returns the puppet (Object) attached to this session. |
+| `get_display_name` | `TypedObject` | target | TypedObject stub. AppearanceMixin override is the canonical override surface (122+ call sites). |
+| `get_extra_info` | `TypedObject` | target | Consumed by evennia.utils.multimatch and evennia.utils.utils.multimatch helpers. |
+
+### Ignored (`returns="ignored"`)
+
+| Hook | Class | Actor | Notes |
+|---|---|---|---|
+| `at_desc` | `AppearanceMixin` | target | Notification that looker is examining target. Name suggests no event but it's the 'looked-at' notify hook. |
+| `at_post_drop` | `AppearanceMixin` | target | Fires after the drop-induced move commits. |
+| `at_post_get` | `AppearanceMixin` | target | Fires after the get-induced move commits. |
+| `at_post_give` | `AppearanceMixin` | target | Fires after the give-induced move commits. |
+| `at_say` | `AppearanceMixin` | self | Composite action: fires at_pre_say, formats via templates, sends to self/location/receivers. |
+| `at_account_creation` | `DefaultAccount` | self | One-shot account creation. Fires once via at_first_save. |
+| `at_character_added` | `DefaultAccount` | self | Notification: character added to the persistent characters-list. |
+| `at_character_removed` | `DefaultAccount` | self | Notification: character removed from the persistent characters-list. |
+| `at_cmdset_get` | `DefaultAccount` | self | Account-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get. |
+| `at_disconnect` | `DefaultAccount` | self | Account-side disconnect hook. |
+| `at_failed_login` | `DefaultAccount` | self | Fires when authentication or at_pre_login rejects a login attempt. |
+| `at_first_login` | `DefaultAccount` | self | One-shot first-login hook. Fires once via at_pre_login when last_login is unset. |
+| `at_first_save` | `DefaultAccount` | self | Driven by Django post_save signal (created=True). Override at_account_creation instead. |
+| `at_post_access` | `DefaultAccount` | target | Account override of LifecycleMixin.at_post_access. |
+| `at_post_channel_msg` | `DefaultAccount` | self | Receiver-side post-delivery hook. |
+| `at_post_create_character` | `DefaultAccount` | self | Fires after a character is created and attached to the account. |
+| `at_post_disconnect` | `DefaultAccount` | self | Fires after disconnect completes. No messaging here; session is gone. |
+| `at_post_login` | `DefaultAccount` | self | Fires after the login completes and the session is fully attached. |
+| `at_post_password_change` | `DefaultAccount` | self | Fires after a successful password change. |
+| `at_puppet_added` | `DefaultAccount` | self | Notification: puppet added to the live puppet-set. Errors here are swallowed by puppet_object. |
+| `at_puppet_removed` | `DefaultAccount` | self | Notification: puppet removed from the live puppet-set. |
+| `at_server_reload` | `DefaultAccount` | self | Account-side reload hook. Fires from EvenniaServerService.shutdown on reload-style stops. |
+| `at_server_shutdown` | `DefaultAccount` | self | Account-side shutdown hook. Fires from EvenniaServerService.shutdown on full-shutdown stops. |
+| `at_channel_creation` | `DefaultChannel` | self | One-shot creation hook. Fires once per channel via at_first_save. |
+| `at_first_save` | `DefaultChannel` | self | Driven by Django post_save signal (created=True). Override at_channel_creation instead. |
+| `at_post_msg` | `DefaultChannel` | self | Fires once after all receivers processed. Conventional spot for logging. |
+| `at_server_reload` | `DefaultScript` | self | Fired from EvenniaServerService.shutdown on reload-style stops; persist non-persistent state here. |
+| `at_server_shutdown` | `DefaultScript` | self | Fired from EvenniaServerService.shutdown on full-shutdown stops. |
+| `at_server_start` | `DefaultScript` | self | Fired from EvenniaServerService.run_init_hooks. Use for timer-less startup setup. |
+| `at_cmdset_get` | `LifecycleMixin` | self | Last-second mutation of the merged cmdset. See command-system.md. |
+| `at_first_save` | `LifecycleMixin` | self | Driven by Django post_save signal (created=True). Override at_object_creation instead. |
+| `at_object_creation` | `LifecycleMixin` | self | One-shot creation hook. Fires once per object via at_first_save. |
+| `at_object_post_copy` | `LifecycleMixin` | source | Fires on the SOURCE object (not the new copy). |
+| `at_object_post_creation` | `LifecycleMixin` | self | Fires after at_object_creation, lets game-side code run final setup. |
+| `at_post_access` | `LifecycleMixin` | target | Fires after a lock check resolves. Gets the result and the accessing object. |
+| `at_post_load` | `LifecycleMixin` | self | Stub override of TypedObject.at_post_load. Fires on every cache load; overrides must be idempotent. |
+| `at_post_puppet` | `LifecycleMixin` | target | Reattach path fires with reattach=True kwarg. |
+| `at_post_unpuppet` | `LifecycleMixin` | target | Fires after the session detaches. session.puppet/puid have been cleared. |
+| `at_prototype_spawn` | `LifecycleMixin` | self | Spawner-only. Fires when an object is created via a prototype, after at_object_creation. |
+| `at_server_reload` | `LifecycleMixin` | self | Fires from EvenniaServerService.shutdown on reload-style stops. |
+| `at_server_shutdown` | `LifecycleMixin` | self | Fires from EvenniaServerService.shutdown on full-shutdown stops. |
+| `at_failed_traverse` | `MovementMixin` | self | Fires on the exit when at_pre_traverse vetoes. |
+| `at_post_arrive` | `MovementMixin` | destination | Fires on the destination after the move commits. |
+| `at_post_leave` | `MovementMixin` | source | Fires on the source location after the move commits. |
+| `at_post_move` | `MovementMixin` | mover | Fires on the mover after location-side post-hooks. |
+| `at_post_traverse` | `MovementMixin` | self | Fires on the exit after the move chain has completed. |
+| `at_db_location_postsave` | `ObjectDB` | self | Engine-internal: fires after db_location is saved. Reconciles the contents cache. |
+| `at_first_save` | `ScriptBase` | self | Driven by Django post_save signal (created=True). Override at_script_creation instead. |
+| `at_pause` | `ScriptBase` | self | Fires when the timer pauses (manual or server reload). |
+| `at_repeat` | `ScriptBase` | self | Fires on every interval tick after start(). is_valid()=False stops further repeats. |
+| `at_script_creation` | `ScriptBase` | self | One-shot creation hook. Fires once per script via at_first_save. |
+| `at_start` | `ScriptBase` | self | Fires when the timer starts or resumes from pause. |
+| `at_stop` | `ScriptBase` | self | Fires when the timer stops permanently. |
+| `at_cmdset_get` | `ServerSession` | self | Session-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get. |
+| `at_disconnect` | `ServerSession` | self | Session-side disconnect hook. |
+| `at_login` | `ServerSession` | self | Session-side login hook. Updates last_login on the account. |
+| `at_sync` | `ServerSession` | self | Fires when the session is re-synced (e.g. after a server reload). Reattaches the puppet. |
+| `at_post_load` | `TypedObject` | self | Fires on every cache load, not just first-load. Overrides must be idempotent. |
+| `at_post_rename` | `TypedObject` | self | db_key written; post_save signal already fired. AppearanceMixin override clears plural aliases for Objects. |
+
+### Conditional (`returns="conditional"`)
+
+| Hook | Class | Actor | Returns |
+|---|---|---|---|
+| `get_search_direct_match` | `SearchMixin` | self | Search-pipeline stage 2: short-circuit returns (me/self/here). Returns (should_return, result). |
+| `get_stacked_results` | `SearchMixin` | self | Search-pipeline stage 5: collapse duplicate matches into stacks. Returns (stacked, results). |
+<!-- hooks-gen:end -->
+
 ## §4. Override discipline
 
 Three categories per hook:
