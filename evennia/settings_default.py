@@ -589,9 +589,10 @@ CMDSET_PATHS = ["commands", "evennia", "evennia.contrib"]
 # to save memory.
 CMDSET_MERGE_CACHE_MAXSIZE = 1000
 # Cache cmd.access(caller, "cmd") during parsing (evennia.commands.cmd_access_cache).
-# Invalidated on cmdset stack changes; call invalidate_cmd_access_cache(caller) when
-# permissions/locks change without a cmdset update.
-CMD_ACCESS_CACHE_ENABLED = False
+# Invalidated on cmdset stack changes; call invalidate_caller_access(caller) when
+# permissions/locks change without a cmdset update. Command classes that override
+# .access() are auto-skipped (see cmd_access_cache._command_uses_base_access).
+CMD_ACCESS_CACHE_ENABLED = True
 # Log attribute flush batch sizes every N global ticks (0 = off). Uses
 # evennia.typeclasses.attribute_metrics.maybe_log_flush_metrics.
 ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60

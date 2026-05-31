@@ -113,7 +113,7 @@ documented warning. If non-zero, those callers need the
 
 **Proposal.** Grep + report. **Doc-only unless the grep finds callers.**
 
-### F-6 (L): `CMD_ACCESS_CACHE_ENABLED` defaults off, `LOCK_CHECK_CACHE_ENABLED` defaults on
+### F-6 (L, shipped): `CMD_ACCESS_CACHE_ENABLED` defaults off, `LOCK_CHECK_CACHE_ENABLED` defaults on
 
 Both are per-caller `ndb` caches with similar invariants and the same
 invalidation triggers (per F-2). The asymmetric defaults look historical

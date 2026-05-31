@@ -1722,6 +1722,56 @@ class TestCmdAccessCache(BaseEvenniaTest):
         self.assertEqual(matches[0][0], "saytest")
 
 
+class TestCmdAccessCacheBypassOnAccessOverride(BaseEvenniaTest):
+    """Commands that override .access() bypass the cache (F-6 auto-skip)."""
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_overriding_access_bypasses_cache(self):
+        from evennia.commands.cmd_access_cache import cached_cmd_access
+
+        class _CustomAccessCmd(_CmdA):
+            def access(self, srcobj, access_type="cmd", default=False, session=None):
+                return super().access(srcobj, access_type, default, session)
+
+        cmd = _CustomAccessCmd("custom")
+        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
+            mock_access.return_value = True
+            cached_cmd_access(cmd, self.char1)
+            cached_cmd_access(cmd, self.char1)
+        self.assertEqual(mock_access.call_count, 2)
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_inherited_override_bypasses_cache(self):
+        """Override two classes up still bypasses (the is-check sees the inherited fn)."""
+        from evennia.commands.cmd_access_cache import cached_cmd_access
+
+        class _OverridingBase(_CmdA):
+            def access(self, srcobj, access_type="cmd", default=False, session=None):
+                return True
+
+        class _InheritsOverride(_OverridingBase):
+            pass
+
+        cmd = _InheritsOverride("inherit")
+        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
+            mock_access.return_value = True
+            cached_cmd_access(cmd, self.char1)
+            cached_cmd_access(cmd, self.char1)
+        self.assertEqual(mock_access.call_count, 2)
+
+    @override_settings(CMD_ACCESS_CACHE_ENABLED=True)
+    def test_base_access_still_cached(self):
+        """Stock Command.access subclasses (no override) still get cached."""
+        from evennia.commands.cmd_access_cache import cached_cmd_access
+
+        cmd = _CmdA("base")
+        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
+            mock_access.return_value = True
+            cached_cmd_access(cmd, self.char1)
+            cached_cmd_access(cmd, self.char1)
+        self.assertEqual(mock_access.call_count, 1)
+
+
 class TestInvalidateCallerAccess(BaseEvenniaTest):
     """Tests for cmd_access_cache.invalidate_caller_access fan-out."""
 

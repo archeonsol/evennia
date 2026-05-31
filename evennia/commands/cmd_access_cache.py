@@ -1,8 +1,11 @@
 """
 Per-caller cache for ``Command.access(caller, "cmd")`` during command parsing.
 
-Enabled with ``CMD_ACCESS_CACHE_ENABLED`` in settings (default off). Results
-live on ``caller.ndb._cmd_access_cache`` so a reload clears the cache.
+Enabled with ``CMD_ACCESS_CACHE_ENABLED`` in settings (default on). Commands
+whose class overrides ``Command.access`` are bypassed automatically (see
+``_command_uses_base_access``) because an override may consult runtime
+state outside the cache key's reach. Results live on
+``caller.ndb._cmd_access_cache`` so a reload clears the cache.
 
 Cache contract:
 
@@ -95,11 +98,33 @@ def _lookup_key(cmd, caller, session=None) -> Tuple:
     return (_generation(caller), _cmd_identity(cmd), sess_id)
 
 
+_BASE_ACCESS = None
+
+
+def _command_uses_base_access(cmd) -> bool:
+    """Return True iff ``cmd`` uses the stock ``Command.access`` implementation.
+
+    Auto-skip seam mirroring the ``"match" in type(cmd).__dict__`` check in
+    :mod:`evennia.commands.cmdparser_trie`: a Command class that overrides
+    ``access`` may consult runtime state outside the cache key's reach
+    (time, randomness, ad-hoc DB queries), so caching its results would
+    serve stale decisions. Base ``Command.access`` delegates straight to
+    LockHandler; its result is pure-function-of-cached-state and safe to
+    cache.
+    """
+    global _BASE_ACCESS
+    if _BASE_ACCESS is None:
+        from evennia.commands.command import Command
+
+        _BASE_ACCESS = Command.access
+    return type(cmd).access is _BASE_ACCESS
+
+
 def cached_cmd_access(cmd, caller, session=None) -> bool:
     """
     Return whether ``caller`` may run ``cmd``, using ndb cache when enabled.
     """
-    if not _enabled():
+    if not _enabled() or not _command_uses_base_access(cmd):
         return cmd.access(caller, "cmd", session=session)
 
     cache = _cache_dict(caller)
