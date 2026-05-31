@@ -16,9 +16,18 @@ import random
 # it regardless of if we change settings later.
 from django.conf import settings
 
-from evennia import (TICKER_HANDLER, CmdSet, Command, DefaultExit, DefaultRoom,
-                     create_object, default_cmds, search_object, syscmdkeys,
-                     utils)
+from evennia import (
+    TICKER_HANDLER,
+    CmdSet,
+    Command,
+    DefaultExit,
+    DefaultRoom,
+    create_object,
+    default_cmds,
+    search_object,
+    syscmdkeys,
+    utils,
+)
 
 from .objects import LightSource
 
@@ -153,34 +162,29 @@ class CmdTutorialLook(default_cmds.CmdLook):
         caller = self.caller
         args = self.args
         if args:
-            # we use quiet=True to turn off automatic error reporting.
-            # This tells search that we want to handle error messages
-            # ourself. This also means the search function will always
-            # return a list (with 0, 1 or more elements) rather than
-            # result/None.
-            looking_at_obj = caller.search(
+            # We use search_for() to get a typed result so we can intercept
+            # the no-match / multi-match cases and check for a "detail" match
+            # before falling back to the default error handler.
+            from evennia.objects.search_result import Ambiguous, Found
+
+            result = caller.search_for(
                 args,
                 # note: excludes room/room aliases
                 candidates=caller.location.contents + caller.contents,
                 use_nicks=True,
-                quiet=True,
             )
-            if len(looking_at_obj) != 1:
-                # no target found or more than one target found (multimatch)
-                # look for a detail that may match
+            if isinstance(result, Found):
+                looking_at_obj = result.obj
+            else:
+                # no/multi match: look for a detail that may match
                 detail = self.obj.return_detail(args)
                 if detail:
                     self.caller.msg(detail)
                     return
-                else:
-                    # no detail found, delegate our result to the normal
-                    # error message handler.
-                    _SEARCH_AT_RESULT(looking_at_obj, caller, args)
-                    return
-            else:
-                # we found a match, extract it from the list and carry on
-                # normally with the look handling.
-                looking_at_obj = looking_at_obj[0]
+                # no detail found, delegate to the default error handler.
+                matches = result.candidates if isinstance(result, Ambiguous) else []
+                _SEARCH_AT_RESULT(matches, caller, args)
+                return
 
         else:
             looking_at_obj = caller.location

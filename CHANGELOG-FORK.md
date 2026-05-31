@@ -25,6 +25,69 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.48 — cleanup: dead `_menutree` branch (F21) + cmdset verifications (F7)
+
+Bundled cleanup. F21 removes one dead conditional in `fieldfill`. F7
+closes the three open verification items from the retired
+`CMDSET_REFACTOR.md §8` — two confirm existing code is correct, one
+confirms a setting is still load-bearing.
+
+### Engine — F21: drop dead `caller.db._menutree` read branch
+
+F5 migrated `_menutree` consumers off the persistent-attribute alias to
+`_evmenu`. One read site in `fieldfill` was missed because it read from
+`caller.db` (persistent) rather than `caller.ndb` (non-persistent), so it
+didn't show up in F5's `ndb._menutree` grep. Confirmed unreachable: zero
+in-tree writes to `caller.db._menutree`.
+
+- [`evennia/contrib/utils/fieldfill/fieldfill.py`](evennia/contrib/utils/fieldfill/fieldfill.py) — `menunode_fieldfill` collapsed to the `ndb._evmenu` branch.
+
+### Engine — F7(a): account cmdset invalidation walk verified
+
+When an account-level cmdset changes,
+[`invalidate_for_cmdset_owner`](evennia/commands/cmd_access_cache.py)
+walks `obj.characters.all()` and drops each playable character's
+cache. `Account.characters` is a `CharactersHandler` over
+`_playable_characters` with a real `.all()` method, so the walk
+resolves. Coverage is conservative-correct: all playable characters
+get invalidated, not just currently-puppeted ones, which is safe
+over-invalidation. No code change.
+
+### Engine — F7(b): `arg_regex` remains load-bearing
+
+Audit of `arg_regex` usage across the engine and the one downstream
+consumer (`newmoo`) shows it is still actively used as an escape hatch:
+exits (`arg_regex=r"^$"`), EvMenu nodes, building commands with
+`/switch` syntax, evscaperoom, help, eveditor, clothing, crafting,
+menu_login, and unloggedin all set non-default values. Not a
+deprecation candidate. No code change.
+
+### Contrib — tutorial_world `look` migrated off dropped `search(quiet=)` kwarg
+
+Surfaced by the full test suite while verifying F21/F7.
+`CmdTutorialLook.func` ([`evennia/contrib/tutorials/tutorial_world/rooms.py`](evennia/contrib/tutorials/tutorial_world/rooms.py))
+called `caller.search(..., quiet=True)`, but `SearchMixin.search()` no
+longer accepts `quiet` — the new API is `search_for()` returning a
+typed `Found` / `Ambiguous` / `NotFound`. Migrated the detail-fallback
+flow to `search_for()` and pattern-matching on the typed result, which
+restores the test (`test_cmdtutorial`) and the original behavior:
+on no-match or multi-match, check for a room detail first; if no
+detail, delegate to the default error handler.
+
+### Engine — F7(c): EvMore "q" sys-cmd dedup re-verified
+
+`cmdset.py:534` strips sys commands carried through the raw
+`commands[:]` copy before re-adding the merged sys set, so a sys cmd
+never appears twice after a merge. The original multi-match this fixed
+was between EvMore's `CmdMore` (key=`__noinput`, alias `q`) and
+`CmdMoreExit` (key=`__nomatch`) on Replace-style merges. Existing
+coverage in
+[`evennia/commands/tests.py`](evennia/commands/tests.py) —
+`test_system_cmds_not_duplicated_after_replace` and
+`test_system_cmds_not_duplicated_after_union` — exercises the dedup
+behavior at both merge types. EvMore's alias path is unchanged. No
+code change.
+
 ## 6.0.0+underspire.47 — settings: rename `CMD_ACCESS_CACHE_ENABLED` (F6)
 
 Single-symbol breaking rename. All other settings in the command layer

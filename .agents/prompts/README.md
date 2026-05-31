@@ -27,8 +27,6 @@ Currently parallel-startable (no unresolved dependencies):
 
 **Unblocked by B1 (typeclass hooks taxonomy doc, shipped):**
 
-- [M1: composable move_to](M1-composable-move.md) — medium. Builder
-  replaces kwargs-as-API.
 - [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces
   merge-time-and-cached with a simpler model; bakes introspection
   in from the start.
@@ -72,11 +70,7 @@ backlog.
 
 - [F3: doc rot sweep in `docs/source/`](F3-doc-rot-sweep.md) —
   gated on a newmoo PR.
-- [F6: `CMD_*` → `COMMAND_*` settings rename](F6-cmd-command-settings-rename.md)
-- [F7: cmdset refactor open verifications](F7-cmdset-refactor-verifications.md)
 - [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md)
-- [F19: unused Django apps](F19-unused-django-apps.md)
-- [F21: dead `_menutree` branch in fieldfill](F21-dead-menutree-branch.md)
 
 **Audit (read before acting):**
 

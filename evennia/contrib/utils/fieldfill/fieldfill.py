@@ -249,25 +249,14 @@ def menunode_fieldfill(caller, raw_string, **kwargs):
     submitted, the form data is passed to a callback as a dictionary.
     """
 
-    # Retrieve menu info - taken from ndb if not persistent or db if persistent
-    if not caller.db._menutree:
-        formdata = caller.ndb._evmenu.formdata
-        formtemplate = caller.ndb._evmenu.formtemplate
-        formcallback = caller.ndb._evmenu.formcallback
-        pretext = caller.ndb._evmenu.pretext
-        posttext = caller.ndb._evmenu.posttext
-        submitcmd = caller.ndb._evmenu.submitcmd
-        borderstyle = caller.ndb._evmenu.borderstyle
-        formhelptext = caller.ndb._evmenu.formhelptext
-    else:
-        formdata = caller.db._menutree.formdata
-        formtemplate = caller.db._menutree.formtemplate
-        formcallback = caller.db._menutree.formcallback
-        pretext = caller.db._menutree.pretext
-        posttext = caller.db._menutree.posttext
-        submitcmd = caller.db._menutree.submitcmd
-        borderstyle = caller.db._menutree.borderstyle
-        formhelptext = caller.db._menutree.formhelptext
+    formdata = caller.ndb._evmenu.formdata
+    formtemplate = caller.ndb._evmenu.formtemplate
+    formcallback = caller.ndb._evmenu.formcallback
+    pretext = caller.ndb._evmenu.pretext
+    posttext = caller.ndb._evmenu.posttext
+    submitcmd = caller.ndb._evmenu.submitcmd
+    borderstyle = caller.ndb._evmenu.borderstyle
+    formhelptext = caller.ndb._evmenu.formhelptext
 
     # Syntax error
     syntax_err = (
