@@ -36,6 +36,161 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.44 — H1 hook registry
+
+Ships [`evennia.hooks`](evennia/hooks/__init__.py), a descriptive
+registry over every public engine hook. The `@hook(...)` decorator
+attaches a `HookSpec` to each `at_*` / `get_*` / `return_*` method on
+engine typeclasses; the lint surface validates the surface; a doc
+generator writes back into the published docs. Dispatch stays direct
+(engine still calls `obj.at_pre_move(...)` itself) — the registry is
+metadata + validation, not a dispatcher. Companion to B1's published
+contracts.
+
+This release also ships three new `at_<noun>_post_creation` stubs to
+close a long-standing asymmetry on Account/Channel/Script, and scrubs
+internal H1/bucket phasing language from the published docs.
+
+### Engine — hook registry surface
+
+- New package `evennia/hooks/` with `HookSpec` (dataclass; validates
+  `phase`, `returns`, `discipline`, `state_cache_state`), the
+  `@hook(...)` decorator, and lookup functions:
+  `hooks.describe(method)`, `hooks.for_event(name)`,
+  `hooks.list_all()`, `hooks.lint()`.
+- Decorator unwraps `classmethod` / `staticmethod` so the spec lives
+  on the underlying function and works regardless of stacking order.
+- Override registration is silent: a subclass that redefines a hook
+  without `@hook` still inherits the parent spec via MRO lookup.
+  Overrides with behavior worth recording may use
+  `@hook(extends="ParentClass.method", notes="...")`.
+- Flat-API export at `evennia.hooks` (lazy via `_LAZY_EXPORTS` in
+  [`evennia/__init__.py`](evennia/__init__.py)).
+- ~108 decorators applied across `TypedObject`, `LifecycleMixin`,
+  `MovementMixin`, `AppearanceMixin`, `MessagingMixin`, `SearchMixin`,
+  `DefaultObject`/`DefaultCharacter`/`DefaultRoom`/`DefaultExit`,
+  `DefaultAccount`/`DefaultGuest`, `DefaultChannel`, `DefaultScript`,
+  `ScriptBase`, `ServerSession`, `ObjectDB`, and the bot subclasses.
+
+### Engine — symmetric post-creation hooks
+
+`DefaultObject` has `at_object_creation` + `at_object_post_creation`
+around the `_createdict` processing in `at_first_save`. Account,
+Channel, and Script lacked the analog. Adds:
+
+- [`DefaultAccount.at_account_post_creation`](evennia/accounts/accounts.py)
+- [`DefaultChannel.at_channel_post_creation`](evennia/comms/comms.py)
+- [`ScriptBase.at_script_post_creation`](evennia/scripts/scripts.py)
+
+Each is wired into the existing `at_first_save` flow, fires once
+after `_createdict` processing and engine-side setup, defaults to
+`pass`, and is registered with
+`@hook(event=<noun>_creation, phase=post)`.
+
+**Migration:** new public override surface. Existing games that
+override `at_first_save` directly continue to work. Games that wanted
+"run after creation _and_ after `_createdict`-driven setup" no longer
+need to subclass `at_first_save`; they can override the new hook
+instead.
+
+### Engine — startup lint
+
+[`evennia.hooks.warn_at_startup`](evennia/hooks/lint.py) runs in
+`ServerService.run_init_hooks`. Findings (MISSING_DECORATOR,
+UNRESOLVED_FIRES_FROM, PHASE_MISMATCH) log to the twisted logger
+without raising — an engine documentation issue cannot block a game
+from booting. Strict enforcement lives in the test suite (see
+**Tests** below).
+
+Lint scope:
+- Walks engine-side subclasses of registered base typeclasses + the
+  five mixins + `TypedObject` + `ServerSession` (recursively via
+  `__subclasses__`), then filters to `evennia.*`.
+- `evennia.contrib.*` and `evennia.game_template.*` excluded: those
+  are game-shaped, not engine.
+- Class-level aliases (`get_absolute_url = web_get_detail_url` style)
+  detected by qualname mismatch and skipped.
+- `fires_from` resolver searches the engine class set, MRO ancestors,
+  and a small list of known handler classes (`CmdSetHandler`,
+  `LockHandler`).
+
+### Engine — doc generator
+
+[`evennia.hooks.docs`](evennia/hooks/docs.py) emits markdown tables
+from the registry and rewrites the published docs between marker
+pairs:
+
+```
+<!-- hooks-gen:start <section> -->
+...generated content...
+<!-- hooks-gen:end -->
+```
+
+Two sections ship:
+- `return-contracts` — every registered hook grouped by declared
+  returns category. Lands in
+  [`Typeclass-Hooks-Reference.md`](docs/source/Components/Typeclass-Hooks-Reference.md)
+  §3.7 as the authoritative roster; hand-curated 3.1–3.6 stay for
+  nuance.
+- `misshapen` — PHASE_MISMATCH findings plus specs that self-flag in
+  notes. Lands in
+  [`Typeclass-Hooks.md`](docs/source/Components/Typeclass-Hooks.md)
+  after §6.
+
+CLI:
+
+```
+python -m evennia.hooks.docs --check     # exit 1 if stale
+python -m evennia.hooks.docs --write     # rewrite in place
+```
+
+### Docs — migration into Sphinx tree
+
+- [`.agents/docs/typeclass-hooks.md`](.agents/docs/) moved to
+  [`docs/source/Components/Typeclass-Hooks.md`](docs/source/Components/Typeclass-Hooks.md)
+  and wired into `Components-Overview.md` under Base components.
+- [`.agents/docs/typeclass-hooks-reference.md`](.agents/docs/) moved
+  to [`docs/source/Components/Typeclass-Hooks-Reference.md`](docs/source/Components/Typeclass-Hooks-Reference.md).
+- Internal phasing language (H1, H1a-H1e, R/S/D/H bucket names,
+  "Phase C cleanup inputs", "design predecessor to H1") scrubbed from
+  the published pages. Strikethrough migration notes preserved
+  ("Renamed from `at_X`") for game-dev reference.
+- §7 "Cleanup triage" deleted — it was internal disposition tracking
+  for in-progress work; all items shipped or have superseding
+  references and history lives in git log.
+- New entry in [`FUTURE-IDEAS.md`](FUTURE-IDEAS.md) for the deferred
+  `appearance_template` ↔ `get_display_*` slot-registry coupling.
+- H1 entry in
+  [`engine-api-architecture.md`](.agents/docs/engine-api-architecture.md)
+  expanded with the locked design (schema, enforcement scope, dispatch
+  mode, API surface, five sub-phases, H-bucket forced decisions).
+
+### Tests
+
+New tests in `evennia/hooks/tests/`:
+
+- [`test_registry.py`](evennia/hooks/tests/test_registry.py) (15 tests)
+  — HookSpec field validation, decorator behavior including duplicate
+  detection, `extends` overrides, save/restore registry pattern, and
+  a pilot integration test asserting
+  `LifecycleMixin.at_pre_puppet` round-trips through the registry.
+- [`test_lint.py`](evennia/hooks/tests/test_lint.py) (8 tests) —
+  per-check coverage plus
+  `PilotIntegrationTest.test_engine_lint_is_clean`, which asserts
+  `lint()` returns zero findings. **This is the CI gate**: any new
+  engine hook added without `@hook` (and without inheriting one)
+  fails this test, so the issue surfaces at `evennia test` time
+  rather than at server boot.
+- [`test_docs.py`](evennia/hooks/tests/test_docs.py) (10 tests) —
+  renderer behavior plus `PublishedDocsInSyncTest`, which fails if
+  the published docs are stale relative to the registry. Run
+  `python -m evennia.hooks.docs --write` to regenerate after
+  decorator changes.
+
+Full suite passes (~2000 tests).
+
+---
+
 ## 6.0.0+underspire.43 — Engine/game boundary migration Phase A
 
 Phase A of the engine/game boundary migration plan
