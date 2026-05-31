@@ -242,7 +242,7 @@ the authoritative roster.
 | `get_say_template_self` | `AppearanceMixin` | self | str.format-ready template for the speaker's self-echo. |
 | `get_self_pronoun` | `AppearanceMixin` | target | Pronoun from the looker's perspective. Default returns 'You' when looker is self. |
 | `return_appearance` | `AppearanceMixin` | target | Composite renderer. Joins get_display_* providers via appearance_template. |
-| `at_look` | `DefaultAccount` | self | H1e: distinct from Object.at_look. Account.at_look is the OOC character picker. |
+| `at_look` | `DefaultAccount` | self | Distinct from Object.at_look. Account.at_look is the OOC character picker. |
 | `get_all_puppets` | `DefaultAccount` | self | Returns all currently puppeted characters on the account. |
 | `get_available_character_slots` | `DefaultAccount` | self | Returns remaining character slots. None = unlimited. |
 | `get_character_slots` | `DefaultAccount` | self | Returns the max number of characters this account may have. None = unlimited. |
@@ -252,7 +252,7 @@ the authoritative roster.
 | `get_puppet` | `DefaultAccount` | self | Returns the puppet attached to the given session, or None. |
 | `get_username_validators` | `DefaultAccount` | self | Returns Django username validators. Override to relax/tighten allowed names. |
 | `get_log_filename` | `DefaultChannel` | self | Returns the log filename used for channel history. |
-| `get_return_exit` | `DefaultExit` | self | Returns the return-exit (or queryset if return_all). H1e: reclassified from D to H bucket; has tests, retain. |
+| `get_return_exit` | `DefaultExit` | self | Returns the return-exit (or queryset if return_all). |
 | `get_cmdset_providers` | `DefaultObject` | self | Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider]. See command-system.md. |
 | `get_nicklist` | `IRCBot` | self | IRCBot-specific: returns the nicklist of the connected channel. |
 | `get_cmdsets` | `LifecycleMixin` | self | Returns the per-class cmdset stack as (current, cmdsets). See command-system.md. |

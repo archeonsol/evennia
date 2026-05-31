@@ -146,8 +146,8 @@ class PilotIntegrationTest(EvenniaTestCase):
         self.assertEqual(flagged, [])
 
     def test_engine_lint_is_clean(self):
-        # H1c has completed; every engine hook is registered or
-        # inherits silently. Lint should return zero findings.
+        # Every engine hook is registered or inherits silently.
+        # Lint should return zero findings.
         findings = lint()
         self.assertEqual(
             findings,

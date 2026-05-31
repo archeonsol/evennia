@@ -332,7 +332,7 @@ class DefaultExit(DefaultObject):
         returns="content",
         discipline="public",
         fires_from=(),
-        notes="Returns the return-exit (or queryset if return_all). H1e: reclassified from D to H bucket; has tests, retain.",
+        notes="Returns the return-exit (or queryset if return_all).",
     )
     def get_return_exit(self, return_all=False):
         """

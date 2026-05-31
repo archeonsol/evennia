@@ -2,8 +2,7 @@
 
 `HookSpec` is the metadata attached to every engine hook by the
 `@hook` decorator. `LintFinding` is the lint-result shape consumed by
-`hooks.lint()`; populated in H1b, declared here so the public API
-surface is stable from H1a onward.
+`hooks.lint()`.
 """
 
 from dataclasses import dataclass, field
@@ -30,7 +29,7 @@ class HookSpec:
             ``ignored``, ``conditional``).
         discipline: ``public``, ``internal``, or ``mixed``.
         fires_from: Tuple of ``"Class.method"`` call sites that fire
-            this hook. Lint resolves each to a real callable in H1b.
+            this hook. Lint resolves each to a real callable.
         state_pk: Whether the object has a database PK at firing.
         state_db_row: Whether a database row exists at firing.
         state_init_done: Whether ``at_init`` has run by firing.
@@ -76,8 +75,6 @@ class HookSpec:
 @dataclass(frozen=True)
 class LintFinding:
     """One issue surfaced by ``hooks.lint()``.
-
-    H1a defines the shape; H1b populates instances.
 
     Attributes:
         code: Short machine-readable code (``MISSING_DECORATOR``,

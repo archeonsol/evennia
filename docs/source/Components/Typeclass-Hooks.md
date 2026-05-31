@@ -14,10 +14,12 @@ and the `ServerSession` puppet/sync hooks. Out of scope: cmdset
 internals (see `command-system.md`); web / protocol hooks (deferred to
 the architecture doc's W1).
 
-This doc is the design predecessor to **H1** (hook registry) in
-[`engine-api-architecture.md`](engine-api-architecture.md). Schema
-choices here inform the registry's decorator surface. Misshapen hooks
-flagged in §6 are Phase C / H1 cleanup inputs.
+The runtime registry that operationalizes these contracts lives at
+`evennia.hooks`. Every hook documented here is declared with a
+`@hook(...)` decorator; the registry validates the surface at server
+startup and feeds the generated tables below. See
+[Components Overview](Components-Overview.md) for where this fits in
+the broader typeclass story.
 
 ## Sequence-diagram legend
 
@@ -170,7 +172,7 @@ Notes:
   `at_pre_*` / `at_post_leave` halves are skipped on first placement.
 - `at_prototype_spawn` is spawner-specific. Objects created with
   `evennia.create_object` directly do NOT fire it. The name (renamed
-  from `at_object_post_spawn` in the S-bucket cleanup) reflects this.
+  from `at_object_post_spawn`) reflects this.
 
 ### 2.2 Object load / idmapper cache rehydration
 
@@ -223,8 +225,7 @@ obj.delete()
 
 `at_pre_delete` is a veto hook (returning `False` aborts). The
 default returns `True`, matching the "non-None truthy allows" rule
-from `is_veto`. (Renamed from `at_object_delete` in the R-bucket
-cleanup; the old name was inconsistent with the `at_pre_*`
+from `is_veto`. (Renamed from `at_object_delete`; the old name was inconsistent with the `at_pre_*`
 convention.)
 
 No `at_post_delete` hook exists on the typeclass; downstream
@@ -250,7 +251,7 @@ rename_caller
 clears plural aliases set by `get_numbered_name`). MRO resolves to
 the mixin for `DefaultObject` and descendants; the base version
 serves Account/Channel/Script (which have no plural aliases to
-clear). Renamed from `at_rename` in the R-bucket cleanup.
+clear). Renamed from `at_rename`.
 
 ### 2.5 Move
 
@@ -410,7 +411,7 @@ unpuppet_object(session)
     session.puid = None
 ```
 
-`at_pre_unpuppet` honors the veto contract (S-bucket fix). On veto
+`at_pre_unpuppet` honors the veto contract. On veto
 the puppet stays attached, session.puppet/puid are NOT cleared, and
 no engine message is emitted; the override is responsible for
 messaging the caller before vetoing.
@@ -695,14 +696,14 @@ sessionhandler.login(session, account)
 
 Notes:
 
-- `at_pre_login` honors the veto contract (S-bucket fix). On veto
+- `at_pre_login` honors the veto contract. On veto
   the session is disconnected via `sessionhandler.disconnect(session,
   reason="Login refused.")`; the override is responsible for
   messaging the user before vetoing. `account.is_connected` is reset
   to False if this was the only session. Failed auth uses
   `at_failed_login` instead (retry-friendly); a veto here is a
   deliberate refusal (banned, locked, IP block).
-- `at_first_login` fires AFTER `at_pre_login` (S-bucket reorder).
+- `at_first_login` fires AFTER `at_pre_login`.
   This means a vetoed login does NOT consume the FIRST_LOGIN flag;
   the next successful login will fire `at_first_login` instead.
 - `at_post_load` here is NOT the cache-load hook (§2.2): same name,
@@ -758,8 +759,7 @@ fires on the persistent characters list ("which characters does this
 account have access to"); the pair `at_puppet_added` /
 `at_puppet_removed` fires on the live puppet set ("which characters
 is this account currently controlling"). All four hooks now share
-the `at_<set>_added` / `at_<set>_removed` convention (renamed in
-the R-bucket cleanup).
+the `at_<set>_added` / `at_<set>_removed` convention.
 
 ### 2.16 Account msg routing
 
@@ -892,8 +892,8 @@ script.delete()
 ```
 
 `Script.at_pre_delete` (same name as `Object.at_pre_delete` (§2.3);
-they coexist on different classes) is a veto pre-hook. Renamed in
-the R-bucket cleanup from `at_script_delete`.
+they coexist on different classes) is a veto pre-hook. Renamed from
+`at_script_delete`.
 
 `at_start` is the resume hook AS WELL as the initial-start hook;
 there is no separate `at_resume`. After a server reload, persistent
@@ -982,8 +982,7 @@ obj.access(accessing_obj, access_type, default, no_superuser_bypass, **kwargs)
 `at_post_access` fires after the lock result is computed and BEFORE
 `access()` returns. Its return value is ignored (so it cannot
 change the access decision); it's a notification hook for logging,
-trace, or analytics. (Renamed from `at_access` in the R-bucket
-cleanup.)
+trace, or analytics. (Renamed from `at_access`.)
 
 Account `at_post_access` (accounts.py:1655) is the analog for
 account-side access checks.
@@ -1029,25 +1028,25 @@ exists.
 
 ## §6. Misshapen hooks
 
-Running tally maintained while writing §1 to §5. Each entry names
-a hook (or pair), the issue, and the section where the symptom
-surfaces. These are inputs to Phase C and to H1; H1 should NOT
-register the current shape verbatim.
+Running tally of hooks whose name does not match their behavior.
+Each entry names a hook (or pair), the issue, and the section where
+the symptom surfaces. Strikethrough means the issue has been
+addressed; the remainder are documented limitations.
 
 ### Naming / semantics mismatches
 
-- ~~**`at_object_delete`**~~: renamed to `at_pre_delete` (R-bucket).
-- ~~**`at_script_delete`**~~: renamed to `at_pre_delete` (R-bucket).
-- ~~**`at_pre_unpuppet`**~~: now honors veto (S-bucket fix). Falsy-not-None aborts detach.
-- ~~**`at_pre_login`**~~: now honors veto (S-bucket fix). Falsy-not-None disconnects the session.
-- ~~**`at_first_login`**~~: now fires AFTER `at_pre_login` (S-bucket reorder). FIRST_LOGIN flag is preserved across vetoed logins.
-- ~~**`at_access`**~~: renamed to `at_post_access` (R-bucket).
+- ~~**`at_object_delete`**~~: renamed to `at_pre_delete`.
+- ~~**`at_script_delete`**~~: renamed to `at_pre_delete`.
+- ~~**`at_pre_unpuppet`**~~: now honors veto. Falsy-not-None aborts detach.
+- ~~**`at_pre_login`**~~: now honors veto. Falsy-not-None disconnects the session.
+- ~~**`at_first_login`**~~: now fires AFTER `at_pre_login`. FIRST_LOGIN flag is preserved across vetoed logins.
+- ~~**`at_access`**~~: renamed to `at_post_access`.
 - **`at_desc`** (§2.13) is named as if it were a post-event hook
   for setting a description, but it fires on every look. Either
   rename (`at_being_looked_at`?) or move the look-time semantics
   into `at_look` / `return_appearance`.
 - ~~**`at_get` / `at_give` / `at_drop`**~~: renamed to
-  `at_post_get` / `at_post_give` / `at_post_drop` (R-bucket). Pairs
+  `at_post_get` / `at_post_give` / `at_post_drop`. Pairs
   now symmetric with `at_pre_get` / `at_pre_give` / `at_pre_drop`.
 - **`at_msg_send` / `at_msg_receive`** (§2.16) are veto-on-falsy
   hooks named without the `at_pre_*` prefix despite firing before
@@ -1085,16 +1084,15 @@ register the current shape verbatim.
 
 - **`get_return_exit`** on `DefaultExit` (exit.py:319): no callers
   in the engine, but has dedicated test coverage in
-  `evennia/objects/tests/test_objects.py:106`. Reclassified to H
-  (defer to H1): tested public surface counts as API by intent;
-  H1 should decide whether this belongs in the engine API.
+  `evennia/objects/tests/test_objects.py:106`. Retained because the
+  tested public surface counts as API.
 - ~~**`get_content_names`** on `AppearanceMixin` (appearance.py:415)~~:
-  deleted as part of §7 D-bucket. Docstring said DEPRECATED; zero
-  callers in engine, tests, or game tree.
+  deleted. Docstring said DEPRECATED; zero callers in engine, tests,
+  or game tree.
 - ~~**`get_visible_contents`** on `AppearanceMixin` (appearance.py:388)~~:
   deleted alongside `get_content_names` (its only caller).
 - ~~**`get_puppet_or_account`** on `ServerSession` (serversession.py:207)~~:
-  deleted as part of §7 D-bucket. One-line method, zero callers.
+  deleted. One-line method, zero callers.
 
 ### Implicit coupling not enforced by signature
 
@@ -1103,8 +1101,8 @@ register the current shape verbatim.
   (`{name}`, `{desc}`, `{exits}`, etc.); the provider methods are
   named to match the slots. Adding a new slot requires editing both
   the template and adding a method; the type system does not
-  enforce the match. A schema-driven H1 should make this explicit
-  (template slot → declared provider).
+  enforce the match. A separate template-slot registry would make
+  this explicit (template slot → declared provider).
 - **`at_channel_msg` named in a docstring but absent from code**
   (§2.17): comms.py:636 documents the per-receiver delivery hook
   as `at_channel_msg`; the actual call is `channel_msg` (no
@@ -1118,7 +1116,7 @@ register the current shape verbatim.
 ### Conditional / partial fire
 
 - ~~**`at_object_post_spawn`**~~: renamed to `at_prototype_spawn`
-  (S-bucket). Spawner-only fire path is now reflected in the name.
+ . Spawner-only fire path is now reflected in the name.
 - **`at_post_arrive` / `at_post_move` at first placement** (§2.1):
   these fire ONLY when `_createdict` supplies a location at
   creation time. The pre/leave halves of the move chain are
@@ -1139,8 +1137,7 @@ register the current shape verbatim.
   the eventual viewer (self / each receiver / location). One "say"
   fires N display-name lookups where N is `1 + len(receivers) + 1`.
   Override authors who do expensive work in `get_display_name`
-  should know this. Documented as a contract, not a bug, but worth
-  flagging for H1's docs.
+  should know this. Documented as a contract, not a bug.
 
 ### Error handling swallows in chain
 
@@ -1162,9 +1159,9 @@ register the current shape verbatim.
   is a maintenance hazard.
 - **`at_look` overloaded across Object and Account** (§2.10, §2.16):
   same name, different contract (single target vs character
-  picker). Intentional duck-typing for OOC look, but worth
-  flagging so H1's registry doesn't collapse the two into one
-  entry.
+  picker). Intentional duck-typing for OOC look; the registry keeps
+  them as separate events (`look` vs `ooc_look`) so the distinction
+  survives introspection.
 
 ### Set-membership vs lifecycle pair naming
 
@@ -1195,82 +1192,4 @@ _None: every `at_pre_*` / `at_post_*` / `at_failed_*` name matches its declared 
 | `TypedObject.at_idmapper_flush` | Misshapen: at_<event> name with veto contract. Return False keeps the object cached. |
 <!-- hooks-gen:end -->
 
-## §7. Cleanup triage
 
-Disposition for each §6 entry. Single-fork, no deprecation cycle:
-rename-only changes land as one engine + game commit. Buckets:
-
-- **R**: pure rename (default body unchanged, no semantic shift). Do anytime.
-- **S**: semantic fix (engine behavior change required). Pre-H1, since H1 should register the corrected shape, not the broken one.
-- **D**: dead code. Delete.
-- **H**: defer to H1 (registry-level decision; fixing in isolation prejudges schema).
-
-### Bucket R: rename-only
-
-| Entry | Action | Notes |
-|---|---|---|
-| ~~`at_object_delete`~~ | Renamed → `at_pre_delete`. Shipped. | |
-| ~~`at_script_delete`~~ | Renamed → `at_pre_delete` (Script version). Shipped. | |
-| ~~`at_access`~~ | Renamed → `at_post_access`. Shipped. | |
-| ~~`at_get` / `at_give` / `at_drop`~~ | Renamed → `at_post_get` / `at_post_give` / `at_post_drop`. Shipped. | |
-| ~~`at_first_save` signature drift~~ | Added `**kwargs` to `LifecycleMixin`, `DefaultAccount`, `DefaultChannel`. Shipped. | |
-| ~~`at_post_unpuppet` positional clarity~~ | Signature now `(self, account, session=None, **kwargs)` (dropped `account=None` default). Shipped. | |
-| ~~`at_channel_msg` docstring~~ | Fixed `Channel.msg` docstring (comms.py:636 → `channel_msg`). Shipped. | |
-| `at_post_arrive`/`at_post_move` at first placement | Doc-only. Update §2.1 in this doc with a "first-placement skips pre/leave" note (already present). No code change. | Already documented; flag as resolved. |
-| `get_display_name` / `get_self_pronoun` fan-out in `at_say` | Doc-only. The per-perspective fan-out is intentional; flag the perf contract in the override-discipline table. | Already in §4.5. |
-| `move_to` swallows hook errors | Doc-only. Behavior is intentional. | Already in §2.5 and §4.2. |
-| `puppet_object` swallows `at_puppet_added` errors | Doc-only. Behavior is intentional. | Already in §2.7. |
-| ~~`at_rename` double-definition~~ | Not a duplicate. `TypedObject.at_post_rename` is a stub (used by Account/Channel/Script); `AppearanceMixin.at_post_rename` clears plural aliases (used by Object/Character). Both renamed from `at_rename` in the rename-cleanup pass. Shipped. | The §7 triage initially assumed both were stubs and proposed deleting one; correction made in commit. |
-| ~~`at_puppet_added` / `at_puppet_removed` vs `at_post_add_character` / `at_post_remove_character`~~ | Renamed character-list pair → `at_character_added` / `at_character_removed`. Shipped. | Both pairs now use the `at_<set>_added/removed` convention. |
-| ~~`at_rename` → `at_post_rename`~~ (extra) | Renamed (both definitions). Shipped. | Notification with clear ordering; deserves `at_post_*` prefix. |
-| ~~`at_password_change` → `at_post_password_change`~~ (extra) | Renamed. Shipped. | Same. |
-
-### Bucket S: semantic fix
-
-| Entry | Action | Notes |
-|---|---|---|
-| ~~`at_pre_unpuppet`~~ | Honors veto in `Account.unpuppet_object`. Shipped. | On veto, skips detach AND skips clearing session.puppet/puid; iteration moves to next session. |
-| ~~`at_pre_login`~~ | Honors veto in `SessionHandler.login`. Shipped. | Veto disconnects the session via `self.disconnect(session, reason="Login refused.")`; if no other sessions remain, resets `account.is_connected = False`. Override messages the user. |
-| ~~`at_first_login` ordering~~ | Now fires AFTER `at_pre_login`. Shipped. | FIRST_LOGIN flag preserved across vetoed logins. |
-| `at_msg_send` / `at_msg_receive` route | Rename + extend to Object. Today: Account-only, named without `at_pre_*`. Target: `at_pre_msg_out` (on sender) and `at_pre_msg_in` (on recipient), defined on both `DefaultObject` and `DefaultAccount`. Same veto-on-falsy contract. | Touching both account.msg and object.msg; medium churn. Punt to immediately after H1 if H1 wants to redefine message routing anyway. |
-| ~~`at_object_post_spawn` spawner-only fire~~ | Renamed → `at_prototype_spawn`. Shipped. | |
-| `at_start` is also resume | Add `at_resume(**kwargs)`. Default body in `DefaultScript` calls `self.at_start(**kwargs)` so existing overrides still fire. Documented as: "override `at_resume` for resume-only logic; override `at_start` for initial-start-only logic; the default chains them." | Optional. If nobody currently distinguishes the two cases in this fork, leave alone. |
-| `at_pause(manual_pause=...)` flag | Leave alone. Splitting into separate hooks (`at_pause_manual` / `at_pause_reload`) doubles the override surface for a binary signal. Doc the flag clearly. | Doc-only; reclassify to R. |
-| `at_say` `msg_self` bool-or-string | Split parameter. `msg_self: bool` controls echo; `msg_self_template: str | None` overrides the template. Default behavior preserved. | Touches `at_say` signature; coordinate with overriders in the game. |
-
-### Bucket D: dead code
-
-Shipped. Engine + game-tree (`../newmoo`) grep confirmed zero
-callers; tests grepped and found callers only for `get_return_exit`,
-which was reclassified to H.
-
-| Entry | Action | Notes |
-|---|---|---|
-| ~~`get_return_exit` (exit.py:319)~~ | Reclassified → H. | Test coverage exists in `test_objects.py:106`. Tested public surface is API by intent; H1 decides whether this belongs in the engine API. |
-| `get_content_names` (appearance.py:415) | Deleted. | Docstring said DEPRECATED; zero callers. |
-| `get_visible_contents` (appearance.py:388) | Deleted (with `get_content_names`). | Only called from `get_content_names`; transitively dead. |
-| `get_puppet_or_account` (serversession.py:207) | Deleted. | Zero callers anywhere. |
-
-### Bucket H: defer to H1
-
-| Entry | Why deferred |
-|---|---|
-| `at_desc` (fires on look, not on description set) | The name is misleading but the semantic is well-defined and game-side overrides commonly use it. Renaming risks churn that H1 should drive: H1 will register hooks under their canonical names, and that's the moment to rename. |
-| `return_appearance` prefix uniqueness | H1 will define the prefix convention for composite renderers; renaming `return_appearance` in isolation prejudges that decision. |
-| `at_<noun>_creation` lacks `_post_creation` analog on Account/Channel/Script | Symmetry across creation chains is an H1 schema concern. Adding the analog now means committing to a contract that H1 may want to shape differently. |
-| `appearance_template` ↔ `get_display_*` implicit coupling | H1's hook registry should make the template-slot ↔ provider-method relationship declarative. Manually fixing the coupling pre-H1 is wasted work. |
-| `at_look` overloaded on Object vs Account | H1 needs to decide whether overloaded names collapse to one registry entry or stay distinct; the renamer follows that decision. |
-| `get_return_exit` (exit.py:319) | No engine callers but has dedicated test coverage. H1 decides whether to register, deprecate, or hoist game-side. |
-
-### Suggested execution order
-
-1. **D bucket first** (one PR). Smallest blast radius; clears noise from the surface before any renames. Pre-deletion grep across the game tree.
-2. **R bucket as one PR per file or one PR total.** Pure mechanical renames + signature additions; easy to review. Shipped in three commits (veto pre-hook renames, notification renames, cleanup grab-bag).
-3. **S bucket selectively**:
-   - `at_first_login` reorder + the `at_pre_unpuppet` / `at_pre_login` veto honoring can go together as a "promise-keeping" PR.
-   - `at_msg_send`/`at_msg_receive` redesign waits until H1 has touched message routing.
-   - `at_object_post_spawn` → `at_prototype_spawn` rename can fold into the R bucket if you commit to the rename.
-   - `at_say` `msg_self` split waits if no game-side code currently misuses the overload.
-4. **H bucket: nothing now.** Flag these as H1 inputs in the architecture doc.
-
-The R+D buckets together are probably 100 to 200 LOC of mechanical change. The S bucket is medium churn but each item is self-contained.

@@ -13,9 +13,9 @@ The generator only writes between marker pairs::
     ...generated content...
     <!-- hooks-gen:end -->
 
-H1d ships generators for ``return-contracts`` (§3) and
-``misshapen`` (§6). §4 / §5 stay hand-written for now; the prose in
-B1 carries nuance worth preserving.
+Two sections are currently generated: ``return-contracts`` (§3.7 of
+the reference doc) and ``misshapen`` (after §6 of the main doc).
+Other sections stay hand-written.
 """
 
 from __future__ import annotations

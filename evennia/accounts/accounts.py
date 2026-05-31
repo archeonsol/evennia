@@ -2243,7 +2243,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         returns="content",
         discipline="public",
         fires_from=(),
-        notes="H1e: distinct from Object.at_look. Account.at_look is the OOC character picker.",
+        notes="Distinct from Object.at_look. Account.at_look is the OOC character picker.",
     )
     def at_look(self, target=None, session=None, **kwargs):
         """
