@@ -25,6 +25,50 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.51 — AS1: Django connection hygiene in `in_thread`
+
+Follow-up to AS1 (`.50`). The blessed
+[`in_thread`](evennia/utils/defer.py) was a thin `deferToThread` that did
+**not** manage Django connections, unlike the hand-rolled wrapper it
+replaced downstream. A pooled worker that touches the ORM (stamina, search,
+help, export handlers) could reuse or accumulate stale DB connections
+("server has gone away"). Since off-reactor ORM work is a primary, expected
+use of the helper, connection hygiene belongs in the engine so the blessed
+path is safe by default rather than relying on every worker author to
+remember it.
+
+### Engine — `in_thread` manages connection lifecycle
+
+- [`evennia/utils/defer.py`](evennia/utils/defer.py): the worker is wrapped
+  so `close_old_connections()` runs before and after it, in the worker
+  thread. The finally-close is the essential one (the next job on that
+  pooled thread starts clean); the before-close guards against a connection
+  that went stale between jobs. Respects `CONN_MAX_AGE` (persistent
+  connections are reused until they age out). `background` and `threaded`
+  inherit this via `in_thread`. Negligible cost for workers that never touch
+  the ORM.
+- Threading-safety contract docstring updated to **positively permit direct
+  Django ORM queries on plain (non-typeclass) models** in the worker (it was
+  only implied before), noting the helper keeps those connections clean.
+  Typeclass / idmapper / `.db` / `.ndb` / `obj.msg` access remains
+  reactor-thread-only.
+
+### Migration
+
+No downstream code change required. Workers that previously relied on the
+hand-rolled wrapper's `close_old_connections` now get it from the engine
+helper; ORM-touching workers no longer need to manage connections
+themselves. (Outstanding: the downstream AS1 Phase 2 blocking-site
+migration and the job-queue drain/ack semantics — fire-and-forget handlers
+may offload via `background`, but completion-semantic jobs like index
+rebuilds must stay inline to keep "acked" meaning "done".)
+
+### Tests
+
+- [`evennia/utils/tests/test_defer.py`](evennia/utils/tests/test_defer.py)
+  (now 8): added a check that `close_old_connections` is called twice (before
+  and after the worker) and both on the worker thread.
+
 ## 6.0.0+underspire.50 — AS1: sync-by-default + threaded I/O helpers
 
 Settles the sync/async direction (AS1): the game stays synchronous by
