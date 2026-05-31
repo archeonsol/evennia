@@ -65,7 +65,6 @@ backlog.
 
 - [F13: contribs half-policy](F13-contribs-policy.md)
 - [F18: unused engine handlers](F18-unused-engine-handlers.md)
-- [F20: prototype `exec` key](F20-prototype-exec-key.md)
 
 **Mechanical / verification:**
 
