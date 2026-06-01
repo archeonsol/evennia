@@ -25,6 +25,40 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.62 — remove the `ingame_python` contrib
+
+Deletes the `ingame_python` contrib (the in-game Python event/callback scripting
+system). It is unused by our game and lets builders execute arbitrary Python
+in-game, a security surface that contradicts the prototype `exec` removal in
+``.49``. It was also opt-in but did a DB query (`ScriptDB.objects.get`) at module
+import time, making it brittle to import before DB setup.
+
+- Removed `evennia/contrib/base_systems/ingame_python/` and its docs
+  (`Contrib-Ingame-Python*.md`, the `Contribs-Overview` entry, and the
+  generated API stubs).
+- Left untouched: the historical `*_convert_contrib_typeclass_paths` migrations
+  that reference the old path as a string remap (no code import; harmless and
+  needed for old DBs).
+
+## 6.0.0+underspire.61 — fix `comms/0019` data migration on fresh installs
+
+The 2021 channel-alias data migration queried the live `ChannelDB` model, which
+selects `db_attrs` (a column added by a much later migration), so it errored on
+a fresh install even with an empty channel table. ``.56`` had hidden this behind
+a blanket `except Exception` wrapping the whole body, which also swallowed
+genuine failures.
+
+- Detect whether there is anything to migrate via the *historical* model
+  (`apps.get_model`), whose query does not reference later-added columns, and
+  early-return on the empty/fresh-install case.
+- The live model is only touched once real channel data exists; the catch around
+  it is narrowed to `OperationalError`/`ProgrammingError` (schema-not-ready on an
+  old upgrade) so real bugs propagate. `atomic=False` is retained only to make
+  that narrow DB-error skip safe.
+
+A fresh `evennia migrate` now applies `comms.0019` with no skipped/no-such-column
+message; the comms suite passes.
+
 ## 6.0.0+underspire.60 — fix JSONB serialization regressions (hidden dbobjs, stable caching)
 
 A full-suite run (2171 tests; prior rounds only ran narrow subsets) surfaced
