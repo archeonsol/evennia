@@ -32,6 +32,20 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
     def get_queryset(self):
         return super().get_queryset()
 
+    def get_by_attribute(self, key=None, category=None, value=None, **kwargs):
+        """Find objects where attribute *key* (in *category*) equals *value*.
+
+        Uses JSONB @> containment (GIN-indexed). *value* must not be None;
+        pass just *key* to test existence instead, but that path returns none()
+        since key-only existence checks are not needed by current callers.
+        """
+        if key is None or value is None:
+            return self.none()
+        from evennia.typeclasses.jsonb_util import to_jsonb
+        cat_key = "~" if category is None else str(category).lower()
+        encoded = to_jsonb(value)
+        return self.filter(db_attrs__contains={cat_key: {"_d": {key: encoded}}})
+
     # common methods for all typed managers. These are used
     # in other methods. Returns querysets.
 
