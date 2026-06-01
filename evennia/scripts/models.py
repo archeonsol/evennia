@@ -84,6 +84,14 @@ class ScriptDB(TypedObject):
     # inherited fields (from TypedObject):
     # db_key, db_typeclass_path, db_date_created, db_permissions
 
+    # JSONB attribute document — one row per object (Workstream B).
+    db_attrs = models.JSONField(
+        "attrs",
+        default=dict,
+        blank=True,
+        help_text="JSONB attribute document. Replaces the db_attributes M2M when the JSONB backend is active.",
+    )
+
     # optional description.
     db_desc = models.CharField("desc", max_length=255, blank=True)
     # A reference to the database object affected by this Script, if any.

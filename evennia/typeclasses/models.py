@@ -52,6 +52,7 @@ from evennia.typeclasses.tags import (AliasHandler, PermissionHandler, Tag,
                                       TagProperty)
 from evennia.utils.idmapper.models import (SharedMemoryModel,
                                            SharedMemoryModelBase)
+from evennia.typeclasses.typed_attr import apply_schema_migrations
 from evennia.utils.logger import log_trace
 from evennia.utils.utils import (class_from_module, inherits_from, is_iter,
                                  is_veto, lazy_property)
@@ -567,7 +568,7 @@ class TypedObject(SharedMemoryModel):
         not the object-creation hook; for that see `at_object_creation`.
 
         """
-        pass
+        apply_schema_migrations(self)
 
     @classmethod
     def search(cls, query, **kwargs):

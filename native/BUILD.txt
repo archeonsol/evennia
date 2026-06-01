@@ -1,0 +1,19 @@
+evennia_native — native Rust extension for the Evennia engine
+==============================================================
+
+Build:
+  cd native/
+  VIRTUAL_ENV=/path/to/venv maturin develop --release   # dev install
+  maturin build --release                                # wheel for distribution
+
+Requires:
+  Rust 1.80+  (https://rustup.rs)
+  maturin 1.0+  (pip install maturin)
+
+When to add code here:
+  Only when Python profiling shows a genuine CPU bottleneck in tight arithmetic
+  or bitwise loops. Attribute-lookup-heavy code (obj.db.x) is NOT helped by Rust.
+  Always provide a Python fallback path; the extension is optional.
+
+Game-specific extensions belong in the game repo, not here.
+This crate is for engine-level, game-agnostic hot paths only.

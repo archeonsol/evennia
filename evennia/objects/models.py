@@ -212,6 +212,14 @@ class ObjectDB(TypedObject):
     # self.key instead). The wrappers are created at the metaclass level and
     # will automatically save and cache the data more efficiently.
 
+    # JSONB attribute document — one row per object (Workstream B).
+    db_attrs = models.JSONField(
+        "attrs",
+        default=dict,
+        blank=True,
+        help_text="JSONB attribute document. Replaces the db_attributes M2M when the JSONB backend is active.",
+    )
+
     # If this is a character object, the account is connected here.
     db_account = models.ForeignKey(
         "accounts.AccountDB",
