@@ -37,7 +37,7 @@ from evennia.server.signals import (SIGNAL_ACCOUNT_POST_CREATE,
                                     SIGNAL_OBJECT_POST_PUPPET,
                                     SIGNAL_OBJECT_POST_UNPUPPET)
 from evennia.server.throttle import Throttle
-from evennia.typeclasses.attributes import ModelAttributeBackend, NickHandler
+from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import class_from_module, create, logger
 from evennia.utils.optionhandler import OptionHandler
@@ -330,7 +330,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
     @lazy_property
     def nicks(self):
-        return NickHandler(self, ModelAttributeBackend)
+        return NickHandler(self, import_string(settings.ATTRIBUTE_BACKEND_CLASS))
 
     @lazy_property
     def sessions(self):

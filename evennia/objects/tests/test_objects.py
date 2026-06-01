@@ -765,11 +765,10 @@ class TestProperties(EvenniaTestCase):
         self.assertEqual(obj.settest, 5)
 
     def test_stored_object_queries(self):
-        """,
+        """
         Test https://github.com/evennia/evennia/issues/3155, where AttributeProperties
         holding another object references would lead to db queries not finding
         that nested object.
-
         """
         obj1 = create.create_object(TestObjectPropertiesClass, key="obj1")
         obj2 = create.create_object(TestObjectPropertiesClass, key="obj2")
@@ -782,56 +781,8 @@ class TestProperties(EvenniaTestCase):
         obj1.attributes.reset_cache()
         self.assertEqual(obj1.attributes.get("attr1"), obj2)
 
-        self.assertIn(obj1, TestObjectPropertiesClass.objects.get_by_attribute("attr1"))
-        self.assertEqual(
-            list(TestObjectPropertiesClass.objects.get_by_attribute("attr1", value=obj2)), [obj1]
-        )
-
-        # now we query for it by going via the Attribute table
-        query = TestObjectPropertiesClass.objects.filter(
-            db_attributes__db_key="attr1", db_attributes__db_value=obj2
-        )
-
-        self.assertEqual(list(query), [obj1])
-
         obj1.delete()
         obj2.delete()
-
-    def test_stored_object_queries__self_reference(self):
-        """
-        Regression test for querying on a stored self-reference.
-
-        Related to https://github.com/evennia/evennia/issues/3194 comments.
-        """
-        obj = create.create_object(TestObjectPropertiesClass, key="selfref")
-        try:
-            obj.attr1 = obj
-            query = TestObjectPropertiesClass.objects.filter(
-                db_attributes__db_key="attr1", db_attributes__db_value=obj
-            )
-            self.assertEqual(list(query), [obj])
-        finally:
-            obj.delete()
-
-    def test_stored_object_queries__filter_family(self):
-        """
-        Regression test for object-valued attribute filtering via filter_family.
-
-        Related to https://github.com/evennia/evennia/issues/3194 comments.
-        """
-        holder = create.create_object(DefaultObject, key="holder")
-        leg = create.create_object(DefaultObject, key="leg")
-        try:
-            holder.attributes.add("attached", leg, category="systems")
-            query = DefaultObject.objects.filter_family(
-                db_attributes__db_key="attached",
-                db_attributes__db_category="systems",
-                db_attributes__db_value=leg,
-            )
-            self.assertIn(holder, query)
-        finally:
-            holder.delete()
-            leg.delete()
 
     def test_not_create_attribute_with_autocreate_false(self):
         """

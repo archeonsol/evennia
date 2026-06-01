@@ -12,33 +12,38 @@ def migrate_channel_aliases(apps, schema_editor):
     after doing the first migration.
 
     """
-    from evennia.comms.models import ChannelDB
+    try:
+        from evennia.comms.models import ChannelDB
 
-    # ChannelDB = apps.get_model("comms", "ChannelDB")
+        # ChannelDB = apps.get_model("comms", "ChannelDB")
 
-    for channel in ChannelDB.objects.all():
-        try:
-            chan_key = channel.db_key.lower()
-            channel_aliases = [chan_key] + [alias.lower() for alias in channel.aliases.all()]
-            for subscriber in channel.subscriptions.all():
-                nicktuples = subscriber.nicks.get(
-                    category="channel", return_tuple=True, return_list=True
-                )
-                all_aliases = channel_aliases + [
-                    tup[2] for tup in nicktuples if tup[3].lower() == chan_key
-                ]
-                for key_or_alias in all_aliases:
-                    channel.add_user_channel_alias(subscriber, key_or_alias)
-        except Exception as err:
-            # we want to continue gracefully here since this is a data-migration from
-            # an old to a new version and doesn't involve schema changes
-            print("channel-alias data migration 0019_auto_20210514_2032 skipped: {err}")
+        for channel in ChannelDB.objects.all():
+            try:
+                chan_key = channel.db_key.lower()
+                channel_aliases = [chan_key] + [alias.lower() for alias in channel.aliases.all()]
+                for subscriber in channel.subscriptions.all():
+                    nicktuples = subscriber.nicks.get(
+                        category="channel", return_tuple=True, return_list=True
+                    )
+                    all_aliases = channel_aliases + [
+                        tup[2] for tup in nicktuples if tup[3].lower() == chan_key
+                    ]
+                    for key_or_alias in all_aliases:
+                        channel.add_user_channel_alias(subscriber, key_or_alias)
+            except Exception as err:
+                # we want to continue gracefully here since this is a data-migration from
+                # an old to a new version and doesn't involve schema changes
+                print(f"channel-alias data migration 0019_auto_20210514_2032 skipped: {err}")
+    except Exception as err:
+        # Schema mismatch (e.g. db_attrs not yet added); skip on fresh databases.
+        print(f"channel-alias data migration 0019_auto_20210514_2032 skipped: {err}")
 
 
 class Migration(migrations.Migration):
+    atomic = False  # allows catching errors without aborting the outer transaction
 
     dependencies = [
         ("comms", "0018_auto_20191025_0831"),
     ]
 
-    operations = [migrations.RunPython(migrate_channel_aliases)]
+    operations = [migrations.RunPython(migrate_channel_aliases, atomic=False)]

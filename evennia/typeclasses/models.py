@@ -43,10 +43,8 @@ from evennia.hooks import hook
 from evennia.locks.lockhandler import LockHandler
 from evennia.server.signals import SIGNAL_TYPED_OBJECT_POST_RENAME
 from evennia.typeclasses import managers
-from evennia.typeclasses.attributes import (Attribute, AttributeHandler,
-                                            AttributeProperty, DbHolder,
-                                            InMemoryAttributeBackend,
-                                            ModelAttributeBackend)
+from evennia.typeclasses.attributes import (AttributeHandler, AttributeProperty,
+                                            DbHolder, InMemoryAttributeBackend)
 from evennia.typeclasses.tags import (AliasHandler, PermissionHandler, Tag,
                                       TagCategoryProperty, TagHandler,
                                       TagProperty)
@@ -367,7 +365,7 @@ class TypedObject(SharedMemoryModel):
             getattr(
                 settings,
                 "ATTRIBUTE_BACKEND_CLASS",
-                "evennia.typeclasses.attributes.ModelAttributeBackend",
+                "evennia.typeclasses.jsonb_handler.JsonbAttributeBackend",
             )
         )
         return AttributeHandler(self, backend_class)

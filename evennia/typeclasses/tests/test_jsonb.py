@@ -301,8 +301,7 @@ class TestJsonbPersistence(BaseEvenniaTest):
 
 class TestForceFlushNoop(BaseEvenniaTest):
 
-    def test_force_flush_noop_on_model_backend(self):
-        # obj1 uses the default ModelAttributeBackend; force_flush should not raise.
+    def test_force_flush_noop_on_jsonb_backend(self):
         self.obj1.attributes.add("x", 1)
         force_flush(self.obj1)  # must not raise
 

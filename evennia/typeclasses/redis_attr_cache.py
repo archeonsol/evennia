@@ -16,8 +16,6 @@ it will raise ``ImproperlyConfigured`` at instantiation.
 
 from django.core.exceptions import ImproperlyConfigured
 
-from evennia.typeclasses.attributes import ModelAttributeBackend
-
 
 # ---------------------------------------------------------------------------
 # No-op stubs — call sites are try/except-wrapped or gated by the disabled
@@ -45,7 +43,7 @@ def drop_owner_keys(model_name: str, obj_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-class RedisCachedModelAttributeBackend(ModelAttributeBackend):
+class RedisCachedModelAttributeBackend:
     """Removed. See module docstring."""
 
     def __init__(self, *args, **kwargs):

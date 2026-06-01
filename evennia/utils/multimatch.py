@@ -12,9 +12,9 @@ from typing import Any, Optional, Union
 from django.conf import settings
 from django.utils.translation import gettext as _
 
-from evennia.utils.utils import str2int, variable_from_module
+from evennia.utils.utils import variable_from_module
 
-# Ordinal words -> 0-based index (first four via str2int; rest explicit)
+# Ordinal words in order; index == 0-based selector
 _ORDINAL_WORDS = (
     "first",
     "second",
@@ -87,13 +87,10 @@ def parse_multimatch_input(searchdata: str) -> tuple[Selector, str]:
         return None, searchdata
     text = searchdata.strip()
 
-    for word in _ORDINAL_WORDS:
+    for idx, word in enumerate(_ORDINAL_WORDS):
         m = re.match(rf"^{re.escape(word)}\s+(.+)$", text, re.IGNORECASE)
         if m:
-            try:
-                return str2int(word) - 1, m.group(1).strip()
-            except ValueError:
-                pass
+            return idx, m.group(1).strip()
 
     for word in _SPECIAL_SELECTORS:
         m = re.match(rf"^{re.escape(word)}\s+(.+)$", text, re.IGNORECASE)
@@ -108,6 +105,11 @@ def parse_multimatch_input(searchdata: str) -> tuple[Selector, str]:
             name = groups.get("name", "") or ""
             args = groups.get("args") or ""
             return int(groups["number"]) - 1, (name + args).strip()
+
+    # optional: "2nd sword", "1st sword", etc. (ordinal suffix + space)
+    m = re.match(r"^(\d+)(?:st|nd|rd|th)\s+(.+)$", text, re.IGNORECASE)
+    if m:
+        return int(m.group(1)) - 1, m.group(2).strip()
 
     # optional: "2 sword" (digit + space)
     m = re.match(r"^(\d+)\s+(.+)$", text)

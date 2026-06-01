@@ -361,6 +361,8 @@ class SearchMixin:
                 idx = resolve_multimatch_index(selector, nresults)
                 if idx is not None:
                     results = [results[idx]]
+                else:
+                    results = []
 
         # handle stacked objects (multiple identical matches collapsed to a stack)
         is_stacked, results = self.get_stacked_results(results, **input_kwargs)

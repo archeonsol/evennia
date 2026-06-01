@@ -300,7 +300,6 @@ def _init(portal_mode=False):
         objects - ObjectDB.objects
         serverconfigs - ServerConfig.objects
         tags - Tags.objects
-        attributes - Attributes.objects
 
         """
 
@@ -310,7 +309,6 @@ def _init(portal_mode=False):
         from .objects.models import ObjectDB
         from .scripts.models import ScriptDB
         from .server.models import ServerConfig
-        from .typeclasses.attributes import Attribute
         from .typeclasses.tags import Tag
 
         # create container's properties
@@ -321,12 +319,11 @@ def _init(portal_mode=False):
         channels = ChannelDB.objects
         objects = ObjectDB.objects
         serverconfigs = ServerConfig.objects
-        attributes = Attribute.objects
         tags = Tag.objects
         # remove these so they are not visible as properties
         del HelpEntry, AccountDB, ScriptDB, Msg, ChannelDB
         # del ExternalChannelConnection
-        del ObjectDB, ServerConfig, Tag, Attribute
+        del ObjectDB, ServerConfig, Tag
 
     managers = DBmanagers()
     del DBmanagers

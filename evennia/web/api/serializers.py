@@ -16,36 +16,24 @@ from evennia.accounts.accounts import DefaultAccount
 from evennia.help.models import HelpEntry
 from evennia.objects.objects import DefaultObject
 from evennia.scripts.models import ScriptDB
-from evennia.typeclasses.attributes import Attribute
 from evennia.typeclasses.tags import Tag
 
 
-class AttributeSerializer(serializers.ModelSerializer):
+class AttributeSerializer(serializers.Serializer):
     """
-    Serialize Attribute views.
-
+    Serialize IAttribute objects (JsonbAttribute or InMemoryAttribute).
     """
 
-    value_display = serializers.SerializerMethodField(source="value")
-    db_value = serializers.CharField(write_only=True, required=False)
-
-    class Meta:
-        model = Attribute
-        fields = ["db_key", "db_category", "db_attrtype", "value_display", "db_value"]
+    db_key = serializers.CharField(source="key")
+    db_category = serializers.CharField(source="category", allow_null=True)
+    db_attrtype = serializers.CharField(source="attrtype", allow_null=True)
+    value_display = serializers.SerializerMethodField()
 
     @staticmethod
-    def get_value_display(obj: Attribute) -> str:
-        """
-        Gets the string display of an Attribute's value for serialization
-        Args:
-            obj: Attribute being serialized
-
-        Returns:
-            The Attribute's value in string format
-
-        """
-        if obj.db_strvalue:
-            return obj.db_strvalue
+    def get_value_display(obj) -> str:
+        strvalue = getattr(obj, "strvalue", None) or getattr(obj, "db_strvalue", None)
+        if strvalue:
+            return strvalue
         return str(obj.value)
 
 

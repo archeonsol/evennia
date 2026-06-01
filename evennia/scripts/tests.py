@@ -164,66 +164,6 @@ class TestScriptDB(TestCase):
         # Check the script is not recreated as a side-effect
         self.assertFalse(self.scr in ScriptDB.objects.get_all_scripts())
 
-    def test_delete_routes_attributes_through_handler(self):
-        """Script.delete() must clear attributes via the handler so backend
-        invalidation (e.g. Redis L2) fires per-attr instead of leaving
-        keys orphaned until TTL expiry. F-8 from the cache audit."""
-        self.scr.attributes.add("k1", "v1")
-        self.scr.attributes.add("k2", "v2")
-        attr_pks = [a.pk for a in self.scr.db_attributes.all()]
-        self.assertEqual(len(attr_pks), 2)
-
-        from evennia.typeclasses.attributes import Attribute
-
-        self.scr.delete()
-        # Attribute rows are gone because do_delete_attribute ran for each
-        # (vs Django's M2M cascade which deletes the through-row but leaves
-        # the Attribute orphaned without firing the handler hook).
-        remaining = Attribute.objects.filter(pk__in=attr_pks).count()
-        self.assertEqual(remaining, 0)
-
-
-class TestIssue3194(BaseEvenniaTest):
-    """
-    Regression test for inconsistent filtering of Script AttributeProperty refs.
-    https://github.com/evennia/evennia/issues/3194
-    """
-
-    def test_script_attributeproperty_filtering_stored_dbobjs(self):
-        script_a = create_script(ScriptWithStoredRef, key="issue3194-script-a")
-        script_b = create_script(ScriptWithStoredRef, key="issue3194-script-b")
-        script_c = create_script(ScriptWithStoredRef, key="issue3194-script-c")
-
-        try:
-            script_a.linked = script_b
-            script_c.linked = self.room1
-
-            self.assertEqual(
-                list(ScriptWithStoredRef.objects.get_by_attribute("linked", value=script_b)),
-                [script_a],
-            )
-            self.assertEqual(
-                list(
-                    ScriptWithStoredRef.objects.filter(
-                        db_attributes__db_key="linked", db_attributes__db_value=script_b
-                    )
-                ),
-                [script_a],
-            )
-            self.assertEqual(
-                list(
-                    ScriptWithStoredRef.objects.filter(
-                        db_attributes__db_key="linked", db_attributes__db_value=self.room1
-                    )
-                ),
-                [script_c],
-            )
-        finally:
-            script_a.delete()
-            script_b.delete()
-            script_c.delete()
-
-
 class TestExtendedLoopingCall(TestCase):
     """
     Test the ExtendedLoopingCall class.

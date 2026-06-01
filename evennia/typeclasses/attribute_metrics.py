@@ -57,11 +57,10 @@ def maybe_log_flush_metrics(stats: dict, tick_count: int) -> None:
     if not stats.get("total"):
         return
     logger.log_info(
-        "attribute_flush tick=%s backends=%s orphans=%s total=%s pending=%s"
+        "attribute_flush tick=%s backends=%s total=%s pending=%s"
         % (
             tick_count,
             stats.get("backends", 0),
-            stats.get("orphans", 0),
             stats.get("total", 0),
             stats.get("pending", 0),
         )

@@ -16,7 +16,6 @@ from django.utils.translation import gettext as _
 from evennia.locks.lockhandler import check_lockstring, validate_lockstring
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripts import DefaultScript
-from evennia.typeclasses.attributes import Attribute
 from evennia.utils import dbserialize, logger
 from evennia.utils.create import create_script
 from evennia.utils.evmore import EvMore
@@ -652,14 +651,14 @@ def search_prototype(
                 not_found.append(db_id)
 
         if not_found:
-            new_db_matches = (
-                Attribute.objects.filter(scriptdb__pk__in=not_found, db_key="prototype")
-                .values_list("db_value", flat=True)
-                .order_by("scriptdb__db_key")
-            )
-            for db_id, prot in zip(not_found, new_db_matches):
-                DB_PROTOTYPE_CACHE.add(db_id, prot)
-            db_matches.extend(list(new_db_matches))
+            not_found_scripts = DefaultScript.objects.filter(
+                pk__in=not_found
+            ).order_by("db_key")
+            for script in not_found_scripts:
+                prot = script.attributes.get("prototype")
+                if prot is not None:
+                    DB_PROTOTYPE_CACHE.add(script.pk, prot)
+                    db_matches.append(prot)
 
         return db_matches
 

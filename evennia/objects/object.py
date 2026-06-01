@@ -28,7 +28,7 @@ from evennia.objects.mixins.search import SearchMixin
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripthandler import ScriptHandler
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
-from evennia.typeclasses.attributes import ModelAttributeBackend, NickHandler
+from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import ansi, create, funcparser, logger, search
 from evennia.utils.multimatch import (narrow_candidates,
@@ -447,7 +447,7 @@ class DefaultObject(
     @lazy_property
     def nicks(self):
         """NickHandler"""
-        return NickHandler(self, ModelAttributeBackend)
+        return NickHandler(self, class_from_module(settings.ATTRIBUTE_BACKEND_CLASS))
 
     @lazy_property
     def sessions(self):

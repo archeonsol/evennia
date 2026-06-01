@@ -17,7 +17,6 @@ from django.conf import settings
 # Metric objects (None when prometheus_client is unavailable or disabled)
 ATTR_FLUSH_TOTAL = None
 ATTR_FLUSH_BACKENDS_TOTAL = None
-ATTR_FLUSH_ORPHANTS_TOTAL = None
 ATTR_DIRTY_PENDING = None
 ATTR_FLUSH_DURATION_SECONDS = None
 CMD_ACCESS_CACHE_HIT_TOTAL = None
@@ -39,7 +38,7 @@ def _enabled() -> bool:
 def _init_metrics() -> bool:
     """Create metrics once on the default Prometheus registry."""
     global _METRICS_READY
-    global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_ORPHANTS_TOTAL
+    global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
     global CMD_ACCESS_CACHE_HIT_TOTAL, CMD_ACCESS_CACHE_MISS_TOTAL
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
@@ -64,11 +63,7 @@ def _init_metrics() -> bool:
     )
     ATTR_FLUSH_BACKENDS_TOTAL = Counter(
         "evennia_attribute_flush_backends_total",
-        "Dirty attribute rows flushed via ModelAttributeBackend",
-    )
-    ATTR_FLUSH_ORPHANTS_TOTAL = Counter(
-        "evennia_attribute_flush_orphans_total",
-        "Dirty attribute rows flushed via orphan path",
+        "Dirty attribute rows flushed via JsonbAttributeBackend",
     )
     ATTR_DIRTY_PENDING = Gauge(
         "evennia_attribute_dirty_pending",
@@ -123,7 +118,6 @@ def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = N
 
     total = int(stats.get("total") or 0)
     backends = int(stats.get("backends") or 0)
-    orphans = int(stats.get("orphans") or 0)
     pending = int(stats.get("pending") or 0)
 
     if ATTR_DIRTY_PENDING is not None:
@@ -133,8 +127,6 @@ def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = N
         ATTR_FLUSH_TOTAL.inc(total)
     if backends and ATTR_FLUSH_BACKENDS_TOTAL is not None:
         ATTR_FLUSH_BACKENDS_TOTAL.inc(backends)
-    if orphans and ATTR_FLUSH_ORPHANTS_TOTAL is not None:
-        ATTR_FLUSH_ORPHANTS_TOTAL.inc(orphans)
     if duration_seconds is not None and ATTR_FLUSH_DURATION_SECONDS is not None:
         ATTR_FLUSH_DURATION_SECONDS.observe(duration_seconds)
 

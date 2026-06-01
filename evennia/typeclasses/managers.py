@@ -10,7 +10,6 @@ import shlex
 from django.db.models import Count, ExpressionWrapper, F, FloatField, Q
 from django.db.models.functions import Cast
 
-from evennia.typeclasses.attributes import Attribute
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
 from evennia.utils.utils import (class_from_module, make_iter,
@@ -31,155 +30,10 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
     """
 
     def get_queryset(self):
-        # Flush write-behind attribute updates before any ORM query, so SQL
-        # filters joining through db_attributes see committed values rather
-        # than stale rows. No-op when nothing is dirty.
-        from evennia.typeclasses.attributes import flush_if_pending
-
-        flush_if_pending()
         return super().get_queryset()
 
     # common methods for all typed managers. These are used
     # in other methods. Returns querysets.
-
-    # Attribute manager methods
-    def get_attribute(
-        self, key=None, category=None, value=None, strvalue=None, obj=None, attrtype=None, **kwargs
-    ):
-        """
-        Return Attribute objects by key, by category, by value, by strvalue, by
-        object (it is stored on) or with a combination of those criteria.
-
-        Args:
-            key (str, optional): The attribute's key to search for
-            category (str, optional): The category of the attribute(s) to search for.
-            value (str, optional): The attribute value to search for.
-                Note that this is not a very efficient operation since it
-                will query for a pickled entity. Mutually exclusive to
-                `strvalue`.
-            strvalue (str, optional): The str-value to search for.
-                Most Attributes will not have strvalue set. This is
-                mutually exclusive to the `value` keyword and will take
-                precedence if given.
-            obj (Object, optional): On which object the Attribute to
-                search for is.
-            attrype (str, optional): An attribute-type to search for.
-                By default this is either `None` (normal Attributes) or
-                `"nick"`.
-            **kwargs (any): Currently unused. Reserved for future use.
-
-        Returns:
-            list: The matching Attributes.
-
-        """
-        dbmodel = self.model.__dbclass__.__name__.lower()
-        query = [("attribute__db_attrtype", attrtype), ("attribute__db_model", dbmodel)]
-        if obj:
-            query.append(("%s__id" % self.model.__dbclass__.__name__.lower(), obj.id))
-        if key:
-            query.append(("attribute__db_key", key))
-        if category:
-            query.append(("attribute__db_category", category))
-        if strvalue:
-            query.append(("attribute__db_strvalue", strvalue))
-        if value is not None:
-            # Primitives bypass db_value (typed columns); dispatch by type.
-            from evennia.typeclasses.attributes import value_query_filter
-
-            query.extend(value_query_filter(value, prefix="attribute__").items())
-        m2m = getattr(self.model, "db_attributes", None)
-        if m2m is None:
-            return Attribute.objects.none()
-        return Attribute.objects.filter(
-            pk__in=m2m.through.objects.filter(**dict(query)).values_list(
-                "attribute_id", flat=True
-            )
-        )
-
-    def get_nick(self, key=None, category=None, value=None, strvalue=None, obj=None):
-        """
-        Get a nick, in parallel to `get_attribute`.
-
-        Args:
-            key (str, optional): The nicks's key to search for
-            category (str, optional): The category of the nicks(s) to search for.
-            value (str, optional): The attribute value to search for. Note that this
-                is not a very efficient operation since it will query for a pickled
-                entity. Mutually exclusive to `strvalue`.
-            strvalue (str, optional): The str-value to search for. Most Attributes
-                will not have strvalue set. This is mutually exclusive to the `value`
-                keyword and will take precedence if given.
-            obj (Object, optional): On which object the Attribute to search for is.
-
-        Returns:
-            nicks (list): The matching Nicks.
-
-        """
-        return self.get_attribute(
-            key=key, category=category, value=value, strvalue=strvalue, obj=obj
-        )
-
-    def get_by_attribute(
-        self, key=None, category=None, value=None, strvalue=None, attrtype=None, **kwargs
-    ):
-        """
-        Return objects having attributes with the given key, category,
-        value, strvalue or combination of those criteria.
-
-        Args:
-            key (str, optional): The attribute's key to search for
-            category (str, optional): The category of the attribute
-                to search for.
-            value (str, optional): The attribute value to search for.
-                Note that this is not a very efficient operation since it
-                will query for a pickled entity. Mutually exclusive to
-                `strvalue`.
-            strvalue (str, optional): The str-value to search for.
-                Most Attributes will not have strvalue set. This is
-                mutually exclusive to the `value` keyword and will take
-                precedence if given.
-            attrype (str, optional): An attribute-type to search for.
-                By default this is either `None` (normal Attributes) or
-                `"nick"`.
-            kwargs (any): Currently unused. Reserved for future use.
-
-        Returns:
-            obj (list): Objects having the matching Attributes.
-
-        """
-        dbmodel = self.model.__dbclass__.__name__.lower()
-        query = [
-            ("db_attributes__db_attrtype", attrtype),
-            ("db_attributes__db_model", dbmodel),
-        ]
-        if key:
-            query.append(("db_attributes__db_key", key))
-        if category:
-            query.append(("db_attributes__db_category", category))
-        if strvalue:
-            query.append(("db_attributes__db_strvalue", strvalue))
-        elif value is not None:
-            # Primitives bypass db_value (typed columns); dispatch by type.
-            from evennia.typeclasses.attributes import value_query_filter
-
-            query.extend(value_query_filter(value, prefix="db_attributes__").items())
-        return self.filter(**dict(query))
-
-    def get_by_nick(self, key=None, nick=None, category="inputline"):
-        """
-        Get object based on its key or nick.
-
-        Args:
-            key (str, optional): The attribute's key to search for
-            nick (str, optional): The nickname to search for
-            category (str, optional): The category of the nick
-                to search for.
-
-        Returns:
-            obj (list): Objects having the matching Nicks.
-
-        """
-        return self.get_by_attribute(key=key, category=category, strvalue=nick, attrtype="nick")
 
     # Tag manager methods
 

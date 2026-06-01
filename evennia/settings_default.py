@@ -742,8 +742,8 @@ START_LOCATION = "#2"
 # out of sync between the processes. Keep on unless you face such
 # issues.
 TYPECLASS_AGGRESSIVE_CACHE = True
-# Attribute backend class path (ModelAttributeBackend or RedisCachedModelAttributeBackend)
-ATTRIBUTE_BACKEND_CLASS = "evennia.typeclasses.attributes.ModelAttributeBackend"
+# Attribute backend class path
+ATTRIBUTE_BACKEND_CLASS = "evennia.typeclasses.jsonb_handler.JsonbAttributeBackend"
 ATTRIBUTE_REDIS_CACHE_ENABLED = False
 ATTRIBUTE_REDIS_CACHE_ALIAS = "attributes"
 ATTRIBUTE_REDIS_CACHE_TTL = 3600
