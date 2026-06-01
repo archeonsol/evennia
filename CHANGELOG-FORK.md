@@ -25,6 +25,50 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.63 — deprecate `ObjectDB.objects.get_objs_with_attr()`
+
+Key-existence attribute search (`get_objs_with_attr(attr_name)`, "any value")
+is unsalvageable under the JSONB attribute model and is now deprecated ahead of
+removal at the Underspire API freeze.
+
+### Performance
+
+The method's docstring claimed "GIN-indexed on PostgreSQL." That was wrong. The
+query compiles to `(db_attrs -> '~' -> '_d') ? attr_name`, testing the `?`
+operator against an *extracted nested object*. The shipped index is a plain
+`USING GIN(db_attrs)` with default `jsonb_ops`
+([`0017_objectdb_db_attrs_gin.py`](evennia/objects/migrations/0017_objectdb_db_attrs_gin.py)),
+which only accelerates top-level `db_attrs @> …` and `db_attrs ? …`. Once the
+expression extracts a sub-document the index cannot apply, so this is an
+unindexed sequential scan on every backend, PostgreSQL included. Key-existence
+also cannot be made indexable through containment: `@>` requires a value, so
+"has key K with any value" has no GIN-friendly form short of a dedicated
+expression index we don't ship. The result set is near-useless besides (every
+object with e.g. `desc` set is almost the whole table).
+
+### API
+
+- [`get_objs_with_attr()`](evennia/objects/manager.py:145) now emits a
+  `DeprecationWarning` and documents the true cost. The in-DB PostgreSQL filter
+  is retained so an existing call doesn't stream every row's `db_attrs` into
+  Python, but it is marked for removal.
+- `get_objs_with_attr_value()` is unaffected: its top-level `db_attrs @> {…}`
+  containment query is genuinely GIN-indexed.
+
+### Migration notes
+
+Downstream callers of `get_objs_with_attr()` should switch to
+[`get_objs_with_attr_value()`](evennia/objects/manager.py:181) (restrict to a
+known value) or pass `candidates=` to bound the scan. The method will be removed
+at the API freeze, so audit usage now: key-only existence searches may require
+larger query refactors and should not be left to the deprecation deadline.
+
+### Tests
+
+- `test_get_objs_with_attr` now asserts the `DeprecationWarning` fires
+  ([`test_objects.py`](evennia/objects/tests/test_objects.py)). Object suite
+  passes (96 tests, SQLite).
+
 ## 6.0.0+underspire.62 — remove the `ingame_python` contrib
 
 Deletes the `ingame_python` contrib (the in-game Python event/callback scripting

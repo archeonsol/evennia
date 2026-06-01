@@ -157,8 +157,26 @@ class ObjectDBManager(TypedObjectManager):
     def get_objs_with_attr(self, attr_name, candidates=None):
         """Find objects that have *attr_name* set (any value).
 
-        GIN-indexed on PostgreSQL; unindexed Python scan on other backends.
+        .. deprecated::
+            Key-existence search is an **unindexed full scan on every backend**,
+            including PostgreSQL: the query tests ``(db_attrs -> '~' -> '_d') ?
+            attr_name`` against an extracted nested object, which the
+            ``GIN(db_attrs)`` index cannot accelerate (only top-level ``@>`` /
+            ``?`` are indexed, and containment cannot express "any value"). It
+            also tends to return nearly the whole table. Restrict to a known
+            value via :meth:`get_objs_with_attr_value` (GIN-indexed), or pass
+            ``candidates`` to bound the scan. This method will be removed.
         """
+        from warnings import warn
+
+        warn(
+            "ObjectDB.objects.get_objs_with_attr() is deprecated: it is an "
+            "unindexed full-table scan on all backends (including PostgreSQL) "
+            "and typically matches nearly every object. Use "
+            "get_objs_with_attr_value() or restrict with candidates instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         cand_restriction = (
             candidates is not None
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
@@ -167,6 +185,8 @@ class ObjectDBManager(TypedObjectManager):
         _flush_attr_writes()
         qs = self.filter(cand_restriction)
         if connection.vendor == "postgresql":
+            # In-DB seq scan (unindexed), but avoids streaming every row's
+            # db_attrs blob into Python the way the portable fallback does.
             return qs.filter(**{"db_attrs__~___d__has_key": attr_name})
         return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name))
 
