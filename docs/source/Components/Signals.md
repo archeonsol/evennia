@@ -111,7 +111,7 @@ happened.
 These are highly specialized Django signals that are unlikely to be useful to most users. But
 they are included here for completeness.
 
-- `m2m_changed` - fires after a Many-to-Many field (like `db_attributes`) changes.
+- `m2m_changed` - fires after a Many-to-Many field (like `db_tags`) changes.
 - `pre_migrate` - fires before database migration starts with `evennia migrate`.
 - `post_migrate` - fires after database migration finished.
 - `request_started` - sent when HTTP request begins.

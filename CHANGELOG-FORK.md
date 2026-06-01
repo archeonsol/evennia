@@ -25,6 +25,136 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.56 — BREAKING: Phase 2 M2M removal, delete `Attribute` model
+
+Final step of the JSONB attribute migration. Removes the `Attribute` Django
+model, `AttributeManager`, `ModelAttributeBackend`, and all write-behind /
+orphan-tracking infrastructure. All attributes now live exclusively in the
+`db_attrs` JSONB column on the owning object row via `JsonbAttributeBackend`,
+which becomes the default `ATTRIBUTE_BACKEND_CLASS`.
+
+**Breaking for downstream code that queried attributes through the ORM.**
+We are in lockstep with our single consumer, so this lands without a
+deprecation cycle. The following public query helpers are gone; attribute
+lookups by value must go through JSONB queries (`db_attrs__contains={...}`)
+or the game-side `world.db_utils.attrs_match()` / `attrs_exists()` helpers:
+
+- Manager methods removed from `TypedObjectManager` / `ObjectDBManager`:
+  `get_attribute`, `get_nick`, `get_by_attribute`, `get_by_nick`,
+  `get_objs_with_attr`, `get_objs_with_attr_value`.
+- `evennia.managers.attributes` (the `Attribute.objects` container) is gone.
+
+What changed:
+
+- `typeclasses/attributes.py`: removed the `Attribute` model,
+  `ModelAttributeBackend`, `value_query_filter`, `_classify_value`,
+  `_mark_attr_dirty`, `flush_if_pending`, and orphan dirty tracking.
+- `settings_default.py`: default `ATTRIBUTE_BACKEND_CLASS` is now
+  `JsonbAttributeBackend`.
+- `accounts/object.py`, `accounts/accounts.py`: `NickHandler` is wired via
+  `settings.ATTRIBUTE_BACKEND_CLASS` instead of the hardcoded (now deleted)
+  model backend. Nicks store their 4-tuple in the `_t_nick__<cat>` document
+  section like any other attrtype.
+- `prototypes/prototypes.py`: the `Attribute` ORM lookup for registered
+  prototypes is replaced with a `DefaultScript` loop reading the prototype
+  from each script's own `db_attrs`.
+- `web/api/serializers.py`: `AttributeSerializer` ported from a
+  `ModelSerializer` to a plain `Serializer` (the model is gone).
+- `web/admin/attributes.py`: reduced to a stub; the inline `Attribute` admin
+  is dropped from the accounts/comms/objects/scripts admin pages.
+- `server/prometheus_metrics.py`, `typeclasses/attribute_metrics.py`:
+  orphan-flush stats removed.
+- Migration `typeclasses/0023`: drops the `typeclasses_attribute` table and
+  its value-type indexes. `comms/0019` (a 2021 migration) carries a
+  compatibility shim for fresh installs.
+
+## 6.0.0+underspire.55 — drop `db_attributes` M2M field, reactor guards
+
+Phase 1 of M2M removal. Drops the `db_attributes` `ManyToManyField` from
+`TypedObject` and the per-typeclass through tables, leaving the `Attribute`
+model itself for Phase 2 (`.56`).
+
+What changed:
+
+- `typeclasses/models.py`: removed the `db_attributes` M2M field. Migrations
+  for objects/accounts/scripts/comms drop the through tables.
+- `typeclasses/attributes.py`, `typeclasses/managers.py`,
+  `typeclasses/models.py`: `ModelAttributeBackend._get_m2m()`, the
+  `remove_attributes_on_delete` signal handler, and `managers.get_attribute`
+  through-access are guarded to no-op when the field is absent.
+- `web/api/views.py`: `obj.db_attributes.all()` becomes
+  `obj.attributes.all()` (handler-level access, backend-agnostic).
+- `web/admin/*`: dropped the `db_attributes.through` inline admin classes.
+- `utils/bulk_tick.py`: `gather_objectdb()` and `apply()` assert
+  `reactor.isInIOThread()`, since both touch the idmapper and L1 dicts that
+  are reactor-thread-only.
+- `typeclasses/jsonb_handler.py`: synthetic attribute `pk` is now a
+  per-backend incrementing counter (`_pk_counter`) instead of
+  `hash((key, category, id(self)))`, eliminating collision and id-reuse risk.
+- Tests: `TestFlushRetry`, `TestAttrtypeQueryAll`, `TestPendingCount`,
+  `TestPkCounter` added to `test_jsonb.py`.
+
+## 6.0.0+underspire.54 — fix JSONB backend bugs from review
+
+Bug-fix pass on the `.52` JSONB backend following a multi-agent review.
+
+- **Write-behind never flushed JSONB backends.** `flush_all_dirty()` /
+  `count_pending_dirty()` gated on `_dirty_attrs`, which `JsonbAttributeBackend`
+  does not have, so every JSONB write stayed in the L1 dict and was lost on
+  shutdown. Added `IAttributeBackend.pending_count()`; the flush loop now
+  flushes every backend in `_DIRTY_BACKENDS` unconditionally.
+- **GIN index migrations crashed SQLite/MySQL CI.** `CREATE INDEX
+  CONCURRENTLY ... USING GIN` is Postgres-only. The four GIN migrations
+  (objects/0017, accounts/0016, comms/0026, scripts/0022) now use `RunPython`
+  guarded on `schema_editor.connection.vendor == "postgresql"` (still
+  `atomic = False`), no-op on other backends.
+- **`to_jsonb` silently stored `null`** for unserializable values. Now raises
+  `ValueError` so the failure surfaces instead of corrupting the slot.
+- **Dead-weakref writes** on `JsonbAttribute.value` / `lock_storage` setters
+  now log an error instead of silently dropping the write.
+- **`do_update_attribute` strvalue branch** left the cached attr's
+  `db_strvalue` / `db_value` stale; both are now updated to match the
+  non-strvalue branch.
+- **`_do_flush`** logged nothing and could retry a poison document forever.
+  It now logs each failure with the pk and gives up after 10 attempts.
+- **`query_all`** blanket-skipped all `_`-prefixed category keys, hiding
+  attrtype sections (`_t_nick__~`, etc.). Attrtype backends now filter to
+  their own `_t_{attrtype}__` prefix.
+- `typed_attr.filter_kwargs` (targeted the orphaned M2M table) now raises
+  `NotImplementedError` pointing at the JSONB query helpers.
+- Reverted the `containers.py` `capacity` field to its original
+  `AttributeProperty(default=20)` (the `.52` `TypedAttr(int, ..., min=0)`
+  swap was an unintended behavior change).
+
+## 6.0.0+underspire.52 — JSONB attribute storage, GIN indexes, bulk-tick
+
+Introduces JSONB-backed attribute storage as an opt-in backend, alongside
+the existing M2M storage (which `.55`/`.56` later remove). JSON-safe values
+are stored verbatim; complex Python objects are pickle-encoded behind a
+`__P:<base64>` sentinel.
+
+What changed:
+
+- `typeclasses/jsonb_handler.py`: `JsonbAttributeBackend`, an
+  `IAttributeBackend` storing all of an object's attributes in a single
+  `db_attrs` JSONField on its own row, with an in-process L1 cache and
+  write-behind flush on the maintenance tick.
+- `typeclasses/jsonb_util.py`: `to_jsonb` / `from_jsonb` encode-decode
+  helpers (the `__P:` sentinel path routes through Evennia's serializer so
+  dbrefs and `_Saver*` proxies normalise correctly).
+- `typeclasses/typed_attr.py`: structured attribute descriptors for hot-path
+  fields.
+- `typeclasses/redis_attr_cache.py`: slimmed to a pure L1 cache; the Redis
+  eviction path is removed (JSONB is the persistence layer now).
+- `utils/bulk_tick.py`: `BulkTickContext`, a three-phase
+  (reactor / worker / reactor) coordinator for vectorised attribute ticks.
+- Per-typeclass migrations add the `db_attrs` JSONB column and a
+  `CREATE INDEX CONCURRENTLY` GIN index (`jsonb_ops`, supporting `@@`, `@?`,
+  `@>`).
+- `native/`: dormant Rust/PyO3 scaffold for future engine hot paths (wired
+  into nothing). `pyproject.toml` scopes package discovery to `evennia*` so
+  setuptools does not treat `native/` as a second top-level package.
+
 ## 6.0.0+underspire.51 — AS1: Django connection hygiene in `in_thread`
 
 Follow-up to AS1 (`.50`). The blessed
