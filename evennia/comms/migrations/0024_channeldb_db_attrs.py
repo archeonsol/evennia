@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
             field=models.JSONField(
                 blank=True,
                 default=dict,
-                help_text="JSONB attribute document. One row per object; replaces the db_attributes M2M when the JSONB backend is active.",
+                help_text="JSONB attribute document. Replaces the db_attributes M2M when the JSONB backend is active.",
                 verbose_name="attrs",
             ),
         ),
