@@ -41,7 +41,7 @@ class ObjectDBManager(TypedObjectManager):
     get_object_with_account
     get_objs_with_key_and_typeclass
     get_objs_with_attr
-    get_objs_with_attr_match
+    get_objs_with_attr_value
     get_objs_with_db_property
     get_objs_with_db_property_match
     get_objs_with_key_or_alias
@@ -140,6 +140,37 @@ class ObjectDBManager(TypedObjectManager):
         return self.filter(
             cand_restriction & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
         ).order_by("id")
+
+    def get_objs_with_attr(self, attr_name, candidates=None):
+        """Find objects that have *attr_name* set (any value). Postgres only."""
+        from django.db import connection
+        if connection.vendor != "postgresql":
+            return self.none()
+        cand_restriction = (
+            candidates is not None
+            and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
+            or Q()
+        )
+        return self.filter(cand_restriction).filter(
+            **{"db_attrs__~___d__has_key": attr_name}
+        )
+
+    def get_objs_with_attr_value(self, attr_name, value, candidates=None, typeclasses=None):
+        """Find objects where attribute *attr_name* equals *value*. Postgres only."""
+        from django.db import connection
+        if connection.vendor != "postgresql":
+            return self.none()
+        from evennia.typeclasses.jsonb_util import to_jsonb
+        cand_restriction = (
+            candidates is not None
+            and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
+            or Q()
+        )
+        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        encoded = to_jsonb(value)
+        return self.filter(cand_restriction & type_restriction).filter(
+            db_attrs__contains={"~": {"_d": {attr_name: encoded}}}
+        )
 
     def get_objs_with_db_property(self, property_name, candidates=None):
         """

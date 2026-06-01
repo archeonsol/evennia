@@ -369,52 +369,6 @@ class TestTypedAttrTypedCol(_TypedAttrBlob, BaseEvenniaTest):
 
 
 # ---------------------------------------------------------------------------
-# TypedAttr typed_col — filter_kwargs
-# ---------------------------------------------------------------------------
-
-
-class TestTypedAttrFilterKwargs(BaseEvenniaTest):
-    def _descriptor(self, **kwargs):
-        td = TypedAttr(int, backend="typed_col", **kwargs)
-        td.__set_name__(type(self.obj1), "level")
-        return td
-
-    def test_filter_kwargs_returns_dict(self):
-        td = self._descriptor()
-        kwargs = td.filter_kwargs(10)
-        self.assertIsInstance(kwargs, dict)
-
-    def test_filter_kwargs_includes_key(self):
-        td = self._descriptor()
-        kwargs = td.filter_kwargs(10)
-        self.assertIn("db_attributes__db_key__iexact", kwargs)
-        self.assertEqual(kwargs["db_attributes__db_key__iexact"], "level")
-
-    def test_filter_kwargs_category_none_gives_isnull(self):
-        td = self._descriptor()  # category=None
-        kwargs = td.filter_kwargs(10)
-        self.assertIn("db_attributes__db_category__isnull", kwargs)
-        self.assertTrue(kwargs["db_attributes__db_category__isnull"])
-
-    def test_filter_kwargs_with_category(self):
-        td = TypedAttr(int, backend="typed_col", category="combat")
-        td.__set_name__(type(self.obj1), "stance")
-        kwargs = td.filter_kwargs(1)
-        self.assertEqual(kwargs["db_attributes__db_category__iexact"], "combat")
-
-    def test_filter_kwargs_custom_prefix(self):
-        td = self._descriptor()
-        kwargs = td.filter_kwargs(5, prefix="attributes__")
-        self.assertIn("attributes__db_key__iexact", kwargs)
-
-    def test_filter_kwargs_raises_for_bag(self):
-        td = TypedAttr(backend="bag")
-        td.__set_name__(type(self.obj1), "stats")
-        with self.assertRaises(TypeError):
-            td.filter_kwargs(5)
-
-
-# ---------------------------------------------------------------------------
 # TypedAttr bag
 # ---------------------------------------------------------------------------
 

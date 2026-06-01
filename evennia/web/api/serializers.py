@@ -22,11 +22,16 @@ from evennia.typeclasses.tags import Tag
 class AttributeSerializer(serializers.Serializer):
     """
     Serialize IAttribute objects (JsonbAttribute or InMemoryAttribute).
+
+    db_key / db_category / db_attrtype are exposed without source= so that
+    validated_data keys match what views.set_attribute reads.  db_value is
+    write-only (input only); value_display is the read path for output.
     """
 
-    db_key = serializers.CharField(source="key")
-    db_category = serializers.CharField(source="category", allow_null=True)
-    db_attrtype = serializers.CharField(source="attrtype", allow_null=True)
+    db_key = serializers.CharField()
+    db_category = serializers.CharField(allow_null=True, required=False, default=None)
+    db_attrtype = serializers.CharField(allow_null=True, required=False, default=None)
+    db_value = serializers.JSONField(required=False, allow_null=True, write_only=True)
     value_display = serializers.SerializerMethodField()
 
     @staticmethod
@@ -34,7 +39,7 @@ class AttributeSerializer(serializers.Serializer):
         strvalue = getattr(obj, "strvalue", None) or getattr(obj, "db_strvalue", None)
         if strvalue:
             return strvalue
-        return str(obj.value)
+        return str(getattr(obj, "value", ""))
 
 
 class TagSerializer(serializers.ModelSerializer):

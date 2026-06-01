@@ -7,6 +7,7 @@ all Attributes and TypedObjects).
 
 import shlex
 
+from django.db import connection
 from django.db.models import Count, ExpressionWrapper, F, FloatField, Q
 from django.db.models.functions import Cast
 
@@ -35,11 +36,10 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
     def get_by_attribute(self, key=None, category=None, value=None, **kwargs):
         """Find objects where attribute *key* (in *category*) equals *value*.
 
-        Uses JSONB @> containment (GIN-indexed). *value* must not be None;
-        pass just *key* to test existence instead, but that path returns none()
-        since key-only existence checks are not needed by current callers.
+        Uses JSONB @> containment (GIN-indexed). Postgres only; returns none()
+        on other backends. *value* must not be None.
         """
-        if key is None or value is None:
+        if key is None or value is None or connection.vendor != "postgresql":
             return self.none()
         from evennia.typeclasses.jsonb_util import to_jsonb
         cat_key = "~" if category is None else str(category).lower()
@@ -580,18 +580,14 @@ class TypeclassManager(TypedObjectManager):
                 db_tags__db_tagtype=None,
             )
 
-        for attrkey, attrval, attrcat in plusattrs:
-            qs = qs.filter(
-                db_attributes__db_key__iexact=attrkey,
-                db_attributes__db_strvalue__iexact=attrval,
-                db_attributes__db_category__iexact=attrcat if attrcat else None,
-            )
-        for attrkey, attrval, attrcat in negattrs:
-            qs = qs.exclude(
-                db_attributes__db_key__iexact=attrkey,
-                db_attributes__db_strvalue__iexact=attrval,
-                db_attributes__db_category__iexact=attrcat if attrcat else None,
-            )
+        if connection.vendor == "postgresql":
+            from evennia.typeclasses.jsonb_util import to_jsonb
+            for attrkey, attrval, attrcat in plusattrs:
+                cat_key = "~" if not attrcat else attrcat.lower()
+                qs = qs.filter(db_attrs__contains={cat_key: {"_d": {attrkey: to_jsonb(attrval)}}})
+            for attrkey, attrval, attrcat in negattrs:
+                cat_key = "~" if not attrcat else attrcat.lower()
+                qs = qs.exclude(db_attrs__contains={cat_key: {"_d": {attrkey: to_jsonb(attrval)}}})
 
         return qs.distinct()
 

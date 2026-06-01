@@ -7,6 +7,11 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("typeclasses", "0022_attribute_typed_value_indexes"),
+        # Through-table FKs pointing at typeclasses_attribute must be dropped first.
+        ("objects", "0018_remove_objectdb_db_attributes"),
+        ("accounts", "0017_remove_accountdb_db_attributes"),
+        ("scripts", "0023_remove_scriptdb_db_attributes"),
+        ("comms", "0027_remove_channeldb_db_attributes"),
     ]
 
     operations = [

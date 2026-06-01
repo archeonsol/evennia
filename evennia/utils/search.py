@@ -338,12 +338,11 @@ def search_channel_attribute(
     )
 
 
-# Replace direct assignments with functions
 def search_attribute_object(*args, **kwargs):
     """
-    Search for attribute objects.
+    Stub. The Attribute model was removed in the JSONB migration. Returns [].
     """
-    return ObjectDB.objects.get_attribute(*args, **kwargs)
+    return []
 
 
 def search_object_by_tag(key=None, category=None, tagtype=None, **kwargs):
