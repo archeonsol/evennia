@@ -10,10 +10,38 @@ Sentinel: ``"__P:"`` — short, unambiguous, not a legal Python identifier.
 """
 
 import base64
-import logging
+from collections.abc import Mapping, Sequence, Set
 
 _SENTINEL = "__P:"
-_logger = logging.getLogger(__name__)
+
+
+def _restore_dbobjs(item, _seen):
+    """Reverse the in-place ``__serialize_dbobjs__`` mutation ``to_pickle`` does.
+
+    Walks *item* read-only and calls ``__deserialize_dbobjs__`` on any embedded
+    object that defines it, restoring hidden dbobjs that encoding replaced with
+    their serialized bytes. Does not reconstruct containers (so it is safe for
+    arbitrary value types, including dict/list subclasses).
+    """
+    if isinstance(item, (str, bytes, bytearray, int, float, bool, type(None))):
+        return
+    oid = id(item)
+    if oid in _seen:
+        return
+    _seen.add(oid)
+    deser = getattr(item, "__deserialize_dbobjs__", None)
+    if deser is not None:
+        try:
+            deser()
+        except Exception:
+            pass
+        return
+    if isinstance(item, Mapping):
+        for val in item.values():
+            _restore_dbobjs(val, _seen)
+    elif isinstance(item, (Sequence, Set)):
+        for val in item:
+            _restore_dbobjs(val, _seen)
 
 
 def _is_json_safe(val) -> bool:
@@ -57,19 +85,24 @@ def to_jsonb(value) -> object:
     except Exception:
         normalized = value
     if _is_json_safe(normalized):
+        # If __serialize_dbobjs__ had run it would have left non-JSON bytes
+        # here, so a JSON-safe result means nothing was mutated in place.
         return normalized
-    # Must sentinel-encode as pickle bytes.
-    if __debug__:
-        _logger.debug("to_jsonb: sentinel-encoding %r (type=%s)", type(value).__name__, type(normalized).__name__)
+    # Sentinel-encode as pickle bytes. NOTE: to_pickle calls __serialize_dbobjs__
+    # on any embedded custom object, mutating it *in place* (a hidden dbobj
+    # becomes its serialized bytes). The owning attribute still references this
+    # live object, so we must undo that mutation once encoding is done,
+    # otherwise later reads return the bytes instead of the dbobj.
     try:
-        raw_bytes = _pickle.dumps(normalized, protocol=5)
-    except Exception:
         try:
+            raw_bytes = _pickle.dumps(normalized, protocol=5)
+        except Exception:
+            # Let the real serialization error (e.g. TypeError for an
+            # un-storable hidden dbobj) propagate rather than masking it.
             raw_bytes = _pickle.dumps(value, protocol=5)
-        except Exception as exc:
-            raise ValueError(
-                f"to_jsonb: cannot serialize value of type {type(value).__name__!r}"
-            ) from exc
+    finally:
+        # Undo the in-place __serialize_dbobjs__ mutation on the live value.
+        _restore_dbobjs(value, set())
     return _SENTINEL + base64.b64encode(raw_bytes).decode()
 
 
@@ -91,7 +124,7 @@ def from_jsonb(encoded, db_obj=None):
     from evennia.utils.dbserialize import from_pickle as _fp
 
     if isinstance(encoded, str) and encoded.startswith(_SENTINEL):
-        raw_bytes = base64.b64decode(encoded[len(_SENTINEL):])
+        raw_bytes = base64.b64decode(encoded[len(_SENTINEL) :])
         normalized = _pickle.loads(raw_bytes)
         return _fp(normalized, db_obj=db_obj)
     # Plain JSON value; wrap containers in _Saver* for write-back if requested.
