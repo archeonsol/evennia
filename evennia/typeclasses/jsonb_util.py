@@ -66,9 +66,10 @@ def to_jsonb(value) -> object:
     except Exception:
         try:
             raw_bytes = _pickle.dumps(value, protocol=5)
-        except Exception:
-            _logger.warning("to_jsonb: unserializable value %r; storing null", type(value).__name__)
-            return None  # unserializable; store null
+        except Exception as exc:
+            raise ValueError(
+                f"to_jsonb: cannot serialize value of type {type(value).__name__!r}"
+            ) from exc
     return _SENTINEL + base64.b64encode(raw_bytes).decode()
 
 

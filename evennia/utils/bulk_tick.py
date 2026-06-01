@@ -151,6 +151,21 @@ class BulkTickContext:
         for row in updates:
             obj_id = row.get("id")
             backend = self._backends.get(obj_id)
+
+            # An object uncached at gather time may have been loaded into the
+            # idmapper between Phase 1 and Phase 3.  Reroute to the L1 path
+            # so the in-process cache stays coherent with what we write.
+            if backend is None and obj_id in self._uncached_ids:
+                from evennia.objects.models import ObjectDB
+                obj = ObjectDB.get_cached_instance(obj_id)
+                if obj is not None:
+                    try:
+                        candidate = obj.attributes.backend
+                        if isinstance(candidate, JsonbAttributeBackend):
+                            backend = candidate
+                    except AttributeError:
+                        pass
+
             if backend is not None:
                 # cached path: write to L1
                 section = backend._l1.setdefault(_NULL_CAT, {}).setdefault("_d", {})

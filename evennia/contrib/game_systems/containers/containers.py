@@ -34,7 +34,7 @@ or implement the same locks/hooks in your own typeclasses.
 from django.conf import settings
 
 from evennia import CmdSet, DefaultObject
-from evennia.typeclasses.typed_attr import TypedAttr
+from evennia.typeclasses.attributes import AttributeProperty
 from evennia.commands.default.general import CmdDrop, CmdGet, CmdLook
 from evennia.utils import class_from_module
 from evennia.utils.utils import is_veto
@@ -51,7 +51,7 @@ class ContribContainer(_BASE_OBJECT_TYPECLASS):
     """
 
     # This defines how many objects the container can hold.
-    capacity = TypedAttr(int, default=20, min=0)
+    capacity = AttributeProperty(default=20)
 
     def at_object_creation(self):
         """

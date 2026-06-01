@@ -220,7 +220,7 @@ def count_pending_dirty():
     """
     backends = 0
     for backend in list(_DIRTY_BACKENDS):
-        backends += len(getattr(backend, "_dirty_attrs", None) or ())
+        backends += backend.pending_count()
     orphans = len(list(_ORPHAN_DIRTY_ATTRS))
     pending = backends + orphans
     return {"backends": backends, "orphans": orphans, "pending": pending}
@@ -270,10 +270,9 @@ def flush_all_dirty():
     t0 = time.perf_counter()
     backends = 0
     for backend in list(_DIRTY_BACKENDS):
-        dirty_n = len(getattr(backend, "_dirty_attrs", None) or ())
-        if dirty_n:
-            backend.flush_dirty()
-            backends += dirty_n
+        dirty_n = backend.pending_count()
+        backend.flush_dirty()
+        backends += dirty_n
     orphans = len(list(_ORPHAN_DIRTY_ATTRS))
     _flush_orphan_dirty()
     duration = time.perf_counter() - t0
@@ -840,6 +839,10 @@ class IAttributeBackend:
         self._catcache = {}
         # full cache was run on all attributes
         self._cache_complete = False
+
+    def pending_count(self) -> int:
+        """Return the number of pending dirty writes not yet flushed to DB."""
+        return len(getattr(self, "_dirty_attrs", None) or ())
 
     def query_all(self):
         """

@@ -90,6 +90,13 @@ class JsonbAttribute(InMemoryAttribute):
         backend = self._backend_ref() if self._backend_ref is not None else None
         if backend is not None:
             backend._on_attr_value_changed(self.db_key, self.db_category, new_value)
+        elif self._backend_ref is not None:
+            from evennia.utils import logger
+            logger.log_err(
+                f"JsonbAttribute: backend evicted while attr {self.db_key!r} still "
+                "referenced — in-place mutation lost. Do not hold strong refs to "
+                "JsonbAttribute objects after the owning object leaves the idmapper."
+            )
 
     @value.deleter
     def value(self):
@@ -105,6 +112,12 @@ class JsonbAttribute(InMemoryAttribute):
         backend = self._backend_ref() if self._backend_ref is not None else None
         if backend is not None:
             backend._on_lock_changed(self.db_key, self.db_category, value)
+        elif self._backend_ref is not None:
+            from evennia.utils import logger
+            logger.log_err(
+                f"JsonbAttribute: backend evicted while attr {self.db_key!r} still "
+                "referenced — lock mutation lost."
+            )
 
     @lock_storage.deleter
     def lock_storage(self):
@@ -136,9 +149,12 @@ class JsonbAttributeBackend(IAttributeBackend):
 
     _attrclass = JsonbAttribute
 
+    _FLUSH_FAIL_LIMIT = 10
+
     def __init__(self, handler, attrtype):
         super().__init__(handler, attrtype)
         self._dirty = False
+        self._flush_failures = 0
         self._l1 = self._load_document()
 
     # ------------------------------------------------------------------
@@ -209,12 +225,21 @@ class JsonbAttributeBackend(IAttributeBackend):
 
     def query_all(self):
         attrs = []
+        attrtype_prefix = f"_t_{self._attrtype}__" if self._attrtype else None
         for cat_key, section in self._l1.items():
             if not isinstance(section, dict):
                 continue
-            if cat_key.startswith("_") and cat_key not in (_NULL_CATEGORY,):
-                continue  # skip internal meta keys
-            category = None if cat_key == _NULL_CATEGORY else cat_key
+            if attrtype_prefix:
+                # Attrtype backend: only yield sections for this attrtype.
+                if not cat_key.startswith(attrtype_prefix):
+                    continue
+                cat_part = cat_key[len(attrtype_prefix):]
+                category = None if cat_part == _NULL_CATEGORY else cat_part
+            else:
+                # Regular backend: skip internal meta and attrtype sections.
+                if cat_key.startswith("_"):
+                    continue
+                category = None if cat_key == _NULL_CATEGORY else cat_key
             data = section.get(_DATA, {})
             locks = section.get(_LOCKS, {})
             strvs = section.get(_STRV, {})
@@ -310,10 +335,12 @@ class JsonbAttributeBackend(IAttributeBackend):
         if strvalue:
             section.setdefault(_DATA, {})[key] = to_jsonb(None)
             section.setdefault(_STRV, {})[key] = value
+            attr.db_strvalue = value
+            attr.db_value = None
         else:
             section.setdefault(_DATA, {})[key] = to_jsonb(value)
-            # Also update the live attr so cached references see the new value.
             attr.db_value = from_jsonb(section[_DATA][key], db_obj=attr)
+            attr.db_strvalue = None
         self._mark_dirty()
 
     def do_batch_update_attribute(self, attr_obj, category, lock_storage, new_value, strvalue):
@@ -364,6 +391,9 @@ class JsonbAttributeBackend(IAttributeBackend):
     # Flush (participates in the existing flush_all_dirty() loop)
     # ------------------------------------------------------------------
 
+    def pending_count(self) -> int:
+        return 1 if self._dirty else 0
+
     def flush_dirty(self):
         """Write the L1 dict to ``db_attrs`` and save.  Called by the tick."""
         if not self._dirty:
@@ -375,10 +405,20 @@ class JsonbAttributeBackend(IAttributeBackend):
             self.obj.db_attrs = self._l1
             self.obj.save(update_fields=["db_attrs"])
             self._dirty = False
+            self._flush_failures = 0
             _DIRTY_BACKENDS.discard(self)
         except Exception:
-            # Keep dirty; retry next tick.
+            from evennia.utils import logger
+            self._flush_failures += 1
             _DIRTY_BACKENDS.add(self)
+            logger.log_trace(
+                f"JsonbAttributeBackend._do_flush: flush attempt #{self._flush_failures} "
+                f"failed for pk={getattr(self.obj, 'pk', '?')}; "
+                f"{'giving up — write lost' if self._flush_failures >= self._FLUSH_FAIL_LIMIT else 'will retry next tick'}."
+            )
+            if self._flush_failures >= self._FLUSH_FAIL_LIMIT:
+                self._dirty = False
+                _DIRTY_BACKENDS.discard(self)
 
     def reset_cache(self):
         """Reload L1 from DB and reset the upper-layer cache."""

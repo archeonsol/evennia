@@ -529,40 +529,18 @@ class TypedAttr:
     # ------------------------------------------------------------------
 
     def filter_kwargs(self, value, *, prefix="db_attributes__"):
+        """Not usable with the JSONB attribute backend.
+
+        The legacy ``db_attributes__`` ORM lookup targets the M2M attribute
+        table, which is no longer written when ``JsonbAttributeBackend`` is
+        active.  Use ``world.db_utils.attrs_match()`` / ``attrs_exists()`` /
+        ``db_attrs__contains={...}`` for JSONB-backed queries instead.
         """
-        Return ORM filter kwargs for querying TypedObjects where this
-        attribute equals *value*, using the indexed typed columns.
-
-        Only valid for ``backend='blob'`` and ``backend='typed_col'``.
-        Uses the existing ``value_query_filter`` helper.
-
-        Example::
-
-            from evennia.objects.models import ObjectDB
-
-            ObjectDB.objects.filter(
-                **Character.level.filter_kwargs(10),
-                db_typeclass_path="typeclasses.characters.Character",
-            )
-
-        Args:
-            value: The value to match.
-            prefix (str): ORM lookup prefix for the Attribute table.
-
-        Returns:
-            dict: Filter kwargs for ``QuerySet.filter(**kwargs)``.
-        """
-        if self.backend == "bag":
-            raise TypeError("filter_kwargs is not supported for bag backend.")
-        from evennia.typeclasses.attributes import value_query_filter
-
-        kwargs = value_query_filter(value, prefix=prefix)
-        kwargs[f"{prefix}db_key__iexact"] = self.attr_key
-        if self.category is not None:
-            kwargs[f"{prefix}db_category__iexact"] = self.category
-        else:
-            kwargs[f"{prefix}db_category__isnull"] = True
-        return kwargs
+        raise NotImplementedError(
+            "TypedAttr.filter_kwargs targets the legacy db_attributes M2M table, "
+            "which is orphaned when the JSONB backend is active. "
+            "Use world.db_utils.attrs_match() or db_attrs__contains for queries."
+        )
 
 
 # ---------------------------------------------------------------------------
