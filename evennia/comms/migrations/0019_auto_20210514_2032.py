@@ -5,42 +5,61 @@ from django.db import migrations
 
 def migrate_channel_aliases(apps, schema_editor):
     """
-    Note - this migration uses the contemporary ChannelDB rather than
-    the apps.get_model version. This allows for using all the
-    helper functionality, but introduces a dependency on current code. So
-    We catch errors and warn, since this is not something that will be needed
-    after doing the first migration.
+    One-time data migration creating per-subscriber channel aliases for
+    channels that predate that feature.
 
+    Whether there is anything to migrate is checked via the *historical* model,
+    so the query only references columns that exist at this point in migration
+    history. On a fresh install the channel table is empty and this is a clean
+    no-op. The actual migration needs alias/nick helpers that live on the
+    current model, so it imports that; but the current model also selects
+    ``db_attrs`` (a column added by a later migration), hence we only touch it
+    once real channel data is known to exist, and narrowly skip if the schema
+    those helpers expect has not been migrated in yet.
     """
+    # Historical model: its query does not reference later-added columns.
+    if not apps.get_model("comms", "ChannelDB").objects.exists():
+        return
+
+    from django.db.utils import OperationalError, ProgrammingError
+
+    from evennia.comms.models import ChannelDB
+
     try:
-        from evennia.comms.models import ChannelDB
+        channels = list(ChannelDB.objects.all())
+    except (OperationalError, ProgrammingError) as err:
+        # The current model references schema added by later migrations that
+        # have not run yet on this upgrade; nothing can be done here.
+        print(
+            f"channel-alias data migration 0019_auto_20210514_2032 skipped (schema not ready): {err}"
+        )
+        return
 
-        # ChannelDB = apps.get_model("comms", "ChannelDB")
-
-        for channel in ChannelDB.objects.all():
-            try:
-                chan_key = channel.db_key.lower()
-                channel_aliases = [chan_key] + [alias.lower() for alias in channel.aliases.all()]
-                for subscriber in channel.subscriptions.all():
-                    nicktuples = subscriber.nicks.get(
-                        category="channel", return_tuple=True, return_list=True
-                    )
-                    all_aliases = channel_aliases + [
-                        tup[2] for tup in nicktuples if tup[3].lower() == chan_key
-                    ]
-                    for key_or_alias in all_aliases:
-                        channel.add_user_channel_alias(subscriber, key_or_alias)
-            except Exception as err:
-                # we want to continue gracefully here since this is a data-migration from
-                # an old to a new version and doesn't involve schema changes
-                print(f"channel-alias data migration 0019_auto_20210514_2032 skipped: {err}")
-    except Exception as err:
-        # Schema mismatch (e.g. db_attrs not yet added); skip on fresh databases.
-        print(f"channel-alias data migration 0019_auto_20210514_2032 skipped: {err}")
+    for channel in channels:
+        try:
+            chan_key = channel.db_key.lower()
+            channel_aliases = [chan_key] + [alias.lower() for alias in channel.aliases.all()]
+            for subscriber in channel.subscriptions.all():
+                nicktuples = subscriber.nicks.get(
+                    category="channel", return_tuple=True, return_list=True
+                )
+                all_aliases = channel_aliases + [
+                    tup[2] for tup in nicktuples if tup[3].lower() == chan_key
+                ]
+                for key_or_alias in all_aliases:
+                    channel.add_user_channel_alias(subscriber, key_or_alias)
+        except Exception as err:
+            # Per-channel data issue; continue migrating the remaining channels.
+            print(
+                f"channel-alias data migration 0019_auto_20210514_2032 skipped for a channel: {err}"
+            )
 
 
 class Migration(migrations.Migration):
-    atomic = False  # allows catching errors without aborting the outer transaction
+    # Non-atomic so the OperationalError/ProgrammingError catch above can skip
+    # cleanly on an upgrade where later schema is not yet present (catching a DB
+    # error inside an atomic block would leave the transaction unusable).
+    atomic = False
 
     dependencies = [
         ("comms", "0018_auto_20191025_0831"),
