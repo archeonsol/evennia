@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "evennia"
-version = "6.0.0+underspire.51"
+version = "6.0.0+underspire.52"
 maintainers = [{ name = "Griatch", email = "griatch@gmail.com" }]
 description = "Underspire Engine — Evennia 6.x fork for UNDERSPIRE (MUD server + game toolkit)."
 requires-python = ">=3.12"
@@ -157,6 +157,10 @@ game = [
 [project.scripts]
 evennia = "evennia.server.evennia_launcher:main"
 
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["evennia*"]
 
 [tool.black]
 line-length = 100
