@@ -1365,6 +1365,11 @@ class InMemoryAttributeBackend(IAttributeBackend):
 class ModelAttributeBackend(IAttributeBackend):
     """
     Uses Django models for storing Attributes.
+
+    Note: the db_attributes M2M field was removed in Phase 1 of the JSONB
+    migration.  All methods below are no-ops / empty-returns when the field
+    is absent so that code paths still wired to this backend (e.g. NickHandler)
+    do not crash.  Phase 2 removes this class entirely.
     """
 
     _attrclass = Attribute
@@ -1375,7 +1380,14 @@ class ModelAttributeBackend(IAttributeBackend):
         self._model = to_str(handler.obj.__dbclass__.__name__.lower())
         self._dirty_attrs: set = set()
 
+    def _get_m2m(self):
+        """Return the M2M manager or None when the field has been removed."""
+        return getattr(self.obj, self._m2m_fieldname, None)
+
     def query_all(self):
+        m2m = self._get_m2m()
+        if m2m is None:
+            return []
         query = {
             "%s__id" % self._model: self._objid,
             "attribute__db_model__iexact": self._model,
@@ -1383,12 +1395,13 @@ class ModelAttributeBackend(IAttributeBackend):
         }
         return [
             conn.attribute
-            for conn in getattr(self.obj, self._m2m_fieldname)
-            .through.objects.select_related("attribute")
-            .filter(**query)
+            for conn in m2m.through.objects.select_related("attribute").filter(**query)
         ]
 
     def query_key(self, key, category):
+        m2m = self._get_m2m()
+        if m2m is None or not self.obj.pk:
+            return []
         query = {
             "%s__id" % self._model: self._objid,
             "attribute__db_model__iexact": self._model,
@@ -1396,15 +1409,12 @@ class ModelAttributeBackend(IAttributeBackend):
             "attribute__db_key__iexact": key.lower(),
             "attribute__db_category__iexact": category.lower() if category else None,
         }
-        if not self.obj.pk:
-            return []
-        return (
-            getattr(self.obj, self._m2m_fieldname)
-            .through.objects.select_related("attribute")
-            .filter(**query)
-        )
+        return m2m.through.objects.select_related("attribute").filter(**query)
 
     def query_category(self, category):
+        m2m = self._get_m2m()
+        if m2m is None:
+            return []
         query = {
             "%s__id" % self._model: self._objid,
             "attribute__db_model__iexact": self._model,
@@ -1413,12 +1423,13 @@ class ModelAttributeBackend(IAttributeBackend):
         }
         return [
             conn.attribute
-            for conn in getattr(self.obj, self._m2m_fieldname)
-            .through.objects.select_related("attribute")
-            .filter(**query)
+            for conn in m2m.through.objects.select_related("attribute").filter(**query)
         ]
 
     def do_create_attribute(self, key, category, lockstring, value, strvalue):
+        m2m = self._get_m2m()
+        if m2m is None:
+            return None
         kwargs = {
             "db_key": key,
             "db_category": category,
@@ -1443,7 +1454,7 @@ class ModelAttributeBackend(IAttributeBackend):
             kwargs["db_strvalue"] = None
         new_attr = self._attrclass(**kwargs)
         new_attr.save()
-        getattr(self.obj, self._m2m_fieldname).add(new_attr)
+        m2m.add(new_attr)
         self._set_cache(key, category, new_attr)
         return new_attr
 
@@ -1530,8 +1541,9 @@ class ModelAttributeBackend(IAttributeBackend):
         return dirty
 
     def do_batch_finish(self, attr_objs):
-        # Add new objects to m2m field all at once
-        getattr(self.obj, self._m2m_fieldname).add(*attr_objs)
+        m2m = self._get_m2m()
+        if m2m is not None and attr_objs:
+            m2m.add(*attr_objs)
 
     def batch_add(self, *args, **kwargs):
         """
@@ -1586,10 +1598,11 @@ class ModelAttributeBackend(IAttributeBackend):
                 new_attr_specs.append((keystr, category))
 
         if new_attr_objs:
-            # bulk insert all new attributes in one query
+            m2m = self._get_m2m()
+            if m2m is None:
+                return
             created = self._attrclass.objects.bulk_create(new_attr_objs)
-            # wire up M2M and cache
-            getattr(self.obj, self._m2m_fieldname).add(*created)
+            m2m.add(*created)
             for attr_obj, (keystr, category) in zip(created, new_attr_specs):
                 self._set_cache(keystr, category, attr_obj)
 

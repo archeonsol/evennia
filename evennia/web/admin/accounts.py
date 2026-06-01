@@ -27,7 +27,6 @@ from evennia.objects.models import ObjectDB
 from evennia.utils import create
 
 from . import utils as adminutils
-from .attributes import AttributeInline
 from .tags import TagInline
 
 sensitive_post_parameters_m = method_decorator(sensitive_post_parameters())
@@ -158,16 +157,6 @@ class AccountTagInline(TagInline):
     related_field = "accountdb"
 
 
-class AccountAttributeInline(AttributeInline):
-    """
-    Inline Account Attributes.
-
-    """
-
-    model = AccountDB.db_attributes.through
-    related_field = "accountdb"
-
-
 class ObjectPuppetInline(admin.StackedInline):
     """
     Inline creation of puppet-Object in Account.
@@ -239,7 +228,7 @@ class AccountAdmin(BaseUserAdmin):
     search_fields = ["=id", "^username", "db_typeclass_path"]
     ordering = ["-db_date_created", "id"]
     list_filter = ["is_superuser", "is_staff", "db_typeclass_path"]
-    inlines = [AccountTagInline, AccountAttributeInline]
+    inlines = [AccountTagInline]
     readonly_fields = ["db_date_created", "serialized_string", "puppeted_objects"]
     view_on_site = False
     fieldsets = (

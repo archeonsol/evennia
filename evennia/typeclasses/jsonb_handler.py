@@ -155,6 +155,7 @@ class JsonbAttributeBackend(IAttributeBackend):
         super().__init__(handler, attrtype)
         self._dirty = False
         self._flush_failures = 0
+        self._pk_counter = 0
         self._l1 = self._load_document()
 
     # ------------------------------------------------------------------
@@ -207,8 +208,9 @@ class JsonbAttributeBackend(IAttributeBackend):
     # ------------------------------------------------------------------
 
     def _make_attr(self, key, category, encoded, lockstring, strvalue):
+        self._pk_counter += 1
         attr = JsonbAttribute(
-            pk=hash((key, category, id(self))),
+            pk=self._pk_counter,
             key=key,
             category=category,
             lock_storage=lockstring or "",

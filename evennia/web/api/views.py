@@ -81,7 +81,7 @@ class TypeclassViewSetMixin(GeneralViewSetMixin):
             else:
                 handler.remove(key=key, category=category)
             return Response(
-                serializers.AttributeSerializer(obj.db_attributes.all(), many=True).data,
+                serializers.AttributeSerializer(obj.attributes.all(), many=True).data,
                 status=status.HTTP_200_OK,
             )
         return Response(attr.errors, status=status.HTTP_400_BAD_REQUEST)

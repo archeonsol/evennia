@@ -8,7 +8,13 @@ Covers:
   - force_flush: no-op on old backend, flushes on JSONB backend
   - Document layout: null category stored as "~", named categories preserved
   - Lockstring and strvalue (nick) storage
+  - _do_flush retry/failure behavior
+  - query_all with attrtype sections
+  - pending_count() return values
+  - unique pk counter per backend instance
 """
+
+from unittest.mock import patch
 
 from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend, force_flush
 from evennia.typeclasses.jsonb_util import _SENTINEL, from_jsonb, to_jsonb
@@ -299,3 +305,132 @@ class TestForceFlushNoop(BaseEvenniaTest):
         # obj1 uses the default ModelAttributeBackend; force_flush should not raise.
         self.obj1.attributes.add("x", 1)
         force_flush(self.obj1)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# _do_flush retry and give-up behavior
+# ---------------------------------------------------------------------------
+
+
+class TestFlushRetry(BaseEvenniaTest):
+
+    def setUp(self):
+        super().setUp()
+        from evennia.typeclasses.attributes import AttributeHandler
+        self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        self.backend = self.handler.backend
+
+    def test_retry_increments_failure_counter(self):
+        self.handler.add("x", 1)
+        with patch.object(self.obj1, "save", side_effect=Exception("db down")):
+            self.backend._do_flush()
+        self.assertEqual(self.backend._flush_failures, 1)
+        self.assertTrue(self.backend._dirty)
+
+    def test_give_up_at_limit_clears_dirty(self):
+        self.handler.add("x", 1)
+        self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
+        with patch.object(self.obj1, "save", side_effect=Exception("db down")):
+            self.backend._do_flush()
+        self.assertEqual(self.backend._flush_failures, self.backend._FLUSH_FAIL_LIMIT)
+        self.assertFalse(self.backend._dirty)
+
+    def test_success_resets_failure_counter(self):
+        self.handler.add("x", 1)
+        self.backend._flush_failures = 3
+        self.backend.flush_dirty()
+        self.assertEqual(self.backend._flush_failures, 0)
+        self.assertFalse(self.backend._dirty)
+
+
+# ---------------------------------------------------------------------------
+# query_all with attrtype sections
+# ---------------------------------------------------------------------------
+
+
+class TestAttrtypeQueryAll(BaseEvenniaTest):
+
+    def setUp(self):
+        super().setUp()
+        from evennia.typeclasses.attributes import AttributeHandler
+
+        class NickHandler(AttributeHandler):
+            _attrtype = "nick"
+
+        self.handler = NickHandler(self.obj1, JsonbAttributeBackend)
+        self.backend = self.handler.backend
+
+    def test_attrtype_section_returned_by_query_all(self):
+        self.handler.add("greet", "hi")
+        attrs = self.backend.query_all()
+        keys = {a.db_key for a in attrs}
+        self.assertIn("greet", keys)
+
+    def test_regular_section_excluded_from_attrtype_backend(self):
+        # Plant a regular (non-nick) attr directly in _l1.
+        self.backend._l1.setdefault("~", {}).setdefault("_d", {})["intruder"] = "val"
+        attrs = self.backend.query_all()
+        keys = {a.db_key for a in attrs}
+        self.assertNotIn("intruder", keys)
+
+    def test_attrtype_category_preserved(self):
+        self.handler.add("greet", "hi", category="en")
+        attrs = self.backend.query_all()
+        cats = {a.db_category for a in attrs}
+        self.assertIn("en", cats)
+
+
+# ---------------------------------------------------------------------------
+# pending_count()
+# ---------------------------------------------------------------------------
+
+
+class TestPendingCount(BaseEvenniaTest):
+
+    def setUp(self):
+        super().setUp()
+        from evennia.typeclasses.attributes import AttributeHandler
+        self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        self.backend = self.handler.backend
+
+    def test_zero_when_clean(self):
+        self.assertEqual(self.backend.pending_count(), 0)
+
+    def test_one_when_dirty(self):
+        self.handler.add("x", 1)
+        self.assertEqual(self.backend.pending_count(), 1)
+
+    def test_zero_after_flush(self):
+        self.handler.add("x", 1)
+        self.backend.flush_dirty()
+        self.assertEqual(self.backend.pending_count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# pk counter uniqueness
+# ---------------------------------------------------------------------------
+
+
+class TestPkCounter(BaseEvenniaTest):
+
+    def setUp(self):
+        super().setUp()
+        from evennia.typeclasses.attributes import AttributeHandler
+        self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        self.backend = self.handler.backend
+
+    def test_pk_unique_per_attr(self):
+        self.handler.add("a", 1)
+        self.handler.add("b", 2)
+        attrs = self.backend.query_all()
+        pks = [a.pk for a in attrs]
+        self.assertEqual(len(pks), len(set(pks)), "duplicate pks across attrs")
+
+    def test_pk_not_hash_collision_prone(self):
+        # hash() can collide for (key=None, cat=None) vs (key=None, cat="")
+        # Counter avoids this entirely.
+        for i in range(50):
+            self.handler.add(f"attr_{i}", i)
+        attrs = self.backend.query_all()
+        pks = [a.pk for a in attrs]
+        self.assertEqual(len(pks), len(set(pks)))

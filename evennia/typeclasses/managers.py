@@ -87,8 +87,11 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             from evennia.typeclasses.attributes import value_query_filter
 
             query.extend(value_query_filter(value, prefix="attribute__").items())
+        m2m = getattr(self.model, "db_attributes", None)
+        if m2m is None:
+            return Attribute.objects.none()
         return Attribute.objects.filter(
-            pk__in=self.model.db_attributes.through.objects.filter(**dict(query)).values_list(
+            pk__in=m2m.through.objects.filter(**dict(query)).values_list(
                 "attribute_id", flat=True
             )
         )

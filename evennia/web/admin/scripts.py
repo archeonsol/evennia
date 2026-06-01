@@ -9,7 +9,6 @@ from django.contrib import admin
 from evennia.scripts.models import ScriptDB
 
 from . import utils as adminutils
-from .attributes import AttributeInline
 from .tags import TagInline
 
 
@@ -60,16 +59,6 @@ class ScriptTagInline(TagInline):
     related_field = "scriptdb"
 
 
-class ScriptAttributeInline(AttributeInline):
-    """
-    Inline attribute tags.
-
-    """
-
-    model = ScriptDB.db_attributes.through
-    related_field = "scriptdb"
-
-
 @admin.register(ScriptDB)
 class ScriptAdmin(admin.ModelAdmin):
     """
@@ -112,7 +101,7 @@ class ScriptAdmin(admin.ModelAdmin):
             },
         ),
     )
-    inlines = [ScriptTagInline, ScriptAttributeInline]
+    inlines = [ScriptTagInline]
 
     def serialized_string(self, obj):
         """

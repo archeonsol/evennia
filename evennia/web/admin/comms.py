@@ -9,7 +9,6 @@ from django.contrib import admin
 
 from evennia.comms.models import ChannelDB, Msg
 
-from .attributes import AttributeInline
 from .tags import TagInline
 
 
@@ -172,16 +171,6 @@ class MsgAdmin(admin.ModelAdmin):
         return super().get_form(request, obj, **kwargs)
 
 
-class ChannelAttributeInline(AttributeInline):
-    """
-    Inline display of Channel Attribute - experimental
-
-    """
-
-    model = ChannelDB.db_attributes.through
-    related_field = "channeldb"
-
-
 class ChannelTagInline(TagInline):
     """
     Inline display of Channel Tags - experimental
@@ -219,7 +208,7 @@ class ChannelAdmin(admin.ModelAdmin):
 
     """
 
-    inlines = [ChannelTagInline, ChannelAttributeInline]
+    inlines = [ChannelTagInline]
     form = ChannelForm
     list_display = (
         "id",

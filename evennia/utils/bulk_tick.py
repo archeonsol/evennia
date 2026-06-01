@@ -94,6 +94,9 @@ class BulkTickContext:
         Must run on the reactor thread.
         Returns self for chaining.
         """
+        from twisted.internet import reactor as _reactor
+        assert _reactor.isInIOThread(), "gather_objectdb must run on the reactor thread"
+
         from evennia.objects.models import ObjectDB
 
         uncached_ids = []
@@ -145,6 +148,9 @@ class BulkTickContext:
         Must run on the reactor thread.
         Returns the number of objects whose L1 / DB was actually mutated.
         """
+        from twisted.internet import reactor as _reactor
+        assert _reactor.isInIOThread(), "apply must run on the reactor thread"
+
         patched = 0
         sql_batch: dict[int, dict[str, Any]] = {}
 

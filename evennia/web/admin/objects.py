@@ -16,18 +16,7 @@ from evennia.accounts.models import AccountDB
 from evennia.objects.models import ObjectDB
 
 from . import utils as adminutils
-from .attributes import AttributeInline
 from .tags import TagInline
-
-
-class ObjectAttributeInline(AttributeInline):
-    """
-    Defines inline descriptions of Attributes (experimental)
-
-    """
-
-    model = ObjectDB.db_attributes.through
-    related_field = "objectdb"
 
 
 class ObjectTagInline(TagInline):
@@ -176,7 +165,7 @@ class ObjectAdmin(admin.ModelAdmin):
 
     """
 
-    inlines = [ObjectTagInline, ObjectAttributeInline]
+    inlines = [ObjectTagInline]
     list_display = (
         "id",
         "db_key",
