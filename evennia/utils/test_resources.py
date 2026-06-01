@@ -36,10 +36,15 @@ import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
 from evennia.commands.command import Command, InterruptCommand
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import (
+    DefaultCharacter,
+    DefaultExit,
+    DefaultObject,
+    DefaultRoom,
+)
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.serversession import ServerSession
+from evennia.typeclasses.attributes import discard_dirty_backends
 from evennia.utils import ansi, create
 from evennia.utils.idmapper.models import flush_cache
 from evennia.utils.utils import all_from_module, inherits_from, to_str
@@ -276,6 +281,7 @@ class EvenniaTestMixin:
     @override_settings(PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"])
     def tearDown(self):
         flush_cache()
+        discard_dirty_backends()
         try:
             evennia.SESSION_HANDLER.data_out = self.backups[0]
             evennia.SESSION_HANDLER.disconnect = self.backups[1]
@@ -451,8 +457,7 @@ class EvenniaCommandTestMixin:
         # Mirror cmdhandler's AccountCommand normalisation so test fixtures
         # see the same caller/character/account shape as real dispatch.
         if getattr(cmdobj, "account_command_caller", False):
-            from evennia.commands.cmdhandler import \
-                _normalize_account_command_caller
+            from evennia.commands.cmdhandler import _normalize_account_command_caller
 
             providers = {"account": cmd_account}
             if cmdobj.session is not None and getattr(cmdobj.session, "puppet", None) is not None:
@@ -593,6 +598,7 @@ class BaseEvenniaTestCase(TestCase):
     def tearDown(self) -> None:
         super().tearDown()
         flush_cache()
+        discard_dirty_backends()
 
 
 class EvenniaTestCase(TestCase):
@@ -613,6 +619,7 @@ class EvenniaTestCase(TestCase):
     def tearDown(self) -> None:
         super().tearDown()
         flush_cache()
+        discard_dirty_backends()
 
 
 @override_settings(**DEFAULT_SETTINGS)

@@ -13,12 +13,61 @@ from django.db.models.functions import Cast
 
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
-from evennia.utils.utils import (class_from_module, make_iter,
-                                 variable_from_module)
+from evennia.utils.utils import class_from_module, make_iter, variable_from_module
 
 __all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__
 _Tag = None
+
+_UNSET = object()
+
+
+def _flush_attr_writes():
+    """Persist pending write-behind attribute changes before a DB attribute query.
+
+    JSONB attributes are written to the ``db_attrs`` column lazily (L1 cache,
+    flushed on the maintenance tick). A search that reads ``db_attrs`` directly
+    would otherwise miss attributes set since the last flush, so callers flush
+    first. No-op when nothing is dirty.
+    """
+    from evennia.typeclasses.attributes import flush_all_dirty
+
+    flush_all_dirty()
+
+
+def _jsonb_match_pks(queryset, key, category=None, value=_UNSET):
+    """Return the pks in *queryset* whose JSONB attribute document holds *key*.
+
+    Portable fallback for backends without JSONB containment (everything
+    except PostgreSQL, which uses GIN-indexed ``@>`` instead). When *value*
+    is supplied the stored encoded value must equal it; otherwise only
+    key-existence is tested. This iterates the candidate rows' ``db_attrs``
+    documents and is therefore unindexed: it backs SQLite/MySQL dev and test
+    runs, not the PostgreSQL hot path.
+
+    Args:
+        queryset (QuerySet): Rows to scan (candidate/typeclass restrictions
+            should already be applied).
+        key (str): Attribute key.
+        category (str or None): Attribute category; ``None`` is the default
+            section.
+        value: Target value. Omit (leave as ``_UNSET``) to test existence only.
+
+    Returns:
+        list: Matching primary keys.
+    """
+    from evennia.typeclasses.jsonb_util import to_jsonb
+
+    cat_key = "~" if category is None else str(category).lower()
+    encoded = None if value is _UNSET else to_jsonb(value)
+    pks = []
+    for pk, doc in queryset.values_list("pk", "db_attrs"):
+        data = ((doc or {}).get(cat_key) or {}).get("_d") or {}
+        if key not in data:
+            continue
+        if value is _UNSET or data[key] == encoded:
+            pks.append(pk)
+    return pks
 
 
 # Managers
@@ -36,15 +85,19 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
     def get_by_attribute(self, key=None, category=None, value=None, **kwargs):
         """Find objects where attribute *key* (in *category*) equals *value*.
 
-        Uses JSONB @> containment (GIN-indexed). Postgres only; returns none()
-        on other backends. *value* must not be None.
+        On PostgreSQL this uses GIN-indexed JSONB ``@>`` containment; on other
+        backends it falls back to an unindexed Python scan. *value* must not be
+        None (key-only existence checks are not needed by current callers).
         """
-        if key is None or value is None or connection.vendor != "postgresql":
+        if key is None or value is None:
             return self.none()
-        from evennia.typeclasses.jsonb_util import to_jsonb
+        _flush_attr_writes()
         cat_key = "~" if category is None else str(category).lower()
-        encoded = to_jsonb(value)
-        return self.filter(db_attrs__contains={cat_key: {"_d": {key: encoded}}})
+        if connection.vendor == "postgresql":
+            from evennia.typeclasses.jsonb_util import to_jsonb
+
+            return self.filter(db_attrs__contains={cat_key: {"_d": {key: to_jsonb(value)}}})
+        return self.filter(pk__in=_jsonb_match_pks(self.all(), key, category, value))
 
     # common methods for all typed managers. These are used
     # in other methods. Returns querysets.
@@ -580,14 +633,22 @@ class TypeclassManager(TypedObjectManager):
                 db_tags__db_tagtype=None,
             )
 
+        if plusattrs or negattrs:
+            _flush_attr_writes()
         if connection.vendor == "postgresql":
             from evennia.typeclasses.jsonb_util import to_jsonb
+
             for attrkey, attrval, attrcat in plusattrs:
                 cat_key = "~" if not attrcat else attrcat.lower()
                 qs = qs.filter(db_attrs__contains={cat_key: {"_d": {attrkey: to_jsonb(attrval)}}})
             for attrkey, attrval, attrcat in negattrs:
                 cat_key = "~" if not attrcat else attrcat.lower()
                 qs = qs.exclude(db_attrs__contains={cat_key: {"_d": {attrkey: to_jsonb(attrval)}}})
+        else:
+            for attrkey, attrval, attrcat in plusattrs:
+                qs = qs.filter(pk__in=_jsonb_match_pks(qs, attrkey, attrcat or None, attrval))
+            for attrkey, attrval, attrcat in negattrs:
+                qs = qs.exclude(pk__in=_jsonb_match_pks(qs, attrkey, attrcat or None, attrval))
 
         return qs.distinct()
 

@@ -31,7 +31,9 @@ class AttributeSerializer(serializers.Serializer):
     db_key = serializers.CharField()
     db_category = serializers.CharField(allow_null=True, required=False, default=None)
     db_attrtype = serializers.CharField(allow_null=True, required=False, default=None)
-    db_value = serializers.JSONField(required=False, allow_null=True, write_only=True)
+    # CharField (not JSONField) so form-encoded scalar values are accepted as-is;
+    # a JSONField would reject a bare string like "test_value" as invalid JSON.
+    db_value = serializers.CharField(required=False, allow_null=True, write_only=True)
     value_display = serializers.SerializerMethodField()
 
     @staticmethod

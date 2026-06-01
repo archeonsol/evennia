@@ -10,9 +10,19 @@ from django.db.models import Q
 from django.db.models.fields import exceptions
 
 from evennia.server import signals
-from evennia.typeclasses.managers import TypeclassManager, TypedObjectManager
-from evennia.utils.utils import (class_from_module, dbid_to_obj, is_iter,
-                                 make_iter, string_partial_matching)
+from evennia.typeclasses.managers import (
+    TypeclassManager,
+    TypedObjectManager,
+    _flush_attr_writes,
+    _jsonb_match_pks,
+)
+from evennia.utils.utils import (
+    class_from_module,
+    dbid_to_obj,
+    is_iter,
+    make_iter,
+    string_partial_matching,
+)
 
 __all__ = ("ObjectManager", "ObjectDBManager")
 _GA = object.__getattribute__
@@ -21,7 +31,10 @@ _GA = object.__getattribute__
 _ATTR = None
 
 from evennia.utils.multimatch import (  # noqa: E402
-    _get_multimatch_input_handler, _multimatch_regex, resolve_multimatch_index)
+    _get_multimatch_input_handler,
+    _multimatch_regex,
+    resolve_multimatch_index,
+)
 
 
 class ObjectDBManager(TypedObjectManager):
@@ -142,35 +155,39 @@ class ObjectDBManager(TypedObjectManager):
         ).order_by("id")
 
     def get_objs_with_attr(self, attr_name, candidates=None):
-        """Find objects that have *attr_name* set (any value). Postgres only."""
-        from django.db import connection
-        if connection.vendor != "postgresql":
-            return self.none()
+        """Find objects that have *attr_name* set (any value).
+
+        GIN-indexed on PostgreSQL; unindexed Python scan on other backends.
+        """
         cand_restriction = (
             candidates is not None
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
             or Q()
         )
-        return self.filter(cand_restriction).filter(
-            **{"db_attrs__~___d__has_key": attr_name}
-        )
+        _flush_attr_writes()
+        qs = self.filter(cand_restriction)
+        if connection.vendor == "postgresql":
+            return qs.filter(**{"db_attrs__~___d__has_key": attr_name})
+        return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name))
 
     def get_objs_with_attr_value(self, attr_name, value, candidates=None, typeclasses=None):
-        """Find objects where attribute *attr_name* equals *value*. Postgres only."""
-        from django.db import connection
-        if connection.vendor != "postgresql":
-            return self.none()
-        from evennia.typeclasses.jsonb_util import to_jsonb
+        """Find objects where attribute *attr_name* equals *value*.
+
+        GIN-indexed on PostgreSQL; unindexed Python scan on other backends.
+        """
         cand_restriction = (
             candidates is not None
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
             or Q()
         )
         type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
-        encoded = to_jsonb(value)
-        return self.filter(cand_restriction & type_restriction).filter(
-            db_attrs__contains={"~": {"_d": {attr_name: encoded}}}
-        )
+        _flush_attr_writes()
+        qs = self.filter(cand_restriction & type_restriction)
+        if connection.vendor == "postgresql":
+            from evennia.typeclasses.jsonb_util import to_jsonb
+
+            return qs.filter(db_attrs__contains={"~": {"_d": {attr_name: to_jsonb(value)}}})
+        return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name, None, value))
 
     def get_objs_with_db_property(self, property_name, candidates=None):
         """
