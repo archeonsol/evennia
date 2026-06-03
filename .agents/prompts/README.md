@@ -72,6 +72,7 @@ backlog.
 
 - [F13: contribs half-policy](F13-contribs-policy.md)
 - [F18: unused engine handlers](F18-unused-engine-handlers.md)
+- [F19: tag-search facade gaps](F19-tag-search-facade-gaps.md)
 
 **Mechanical / verification:**
 
