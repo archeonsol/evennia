@@ -25,6 +25,23 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.68 — bulk_tick reactor-thread check (Twisted compat)
+
+### Engine
+
+- [`evennia/utils/bulk_tick.py`](evennia/utils/bulk_tick.py): `gather_objectdb` and
+  `apply` now assert the I/O thread via `twisted.python.threadable.isInIOThread()`
+  instead of `reactor.isInIOThread()`. Production `EPollReactor` on older Twisted
+  builds lacks the reactor method and raised `AttributeError` every global-tick
+  heartbeat, forcing the game into legacy per-object fallback while spamming logs.
+
+### Migration
+
+- Pin production to `underspire.68` (or newer) in the game deploy workflow
+  `EVENNIA_REF`.
+
+---
+
 ## 6.0.0+underspire.63 — deprecate `ObjectDB.objects.get_objs_with_attr()`
 
 Key-existence attribute search (`get_objs_with_attr(attr_name)`, "any value")

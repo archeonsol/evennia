@@ -42,6 +42,18 @@ from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
 _NULL_CAT = "~"   # db_attrs key for the default (category=None) section
 
 
+def _assert_reactor_thread(where: str) -> None:
+    """Fail fast if not on the Twisted I/O thread (idmapper/L1 are not thread-safe).
+
+    Uses ``twisted.python.threadable.isInIOThread`` — the portable API.  Some
+    Twisted builds expose ``reactor.isInIOThread`` only on newer releases; prod
+    EPollReactor lacks that method and raised AttributeError every heartbeat tick.
+    """
+    from twisted.python import threadable
+
+    assert threadable.isInIOThread(), f"{where} must run on the reactor thread"
+
+
 class BulkTickContext:
     """
     Reactor-side coordinator for a single bulk-tick cycle.
@@ -94,8 +106,7 @@ class BulkTickContext:
         Must run on the reactor thread.
         Returns self for chaining.
         """
-        from twisted.internet import reactor as _reactor
-        assert _reactor.isInIOThread(), "gather_objectdb must run on the reactor thread"
+        _assert_reactor_thread("gather_objectdb")
 
         from evennia.objects.models import ObjectDB
 
@@ -148,8 +159,7 @@ class BulkTickContext:
         Must run on the reactor thread.
         Returns the number of objects whose L1 / DB was actually mutated.
         """
-        from twisted.internet import reactor as _reactor
-        assert _reactor.isInIOThread(), "apply must run on the reactor thread"
+        _assert_reactor_thread("apply")
 
         patched = 0
         sql_batch: dict[int, dict[str, Any]] = {}
