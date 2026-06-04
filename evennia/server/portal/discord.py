@@ -572,6 +572,10 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
             if data["author"]["id"] == self.discord_id:
                 # it's by the bot itself! disregard
                 return
+            if data.get("webhook_id"):
+                # Webhook posts (including our own channel webhook fallback) must not
+                # re-enter the game via BUS.emit — they are not player chat.
+                return
             message = data["content"]
             channel_id = data["channel_id"]
             keywords = {"channel_id": channel_id}
