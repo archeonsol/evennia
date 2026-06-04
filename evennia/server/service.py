@@ -527,21 +527,17 @@ class EvenniaServerService(MultiService):
 
         self.at_server_init()
 
-        # Boot bulk-job: ensure every owned character has a ControlBinding
-        # (the durable control graph that replaces the session.puppet / puid
-        # pointer pair). Idempotent and skipped on warm reloads, where the
-        # rows already exist from the prior cold start.
-        if mode != "reload":
-            try:
-                from evennia.accounts.models import ControlBinding
+        # Boot/reload bulk-job: reconcile legacy ownership (db_account,
+        # _last_puppet, _playable_characters, puppet locks) into ControlBinding
+        # rows. Idempotent — safe on every PSYNC including @reload.
+        try:
+            from evennia.accounts.models import ControlBinding
 
-                created = ControlBinding.populate_missing()
-                if created:
-                    logger.log_info(
-                        f"ControlBinding: populated {created} missing control binding(s)."
-                    )
-            except Exception:
-                logger.log_trace("ControlBinding.populate_missing failed at startup")
+            stats = ControlBinding.reconcile_ownership()
+            if stats.get("created"):
+                logger.log_info(f"ControlBinding reconcile: {stats}")
+        except Exception:
+            logger.log_trace("ControlBinding.reconcile_ownership failed at startup")
 
         # call correct server hook based on start file value
         if mode == "reload":

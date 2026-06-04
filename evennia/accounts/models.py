@@ -16,6 +16,8 @@ account info and OOC account configuration variables etc.
 
 """
 
+import re
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -198,6 +200,9 @@ class AccountDB(TypedObject, AbstractUser):
 #: in-world body — the IC character, then any nested bodies it drives).
 CONTROL_ACCOUNT = "account"
 CONTROL_OBJECT = "object"
+
+# Player-character puppet locks from DefaultAccount.at_post_create_character.
+_PID_LOCK_RE = re.compile(r"pid\((\d+)\)")
 
 
 class ControlBinding(models.Model):
@@ -385,24 +390,146 @@ class ControlBinding(models.Model):
         return binding
 
     @classmethod
-    def populate_missing(cls):
-        """Boot bulk-job: create a binding row for every owned character that
-        lacks one. Idempotent — safe to run on every server start. Returns the
-        number of rows created."""
+    def ensure_playable(cls, account, identity):
+        """Idempotent: durable ``ControlBinding`` + ``ObjectDB.db_account`` sync.
+
+        Mirrors :meth:`CharactersHandler.add` ownership writes without firing
+        ``at_character_added`` (safe for bulk backfill).
+        """
+        if account is None or identity is None:
+            return False
+        identity_id = getattr(identity, "id", None) or getattr(identity, "pk", None)
+        account_id = getattr(account, "id", None) or getattr(account, "pk", None)
+        if not identity_id or not account_id:
+            return False
+        had_binding = cls.objects.filter(db_identity_id=identity_id).exists()
+        cls.for_identity(account, identity)
+        if getattr(identity, "db_account_id", None) != account_id:
+            identity.db_account_id = account_id
+            identity.save(update_fields=["db_account"])
+        return not had_binding
+
+    @classmethod
+    def _identity_ids_for_account(cls, account):
+        """Character ids already bound to this account in the control graph."""
+        return set(
+            cls.objects.filter(db_account=account)
+            .exclude(db_identity__isnull=True)
+            .values_list("db_identity_id", flat=True)
+        )
+
+    @classmethod
+    def reconcile_account(cls, account, *, scan_locks=True):
+        """Repair one account's playable set from legacy ownership signals.
+
+        Sources (in order): ``ObjectDB.db_account``, ``_last_puppet``,
+        ``_playable_characters``, and (optional) ``pid()`` puppet locks on
+        character typeclasses with no ``db_account``.
+
+        Returns:
+            int: number of identities newly linked to this account.
+        """
         from evennia.objects.models import ObjectDB
 
-        existing = set(
-            cls.objects.exclude(db_identity__isnull=True).values_list(
-                "db_identity_id", flat=True
-            )
-        )
+        if account is None:
+            return 0
+        linked = cls._identity_ids_for_account(account)
         created = 0
-        owned = ObjectDB.objects.exclude(db_account__isnull=True).values_list(
-            "id", "db_account_id"
-        )
-        for obj_id, acct_id in owned:
-            if obj_id in existing:
-                continue
-            cls.objects.create(db_account_id=acct_id, db_identity_id=obj_id)
-            created += 1
+
+        def _try(identity):
+            nonlocal created
+            if identity is None:
+                return
+            identity_id = getattr(identity, "id", None)
+            if not identity_id or identity_id in linked:
+                return
+            if cls.ensure_playable(account, identity):
+                created += 1
+            linked.add(identity_id)
+
+        for identity_id in ObjectDB.objects.filter(db_account_id=account.id).values_list(
+            "id", flat=True
+        ):
+            _try(ObjectDB.objects.filter(id=identity_id).first())
+
+        last = getattr(getattr(account, "db", None), "_last_puppet", None)
+        _try(last)
+
+        playable = getattr(getattr(account, "db", None), "_playable_characters", None) or []
+        for entry in make_iter(playable):
+            _try(entry)
+
+        if scan_locks:
+            char_marker = (
+                getattr(settings, "BASE_CHARACTER_TYPECLASS", "") or "characters"
+            ).rsplit(".", 1)[-1]
+            qs = ObjectDB.objects.filter(db_account__isnull=True).exclude(
+                db_lock_storage=""
+            )
+            if char_marker:
+                qs = qs.filter(db_typeclass_path__icontains=char_marker)
+            for identity_id, lock_storage in qs.values_list("id", "db_lock_storage"):
+                if identity_id in linked:
+                    continue
+                match = _PID_LOCK_RE.search(lock_storage or "")
+                if not match or int(match.group(1)) != account.id:
+                    continue
+                _try(ObjectDB.objects.filter(id=identity_id).first())
+
         return created
+
+    @classmethod
+    def reconcile_ownership(cls):
+        """Global idempotent I1 ownership backfill (all accounts).
+
+        Safe on every server start and reload. Returns a stats dict for logging.
+        """
+        from evennia.objects.models import ObjectDB
+
+        stats = {"accounts": 0, "puppet_lock": 0, "db_account_resync": 0}
+
+        for account in AccountDB.objects.all():
+            stats["accounts"] += cls.reconcile_account(account, scan_locks=False)
+
+        char_marker = (getattr(settings, "BASE_CHARACTER_TYPECLASS", "") or "characters").rsplit(
+            ".", 1
+        )[-1]
+        qs = ObjectDB.objects.filter(db_account__isnull=True).exclude(db_lock_storage="")
+        if char_marker:
+            qs = qs.filter(db_typeclass_path__icontains=char_marker)
+        for identity_id, lock_storage in qs.values_list("id", "db_lock_storage"):
+            match = _PID_LOCK_RE.search(lock_storage or "")
+            if not match:
+                continue
+            account = AccountDB.objects.filter(id=int(match.group(1))).first()
+            if not account:
+                continue
+            if identity_id in cls._identity_ids_for_account(account):
+                continue
+            identity = ObjectDB.objects.filter(id=identity_id).first()
+            if identity and cls.ensure_playable(account, identity):
+                stats["puppet_lock"] += 1
+
+        for binding in cls.objects.exclude(db_identity__isnull=True).select_related(
+            "db_account", "db_identity"
+        ):
+            identity = binding.db_identity
+            if identity is None:
+                continue
+            if identity.db_account_id != binding.db_account_id:
+                identity.db_account_id = binding.db_account_id
+                identity.save(update_fields=["db_account"])
+                stats["db_account_resync"] += 1
+
+        stats["created"] = sum(stats.values())
+        return stats
+
+    @classmethod
+    def populate_missing(cls):
+        """Boot bulk-job: reconcile legacy ownership into ``ControlBinding`` rows.
+
+        Idempotent — safe on every server start **and** reload. Returns the
+        number of new links plus ``db_account`` resyncs (same as
+        ``reconcile_ownership()['created']``).
+        """
+        return cls.reconcile_ownership().get("created", 0)
