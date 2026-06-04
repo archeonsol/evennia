@@ -171,6 +171,12 @@ class CharactersHandler:
             db_account=self.owner, db_identity=character
         ).exists()
         ControlBinding.for_identity(self.owner, character)
+        # Keep ObjectDB.db_account in sync for legacy ownership reads (chargen web,
+        # locks, populate_missing, etc.). I1 focus uses ControlBinding; this field
+        # is durable ownership, not the live session driver.
+        if character.db_account_id != self.owner.id:
+            character.db_account = self.owner
+            character.save(update_fields=["db_account"])
         if not already:
             self.owner.at_character_added(character)
 
