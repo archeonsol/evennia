@@ -1090,16 +1090,16 @@ class TestAtPrePuppetVeto(BaseEvenniaTest):
         self.char1.location = self.room1
         with patch.object(type(self.char1), "at_pre_puppet", return_value=False):
             self.account.puppet_object(self.session, self.char1)
-        # Puppet did not attach; session has no puppet, char has no account.
-        self.assertIsNone(self.session.puppet)
-        self.assertIsNone(self.char1.account)
+        # Puppet did not attach; session drives no body.
+        self.assertIsNone(self.session.get_puppet())
+        self.assertIsNone(self.session.bid)
 
     def test_none_allows_puppet(self):
         self.account.unpuppet_object(self.session)
         self.char1.location = self.room1
         with patch.object(type(self.char1), "at_pre_puppet", return_value=None):
             self.account.puppet_object(self.session, self.char1)
-        self.assertEqual(self.session.puppet, self.char1)
+        self.assertEqual(self.session.get_puppet(), self.char1)
 
 
 class TestTransformHookNoneRule(BaseEvenniaTest):

@@ -101,7 +101,7 @@ def text(session, *args, **kwargs):
 
     if session.account:
         # nick replacement
-        puppet = session.puppet
+        puppet = session.get_puppet()
         if puppet:
             txt = puppet.nicks.nickreplace(txt, categories=("inputline"), include_account=True)
         else:
@@ -353,7 +353,7 @@ def get_value(session, *args, **kwargs):
 
     """
     name = kwargs.get("name", "")
-    obj = session.puppet or session.account
+    obj = session.get_puppet() or session.account
     if name in _gettable:
         session.msg(get_value={"name": name, "value": _gettable[name](obj)})
 
@@ -472,9 +472,10 @@ def monitor(session, *args, **kwargs):
     name = kwargs.get("name", None)
     outputfunc_name = kwargs.get("outputfunc_name", "monitor")
     category = kwargs.get("category", None)
-    if name and name in _monitorable and session.puppet:
+    _puppet = session.get_puppet()
+    if name and name in _monitorable and _puppet:
         field_name = _monitorable[name]
-        obj = session.puppet
+        obj = _puppet
         if kwargs.get("stop", False):
             MONITOR_HANDLER.remove(obj, field_name, idstring=session.sessid)
         else:
@@ -516,7 +517,7 @@ def monitored(session, *args, **kwargs):
         except Exception:
             return str(value)
 
-    obj = session.puppet
+    obj = session.get_puppet()
     monitors = []
     for mon_obj, fieldname, idstring, persistent, monitor_kwargs in MONITOR_HANDLER.all(obj=obj):
         safe_kwargs = {key: _safe_pickle(val) for key, val in monitor_kwargs.items()}
@@ -637,7 +638,7 @@ def msdp_list(session, *args, **kwargs):
     if "reportable_variables" in args_lower:
         session.msg(reportable_variables=(_monitorable, {}))
     if "reported_variables" in args_lower:
-        obj = session.puppet
+        obj = session.get_puppet()
         monitor_infos = MONITOR_HANDLER.all(obj=obj)
         fieldnames = [tup[1] for tup in monitor_infos]
         session.msg(reported_variables=(fieldnames, {}))

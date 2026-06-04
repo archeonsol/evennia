@@ -1,0 +1,68 @@
+# Default linguistics tables for evennia.narrative.emote.
+# Games may replace or extend via load_linguistics() / custom YAML paths.
+
+pronoun_map:
+  male: [he, his, him]
+  female: [she, her, her]
+  neutral: [they, their, them]
+  nonbinary: [they, their, them]
+
+first_to_second_map:
+  - ["\\bI'm\\b", "you're"]
+  - ["\\bI've\\b", "you've"]
+  - ["\\bI'll\\b", "you'll"]
+  - ["\\bI'd\\b", "you'd"]
+  - ["\\bI am\\b", "you are"]
+  - ["\\bI was\\b", "you were"]
+  - ["\\bI were\\b", "you were"]
+  - ["\\bI will\\b", "you will"]
+  - ["\\bI have\\b", "you have"]
+  - ["\\bI had\\b", "you had"]
+  - ["\\bI would\\b", "you would"]
+  - ["\\bI could\\b", "you could"]
+  - ["\\bI should\\b", "you should"]
+  - ["\\bI can\\b", "you can"]
+  - ["\\bI did\\b", "you did"]
+  - ["\\bI do\\b", "you do"]
+  - ["\\bI\\b", "you"]
+  - ["\\bmy\\b", "your"]
+  - ["\\bme\\b", "you"]
+  - ["\\bmyself\\b", "yourself"]
+  - ["\\bmine\\b", "yours"]
+
+irregular_verbs:
+  have: has
+  do: does
+  go: goes
+  be: is
+  am: is
+  are: is
+  say: says
+
+auxiliaries:
+  - is
+  - are
+  - was
+  - were
+  - will
+  - would
+  - could
+  - should
+  - can
+  - had
+  - has
+  - have
+
+pronoun_patterns:
+  - ["\\bher\\s+(\\w+)", "female", "poss_det", true]
+  - ["\\bhers\\b", "female", "poss_stand", false]
+  - ["\\bhis\\s+(\\w+)", "male", "poss_det", true]
+  - ["\\bhis\\b", "male", "poss_stand", false]
+  - ["\\btheir\\s+(\\w+)", "neutral", "poss_det", true]
+  - ["\\btheirs\\b", "neutral", "poss_stand", false]
+  - ["\\bher\\b", "female", "obj", false]
+  - ["\\bhim\\b", "male", "obj", false]
+  - ["\\bthem\\b", "neutral", "obj", false]
+  - ["\\bshe\\b", "female", "sub", false]
+  - ["\\bhe\\b", "male", "sub", false]
+  - ["\\bthey\\b", "neutral", "sub", false]

@@ -615,7 +615,7 @@ class LifecycleMixin:
         returns="veto",
         discipline="public",
         fires_from=("DefaultAccount.unpuppet_object",),
-        notes="Veto aborts detach. Puppet stays attached; session.puppet/puid stay set.",
+        notes="Veto aborts detach. Body stays driven; the focus stack is unchanged.",
     )
     def at_pre_unpuppet(self, **kwargs):
         """
@@ -647,7 +647,7 @@ class LifecycleMixin:
         returns="ignored",
         discipline="public",
         fires_from=("DefaultAccount.unpuppet_object",),
-        notes="Fires after the session detaches. session.puppet/puid have been cleared.",
+        notes="Fires after the session detaches. The focus stack has collapsed off this body.",
     )
     def at_post_unpuppet(self, account, session=None, **kwargs):
         """

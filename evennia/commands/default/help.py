@@ -348,6 +348,12 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
         """
         if inherits_from(cmd_or_topic, "evennia.commands.command.Command"):
             return cmd_or_topic.auto_help and cmd_or_topic.access(caller, "read", default=True)
+        from evennia.help.catalog import is_action_help_topic
+
+        if is_action_help_topic(cmd_or_topic):
+            return cmd_or_topic.auto_help and cmd_or_topic.access(
+                caller, "read", default=True, session=self.session
+            )
         else:
             return cmd_or_topic.access(caller, "read", default=True)
 
@@ -376,6 +382,13 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             accessible to all.
 
         """
+        from evennia.help.catalog import is_action_help_topic
+
+        if is_action_help_topic(cmd_or_topic):
+            if not cmd_or_topic.auto_help:
+                return False
+            return cmd_or_topic.access(caller, "view", default=True, session=self.session)
+
         if hasattr(cmd_or_topic, "auto_help") and not cmd_or_topic.auto_help:
             return False
 
@@ -407,27 +420,35 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                 `({key: cmd,...}, {key: dbentry,...}, {key: fileentry,...}`
 
         """
-        # start with cmd-help
-        cmdset = self.cmdset
-        # removing doublets in cmdset, caused by cmdhandler
-        # having to allow doublet commands to manage exits etc.
-        cmdset.make_unique(caller)
-        # retrieve all available commands and database / file-help topics.
-        # also check the 'cmd:' lock here
-        cmd_help_topics = [
-            cmd for cmd in cmdset if cmd and cmd.access(caller, "cmd", session=self.session)
-        ]
-        # get all file-based help entries, checking perms
+        engine_help = getattr(settings, "ACTION_ENGINE_ENABLED", False)
+        if engine_help:
+            from evennia.help.catalog import (
+                actor_for_help,
+                collect_action_help_topics,
+                should_include_action_topics_in_index,
+            )
+
+            actor = actor_for_help(caller, self.session)
+            cmd_help_topics = {}
+            if should_include_action_topics_in_index(actor):
+                cmd_help_topics = collect_action_help_topics(
+                    actor, mode=mode, staff_reference=True
+                )
+        else:
+            cmdset = self.cmdset
+            cmdset.make_unique(caller)
+            cmd_help_topics = [
+                cmd for cmd in cmdset if cmd and cmd.access(caller, "cmd", session=self.session)
+            ]
         file_help_topics = {topic.key.lower().strip(): topic for topic in FILE_HELP_ENTRIES.all()}
-        # get db-based help entries, checking perms
         db_help_topics = {topic.key.lower().strip(): topic for topic in HelpEntry.objects.all()}
         if mode == "list":
-            # check the view lock for all help entries/commands and determine key
-            cmd_help_topics = {
-                cmd.auto_help_display_key if hasattr(cmd, "auto_help_display_key") else cmd.key: cmd
-                for cmd in cmd_help_topics
-                if self.can_list_topic(cmd, caller)
-            }
+            if not engine_help:
+                cmd_help_topics = {
+                    cmd.auto_help_display_key if hasattr(cmd, "auto_help_display_key") else cmd.key: cmd
+                    for cmd in cmd_help_topics
+                    if self.can_list_topic(cmd, caller)
+                }
             db_help_topics = {
                 key: entry
                 for key, entry in db_help_topics.items()
@@ -439,12 +460,12 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                 if self.can_list_topic(entry, caller)
             }
         else:
-            # query - check the read lock on entries
-            cmd_help_topics = {
-                cmd.auto_help_display_key if hasattr(cmd, "auto_help_display_key") else cmd.key: cmd
-                for cmd in cmd_help_topics
-                if self.can_read_topic(cmd, caller)
-            }
+            if not engine_help:
+                cmd_help_topics = {
+                    cmd.auto_help_display_key if hasattr(cmd, "auto_help_display_key") else cmd.key: cmd
+                    for cmd in cmd_help_topics
+                    if self.can_read_topic(cmd, caller)
+                }
             db_help_topics = {
                 key: entry
                 for key, entry in db_help_topics.items()
@@ -494,7 +515,11 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                 aliases = [m.key]
                 if not isinstance(m, HelpCategory):
                     # Aliases for help created with 'sethelp' is an AliasHandler
-                    aliases += m.aliases if isinstance(m.aliases, list) else m.aliases.all()
+                    aliases += (
+                        list(m.aliases)
+                        if isinstance(m.aliases, (list, tuple))
+                        else m.aliases.all()
+                    )
                 if query in aliases:
                     matches.remove(m)
                     matches.insert(0, m)
@@ -541,6 +566,18 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
         """
         Run the dynamic help entry creator.
         """
+        if getattr(settings, "ACTION_ENGINE_ENABLED", False):
+            from evennia.help.renderer import render_help
+
+            render_help(
+                self.caller,
+                topic=self.topic,
+                subtopics=self.subtopics,
+                cmdset=self.cmdset,
+                session=self.session,
+            )
+            return
+
         caller = self.caller
         query, subtopics, cmdset = self.topic, self.subtopics, self.cmdset
         clickable_topics = self.clickable_topics
@@ -656,17 +693,27 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
             return
 
         if inherits_from(match, "evennia.commands.command.Command"):
-            # a command match
             topic = match.key
             help_text = match.get_help(caller, cmdset)
             aliases = match.aliases
             suggested = suggestions[1:]
         else:
-            # a database (or file-help) match
-            topic = match.key
-            help_text = match.entrytext
-            aliases = match.aliases if isinstance(match.aliases, list) else match.aliases.all()
-            suggested = suggestions[1:]
+            from evennia.help.catalog import is_action_help_topic
+
+            if is_action_help_topic(match):
+                topic = match.key
+                help_text = match.get_help(caller, cmdset)
+                aliases = match.aliases
+                suggested = suggestions[1:] if suggestions else []
+            else:
+                topic = match.key
+                help_text = match.entrytext
+                aliases = (
+                    list(match.aliases)
+                    if isinstance(match.aliases, (list, tuple))
+                    else match.aliases.all()
+                )
+                suggested = suggestions[1:] if suggestions else []
 
         # parse for subtopics. The subtopic_map is a dict with the current topic/subtopic
         # text is stored under a `None` key and all other keys are subtopic titles pointing

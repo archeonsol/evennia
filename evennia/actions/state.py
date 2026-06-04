@@ -1,0 +1,120 @@
+"""
+State objects (CM1 Phase 3c): per-actor rule providers with a lifecycle.
+
+A *state* is an ordinary class carrying ``@rule`` methods, attached to an actor
+at runtime. Because the engine treats any object in the dispatch context as a
+rule provider, a state needs no special engine support — it simply sits at the
+front of the provider list (``actor.state_objects``) so its rules get the first,
+highest-gate say in every phase.
+
+States model transient, stacking conditions ("flatlined", "grappled", "in a
+menu", "disambiguating a target"). They are stored on the *holder* object — the
+character or account — under ``holder.ndb.active_states`` (a plain list,
+non-persistent: states do not survive a reload by design). This module owns the
+three lifecycle operations:
+
+* :func:`enter_state` — append a state instance (most-recent last).
+* :func:`exit_state` — drop every state of a given type.
+* :func:`has_state` — membership test by type.
+
+:class:`Actor` (see ``actor.py``) exposes these as methods that delegate here,
+so rule bodies can write ``actor.exit_state(DisambiguationState)``.
+
+Concrete game states (FlatlinedState, GrappledState, …) live game-side, not in
+the engine; the engine ships only the base plus the two generic interaction
+states in ``menus.py`` (EvMenuState, DisambiguationState).
+"""
+
+__all__ = [
+    "StateProvider",
+    "enter_state",
+    "exit_state",
+    "has_state",
+    "get_states",
+]
+
+
+class StateProvider:
+    """Base for all state objects.
+
+    Subclass it, attach ``@rule`` methods, and install an instance with
+    :func:`enter_state`. The base is intentionally empty — it exists as a marker
+    and a shared home for any future common behavior. A state's ``@rule`` methods
+    typically target the catch-all base ``Action`` at high priority to gate or
+    intercept *every* action while the state is active.
+    """
+
+    __slots__ = ()
+
+
+def _active_list(holder, *, create=False):
+    """Return the holder's live ``active_states`` list.
+
+    Args:
+        holder: an object exposing ``.ndb`` (Evennia non-persistent attributes).
+        create (bool): if True, initialize the list on the holder when absent.
+
+    Returns:
+        list | None: the list (possibly newly created), or ``None`` when absent
+        and ``create`` is False.
+    """
+    ndb = getattr(holder, "ndb", None)
+    if ndb is None:
+        if not create:
+            return None
+        raise TypeError(f"{holder!r} has no .ndb to hold states")
+    current = getattr(ndb, "active_states", None)
+    if current is None:
+        if not create:
+            return None
+        current = []
+        ndb.active_states = current
+    return current
+
+
+def enter_state(holder, state):
+    """Install ``state`` on ``holder`` (appended, so newest sorts last).
+
+    Args:
+        holder: the character/account whose ``ndb.active_states`` holds states.
+        state (StateProvider): the state instance to add.
+
+    Returns:
+        StateProvider: the installed ``state`` (for chaining).
+    """
+    states = _active_list(holder, create=True)
+    states.append(state)
+    return state
+
+
+def exit_state(holder, state_type):
+    """Remove every state that is an instance of ``state_type`` from ``holder``.
+
+    Args:
+        holder: the character/account holding the states.
+        state_type (type): the StateProvider subclass to drop.
+
+    Returns:
+        list: the removed state instances (empty if none were active).
+    """
+    states = _active_list(holder)
+    if not states:
+        return []
+    removed = [s for s in states if isinstance(s, state_type)]
+    if removed:
+        holder.ndb.active_states = [s for s in states if not isinstance(s, state_type)]
+    return removed
+
+
+def has_state(holder, state_type) -> bool:
+    """True if ``holder`` currently carries any state of ``state_type``."""
+    states = _active_list(holder)
+    if not states:
+        return False
+    return any(isinstance(s, state_type) for s in states)
+
+
+def get_states(holder):
+    """Return a copy of ``holder``'s active states (newest last); ``[]`` if none."""
+    states = _active_list(holder)
+    return list(states) if states else []

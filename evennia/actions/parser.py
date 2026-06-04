@@ -1,0 +1,296 @@
+"""
+The action parser (CM1 Phase 2): raw command text → a typed :class:`Action`.
+
+The parser is deliberately thin. It does three things:
+
+1. Split the input into a verb (with optional ``/switches``) and the remaining
+   argument text.
+2. Resolve the verb against the registry (longest exact multi-word phrase, then
+   single-token :class:`~evennia.actions.registry.VerbTrie` prefix), producing a
+   *confidence* score.
+3. Hand the argument text to the matched action's ``parse`` classmethod, which
+   turns it into a populated dataclass instance.
+
+Failure modes map onto system actions rather than ``None``-returns or printed
+errors:
+
+* Empty input → :meth:`ActionParser.parse` returns ``None`` (the dispatch bridge
+  in Phase 4 substitutes :class:`NoInputAction`).
+* Unknown / ambiguous verb → :class:`NoMatchAction` carrying the raw string and a
+  list of fuzzy ``suggestions``.
+* A matched action whose ``parse`` raises :class:`ParseError` → also
+  :class:`NoMatchAction`, carrying ``parse``'s message.
+
+:class:`AmbiguousTarget` (raised by ``actor.search`` on a multi-match) is **not**
+swallowed: it propagates out of the parser so the Phase 4 dispatch loop can stand
+up a disambiguation state. That is the whole point of the parser refusing to
+"print and return None" the way the legacy command system did.
+"""
+
+from dataclasses import dataclass, field
+from typing import Optional, Protocol, runtime_checkable
+
+from .action import Action, action
+from .exceptions import AmbiguousTarget, ParseError
+from .registry import action_registry
+
+__all__ = [
+    "ParseResult",
+    "ActionParser",
+    "parser",
+    "NoInputAction",
+    "NoMatchAction",
+    "LoginStartAction",
+    "DynamicVerbResolver",
+]
+
+
+@runtime_checkable
+class DynamicVerbResolver(Protocol):
+    """A resolver for verbs that cannot live in the static :class:`VerbTrie`.
+
+    Some "verbs" are *contextual*: room exit names ("north", "shard", "fire
+    escape"), channel aliases, per-character nicks. They are unknown at import
+    time, so the registry can't hold them. A resolver is consulted by
+    :meth:`ActionParser.parse` only **after** the trie and symbol-prefix lookups
+    both miss — so a statically registered verb always wins — and **before**
+    falling through to :class:`NoMatchAction`.
+
+    A resolver is any callable ``(stripped, actor) -> Action | None``:
+
+    * return a populated :class:`Action` to claim the input;
+    * return ``None`` to decline (the next resolver, then ``_nomatch``, is tried);
+    * raise :class:`AmbiguousTarget` to trigger disambiguation (e.g. two exits
+      both named "door").
+
+    Resolvers keep the engine game-agnostic: the *exit* resolver lives game-side
+    and is registered onto the shared parser when the movement package imports,
+    exactly as ``@action`` verbs register at import time.
+    """
+
+    def __call__(self, stripped: str, actor) -> Optional[Action]:
+        ...
+
+
+@dataclass
+class ParseResult:
+    """The outcome of parsing one line of input.
+
+    Attributes:
+        action (Action): the typed action ready for the engine to dispatch.
+        raw_verb (str): the verb token exactly as the player typed it (before
+            trie resolution; useful for echoing abbreviations).
+        raw_args (str): everything after the verb and switches.
+        confidence (float): ``1.0`` for an exact verb match, ``< 1.0`` for a
+            prefix match (``len(raw_verb) / len(canonical_verb)``), and ``0.0``
+            for a no-match (the action is a :class:`NoMatchAction`).
+    """
+
+    action: Action
+    raw_verb: str
+    raw_args: str
+    confidence: float = 1.0
+
+
+# --------------------------------------------------------------------------- #
+# System actions
+# --------------------------------------------------------------------------- #
+
+
+@action("__noinput__")
+@dataclass
+class NoInputAction(Action):
+    """Dispatched when the player submits an empty line."""
+
+
+@action("__nomatch__")
+@dataclass
+class NoMatchAction(Action):
+    """Dispatched when no verb matches (or a matched action failed to parse).
+
+    Attributes:
+        raw_string (str): the full line the player typed.
+        suggestions (list): fuzzy near-miss verbs ("did you mean…").
+        error (str): a parse error message, when the verb matched but its
+            arguments were malformed.
+    """
+
+    raw_string: str = ""
+    suggestions: list = field(default_factory=list)
+    error: str = ""
+
+
+@action("__loginstart__")
+@dataclass
+class LoginStartAction(Action):
+    """Dispatched once when a session connects, before any input."""
+
+
+# --------------------------------------------------------------------------- #
+# Parser
+# --------------------------------------------------------------------------- #
+
+
+class ActionParser:
+    """Turns raw input text into a :class:`ParseResult`. Stateless; one shared
+    instance (:data:`parser`) is fine, but tests may build their own."""
+
+    def __init__(self, registry=None, resolvers=None):
+        self._registry = registry or action_registry
+        self._resolvers = list(resolvers or [])
+
+    def add_resolver(self, resolver):
+        """Append a :class:`DynamicVerbResolver` to the trie-miss chain.
+
+        Resolvers are consulted in registration order. Idempotent for the same
+        callable object (re-importing the movement package won't double-register
+        on the shared parser singleton)."""
+        if resolver not in self._resolvers:
+            self._resolvers.append(resolver)
+        return resolver
+
+    def clear_resolvers(self):
+        """Drop all dynamic resolvers (mainly for tests)."""
+        self._resolvers.clear()
+
+    def _resolve_dynamic(self, stripped, actor):
+        """Try each resolver in turn; return the first non-``None`` Action.
+
+        :class:`AmbiguousTarget` from a resolver propagates (the dispatch bridge
+        turns it into a disambiguation prompt), exactly like ``actor.search``.
+        """
+        if actor is None:
+            return None
+        for resolver in self._resolvers:
+            built = resolver(stripped, actor)
+            if built is not None:
+                return built
+        return None
+
+    @staticmethod
+    def _split_verb(verb_token):
+        """Split a ``verb/switch1/switch2`` token into ``(verb, [switches])``."""
+        if "/" not in verb_token:
+            return verb_token, []
+        parts = verb_token.split("/")
+        verb = parts[0]
+        switches = [p for p in parts[1:] if p]
+        return verb, switches
+
+    def _match_symbol_prefix(self, stripped):
+        """Match a no-space symbol-prefix verb glued to its arguments.
+
+        Tries the registry's all-punctuation verbs longest-first; the first one
+        that ``stripped`` starts with wins (``,`` and ``.`` are single chars, so
+        order rarely matters, but longest-first is correct if a multi-char symbol
+        verb is ever registered). Switches are not supported in the glued form.
+
+        Returns ``(verb, switches, match, raw_args)`` or ``None``.
+        """
+        for sym in self._registry.symbol_verbs:
+            if stripped.startswith(sym):
+                match = self._registry.match_verb(sym)
+                if match is None:
+                    continue
+                return sym, [], match, stripped[len(sym):].strip()
+        return None
+
+    def parse(self, raw_string, actor, context=None):
+        """Parse ``raw_string`` into a :class:`ParseResult`, or ``None`` if the
+        input is empty.
+
+        Args:
+            raw_string (str): the player's raw input line.
+            actor: the acting entity (must expose ``search`` for object args).
+            context: the :class:`ActionContext` for this dispatch (passed
+                through to per-action ``parse``).
+
+        Returns:
+            ParseResult | None: ``None`` only for empty input.
+
+        Raises:
+            AmbiguousTarget: propagated from ``actor.search`` (never swallowed).
+        """
+        if raw_string is None:
+            return None
+        stripped = raw_string.strip()
+        if not stripped:
+            return None
+
+        tokens = stripped.split()
+        verb, switches = self._split_verb(tokens[0])
+        tokens[0] = verb
+
+        vm = self._registry.match_tokens(tokens)
+        # Single-char lines are often compass exit aliases; prefer a dynamic
+        # resolver (exit names) over a weak verb prefix (e.g. ``n`` → ``newrecipe``).
+        if vm is not None and vm.span == 1 and len(tokens[0]) == 1:
+            resolved = self._resolve_dynamic(stripped, actor)
+            if resolved is not None:
+                resolved._raw_string = raw_string
+                return ParseResult(
+                    action=resolved,
+                    raw_verb=verb,
+                    raw_args=" ".join(tokens[1:]),
+                    confidence=1.0,
+                )
+        if vm is not None:
+            raw_verb = " ".join(tokens[: vm.span])
+            raw_args = " ".join(tokens[vm.span :])
+            canonical = vm.canonical
+            action_cls = vm.action_cls
+            confidence = vm.confidence
+        else:
+            # No registered verb matched. Try a no-space symbol prefix
+            # (``.wave``, ``"hi``) — the engine analogue of a command's
+            # ``arg_regex=None``. Only all-punctuation verbs are eligible.
+            symbol = self._match_symbol_prefix(stripped)
+            if symbol is None:
+                # Last chance before no-match: dynamic verbs (exit names, …).
+                # A resolver claims the *whole* stripped line and returns a built
+                # action directly — there is no separate ``parse`` step for it.
+                resolved = self._resolve_dynamic(stripped, actor)
+                if resolved is not None:
+                    resolved._raw_string = raw_string
+                    return ParseResult(
+                        action=resolved,
+                        raw_verb=verb,
+                        raw_args=" ".join(tokens[1:]),
+                        confidence=1.0,
+                    )
+                return self._nomatch(raw_string, verb)
+            verb, switches, match, raw_args = symbol
+            canonical, action_cls, confidence = match
+            raw_verb = verb
+
+        try:
+            built = action_cls.parse(
+                raw_args, actor, context, switches=switches, verb=canonical
+            )
+        except ParseError as err:
+            return self._nomatch(raw_string, verb, error=getattr(err, "message", str(err)))
+        # AmbiguousTarget intentionally NOT caught here.
+
+        built._raw_string = raw_string
+        return ParseResult(
+            action=built,
+            raw_verb=raw_verb,
+            raw_args=raw_args,
+            confidence=confidence,
+        )
+
+    def _nomatch(self, raw_string, verb, error=""):
+        """Build a :class:`NoMatchAction` ParseResult with fuzzy suggestions."""
+        suggestions = self._registry.suggest_verbs(verb) if verb else []
+        nomatch = NoMatchAction(raw_string=raw_string, suggestions=suggestions, error=error)
+        nomatch._raw_string = raw_string
+        return ParseResult(
+            action=nomatch,
+            raw_verb=verb,
+            raw_args=raw_string,
+            confidence=0.0,
+        )
+
+
+#: shared parser instance
+parser = ActionParser()

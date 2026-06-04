@@ -19,7 +19,7 @@ class TestMonitoredInputfunc(BaseEvenniaTest):
         The monitored payload sent over AMP must not include raw Session objects.
         """
 
-        self.session.puppet = self.char1
+        # the fixture session already puppets char1 (auto-puppet on login)
         inputfuncs.monitor(self.session, name="location")
         inputfuncs.monitored(self.session)
 

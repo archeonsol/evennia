@@ -267,6 +267,39 @@ _RE_OK = re.compile(r"%s|and|or|not")
 #
 
 
+def _account_quelled(accessing_obj):
+    """True when the accessing entity's account has @quell active."""
+    if accessing_obj is None:
+        return False
+    account = None
+    if utils.inherits_from(accessing_obj, evennia.DefaultAccount):
+        account = accessing_obj
+    elif utils.inherits_from(accessing_obj, evennia.DefaultObject):
+        account = getattr(accessing_obj, "account", None)
+    elif hasattr(accessing_obj, "get_account"):
+        account = accessing_obj.get_account()
+    if account is None:
+        return False
+    try:
+        return bool(account.attributes.get("_quell"))
+    except (AttributeError, TypeError):
+        return False
+
+
+def _superuser_bypass_allowed(accessing_obj, no_superuser_bypass=False):
+    """Return True when superuser lock bypass should apply (honors @quell)."""
+    if no_superuser_bypass or accessing_obj is None or _account_quelled(accessing_obj):
+        return False
+    if getattr(accessing_obj, "is_superuser", False):
+        return True
+    account = None
+    if utils.inherits_from(accessing_obj, evennia.DefaultObject):
+        account = getattr(accessing_obj, "account", None)
+    elif hasattr(accessing_obj, "get_account"):
+        account = accessing_obj.get_account()
+    return bool(account and getattr(account, "is_superuser", False))
+
+
 class LockHandler:
     """
     This handler should be attached to all objects implementing
@@ -417,7 +450,9 @@ class LockHandler:
             obj (object): This is checked for the `is_superuser` property.
 
         """
-        self.lock_bypass = hasattr(obj, "is_superuser") and obj.is_superuser
+        self.lock_bypass = (
+            hasattr(obj, "is_superuser") and obj.is_superuser and not _account_quelled(obj)
+        )
 
     def add(self, lockstring, validate_only=False):
         """
@@ -653,8 +688,7 @@ class LockHandler:
             functions (as defined by your settings) are executed.
 
         """
-        # Fast path: direct is_superuser check before any attribute chain traversal
-        if not no_superuser_bypass and getattr(accessing_obj, "is_superuser", False):
+        if _superuser_bypass_allowed(accessing_obj, no_superuser_bypass):
             return True
 
         try:
@@ -663,19 +697,7 @@ class LockHandler:
                 return True
         except AttributeError:
             # happens before session is initiated.
-            if not no_superuser_bypass and (
-                (
-                    utils.inherits_from(accessing_obj, evennia.DefaultObject)
-                    and hasattr(accessing_obj.account, "is_superuser")
-                    and accessing_obj.account.is_superuser
-                )
-                or (
-                    hasattr(accessing_obj, "get_account")
-                    and (
-                        not accessing_obj.get_account() or accessing_obj.get_account().is_superuser
-                    )
-                )
-            ):
+            if _superuser_bypass_allowed(accessing_obj, no_superuser_bypass):
                 return True
 
         # no superuser or bypass -> normal lock operation
@@ -797,20 +819,7 @@ class LockHandler:
             if accessing_obj.locks.lock_bypass and not no_superuser_bypass:
                 return True
         except AttributeError:
-            if not no_superuser_bypass and (
-                (hasattr(accessing_obj, "is_superuser") and accessing_obj.is_superuser)
-                or (
-                    utils.inherits_from(accessing_obj, evennia.DefaultObject)
-                    and hasattr(accessing_obj.account, "is_superuser")
-                    and accessing_obj.account.is_superuser
-                )
-                or (
-                    hasattr(accessing_obj, "get_account")
-                    and (
-                        not accessing_obj.get_account() or accessing_obj.get_account().is_superuser
-                    )
-                )
-            ):
+            if _superuser_bypass_allowed(accessing_obj, no_superuser_bypass):
                 return True
         if ":" not in lockstring:
             lockstring = "%s:%s" % ("_dummy", lockstring)
@@ -896,7 +905,7 @@ def check_perm(obj, permission, no_superuser_bypass=False):
     """
     from evennia.locks.lockfuncs import perm
 
-    if not no_superuser_bypass and obj.is_superuser:
+    if _superuser_bypass_allowed(obj, no_superuser_bypass):
         return True
     return perm(obj, None, permission)
 

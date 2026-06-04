@@ -2217,10 +2217,15 @@ class CmdTypeclass(COMMAND_DEFAULT_CLASS):
                 obj = self.account.search(query)
                 if not obj:
                     return
-            elif hasattr(caller, "puppet") and caller.puppet.__dbclass__ == dbclass:
+            elif (
+                hasattr(caller, "get_puppet")
+                and self.session
+                and caller.get_puppet(self.session)
+                and caller.get_puppet(self.session).__dbclass__ == dbclass
+            ):
                 # applying object while caller is account
                 caller.msg(f"Trying to search {new_typeclass} with query '{self.lhs}'.")
-                obj = caller.puppet.search(query)
+                obj = caller.get_puppet(self.session).search(query)
                 if not obj:
                     return
             else:

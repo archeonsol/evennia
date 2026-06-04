@@ -2933,7 +2933,8 @@ def strip_unsafe_input(txt, session=None, bypass_perms=None):
             strip_unsafe_tokens as _STRIP_UNSAFE_TOKENS
 
     if session:
-        obj = session.puppet if session.puppet else session.account
+        _puppet = session.get_puppet()
+        obj = _puppet if _puppet else session.account
         bypass_perms = bypass_perms or settings.INPUT_CLEANUP_BYPASS_PERMISSIONS
         if obj.permissions.check(*bypass_perms):
             return txt

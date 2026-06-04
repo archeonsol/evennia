@@ -455,8 +455,13 @@ class EvenniaCommandTestMixin:
                 _normalize_account_command_caller
 
             providers = {"account": cmd_account}
-            if cmdobj.session is not None and getattr(cmdobj.session, "puppet", None) is not None:
-                providers["object"] = cmdobj.session.puppet
+            _sess_puppet = (
+                cmdobj.session.get_puppet()
+                if cmdobj.session is not None and hasattr(cmdobj.session, "get_puppet")
+                else None
+            )
+            if _sess_puppet is not None:
+                providers["object"] = _sess_puppet
             _normalize_account_command_caller(cmdobj, caller, providers)
         inputs = inputs or []
         # set up receivers

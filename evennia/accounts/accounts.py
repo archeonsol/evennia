@@ -63,6 +63,16 @@ LOGIN_THROTTLE = Throttle(
 )
 
 
+def _sync_session_bid_to_portal(session):
+    """Push the session's current ``bid`` to the Portal for PSYNC/@reload survival."""
+    if not session or getattr(settings, "TEST_ENVIRONMENT", False):
+        return
+    try:
+        evennia.SESSION_HANDLER.session_portal_sync(session)
+    except Exception:
+        logger.log_trace("Failed to sync session bid to portal")
+
+
 class AccountSessionHandler(object):
     """
     Manages the session(s) attached to an account.
@@ -120,8 +130,14 @@ class AccountSessionHandler(object):
 
 class CharactersHandler:
     """
-    A simple Handler that lives on DefaultAccount as .characters via @lazy_property used to
-    wrap access to .db._playable_characters.
+    Handler living on DefaultAccount as ``.characters`` via @lazy_property.
+
+    The set of playable characters is *derived from the durable
+    :class:`~evennia.accounts.models.ControlBinding` control graph* — one
+    binding per IC self (``db_identity``) anchored to its controlling account
+    (``db_account``) — rather than a parallel ``_playable_characters``
+    attribute. The binding is the single source of truth for who owns/controls
+    which character, so reads here cannot drift from the focus/puppet state.
     """
 
     def __init__(self, owner: "DefaultAccount"):
@@ -132,39 +148,45 @@ class CharactersHandler:
             owner: The Account that owns this handler.
         """
         self.owner = owner
-        self._ensure_playable_characters()
-        self._clean()
 
-    def _ensure_playable_characters(self):
-        if self.owner.db._playable_characters is None:
-            self.owner.db._playable_characters = []
+    def _query(self):
+        from evennia.accounts.models import ControlBinding
 
-    def _clean(self):
-        # Remove all instances of None from the list.
-        self.owner.db._playable_characters = [x for x in self.owner.db._playable_characters if x]
+        return (
+            ControlBinding.objects.filter(db_account=self.owner)
+            .exclude(db_identity__isnull=True)
+            .select_related("db_identity")
+        )
 
     def add(self, character: "DefaultCharacter"):
         """
-        Add a character to this account's list of playable characters.
+        Bind a character to this account as a playable IC self (idempotent).
 
         Args:
             character (DefaultCharacter): The character to add.
         """
-        self._clean()
-        if character not in self.owner.db._playable_characters:
-            self.owner.db._playable_characters.append(character)
+        from evennia.accounts.models import ControlBinding
+
+        already = ControlBinding.objects.filter(
+            db_account=self.owner, db_identity=character
+        ).exists()
+        ControlBinding.for_identity(self.owner, character)
+        if not already:
             self.owner.at_character_added(character)
 
     def remove(self, character: "DefaultCharacter"):
         """
-        Remove a character from this account's list of playable characters.
+        Drop a character's binding to this account.
 
         Args:
             character (DefaultCharacter): The character to remove.
         """
-        self._clean()
-        if character in self.owner.db._playable_characters:
-            self.owner.db._playable_characters.remove(character)
+        from evennia.accounts.models import ControlBinding
+
+        qs = ControlBinding.objects.filter(db_account=self.owner, db_identity=character)
+        existed = qs.exists()
+        qs.delete()
+        if existed:
             self.owner.at_character_removed(character)
 
     def all(self) -> list["DefaultCharacter"]:
@@ -174,8 +196,7 @@ class CharactersHandler:
         Returns:
             list[DefaultCharacter]: All playable characters.
         """
-        self._clean()
-        return list(self.owner.db._playable_characters)
+        return [binding.db_identity for binding in self._query()]
 
     def count(self) -> int:
         """
@@ -184,7 +205,7 @@ class CharactersHandler:
         Returns:
             int: The number of playable characters.
         """
-        return len(self.all())
+        return self._query().count()
 
     __len__ = count
 
@@ -544,7 +565,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
     # puppeting operations
 
-    def puppet_object(self, session, obj):
+    def puppet_object(self, session, obj, push=False):
         """
         Use the given session to control (puppet) the given object (usually
         a Character type).
@@ -552,6 +573,14 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         Args:
             session (Session): session to use for puppeting
             obj (Object): the object to start puppeting
+            push (bool): Focus-stack semantics. When True and the session is
+                already driving a body, ``obj`` is *pushed* on top of that
+                body's existing ControlBinding (the identity — the character —
+                is preserved at the floor) rather than swapping the puppet and
+                minting a fresh per-body binding. This is the engine primitive
+                behind jack-in / rig / dive: the meat body stays in the focus
+                stack beneath the avatar/vehicle and ``pop_focus`` returns to
+                it. The inverse is :meth:`pop_focus`.
 
         Raises:
             RuntimeError: If puppeting is not possible, the
@@ -568,80 +597,93 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             # already puppeting this object
             self.msg(_("You are already puppeting this object."))
             return
-        # First-attach detection for the at_puppet_added hook. Captured
-        # before any takeover-unpuppet runs, so a session swap on a
-        # currently-puppeted character is not seen as a fresh attach.
-        was_already_owned = obj.account == self and bool(obj.sessions.count())
+        # Who, if anyone, is *currently driving* this body? Control is now a
+        # live property of the focus body's attached sessions, not of the
+        # durable ``obj.account`` ownership pointer.
+        live_sessions = list(obj.sessions.all())
+        driving_account = live_sessions[0].account if live_sessions else None
+        # First-attach detection for the at_puppet_added hook. Captured before
+        # any takeover-unpuppet runs, so a session swap on a currently-driven
+        # character is not seen as a fresh attach.
+        was_already_live = driving_account == self and bool(live_sessions)
         if not obj.access(self, "puppet"):
             # no access
             self.msg(_("You don't have permission to puppet '{key}'.").format(key=obj.key))
             return
-        if obj.account:
-            # object already puppeted
-            if obj.account == self:
-                if obj.sessions.count():
-                    # we may take over another of our sessions
-                    # output messages to the affected sessions
-                    if settings.MULTISESSION_MODE in (1, 3):
-                        txt1 = _("Sharing |c{name}|n with another of your sessions.").format(
-                            name=obj.name
-                        )
-                        txt2 = _(
-                            "|c{name}|n|G is now shared from another of your sessions.|n"
-                        ).format(name=obj.name)
-                        self.msg(txt1, session=session)
-                        self.msg(txt2, session=obj.sessions.all())
-                    else:
-                        txt1 = _("Taking over |c{name}|n from another of your sessions.").format(
-                            name=obj.name
-                        )
-                        txt2 = _(
-                            "|c{name}|n|R is now acted from another of your sessions.|n"
-                        ).format(name=obj.name)
-                        self.msg(txt1, session=session)
-                        self.msg(txt2, session=obj.sessions.all())
-                        self.unpuppet_object(obj.sessions.get())
-            elif obj.account.is_connected:
+        if driving_account is not None:
+            # body already driven by a live session
+            if driving_account == self:
+                # we may take over another of our sessions
+                # output messages to the affected sessions
+                if settings.MULTISESSION_MODE in (1, 3):
+                    txt1 = _("Sharing |c{name}|n with another of your sessions.").format(
+                        name=obj.name
+                    )
+                    txt2 = _(
+                        "|c{name}|n|G is now shared from another of your sessions.|n"
+                    ).format(name=obj.name)
+                    self.msg(txt1, session=session)
+                    self.msg(txt2, session=obj.sessions.all())
+                else:
+                    txt1 = _("Taking over |c{name}|n from another of your sessions.").format(
+                        name=obj.name
+                    )
+                    txt2 = _(
+                        "|c{name}|n|R is now acted from another of your sessions.|n"
+                    ).format(name=obj.name)
+                    self.msg(txt1, session=session)
+                    self.msg(txt2, session=obj.sessions.all())
+                    self.unpuppet_object(obj.sessions.get())
+            elif driving_account.is_connected:
                 # controlled by another account
                 self.msg(_("|c{key}|R is already puppeted by another Account.").format(key=obj.key))
                 return
 
-        if session.puppet:
+        # A focus push keeps the session's current body in the stack (the meat
+        # body the avatar/vehicle layers on top of), so skip the swap-unpuppet.
+        pushing = bool(push) and session.get_puppet() is not None
+        if not pushing and session.get_puppet():
             # cleanly unpuppet eventual previous object puppeted by this session
             self.unpuppet_object(session)
         # if we get to this point the character is ready to puppet or it
         # was left with a lingering account/session reference from an unclean
-        # server kill or similar
-
-        # check so we are not puppeting too much already
-        max_puppets = settings.MAX_NR_SIMULTANEOUS_PUPPETS
-        if max_puppets is not None:
-            already_puppeted = self.get_all_puppets()
-            if (
-                not self.is_superuser
-                and not self.check_permstring("Developer")
-                and obj not in already_puppeted
-                and len(self.get_all_puppets()) >= max_puppets
-            ):
-                self.msg(
-                    _("You cannot control any more puppets (max {max_puppets})").format(
-                        max_puppets=max_puppets
-                    )
-                )
-                return
+        # server kill or similar.
+        #
+        # The old MAX_NR_SIMULTANEOUS_PUPPETS cap is retired: a session drives a
+        # single body (the ControlBinding focus top), and layering another body
+        # is a *push* that swaps the live session rather than adding a parallel
+        # puppet — so the cap not only no longer applies, it would wrongly block
+        # a focus push (the meat body still holds the session at this point).
 
         # do the puppeting. at_pre_puppet may veto by returning False (or
         # other non-None falsy); None / True allow the attach.
         if is_veto(obj.at_pre_puppet(self, session=session)):
             return
-        # used to track in case of crash so we can clean up later
-        obj.tags.add("puppeted", category="account")
 
-        # do the connection
+        # do the connection: drive ``obj`` through this account's durable
+        # ControlBinding (focus stack), then attach the runtime session to the
+        # body for msg routing. ``obj.account`` (ownership) is left untouched.
+        from evennia.accounts.models import ControlBinding
+
+        if pushing:
+            # Layer ``obj`` on top of the body the session already drives,
+            # reusing that body's binding so the identity (character) stays at
+            # the floor. The underlying body keeps its place in the stack and
+            # only sheds its live session (it goes dormant, not unpuppeted).
+            old = session.get_puppet()
+            binding = session.binding or ControlBinding.for_identity(self, obj)
+            if old is not None and old is not obj:
+                old.sessions.remove(session)
+            if binding.focus is not obj:
+                binding.push(obj)
+        else:
+            binding = ControlBinding.for_identity(self, obj)
+            if binding.focus is not obj:
+                binding.push(obj)
+        session.bid = binding.pk
+        session._binding = binding
         obj.sessions.add(session)
-        obj.account = self
-        session.puid = obj.id
-        session.puppet = obj
+        _sync_session_bid_to_portal(session)
 
         # re-cache locks to make sure superuser bypass is updated
         obj.locks.cache_lock_bypass(obj)
@@ -659,27 +701,39 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         except Exception:
             logger.log_trace("cmdset merge warmup scheduling failed")
 
-        if not was_already_owned:
+        if not was_already_live:
             # Puppet-set membership change; fires once per first-attach.
             try:
                 self.at_puppet_added(obj, session=session)
             except Exception:
                 logger.log_trace("at_puppet_added hook failed")
 
-    def unpuppet_object(self, session):
+        if pushing:
+            # A real focus push (jack-in / rig / dive) — notify subscribers. A
+            # plain login (push=False) sets the floor body and does not emit.
+            self._emit_focus_changed(session, obj, "push")
+
+    def unpuppet_object(self, session, collapse=True):
         """
         Disengage control over an object.
 
         Args:
             session (Session or list): The session or a list of
                 sessions to disengage from their puppets.
+            collapse (bool): When True (the default — a deliberate go-OOC),
+                the durable focus stack is collapsed back to the account floor
+                once the last live session detaches. When False (a network
+                drop or server shutdown), the stack is left intact so the body
+                the session was driving — including any pushed avatar/vehicle —
+                survives the disconnect and is restored on next login by
+                :meth:`at_post_login`. Only the runtime session is detached.
 
         Raises:
             RuntimeError With message about error.
 
         """
         for session in make_iter(session):
-            obj = session.puppet
+            obj = session.get_puppet()
             if obj:
                 # at_pre_unpuppet may veto by returning False (or other non-None
                 # falsy); None / True allow the detach. Veto leaves the puppet
@@ -688,10 +742,16 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     continue
                 obj.sessions.remove(session)
                 last_session = not obj.sessions.count()
-                if last_session:
-                    del obj.account
+                # Collapse the focus stack back to the account floor only when
+                # no co-driving session remains on this body (co-perception:
+                # other sessions sharing this binding keep their focus) and the
+                # caller asked for a collapse. A network drop / shutdown passes
+                # collapse=False to keep the durable stack for login restore.
+                # Ownership (``obj.account``) is durable and left intact.
+                binding = session.binding
+                if collapse and last_session and binding is not None:
+                    binding.collapse_to(binding.db_account)
                 obj.at_post_unpuppet(self, session=session)
-                obj.tags.remove("puppeted", category="account")
                 SIGNAL_OBJECT_POST_UNPUPPET.send(sender=obj, session=session, account=self)
                 if last_session:
                     # Puppet-set membership change; fires once per last-detach.
@@ -700,15 +760,170 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     except Exception:
                         logger.log_trace("at_puppet_removed hook failed")
             # Just to be sure we're always clear.
-            session.puppet = None
-            session.puid = None
+            session.bid = None
+            session._binding = None
+            _sync_session_bid_to_portal(session)
+
+    def pop_focus(self, session):
+        """
+        Drop one focus level: tear down the body the session is currently
+        driving and re-attach the session to the body now on top of the stack.
+
+        This is the inverse of ``puppet_object(session, obj, push=True)`` — the
+        jack-out / un-rig / un-dive primitive. Unlike :meth:`unpuppet_object`
+        it does not collapse to the account floor or clear the binding; it pops
+        a single layer so control returns to the body beneath (the meat
+        character), re-priming that body with a lightweight ``reattach`` puppet
+        rather than a fresh login.
+
+        Args:
+            session (Session): the session to pop a focus level for.
+
+        Returns:
+            Object or None: the body control returned to, or None if the stack
+            popped all the way to the account floor (session left fully OOC).
+        """
+        obj = session.get_puppet()
+        binding = session.binding
+        if obj is None or binding is None:
+            return None
+        # at_pre_unpuppet may veto the teardown.
+        if is_veto(obj.at_pre_unpuppet()):
+            return None
+        obj.sessions.remove(session)
+        binding.pop()
+        obj.at_post_unpuppet(self, session=session)
+        SIGNAL_OBJECT_POST_UNPUPPET.send(sender=obj, session=session, account=self)
+        try:
+            self.at_puppet_removed(obj, session=session)
+        except Exception:
+            logger.log_trace("at_puppet_removed hook failed")
+
+        new_focus = binding.focus
+        if isinstance(new_focus, AccountDB):
+            # Popped to the account floor — fully OOC.
+            session.bid = None
+            session._binding = None
+            _sync_session_bid_to_portal(session)
+            self._emit_focus_changed(session, obj, "pop")
+            return None
+
+        # Re-attach to the body now on top (the meat character) without
+        # re-running its full login pipeline.
+        new_focus.sessions.add(session)
+        session.bid = binding.pk
+        session._binding = binding
+        _sync_session_bid_to_portal(session)
+        new_focus.locks.cache_lock_bypass(new_focus)
+        new_focus.at_post_puppet(reattach=True, session=session)
+        # Pop emitted after re-attach so the actor's focus resolves to the body
+        # control returned to (the meat character now on top).
+        self._emit_focus_changed(session, obj, "pop")
+        return new_focus
+
+    def reattach_focus(self, session, binding):
+        """
+        Re-attach ``session`` to the body on top of ``binding``'s durable focus
+        stack without running a fresh puppet/login pipeline.
+
+        Used by :meth:`at_post_login` to restore a pushed body (a Matrix avatar
+        or rigged vehicle) that survived a disconnect: the focus stack is
+        durable, so we just resolve the active body and wire this runtime
+        session to it, firing at_pre/at_post_puppet with ``reattach=True`` so
+        non-persistent cmdset/state rebuilds while login-only echoes stay
+        suppressed. Mirrors the reload path in ``ServerSession.at_sync``.
+
+        Returns:
+            Object or None: the restored body, or None if the stack resolved to
+            the account floor or the reattach was vetoed.
+        """
+        obj = binding.focus
+        if obj is None or isinstance(obj, AccountDB):
+            return None
+        if is_veto(obj.at_pre_puppet(self, session=session, reattach=True)):
+            return None
+        obj.sessions.add(session)
+        session.bid = binding.pk
+        session._binding = binding
+        _sync_session_bid_to_portal(session)
+        obj.locks.cache_lock_bypass(obj)
+        obj.at_post_puppet(reattach=True, session=session)
+        SIGNAL_OBJECT_POST_PUPPET.send(sender=obj, account=self, session=session)
+        return obj
+
+    @hook(
+        event="session_sync",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Reattach puppet after server reload when bid-based at_sync could not restore focus.",
+    )
+    def at_sync_restore_puppet(self, session):
+        """
+        Last-resort puppet restore after PSYNC when ``session.bid`` was missing
+        or stale on the Portal. Uses the durable ControlBinding graph and
+        ``db._last_puppet`` rather than running the full login pipeline.
+
+        Returns:
+            bool: True if the session now has an in-game puppet.
+
+        """
+        if not session or session.get_puppet():
+            return bool(session and session.get_puppet())
+
+        from evennia.accounts.models import ControlBinding
+
+        identity = getattr(self.db, "_last_puppet", None)
+        if identity:
+            binding = ControlBinding.objects.filter(db_identity=identity).first()
+            if binding:
+                focus = binding.focus
+                if focus is not None and not isinstance(focus, AccountDB):
+                    return self.reattach_focus(session, binding) is not None
+
+        # Reload-restore always re-enters the body (no AUTO_PUPPET_ON_LOGIN gate:
+        # the focus/binding model has no char-select to fall back to).
+        if identity:
+            try:
+                self.puppet_object(session, identity)
+            except RuntimeError:
+                logger.log_trace("at_sync_restore_puppet puppet_object failed")
+            return session.get_puppet() is not None
+        return False
+
+    def _emit_focus_changed(self, session, body, change):
+        """Emit a :class:`~evennia.actions.actor.FocusChanged` for a focus-stack
+        mutation driven through the engine puppet flow (jack-in push / jack-out
+        pop), so ``@subscribe(FocusChanged)`` handlers fire on the same single
+        path the action-system ``Actor.push_focus``/``pop_focus`` use. Emitted
+        only for real pushes/pops — a plain login (push=False) or a disconnect
+        collapse does not change focus *level* and stays on the puppet hooks.
+
+        A buggy emit must never break the puppet transition, so it is fully
+        guarded.
+        """
+        try:
+            from evennia.actions.actor import Actor, FocusChanged
+            from evennia.actions.engine import engine as _engine
+
+            actor = Actor.from_caller(session, callertype="session")
+            _engine.emit(
+                FocusChanged(actor=actor, body=body, change=change, focus=actor.focus)
+            )
+        except Exception:
+            logger.log_trace("account._emit_focus_changed failed")
 
     def unpuppet_all(self):
         """
         Disconnect all puppets. This is called by server before a
         reset/shutdown.
         """
-        self.unpuppet_object(self.sessions.all())
+        # Shutdown must not collapse the durable focus stack — a player jacked
+        # into the Matrix at restart should still be jacked in afterwards and
+        # have their avatar restored on next login.
+        self.unpuppet_object(self.sessions.all(), collapse=False)
 
     @hook(
         event="account_query",
@@ -732,7 +947,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             puppet (Object): The matching puppeted object, if any.
 
         """
-        return session.puppet if session else None
+        return session.get_puppet() if session else None
 
     @hook(
         event="account_query",
@@ -752,7 +967,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 by this Account.
 
         """
-        return list(set(session.puppet for session in self.sessions.all() if session.puppet))
+        return list(
+            {session.get_puppet() for session in self.sessions.all() if session.get_puppet()}
+        )
 
     def __get_single_puppet(self):
         """
@@ -1660,10 +1877,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if isinstance(result, Found):
             match = result.obj
             if return_puppet:
-                try:
-                    return match.puppet
-                except AttributeError:
-                    return None
+                puppets = match.get_all_puppets() if hasattr(match, "get_all_puppets") else []
+                return puppets[0] if puppets else None
             return match
 
         matches = result.candidates if isinstance(result, Ambiguous) else []
@@ -1759,9 +1974,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         configuration values etc.
 
         """
-        # set an (empty) attribute holding the characters this account has
+        # Playable characters are now derived from the ControlBinding graph
+        # (see CharactersHandler); no ``_playable_characters`` attribute is set.
         lockstring = "attrread:perm(Admins);attredit:perm(Admins);attrcreate:perm(Admins);"
-        self.attributes.add("_playable_characters", [], lockstring=lockstring)
         self.attributes.add("_saved_protocol_flags", {}, lockstring=lockstring)
 
     def at_post_load(self):
@@ -2091,7 +2306,27 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if settings.AUTO_PUPPET_ON_LOGIN:
             # in this mode we try to auto-connect to our last connected object, if any
             try:
-                self.puppet_object(session, self.db._last_puppet)
+                identity = self.db._last_puppet
+                # If a body was pushed onto this identity's durable focus stack
+                # (jacked into the Matrix / rigged a vehicle) and survived the
+                # last disconnect, restore that body rather than re-puppeting
+                # the meat character beneath it.
+                from evennia.accounts.models import ControlBinding
+
+                binding = (
+                    ControlBinding.objects.filter(db_identity=identity).first()
+                    if identity
+                    else None
+                )
+                focus = binding.focus if binding else None
+                if (
+                    focus is not None
+                    and focus is not identity
+                    and not isinstance(focus, AccountDB)
+                ):
+                    self.reattach_focus(session, binding)
+                else:
+                    self.puppet_object(session, identity)
             except RuntimeError:
                 logger.log_trace("Error during auto-puppet on login")
                 self.msg(_("The Character does not exist."))

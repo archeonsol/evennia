@@ -68,8 +68,9 @@ class Session:
         # if user has authenticated already or not
         self.logged_in = False
 
-        # database id of puppeted object (if any)
-        self.puid = None
+        # pk of the ControlBinding this session drives (if any). Replaces the
+        # legacy puid/puppet pointer pair; the binding owns the focus stack.
+        self.bid = None
 
         # session time statistics
         self.conn_time = time.time()

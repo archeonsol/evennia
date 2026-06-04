@@ -894,6 +894,17 @@ def cmdhandler(
             except Exception:
                 pass
 
+    # Action engine bridge (CM1 Phase 8): normal player input never merges cmdsets.
+    # Legacy cmdset merge below is only reached for cmdobj= injection, system
+    # CMD_SYSINPUT, or when the bridge explicitly returns False (tests).
+    from evennia.actions.dispatch import try_action_dispatch
+
+    handled = yield try_action_dispatch(
+        called_by, raw_string, session=session, callertype=callertype, **kwargs
+    )
+    if handled:
+        return
+
     (
         cmdset_providers,
         cmdset_providers_list,

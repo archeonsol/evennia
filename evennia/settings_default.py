@@ -471,6 +471,14 @@ SEARCH_AT_RESULT = "evennia.utils.utils.at_search_result"
 # cmdset merging and parsing. Costs one regex sweep per dispatched command;
 # set False to skip if you need raw byte-for-byte input through to commands.
 INPUT_FTFY_NORMALIZE = True
+# When True, route each command through the action engine bridge (CM1) at the
+# top of cmdhandler, before the legacy cmdset path. The bridge dispatches typed
+# actions whose verbs are registered and falls through (returns False) for every
+# unported verb, so the legacy path stays byte-for-byte identical until verbs
+# are ported. Default False — the bridge is inert in production until a deploy
+# opts in. See evennia.actions.dispatch.try_action_dispatch.
+# Deprecated (CM1 Phase 8): cmdhandler always uses try_action_dispatch first.
+ACTION_ENGINE_ENABLED = True
 # The module holding text strings for the connection screen.
 # This module should contain one or more variables
 # with strings defining the look of the screen.
@@ -848,6 +856,15 @@ FILE_HELP_ENTRY_MODULES = ["world.help_entries"]
 # if topics listed in help should be clickable
 # clickable links only work on clients that support MXP.
 HELP_CLICKABLE_TOPICS = True
+# When ACTION_ENGINE_ENABLED, action registry topics in help (CM1 Phase 8).
+# False = bare help lists file/DB topics only (player-facing docs written by staff).
+HELP_INDEX_ACTIONS = False
+# Staff (effective Builder+) also see an ACL-filtered command index on bare help.
+HELP_INDEX_ACTIONS_FOR_STAFF = True
+# Magic topic for staff command reference (e.g. ``help commands``).
+HELP_COMMANDS_TOPIC = "commands"
+# New @action classes omit themselves from help unless auto_help=True explicitly.
+HELP_ACTIONS_DEFAULT_AUTO_HELP = False
 # The Lunr search engine (used by help) excludes 'common' words from its search.
 # This is not so good when those words are names of commands, like who or say;
 # so we need to make sure to tell Lunr to not filter them out by adding them here
@@ -944,6 +961,13 @@ PERMISSION_HIERARCHY = [
 ]
 # The default permission given to all new accounts
 PERMISSION_ACCOUNT_DEFAULT = "Player"
+# Dotted path to the Capability IntFlag enum used by the action system's typed
+# command/action gates (evennia.actions). Must subclass
+# evennia.actions.permission.Capability (a member-less base, so it stays
+# subclassable) and declare its rank order via __rank_order__. Leave as None to
+# use the built-in evennia.actions.permission.DefaultCapability, whose ranks
+# mirror PERMISSION_HIERARCHY.
+CAPABILITY_ENUM = None
 # Default sizes for client window (in number of characters), if client
 # is not supplying this on its own
 CLIENT_DEFAULT_WIDTH = 78
@@ -1402,7 +1426,7 @@ SESSION_SYNC_ATTRS = (
     "csessid",
     "uname",
     "logged_in",
-    "puid",
+    "bid",
     "conn_time",
     "cmd_last",
     "cmd_last_visible",

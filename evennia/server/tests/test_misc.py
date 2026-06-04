@@ -157,11 +157,15 @@ class TestAtSyncFiresPuppetHooks(BaseEvenniaTest):
     def test_reattach_fires_pre_and_post_puppet_with_reattach_kwarg(self):
         from unittest.mock import patch
 
+        from evennia.accounts.models import ControlBinding
+
         sess = ServerSession()
         sess.init_session("telnet", "127.0.0.1", sessionhandler=None)
         sess.logged_in = True
         sess.account = self.account
-        sess.puid = self.char1.id
+        binding = ControlBinding.for_identity(self.account, self.char1)
+        binding.push(self.char1)
+        sess.bid = binding.pk
 
         with (
             patch.object(type(self.char1), "at_pre_puppet", return_value=None) as pre,
@@ -174,16 +178,20 @@ class TestAtSyncFiresPuppetHooks(BaseEvenniaTest):
         self.assertIs(pre.call_args.kwargs.get("session"), sess)
         post.assert_called_once()
         self.assertEqual(post.call_args.kwargs.get("reattach"), True)
-        self.assertIs(sess.puppet, self.char1)
+        self.assertIs(sess.get_puppet(), self.char1)
 
     def test_pre_puppet_veto_aborts_reattach(self):
         from unittest.mock import patch
+
+        from evennia.accounts.models import ControlBinding
 
         sess = ServerSession()
         sess.init_session("telnet", "127.0.0.1", sessionhandler=None)
         sess.logged_in = True
         sess.account = self.account
-        sess.puid = self.char1.id
+        binding = ControlBinding.for_identity(self.account, self.char1)
+        binding.push(self.char1)
+        sess.bid = binding.pk
 
         with (
             patch.object(type(self.char1), "at_pre_puppet", return_value=False),
@@ -192,8 +200,8 @@ class TestAtSyncFiresPuppetHooks(BaseEvenniaTest):
             sess.at_sync()
 
         post.assert_not_called()
-        self.assertIsNone(sess.puppet)
-        self.assertIsNone(sess.puid)
+        self.assertIsNone(sess.get_puppet())
+        self.assertIsNone(sess.bid)
 
     def test_reattach_default_post_puppet_suppresses_echo(self):
         # `reattach=True` short-circuits the default at_post_puppet body so
@@ -203,3 +211,22 @@ class TestAtSyncFiresPuppetHooks(BaseEvenniaTest):
         with patch.object(self.char1, "msg") as msg:
             self.char1.at_post_puppet(reattach=True)
         msg.assert_not_called()
+
+    def test_at_sync_restore_puppet_without_bid(self):
+        """Missing portal bid after reload falls back to durable binding restore."""
+        from evennia.accounts.models import ControlBinding
+
+        self.account.db._last_puppet = self.char1
+        binding = ControlBinding.for_identity(self.account, self.char1)
+        binding.push(self.char1)
+
+        sess = ServerSession()
+        sess.init_session("telnet", "127.0.0.1", sessionhandler=None)
+        sess.logged_in = True
+        sess.account = self.account
+        sess.bid = None
+
+        sess.at_sync()
+
+        self.assertIs(sess.get_puppet(), self.char1)
+        self.assertEqual(sess.bid, binding.pk)

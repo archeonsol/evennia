@@ -2404,7 +2404,7 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         )
 
     def test_account_command_with_puppet_normalises_caller_and_character(self):
-        self.session.puppet = self.char1
+        # fixture session already puppets char1 (auto-puppet on login)
         cmd = _CmdAcctMarker()
         d = self._dispatch(cmd)
 
@@ -2417,7 +2417,7 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         return d
 
     def test_account_command_without_puppet_sets_character_none(self):
-        self.session.puppet = None
+        self.account.unpuppet_object(self.session)
         cmd = _CmdAcctMarker()
         d = self._dispatch(cmd)
 
@@ -2431,7 +2431,7 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         return d
 
     def test_regular_command_caller_untouched_and_no_character_attr(self):
-        self.session.puppet = self.char1
+        # fixture session already puppets char1 (auto-puppet on login)
         cmd = _CmdObjMarker()
         d = self._dispatch(cmd)
 
@@ -3122,7 +3122,7 @@ class TestCmdsetMergeWarmup(BaseEvenniaTest):
 
         unpuppeted = MagicMock()
         unpuppeted.logged_in = True
-        unpuppeted.puppet = None
+        unpuppeted.get_puppet = MagicMock(return_value=None)
         fake_handler = MagicMock()
         fake_handler.get_sessions.return_value = [unpuppeted]
         with (

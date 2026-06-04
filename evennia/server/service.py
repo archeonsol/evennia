@@ -163,19 +163,11 @@ class EvenniaServerService(MultiService):
 
         self.process_idle_timeouts()
 
-        # run unpuppet hooks for objects that are marked as being puppeted,
-        # but which lacks an account (indicates a broken unpuppet operation
-        # such as a server crash)
-        if self.maintenance_count > 1:
-            unpuppet_count = 0
-            for obj in evennia.ObjectDB.objects.get_by_tag(key="puppeted", category="account"):
-                if not obj.has_account:
-                    obj.at_pre_unpuppet()
-                    obj.at_post_unpuppet(None, reason=_(" (connection lost)"))
-                    obj.tags.remove("puppeted", category="account")
-                    unpuppet_count += 1
-            if unpuppet_count:
-                logger.log_msg(f"Ran unpuppet-hooks for {unpuppet_count} link-dead puppets.")
+        # Link-dead puppets (a body whose session died on a crash) no longer
+        # need a tag-scan cleanup: control is anchored in the durable
+        # ControlBinding focus stack, and the body is restored on next login by
+        # at_post_login / reattach_focus. The old "puppeted" account-tag marker
+        # and its periodic at_post_unpuppet sweep are retired.
 
     def process_idle_timeouts(self):
         # handle idle timeouts
@@ -535,6 +527,22 @@ class EvenniaServerService(MultiService):
 
         self.at_server_init()
 
+        # Boot bulk-job: ensure every owned character has a ControlBinding
+        # (the durable control graph that replaces the session.puppet / puid
+        # pointer pair). Idempotent and skipped on warm reloads, where the
+        # rows already exist from the prior cold start.
+        if mode != "reload":
+            try:
+                from evennia.accounts.models import ControlBinding
+
+                created = ControlBinding.populate_missing()
+                if created:
+                    logger.log_info(
+                        f"ControlBinding: populated {created} missing control binding(s)."
+                    )
+            except Exception:
+                logger.log_trace("ControlBinding.populate_missing failed at startup")
+
         # call correct server hook based on start file value
         if mode == "reload":
             logger.log_msg("Server successfully reloaded.")
@@ -824,7 +832,7 @@ class EvenniaServerService(MultiService):
             for guest in evennia.AccountDB.objects.all().filter(
                 db_typeclass_path=settings.BASE_GUEST_TYPECLASS
             ):
-                for character in guest.db._playable_characters:
+                for character in list(guest.characters.all()):
                     if character:
                         character.delete()
                 guest.delete()

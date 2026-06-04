@@ -107,6 +107,22 @@ class TestLockfuncs(BaseEvenniaTest):
         self.assertEqual(True, lockfuncs.perm(self.char2, None, "Builders"))
 
     @override_settings(PERMISSION_HIERARCHY=settings_default.PERMISSION_HIERARCHY)
+    def test_quelled_superuser_lock_bypass_disabled(self):
+        from evennia.locks.lockhandler import check_lockstring, check_perm
+
+        self.account.is_superuser = True
+        self.account.attributes.add("_quell", True)
+        self.char1.permissions.clear()
+        self.char1.permissions.add("Player")
+        self.char1.locks.reset()
+        self.account.locks.reset()
+        self.assertFalse(self.account.locks.lock_bypass)
+        self.assertFalse(check_perm(self.char1, "Developer"))
+        self.assertFalse(
+            check_lockstring(self.char1, "cmd:perm(Builder)", access_type="cmd")
+        )
+
+    @override_settings(PERMISSION_HIERARCHY=settings_default.PERMISSION_HIERARCHY)
     def test_quell_above_perm(self):
         self.assertEqual(True, lockfuncs.perm_above(self.char2, None, "Player"))
         self.assertEqual(True, lockfuncs.perm_above(self.char2, None, "Builder"))
@@ -230,7 +246,8 @@ class TestLockfuncs(BaseEvenniaTest):
         # MULTISESSION_MODE 0.
         ooc_session = ServerSession()
         ooc_session.sessid = 2
-        ooc_session.puppet = None
+        ooc_session.logged_in = True
+        ooc_session.bid = None
 
         self.assertFalse(lockfuncs.is_ooc(self.account, self.char1, session=ic_session))
         self.assertTrue(lockfuncs.is_ooc(self.account, self.char1, session=ooc_session))

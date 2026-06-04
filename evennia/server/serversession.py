@@ -57,10 +57,29 @@ class ServerSession(_BASE_SESSION_CLASS):
         Initiate to avoid AttributeErrors down the line
 
         """
-        self.puppet = None
         self.account = None
+        self.bid = None
+        self._binding = None
         self.cmdset_storage_string = ""
         self.cmdset = CmdSetHandler(self, True)
+
+    @property
+    def binding(self):
+        """The :class:`~evennia.accounts.models.ControlBinding` this session
+        currently drives, resolved from ``self.bid`` (``None`` when OOC at the
+        character-select screen). Cached on the session; the cache invalidates
+        when ``bid`` changes."""
+        bid = getattr(self, "bid", None)
+        if not bid:
+            self._binding = None
+            return None
+        cached = self._binding
+        if cached is not None and cached.pk == bid:
+            return cached
+        from evennia.accounts.models import ControlBinding
+
+        self._binding = ControlBinding.objects.filter(pk=bid).first()
+        return self._binding
 
     def __cmdset_storage_get(self):
         return [path.strip() for path in self.cmdset_storage_string.split(",")]
@@ -94,8 +113,9 @@ class ServerSession(_BASE_SESSION_CLASS):
         out = {"session": self}
         if self.account:
             out["account"] = self.account
-        if self.puppet:
-            out["object"] = self.puppet
+        puppet = self.get_puppet()
+        if puppet:
+            out["object"] = puppet
         return out
 
     @property
@@ -132,29 +152,36 @@ class ServerSession(_BASE_SESSION_CLASS):
 
         self.cmdset.update(init_mode=True)
 
-        if self.puid:
-            # reconnect puppet (puid is only set if we are coming
-            # back from a server reload). Skips access checks (the
+        if self.bid:
+            # reconnect the focus body (bid is only set if we are coming
+            # back from a server reload). The ControlBinding and its focus
+            # stack are durable, so we just re-resolve the active body and
+            # re-attach this runtime session to it. Skips access checks (the
             # session was already authenticated pre-reload) but fires
             # at_pre_puppet / at_post_puppet with reattach=True so any
-            # non-persistent cmdset state the game stacks in
-            # at_post_puppet rebuilds. Default echoes are suppressed
-            # by the reattach kwarg in DefaultObject / DefaultCharacter
-            # at_post_puppet.
-            obj = _ObjectDB.objects.get(id=self.puid)
-            if is_veto(obj.at_pre_puppet(self.account, session=self, reattach=True)):
-                # Veto leaves the session unpuppeted; the override is
+            # non-persistent cmdset state the game stacks in at_post_puppet
+            # rebuilds. Default echoes are suppressed by the reattach kwarg
+            # in DefaultObject / DefaultCharacter at_post_puppet.
+            self._binding = None  # force a fresh resolve
+            obj = self.get_puppet()
+            if obj is None:
+                # binding gone or collapsed to the account floor — nothing to
+                # reattach via bid alone.
+                self.bid = None
+            elif is_veto(obj.at_pre_puppet(self.account, session=self, reattach=True)):
+                # Veto leaves the session unbound; the override is
                 # responsible for any user-visible explanation.
-                self.puid = None
-                self.puppet = None
-                return
-            obj.sessions.add(self)
-            obj.account = self.account
-            self.puid = obj.id
-            self.puppet = obj
-            # obj.scripts.validate()
-            obj.locks.cache_lock_bypass(obj)
-            obj.at_post_puppet(reattach=True)
+                self.bid = None
+                self._binding = None
+            else:
+                obj.sessions.add(self)
+                obj.locks.cache_lock_bypass(obj)
+                obj.at_post_puppet(reattach=True)
+
+        if self.logged_in and self.account and not self.get_puppet():
+            restore = getattr(self.account, "at_sync_restore_puppet", None)
+            if restore:
+                restore(session=self)
 
     @hook(
         event="login",
@@ -178,8 +205,8 @@ class ServerSession(_BASE_SESSION_CLASS):
         self.uname = self.account.username
         self.logged_in = True
         self.conn_time = time.time()
-        self.puid = None
-        self.puppet = None
+        self.bid = None
+        self._binding = None
         self.cmdset_storage = settings.CMDSET_SESSION
 
         # Update account's last login time.
@@ -205,8 +232,11 @@ class ServerSession(_BASE_SESSION_CLASS):
         """
         if self.logged_in:
             account = self.account
-            if self.puppet:
-                account.unpuppet_object(self)
+            if self.get_puppet():
+                # Network drop: detach the runtime session but preserve the
+                # durable focus stack so the body (and any pushed avatar/rig)
+                # is restored on next login via at_post_login.
+                account.unpuppet_object(self, collapse=False)
             # calling account hook
             account.at_disconnect(reason)
             self.logged_in = False
@@ -252,10 +282,19 @@ class ServerSession(_BASE_SESSION_CLASS):
         Get the in-game character associated with this session.
 
         Returns:
-            puppet (Object or None): The puppeted object, if any.
+            puppet (Object or None): The active focus body, if any. ``None``
+            when OOC (focus rests on the account floor) or unbound.
 
         """
-        return self.puppet if self.logged_in else None
+        if not self.logged_in:
+            return None
+        binding = self.binding
+        if binding is None:
+            return None
+        from evennia.accounts.models import AccountDB
+
+        focus = binding.focus
+        return None if isinstance(focus, AccountDB) else focus
 
     get_character = get_puppet
 
@@ -576,8 +615,9 @@ class ServerSession(_BASE_SESSION_CLASS):
         notes="Session-side display name (for logging / admin tools).",
     )
     def get_display_name(self, *args, **kwargs):
-        if self.puppet:
-            return self.puppet.get_display_name(*args, **kwargs)
+        puppet = self.get_puppet()
+        if puppet:
+            return puppet.get_display_name(*args, **kwargs)
         elif self.account:
             return self.account.get_display_name(*args, **kwargs)
         else:

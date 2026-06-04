@@ -96,7 +96,8 @@ def warm_all_logged_in_puppet_sessions() -> None:
     for session in SESSION_HANDLER.get_sessions():
         if not getattr(session, "logged_in", False):
             continue
-        if not getattr(session, "puppet", None):
+        get_puppet = getattr(session, "get_puppet", None)
+        if not (get_puppet and get_puppet()):
             continue
         d = warm_cmdset_merge_for_session(session)
         if d is not None and hasattr(d, "addErrback"):

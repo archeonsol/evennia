@@ -223,7 +223,7 @@ class TestDefaultAccount(TestCase):
 
     def setUp(self):
         self.s1 = MagicMock()
-        self.s1.puppet = None
+        self.s1.get_puppet = Mock(return_value=None)
         self.s1.sessid = 0
 
     def test_puppet_object_no_object(self):
@@ -260,7 +260,7 @@ class TestDefaultAccount(TestCase):
         self.s1.data_out = Mock(return_value=None)
 
         obj = Mock()
-        self.s1.puppet = obj
+        self.s1.get_puppet = Mock(return_value=obj)
         account.puppet_object(self.s1, obj)
         self.s1.data_out.assert_called_with(
             options=None, text="You are already puppeting this object."
@@ -282,6 +282,7 @@ class TestDefaultAccount(TestCase):
         self.s1.data_out = MagicMock()
         obj = Mock()
         obj.access = Mock(return_value=False)
+        obj.sessions.all = Mock(return_value=[])
 
         account.puppet_object(self.s1, obj)
 
@@ -303,16 +304,23 @@ class TestDefaultAccount(TestCase):
         self.s1.uid = account.uid
         evennia.SESSION_HANDLER[self.s1.uid] = self.s1
 
-        self.s1.puppet = None
+        self.s1.get_puppet = Mock(return_value=None)
+        self.s1.account = account
         self.s1.logged_in = True
         self.s1.data_out = MagicMock()
 
         obj = Mock()
         obj.access = Mock(return_value=True)
-        obj.account = account
+        # another live session of *this* account is currently driving obj
         obj.sessions.all = MagicMock(return_value=[self.s1])
+        obj.sessions.get = MagicMock(return_value=self.s1)
 
-        account.puppet_object(self.s1, obj)
+        # the focus stack / ControlBinding internals are exercised by the
+        # dedicated binding tests; here we only assert the takeover messaging
+        # and the at_post_puppet hook, so stub the durable binding lookup.
+        with patch("evennia.accounts.models.ControlBinding.for_identity") as for_identity:
+            for_identity.return_value = MagicMock()
+            account.puppet_object(self.s1, obj)
         # works because django.conf.settings.MULTISESSION_MODE is not in (1, 3)
         self.assertTrue(
             self.s1.data_out.call_args[1]["text"].endswith("from another of your sessions.|n")
@@ -332,14 +340,19 @@ class TestDefaultAccount(TestCase):
         self.s1.uid = account.uid
         evennia.SESSION_HANDLER[self.s1.uid] = self.s1
 
-        self.s1.puppet = None
+        self.s1.get_puppet = Mock(return_value=None)
         self.s1.logged_in = True
         self.s1.data_out = Mock(return_value=None)
 
         obj = Mock()
         obj.access = Mock(return_value=True)
-        obj.account = Mock()
         obj.at_post_puppet = Mock()
+        # obj is currently driven by a live session of *another*, connected
+        # account, so the puppet attempt is refused.
+        other_session = MagicMock()
+        other_session.account = Mock()
+        other_session.account.is_connected = True
+        obj.sessions.all = MagicMock(return_value=[other_session])
 
         account.puppet_object(self.s1, obj)
         self.assertTrue(
@@ -415,6 +428,110 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
         self.account.at_puppet_removed = MagicMock()
         self.account.unpuppet_object(self.session)
         self.account.at_puppet_removed.assert_called_once_with(self.char1, session=self.session)
+
+
+class TestAccountFocusPushPop(BaseEvenniaTest):
+    """puppet_object(push=True) layers a body; pop_focus returns to the one
+    beneath, preserving identity (the I1 jack-in/jack-out primitive)."""
+
+    def setUp(self):
+        super().setUp()
+        # self.session already drives self.char1 (the meat body). char2 stands
+        # in for the avatar/vehicle layered on top.
+        self.char2.locks.add("puppet:all()")
+
+    def test_push_layers_body_and_keeps_identity(self):
+        self.account.puppet_object(self.session, self.char2, push=True)
+        binding = self.session.binding
+        # focus moved to the layered body
+        self.assertEqual(self.session.get_puppet(), self.char2)
+        # identity stays the meat character
+        self.assertEqual(binding.db_identity, self.char1)
+        # full stack: [account, char1, char2]
+        self.assertEqual(binding.stack_objects, [self.account, self.char1, self.char2])
+        # meat body shed its live session; avatar holds it
+        self.assertNotIn(self.session, list(self.char1.sessions.all()))
+        self.assertIn(self.session, list(self.char2.sessions.all()))
+
+    def test_pop_returns_to_body_beneath(self):
+        self.account.puppet_object(self.session, self.char2, push=True)
+        returned = self.account.pop_focus(self.session)
+        self.assertEqual(returned, self.char1)
+        self.assertEqual(self.session.get_puppet(), self.char1)
+        binding = self.session.binding
+        self.assertEqual(binding.stack_objects, [self.account, self.char1])
+        self.assertIn(self.session, list(self.char1.sessions.all()))
+        self.assertNotIn(self.session, list(self.char2.sessions.all()))
+
+    def test_pop_to_floor_goes_ooc(self):
+        # Pop the only layer (char1) straight off — lands on the account floor.
+        returned = self.account.pop_focus(self.session)
+        self.assertIsNone(returned)
+        self.assertIsNone(self.session.get_puppet())
+        self.assertIsNone(self.session.bid)
+
+
+class TestAccountDisconnectRestore(BaseEvenniaTest):
+    """A network drop preserves the durable focus stack (collapse=False); a
+    deliberate go-OOC collapses it (collapse=True). at_post_login restores a
+    pushed body (the jacked-in avatar) rather than the meat character beneath."""
+
+    def setUp(self):
+        super().setUp()
+        self.char2.locks.add("puppet:all()")
+        self.account.db._last_puppet = self.char1
+
+    def test_disconnect_preserves_pushed_stack(self):
+        self.account.puppet_object(self.session, self.char2, push=True)
+        binding = self.session.binding
+        self.account.unpuppet_object(self.session, collapse=False)
+        # session detached from the runtime body...
+        self.assertIsNone(self.session.bid)
+        self.assertNotIn(self.session, list(self.char2.sessions.all()))
+        # ...but the durable stack still carries the pushed body
+        binding.refresh_from_db()
+        self.assertEqual(binding.stack_objects, [self.account, self.char1, self.char2])
+
+    def test_deliberate_ooc_collapses_stack(self):
+        self.account.puppet_object(self.session, self.char2, push=True)
+        binding = self.session.binding
+        self.account.unpuppet_object(self.session)  # collapse=True default
+        binding.refresh_from_db()
+        self.assertEqual(binding.stack_objects, [self.account])
+
+    def test_login_restores_pushed_focus(self):
+        self.account.puppet_object(self.session, self.char2, push=True)
+        self.account.unpuppet_object(self.session, collapse=False)
+        self.session.bid = None
+        self.session._binding = None
+        self.account.at_post_login(self.session)
+        # restored straight to the avatar, not the meat char beneath it
+        self.assertEqual(self.session.get_puppet(), self.char2)
+
+    def test_login_without_push_puppets_character(self):
+        # No body pushed — stack is just [account, char1]; login puppets char1.
+        self.account.unpuppet_object(self.session, collapse=False)
+        self.session.bid = None
+        self.session._binding = None
+        self.account.at_post_login(self.session)
+        self.assertEqual(self.session.get_puppet(), self.char1)
+
+    def test_permadeath_collapses_and_drops_binding(self):
+        # Permadeath ("go light"): the player is jacked in (avatar pushed), then
+        # the lobby collapses the stack to the account floor and deletes the
+        # identity character. The ControlBinding (keyed on the identity via an
+        # on_delete=CASCADE OneToOne) must go with it — no orphaned focus stack.
+        from evennia.accounts.models import ControlBinding
+
+        self.account.puppet_object(self.session, self.char2, push=True)
+        binding = self.session.binding
+        binding_pk = binding.pk
+        # go-light: deliberate collapse to floor, then delete the identity self.
+        self.account.unpuppet_object(self.session)  # collapse=True default
+        binding.refresh_from_db()
+        self.assertEqual(binding.stack_objects, [self.account])
+        self.char1.delete()
+        self.assertFalse(ControlBinding.objects.filter(pk=binding_pk).exists())
 
 
 class TestAccountPuppetDeletion(BaseEvenniaTest):

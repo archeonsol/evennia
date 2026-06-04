@@ -102,7 +102,7 @@ class CmdOOCLook(MuxAccountLookCommand):
     def func(self):
         """implement the ooc look command"""
 
-        if self.session.puppet:
+        if self.session.get_puppet():
             # if we are puppeting, this is only reached in the case the that puppet
             # has no look command on its own.
             self.msg("You currently have no ability to look around.")
@@ -289,7 +289,8 @@ class CmdIC(AccountCommand):
             if account.locks.check_lockstring(account, "perm(Builder)"):
                 # builders and higher should be able to puppet more than their
                 # playable characters.
-                if session.puppet:
+                _session_puppet = session.get_puppet()
+                if _session_puppet:
                     # start by local search - this helps to avoid the user
                     # getting locked into their playable characters should one
                     # happen to be named the same as another. We replace the suggestion
@@ -298,7 +299,7 @@ class CmdIC(AccountCommand):
                     # (by going to the same location).
                     from evennia.objects.search_result import Ambiguous, Found
 
-                    puppet_result = session.puppet.search_for(self.args)
+                    puppet_result = _session_puppet.search_for(self.args)
                     if isinstance(puppet_result, Found):
                         local_chars = [puppet_result.obj]
                     elif isinstance(puppet_result, Ambiguous):
@@ -983,7 +984,7 @@ class CmdQuell(AccountCommand):
     def _recache_locks(self, account):
         """Helper method to reset the lockhandler on an already puppeted object"""
         if self.session:
-            char = self.session.puppet
+            char = self.session.get_puppet()
             if char:
                 # we are already puppeting an object. We need to reset
                 # the lock caches (otherwise the superuser status change
@@ -1011,7 +1012,7 @@ class CmdQuell(AccountCommand):
                 return
             account.attributes.add("_quell", True)
             mutated = True
-            puppet = self.session.puppet if self.session else None
+            puppet = self.session.get_puppet() if self.session else None
             if puppet:
                 cpermstr = "(%s)" % ", ".join(puppet.permissions.all())
                 cpermstr = f"Quelling to current puppet's permissions {cpermstr}."
@@ -1030,7 +1031,7 @@ class CmdQuell(AccountCommand):
         # account *and* the active puppet so character-level access
         # checks see the new effective perms, then fire the signal.
         if mutated:
-            puppet = self.session.puppet if self.session else None
+            puppet = self.session.get_puppet() if self.session else None
             invalidate_caller_access(account, puppet)
             permissions_changed.send_robust(
                 sender=type(self),
