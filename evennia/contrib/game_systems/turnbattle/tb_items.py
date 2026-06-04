@@ -478,7 +478,8 @@ class ItemCombatRules(tb_basic.BasicCombatRules):
 
         item_msg = "%s uses %s! " % (user, item)
 
-        for key in target.db.conditions:
+        # iterate a snapshot: the loop deletes from target.db.conditions
+        for key in list(target.db.conditions):
             if key in to_cure:
                 # If condition specified in to_cure, remove it.
                 item_msg += "%s no longer has the '%s' condition. " % (str(target), str(key))

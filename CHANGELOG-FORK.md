@@ -25,6 +25,183 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.63 — deprecate `ObjectDB.objects.get_objs_with_attr()`
+
+Key-existence attribute search (`get_objs_with_attr(attr_name)`, "any value")
+is unsalvageable under the JSONB attribute model and is now deprecated ahead of
+removal at the Underspire API freeze.
+
+### Performance
+
+The method's docstring claimed "GIN-indexed on PostgreSQL." That was wrong. The
+query compiles to `(db_attrs -> '~' -> '_d') ? attr_name`, testing the `?`
+operator against an *extracted nested object*. The shipped index is a plain
+`USING GIN(db_attrs)` with default `jsonb_ops`
+([`0017_objectdb_db_attrs_gin.py`](evennia/objects/migrations/0017_objectdb_db_attrs_gin.py)),
+which only accelerates top-level `db_attrs @> …` and `db_attrs ? …`. Once the
+expression extracts a sub-document the index cannot apply, so this is an
+unindexed sequential scan on every backend, PostgreSQL included. Key-existence
+also cannot be made indexable through containment: `@>` requires a value, so
+"has key K with any value" has no GIN-friendly form short of a dedicated
+expression index we don't ship. The result set is near-useless besides (every
+object with e.g. `desc` set is almost the whole table).
+
+### API
+
+- [`get_objs_with_attr()`](evennia/objects/manager.py:145) now emits a
+  `DeprecationWarning` and documents the true cost. The in-DB PostgreSQL filter
+  is retained so an existing call doesn't stream every row's `db_attrs` into
+  Python, but it is marked for removal.
+- `get_objs_with_attr_value()` is unaffected: its top-level `db_attrs @> {…}`
+  containment query is genuinely GIN-indexed.
+
+### Migration notes
+
+Downstream callers of `get_objs_with_attr()` should switch to
+[`get_objs_with_attr_value()`](evennia/objects/manager.py:181) (restrict to a
+known value) or pass `candidates=` to bound the scan. The method will be removed
+at the API freeze, so audit usage now: key-only existence searches may require
+larger query refactors and should not be left to the deprecation deadline.
+
+### Tests
+
+- `test_get_objs_with_attr` now asserts the `DeprecationWarning` fires
+  ([`test_objects.py`](evennia/objects/tests/test_objects.py)). Object suite
+  passes (96 tests, SQLite).
+
+## 6.0.0+underspire.62 — remove the `ingame_python` contrib
+
+Deletes the `ingame_python` contrib (the in-game Python event/callback scripting
+system). It is unused by our game and lets builders execute arbitrary Python
+in-game, a security surface that contradicts the prototype `exec` removal in
+``.49``. It was also opt-in but did a DB query (`ScriptDB.objects.get`) at module
+import time, making it brittle to import before DB setup.
+
+- Removed `evennia/contrib/base_systems/ingame_python/` and its docs
+  (`Contrib-Ingame-Python*.md`, the `Contribs-Overview` entry, and the
+  generated API stubs).
+- Left untouched: the historical `*_convert_contrib_typeclass_paths` migrations
+  that reference the old path as a string remap (no code import; harmless and
+  needed for old DBs).
+
+## 6.0.0+underspire.61 — fix `comms/0019` data migration on fresh installs
+
+The 2021 channel-alias data migration queried the live `ChannelDB` model, which
+selects `db_attrs` (a column added by a much later migration), so it errored on
+a fresh install even with an empty channel table. ``.56`` had hidden this behind
+a blanket `except Exception` wrapping the whole body, which also swallowed
+genuine failures.
+
+- Detect whether there is anything to migrate via the *historical* model
+  (`apps.get_model`), whose query does not reference later-added columns, and
+  early-return on the empty/fresh-install case.
+- The live model is only touched once real channel data exists; the catch around
+  it is narrowed to `OperationalError`/`ProgrammingError` (schema-not-ready on an
+  old upgrade) so real bugs propagate. `atomic=False` is retained only to make
+  that narrow DB-error skip safe.
+
+A fresh `evennia migrate` now applies `comms.0019` with no skipped/no-such-column
+message; the comms suite passes.
+
+## 6.0.0+underspire.60 — fix JSONB serialization regressions (hidden dbobjs, stable caching)
+
+A full-suite run (2171 tests; prior rounds only ran narrow subsets) surfaced
+core ``dbserialize`` regressions introduced by the JSONB backend.
+
+- ``jsonb_util.to_jsonb`` left embedded *hidden* dbobjs serialized. ``to_pickle``
+  calls ``__serialize_dbobjs__`` in place, replacing a container's hidden dbobj
+  with its bytes, and the owning attribute kept referencing that mutated live
+  object, so later reads returned raw bytes. ``to_jsonb`` now restores the live
+  value after encoding via a read-only walk that calls ``__deserialize_dbobjs__``
+  (it must not reconstruct containers: ``from_pickle`` cannot rebuild ``_Saver*``
+  types from a generator, and ``deserialize`` mishandles dict/list subclasses).
+- ``to_jsonb`` masked the real serialization error. An un-storable hidden dbobj
+  now propagates the underlying error (e.g. ``TypeError``) instead of a generic
+  ``ValueError``, restoring the documented "raises on unstorable value" contract.
+- ``evennia/utils/tests/test_dbserialize.py``: relaxed two assertions that
+  required the read-back object to be the *same* object assigned. Identity
+  across the write-behind store is not a contract (the value is round-tripped);
+  the tests now assert what is guaranteed: consecutive reads are stable and
+  hidden dbobjs round-trip.
+- Contrib fallout from stable caching: a read now returns the same ``_Saver``
+  object each time (instead of a fresh copy), which exposed two
+  modify-during-iteration bugs that iterated an attribute collection while
+  deleting from it. Both now iterate a snapshot:
+  [`turnbattle/tb_items.py`](evennia/contrib/game_systems/turnbattle/tb_items.py)
+  (`itemfunc_cure_condition`) and
+  [`evadventure/combat_turnbased.py`](evennia/contrib/tutorials/evadventure/combat_turnbased.py)
+  (`stop_combat`).
+
+Known pre-existing failure (unrelated, not addressed): the
+``evennia.contrib.base_systems.ingame_python`` package errors at import time
+because ``register_events`` runs ``ScriptDB.objects.get(...)`` at module load,
+before the DB exists during test discovery.
+
+## 6.0.0+underspire.59 — JSONB attribute search on all backends; fix REST set_attribute
+
+The ``.56a``/``.57`` attribute-search restoration was PostgreSQL-only: the
+queries returned ``none()`` (or skipped their filters) on SQLite/MySQL, so
+attribute search silently returned empty results, and the existing tests failed
+outright on the default (SQLite) backend.
+
+- Added a portable Python fallback (``_jsonb_match_pks`` in
+  [`typeclasses/managers.py`](evennia/typeclasses/managers.py)) used on every
+  non-PostgreSQL backend; PostgreSQL keeps the GIN-indexed ``@>`` containment
+  fast path. Applies to ``get_by_attribute``, ``smart_search`` attr tokens, and
+  ``ObjectDBManager.get_objs_with_attr``/``get_objs_with_attr_value``. No
+  candidate-passing required; MySQL rides the fallback.
+- These DB-level queries now flush pending write-behind attribute writes first
+  (``_flush_attr_writes``): JSONB attributes live in the L1 cache until the
+  maintenance tick, so a search reading ``db_attrs`` directly would otherwise
+  miss recently-set attributes. This affected all backends.
+- [`web/api/serializers.py`](evennia/web/api/serializers.py): ``AttributeSerializer.db_value``
+  reverted to ``CharField`` (the ``.57`` ``JSONField`` rejected form-encoded
+  scalar values like ``"test_value"``, 400ing ``set_attribute`` for every
+  object type).
+- Test isolation: ``_DIRTY_BACKENDS`` is now reset in ``tearDown``
+  (``discard_dirty_backends``). ``flush_cache()`` clears the idmapper but not
+  this separate write-behind set, so dirty backends leaked across tests; under
+  SQLite pk reuse a stale backend's document clobbered a later test's write
+  during ``flush_all_dirty()``.
+
+## 6.0.0+underspire.58 — collapse no-op AlterField migrations into AddField
+
+The per-typeclass attribute migrations split the ``db_attrs`` column addition
+across an ``AddField`` followed by an ``AlterField`` that only edited the
+field's ``help_text`` (no DDL, no ``null``/``db_index`` change despite the
+original commit message). Collapsed each into a single ``AddField``, removing
+the dead AlterField migrations.
+
+## 6.0.0+underspire.57 — fix JSONB review gaps (C1-C4, migration deps, test cleanup)
+
+Addresses dangling references and breakage left by the M2M removal (``.55``/``.56``).
+Note: the attribute-search restorations here were PostgreSQL-only and were made
+backend-portable in ``.59``.
+
+- Restored ``ObjectDBManager.get_objs_with_attr`` / ``get_objs_with_attr_value``
+  (fixes ``search_object(attribute_name=...)``) and Postgres-guarded
+  ``get_by_attribute`` (it had raised ``NotSupportedError`` on SQLite).
+- ``TypeclassManager.smart_search``: ``attr==`` / ``attr!=`` tokens ported from
+  the removed ``db_attributes__`` M2M lookup to JSONB ``@>`` containment.
+- [`web/api/serializers.py`](evennia/web/api/serializers.py): ``AttributeSerializer``
+  field sources realigned so ``views.set_attribute`` reads the right keys;
+  ``search_attribute_object`` reduced to a stub (the ``Attribute`` model is gone).
+- Migration ``typeclasses/0023`` (delete ``Attribute``) gained explicit
+  dependencies on the four ``RemoveField(db_attributes)`` through-table drops,
+  so the parent table is dropped after the FK-holding through tables on
+  PostgreSQL/MySQL regardless of the migration planner's sort order.
+- Removed ``TestTypedAttrFilterKwargs`` (it targeted the orphaned
+  ``db_attributes__`` ``filter_kwargs``, which now raises ``NotImplementedError``).
+
+## 6.0.0+underspire.56a — restore `get_by_attribute` via JSONB containment
+
+``search_object_attribute`` / ``search_account_attribute`` /
+``search_script_attribute`` delegate to ``TypedObjectManager.get_by_attribute``,
+which ``.56`` removed while leaving the callers in place. Re-added it using
+GIN-indexed ``@>`` containment (``filter(db_attrs__contains={cat: {_d: {key: value}}})``),
+absorbing the now-unused ``strvalue``/``attrtype`` params via ``**kwargs``.
+(Made backend-portable in ``.59``.)
+
 ## 6.0.0+underspire.56 — BREAKING: Phase 2 M2M removal, delete `Attribute` model
 
 Final step of the JSONB attribute migration. Removes the `Attribute` Django

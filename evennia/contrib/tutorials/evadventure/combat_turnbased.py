@@ -25,9 +25,15 @@ from evennia import AttributeProperty, CmdSet, Command, EvMenu
 from evennia.utils import inherits_from, list_to_string
 
 from .characters import EvAdventureCharacter
-from .combat_base import (CombatAction, CombatActionAttack, CombatActionHold,
-                          CombatActionStunt, CombatActionUseItem,
-                          CombatActionWield, EvAdventureCombatBaseHandler)
+from .combat_base import (
+    CombatAction,
+    CombatActionAttack,
+    CombatActionHold,
+    CombatActionStunt,
+    CombatActionUseItem,
+    CombatActionWield,
+    EvAdventureCombatBaseHandler,
+)
 from .enums import Ability
 
 
@@ -198,7 +204,8 @@ class EvAdventureTurnbasedCombatHandler(EvAdventureCombatBaseHandler):
         Stop the combat immediately.
 
         """
-        for combatant in self.combatants:
+        # iterate a snapshot: remove_combatant mutates self.combatants
+        for combatant in list(self.combatants):
             self.remove_combatant(combatant)
         self.stop()
         self.delete()

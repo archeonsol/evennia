@@ -1,12 +1,20 @@
 from mock import MagicMock, patch
 
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import (
+    DefaultCharacter,
+    DefaultExit,
+    DefaultObject,
+    DefaultRoom,
+)
 from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.typeclasses.attributes import AttributeProperty
-from evennia.typeclasses.tags import (AliasProperty, PermissionProperty,
-                                      TagCategoryProperty, TagProperty)
+from evennia.typeclasses.tags import (
+    AliasProperty,
+    PermissionProperty,
+    TagCategoryProperty,
+    TagProperty,
+)
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
@@ -411,7 +419,8 @@ class TestObjectManager(BaseEvenniaTest):
 
     def test_get_objs_with_attr(self):
         self.obj1.db.testattr = "testval1"
-        query = ObjectDB.objects.get_objs_with_attr("testattr")
+        with self.assertWarns(DeprecationWarning):
+            query = ObjectDB.objects.get_objs_with_attr("testattr")
         self.assertEqual(list(query), [self.obj1])
         query = ObjectDB.objects.get_objs_with_attr("testattr", candidates=[self.char1, self.obj1])
         self.assertEqual(list(query), [self.obj1])

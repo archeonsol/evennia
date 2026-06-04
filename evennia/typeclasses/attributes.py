@@ -26,6 +26,18 @@ from evennia.utils.utils import is_iter, lazy_property, make_iter, to_str
 _DIRTY_BACKENDS: "weakref.WeakSet" = weakref.WeakSet()
 
 
+def discard_dirty_backends():
+    """Drop all pending write-behind registrations *without* flushing them.
+
+    For test teardown only. A test rolls back its DB transaction, so any
+    unflushed JSONB attribute writes must be discarded with it; otherwise the
+    dirty backends leak into later tests (the idmapper cache is reset by
+    ``flush_cache()``, but this set is independent of it). Under SQLite pk
+    reuse a leaked stale backend can then clobber a later test's write during
+    ``flush_all_dirty()``. Never call this in production: it would silently
+    drop genuinely pending writes.
+    """
+    _DIRTY_BACKENDS.clear()
 
 
 def count_pending_dirty():
@@ -64,8 +76,7 @@ def flush_all_dirty():
         "pending": pending_stats["pending"],
     }
     try:
-        from evennia.typeclasses.attribute_metrics import \
-            record_attribute_flush_stats
+        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
 
         record_attribute_flush_stats(stats, duration_seconds=duration)
     except Exception:

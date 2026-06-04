@@ -34,7 +34,7 @@ If you want to add a contrib, see [the contrib guidelines](./Contribs-Guidelines
 | [color_markups](#color_markups) | [components](#components) | [containers](#containers) | [cooldowns](#cooldowns) | [crafting](#crafting) |
 | [custom_gametime](#custom_gametime) | [debugpy](#debugpy) | [dice](#dice) | [email_login](#email_login) | [evadventure](#evadventure) |
 | [evscaperoom](#evscaperoom) | [extended_room](#extended_room) | [fieldfill](#fieldfill) | [gendersub](#gendersub) | [git_integration](#git_integration) |
-| [godotwebsocket](#godotwebsocket) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [ingame_python](#ingame_python) | [ingame_reports](#ingame_reports) |
+| [godotwebsocket](#godotwebsocket) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [ingame_reports](#ingame_reports) |
 | [llm](#llm) | [mail](#mail) | [mapbuilder](#mapbuilder) | [menu_login](#menu_login) | [mirror](#mirror) |
 | [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) | [name_generator](#name_generator) | [puzzles](#puzzles) | [random_string_generator](#random_string_generator) |
 | [red_button](#red_button) | [rpsystem](#rpsystem) | [simpledoor](#simpledoor) | [slow_exit](#slow_exit) | [storage](#storage) |
@@ -64,7 +64,6 @@ Contrib-Components.md
 Contrib-Custom-Gametime.md
 Contrib-Email-Login.md
 Contrib-Godotwebsocket.md
-Contrib-Ingame-Python.md
 Contrib-Ingame-Reports.md
 Contrib-Menu-Login.md
 Contrib-Mux-Comms-Cmds.md
@@ -156,22 +155,6 @@ You can use Godot to provide advanced functionality with proper Evennia support.
 
 [Read the documentation](./Contrib-Godotwebsocket.md) - [Browse the Code](evennia.contrib.base_systems.godotwebsocket)
 
-
-
-### `ingame_python`
-
-_Contrib by Vincent Le Goff 2017_
-
-This contrib adds the ability to script with Python in-game. It allows trusted
-staff/builders to dynamically add features and triggers to individual objects
-without needing to do it in external Python modules. Using custom Python in-game,
-specific rooms, exits, characters, objects etc can be made to behave differently from
-its "cousins". This is similar to how softcode works for MU or MudProgs for DIKU.
-Keep in mind, however, that allowing Python in-game comes with _severe_
-security concerns (you must trust your builders deeply), so read the warnings in
-this module carefully before continuing.
-
-[Read the documentation](./Contrib-Ingame-Python.md) - [Browse the Code](evennia.contrib.base_systems.ingame_python)
 
 
 
