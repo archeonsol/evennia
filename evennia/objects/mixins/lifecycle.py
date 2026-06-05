@@ -201,10 +201,13 @@ class LifecycleMixin:
             # no need to disconnect, Account just jumps to OOC mode.
         # sever the connection (important!)
         if self.account:
-            # Remove the object from playable characters list
-            self.account.characters.remove(self)
+            # Detach live sessions first: unpuppet collapses the focus stack via
+            # the session's still-live ControlBinding. Dropping the binding before
+            # this would leave collapse_to bumping an already-deleted row.
             for session in self.sessions.all():
                 self.account.unpuppet_object(session)
+            # Then drop the durable playable-set binding.
+            self.account.characters.remove(self)
 
         # unlink account/home to avoid issues with saving
         self.db_account = None
@@ -224,8 +227,7 @@ class LifecycleMixin:
         # location: removing this object removes its cmdset from the
         # room's available command pool.
         try:
-            from evennia.commands.location_cmdset_cache import \
-                bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
 
             if self.location is not None:
                 bump_cmdset_generation(self.location)

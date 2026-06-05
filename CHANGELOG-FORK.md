@@ -25,6 +25,65 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.70 — fix crash when deleting a puppeted character (I1)
+
+### Engine
+
+- [`evennia/objects/mixins/lifecycle.py`](evennia/objects/mixins/lifecycle.py):
+  `delete()` now detaches live sessions (`unpuppet_object`) **before** dropping
+  the character's `ControlBinding` (`characters.remove`). The prior order
+  deleted the binding row first, so `unpuppet_object` → `collapse_to` →
+  `_bump` then issued `save(update_fields=...)` against an already-deleted row,
+  raising `ControlBinding.NotUpdated` and aborting the delete. Any attempt to
+  delete a currently logged-in/puppeted character crashed. Latent since the
+  `.65` I1 control-graph rewrite; the regression test only now exercises the
+  path.
+
+### Tests
+
+- [`evennia/accounts/tests.py`](evennia/accounts/tests.py): updated three
+  `CharactersHandler` tests to the `ControlBinding`-derived playable set
+  (`test_characters_property`, `test_add_character_to_playable_list`,
+  `test_puppet_deletion`). They previously asserted the removed
+  `_playable_characters` attribute semantics. `test_puppet_deletion` is now the
+  ground-truth test for the delete-while-puppeted fix above.
+- [`evennia/help/`](evennia/help/): moved `tests.py` into the `tests/` package
+  as `tests/test_help.py`. The `.65` CM1 work added the `tests/` package
+  (`test_catalog.py`) alongside the existing `tests.py` module; Python cannot
+  resolve `evennia.help.tests` as both, which aborted full-suite discovery
+  (`evennia test evennia`) with an `ImportError`. Per-module runs were
+  unaffected, so it went unnoticed.
+- [`evennia/actions/tests/test_control_binding.py`](evennia/actions/tests/test_control_binding.py),
+  [`test_actor_focus.py`](evennia/actions/tests/test_actor_focus.py): the
+  `ControlBinding` focus-stack tests created a binding on `self.char1`, but the
+  shared `EvenniaTest` setUp now auto-binds char1 (login puppets it), colliding
+  on the OneToOne `db_identity` and starting with a non-empty stack. Bind a
+  fresh, unpuppeted identity instead; the `FocusChanged.providers()` assertion
+  now also distinguishes the three scopes (body, identity, focus) it could not
+  before. 42 tests restored.
+
+### Migration
+
+- None. Behavior-only fix.
+
+---
+
+## 6.0.0+underspire.69 — ignore webhook-origin Discord messages
+
+### Engine
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py):
+  `MESSAGE_CREATE` events carrying a `webhook_id` are now dropped before they
+  reach `BUS.emit`. Channel webhook posts (including the bridge's own channel
+  webhook fallback) are not player chat; without this guard each outbound
+  bridge delivery re-entered the game as inbound, producing an echo loop.
+
+### Migration
+
+- None. Behavior-only fix for deployments using Discord channel webhooks.
+
+---
+
 ## 6.0.0+underspire.68 — bulk_tick reactor-thread check (Twisted compat)
 
 ### Engine
@@ -39,6 +98,49 @@ matching release procedure.
 
 - Pin production to `underspire.68` (or newer) in the game deploy workflow
   `EVENNIA_REF`.
+
+---
+
+## 6.0.0+underspire.67 — ControlBinding ownership reconcile (I1 migration gaps)
+
+### Engine
+
+- [`evennia/accounts/models.py`](evennia/accounts/models.py): `ControlBinding`
+  gains `reconcile_ownership()` (global), `reconcile_account()` (per-account),
+  and `ensure_playable()` (idempotent binding + `db_account` sync). The boot
+  bulk-job now rebuilds the I1 control graph from every legacy ownership
+  signal: `ObjectDB.db_account`, `_last_puppet`, `_playable_characters`, and
+  `pid(<n>)` puppet locks on character typeclasses with no `db_account`.
+  `populate_missing()` is retained as a thin wrapper over
+  `reconcile_ownership()` for callers.
+- [`evennia/server/service.py`](evennia/server/service.py): the reconcile job
+  runs on **every** server start *and* reload, not just cold boot. The prior
+  `mode != "reload"` guard skipped warm reloads, so bindings created by signals
+  after the cold start (or rows missed because `db_account` was already set)
+  never reconciled. Startup now logs the full stats dict
+  (`accounts`, `puppet_lock`, `db_account_resync`).
+
+### Migration
+
+- Idempotent. No action required; existing installs converge on the next
+  start or `@reload`.
+
+---
+
+## 6.0.0+underspire.66 — character ownership `db_account` sync on `characters.add`
+
+### Engine
+
+- [`evennia/accounts/accounts.py`](evennia/accounts/accounts.py):
+  `CharactersHandler.add` now writes `ObjectDB.db_account` alongside the
+  `ControlBinding` it creates. I1 ownership reads through `ControlBinding`, but
+  legacy paths (web chargen, locks, `populate_missing`) still read the durable
+  `db_account` field; leaving it unset desynced those reads from the control
+  graph. The field is durable ownership, not the live session driver.
+
+### Migration
+
+- Idempotent; the write is skipped when `db_account` already matches the owner.
 
 ---
 

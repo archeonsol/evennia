@@ -7,8 +7,11 @@ from django.test import override_settings
 from mock import MagicMock, Mock, patch
 
 import evennia
-from evennia.accounts.accounts import (AccountSessionHandler, DefaultAccount,
-                                       DefaultGuest)
+from evennia.accounts.accounts import (
+    AccountSessionHandler,
+    DefaultAccount,
+    DefaultGuest,
+)
 from evennia.utils import create
 from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.utils.utils import uses_database
@@ -537,12 +540,8 @@ class TestAccountDisconnectRestore(BaseEvenniaTest):
 class TestAccountPuppetDeletion(BaseEvenniaTest):
     @override_settings(MULTISESSION_MODE=2)
     def test_puppet_deletion(self):
-        # Check for existing chars
-        self.assertFalse(self.account.characters, "Account should not have any chars by default.")
-
-        # Add char1 to account's playable characters
-        self.account.characters.add(self.char1)
-        self.assertTrue(self.account.characters, "Char was not added to account.")
+        # char1 is bound to the account by the login in setUp.
+        self.assertTrue(self.account.characters, "Char should be bound to account.")
 
         # See what happens when we delete char1.
         self.char1.delete()
@@ -560,15 +559,18 @@ class TestDefaultAccountEv(BaseEvenniaTest):
     """
 
     def test_characters_property(self):
-        "test existence of None in _playable_characters Attr"
-        self.account.db._playable_characters = [self.char1, None]
+        "playable set derives from ControlBinding, not the legacy _playable_characters attr"
+        # char1 is bound to the account by the login in setUp. The legacy
+        # _playable_characters attribute (here naming a different, unbound
+        # character plus a None) must not influence the derived playable set.
+        self.account.db._playable_characters = [self.char2, None]
         self.assertEqual(self.account.characters.all(), [self.char1])
-        self.assertEqual(self.account.db._playable_characters, [self.char1])
 
     def test_add_character_to_playable_list(self):
-        self.assertEqual(self.account.characters.all(), [])
-        self.account.characters.add(self.char1)
-        self.assertEqual(self.account.characters.all(), [self.char1])
+        # char2 belongs to account2 and has no ControlBinding to this account.
+        self.assertNotIn(self.char2, self.account.characters.all())
+        self.account.characters.add(self.char2)
+        self.assertIn(self.char2, self.account.characters.all())
 
     def test_remove_character_from_playable_list(self):
         self.account.characters.add(self.char1)

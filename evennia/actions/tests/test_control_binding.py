@@ -7,14 +7,17 @@ persisted row.
 """
 
 from evennia.accounts.models import ControlBinding
+from evennia.utils import create
 from evennia.utils.test_resources import EvenniaTest
 
 
 class TestControlBinding(EvenniaTest):
     def _binding(self):
-        return ControlBinding.objects.create(
-            db_account=self.account, db_identity=self.char1
-        )
+        # Bind a fresh, unpuppeted identity. setUp logs in self.account, which
+        # auto-binds self.char1; reusing char1 here collides on the OneToOne
+        # db_identity and starts with a non-empty focus stack.
+        identity = create.create_object(self.character_typeclass, key="BoundChar")
+        return ControlBinding.objects.create(db_account=self.account, db_identity=identity)
 
     def test_floor_is_account_focus_never_none(self):
         b = self._binding()

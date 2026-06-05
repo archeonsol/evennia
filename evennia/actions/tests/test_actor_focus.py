@@ -24,6 +24,7 @@ from evennia.actions.context import ActionContext
 from evennia.actions.engine import RuleEngine
 from evennia.actions.result import PASS
 from evennia.actions.rule import rule
+from evennia.utils import create
 from evennia.utils.test_resources import EvenniaTest
 
 
@@ -80,7 +81,10 @@ class TestActorLegacyParity(EvenniaTest):
 
 class TestActorBound(EvenniaTest):
     def _bound(self):
-        b = ControlBinding.objects.create(db_account=self.account, db_identity=self.char1)
+        # Fresh, unpuppeted identity: setUp auto-binds self.char1, which would
+        # collide on the OneToOne db_identity and start with a non-empty stack.
+        self.identity = create.create_object(self.character_typeclass, key="BoundChar")
+        b = ControlBinding.objects.create(db_account=self.account, db_identity=self.identity)
         return Actor(session=self.session, account=self.account, binding=b), b
 
     def _recorder(self):
@@ -95,7 +99,7 @@ class TestActorBound(EvenniaTest):
 
     def test_identity_is_binding_identity(self):
         a, _ = self._bound()
-        self.assertEqual(a.identity, self.char1)
+        self.assertEqual(a.identity, self.identity)
 
     def test_focus_floor_is_account(self):
         a, _ = self._bound()
@@ -159,7 +163,9 @@ class TestActorBound(EvenniaTest):
         a, _ = self._bound()
         a.push_focus(self.char1)
         ev = FocusChanged(actor=a, body=self.char1, change="push", focus=a.focus)
-        self.assertEqual(ev.providers(), [self.char1, self.char1, self.char1])
+        # providers() scopes are [body, identity, focus]; identity is the
+        # binding's durable self, distinct from the pushed body/focus here.
+        self.assertEqual(ev.providers(), [self.char1, self.identity, self.char1])
 
 
 class TestFocusRaceGuard(EvenniaTest):
@@ -167,7 +173,10 @@ class TestFocusRaceGuard(EvenniaTest):
     session pops that body mid-suspend, the resume aborts the carry_out phase."""
 
     def _setup(self):
-        b = ControlBinding.objects.create(db_account=self.account, db_identity=self.char1)
+        # Fresh, unpuppeted identity (setUp auto-binds self.char1); char1 is
+        # still used below as the pushed *body* whose pop triggers the guard.
+        identity = create.create_object(self.character_typeclass, key="RaceChar")
+        b = ControlBinding.objects.create(db_account=self.account, db_identity=identity)
         b.push(self.char1)  # focus = char1
         actor = Actor(session=self.session, account=self.account, binding=b)
         fired, d = [], Deferred()
@@ -177,13 +186,13 @@ class TestFocusRaceGuard(EvenniaTest):
     def test_pop_during_suspend_aborts_phase(self):
         b, actor, fired, d, ctx = self._setup()
         dd = RuleEngine().dispatch(Poke(), actor, ctx)
-        self.assertFalse(dd.called)          # suspended on the unfired Deferred
+        self.assertFalse(dd.called)  # suspended on the unfired Deferred
         self.assertEqual(fired, ["work"])
         # Another session (a second instance of the same row) pops char1.
         other = ControlBinding.objects.get(pk=b.pk)
         self.assertEqual(other.pop(), self.char1)
-        d.callback(PASS)                     # resume
-        self.assertEqual(fired, ["work"])    # 'after' never ran — phase aborted
+        d.callback(PASS)  # resume
+        self.assertEqual(fired, ["work"])  # 'after' never ran — phase aborted
         self.assertEqual(_sync(dd).outcome, "aborted")
 
     def test_untouched_focus_completes(self):

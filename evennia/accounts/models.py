@@ -311,22 +311,14 @@ class ControlBinding(models.Model):
         """The generation straight from the DB, so another session's bump on a
         *different* in-memory instance of this row is seen. ``None`` if the row
         was deleted. Cheap: a single indexed-PK ``values_list``."""
-        return (
-            type(self)
-            .objects.filter(pk=self.pk)
-            .values_list("db_generation", flat=True)
-            .first()
-        )
+        return type(self).objects.filter(pk=self.pk).values_list("db_generation", flat=True).first()
 
     def live_contains(self, obj):
         """True if ``obj`` is on the *persisted* stack (re-read from the DB),
         not just this instance's possibly-stale copy. ``False`` if the row is
         gone."""
         fresh = (
-            type(self)
-            .objects.filter(pk=self.pk)
-            .values_list("db_focus_stack", flat=True)
-            .first()
+            type(self).objects.filter(pk=self.pk).values_list("db_focus_stack", flat=True).first()
         )
         if not fresh:
             return False
@@ -463,9 +455,7 @@ class ControlBinding(models.Model):
             char_marker = (
                 getattr(settings, "BASE_CHARACTER_TYPECLASS", "") or "characters"
             ).rsplit(".", 1)[-1]
-            qs = ObjectDB.objects.filter(db_account__isnull=True).exclude(
-                db_lock_storage=""
-            )
+            qs = ObjectDB.objects.filter(db_account__isnull=True).exclude(db_lock_storage="")
             if char_marker:
                 qs = qs.filter(db_typeclass_path__icontains=char_marker)
             for identity_id, lock_storage in qs.values_list("id", "db_lock_storage"):

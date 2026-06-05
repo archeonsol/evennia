@@ -33,13 +33,14 @@ Why not bypass write-behind with direct SQL for cached objects?
     safe.  _apply_uncached reads all uncached objects in one query and uses
     bulk_update for a single write round-trip regardless of batch size.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
 
-_NULL_CAT = "~"   # db_attrs key for the default (category=None) section
+_NULL_CAT = "~"  # db_attrs key for the default (category=None) section
 
 
 def _assert_reactor_thread(where: str) -> None:
@@ -173,6 +174,7 @@ class BulkTickContext:
             # so the in-process cache stays coherent with what we write.
             if backend is None and obj_id in self._uncached_ids:
                 from evennia.objects.models import ObjectDB
+
                 obj = ObjectDB.get_cached_instance(obj_id)
                 if obj is not None:
                     try:
@@ -214,9 +216,7 @@ class BulkTickContext:
         """
         from evennia.objects.models import ObjectDB
 
-        qs = list(
-            ObjectDB.objects.filter(id__in=batch.keys()).only("id", "db_attrs")
-        )
+        qs = list(ObjectDB.objects.filter(id__in=batch.keys()).only("id", "db_attrs"))
         to_save = []
         for obj in qs:
             updates = batch.get(obj.id)

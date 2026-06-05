@@ -32,17 +32,25 @@ from evennia.hooks import hook
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripthandler import ScriptHandler
 from evennia.server.models import ServerConfig
-from evennia.server.signals import (SIGNAL_ACCOUNT_POST_CREATE,
-                                    SIGNAL_ACCOUNT_POST_LOGIN_FAIL,
-                                    SIGNAL_OBJECT_POST_PUPPET,
-                                    SIGNAL_OBJECT_POST_UNPUPPET)
+from evennia.server.signals import (
+    SIGNAL_ACCOUNT_POST_CREATE,
+    SIGNAL_ACCOUNT_POST_LOGIN_FAIL,
+    SIGNAL_OBJECT_POST_PUPPET,
+    SIGNAL_OBJECT_POST_UNPUPPET,
+)
 from evennia.server.throttle import Throttle
 from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import class_from_module, create, logger
 from evennia.utils.optionhandler import OptionHandler
-from evennia.utils.utils import (is_iter, is_veto, lazy_property, make_iter,
-                                 to_str, variable_from_module)
+from evennia.utils.utils import (
+    is_iter,
+    is_veto,
+    lazy_property,
+    make_iter,
+    to_str,
+    variable_from_module,
+)
 
 __all__ = ("DefaultAccount", "DefaultGuest")
 
@@ -625,18 +633,18 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     txt1 = _("Sharing |c{name}|n with another of your sessions.").format(
                         name=obj.name
                     )
-                    txt2 = _(
-                        "|c{name}|n|G is now shared from another of your sessions.|n"
-                    ).format(name=obj.name)
+                    txt2 = _("|c{name}|n|G is now shared from another of your sessions.|n").format(
+                        name=obj.name
+                    )
                     self.msg(txt1, session=session)
                     self.msg(txt2, session=obj.sessions.all())
                 else:
                     txt1 = _("Taking over |c{name}|n from another of your sessions.").format(
                         name=obj.name
                     )
-                    txt2 = _(
-                        "|c{name}|n|R is now acted from another of your sessions.|n"
-                    ).format(name=obj.name)
+                    txt2 = _("|c{name}|n|R is now acted from another of your sessions.|n").format(
+                        name=obj.name
+                    )
                     self.msg(txt1, session=session)
                     self.msg(txt2, session=obj.sessions.all())
                     self.unpuppet_object(obj.sessions.get())
@@ -699,8 +707,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         # Prime the cmdset merge cache so the first typed command does not pay
         # the cold-merge latency. See evennia.commands.cmdset_merge_warmup.
-        from evennia.commands.cmdset_merge_warmup import \
-            schedule_cmdset_merge_warmup_for_character
+        from evennia.commands.cmdset_merge_warmup import (
+            schedule_cmdset_merge_warmup_for_character,
+        )
 
         try:
             schedule_cmdset_merge_warmup_for_character(obj)
@@ -915,9 +924,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             from evennia.actions.engine import engine as _engine
 
             actor = Actor.from_caller(session, callertype="session")
-            _engine.emit(
-                FocusChanged(actor=actor, body=body, change=change, focus=actor.focus)
-            )
+            _engine.emit(FocusChanged(actor=actor, body=body, change=change, focus=actor.focus))
         except Exception:
             logger.log_trace("account._emit_focus_changed failed")
 
@@ -2325,11 +2332,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     else None
                 )
                 focus = binding.focus if binding else None
-                if (
-                    focus is not None
-                    and focus is not identity
-                    and not isinstance(focus, AccountDB)
-                ):
+                if focus is not None and focus is not identity and not isinstance(focus, AccountDB):
                     self.reattach_focus(session, binding)
                 else:
                     self.puppet_object(session, identity)
