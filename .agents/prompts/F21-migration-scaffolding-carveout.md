@@ -1,15 +1,20 @@
 # F21: carve out one-time migration scaffolding (reconcile et al.)
 
-Status: todo
+Status: in-progress — I1 reconcile removed in `.72`; the broader sweep remains.
+
+## Done in `.72`
+
+The I1 ownership backfill (`ControlBinding.reconcile_ownership` /
+`reconcile_account` / `ensure_playable` / `_identity_ids_for_account`,
+`_PID_LOCK_RE`) and its `@verify-reconcile` gate command + cmdset registrations
+were deleted from the engine after a confirmed `created: 0` pass in production.
+The game owns its own `at_server_start` backfill now. **Remaining sweep below.**
 
 ## Goal
 
 The fork carries one-time migration/backfill machinery that exists only to
 repair pre-migration databases and is dead weight once every live DB has been
-migrated. The clearest current example is the I1 ownership backfill
-(`ControlBinding.reconcile_ownership` / `reconcile_account` / `ensure_playable`)
-plus its temporary gate command `@verify-reconcile`, all explicitly marked
-TEMPORARY in `.71`. Sweep for *all* such scaffolding and produce a removal plan,
+migrated. Sweep for *all* such scaffolding and produce a removal plan,
 so it gets deleted on a deliberate deprecation cycle rather than lingering.
 
 ## Approach
@@ -26,9 +31,16 @@ so it gets deleted on a deliberate deprecation cycle rather than lingering.
 2. **Classify** each: (a) safe to delete now (every live DB past it), (b) keep
    until a gate confirms completion (like `@verify-reconcile`), (c) permanent
    (must stay for fresh installs / ongoing use).
-3. **Gate before deleting.** For reconcile specifically: run `@verify-reconcile`
-   against production; a zero first pass means the backfill is safe to remove.
-   Only then delete `reconcile_ownership` / `reconcile_account` /
+3. **Gate before deleting.** The real gate is `ControlBinding.reconcile_ownership()`
+   returning `created: 0` on a fresh pass against production — that means every
+   ownership is already backfilled. The `@verify-reconcile` command is only a
+   stock-cmdset convenience wrapper around it; a game with engine-only dispatch
+   (empty anchor cmdsets that don't merge the Evennia defaults) can't reach the
+   command at all, so do NOT assume it is runnable in-game. Run the check via the
+   command where available, else `evennia shell -c "from evennia.accounts.models
+   import ControlBinding; print(ControlBinding.reconcile_ownership())"`, or read
+   the game's `at_server_start` reconcile log line. Only after a confirmed
+   `created: 0` pass, delete `reconcile_ownership` / `reconcile_account` /
    `ensure_playable`, the `@verify-reconcile` command, and its two cmdset
    registrations (all marked TEMPORARY).
 4. **Present the inventory + classification and get a decision** before deleting

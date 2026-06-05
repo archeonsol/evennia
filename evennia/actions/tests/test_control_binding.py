@@ -110,18 +110,6 @@ class TestControlBinding(EvenniaTest):
         self.assertEqual(b.db_focus_stack, [])
         self.assertIs(ControlBinding.objects.get(pk=b.pk), b)
 
-    def test_ensure_playable_sets_ownership_only(self):
-        # ensure_playable is ownership backfill; it sets ObjectDB.db_account and
-        # does not mint a control graph.
-        identity = create.create_object(self.character_typeclass, key="OwnMe")
-        identity.db_account = None
-        identity.save(update_fields=["db_account"])
-        self.assertTrue(ControlBinding.ensure_playable(self.account, identity))
-        self.assertEqual(identity.db_account_id, self.account.id)
-        self.assertFalse(ControlBinding.objects.filter(db_identity=identity).exists())
-        # idempotent
-        self.assertFalse(ControlBinding.ensure_playable(self.account, identity))
-
     # -- idmapper sharing (the staleness fix) -------------------------------
     def test_idmapper_shares_instance_across_gets(self):
         b = self._binding()

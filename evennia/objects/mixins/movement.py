@@ -158,8 +158,7 @@ class MovementMixin:
         # commands available in each room depends on what objects are
         # present, and the cache key is keyed by location generation.
         try:
-            from evennia.commands.location_cmdset_cache import \
-                bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
 
             if source_location is not None:
                 bump_cmdset_generation(source_location)
@@ -248,7 +247,7 @@ class MovementMixin:
                 )
                 return
 
-            if obj.has_account:
+            if obj.is_puppeted:
                 if home:
                     string = _(
                         "Your current location has ceased to exist, moving you to (#{dbid})."
@@ -447,7 +446,7 @@ class MovementMixin:
 
         """
 
-        if not source_location and self.location.has_account:
+        if not source_location and self.location.is_puppeted:
             # This was created from nowhere and added to an account's
             # inventory; it's probably the result of a create command.
             string = _("You now have {name} in your possession.").format(

@@ -11,8 +11,7 @@ from django.db.models import Max, Min, Q
 
 import evennia
 from evennia import InterruptCommand
-from evennia.commands.cmdhandler import (generate_cmdset_providers,
-                                         get_and_merge_cmdsets)
+from evennia.commands.cmdhandler import generate_cmdset_providers, get_and_merge_cmdsets
 from evennia.locks.lockhandler import LockException
 from evennia.objects.models import ObjectDB
 from evennia.objects.search_result import Ambiguous, Found, NotFound
@@ -26,10 +25,18 @@ from evennia.utils.dbserialize import deserialize
 from evennia.utils.eveditor import EvEditor
 from evennia.utils.evmore import EvMore
 from evennia.utils.evtable import EvTable
-from evennia.utils.utils import (class_from_module, crop, dbref, display_len,
-                                 format_grid, get_all_typeclasses,
-                                 inherits_from, interactive, list_to_string,
-                                 variable_from_module)
+from evennia.utils.utils import (
+    class_from_module,
+    crop,
+    dbref,
+    display_len,
+    format_grid,
+    get_all_typeclasses,
+    inherits_from,
+    interactive,
+    list_to_string,
+    variable_from_module,
+)
 
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 
@@ -3892,10 +3899,10 @@ class CmdTeleport(COMMAND_DEFAULT_CLASS):
                 # in this case lhs is always the object to teleport
                 obj_to_teleport = destination
 
-            if obj_to_teleport.has_account:
+            if obj_to_teleport.is_puppeted:
                 caller.msg(
                     f"Cannot teleport a puppeted object ({obj_to_teleport.key}, puppeted by"
-                    f" {obj_to_teleport.account}) to a None-location."
+                    f" {obj_to_teleport.puppeteer}) to a None-location."
                 )
                 return
             caller.msg(f"Teleported {obj_to_teleport} -> None-location.")

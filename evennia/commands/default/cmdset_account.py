@@ -64,7 +64,6 @@ class AccountCmdSet(CmdSet):
 
         # Admin commands
         self.add(admin.CmdNewPassword())
-        self.add(admin.CmdVerifyReconcile())  # TEMPORARY: remove with I1 reconcile
 
         # Comm commands
         self.add(comms.CmdChannel())

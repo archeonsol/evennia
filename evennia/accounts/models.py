@@ -16,8 +16,6 @@ account info and OOC account configuration variables etc.
 
 """
 
-import re
-
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -201,9 +199,6 @@ class AccountDB(TypedObject, AbstractUser):
 #: in-world body — the IC character, then any nested bodies it drives).
 CONTROL_ACCOUNT = "account"
 CONTROL_OBJECT = "object"
-
-# Player-character puppet locks from DefaultAccount.at_post_create_character.
-_PID_LOCK_RE = re.compile(r"pid\((\d+)\)")
 
 
 class ControlBinding(SharedMemoryModel):
@@ -402,120 +397,3 @@ class ControlBinding(SharedMemoryModel):
             binding.db_account_id = account_id
             binding.save(update_fields=["db_account"])
         return binding
-
-    @classmethod
-    def ensure_playable(cls, account, identity):
-        """Idempotent ownership backfill: set the identity's durable owner
-        (``ObjectDB.db_account``) to ``account`` if not already so.
-
-        Migration scaffolding only — ownership is otherwise written through the
-        account's ``characters`` handler. Does not create a binding (control
-        graphs are minted on first puppet). Returns True if newly assigned.
-        """
-        if account is None or identity is None:
-            return False
-        identity_id = getattr(identity, "id", None) or getattr(identity, "pk", None)
-        account_id = getattr(account, "id", None) or getattr(account, "pk", None)
-        if not identity_id or not account_id:
-            return False
-        if getattr(identity, "db_account_id", None) == account_id:
-            return False
-        identity.db_account_id = account_id
-        identity.save(update_fields=["db_account"])
-        return True
-
-    @classmethod
-    def _identity_ids_for_account(cls, account):
-        """Ids of the characters already owned by this account."""
-        from evennia.objects.models import ObjectDB
-
-        return set(ObjectDB.objects.filter(db_account=account).values_list("id", flat=True))
-
-    @classmethod
-    def reconcile_account(cls, account, *, scan_locks=True):
-        """Backfill one account's character ownership from legacy signals.
-
-        Sets ``ObjectDB.db_account`` for not-yet-owned characters named by
-        ``_last_puppet``, ``_playable_characters``, and (optional) ``pid()``
-        puppet locks. Characters the account already owns are skipped.
-
-        Returns:
-            int: number of characters newly owned by this account.
-        """
-        from evennia.objects.models import ObjectDB
-
-        if account is None:
-            return 0
-        linked = cls._identity_ids_for_account(account)
-        created = 0
-
-        def _try(identity):
-            nonlocal created
-            if identity is None:
-                return
-            identity_id = getattr(identity, "id", None)
-            if not identity_id or identity_id in linked:
-                return
-            if cls.ensure_playable(account, identity):
-                created += 1
-            linked.add(identity_id)
-
-        last = getattr(getattr(account, "db", None), "_last_puppet", None)
-        _try(last)
-
-        playable = getattr(getattr(account, "db", None), "_playable_characters", None) or []
-        for entry in make_iter(playable):
-            _try(entry)
-
-        if scan_locks:
-            char_marker = (
-                getattr(settings, "BASE_CHARACTER_TYPECLASS", "") or "characters"
-            ).rsplit(".", 1)[-1]
-            qs = ObjectDB.objects.filter(db_account__isnull=True).exclude(db_lock_storage="")
-            if char_marker:
-                qs = qs.filter(db_typeclass_path__icontains=char_marker)
-            for identity_id, lock_storage in qs.values_list("id", "db_lock_storage"):
-                if identity_id in linked:
-                    continue
-                match = _PID_LOCK_RE.search(lock_storage or "")
-                if not match or int(match.group(1)) != account.id:
-                    continue
-                _try(ObjectDB.objects.filter(id=identity_id).first())
-
-        return created
-
-    @classmethod
-    def reconcile_ownership(cls):
-        """Global idempotent ownership backfill (all accounts).
-
-        Sets ``ObjectDB.db_account`` from legacy signals; never touches
-        ``ControlBinding.db_account`` (the controller is a separate fact from
-        ownership and would be corrupted by a sync). Safe on every start and
-        reload. Returns a stats dict for logging.
-        """
-        from evennia.objects.models import ObjectDB
-
-        stats = {"accounts": 0, "puppet_lock": 0}
-
-        for account in AccountDB.objects.all():
-            stats["accounts"] += cls.reconcile_account(account, scan_locks=False)
-
-        char_marker = (getattr(settings, "BASE_CHARACTER_TYPECLASS", "") or "characters").rsplit(
-            ".", 1
-        )[-1]
-        qs = ObjectDB.objects.filter(db_account__isnull=True).exclude(db_lock_storage="")
-        if char_marker:
-            qs = qs.filter(db_typeclass_path__icontains=char_marker)
-        for identity_id, lock_storage in qs.values_list("id", "db_lock_storage"):
-            match = _PID_LOCK_RE.search(lock_storage or "")
-            if not match:
-                continue
-            account = AccountDB.objects.filter(id=int(match.group(1))).first()
-            if not account:
-                continue
-            identity = ObjectDB.objects.filter(id=identity_id).first()
-            if identity and cls.ensure_playable(account, identity):
-                stats["puppet_lock"] += 1
-
-        stats["created"] = stats["accounts"] + stats["puppet_lock"]
-        return stats

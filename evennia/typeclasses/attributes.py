@@ -1582,14 +1582,17 @@ class NickHandler(AttributeHandler):
                     if nick and nick.key
                 }
             )
-        if include_account and self.obj.has_account:
+        # Merge the *driving* account's nicks (the puppeteer), not the durable
+        # owner's: a staff-possessed body expands the driver's input nicks, and an
+        # undriven body has no live typist whose nicks apply. getattr keeps this
+        # safe when self.obj is an Account (no puppeteer) or a non-puppetable obj.
+        driver = getattr(self.obj, "puppeteer", None)
+        if include_account and driver:
             for category in make_iter(categories):
                 nicks.update(
                     {
                         nick.key: nick
-                        for nick in make_iter(
-                            self.obj.account.nicks.get(category=category, return_obj=True)
-                        )
+                        for nick in make_iter(driver.nicks.get(category=category, return_obj=True))
                         if nick and nick.key
                     }
                 )

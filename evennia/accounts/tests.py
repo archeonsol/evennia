@@ -637,6 +637,16 @@ class TestControllerVsOwnership(BaseEvenniaTest):
         idle = self._npc("Idle")
         self.assertTrue(lockfuncs.is_ooc(idle, idle, session=self.session))
 
+    def test_nickreplace_uses_driver_account_nicks(self):
+        # account-level nicks belong to the *driver*: a possessed (unowned) NPC
+        # expands the driving account's input nicks, not its (absent) owner's.
+        self.account.nicks.add("hi", "hello", category="inputline")
+        npc = self._npc()
+        self.assertIsNone(npc.account)  # unowned: the old has_account path gave nothing
+        self.account.unpuppet_object(self.session)
+        self.account.puppet_object(self.session, npc)
+        self.assertEqual(npc.nicks.nickreplace("hi"), "hello")
+
 
 class TestPermissionsFollowDriver(BaseEvenniaTest):
     """The permissions that apply when a body acts come from the live *driver*

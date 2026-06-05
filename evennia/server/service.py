@@ -529,12 +529,6 @@ class EvenniaServerService(MultiService):
 
         self.at_server_init()
 
-        # The I1 legacy-ownership backfill (ControlBinding.reconcile_ownership)
-        # reads game attribute conventions (_last_puppet, _playable_characters,
-        # pid() puppet locks), so it is game-migration logic, not engine boot
-        # work; the game invokes it from its own at_server_start hook. The
-        # temporary @verify-reconcile command gates its eventual deletion.
-
         # call correct server hook based on start file value
         if mode == "reload":
             logger.log_msg("Server successfully reloaded.")

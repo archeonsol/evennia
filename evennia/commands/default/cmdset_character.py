@@ -64,7 +64,6 @@ class CharacterCmdSet(CmdSet):
         self.add(admin.CmdPerm())
         self.add(admin.CmdWall())
         self.add(admin.CmdForce())
-        self.add(admin.CmdVerifyReconcile())  # TEMPORARY: remove with I1 reconcile
 
         # Building and world manipulation
         self.add(building.CmdTeleport())

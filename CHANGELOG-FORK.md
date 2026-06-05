@@ -25,6 +25,75 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.72 — finish the has_account liveness audit; delete the I1 reconcile scaffolding
+
+Completes the `.71` API-honesty work and lands the deprecation-cycle cleanup that
+`.71` set up. No schema changes.
+
+### Engine — `has_account` liveness-reader audit (F10)
+
+`.71` flipped `has_account`/`obj.account` from "currently driven" to "durable
+owner" and added `is_puppeted`/`puppeteer`, but switched only the *permission*
+readers. This release audits the remaining engine *liveness* readers per-site and
+moves the ones that meant "is someone playing this body" onto the driver:
+
+- [`objects/mixins/movement.py`](evennia/objects/mixins/movement.py): the
+  location-destroyed and create-into-inventory notifications gate on
+  `is_puppeted` (notify a live driver), not ownership.
+- [`commands/default/building.py`](evennia/commands/default/building.py):
+  `@teleport/tonone` refuses on `is_puppeted` and names the `puppeteer` — **fixes
+  a `.71` regression** where an owned-but-offline character could no longer be
+  teleported to `None`.
+- [`commands/default/admin.py`](evennia/commands/default/admin.py): `@pemit/@cemit`
+  `accounts_only` emits to live-driven bodies (`is_puppeted`).
+- [`typeclasses/attributes.py`](evennia/typeclasses/attributes.py): `NickHandler`
+  merges the **driver's** account nicks (`puppeteer`), not the owner's — **fixes
+  possession**: a staff-driven NPC expands the staff's input nicks.
+- Deliberately kept on ownership (correct as "owned"): `@examine`'s account-info
+  block ([`building.py`](evennia/commands/default/building.py)) and the
+  `has_account` lockfunc ([`locks/lockfuncs.py`](evennia/locks/lockfuncs.py)).
+- Contrib `has_account` readers (barter, tutorial_world) are a noted follow-on,
+  out of scope for this engine pass.
+
+### Engine — I1 reconcile scaffolding deleted
+
+After a confirmed `created: 0` reconcile pass in production, the one-time I1
+ownership backfill is removed from the engine
+([`accounts/models.py`](evennia/accounts/models.py)): `reconcile_ownership`,
+`reconcile_account`, `ensure_playable`, `_identity_ids_for_account`, the
+`_PID_LOCK_RE` regex (and the now-unused `import re`), plus the temporary
+`@verify-reconcile` command ([`commands/default/admin.py`](evennia/commands/default/admin.py))
+and its two cmdset registrations. The game owns its own `at_server_start` backfill
+now. (Tracked in `.agents/prompts/F21`; the broader scaffolding sweep remains.)
+
+### API / semantics — deferred review findings closed as by-design
+
+The fleet review's two remaining API findings recommend deprecation shims; both
+are resolved **by design**, consistent with the fork's no-back-compat-shims policy
+(set at `.65`, restated at `.71`): the renamed membership hooks
+(`at_post_add_character`/`at_post_remove_character` → `at_character_added`/
+`at_character_removed`) and the removed `session.puppet`/`session.puid` (use
+`get_puppet()`) stay broken without an alias.
+
+### Migration notes
+
+- None (no schema change). **Deploy coordination:** the engine no longer defines
+  `ControlBinding.reconcile_ownership`; deploy this together with the game change
+  that drops its `at_server_start` reconcile call, or the game's startup will
+  `AttributeError`.
+
+### Tests
+
+- [`accounts/tests.py`](evennia/accounts/tests.py): `test_nickreplace_uses_driver_account_nicks`
+  (possession uses the driver's nicks).
+- [`commands/default/tests.py`](evennia/commands/default/tests.py):
+  `test_teleport_tonone_offline_owned_allowed` (the regression fix; the existing
+  puppeted-refused case still holds).
+- [`actions/tests/test_control_binding.py`](evennia/actions/tests/test_control_binding.py):
+  dropped `test_ensure_playable_sets_ownership_only` (tested deleted API).
+
+---
+
 ## 6.0.0+underspire.71 — ControlBinding single-source rework; permissions follow the driver
 
 Follow-up to the fleet review of the I1 ControlBinding subsystem. The control
