@@ -322,6 +322,10 @@ class CmdIC(AccountCommand):
                     )
 
         # handle possible candidates
+        # drop falsy entries: a no-match search returns None, which make_iter
+        # turns into [None] — without this a nonexistent name would reach
+        # puppet_object(None) and crash on None.name.
+        character_candidates = [char for char in character_candidates if char]
         if not character_candidates:
             self.msg("That is not a valid character choice.")
             return

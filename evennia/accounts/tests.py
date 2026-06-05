@@ -105,14 +105,16 @@ class TestDefaultGuest(BaseEvenniaTest):
     def test_at_server_shutdown(self):
         account, errors = DefaultGuest.create(ip=self.ip)
         self.char1.delete = MagicMock()
-        account.characters.add(self.char1)
+        # char1 is owned by the main test account; transfer=True takes the
+        # throwaway body for the guest (sanctioned reassignment).
+        account.characters.add(self.char1, transfer=True)
         account.at_server_shutdown()
         self.char1.delete.assert_called()
 
     def test_at_post_disconnect(self):
         account, errors = DefaultGuest.create(ip=self.ip)
         self.char1.delete = MagicMock()
-        account.characters.add(self.char1)
+        account.characters.add(self.char1, transfer=True)
         account.at_post_disconnect()
         self.char1.delete.assert_called()
 
@@ -450,8 +452,8 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         self.assertEqual(self.session.get_puppet(), self.char2)
         # identity stays the meat character
         self.assertEqual(binding.db_identity, self.char1)
-        # full stack: [account, char1, char2]
-        self.assertEqual(binding.stack_objects, [self.account, self.char1, self.char2])
+        # bodies above the (derived) floor: [char1, char2]
+        self.assertEqual(binding.stack_objects, [self.char1, self.char2])
         # meat body shed its live session; avatar holds it
         self.assertNotIn(self.session, list(self.char1.sessions.all()))
         self.assertIn(self.session, list(self.char2.sessions.all()))
@@ -462,7 +464,7 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         self.assertEqual(returned, self.char1)
         self.assertEqual(self.session.get_puppet(), self.char1)
         binding = self.session.binding
-        self.assertEqual(binding.stack_objects, [self.account, self.char1])
+        self.assertEqual(binding.stack_objects, [self.char1])
         self.assertIn(self.session, list(self.char1.sessions.all()))
         self.assertNotIn(self.session, list(self.char2.sessions.all()))
 
@@ -472,6 +474,35 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         self.assertIsNone(returned)
         self.assertIsNone(self.session.get_puppet())
         self.assertIsNone(self.session.bid)
+
+    @override_settings(MULTISESSION_MODE=0)
+    def test_takeover_preserves_pushed_stack(self):
+        # session1 is jacked into char2 (avatar) on top of char1: stack
+        # [char1, char2]. A second session of the same account takes char2 over.
+        from evennia.server.serversession import ServerSession
+
+        self.account.puppet_object(self.session, self.char2, push=True)
+        self.assertEqual(self.session.binding.stack_objects, [self.char1, self.char2])
+
+        sess2 = ServerSession()
+        # distinct address: ServerSession.__eq__ compares by address.
+        sess2.init_session("telnet", ("localhost", "testmode2"), evennia.SESSION_HANDLER)
+        sess2.sessid = 43
+        sess2.uname = self.account.username
+        sess2.logged_in = True
+        sess2.account = self.account
+        sess2.uid = self.account.id
+        evennia.SESSION_HANDLER[43] = sess2
+        try:
+            self.account.puppet_object(sess2, self.char2)
+            # the pushed stack survived the takeover (no collapse to the floor);
+            # the new session drives char2, the old one is detached.
+            self.assertIs(sess2.get_puppet(), self.char2)
+            self.assertEqual(sess2.binding.stack_objects, [self.char1, self.char2])
+            self.assertNotIn(self.session, list(self.char2.sessions.all()))
+        finally:
+            if 43 in evennia.SESSION_HANDLER:
+                del evennia.SESSION_HANDLER[43]
 
 
 class TestAccountDisconnectRestore(BaseEvenniaTest):
@@ -493,29 +524,29 @@ class TestAccountDisconnectRestore(BaseEvenniaTest):
         self.assertNotIn(self.session, list(self.char2.sessions.all()))
         # ...but the durable stack still carries the pushed body
         binding.refresh_from_db()
-        self.assertEqual(binding.stack_objects, [self.account, self.char1, self.char2])
+        self.assertEqual(binding.stack_objects, [self.char1, self.char2])
 
     def test_deliberate_ooc_collapses_stack(self):
         self.account.puppet_object(self.session, self.char2, push=True)
         binding = self.session.binding
         self.account.unpuppet_object(self.session)  # collapse=True default
         binding.refresh_from_db()
-        self.assertEqual(binding.stack_objects, [self.account])
+        # stack emptied to the floor; focus derives back to the account.
+        self.assertEqual(binding.stack_objects, [])
+        self.assertEqual(binding.focus, self.account)
 
     def test_login_restores_pushed_focus(self):
         self.account.puppet_object(self.session, self.char2, push=True)
         self.account.unpuppet_object(self.session, collapse=False)
         self.session.bid = None
-        self.session._binding = None
         self.account.at_post_login(self.session)
         # restored straight to the avatar, not the meat char beneath it
         self.assertEqual(self.session.get_puppet(), self.char2)
 
     def test_login_without_push_puppets_character(self):
-        # No body pushed — stack is just [account, char1]; login puppets char1.
+        # No body pushed — stack is just [char1]; login puppets char1.
         self.account.unpuppet_object(self.session, collapse=False)
         self.session.bid = None
-        self.session._binding = None
         self.account.at_post_login(self.session)
         self.assertEqual(self.session.get_puppet(), self.char1)
 
@@ -532,9 +563,123 @@ class TestAccountDisconnectRestore(BaseEvenniaTest):
         # go-light: deliberate collapse to floor, then delete the identity self.
         self.account.unpuppet_object(self.session)  # collapse=True default
         binding.refresh_from_db()
-        self.assertEqual(binding.stack_objects, [self.account])
+        self.assertEqual(binding.stack_objects, [])
         self.char1.delete()
         self.assertFalse(ControlBinding.objects.filter(pk=binding_pk).exists())
+
+
+class TestControllerVsOwnership(BaseEvenniaTest):
+    """The three facts stay in their own homes: ownership on
+    ``ObjectDB.db_account``, the controller (driver/floor) on
+    ``ControlBinding.db_account``, live driving on ``obj.sessions``. Staff
+    possession is where they diverge."""
+
+    def _npc(self, key="NPC"):
+        npc = create.create_object(self.character_typeclass, key=key, location=self.room1)
+        npc.locks.add("puppet:all()")
+        return npc
+
+    def test_possession_leaves_ownership_untouched(self):
+        npc = self._npc()
+        self.assertIsNone(npc.db_account)  # unowned
+        # account goes OOC, then possesses the unowned NPC.
+        self.account.unpuppet_object(self.session)
+        self.account.puppet_object(self.session, npc)
+        self.assertIs(self.session.get_puppet(), npc)
+        # ownership untouched; the controller is the live driver.
+        self.assertIsNone(npc.db_account)
+        self.assertEqual(self.session.binding.db_account_id, self.account.id)
+        # possessing an NPC does not add it to the account's roster (ownership).
+        self.assertNotIn(npc, self.account.characters.all())
+
+    def test_is_puppeted_distinct_from_has_account(self):
+        # char1 is owned by and driven by the account (login in setUp).
+        self.assertTrue(self.char1.is_puppeted)
+        self.assertTrue(self.char1.has_account)
+        # an owned-but-undriven character: owned, not puppeted.
+        idle = self._npc("Idle")
+        idle.account = self.account
+        self.assertFalse(idle.is_puppeted)
+        self.assertTrue(idle.has_account)
+
+    def test_puppeteer_is_the_driver_not_the_owner(self):
+        # driven own character: driver == owner.
+        self.assertEqual(self.char1.puppeteer, self.account)
+        # possessed NPC: driver is the account, owner is None.
+        npc = self._npc()
+        self.account.unpuppet_object(self.session)
+        self.account.puppet_object(self.session, npc)
+        self.assertEqual(npc.puppeteer, self.account)
+        self.assertIsNone(npc.account)
+        # undriven body has no puppeteer.
+        idle = self._npc("Idle")
+        self.assertIsNone(idle.puppeteer)
+
+    def test_remove_detaches_live_session(self):
+        # Disowning a character that is currently being driven must release the
+        # session, not leave it half-attached to a body whose binding is gone.
+        self.assertTrue(self.char1.is_puppeted)
+        self.account.characters.remove(self.char1)
+        self.assertEqual(self.char1.sessions.count(), 0)
+        self.assertFalse(self.char1.is_puppeted)
+        self.assertIsNone(self.session.bid)
+        self.assertIsNone(self.session.get_puppet())
+
+    def test_is_ooc_follows_driver_under_possession(self):
+        from evennia.locks import lockfuncs
+
+        # actively possessing an unowned NPC is IC, not OOC.
+        npc = self._npc()
+        self.account.unpuppet_object(self.session)
+        self.account.puppet_object(self.session, npc)
+        self.assertFalse(lockfuncs.is_ooc(npc, npc, session=self.session))
+        # an undriven body has no in-character driver -> OOC.
+        idle = self._npc("Idle")
+        self.assertTrue(lockfuncs.is_ooc(idle, idle, session=self.session))
+
+
+class TestPermissionsFollowDriver(BaseEvenniaTest):
+    """The permissions that apply when a body acts come from the live *driver*
+    (``puppeteer``), never the durable *owner* (``account``). A stale or
+    higher-perm owner must not leak to whoever is driving the body."""
+
+    def _body_owned_by(self, owner, key="Body"):
+        body = create.create_object(self.character_typeclass, key=key, location=self.room1)
+        body.account = owner
+        body.locks.add("puppet:all()")
+        return body
+
+    def test_owner_perms_do_not_leak_to_driver(self):
+        from evennia.locks.lockfuncs import perm
+
+        # body OWNED by an Admin account, DRIVEN by a plain-player account.
+        self.account.permissions.remove("Developer")  # drop the test base's elevation
+        self.account.permissions.add("Player")
+        self.account2.permissions.add("Admin")
+        body = self._body_owned_by(self.account2)
+        body.sessions.add(self.session)  # driver is self.account (Player)
+        self.assertEqual(body.puppeteer, self.account)
+        # the owner's Admin must NOT pass — the driver is only a player.
+        self.assertFalse(perm(body, body, "Admin"))
+        # the driver's own (lower) perm still passes.
+        self.assertTrue(perm(body, body, "Player"))
+
+    def test_driver_perms_apply_when_possessing(self):
+        from evennia.locks.lockfuncs import perm
+
+        # body OWNED by a plain account, DRIVEN by an Admin (staff possession).
+        self.account.permissions.add("Admin")
+        body = self._body_owned_by(self.account2)
+        body.sessions.add(self.session)  # driver is self.account (Admin)
+        self.assertTrue(perm(body, body, "Admin"))
+
+    def test_superuser_owner_does_not_leak_via_driver(self):
+        self.account2.is_superuser = True
+        self.account2.save()
+        body = self._body_owned_by(self.account2)
+        body.sessions.add(self.session)  # driver self.account is not a superuser
+        self.assertFalse(body.is_superuser)
+        self.assertFalse(body.check_permstring("Developer"))
 
 
 class TestAccountPuppetDeletion(BaseEvenniaTest):
@@ -567,9 +712,13 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.assertEqual(self.account.characters.all(), [self.char1])
 
     def test_add_character_to_playable_list(self):
-        # char2 belongs to account2 and has no ControlBinding to this account.
+        # char2 belongs to account2; adding without transfer refuses the steal.
         self.assertNotIn(self.char2, self.account.characters.all())
-        self.account.characters.add(self.char2)
+        with self.assertRaises(ValueError):
+            self.account.characters.add(self.char2)
+        self.assertNotIn(self.char2, self.account.characters.all())
+        # transfer=True is the sanctioned reassignment.
+        self.account.characters.add(self.char2, transfer=True)
         self.assertIn(self.char2, self.account.characters.all())
 
     def test_remove_character_from_playable_list(self):

@@ -10,8 +10,15 @@ command method rather than caller.msg().
 """
 
 from evennia.commands.cmdset import CmdSet
-from evennia.commands.default import (account, admin, building, comms, general,
-                                      help, system)
+from evennia.commands.default import (
+    account,
+    admin,
+    building,
+    comms,
+    general,
+    help,
+    system,
+)
 
 
 class AccountCmdSet(CmdSet):
@@ -57,6 +64,7 @@ class AccountCmdSet(CmdSet):
 
         # Admin commands
         self.add(admin.CmdNewPassword())
+        self.add(admin.CmdVerifyReconcile())  # TEMPORARY: remove with I1 reconcile
 
         # Comm commands
         self.add(comms.CmdChannel())

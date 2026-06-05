@@ -30,8 +30,10 @@ _PERMISSION_HIERARCHY_PLURAL = [
 def _to_account(accessing_obj):
     "Helper function. Makes sure an accessing object is an account object"
     if utils.inherits_from(accessing_obj, "evennia.objects.object.DefaultObject"):
-        # an object. Convert to account.
-        accessing_obj = accessing_obj.account
+        # a body. Resolve to the account *driving* it (puppeteer), not its
+        # durable owner — permissions follow the live driver, so a body owned by
+        # one account but driven by another acts with the driver's perms.
+        accessing_obj = accessing_obj.puppeteer
     return accessing_obj
 
 
@@ -113,9 +115,12 @@ def perm(accessing_obj, accessed_obj, *args, **kwargs):
     gtmode = kwargs.pop("_greater_than", False)
     is_quell = False
 
+    # Elevate via the account *driving* the body (its live puppeteer), not its
+    # durable owner: permissions follow the driver, so possessing staff act with
+    # their own perms and an idle owner's perms never leak to a different driver.
     account = (
         utils.inherits_from(accessing_obj, "evennia.objects.object.DefaultObject")
-        and accessing_obj.account
+        and accessing_obj.puppeteer
     )
     # check object perms (note that accessing_obj could be an Account too)
     perms_account = []
@@ -515,7 +520,10 @@ def is_ooc(accessing_obj, accessed_obj, *args, **kwargs):
     function will still return True.
     """
     obj = accessed_obj.obj if hasattr(accessed_obj, "obj") else accessed_obj
-    account = obj.account if utils.inherits_from(obj, evennia.DefaultObject) else obj
+    # Resolve to the account *driving* the body (puppeteer), not its durable
+    # owner: a session actively possessing an unowned NPC (owner None) is IC, not
+    # OOC. With no live driver there is nothing in-character, so treat as OOC.
+    account = obj.puppeteer if utils.inherits_from(obj, evennia.DefaultObject) else obj
     if not account:
         return True
     session = kwargs.get("session", None)

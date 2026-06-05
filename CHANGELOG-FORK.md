@@ -25,6 +25,120 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.71 — ControlBinding single-source rework; permissions follow the driver
+
+Follow-up to the fleet review of the I1 ControlBinding subsystem. The control
+graph is reworked so that each fact has exactly one home, and the permission
+system is corrected to key off the live driver rather than the durable owner.
+The control graph now distinguishes three independent facts that the `.65`
+design conflated:
+
+- **Ownership** ("who a character belongs to"): the character's
+  `ObjectDB.db_account`. This alone defines an account's playable roster.
+- **Controller** (the account a control graph's floor rests on — where `focus`
+  returns when nothing is pushed): `ControlBinding.db_account`. Equal to the
+  owner for a player on their own character, but different when staff possess
+  an NPC or another's body.
+- **Live driving** (who is actually playing a body right now):
+  `ObjectDB.sessions`, surfaced as `is_puppeted` / the new `puppeteer`.
+
+### Engine — control graph
+
+- [`evennia/accounts/models.py`](evennia/accounts/models.py): `ControlBinding`
+  is now a `SharedMemoryModel` (idmapper-backed). Every session driving the same
+  binding resolves the one shared in-memory instance, so a co-session's
+  push/pop is seen immediately with no per-read query — this *deletes* the
+  session-level binding cache plus its `db_generation` poll and `refresh_from_db`
+  from [`serversession.py`](evennia/server/serversession.py) (the staleness
+  guard is now structural). `session.binding` resolves via `objects.get(pk=...)`
+  (a cache hit) and `for_identity` caches a freshly created binding so the
+  creator's instance is canonical.
+- **F2 focus stack.** The controller floor is no longer stored. `db_focus_stack`
+  holds only the bodies *above* the floor; `focus` returns `db_account` (the
+  controller) on an empty stack. `_ensure_floor` is removed; `collapse_to_floor`
+  replaces collapsing to a stored account entry. This removes the last duplicated
+  copy of the controller.
+- **`for_identity` repoints the controller, not ownership.** Attaching/puppeting
+  (re)points `ControlBinding.db_account` at the current driver (so possession and
+  takeover work) and never touches the identity's `ObjectDB.db_account`. The
+  `.67`/`.70` `for_identity`-transfers-ownership behaviour and the reconcile
+  `identity ← binding` resync are removed: the resync corrupted ownership for any
+  possessed (driver ≠ owner) body.
+- Session takeover detaches the old session with `collapse=False` and reattaches
+  the new session to the same binding, so a pushed avatar/vehicle stack survives
+  the takeover.
+
+### Engine — ownership / roster
+
+- [`evennia/accounts/accounts.py`](evennia/accounts/accounts.py): the playable
+  roster (`CharactersHandler`) is now derived from ownership
+  (`ObjectDB.db_account`), decoupled from the control graph. `add(transfer=)`
+  refuses a character owned by another account unless `transfer=True`; `remove`
+  disowns (clears `db_account`) and drops any control graph, so ownership and the
+  graph cannot diverge. `remove` detaches any live session first, so disowning a
+  currently-driven character never leaves a session half-attached to a body whose
+  binding is gone.
+- The I1 legacy-ownership backfill (`ControlBinding.reconcile_ownership` /
+  `reconcile_account` / `ensure_playable`) is now ownership-only — it sets
+  `ObjectDB.db_account` from legacy signals (`_last_puppet`,
+  `_playable_characters`, `pid()` locks) and never creates bindings. The engine
+  no longer auto-runs it on PSYNC ([`server/service.py`](evennia/server/service.py));
+  the game owns invoking its backfill. The temporary Developer-locked
+  **`@verify-reconcile`** command ([`commands/default/admin.py`](evennia/commands/default/admin.py))
+  gates eventual deletion of the machinery.
+
+### Engine — permissions follow the live driver
+
+- The permissions that apply when a body acts now come from the account
+  *driving* it (`DefaultObject.puppeteer`), never the durable owner. This closes
+  a privilege path opened by the `.65` `obj.account`=owner repurposing: a session
+  driving a body whose owner had higher perms would inherit the owner's perms.
+  It also restores the original "an Object *controlled by* an Account" contract —
+  pre-I1 `obj.account` was the live-puppet pointer.
+- Spots moved from owner to driver: `perm` / `pperm` / `_to_account`
+  ([`locks/lockfuncs.py`](evennia/locks/lockfuncs.py)),
+  `TypedObject.check_permstring` superuser bypass
+  ([`typeclasses/models.py`](evennia/typeclasses/models.py)),
+  `DefaultObject.is_superuser` and `get_cmdset_providers`
+  ([`objects/object.py`](evennia/objects/object.py)), and the `is_ooc` lockfunc
+  (a session possessing an unowned NPC is IC, not OOC).
+  `Character.at_post_puppet` records `_last_puppet` on the driver
+  ([`objects/character.py`](evennia/objects/character.py)) (an undriven/possessed
+  body has no owner to record on). An *undriven* body now has no account
+  elevation at all (only its own object perms) — the secure default. Ownership-
+  based access should be an explicit ownership lock, not perm-elevation.
+
+### API / semantics
+
+- New `DefaultObject.is_puppeted` (a live session drives this body) and
+  `DefaultObject.puppeteer` (the driving account), distinct from `has_account`
+  (durable owner) and `is_connected` (owner connected somewhere).
+
+### Migration notes
+
+- One migration, [`accounts/0019`](evennia/accounts/migrations/0019_controlbinding_focus_floor.py):
+  strips the stored `["account", id]` floor entry from every focus stack
+  (reversible). No `ControlBinding` column is dropped — `db_account` stays as the
+  controller. No back-compat shims (consistent with the `.65` API churn): game
+  code that read `obj.has_account` as "currently driven" must use `is_puppeted`;
+  code relying on an *offline* character carrying its account's perms must switch
+  to an explicit ownership check; ownership writes must route through the
+  `characters` handler.
+
+### Tests
+
+- [`actions/tests/test_control_binding.py`](evennia/actions/tests/test_control_binding.py):
+  F2 focus semantics, controller-vs-ownership, idmapper instance sharing, and
+  co-session push visibility.
+- [`accounts/tests.py`](evennia/accounts/tests.py): possession leaves ownership
+  untouched; `is_puppeted` / `puppeteer`; ownership-based roster + `transfer=`;
+  takeover preserves the pushed stack; and `TestPermissionsFollowDriver` (the
+  ground-truth escalation tests).
+- [`locks/tests.py`](evennia/locks/tests.py): the puppet-perm tests now drive
+  `char2` with its account, reflecting "permissions follow the live driver."
+
+---
+
 ## 6.0.0+underspire.70 — fix crash when deleting a puppeted character (I1)
 
 ### Engine

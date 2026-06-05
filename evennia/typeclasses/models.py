@@ -43,17 +43,30 @@ from evennia.hooks import hook
 from evennia.locks.lockhandler import LockHandler
 from evennia.server.signals import SIGNAL_TYPED_OBJECT_POST_RENAME
 from evennia.typeclasses import managers
-from evennia.typeclasses.attributes import (AttributeHandler, AttributeProperty,
-                                            DbHolder, InMemoryAttributeBackend)
-from evennia.typeclasses.tags import (AliasHandler, PermissionHandler, Tag,
-                                      TagCategoryProperty, TagHandler,
-                                      TagProperty)
-from evennia.utils.idmapper.models import (SharedMemoryModel,
-                                           SharedMemoryModelBase)
+from evennia.typeclasses.attributes import (
+    AttributeHandler,
+    AttributeProperty,
+    DbHolder,
+    InMemoryAttributeBackend,
+)
+from evennia.typeclasses.tags import (
+    AliasHandler,
+    PermissionHandler,
+    Tag,
+    TagCategoryProperty,
+    TagHandler,
+    TagProperty,
+)
 from evennia.typeclasses.typed_attr import apply_schema_migrations
+from evennia.utils.idmapper.models import SharedMemoryModel, SharedMemoryModelBase
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import (class_from_module, inherits_from, is_iter,
-                                 is_veto, lazy_property)
+from evennia.utils.utils import (
+    class_from_module,
+    inherits_from,
+    is_iter,
+    is_veto,
+    lazy_property,
+)
 
 __all__ = ("TypedObject",)
 
@@ -749,11 +762,11 @@ class TypedObject(SharedMemoryModel):
 
         """
         if inherits_from(self, evennia.DefaultObject):
-            if (
-                self.account
-                and self.account.is_superuser
-                and not self.account.attributes.get("_quell")
-            ):
+            # Superuser bypass follows the live driver (puppeteer), not the
+            # durable owner: a superuser owner does not leak its bypass to a
+            # different account driving the body.
+            driver = self.puppeteer
+            if driver and driver.is_superuser and not driver.attributes.get("_quell"):
                 return True
         else:
             if self.is_superuser and not self.attributes.get("_quell"):

@@ -26,6 +26,7 @@ from django.utils.encoding import smart_str
 from evennia.accounts.manager import AccountDBManager
 from evennia.server.signals import SIGNAL_ACCOUNT_POST_RENAME
 from evennia.typeclasses.models import TypedObject
+from evennia.utils.idmapper.models import SharedMemoryModel
 from evennia.utils.utils import make_iter
 
 __all__ = ("AccountDB", "ControlBinding")
@@ -205,21 +206,34 @@ CONTROL_OBJECT = "object"
 _PID_LOCK_RE = re.compile(r"pid\((\d+)\)")
 
 
-class ControlBinding(models.Model):
-    """One identity's durable control graph (I1).
+class ControlBinding(SharedMemoryModel):
+    """One control graph: an account driving a chain of bodies (I1).
 
-    Replaces the ``session.puppet`` / ``obj.account`` pointer pair. A binding
-    holds an **ordered focus stack** — the chain of things the controller is
-    currently driving::
+    Anchored (OneToOne) on ``db_identity`` — the *root driven body* of this
+    graph (a player's character, or an NPC a builder is possessing). It holds
+    an **ordered focus stack** of the bodies layered above that root::
 
-        [["account", 4]]                       # OOC / character-select
-        [["account", 4], ["object", 18]]       # @ic — driving the character
-        [["account", 4], ["object", 18], ["object", 73]]   # jacked into avatar #73
+        []                                  # OOC — focus rests on the controller
+        [["object", 18]]                    # @ic — driving character #18
+        [["object", 18], ["object", 73]]    # jacked into avatar #73
 
-    The top of the stack is the *active body* (``focus``); the floor is always
-    the controlling account, so ``focus`` is never empty and never ``None``.
-    Sessions are runtime-only and re-attach at connect — they are never stored
-    here.
+    Three distinct facts, each with a single home (none duplicated here):
+
+    - **Ownership** ("who this character belongs to") lives on the identity's
+      ``ObjectDB.db_account``, *not* here.
+    - **Controller** — the account this graph's floor rests on, i.e. where
+      ``focus`` resolves when the stack is empty — is ``db_account``. It is the
+      account currently *driving*: equal to the owner for a player on their own
+      character, but different when staff possess an NPC or another's body.
+      ``for_identity`` (re)points it at the current driver; ownership is never
+      touched.
+    - **Live driving** is ``ObjectDB.sessions`` at runtime; never stored here.
+
+    The stack stores only the bodies *above* the floor; the floor is derived
+    (``focus`` returns ``db_account`` on an empty stack), so it is never
+    persisted twice. As a :class:`SharedMemoryModel` the binding is
+    idmapper-cached: every session driving the same row resolves the one shared
+    instance, so a co-session's push/pop is seen with no refresh.
 
     ``db_generation`` bumps on every structural mutation; an in-flight dispatch
     captures it and re-validates on resume so a co-session's push/pop across a
@@ -232,7 +246,7 @@ class ControlBinding(models.Model):
         related_name="control_bindings",
         on_delete=models.CASCADE,
         db_index=True,
-        help_text="The account that owns this control graph.",
+        help_text="The account currently driving this graph (the stack floor).",
     )
     db_identity = models.OneToOneField(
         "objects.ObjectDB",
@@ -240,12 +254,12 @@ class ControlBinding(models.Model):
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        help_text="The persistent IC self (the character) this binding is for.",
+        help_text="The root driven body (character/NPC) this graph is anchored on.",
     )
     db_focus_stack = models.JSONField(
         default=list,
         blank=True,
-        help_text="Ordered [[kind, id], ...]; floor=account, top=active body.",
+        help_text="Ordered [[kind, id], ...] of bodies ABOVE the floor; top=active body.",
     )
     db_generation = models.PositiveIntegerField(
         default=0,
@@ -280,31 +294,29 @@ class ControlBinding(models.Model):
 
         return ObjectDB.objects.filter(id=pk).first()
 
-    def _ensure_floor(self):
-        """Guarantee the account sits at the stack floor (idempotent)."""
-        floor = [CONTROL_ACCOUNT, self.db_account_id]
-        if not self.db_focus_stack:
-            self.db_focus_stack = [floor]
-        elif self.db_focus_stack[0] != floor:
-            self.db_focus_stack.insert(0, floor)
-
     # -- queries ------------------------------------------------------------
     @property
+    def controller(self):
+        """The account driving this graph (the stack floor)."""
+        return self.db_account
+
+    @property
     def focus(self):
-        """The active body — top of stack, resolved to a live object."""
-        self._ensure_floor()
-        return self._resolve(self.db_focus_stack[-1])
+        """The active body — top of the stack, resolved to a live object, or
+        the controller account when the stack is empty (OOC). Never ``None``
+        for a live row."""
+        if self.db_focus_stack:
+            return self._resolve(self.db_focus_stack[-1])
+        return self.db_account
 
     @property
     def stack_objects(self):
-        """The whole focus stack resolved bottom→top (skipping dead rows)."""
-        self._ensure_floor()
+        """The bodies above the floor, resolved bottom→top (dead rows skipped)."""
         return [obj for obj in (self._resolve(e) for e in self.db_focus_stack) if obj is not None]
 
     def contains(self, obj):
-        """True if ``obj`` is anywhere in the focus stack."""
-        entry = self._entry_for(obj)
-        return entry in self.db_focus_stack
+        """True if ``obj`` is a body anywhere in the focus stack."""
+        return self._entry_for(obj) in self.db_focus_stack
 
     # -- DB-authoritative reads (cross-session race guard) ------------------
     def current_generation(self):
@@ -327,16 +339,14 @@ class ControlBinding(models.Model):
     # -- mutations (each bumps generation + saves) --------------------------
     def push(self, body):
         """Push ``body`` as the new active focus. Returns the pushed object."""
-        self._ensure_floor()
         self.db_focus_stack.append(self._entry_for(body))
         self._bump()
         return body
 
     def pop(self):
-        """Pop the top body (never below the account floor). Returns the
-        dropped object, or ``None`` if only the floor remained."""
-        self._ensure_floor()
-        if len(self.db_focus_stack) <= 1:
+        """Pop the top body. Returns the dropped object, or ``None`` if the
+        stack was already empty (focus already on the controller floor)."""
+        if not self.db_focus_stack:
             return None
         dropped = self._resolve(self.db_focus_stack.pop())
         self._bump()
@@ -345,18 +355,23 @@ class ControlBinding(models.Model):
     def collapse_to(self, body):
         """Pop bodies until ``body`` is the active focus, returning the dropped
         objects **top-first** (so callers can fire one teardown per level in
-        unwind order). If ``body`` is not in the stack, collapses to the floor.
+        unwind order). If ``body`` is not a body in the stack (e.g. the
+        controller account), collapses all the way to the floor (empty stack).
 
         The single generation bump covers the whole collapse.
         """
-        self._ensure_floor()
         target = self._entry_for(body)
         dropped = []
-        while len(self.db_focus_stack) > 1 and self.db_focus_stack[-1] != target:
+        while self.db_focus_stack and self.db_focus_stack[-1] != target:
             dropped.append(self._resolve(self.db_focus_stack.pop()))
         if dropped:
             self._bump()
         return dropped
+
+    def collapse_to_floor(self):
+        """Go fully OOC: pop every body so ``focus`` resolves to the controller.
+        Returns the dropped objects top-first."""
+        return self.collapse_to(self.db_account)
 
     def _bump(self):
         self.db_generation = (self.db_generation or 0) + 1
@@ -365,28 +380,37 @@ class ControlBinding(models.Model):
     # -- construction -------------------------------------------------------
     @classmethod
     def for_identity(cls, account, identity):
-        """Get-or-create the binding for a persistent IC self (``identity``).
+        """Get-or-create the control graph anchored on ``identity``, with
+        ``account`` as its controller (the driver / stack floor).
 
-        The identity is the durable anchor (OneToOne), so one character has
-        exactly one control graph regardless of which account currently drives
-        it. The floor is (re)asserted to the *current* controlling account, so
-        an ownership transfer is reflected without orphaning the stack.
+        The identity is the durable anchor (OneToOne), so a body has exactly
+        one control graph. Attaching points the **controller** at the current
+        driver — a possession or takeover repoints it — but never changes the
+        identity's **ownership** (``ObjectDB.db_account``); route ownership
+        through the owning account's ``characters`` handler.
         """
-        binding, _created = cls.objects.get_or_create(
-            db_identity=identity, defaults={"db_account": account}
+        binding, created = cls.objects.get_or_create(
+            db_identity=identity, defaults={"db_account": account, "db_focus_stack": []}
         )
-        if binding.db_account_id != account.id:
-            binding.db_account = account
+        if created:
+            # save() does not auto-cache; make the creator's instance the
+            # canonical idmapper one so every later objects.get() shares it
+            # (and a co-session never resolves a divergent copy).
+            cls.cache_instance(binding)
+        account_id = getattr(account, "id", None) or getattr(account, "pk", None)
+        if account_id and binding.db_account_id != account_id:
+            binding.db_account_id = account_id
             binding.save(update_fields=["db_account"])
-        binding._ensure_floor()
         return binding
 
     @classmethod
     def ensure_playable(cls, account, identity):
-        """Idempotent: durable ``ControlBinding`` + ``ObjectDB.db_account`` sync.
+        """Idempotent ownership backfill: set the identity's durable owner
+        (``ObjectDB.db_account``) to ``account`` if not already so.
 
-        Mirrors :meth:`CharactersHandler.add` ownership writes without firing
-        ``at_character_added`` (safe for bulk backfill).
+        Migration scaffolding only — ownership is otherwise written through the
+        account's ``characters`` handler. Does not create a binding (control
+        graphs are minted on first puppet). Returns True if newly assigned.
         """
         if account is None or identity is None:
             return False
@@ -394,32 +418,29 @@ class ControlBinding(models.Model):
         account_id = getattr(account, "id", None) or getattr(account, "pk", None)
         if not identity_id or not account_id:
             return False
-        had_binding = cls.objects.filter(db_identity_id=identity_id).exists()
-        cls.for_identity(account, identity)
-        if getattr(identity, "db_account_id", None) != account_id:
-            identity.db_account_id = account_id
-            identity.save(update_fields=["db_account"])
-        return not had_binding
+        if getattr(identity, "db_account_id", None) == account_id:
+            return False
+        identity.db_account_id = account_id
+        identity.save(update_fields=["db_account"])
+        return True
 
     @classmethod
     def _identity_ids_for_account(cls, account):
-        """Character ids already bound to this account in the control graph."""
-        return set(
-            cls.objects.filter(db_account=account)
-            .exclude(db_identity__isnull=True)
-            .values_list("db_identity_id", flat=True)
-        )
+        """Ids of the characters already owned by this account."""
+        from evennia.objects.models import ObjectDB
+
+        return set(ObjectDB.objects.filter(db_account=account).values_list("id", flat=True))
 
     @classmethod
     def reconcile_account(cls, account, *, scan_locks=True):
-        """Repair one account's playable set from legacy ownership signals.
+        """Backfill one account's character ownership from legacy signals.
 
-        Sources (in order): ``ObjectDB.db_account``, ``_last_puppet``,
-        ``_playable_characters``, and (optional) ``pid()`` puppet locks on
-        character typeclasses with no ``db_account``.
+        Sets ``ObjectDB.db_account`` for not-yet-owned characters named by
+        ``_last_puppet``, ``_playable_characters``, and (optional) ``pid()``
+        puppet locks. Characters the account already owns are skipped.
 
         Returns:
-            int: number of identities newly linked to this account.
+            int: number of characters newly owned by this account.
         """
         from evennia.objects.models import ObjectDB
 
@@ -438,11 +459,6 @@ class ControlBinding(models.Model):
             if cls.ensure_playable(account, identity):
                 created += 1
             linked.add(identity_id)
-
-        for identity_id in ObjectDB.objects.filter(db_account_id=account.id).values_list(
-            "id", flat=True
-        ):
-            _try(ObjectDB.objects.filter(id=identity_id).first())
 
         last = getattr(getattr(account, "db", None), "_last_puppet", None)
         _try(last)
@@ -470,13 +486,16 @@ class ControlBinding(models.Model):
 
     @classmethod
     def reconcile_ownership(cls):
-        """Global idempotent I1 ownership backfill (all accounts).
+        """Global idempotent ownership backfill (all accounts).
 
-        Safe on every server start and reload. Returns a stats dict for logging.
+        Sets ``ObjectDB.db_account`` from legacy signals; never touches
+        ``ControlBinding.db_account`` (the controller is a separate fact from
+        ownership and would be corrupted by a sync). Safe on every start and
+        reload. Returns a stats dict for logging.
         """
         from evennia.objects.models import ObjectDB
 
-        stats = {"accounts": 0, "puppet_lock": 0, "db_account_resync": 0}
+        stats = {"accounts": 0, "puppet_lock": 0}
 
         for account in AccountDB.objects.all():
             stats["accounts"] += cls.reconcile_account(account, scan_locks=False)
@@ -494,32 +513,9 @@ class ControlBinding(models.Model):
             account = AccountDB.objects.filter(id=int(match.group(1))).first()
             if not account:
                 continue
-            if identity_id in cls._identity_ids_for_account(account):
-                continue
             identity = ObjectDB.objects.filter(id=identity_id).first()
             if identity and cls.ensure_playable(account, identity):
                 stats["puppet_lock"] += 1
 
-        for binding in cls.objects.exclude(db_identity__isnull=True).select_related(
-            "db_account", "db_identity"
-        ):
-            identity = binding.db_identity
-            if identity is None:
-                continue
-            if identity.db_account_id != binding.db_account_id:
-                identity.db_account_id = binding.db_account_id
-                identity.save(update_fields=["db_account"])
-                stats["db_account_resync"] += 1
-
-        stats["created"] = sum(stats.values())
+        stats["created"] = stats["accounts"] + stats["puppet_lock"]
         return stats
-
-    @classmethod
-    def populate_missing(cls):
-        """Boot bulk-job: reconcile legacy ownership into ``ControlBinding`` rows.
-
-        Idempotent — safe on every server start **and** reload. Returns the
-        number of new links plus ``db_account`` resyncs (same as
-        ``reconcile_ownership()['created']``).
-        """
-        return cls.reconcile_ownership().get("created", 0)

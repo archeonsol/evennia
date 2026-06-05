@@ -31,12 +31,23 @@ from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import ansi, create, funcparser, logger, search
-from evennia.utils.multimatch import (narrow_candidates,
-                                      parse_search_qualifiers,
-                                      resolve_multimatch_index, try_autopick)
-from evennia.utils.utils import (class_from_module, compress_whitespace, dbref,
-                                 is_iter, iter_to_str, lazy_property,
-                                 make_iter, to_str, variable_from_module)
+from evennia.utils.multimatch import (
+    narrow_candidates,
+    parse_search_qualifiers,
+    resolve_multimatch_index,
+    try_autopick,
+)
+from evennia.utils.utils import (
+    class_from_module,
+    compress_whitespace,
+    dbref,
+    is_iter,
+    iter_to_str,
+    lazy_property,
+    make_iter,
+    to_str,
+    variable_from_module,
+)
 
 _INFLECT = inflect.engine()
 
@@ -464,8 +475,43 @@ class DefaultObject(
 
     @property
     def has_account(self):
-        """True if this object has an associated account (online or offline)."""
+        """True if this object has an associated account (online or offline).
+
+        This is *durable ownership*, not live control. For "is someone playing
+        this body right now" use :attr:`is_puppeted`; for "who is driving it"
+        (whose permissions apply) use :attr:`puppeteer`.
+        """
         return bool(self.account)
+
+    @property
+    def is_puppeted(self):
+        """True if at least one live session is currently driving this object
+        (someone is actively playing it right now).
+
+        Distinct from :attr:`has_account` (durable ownership, online or offline)
+        and :attr:`is_connected` (the owning account has a session connected
+        somewhere, not necessarily on this body).
+        """
+        return bool(self.sessions.count())
+
+    @property
+    def puppeteer(self):
+        """The account *currently driving* this body (its live controller), or
+        ``None`` if nothing is driving it.
+
+        This is the account whose permissions apply when this body acts, and is
+        deliberately distinct from :attr:`account` (the durable *owner*): when
+        staff possess an NPC or another player's body, the driver is the staff
+        account while ownership is unchanged. Resolved from the live sessions,
+        so it is never the stale owner.
+
+        All sessions on a body belong to one account (``puppet_object`` blocks a
+        connected foreign account from co-driving), so the ``[0]`` pick is
+        unambiguous in normal play; the only window for a foreign session is a
+        not-yet-reaped straggler from an unclean session kill.
+        """
+        sessions = self.sessions.all()
+        return sessions[0].account if sessions else None
 
     @hook(
         event="cmdset",
@@ -488,18 +534,25 @@ class DefaultObject(
             dict[str, CmdSetProvider]: The CmdSetProviders linked to this Object.
         """
         out = {"object": self}
-        if self.account:
-            out["account"] = self.account
+        # The acting account's cmdsets come from the live driver (puppeteer),
+        # not the durable owner: when a body is possessed, the driver's commands
+        # apply, not the absent owner's. (The driving session also supplies this
+        # provider, so for a player on their own character the two agree.)
+        driver = self.puppeteer
+        if driver:
+            out["account"] = driver
         return out
 
     @property
     def is_superuser(self):
-        """True if this object has an account and that account is a superuser."""
-        return (
-            self.db_account
-            and self.db_account.is_superuser
-            and not self.db_account.attributes.get("_quell")
-        )
+        """True if a superuser account is *currently driving* this object.
+
+        Follows the live driver (:attr:`puppeteer`), not the durable owner, so a
+        superuser owner's bypass never leaks to a different account driving the
+        body (and an idle, undriven body is never superuser).
+        """
+        driver = self.puppeteer
+        return bool(driver and driver.is_superuser and not driver.attributes.get("_quell"))
 
     def contents_get(self, exclude=None, content_type=None):
         """

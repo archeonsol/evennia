@@ -131,7 +131,9 @@ class EvenniaServerService(MultiService):
 
         if getattr(settings, "ATTRIBUTE_FLUSH_ON_MAINTENANCE", False):
             try:
-                from evennia.typeclasses.attribute_metrics import maybe_log_flush_metrics
+                from evennia.typeclasses.attribute_metrics import (
+                    maybe_log_flush_metrics,
+                )
                 from evennia.typeclasses.attributes import flush_all_dirty
 
                 stats = flush_all_dirty()
@@ -527,17 +529,11 @@ class EvenniaServerService(MultiService):
 
         self.at_server_init()
 
-        # Boot/reload bulk-job: reconcile legacy ownership (db_account,
-        # _last_puppet, _playable_characters, puppet locks) into ControlBinding
-        # rows. Idempotent — safe on every PSYNC including @reload.
-        try:
-            from evennia.accounts.models import ControlBinding
-
-            stats = ControlBinding.reconcile_ownership()
-            if stats.get("created"):
-                logger.log_info(f"ControlBinding reconcile: {stats}")
-        except Exception:
-            logger.log_trace("ControlBinding.reconcile_ownership failed at startup")
+        # The I1 legacy-ownership backfill (ControlBinding.reconcile_ownership)
+        # reads game attribute conventions (_last_puppet, _playable_characters,
+        # pid() puppet locks), so it is game-migration logic, not engine boot
+        # work; the game invokes it from its own at_server_start hook. The
+        # temporary @verify-reconcile command gates its eventual deletion.
 
         # call correct server hook based on start file value
         if mode == "reload":
@@ -796,7 +792,9 @@ class EvenniaServerService(MultiService):
         # Prime the cmdset merge cache for every already-puppeted session so
         # the first typed command after reload does not pay the cold merge.
         if mode == "reload":
-            from evennia.commands.cmdset_merge_warmup import warm_all_logged_in_puppet_sessions
+            from evennia.commands.cmdset_merge_warmup import (
+                warm_all_logged_in_puppet_sessions,
+            )
 
             try:
                 warm_all_logged_in_puppet_sessions()

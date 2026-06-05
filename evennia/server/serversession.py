@@ -16,11 +16,13 @@ from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.comms.models import ChannelDB
 from evennia.hooks import hook
 from evennia.scripts.monitorhandler import MONITOR_HANDLER
-from evennia.typeclasses.attributes import (AttributeHandler, DbHolder,
-                                            InMemoryAttributeBackend)
+from evennia.typeclasses.attributes import (
+    AttributeHandler,
+    DbHolder,
+    InMemoryAttributeBackend,
+)
 from evennia.utils import logger
-from evennia.utils.utils import (class_from_module, is_veto, lazy_property,
-                                 make_iter)
+from evennia.utils.utils import class_from_module, is_veto, lazy_property, make_iter
 
 _GA = object.__getattribute__
 _SA = object.__setattr__
@@ -59,27 +61,29 @@ class ServerSession(_BASE_SESSION_CLASS):
         """
         self.account = None
         self.bid = None
-        self._binding = None
         self.cmdset_storage_string = ""
         self.cmdset = CmdSetHandler(self, True)
 
     @property
     def binding(self):
         """The :class:`~evennia.accounts.models.ControlBinding` this session
-        currently drives, resolved from ``self.bid`` (``None`` when OOC at the
-        character-select screen). Cached on the session; the cache invalidates
-        when ``bid`` changes."""
+        currently drives, resolved fresh from ``self.bid`` (``None`` when OOC at
+        the character-select screen, or if the binding row is gone).
+
+        Not cached on the session: ``ControlBinding`` is idmapper-backed, so
+        ``objects.get(pk=...)`` returns the one shared in-memory instance for
+        this row (a cache hit, no query) — every co-session driving the same
+        binding sees the same focus stack, so a push/pop by one is visible to
+        all without any refresh."""
         bid = getattr(self, "bid", None)
         if not bid:
-            self._binding = None
             return None
-        cached = self._binding
-        if cached is not None and cached.pk == bid:
-            return cached
         from evennia.accounts.models import ControlBinding
 
-        self._binding = ControlBinding.objects.filter(pk=bid).first()
-        return self._binding
+        try:
+            return ControlBinding.objects.get(pk=bid)
+        except ControlBinding.DoesNotExist:
+            return None
 
     def __cmdset_storage_get(self):
         return [path.strip() for path in self.cmdset_storage_string.split(",")]
@@ -162,7 +166,6 @@ class ServerSession(_BASE_SESSION_CLASS):
             # non-persistent cmdset state the game stacks in at_post_puppet
             # rebuilds. Default echoes are suppressed by the reattach kwarg
             # in DefaultObject / DefaultCharacter at_post_puppet.
-            self._binding = None  # force a fresh resolve
             obj = self.get_puppet()
             if obj is None:
                 # binding gone or collapsed to the account floor — nothing to
@@ -172,7 +175,6 @@ class ServerSession(_BASE_SESSION_CLASS):
                 # Veto leaves the session unbound; the override is
                 # responsible for any user-visible explanation.
                 self.bid = None
-                self._binding = None
             else:
                 obj.sessions.add(self)
                 obj.locks.cache_lock_bypass(obj)
@@ -206,7 +208,6 @@ class ServerSession(_BASE_SESSION_CLASS):
         self.logged_in = True
         self.conn_time = time.time()
         self.bid = None
-        self._binding = None
         self.cmdset_storage = settings.CMDSET_SESSION
 
         # Update account's last login time.

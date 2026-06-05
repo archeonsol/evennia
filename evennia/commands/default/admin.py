@@ -29,6 +29,7 @@ __all__ = (
     "CmdPerm",
     "CmdWall",
     "CmdForce",
+    "CmdVerifyReconcile",
 )
 
 
@@ -619,3 +620,55 @@ class CmdForce(COMMAND_DEFAULT_CLASS):
             return
         targ.execute_cmd(self.rhs)
         self.msg(f"You have forced {targ} to: {self.rhs}")
+
+
+class CmdVerifyReconcile(COMMAND_DEFAULT_CLASS):
+    """
+    verify the I1 ownership backfill is complete
+
+    Usage:
+        @verify-reconcile
+
+    Runs the idempotent ownership reconcile twice and reports what each pass
+    changed:
+
+      - Pass 1 reports zero  -> every character's owner (ObjectDB.db_account)
+        is already set from its legacy signals. The backfill is safe to delete.
+      - Pass 1 reports > 0   -> stragglers existed and were just repaired. The
+        DB is clean now; re-run to confirm a zero first pass before removal.
+      - Pass 2 reports > 0   -> the reconcile is not idempotent; do NOT delete
+        it, investigate first.
+
+    TEMPORARY: gates removal of the I1 reconcile machinery. Remove together with
+    ControlBinding.reconcile_ownership / reconcile_account / ensure_playable
+    once the backfill is confirmed complete.
+    """
+
+    key = "@verify-reconcile"
+    aliases = ["@verifyreconcile"]
+    locks = "cmd:perm(Developer)"
+    help_category = "System"
+
+    def func(self):
+        from evennia.accounts.models import ControlBinding
+
+        first = ControlBinding.reconcile_ownership()
+        second = ControlBinding.reconcile_ownership()
+        self.msg(f"Pass 1 (backfill + self-heal): {first}")
+        self.msg(f"Pass 2 (confirm idempotent):   {second}")
+        if second.get("created"):
+            self.msg(
+                "|rNot idempotent: pass 2 still changed rows. reconcile is NOT safe to "
+                "remove — investigate before deleting.|n"
+            )
+        elif first.get("created"):
+            self.msg(
+                f"|yPass 1 repaired {first['created']} straggler(s)|n — the backfill had "
+                "not fully completed. The DB is clean now; re-run @verify-reconcile to "
+                "confirm a zero first pass before removing reconcile."
+            )
+        else:
+            self.msg(
+                "|gClean: every character's ownership is already set.|n The I1 reconcile "
+                "backfill is safe to delete."
+            )

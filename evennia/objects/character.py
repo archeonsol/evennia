@@ -283,7 +283,13 @@ class DefaultCharacter(DefaultObject):
         """
         if kwargs.get("reattach"):
             return
-        self.account.db._last_puppet = self
+        # Record on the *driving* account, not self.account (the durable owner):
+        # during possession (staff driving an unowned NPC or another's body) the
+        # owner may be None or a different account. self.puppeteer is the live
+        # driver, resolved from the session already attached at this point.
+        driver = self.puppeteer or self.account
+        if driver:
+            driver.db._last_puppet = self
         self.msg(_("\nYou become |c{name}|n.\n").format(name=self.key))
         self.msg((self.at_look(self.location), {"type": "look"}), options=None)
 

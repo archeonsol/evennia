@@ -6,8 +6,14 @@ Account cmdset. Account commands remain available also to Characters.
 """
 
 from evennia.commands.cmdset import CmdSet
-from evennia.commands.default import (admin, batchprocess, building, general,
-                                      help, system)
+from evennia.commands.default import (
+    admin,
+    batchprocess,
+    building,
+    general,
+    help,
+    system,
+)
 
 
 class CharacterCmdSet(CmdSet):
@@ -58,6 +64,7 @@ class CharacterCmdSet(CmdSet):
         self.add(admin.CmdPerm())
         self.add(admin.CmdWall())
         self.add(admin.CmdForce())
+        self.add(admin.CmdVerifyReconcile())  # TEMPORARY: remove with I1 reconcile
 
         # Building and world manipulation
         self.add(building.CmdTeleport())

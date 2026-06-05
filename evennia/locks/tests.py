@@ -8,6 +8,7 @@ This module tests the lock functionality of Evennia.
 
 """
 
+import evennia
 from evennia.server.serversession import ServerSession
 from evennia.utils.test_resources import BaseEvenniaTest
 
@@ -45,10 +46,31 @@ class TestLockCheck(BaseEvenniaTest):
 
 
 class TestLockfuncs(BaseEvenniaTest):
+    _CHAR2_SESSID = 42
+
     def setUp(self):
         super().setUp()
         self.account2.permissions.add("Admin")
         self.char2.permissions.add("Builder")
+        # Permissions follow the live driver, not the owner: for account2's
+        # Admin to elevate char2's lock checks, account2 must actually be
+        # *driving* char2. Register a session for account2 as char2's puppeteer.
+        self._char2_session = ServerSession()
+        self._char2_session.init_session(
+            "telnet", ("localhost", "testmode"), evennia.SESSION_HANDLER
+        )
+        self._char2_session.sessid = self._CHAR2_SESSID
+        self._char2_session.logged_in = True
+        self._char2_session.account = self.account2
+        self._char2_session.uid = self.account2.id
+        evennia.SESSION_HANDLER[self._CHAR2_SESSID] = self._char2_session
+        self.char2.sessions.add(self._char2_session)
+
+    def tearDown(self):
+        self.char2.sessions.clear()
+        if self._CHAR2_SESSID in evennia.SESSION_HANDLER:
+            del evennia.SESSION_HANDLER[self._CHAR2_SESSID]
+        super().tearDown()
 
     def test_booleans(self):
         self.assertEqual(True, lockfuncs.true(self.account2, self.obj1))
@@ -118,9 +140,7 @@ class TestLockfuncs(BaseEvenniaTest):
         self.account.locks.reset()
         self.assertFalse(self.account.locks.lock_bypass)
         self.assertFalse(check_perm(self.char1, "Developer"))
-        self.assertFalse(
-            check_lockstring(self.char1, "cmd:perm(Builder)", access_type="cmd")
-        )
+        self.assertFalse(check_lockstring(self.char1, "cmd:perm(Builder)", access_type="cmd"))
 
     @override_settings(PERMISSION_HIERARCHY=settings_default.PERMISSION_HIERARCHY)
     def test_quell_above_perm(self):

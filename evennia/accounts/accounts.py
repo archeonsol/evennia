@@ -140,12 +140,11 @@ class CharactersHandler:
     """
     Handler living on DefaultAccount as ``.characters`` via @lazy_property.
 
-    The set of playable characters is *derived from the durable
-    :class:`~evennia.accounts.models.ControlBinding` control graph* — one
-    binding per IC self (``db_identity``) anchored to its controlling account
-    (``db_account``) — rather than a parallel ``_playable_characters``
-    attribute. The binding is the single source of truth for who owns/controls
-    which character, so reads here cannot drift from the focus/puppet state.
+    The playable set is *ownership*: the characters whose durable owner
+    (``ObjectDB.db_account``) is this account. Ownership is the single source
+    of truth, decoupled from the :class:`~evennia.accounts.models.ControlBinding`
+    control graph (which tracks who is *driving* a body right now, not who owns
+    it). A control graph is minted on first puppet, not by roster membership.
     """
 
     def __init__(self, owner: "DefaultAccount"):
@@ -158,50 +157,64 @@ class CharactersHandler:
         self.owner = owner
 
     def _query(self):
-        from evennia.accounts.models import ControlBinding
+        from evennia.objects.models import ObjectDB
 
-        return (
-            ControlBinding.objects.filter(db_account=self.owner)
-            .exclude(db_identity__isnull=True)
-            .select_related("db_identity")
-        )
+        return ObjectDB.objects.filter(db_account=self.owner)
 
-    def add(self, character: "DefaultCharacter"):
+    def add(self, character: "DefaultCharacter", transfer: bool = False):
         """
-        Bind a character to this account as a playable IC self (idempotent).
+        Make ``character`` a playable IC self of this account (idempotent).
+
+        Ownership is a single field (``ObjectDB.db_account``); this is the only
+        write. Refuses a character already owned by a *different* account unless
+        ``transfer=True`` (staff reassignment / body-swap), so adding never
+        silently steals another account's character.
 
         Args:
             character (DefaultCharacter): The character to add.
-        """
-        from evennia.accounts.models import ControlBinding
+            transfer (bool): Allow taking a character owned by another account.
+                Defaults to False.
 
-        already = ControlBinding.objects.filter(
-            db_account=self.owner, db_identity=character
-        ).exists()
-        ControlBinding.for_identity(self.owner, character)
-        # Keep ObjectDB.db_account in sync for legacy ownership reads (chargen web,
-        # locks, populate_missing, etc.). I1 focus uses ControlBinding; this field
-        # is durable ownership, not the live session driver.
-        if character.db_account_id != self.owner.id:
+        Raises:
+            ValueError: If ``character`` is owned by another account and
+                ``transfer`` is False.
+        """
+        current_owner_id = getattr(character, "db_account_id", None)
+        if current_owner_id not in (None, self.owner.id) and not transfer:
+            raise ValueError(
+                f"{character} is owned by account #{current_owner_id}; "
+                "pass transfer=True to reassign ownership."
+            )
+        already = current_owner_id == self.owner.id
+        if not already:
             character.db_account = self.owner
             character.save(update_fields=["db_account"])
-        if not already:
             self.owner.at_character_added(character)
 
     def remove(self, character: "DefaultCharacter"):
         """
-        Drop a character's binding to this account.
+        Drop ``character`` from this account's playable set (disown it).
+
+        Clears the durable owner and tears down any control graph anchored on
+        it, so ownership and the control graph cannot diverge.
 
         Args:
             character (DefaultCharacter): The character to remove.
         """
         from evennia.accounts.models import ControlBinding
 
-        qs = ControlBinding.objects.filter(db_account=self.owner, db_identity=character)
-        existed = qs.exists()
-        qs.delete()
-        if existed:
-            self.owner.at_character_removed(character)
+        if getattr(character, "db_account_id", None) != self.owner.id:
+            return
+        # Detach any live session first, so disowning never leaves a session
+        # half-attached to a body whose binding is about to be deleted (mirrors
+        # the order LifecycleMixin.delete() uses). Each session is released
+        # through its own driving account.
+        for session in list(character.sessions.all()):
+            (session.account or self.owner).unpuppet_object(session)
+        character.db_account = None
+        character.save(update_fields=["db_account"])
+        ControlBinding.objects.filter(db_identity=character).delete()
+        self.owner.at_character_removed(character)
 
     def all(self) -> list["DefaultCharacter"]:
         """
@@ -210,7 +223,7 @@ class CharactersHandler:
         Returns:
             list[DefaultCharacter]: All playable characters.
         """
-        return [binding.db_identity for binding in self._query()]
+        return list(self._query())
 
     def count(self) -> int:
         """
@@ -624,6 +637,10 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             # no access
             self.msg(_("You don't have permission to puppet '{key}'.").format(key=obj.key))
             return
+        # If a takeover detaches another of our sessions, the new session
+        # reattaches to that session's existing binding (preserving any pushed
+        # avatar/vehicle stack) rather than building a fresh one.
+        takeover_binding = None
         if driving_account is not None:
             # body already driven by a live session
             if driving_account == self:
@@ -647,7 +664,12 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     )
                     self.msg(txt1, session=session)
                     self.msg(txt2, session=obj.sessions.all())
-                    self.unpuppet_object(obj.sessions.get())
+                    # Detach the old session WITHOUT collapsing so a pushed
+                    # avatar/vehicle stack survives; capture its binding so the
+                    # new session reattaches to the same graph below.
+                    takeover_sessions = list(make_iter(obj.sessions.get()))
+                    takeover_binding = takeover_sessions[0].binding if takeover_sessions else None
+                    self.unpuppet_object(takeover_sessions, collapse=False)
             elif driving_account.is_connected:
                 # controlled by another account
                 self.msg(_("|c{key}|R is already puppeted by another Account.").format(key=obj.key))
@@ -691,11 +713,12 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             if binding.focus is not obj:
                 binding.push(obj)
         else:
-            binding = ControlBinding.for_identity(self, obj)
+            # On takeover, reattach to the detached session's binding so a
+            # pushed avatar/vehicle survives; obj is already its focus top.
+            binding = takeover_binding or ControlBinding.for_identity(self, obj)
             if binding.focus is not obj:
                 binding.push(obj)
         session.bid = binding.pk
-        session._binding = binding
         obj.sessions.add(session)
         _sync_session_bid_to_portal(session)
 
@@ -765,7 +788,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 # Ownership (``obj.account``) is durable and left intact.
                 binding = session.binding
                 if collapse and last_session and binding is not None:
-                    binding.collapse_to(binding.db_account)
+                    binding.collapse_to_floor()
                 obj.at_post_unpuppet(self, session=session)
                 SIGNAL_OBJECT_POST_UNPUPPET.send(sender=obj, session=session, account=self)
                 if last_session:
@@ -776,7 +799,6 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                         logger.log_trace("at_puppet_removed hook failed")
             # Just to be sure we're always clear.
             session.bid = None
-            session._binding = None
             _sync_session_bid_to_portal(session)
 
     def pop_focus(self, session):
@@ -818,7 +840,6 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if isinstance(new_focus, AccountDB):
             # Popped to the account floor — fully OOC.
             session.bid = None
-            session._binding = None
             _sync_session_bid_to_portal(session)
             self._emit_focus_changed(session, obj, "pop")
             return None
@@ -827,7 +848,6 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # re-running its full login pipeline.
         new_focus.sessions.add(session)
         session.bid = binding.pk
-        session._binding = binding
         _sync_session_bid_to_portal(session)
         new_focus.locks.cache_lock_bypass(new_focus)
         new_focus.at_post_puppet(reattach=True, session=session)
@@ -859,7 +879,6 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             return None
         obj.sessions.add(session)
         session.bid = binding.pk
-        session._binding = binding
         _sync_session_bid_to_portal(session)
         obj.locks.cache_lock_bypass(obj)
         obj.at_post_puppet(reattach=True, session=session)
@@ -1894,6 +1913,10 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 return puppets[0] if puppets else None
             return match
 
+        if kwargs.get("quiet"):
+            # quiet: suppress the not-found / multimatch prompt (mirrors
+            # DefaultObject.search's quiet contract) and just return None.
+            return None
         matches = result.candidates if isinstance(result, Ambiguous) else []
         return _AT_SEARCH_RESULT(
             matches,
