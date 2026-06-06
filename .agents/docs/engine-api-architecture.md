@@ -78,31 +78,40 @@ churn, and dependencies. Per-item design happens when picked up.
 Items are ordered approximately by dependency. Independent items come
 first; items that consume substrate from earlier items come later.
 
-### I1. Actor abstraction
+### I1. Actor abstraction — substrate shipped (CM1 Phase 3a); closeout pending
 
-Substrate primitive; precedes L1, R1, I2. Migrated here from the
-boundary-migration doc (was Phase C1) because it's substrate, not
-boundary.
+The substrate primitive landed as `Actor` in
+`evennia/actions/actor.py` (CM1 Phase 3a): a computed view over the
+(session, account, character) triple that answers "who is acting, on
+what, with what authority." It exposes derived `identity` / `focus` /
+`effective` / `location` / `state_objects`, built deterministically
+from cmdhandler's `callertype` via `Actor.from_caller`. Post-`.71`,
+`focus`/`identity` resolve from the durable `ControlBinding` focus
+stack when one is attached (the legacy triple remains the fallback for
+bindingless / programmatic actors). The action engine resolves every
+dispatch through it, so it already *is* the target for L1's `check`
+actor, R1's viewer arg, and I2's multi-puppet anchor.
 
-- Problem: `self.caller` in a command can be a Session, Account, or
-  Object depending on cmdset routing. The session-proxy /
-  `AccountCommand` machinery papers over this but exposes the
-  underlying ambiguity to game code. There's no single object
-  answering "who is acting, on what, with what authority."
-- Target: one object (working name deliberately ambiguous; pick
-  during design) unifying session, account, puppet, and effective
-  permissions. Once landed: `self.caller` ambiguity collapses,
-  `AccountCommand` split retires or reframes as a routing hint, L1's
-  `check` first arg has a place to live, R1's viewer arg has a place
-  to live, I2's multi-puppet machinery has a place to live.
-- Design questions to resolve when picked up: wrapper around the
-  existing trio or a replacement, what does the migration story look
-  like for existing game code, does it touch cmdset merge or just
-  the command entry point.
-- Churn: medium to large (substrate change; many call sites touch
-  identity).
-- Dependencies: none structural; benefits from B1 (hook signatures
-  reference actor cleanly).
+Original problem (now addressed for engine-routed input): `self.caller`
+could be a Session, Account, or Object depending on cmdset routing; the
+session-proxy / `AccountCommand` machinery papered over it.
+
+Remaining to formally close I1 — a reconciliation, not new substrate
+(the heavy churn already landed inside CM1):
+
+- **`AccountCommand` fate.** `Actor.from_caller(callertype=...)` now
+  derives account-vs-character context, so the class's disambiguation
+  role is largely subsumed. Decide: retire, reframe as a routing hint,
+  or keep (`evennia/commands/command.py:964`).
+- **`self.caller` migration.** Still used by the remaining legacy
+  default command modules; tangled with the builder/command-group port
+  (those modules are on the chopping block anyway).
+- **Stale self-references.** `actor.py`'s "until I1 lands" docstring
+  framing, once the above is decided.
+- L1 / R1 / I2 consume the Actor only nominally (not yet built).
+
+- Churn: low now (doc + the `AccountCommand` decision).
+- Dependencies: none structural.
 
 ### Q1. `search` Result type — shipped
 

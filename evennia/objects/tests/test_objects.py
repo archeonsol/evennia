@@ -1,20 +1,12 @@
 from mock import MagicMock, patch
 
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (
-    DefaultCharacter,
-    DefaultExit,
-    DefaultObject,
-    DefaultRoom,
-)
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
 from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.typeclasses.attributes import AttributeProperty
-from evennia.typeclasses.tags import (
-    AliasProperty,
-    PermissionProperty,
-    TagCategoryProperty,
-    TagProperty,
-)
+from evennia.typeclasses.tags import (AliasProperty, PermissionProperty,
+                                      TagCategoryProperty, TagProperty)
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
@@ -419,13 +411,35 @@ class TestObjectManager(BaseEvenniaTest):
 
     def test_get_objs_with_attr(self):
         self.obj1.db.testattr = "testval1"
+        # Attribute search is force-gated; without force=True it raises.
+        with self.assertRaises(RuntimeError):
+            ObjectDB.objects.get_objs_with_attr("testattr")
         with self.assertWarns(DeprecationWarning):
-            query = ObjectDB.objects.get_objs_with_attr("testattr")
+            query = ObjectDB.objects.get_objs_with_attr("testattr", force=True)
         self.assertEqual(list(query), [self.obj1])
-        query = ObjectDB.objects.get_objs_with_attr("testattr", candidates=[self.char1, self.obj1])
+        query = ObjectDB.objects.get_objs_with_attr(
+            "testattr", candidates=[self.char1, self.obj1], force=True
+        )
         self.assertEqual(list(query), [self.obj1])
-        query = ObjectDB.objects.get_objs_with_attr("NotFound", candidates=[self.char1, self.obj1])
+        query = ObjectDB.objects.get_objs_with_attr(
+            "NotFound", candidates=[self.char1, self.obj1], force=True
+        )
         self.assertFalse(query)
+
+    def test_get_objs_with_attr_value_force_gated(self):
+        self.obj1.db.testattr = "testval1"
+        # Game-logic call (no force) raises; maintenance call (force=True) runs.
+        with self.assertRaises(RuntimeError):
+            ObjectDB.objects.get_objs_with_attr_value("testattr", "testval1")
+        query = ObjectDB.objects.get_objs_with_attr_value("testattr", "testval1", force=True)
+        self.assertEqual(list(query), [self.obj1])
+
+    def test_search_object_attribute_name_penalized(self):
+        # search_object(attribute_name=...) falls through to the gated attribute
+        # scan once no db_<field> matches, so the public search path raises.
+        self.obj1.db.testattr = "testval1"
+        with self.assertRaises(RuntimeError):
+            ObjectDB.objects.search_object("testval1", attribute_name="testattr")
 
     def test_copy_object(self):
         "Test that all attributes and tags properly copy across objects"

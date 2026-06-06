@@ -21,23 +21,44 @@ Currently parallel-startable (no unresolved dependencies):
 - [A1: attribute storage model](A1-attribute-descriptors.md) —
   large, exploratory. Direction not yet committed (typed descriptors
   are one candidate, not the foregone answer).
-- [I1: actor abstraction](I1-actor-abstraction.md) — largest.
-  Substrate; unblocks L1, I2, R1.
+- [I1: actor abstraction](I1-actor-abstraction.md) — substrate;
+  unblocks L1, I2, R1. **Scope under review:** CM1 Phase 3a already
+  shipped an `Actor` in `evennia/actions/actor.py` (unifies the
+  session/account/character trio for the action engine). Whether that
+  delivers I1 or leaves a distinct remaining scope (legacy `self.caller`
+  migration, L1/R1/I2 consuming that `Actor`) is unresolved; the
+  architecture-doc I1 entry is stale on this. Confirm before starting.
+- [AS2: unified system scheduler](AS2-system-scheduler.md) — large,
+  not started; design approved, prompt is the build spec. One engine
+  primitive replacing the game's `global_tick` / `Script.interval` /
+  APScheduler. Companion downstream migration is game-repo work.
 
 **Shipped:**
 
-- [AS1: sync/async commitment](AS1-sync-async-commitment.md) — engine
+- [AS1: sync/async commitment](AS1-implementation-roadmap.md) — engine
   shipped in `6.0.0+underspire.50` (`evennia.utils.defer` + reactor-stall
   watchdog). Phase 2 (downstream blocking-site migration) is game-repo
   work, tracked there. Settles the rule-body contract CM1 builds on.
 
-**Unblocked by B1 (typeclass hooks taxonomy doc, shipped):**
+**CM1 action system (active; replaces the old cmdset rethink):**
 
-- [CM1: cmdset rethink](CM1-cmdset-rethink.md) — large. Replaces
-  merge-time-and-cached with a simpler model; bakes introspection
-  in from the start. Rule-body sync/async contract now settled by AS1
-  (`carry_out`/`report` may defer via `evennia.utils.defer`; `check`
-  must not block).
+- [CM1: action-system roadmap](CM1-action-system-roadmap.md) —
+  authoritative design + status. Phase 1–8 complete: the engine action
+  bridge is the sole player-input dispatch path, player cmdsets are empty
+  anchors, the legacy `commands/*_cmds` tree is deleted. Remaining is
+  optional substrate archival (retire `evennia/commands/cmdset.py` /
+  `CmdSet` from `evennia/__init__.py`).
+- [CM1: cmdset-elimination port ledger](CM1-port-ledger.md) — the live
+  burndown tracker for the roadmap; update it in the same commit as each
+  port batch.
+- [CM1: input-capture migration](CM1-input-capture-migration.md) —
+  medium, todo. Follow-on to the `.73` engine-only-dispatch release.
+  Migrate EvMore / EvEditor (and any remaining cmdset
+  `CMD_NOMATCH`/`CMD_NOINPUT` capture) onto engine `StateProvider`s,
+  modeled on `.73`'s `GetInputState`/`YesNoState`. These are silently
+  bypassed by the engine bridge today; their func-direct tests don't
+  prove routing. Clears the blockers for removing the legacy cmdset
+  dispatch path.
 
 **Boundary work (depends on architecture-doc substrate):**
 
@@ -73,12 +94,18 @@ backlog.
 - [F13: contribs half-policy](F13-contribs-policy.md)
 - [F18: unused engine handlers](F18-unused-engine-handlers.md)
 - [F19: tag-search facade gaps](F19-tag-search-facade-gaps.md)
+- [F20: ownership-change provenance](F20-ownership-provenance-audit.md)
+  — follow-on to the `.71` ControlBinding rework; a cold-path audit
+  trail for past ownership, engine-vs-game placement to decide.
 
 **Mechanical / verification:**
 
 - [F3: doc rot sweep in `docs/source/`](F3-doc-rot-sweep.md) —
   gated on a newmoo PR.
 - [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md)
+- [F21: migration-scaffolding carveout](F21-migration-scaffolding-carveout.md)
+  — in-progress. The I1 reconcile scaffolding was removed in `.72`; the
+  broader sweep for one-time backfill machinery remains.
 
 **Audit (read before acting):**
 

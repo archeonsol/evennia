@@ -1,6 +1,35 @@
 # I1: actor/context abstraction
 
-Status: todo
+Status: substrate shipped (CM1 Phase 3a, `evennia/actions/actor.py`) — closeout pending.
+
+## What already shipped (don't rebuild)
+
+The keystone primitive this prompt specified landed inside CM1 as `Actor`
+(`evennia/actions/actor.py`): a computed view over the (session, account,
+character) triple with derived `identity`/`focus`/`effective`/`location`/
+`state_objects`, built deterministically from cmdhandler's `callertype` via
+`Actor.from_caller`. Post-`.71` it resolves focus/identity from the durable
+`ControlBinding` focus stack when one is attached (legacy triple is the
+bindingless fallback). The action engine routes every dispatch through it.
+
+So the design questions below are mostly **answered by what shipped**: a thin
+computed wrapper (not a replacement), constructed per dispatch from
+`callertype`, following the binding's focus, exposing the trio + derived views.
+
+## Remaining to close (a reconciliation, not new substrate)
+
+1. **`AccountCommand` fate** (`evennia/commands/command.py:964`) —
+   `Actor.from_caller(callertype=...)` now derives account-vs-character
+   context, so its disambiguation role is largely subsumed. Decide: retire,
+   reframe as a routing hint, or keep. **Discussion-first.**
+2. **`self.caller` migration** — still used by the remaining legacy default
+   command modules; tangled with the builder/command-group port (those modules
+   are slated for migration anyway). Sequence after that port, not before.
+3. **Stale self-references** — `actor.py`'s "until I1 lands" docstring framing.
+4. L1 / R1 / I2 consume the `Actor` only nominally (not yet built; separate
+   items, each unblocked by this substrate).
+
+The original full prompt below is retained for the design rationale.
 
 ## Goal
 

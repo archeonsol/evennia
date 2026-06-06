@@ -10,19 +10,10 @@ from django.db.models import Q
 from django.db.models.fields import exceptions
 
 from evennia.server import signals
-from evennia.typeclasses.managers import (
-    TypeclassManager,
-    TypedObjectManager,
-    _flush_attr_writes,
-    _jsonb_match_pks,
-)
-from evennia.utils.utils import (
-    class_from_module,
-    dbid_to_obj,
-    is_iter,
-    make_iter,
-    string_partial_matching,
-)
+from evennia.typeclasses.managers import (TypeclassManager, TypedObjectManager,
+                                          _flush_attr_writes, _jsonb_match_pks)
+from evennia.utils.utils import (class_from_module, dbid_to_obj, is_iter,
+                                 make_iter, string_partial_matching)
 
 __all__ = ("ObjectManager", "ObjectDBManager")
 _GA = object.__getattribute__
@@ -31,10 +22,32 @@ _GA = object.__getattribute__
 _ATTR = None
 
 from evennia.utils.multimatch import (  # noqa: E402
-    _get_multimatch_input_handler,
-    _multimatch_regex,
-    resolve_multimatch_index,
+    _get_multimatch_input_handler, _multimatch_regex, resolve_multimatch_index)
+
+_ATTR_SEARCH_FORCE_MSG = (
+    "{method}() runs an attribute search, which forces a process-wide "
+    "flush_all_dirty() to expose the write-behind attribute cache. This must "
+    "not happen in game logic: model reverse lookups as indexed Tags instead. "
+    "Pass force=True only from tests, cleanup, or migrations."
 )
+
+
+def _require_attribute_search_force(force, method):
+    """Block attribute searches unless the caller explicitly opts in.
+
+    Attribute-value/key search is intentionally hostile to use in game logic:
+    every call triggers a process-wide ``flush_all_dirty()``. Maintenance code
+    (tests, cleanup, migrations) acknowledges that cost with ``force=True``.
+
+    Args:
+        force (bool): The caller's opt-in flag.
+        method (str): Method name, for the error message.
+
+    Raises:
+        RuntimeError: If *force* is not truthy.
+    """
+    if not force:
+        raise RuntimeError(_ATTR_SEARCH_FORCE_MSG.format(method=method))
 
 
 class ObjectDBManager(TypedObjectManager):
@@ -154,8 +167,13 @@ class ObjectDBManager(TypedObjectManager):
             cand_restriction & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
         ).order_by("id")
 
-    def get_objs_with_attr(self, attr_name, candidates=None):
+    def get_objs_with_attr(self, attr_name, candidates=None, force=False):
         """Find objects that have *attr_name* set (any value).
+
+        Reserved for maintenance (tests, cleanup, migrations): attribute search
+        forces a process-wide flush and must not run in game logic, so callers
+        must opt in with ``force=True`` (see
+        :func:`_require_attribute_search_force`). Use indexed Tags instead.
 
         .. deprecated::
             Key-existence search is an **unindexed full scan on every backend**,
@@ -166,9 +184,13 @@ class ObjectDBManager(TypedObjectManager):
             also tends to return nearly the whole table. Restrict to a known
             value via :meth:`get_objs_with_attr_value` (GIN-indexed), or pass
             ``candidates`` to bound the scan. This method will be removed.
+
+        Raises:
+            RuntimeError: If *force* is not True.
         """
         from warnings import warn
 
+        _require_attribute_search_force(force, "get_objs_with_attr")
         warn(
             "ObjectDB.objects.get_objs_with_attr() is deprecated: it is an "
             "unindexed full-table scan on all backends (including PostgreSQL) "
@@ -190,11 +212,22 @@ class ObjectDBManager(TypedObjectManager):
             return qs.filter(**{"db_attrs__~___d__has_key": attr_name})
         return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name))
 
-    def get_objs_with_attr_value(self, attr_name, value, candidates=None, typeclasses=None):
+    def get_objs_with_attr_value(
+        self, attr_name, value, candidates=None, typeclasses=None, force=False
+    ):
         """Find objects where attribute *attr_name* equals *value*.
 
         GIN-indexed on PostgreSQL; unindexed Python scan on other backends.
+        Either way the query forces a process-wide ``flush_all_dirty()`` to make
+        the write-behind attribute cache visible, so this is **not** for game
+        logic: model reverse lookups as indexed Tags instead. Reserved for
+        tests, cleanup, and migrations, which must opt in with ``force=True``
+        (see :func:`_require_attribute_search_force`).
+
+        Raises:
+            RuntimeError: If *force* is not True.
         """
+        _require_attribute_search_force(force, "get_objs_with_attr_value")
         cand_restriction = (
             candidates is not None
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
@@ -421,6 +454,9 @@ class ObjectDBManager(TypedObjectManager):
                     attribute_name, searchdata, candidates=candidates, typeclasses=typeclass
                 )
                 if not matches:
+                    # Deliberately no force=True: falling through to an
+                    # attribute-value scan from .search()/search_object() is the
+                    # game-logic path we want to penalize, so it raises here.
                     matches = self.get_objs_with_attr_value(
                         attribute_name, searchdata, candidates=candidates, typeclasses=typeclass
                     )

@@ -25,19 +25,18 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.74 — drop dead attribute-value search wrappers
+## 6.0.0+underspire.74 — remove dead attribute-search wrappers, force-gate the rest
 
-Removes the four convenience wrappers that backed attribute-value search from
-the flat `evennia.utils.search` API and the now-orphaned manager primitive
-beneath them. No schema changes.
+Attribute search forces a process-wide `flush_all_dirty()` on every call. This
+release removes the dead convenience wrappers and makes the remaining attribute
+searches refuse to run from game logic: reverse lookups must be modelled as
+indexed Tags. No schema changes.
 
 ### Engine — `search.py` wrappers removed
 
 The downstream game migrated every reverse lookup (Discord link id/token,
 tailoring web-edit tokens, web-write draft-by-title) to indexed tags, so these
-wrappers have no remaining callers anywhere in the engine, contribs, or the
-game. Each backed every call with a process-wide `flush_all_dirty()`
-write-behind flush, which is why they were deprecated.
+wrappers had no remaining callers anywhere in the engine, contribs, or the game.
 
 - [`utils/search.py`](evennia/utils/search.py): deleted `search_object_attribute`,
   `search_account_attribute`, `search_script_attribute`, and
@@ -47,29 +46,42 @@ write-behind flush, which is why they were deprecated.
   wrappers above (the account/script/channel managers expose no `attribute_name`
   search path), so it was fully dead once they were gone.
 
-### Kept
+### Engine — remaining attribute search is force-gated
 
-- `ObjectDB.objects.get_objs_with_attr_value`
-  ([`objects/manager.py`](evennia/objects/manager.py)) stays: it is the live,
-  GIN-indexed path behind `search_object(attribute_name=…, attribute_value=…)`,
-  the documented flat-API attribute search. Its `flush_all_dirty()` there is a
-  write-behind-cache correctness requirement, not the discouraged
-  convenience-wrapper pattern.
+The only surviving attribute-search primitives now refuse to run unless the
+caller explicitly opts in with `force=True`, which exists for tests, cleanup,
+and migrations only. Game logic must not trigger the flush.
+
+- [`objects/manager.py`](evennia/objects/manager.py):
+  `ObjectDB.objects.get_objs_with_attr_value` and `get_objs_with_attr` gained a
+  `force=False` argument; calling without it raises `RuntimeError` pointing to
+  Tags (`_require_attribute_search_force`).
+- The `search_object(attribute_name=…, attribute_value=…)` /
+  `DefaultObject.search(attribute_name=…)` path falls through to
+  `get_objs_with_attr_value` **without** `force`, so it now raises in game logic.
+  (A `db_<field>` property match still returns first and is unaffected.)
+- `get_objs_with_attr` remains separately deprecated (unindexed full scan) on top
+  of the new gate.
 
 ### Migration notes
 
-Downstream code that still calls `search.search_<type>_attribute(...)` must move
-to `search_object(attribute_name=…, attribute_value=…)` for objects, or (better)
-to indexed tags for any reverse lookup. Direct callers of
-`Manager.get_by_attribute(...)` should use `get_objs_with_attr_value(...)` on the
-ObjectDB manager or tag-based lookup.
+- `search.search_<type>_attribute(...)` and `Manager.get_by_attribute(...)` are
+  gone. Use indexed Tags for reverse lookups.
+- `search_object(attribute_name=…)` / `.search(attribute_name=…)` now raise
+  `RuntimeError` when they reach the attribute scan. Migrate those lookups to
+  Tags, or to a real `db_<field>` property search where applicable.
+- Maintenance code that genuinely needs the scan calls the manager method
+  directly with `force=True`.
 
 ### Tests
 
 - [`utils/tests/test_search.py`](evennia/utils/tests/test_search.py): dropped the
   four wrapper tests (`test_search_object_attribute[_wrong]`,
-  `test_search_script_attribute[_wrong]`) and their imports. Remaining search
-  suite plus `evennia.typeclasses` and `evennia.objects` (295 tests) pass.
+  `test_search_script_attribute[_wrong]`) and their imports.
+- [`objects/tests/test_objects.py`](evennia/objects/tests/test_objects.py): added
+  `test_get_objs_with_attr_value_force_gated` and
+  `test_search_object_attribute_name_penalized`; updated `test_get_objs_with_attr`
+  to assert the gate and pass `force=True`. `evennia.objects` + search suites pass.
 
 ## 6.0.0+underspire.73 — action engine is the sole player-input dispatch path
 

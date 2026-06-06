@@ -5,9 +5,8 @@ worker_pool removal `fedcf2a47`, Phase 1 watchdog `6060f8b74`, jobs
 docstring `9ab664c49`). Phase 2 (downstream blocking-site migration) is
 pending in the game repo. Branch: `as1-sync-async`.
 
-Replaces the open-ended `AS1-sync-async-commitment.md` exploration with a
-decided direction and an implementation plan. The prompt remains the
-upstream task definition; this is the committed design.
+The committed AS1 design and implementation record: the decided direction
+(sync-by-default + threaded I/O helpers) and the plan that shipped it.
 
 ---
 
