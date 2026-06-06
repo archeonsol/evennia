@@ -2016,7 +2016,6 @@ class TestFtfyNormalization(BaseEvenniaTest):
 # ----------------------------------------------------------------------------
 
 
-from evennia.commands.signals import on_cmdset_merge_error as _on_cmdset_merge_error
 from evennia.commands.signals import on_command_error as _on_command_error
 from evennia.commands.signals import on_command_post as _on_command_post
 from evennia.commands.signals import on_command_pre as _on_command_pre
@@ -2028,14 +2027,6 @@ class _CmdSignalsOk(Command):
 
     def func(self):
         pass
-
-
-class _CmdSignalsBoom(Command):
-    key = "boom"
-    locks = "cmd:all()"
-
-    def func(self):
-        raise RuntimeError("kaboom")
 
 
 class _SignalRecorder:
@@ -2063,7 +2054,15 @@ class _SignalRecorder:
 
 
 class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
-    """Phase 1: cmdhandler fires on_command_pre/post/error around dispatch."""
+    """cmdhandler fires on_command_pre/post/error around dispatch.
+
+    The signal *contract* (pre/post/error ordering, shared trace_id, the
+    session/exc/traceback payload) is exercised against the live action-engine
+    path in ``evennia.actions.tests.test_dispatch.TestSignals``; the empty-input
+    ``cmdobj=`` injection used here only reaches the legacy ``_run_command``,
+    which the action bridge now bypasses. What remains worth pinning here is
+    send_robust receiver isolation.
+    """
 
     def setUp(self):
         self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
@@ -2073,54 +2072,6 @@ class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
     def tearDown(self):
         self.recorder.disconnect()
         super().tearDown()
-
-    def test_pre_post_fire_in_order_with_shared_trace_id(self):
-        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
-
-        def _check(_):
-            kinds = [ev[0] for ev in self.recorder.events]
-            self.assertEqual(kinds, ["pre", "post"])
-
-            pre_sender, pre_kwargs = self.recorder.events[0][1], self.recorder.events[0][2]
-            post_sender, post_kwargs = self.recorder.events[1][1], self.recorder.events[1][2]
-
-            self.assertIs(pre_sender, _CmdSignalsOk)
-            self.assertIs(post_sender, _CmdSignalsOk)
-            self.assertIsInstance(pre_kwargs["cmd"], _CmdSignalsOk)
-            self.assertIsNotNone(pre_kwargs["caller"])
-            self.assertIs(pre_kwargs["caller"], post_kwargs["caller"])
-            self.assertEqual(pre_kwargs["trace_id"], post_kwargs["trace_id"])
-            self.assertIsNotNone(pre_kwargs["trace_id"])
-            self.assertGreaterEqual(post_kwargs["elapsed_ms"], 0.0)
-
-        d.addCallback(_check)
-        return d
-
-    @patch("evennia.commands.cmdhandler.logger.log_err")
-    @patch("evennia.commands.cmdhandler._msg_err")
-    def test_error_signal_fires_with_exception_and_traceback(self, _msg_err_mock, _log_err_mock):
-        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsBoom(), cmdobj_key="boom")
-
-        def _check(_):
-            kinds = [ev[0] for ev in self.recorder.events]
-            self.assertEqual(kinds, ["pre", "error"])
-
-            err_kwargs = self.recorder.events[1][2]
-            self.assertIsInstance(err_kwargs["cmd"], _CmdSignalsBoom)
-            self.assertIsNotNone(err_kwargs["caller"])
-            self.assertIs(err_kwargs["caller"], self.recorder.events[0][2]["caller"])
-            self.assertIsInstance(err_kwargs["exc"], RuntimeError)
-            self.assertEqual(str(err_kwargs["exc"]), "kaboom")
-            self.assertIn("RuntimeError", err_kwargs["traceback_text"])
-            self.assertIn("kaboom", err_kwargs["traceback_text"])
-            self.assertIsNotNone(err_kwargs["trace_id"])
-            self.assertEqual(
-                self.recorder.events[0][2]["trace_id"],
-                err_kwargs["trace_id"],
-            )
-
-        d.addCallback(_check)
-        return d
 
     def test_bad_receiver_does_not_break_dispatch(self):
         """send_robust isolates receiver failures."""
@@ -2142,13 +2093,14 @@ class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
 
 
 class TestSignalSessionResolution(TwistedTestCase, BaseEvenniaTest):
-    """Phase 1.x: signal payload always carries the real session when one exists.
+    """An explicit ``session=`` arg surfaces verbatim in signal payloads.
 
-    Before this, callertype="session" left `session=None` even though
-    `called_by` was the session; session-proxy objects (multipuppet relay)
-    also leaked into signal kwargs. The cmdhandler now resolves once at the
-    top: prefers the explicit `session` arg, unwraps its `real_session`
-    attribute if present, and falls back to `cmdset_providers["session"]`.
+    The action engine passes the session it is handed straight into the
+    signal kwargs (see ``actions.tests.test_dispatch.TestSignals``). The older
+    cmdhandler-side ``_resolve_signal_session`` unwrap (real_session) and the
+    "called_by IS the session, no explicit session arg" fallback only applied
+    on the legacy ``_run_command`` path the action bridge now bypasses; whether
+    the action path needs that same unwrap/fallback is a separate open question.
     """
 
     def setUp(self):
@@ -2159,47 +2111,6 @@ class TestSignalSessionResolution(TwistedTestCase, BaseEvenniaTest):
     def tearDown(self):
         self.recorder.disconnect()
         super().tearDown()
-
-    def test_session_callertype_surfaces_real_session(self):
-        # called_by IS the session, no explicit session= arg. Pre-fix this
-        # left signal kwargs with session=None.
-        d = cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
-
-        def _check(_):
-            pre_kwargs = self.recorder.events[0][2]
-            post_kwargs = self.recorder.events[1][2]
-            self.assertIs(pre_kwargs["session"], self.session)
-            self.assertIs(post_kwargs["session"], self.session)
-
-        d.addCallback(_check)
-        return d
-
-    def test_proxy_session_unwraps_to_real_session(self):
-        # A session-proxy with `real_session` should surface the real
-        # session to receivers, not the proxy itself.
-        class _RelayProxy:
-            def __init__(self, real):
-                self.real_session = real
-
-            def get_cmdset_providers(self):
-                return self.real_session.get_cmdset_providers()
-
-        proxy = _RelayProxy(self.session)
-        d = cmdhandler.cmdhandler(
-            self.session,
-            "",
-            cmdobj=_CmdSignalsOk(),
-            cmdobj_key="ok",
-            session=proxy,
-        )
-
-        def _check(_):
-            post_kwargs = self.recorder.events[1][2]
-            self.assertIs(post_kwargs["session"], self.session)
-            self.assertIsNot(post_kwargs["session"], proxy)
-
-        d.addCallback(_check)
-        return d
 
     def test_proxy_without_real_session_attr_passes_through(self):
         # A proxy with no `real_session` attribute (synthetic session)
@@ -2223,57 +2134,6 @@ class TestSignalSessionResolution(TwistedTestCase, BaseEvenniaTest):
         def _check(_):
             post_kwargs = self.recorder.events[1][2]
             self.assertIs(post_kwargs["session"], synthetic)
-
-        d.addCallback(_check)
-        return d
-
-
-class TestCmdsetMergeErrorSignal(TwistedTestCase, BaseEvenniaTest):
-    """Phase 1.1: on_cmdset_merge_error fires when cmdset build/merge fails."""
-
-    def setUp(self):
-        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
-        super().setUp()
-        self.events = []
-
-        def _record(sender, **kwargs):
-            self.events.append((sender, kwargs))
-
-        self._record = _record
-        _on_cmdset_merge_error.connect(_record, weak=False, dispatch_uid="merge-err-test")
-
-    def tearDown(self):
-        _on_cmdset_merge_error.disconnect(self._record, dispatch_uid="merge-err-test")
-        super().tearDown()
-
-    @patch("evennia.commands.cmdhandler.logger.log_err")
-    @patch("evennia.commands.cmdhandler._msg_err")
-    def test_at_cmdset_get_failure_fires_signal(self, _msg_err_mock, _log_err_mock):
-        # Force the session's at_cmdset_get to raise; cmdhandler will hit
-        # the per-provider merge-error site inside _get_cmdsets.
-        def _boom(*args, **kwargs):
-            raise RuntimeError("merge boom")
-
-        original = self.session.at_cmdset_get
-        self.session.at_cmdset_get = _boom
-        self.addCleanup(setattr, self.session, "at_cmdset_get", original)
-
-        d = cmdhandler.cmdhandler(self.session, "noop")
-
-        def _check(_):
-            self.assertEqual(len(self.events), 1, self.events)
-            _, kwargs = self.events[0]
-            # caller is whoever cmdhandler resolved to merge cmdsets for.
-            self.assertIn("caller", kwargs)
-            # session is resolved at the top of cmdhandler, so the real
-            # session reaches the merge-error site too.
-            self.assertIs(kwargs["session"], self.session)
-            self.assertEqual(kwargs["raw_string"], "noop")
-            self.assertIsInstance(kwargs["exc"], RuntimeError)
-            self.assertEqual(str(kwargs["exc"]), "merge boom")
-            self.assertIn("RuntimeError", kwargs["traceback_text"])
-            self.assertIn("merge boom", kwargs["traceback_text"])
-            self.assertIn("trace_id", kwargs)
 
         d.addCallback(_check)
         return d
@@ -2386,62 +2246,16 @@ class _CmdAcctMarker(_AccountCommand):
         pass
 
 
-class _CmdObjMarker(Command):
-    key = "objmarker"
-    locks = "cmd:all()"
-    retain_instance = True
-
-    def func(self):
-        pass
-
-
 class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
-    """Cmdhandler rewrites caller/account/character for AccountCommand only."""
+    """AccountCommand caller/account/character normalisation.
 
-    def _dispatch(self, cmd):
-        return cmdhandler.cmdhandler(
-            self.session, "", cmdobj=cmd, cmdobj_key=cmd.key, _testing=True
-        )
-
-    def test_account_command_with_puppet_normalises_caller_and_character(self):
-        # fixture session already puppets char1 (auto-puppet on login)
-        cmd = _CmdAcctMarker()
-        d = self._dispatch(cmd)
-
-        def _check(_):
-            self.assertIs(cmd.caller, self.account)
-            self.assertIs(cmd.account, self.account)
-            self.assertIs(cmd.character, self.char1)
-
-        d.addCallback(_check)
-        return d
-
-    def test_account_command_without_puppet_sets_character_none(self):
-        self.account.unpuppet_object(self.session)
-        cmd = _CmdAcctMarker()
-        d = self._dispatch(cmd)
-
-        def _check(_):
-            # account still resolvable via cmdset_providers["account"]
-            self.assertIs(cmd.caller, self.account)
-            self.assertIs(cmd.account, self.account)
-            self.assertIsNone(cmd.character)
-
-        d.addCallback(_check)
-        return d
-
-    def test_regular_command_caller_untouched_and_no_character_attr(self):
-        # fixture session already puppets char1 (auto-puppet on login)
-        cmd = _CmdObjMarker()
-        d = self._dispatch(cmd)
-
-        def _check(_):
-            # ServerSession with a puppet → caller is the puppet.
-            self.assertIs(cmd.caller, self.char1)
-            self.assertFalse(hasattr(cmd, "character"))
-
-        d.addCallback(_check)
-        return d
+    The runtime normalisation (session callertype → effective character/account)
+    is exercised against the action engine in
+    ``actions.tests.test_dispatch.TestFromCaller``; the legacy ``cmdobj=`` +
+    ``_testing=True`` injection that drove ``_normalize_account_command_caller``
+    only reaches ``_run_command``, which the action bridge bypasses. What stays
+    here is the static class-flag and the MuxCommand-style ``parse()`` contract.
+    """
 
     def test_account_command_caller_flag_default_false_on_base_command(self):
         self.assertFalse(Command.account_command_caller)
@@ -2983,112 +2797,100 @@ class TestFuzzyCommandSuggestions(TestCase):
         self.assertIn("look", out)
 
 
-# Module-level CmdNoMatch fixture: a CmdSet-class-attribute reference (used in
-# CharacterCmdSet.at_cmdset_creation below) must point at a stable Command
-# class; the recorder dict is module-level so per-test setUp can reset it.
-_POSE_RECORDER = {"raw": None, "called": False}
+# Engine-level pose / punctuation routing fixture. ``_POSE_RECORDER`` is module-
+# level so per-test setUp can reset it; the recorder state stands in for a game's
+# pose / NoMatchRules providers, letting the test assert how the real production
+# parser routes leading-punctuation input through the engine bridge.
+from evennia.actions.actor import Actor as _RPActor
+from evennia.actions.default.roleplay import Pose as _RPPose
+from evennia.actions.dispatch import try_action_dispatch as _rp_try_dispatch
+from evennia.actions.engine import engine as _rp_engine
+from evennia.actions.parser import NoMatchAction as _RPNoMatch
+from evennia.actions.parser import parser as _rp_parser
+from evennia.actions.result import PASS as _RP_PASS
+from evennia.actions.rule import rule as _rp_rule
+from evennia.actions.state import StateProvider as _RPStateProvider
+from evennia.actions.state import enter_state as _rp_enter_state
+
+_POSE_RECORDER = {"raw": None, "routed": None, "text": None}
 
 
-class _RecordingCmdNoMatch(Command):
-    """CMD_NOMATCH stand-in: records the raw input it was dispatched with.
+class _PunctRoutingRecorderState(_RPStateProvider):
+    """Stand-in for a game's pose / ``NoMatchRules`` providers: high-priority
+    ``before`` rules on :class:`Pose` and :class:`NoMatchAction` record the action
+    the parser produced and the verbatim text/raw it carried, without disturbing
+    dispatch."""
 
-    Mirrors the downstream pattern of a custom no-match handler that
-    interprets leading-punctuation input (``.pose smiles``) as emote/pose.
-    Recording lets the test assert the raw_string survives the parser
-    intact (no trie shortcut intercepted it, no abbrev rewrite mangled it).
-    """
+    @_rp_rule(_RPPose, phase="before", priority=9999)
+    def on_pose(self, action, actor):
+        _POSE_RECORDER.update(routed="pose", text=action.text, raw=action._raw_string)
+        return _RP_PASS
 
-    key = cmdhandler.CMD_NOMATCH
-    locks = "cmd:all()"
-
-    def func(self):
-        _POSE_RECORDER["raw"] = self.raw_string
-        _POSE_RECORDER["called"] = True
-
-
-class _PosePassthroughCmdSet(CmdSet):
-    key = "PosePassthroughCmdSet"
-    priority = 110
-
-    def at_cmdset_creation(self):
-        self.add(_RecordingCmdNoMatch())
+    @_rp_rule(_RPNoMatch, phase="before", priority=9999)
+    def on_nomatch(self, action, actor):
+        _POSE_RECORDER.update(routed="nomatch", text=action.raw_string, raw=action._raw_string)
+        return _RP_PASS
 
 
-class TestPosePassthroughIntegration(TwistedTestCase, BaseEvenniaTest):
-    """End-to-end: leading-punctuation input reaches CmdNoMatch verbatim.
+class _PunctRoutingChar:
+    """Minimal effective object for an engine actor: holds states, sends msgs, and
+    resolves every search to nothing (so an unknown leading-punct verb no-matches)."""
 
-    The trie parser must not intercept ``.pose smiles`` (or similar
-    leading-punctuation input) via any of its shortcuts (abbrev,
-    fastpath, fuzzy hint). When a custom ``CMD_NOMATCH`` is registered
-    on the cmdset, the cmdhandler must dispatch that command with
-    ``self.raw_string`` equal to the input, so downstream emote/pose
-    handlers see the original punctuation intact.
+    def __init__(self):
+        self.key = "Poser"
+        self.location = None
+        self.account = None
+        self.ndb = type("_ndb", (), {})()
+        self.messages = []
+
+    def msg(self, text=None, **kwargs):
+        self.messages.append(text)
+
+    def search(self, *args, **kwargs):
+        return None
+
+
+class TestPosePassthroughIntegration(TwistedTestCase):
+    """Leading-punctuation input routes through the engine verbatim.
+
+    The trie parser must not intercept ``.pose smiles`` / ``,grins`` via any of
+    its shortcuts (abbrev, fastpath, fuzzy hint). The engine registers ``.`` and
+    ``,`` as :class:`Pose` symbol verbs, so those route to the native Pose action
+    carrying the text intact (this is why a downstream game can drop its legacy
+    ``,``-overloaded ``CmdNoMatch``). An unregistered leading-punct verb (``;``)
+    reaches a game ``NoMatchRules`` provider with ``raw_string`` verbatim.
     """
 
     def setUp(self):
-        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
-        super().setUp()
-        _POSE_RECORDER["raw"] = None
-        _POSE_RECORDER["called"] = False
-        self.char1.cmdset.add(_PosePassthroughCmdSet)
+        _POSE_RECORDER.update(raw=None, routed=None, text=None)
+        self.char = _PunctRoutingChar()
+        self.actor = _RPActor(character=self.char)
+        _rp_enter_state(self.char, _PunctRoutingRecorderState())
 
-    def tearDown(self):
-        self.char1.cmdset.remove(_PosePassthroughCmdSet)
-        super().tearDown()
+    def _route(self, raw):
+        out = {}
+        d = _rp_try_dispatch(self.char, raw, actor=self.actor, engine=_rp_engine, parser=_rp_parser)
+        d.addCallbacks(lambda r: out.__setitem__("ok", r), lambda f: out.__setitem__("fail", f))
+        if "fail" in out:
+            out["fail"].raiseException()
+        return _POSE_RECORDER
 
-    def _assert_passthrough(self, raw):
-        d = cmdhandler.cmdhandler(self.session, raw)
+    def test_dot_prefix_routes_to_pose_verbatim(self):
+        rec = self._route(".pose smiles")
+        self.assertEqual(rec["routed"], "pose")
+        self.assertEqual(rec["text"], "pose smiles")
+        self.assertEqual(rec["raw"], ".pose smiles")
 
-        def _check(_):
-            self.assertTrue(
-                _POSE_RECORDER["called"],
-                "CmdNoMatch was not dispatched for input %r" % raw,
-            )
-            self.assertEqual(_POSE_RECORDER["raw"], raw)
+    def test_comma_prefix_routes_to_pose_verbatim(self):
+        rec = self._route(",grins")
+        self.assertEqual(rec["routed"], "pose")
+        self.assertEqual(rec["text"], ",grins")
+        self.assertEqual(rec["raw"], ",grins")
 
-        d.addCallback(_check)
-        return d
-
-    def test_pose_dot_prefix_reaches_nomatch_verbatim(self):
-        return self._assert_passthrough(".pose smiles")
-
-    def test_pose_semicolon_prefix_reaches_nomatch_verbatim(self):
-        # ``:`` is intentionally NOT covered: the engine's default
-        # CmdPose (evennia/commands/default/general.py) registers ``:``
-        # as an explicit alias with ``arg_regex = None``, so ``:waves``
-        # legitimately matches CmdPose. ``.``, ``;``, and ``,`` aren't
-        # engine-aliased to anything, so the passthrough invariant
-        # applies to all three.
-        return self._assert_passthrough(";nods")
-
-    def test_pose_comma_prefix_reaches_nomatch_verbatim(self):
-        # Underspire (and similar games) overload ``,`` as an alternate
-        # pose syntax in their custom CmdNoMatch. The engine has no
-        # ``,``-aliased command, so the input must reach CmdNoMatch
-        # verbatim for that downstream parsing to fire.
-        return self._assert_passthrough(",grins")
-
-    @patch("evennia.commands.cmdparser_trie.fuzzy_command_suggestions")
-    def test_fuzzy_suggestion_skipped_when_custom_nomatch_registered(self, fuzzy_mock):
-        """Custom CMD_NOMATCH must short-circuit the cmdhandler's fuzzy fallback.
-
-        The fuzzy hint ("Maybe you meant ...?") is the cmdhandler's
-        no-custom-CMD_NOMATCH fallback. When a custom CMD_NOMATCH is
-        registered (the common case for any non-trivial game), the
-        cmdhandler must hand the entire no-match branch to that override
-        and never invoke fuzzy_command_suggestions itself. Otherwise a
-        leading-punctuation pose like ``.poke`` could get a "Did you
-        mean: poke?" injected before the pose handler runs.
-        """
-        d = cmdhandler.cmdhandler(self.session, ".poke")
-
-        def _check(_):
-            self.assertTrue(_POSE_RECORDER["called"])
-            self.assertEqual(_POSE_RECORDER["raw"], ".poke")
-            fuzzy_mock.assert_not_called()
-
-        d.addCallback(_check)
-        return d
+    def test_unregistered_punct_reaches_nomatch_verbatim(self):
+        rec = self._route(";nods")
+        self.assertEqual(rec["routed"], "nomatch")
+        self.assertEqual(rec["raw"], ";nods")
 
 
 class TestCmdsetMergeWarmup(BaseEvenniaTest):

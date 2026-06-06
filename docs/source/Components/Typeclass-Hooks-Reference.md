@@ -204,7 +204,7 @@ the authoritative roster.
 | `at_pre_login` | `DefaultAccount` | self | Veto disconnects the session ('Login refused.'). Fires at_first_login on the first successful login. |
 | `at_pre_delete` | `LifecycleMixin` | self | Return False to abort delete(). |
 | `at_pre_puppet` | `LifecycleMixin` | target | Reattach path fires with reattach=True kwarg. |
-| `at_pre_unpuppet` | `LifecycleMixin` | target | Veto aborts detach. Puppet stays attached; session.puppet/puid stay set. |
+| `at_pre_unpuppet` | `LifecycleMixin` | target | Veto aborts detach. Body stays driven; the focus stack is unchanged. |
 | `at_pre_arrive` | `MovementMixin` | destination | Fires on the destination. Veto aborts after at_pre_move and at_pre_leave pass. |
 | `at_pre_leave` | `MovementMixin` | source | Fires on the source location. Veto aborts after at_pre_move passes. |
 | `at_pre_move` | `MovementMixin` | mover | Fires on the mover. Veto aborts: no mover-side or location-side post-hooks fire. |
@@ -243,6 +243,7 @@ the authoritative roster.
 | `get_self_pronoun` | `AppearanceMixin` | target | Pronoun from the looker's perspective. Default returns 'You' when looker is self. |
 | `return_appearance` | `AppearanceMixin` | target | Composite renderer. Joins get_display_* providers via appearance_template. |
 | `at_look` | `DefaultAccount` | self | Distinct from Object.at_look. Account.at_look is the OOC character picker. |
+| `at_sync_restore_puppet` | `DefaultAccount` | self | Reattach puppet after server reload when bid-based at_sync could not restore focus. |
 | `get_all_puppets` | `DefaultAccount` | self | Returns all currently puppeted characters on the account. |
 | `get_available_character_slots` | `DefaultAccount` | self | Returns remaining character slots. None = unlimited. |
 | `get_character_slots` | `DefaultAccount` | self | Returns the max number of characters this account may have. None = unlimited. |
@@ -313,7 +314,7 @@ the authoritative roster.
 | `at_post_access` | `LifecycleMixin` | target | Fires after a lock check resolves. Gets the result and the accessing object. |
 | `at_post_load` | `LifecycleMixin` | self | Stub override of TypedObject.at_post_load. Fires on every cache load; overrides must be idempotent. |
 | `at_post_puppet` | `LifecycleMixin` | target | Reattach path fires with reattach=True kwarg. |
-| `at_post_unpuppet` | `LifecycleMixin` | target | Fires after the session detaches. session.puppet/puid have been cleared. |
+| `at_post_unpuppet` | `LifecycleMixin` | target | Fires after the session detaches. The focus stack has collapsed off this body. |
 | `at_prototype_spawn` | `LifecycleMixin` | self | Spawner-only. Fires when an object is created via a prototype, after at_object_creation. |
 | `at_server_reload` | `LifecycleMixin` | self | Fires from EvenniaServerService.shutdown on reload-style stops. |
 | `at_server_shutdown` | `LifecycleMixin` | self | Fires from EvenniaServerService.shutdown on full-shutdown stops. |

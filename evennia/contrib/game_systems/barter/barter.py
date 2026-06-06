@@ -415,7 +415,7 @@ class CmdTradeBase(Command):
         if ":" in self.args:
             self.args, self.emote = [part.strip() for part in self.args.rsplit(":", 1)]
             self.str_caller = 'You say, "' + self.emote + '"\n  [%s]'
-            if self.caller.has_account:
+            if self.caller.is_puppeted:
                 self.str_other = '|c%s|n says, "' % self.caller.key + self.emote + '"\n  [%s]'
             else:
                 self.str_other = '%s says, "' % self.caller.key + self.emote + '"\n  [%s]'
@@ -817,7 +817,7 @@ class CmdTrade(Command):
         if ":" in self.args:
             self.args, emote = [part.strip() for part in self.args.rsplit(":", 1)]
             selfemote = 'You say, "%s"\n  ' % emote
-            if self.caller.has_account:
+            if self.caller.is_puppeted:
                 theiremote = '|c%s|n says, "%s"\n  ' % (self.caller.key, emote)
             else:
                 theiremote = '%s says, "%s"\n  ' % (self.caller.key, emote)

@@ -25,6 +25,78 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.73 — action engine is the sole player-input dispatch path
+
+Makes the CM1 action engine unconditional and starts the one-version deprecation
+clock on the legacy cmdset dispatch path. No schema changes.
+
+### Engine — `ACTION_ENGINE_ENABLED` gate removed
+
+The setting is deleted and every site that read it is now unconditional, so the
+engine bridge owns all player input and there is no flag to turn it off:
+
+- [`settings_default.py`](evennia/settings_default.py): `ACTION_ENGINE_ENABLED`
+  removed (its stale `HELP_INDEX_ACTIONS` comment fixed).
+- [`commands/default/help.py`](evennia/commands/default/help.py): `CmdHelp.collect_topics`
+  and `CmdHelp.func` use the action-registry/`render_help` path unconditionally;
+  ~220 lines of dead legacy-cmdset help body deleted.
+- Stale doc comments updated in [`help/catalog.py`](evennia/help/catalog.py),
+  [`help/__init__.py`](evennia/help/__init__.py), and
+  [`actions/tests/test_dispatch.py`](evennia/actions/tests/test_dispatch.py).
+
+### Engine — `get_input` / `ask_yes_no` are engine-native states
+
+[`utils/evmenu.py`](evennia/utils/evmenu.py)'s `get_input` and `ask_yes_no` no
+longer install `InputCmdSet` / `YesNoQuestionCmdSet` (which the engine bridge
+never routed to, leaving the prompts dead). They now install
+`GetInputState` / `YesNoState`, new `StateProvider`s in
+[`actions/menus.py`](evennia/actions/menus.py) modeled on `InputCaptureState`, so
+the engine routes the reply line. The four legacy cmdset classes
+(`CmdGetInput`, `InputCmdSet`, `CmdYesNoQuestion`, `YesNoQuestionCmdSet`) and the
+`_Prompt` holder are deleted. **Fixes** `@tasks`/`@delays` confirmation prompts
+and any `get_input`/`ask_yes_no`/`@interactive` flow under the engine.
+
+### Engine — `cmdobj=` injection bypasses the bridge
+
+[`commands/cmdhandler.py`](evennia/commands/cmdhandler.py): the action-engine
+bridge now runs only when `cmdobj is None`. A `cmdobj=`-injected Command (login
+`connect`, contrib menu commands) goes straight to the legacy command-run path so
+its `func` actually executes. **Fixes** issue 2627: the crash-in-`connect` error
+log masks the password again (`'connect johnny ***********'`), since the command
+once more reaches the error path that masks it.
+
+### Tests
+
+- [`commands/default/tests.py`](evennia/commands/default/tests.py): `TestCmdTasks`
+  (×15) green via the `YesNoState` migration.
+- [`commands/tests.py`](evennia/commands/tests.py): `TestIssue2627` green via the
+  `cmdobj=` bypass. `TestCmdsetMergeErrorSignal` **deleted** — `on_cmdset_merge_error`
+  has no producer on the engine input path (legacy-only signal). `TestPosePassthroughIntegration`
+  **rewritten** to the engine layer: it asserts the production parser routes `.`/`,`
+  to the native `Pose` action verbatim and an unregistered leading-punct (`;`) reaches
+  a `NoMatchRules` provider with `raw_string` intact (replacing the legacy cmdset
+  `CMD_NOMATCH` fixture).
+
+### Deprecation — legacy cmdset dispatch + cmdset input-capture (removed next release)
+
+The legacy cmdset merge/match block in `cmdhandler` is now reachable only by
+`cmdobj=` injection and will be **removed in the next release**. Subsystems that
+still capture input via cmdset `CMD_NOMATCH`/`CMD_NOINPUT` commands are bypassed
+by the engine bridge and must migrate to engine `StateProvider`s (model them on
+`GetInputState`/`YesNoState`): **EvMore** paging ([`utils/evmore.py`](evennia/utils/evmore.py)),
+**EvEditor** ([`utils/eveditor.py`](evennia/utils/eveditor.py)), and any custom
+`CMD_NOMATCH` overrides. Their existing tests pass only because they call the
+command `func` directly, not through `cmdhandler`, so green tests do not prove the
+routing survives the bridge.
+
+### Migration notes
+
+- None (no schema change). **Downstream:** remove any game-side compatibility
+  bridge that re-plugged unported verbs or input-capture cmdsets into the engine.
+  This is the last release before the legacy cmdset dispatch path is removed.
+
+---
+
 ## 6.0.0+underspire.72 — finish the has_account liveness audit; delete the I1 reconcile scaffolding
 
 Completes the `.71` API-honesty work and lands the deprecation-cycle cleanup that

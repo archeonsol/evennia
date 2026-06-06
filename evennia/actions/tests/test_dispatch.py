@@ -2,9 +2,8 @@
 
 These exercise ``try_action_dispatch`` directly (with an isolated parser/engine
 and fake actor), covering the routing decision, signal firing, disambiguation
-install + replay, active-state capture, and profiling middleware — without
-touching the real cmdhandler (the flag-gated shim there is a thin call into
-this module, inert while ``ACTION_ENGINE_ENABLED`` is False).
+install + replay, active-state capture, and profiling middleware, without
+touching the real cmdhandler (the shim there is a thin call into this module).
 """
 
 import unittest
@@ -25,8 +24,7 @@ from evennia.actions.parser import ActionParser, NoMatchAction
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import CLAIM
 from evennia.actions.rule import rule
-from evennia.commands.signals import on_command_post, on_command_pre
-
+from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
 
 ENGINE = RuleEngine()
 
@@ -34,9 +32,7 @@ ENGINE = RuleEngine()
 def _sync(d):
     """Extract an already-fired Deferred's result, re-raising on failure."""
     out = {}
-    d.addCallbacks(
-        lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f)
-    )
+    d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
     if "fail" in out:
         out["fail"].raiseException()
     if "result" not in out:
@@ -96,9 +92,7 @@ def _make_registry():
 
 def _dispatch(actor, raw, parser):
     return _sync(
-        try_action_dispatch(
-            actor.effective, raw, actor=actor, engine=ENGINE, parser=parser
-        )
+        try_action_dispatch(actor.effective, raw, actor=actor, engine=ENGINE, parser=parser)
     )
 
 
@@ -132,19 +126,24 @@ class TestSignals(unittest.TestCase):
         self.parser = ActionParser(registry=_make_registry())
         self.char = FakeChar()
         self.actor = Actor(character=self.char)
-        self.pre, self.post = [], []
+        self.pre, self.post, self.error = [], [], []
         on_command_pre.connect(self._on_pre, weak=False)
         on_command_post.connect(self._on_post, weak=False)
+        on_command_error.connect(self._on_error, weak=False)
 
     def tearDown(self):
         on_command_pre.disconnect(self._on_pre)
         on_command_post.disconnect(self._on_post)
+        on_command_error.disconnect(self._on_error)
 
     def _on_pre(self, sender, **kwargs):
         self.pre.append((sender, kwargs))
 
     def _on_post(self, sender, **kwargs):
         self.post.append((sender, kwargs))
+
+    def _on_error(self, sender, **kwargs):
+        self.error.append((sender, kwargs))
 
     def test_engine_dispatch_fires_pre_and_post(self):
         goblin = RuleTarget("goblin")
@@ -165,6 +164,54 @@ class TestSignals(unittest.TestCase):
         _dispatch(self.actor, "frobnicate", self.parser)
         self.assertEqual([s for s, _ in self.pre], [NoMatchAction])
         self.assertEqual([s for s, _ in self.post], [NoMatchAction])
+
+    def test_dispatch_failure_fires_error_signal_not_post(self):
+        # When the engine dispatch itself raises (an engine-level failure, not a
+        # buggy rule, which the engine records as FAIL), the wrapper fires
+        # on_command_pre then on_command_error (with the exception + traceback)
+        # and re-raises; NO post fires.
+        from unittest import mock
+
+        goblin = RuleTarget("goblin")
+        self.char._search_hook = lambda name: goblin
+        with mock.patch.object(ENGINE, "dispatch", side_effect=RuntimeError("kaboom")):
+            with self.assertRaises(RuntimeError):
+                _dispatch(self.actor, "kick goblin", self.parser)
+        self.assertEqual([s for s, _ in self.pre], [Kick])
+        self.assertEqual([s for s, _ in self.post], [])
+        self.assertEqual([s for s, _ in self.error], [Kick])
+        err_kwargs = self.error[0][1]
+        self.assertIsInstance(err_kwargs["exc"], RuntimeError)
+        self.assertEqual(str(err_kwargs["exc"]), "kaboom")
+        self.assertIn("RuntimeError", err_kwargs["traceback_text"])
+        self.assertIn("kaboom", err_kwargs["traceback_text"])
+
+    def test_signals_carry_session_and_shared_trace_id(self):
+        # The session passed to dispatch surfaces verbatim in signal kwargs, and
+        # pre/post share the single trace_id read at the top of the dispatch.
+        from evennia.utils.command_trace import begin_command_trace, end_command_trace
+
+        goblin = RuleTarget("goblin")
+        self.char._search_hook = lambda name: goblin
+        sentinel_session = object()
+        tid = begin_command_trace(raw_string="kick goblin", cmd_key="kick")
+        try:
+            _sync(
+                try_action_dispatch(
+                    self.actor.effective,
+                    "kick goblin",
+                    actor=self.actor,
+                    engine=ENGINE,
+                    parser=self.parser,
+                    session=sentinel_session,
+                )
+            )
+        finally:
+            end_command_trace()
+        self.assertIs(self.pre[0][1]["session"], sentinel_session)
+        self.assertIs(self.post[0][1]["session"], sentinel_session)
+        self.assertEqual(self.pre[0][1]["trace_id"], tid)
+        self.assertEqual(self.post[0][1]["trace_id"], tid)
 
 
 # --- disambiguation ---------------------------------------------------------
@@ -195,9 +242,7 @@ class TestDisambiguation(unittest.TestCase):
         # The replayed search must hand back the chosen candidate.
         self.char._search_hook = lambda name: self.actor._take_search_override(name)
         self.actor.enter_state(
-            DisambiguationState(
-                [c1, c2], pending_raw="kick goblin", ambiguous_name="goblin"
-            )
+            DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
         )
         handled = _dispatch(self.actor, "2", self.parser)
         self.assertTrue(handled)
@@ -208,9 +253,7 @@ class TestDisambiguation(unittest.TestCase):
     def test_invalid_choice_cancels(self):
         c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
         self.actor.enter_state(
-            DisambiguationState(
-                [c1, c2], pending_raw="kick goblin", ambiguous_name="goblin"
-            )
+            DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
         )
         handled = _dispatch(self.actor, "99", self.parser)
         self.assertTrue(handled)

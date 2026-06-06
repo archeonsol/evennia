@@ -567,6 +567,31 @@ class TestAccountDisconnectRestore(BaseEvenniaTest):
         self.char1.delete()
         self.assertFalse(ControlBinding.objects.filter(pk=binding_pk).exists())
 
+    def test_delete_identity_under_live_pushed_stack(self):
+        # The pushed-stack variant of the .70 crash: a live session is jacked
+        # into char2 (avatar) on top of char1 (the meat identity) WITHOUT first
+        # collapsing the stack — focus stack [char1, char2], session driving
+        # char2. Deleting the identity char1 must still succeed and tear down
+        # the binding without a save-on-deleted-row error, even though the live
+        # session never sat on char1.
+        from evennia.accounts.models import ControlBinding
+
+        self.account.puppet_object(self.session, self.char2, push=True)
+        binding = self.session.binding
+        binding_pk = binding.pk
+        # non-floor stack: the session is driving the avatar above the identity
+        self.assertEqual(binding.stack_objects, [self.char1, self.char2])
+        self.assertEqual(binding.db_identity, self.char1)
+        self.assertNotIn(self.session, list(self.char1.sessions.all()))
+        self.assertIn(self.session, list(self.char2.sessions.all()))
+
+        # delete the meat identity out from under the still-live pushed avatar
+        self.assertTrue(self.char1.delete())
+
+        # binding (anchored on the deleted identity) is gone, char1 disowned
+        self.assertFalse(ControlBinding.objects.filter(pk=binding_pk).exists())
+        self.assertNotIn(self.char1, self.account.characters.all())
+
 
 class TestControllerVsOwnership(BaseEvenniaTest):
     """The three facts stay in their own homes: ownership on

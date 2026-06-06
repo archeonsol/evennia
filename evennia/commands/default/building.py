@@ -875,7 +875,7 @@ class CmdDestroy(COMMAND_DEFAULT_CLASS):
                     return f"\nYou don't have permission to delete {objname}."
                 if obj.account and "override" not in self.switches:
                     return (
-                        f"\nObject {objname} is controlled by an active account. Use /override to"
+                        f"\nObject {objname} is owned by an account. Use /override to"
                         " delete anyway."
                     )
                 if obj.dbid == int(settings.DEFAULT_HOME.lstrip("#")):

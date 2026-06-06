@@ -32,6 +32,8 @@ __all__ = [
     "MenuInputAction",
     "MenuPrompt",
     "InputCaptureState",
+    "GetInputState",
+    "YesNoState",
     "EvMenuState",
     "DisambiguationState",
     "format_menu_prompt",
@@ -145,6 +147,129 @@ class InputCaptureState(StateProvider):
         d = self.deferred
         if d is not None and not d.called:
             d.callback(action.raw)
+        return CLAIM
+
+
+# --------------------------------------------------------------------------- #
+# GetInputState / YesNoState (engine-native evmenu.get_input / ask_yes_no)
+# --------------------------------------------------------------------------- #
+
+
+class GetInputState(StateProvider):
+    """Engine-native replacement for :func:`evennia.utils.evmenu.get_input`.
+
+    Captures the next input line and runs
+    ``callback(caller, prompt, result, *args, **kwargs)``. A falsy return ends the
+    prompt (the state exits); a truthy return keeps the state active so the
+    callback can collect another line (the callback re-prompts as needed). Backs
+    the same pattern the legacy ``InputCmdSet`` did, but as a rule provider so the
+    action engine routes the captured line.
+    """
+
+    def __init__(self, caller, prompt, callback, session=None, args=(), kwargs=None):
+        self.caller = caller
+        self.prompt = prompt
+        self.callback = callback
+        self.session = session
+        self.args = tuple(args)
+        self.kwargs = dict(kwargs or {})
+
+    @rule(Action, phase="before", priority=9999)
+    def capture_input(self, action, actor):
+        if isinstance(action, MenuInputAction):
+            return PASS
+        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
+
+    @rule(MenuInputAction, phase="carry_out", priority=9999)
+    def deliver_input(self, action, actor):
+        if action.menu is not self:
+            return PASS
+        result = (action.raw or "").rstrip()
+        try:
+            keep = self.callback(self.caller, self.prompt, result, *self.args, **self.kwargs)
+        except Exception:
+            from evennia.utils import logger
+
+            self.caller.msg("|rError in get_input. Choice not confirmed (report to admin)|n")
+            logger.log_trace("Error in get_input")
+            actor.exit_state(GetInputState)
+            return CLAIM
+        if not keep:
+            actor.exit_state(GetInputState)
+        return CLAIM
+
+
+class YesNoState(StateProvider):
+    """Engine-native replacement for :func:`evennia.utils.evmenu.ask_yes_no`.
+
+    Captures the next input line and resolves it as a yes/no/abort choice,
+    invoking ``yes_callable`` / ``no_callable`` with ``(caller, *args, **kwargs)``
+    (``kwargs["caller_session"]`` is set to the answering session). An empty line
+    uses ``default``; an unrecognized line re-shows the prompt and keeps the state
+    active. Backs the same pattern the legacy ``YesNoQuestionCmdSet`` did.
+    """
+
+    def __init__(
+        self,
+        caller,
+        prompt,
+        yes_callable,
+        no_callable,
+        default=None,
+        allow_abort=False,
+        session=None,
+        args=(),
+        kwargs=None,
+    ):
+        self.caller = caller
+        self.prompt = prompt
+        self.yes_callable = yes_callable
+        self.no_callable = no_callable
+        self.default = default
+        self.allow_abort = allow_abort
+        self.session = session
+        self.args = tuple(args)
+        self.kwargs = dict(kwargs or {})
+
+    @rule(Action, phase="before", priority=9999)
+    def capture_input(self, action, actor):
+        if isinstance(action, MenuInputAction):
+            return PASS
+        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
+
+    @rule(MenuInputAction, phase="carry_out", priority=9999)
+    def deliver_input(self, action, actor):
+        if action.menu is not self:
+            return PASS
+        caller = self.caller
+        session = self.session or getattr(actor, "session", None)
+        raw = (action.raw or "").strip()
+        inp = raw.lower() if raw else (self.default or "")
+        if isinstance(inp, str):
+            inp = inp.lower()
+        try:
+            if inp in ("a", "abort") and self.allow_abort:
+                caller.msg("Aborted.", session=session)
+                actor.exit_state(YesNoState)
+                return CLAIM
+            kwargs = dict(self.kwargs)
+            kwargs["caller_session"] = session
+            if inp in ("yes", "y"):
+                self.yes_callable(caller, *self.args, **kwargs)
+            elif inp in ("no", "n"):
+                self.no_callable(caller, *self.args, **kwargs)
+            else:
+                # Unrecognized input: re-show the prompt and keep waiting.
+                caller.msg(self.prompt, session=session)
+                return CLAIM
+            actor.exit_state(YesNoState)
+        except Exception:
+            from evennia.utils import logger
+
+            caller.msg("|rError in ask_yes_no. Choice not confirmed (report to admin)|n")
+            logger.log_trace("Error in ask_yes_no")
+            actor.exit_state(YesNoState)
+            raise
         return CLAIM
 
 
@@ -286,10 +411,7 @@ class DisambiguationState(StateProvider):
         ``looker`` (the choosing character) makes the candidate labels
         viewer-aware (sdesc/recog), so a character's real key is never shown.
         """
-        lines = [
-            f"  {i + 1}: {_candidate_label(c, looker)}"
-            for i, c in enumerate(self.candidates)
-        ]
+        lines = [f"  {i + 1}: {_candidate_label(c, looker)}" for i, c in enumerate(self.candidates)]
         return "Which one did you mean?\n" + "\n".join(lines)
 
     @rule(Action, phase="before", priority=9999)

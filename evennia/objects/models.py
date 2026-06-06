@@ -183,7 +183,8 @@ class ObjectDB(TypedObject):
 
     The ObjectDB adds the following properties:
 
-      - account - optional connected account (always together with sessid)
+      - account - the owning account, if any (durable; online or offline). For
+        the account currently driving this body use the puppeteer property.
       - sessid - optional connection session id (always together with account)
       - location - in-game location of object
       - home - safety location for object (handler)
@@ -192,7 +193,10 @@ class ObjectDB(TypedObject):
       - aliases - aliases for this object (property)
       - nicks - nicknames for *other* things in Evennia (handler)
       - sessions - sessions connected to this object (see also account)
-      - has_account - bool if an active account is currently connected
+      - has_account - bool, durable ownership: the object belongs to an account
+        (online or offline). For "is someone playing this body right now" use
+        is_puppeted; for "the owning account is connected somewhere" use
+        is_connected.
       - contents - other objects having this object as location
       - exits - exits from this object
 

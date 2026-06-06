@@ -2,8 +2,8 @@
 Access-aware help catalog for the action engine (CM1 Phase 8).
 
 Stock Evennia command help filters topics through merged cmdsets and lock
-checks. When ``ACTION_ENGINE_ENABLED`` is on, cmdsets are empty and verbs live
-in the action registry instead — this module is the replacement: it builds
+checks. In this fork cmdsets are empty and verbs live in the action registry
+instead; this module is the replacement: it builds
 Command-shaped help entries from registered actions and filters them with the
 same ``carry_out`` ``requires=`` predicates the dispatch engine uses (including
 quell semantics via :class:`~evennia.actions.predicate.HasCapability`).
@@ -283,9 +283,7 @@ class ActionHelpTopic:
     def access(self, caller, access_type="read", default=True, session=None):
         del access_type, default
         actor = actor_for_help(caller, session)
-        return action_help_accessible(
-            self.action_cls, actor, staff_reference=True
-        )
+        return action_help_accessible(self.action_cls, actor, staff_reference=True)
 
     def get_help(self, caller, cmdset=None):
         del cmdset
@@ -341,9 +339,7 @@ def collect_action_help_topics(
         if key in seen:
             continue
         seen.add(key)
-        if action_help_accessible(
-            topic.action_cls, actor, staff_reference=acl_as_staff_ref
-        ):
+        if action_help_accessible(topic.action_cls, actor, staff_reference=acl_as_staff_ref):
             topics[key] = topic
     return topics
 
@@ -364,9 +360,7 @@ def lookup_action_help_topic(key: str, actor, *, include_denied=False, staff_ref
 
     for topic_key, topic in _iter_action_verbs(action_registry):
         if topic_key == key or key in [a.lower() for a in topic.aliases]:
-            if action_help_accessible(
-                topic.action_cls, actor, staff_reference=True
-            ):
+            if action_help_accessible(topic.action_cls, actor, staff_reference=True):
                 return topic, False
             if include_denied:
                 return topic, True

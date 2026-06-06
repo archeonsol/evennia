@@ -247,7 +247,8 @@ class DefaultObject(
                        Sessions directly.
      location (Object) - current location. Is None if this is a room
      home (Object) - safety start-location
-     has_account (bool, read-only)- will only return *connected* accounts
+     is_puppeted (bool, read-only) - True if a live session is currently driving
+                            this body (someone is playing it right now)
      contents (list, read only) - returns all objects inside this object
      exits (list of Objects, read-only) - returns all exits from this
                        object, if any
@@ -255,7 +256,8 @@ class DefaultObject(
      is_superuser (bool, read-only) - True/False if this user is a superuser
      is_connected (bool, read-only) - True if this object is associated with
                             an Account with any connected sessions.
-     has_account (bool, read-only) - True is this object has an associated account.
+     has_account (bool, read-only) - True if this object has an associated account
+                        (durable ownership, online or offline).
      is_superuser (bool, read-only): True if this object has an account and that
                         account is a superuser.
      plural_category (string) - Alias category for the plural strings of this object

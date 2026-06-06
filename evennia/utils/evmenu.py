@@ -273,6 +273,7 @@ from inspect import getfullargspec, isfunction
 from math import ceil
 
 from django.conf import settings
+
 # i18n
 from django.utils.translation import gettext as _
 
@@ -282,8 +283,17 @@ from evennia.commands import cmdhandler
 from evennia.utils import logger
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.evtable import EvColumn, EvTable
-from evennia.utils.utils import (crop, dedent, inherits_from, is_iter, m_len,
-                                 make_iter, mod_import, pad, to_str)
+from evennia.utils.utils import (
+    crop,
+    dedent,
+    inherits_from,
+    is_iter,
+    m_len,
+    make_iter,
+    mod_import,
+    pad,
+    to_str,
+)
 
 # we use cmdhandler instead of evennia.syscmdkeys to
 # avoid some cases of loading before evennia init'd
@@ -1494,67 +1504,6 @@ def list_node(option_generator, select=None, pagesize=10):
 # -------------------------------------------------------------------------------------------------
 
 
-class CmdGetInput(Command):
-    """
-    Enter your data and press return.
-    """
-
-    key = _CMD_NOMATCH
-    aliases = _CMD_NOINPUT
-
-    def func(self):
-        """This is called when user enters anything."""
-        caller = self.caller
-        try:
-            getinput = caller.ndb._getinput
-            if not getinput and inherits_from(caller, evennia.DefaultObject):
-                getinput = caller.account.ndb._getinput
-                if getinput:
-                    caller = caller.account
-            callback = getinput._callback
-
-            caller.ndb._getinput._session = self.session
-            prompt = caller.ndb._getinput._prompt
-            args = caller.ndb._getinput._args
-            kwargs = caller.ndb._getinput._kwargs
-            result = self.raw_string.rstrip()  # we strip the ending line break caused by sending
-
-            ok = not callback(caller, prompt, result, *args, **kwargs)
-            if ok:
-                # only clear the state if the callback does not return
-                # anything
-                del caller.ndb._getinput
-                caller.cmdset.remove(InputCmdSet)
-        except Exception:
-            # make sure to clean up cmdset if something goes wrong
-            caller.msg("|rError in get_input. Choice not confirmed (report to admin)|n")
-            logger.log_trace("Error in get_input")
-            caller.cmdset.remove(InputCmdSet)
-
-
-class InputCmdSet(CmdSet):
-    """
-    This stores the input command
-    """
-
-    key = "input_cmdset"
-    priority = 1
-    mergetype = "Replace"
-    no_objs = True
-    no_exits = True
-    no_channels = False
-
-    def at_cmdset_creation(self):
-        """called once at creation"""
-        self.add(CmdGetInput())
-
-
-class _Prompt:
-    """Dummy holder"""
-
-    pass
-
-
 def get_input(caller, prompt, callback, session=None, *args, **kwargs):
     """
     This is a helper function for easily request input from the caller.
@@ -1606,108 +1555,16 @@ def get_input(caller, prompt, callback, session=None, *args, **kwargs):
     """
     if not callable(callback):
         raise RuntimeError("get_input: input callback is not callable.")
-    caller.ndb._getinput = _Prompt()
-    caller.ndb._getinput._callback = callback
-    caller.ndb._getinput._prompt = prompt
-    caller.ndb._getinput._session = session
-    caller.ndb._getinput._args = args
-    caller.ndb._getinput._kwargs = kwargs
-    caller.cmdset.add(InputCmdSet, persistent=False)
+    from evennia.actions.menus import GetInputState
+    from evennia.actions.state import enter_state, exit_state
+
+    # Avoid stacking; the legacy InputCmdSet used Replace for the same reason.
+    exit_state(caller, GetInputState)
+    enter_state(
+        caller,
+        GetInputState(caller, prompt, callback, session=session, args=args, kwargs=kwargs),
+    )
     caller.msg(prompt, session=session)
-
-
-class CmdYesNoQuestion(Command):
-    """
-    Handle a prompt for yes or no. Press [return] for the default choice.
-
-    """
-
-    key = _CMD_NOINPUT
-    aliases = [_CMD_NOMATCH]
-    arg_regex = r"^$"
-
-    def _clean(self, caller):
-        if hasattr(caller.ndb, "_yes_no_question"):
-            del caller.ndb._yes_no_question
-        while caller.cmdset.has(YesNoQuestionCmdSet):
-            caller.cmdset.remove(YesNoQuestionCmdSet)
-        if inherits_from(caller, evennia.DefaultObject) and caller.account:
-            if hasattr(caller.account.ndb, "_yes_no_question"):
-                del caller.account.ndb._yes_no_question
-            while caller.account.cmdset.has(YesNoQuestionCmdSet):
-                caller.account.cmdset.remove(YesNoQuestionCmdSet)
-
-    def func(self):
-        """This is called when user enters anything."""
-        caller = self.caller
-        try:
-            yes_no_question = caller.ndb._yes_no_question
-            if not yes_no_question and inherits_from(caller, evennia.DefaultObject):
-                yes_no_question = caller.account.ndb._yes_no_question
-                caller = caller.account
-
-            if not yes_no_question:
-                self._clean(caller)
-                return
-
-            inp = self.cmdname
-
-            if inp in (_CMD_NOINPUT, _CMD_NOMATCH):
-                raw = self.raw_cmdname.strip()
-                if not raw:
-                    # use default
-                    inp = yes_no_question.default
-                else:
-                    inp = raw
-
-            if isinstance(inp, str):
-                inp = inp.lower()
-
-            if inp in ("a", "abort") and yes_no_question.allow_abort:
-                caller.msg(_("Aborted."))
-                self._clean(caller)
-                return
-
-            caller.ndb._yes_no_question.session = self.session
-
-            args = yes_no_question.args
-            kwargs = yes_no_question.kwargs
-            kwargs["caller_session"] = self.session
-
-            if inp in ("yes", "y"):
-                yes_no_question.yes_callable(caller, *args, **kwargs)
-            elif inp in ("no", "n"):
-                yes_no_question.no_callable(caller, *args, **kwargs)
-            else:
-                # invalid input. Resend prompt without cleaning
-                caller.msg(yes_no_question.prompt, session=self.session)
-                return
-
-            # cleanup
-            self._clean(caller)
-        except Exception:
-            # make sure to clean up cmdset if something goes wrong
-            caller.msg(_("|rError in ask_yes_no. Choice not confirmed (report to admin)|n"))
-            logger.log_trace("Error in ask_yes_no")
-            self._clean(caller)
-            raise
-
-
-class YesNoQuestionCmdSet(CmdSet):
-    """
-    This stores the input command
-    """
-
-    key = "yes_no_question_cmdset"
-    priority = 1
-    mergetype = "Replace"
-    no_objs = True
-    no_exits = True
-    no_channels = False
-
-    def at_cmdset_creation(self):
-        """called once at creation"""
-        self.add(CmdYesNoQuestion())
 
 
 def ask_yes_no(
@@ -1799,25 +1656,25 @@ def ask_yes_no(
     options += abort_txt
     prompt = prompt.format(options=options)
 
-    caller.ndb._yes_no_question = _Prompt()
-    caller.ndb._yes_no_question.prompt = prompt
-    caller.ndb._yes_no_question.session = session
-    caller.ndb._yes_no_question.prompt = prompt
-    caller.ndb._yes_no_question.default = default
-    caller.ndb._yes_no_question.allow_abort = allow_abort
-    caller.ndb._yes_no_question.yes_callable = yes_action
-    caller.ndb._yes_no_question.no_callable = no_action
-    caller.ndb._yes_no_question.args = args
-    caller.ndb._yes_no_question.kwargs = kwargs
+    from evennia.actions.menus import YesNoState
+    from evennia.actions.state import enter_state, exit_state
 
-    # Avoid duplicate yes/no cmdsets across account/object command merges.
-    while caller.cmdset.has(YesNoQuestionCmdSet):
-        caller.cmdset.remove(YesNoQuestionCmdSet)
-    if inherits_from(caller, evennia.DefaultObject) and caller.account:
-        while caller.account.cmdset.has(YesNoQuestionCmdSet):
-            caller.account.cmdset.remove(YesNoQuestionCmdSet)
-
-    caller.cmdset.add(YesNoQuestionCmdSet, persistent=False)
+    # Avoid stacking; the legacy YesNoQuestionCmdSet used Replace for the same reason.
+    exit_state(caller, YesNoState)
+    enter_state(
+        caller,
+        YesNoState(
+            caller,
+            prompt,
+            yes_action,
+            no_action,
+            default=default,
+            allow_abort=allow_abort,
+            session=session,
+            args=args,
+            kwargs=kwargs,
+        ),
+    )
     caller.msg(prompt, session=session)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from evennia.help.utils import parse_entry_for_subcategories
 from evennia.utils.utils import inherits_from
 
 __all__ = ["render_help"]
@@ -73,8 +74,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
             caller.msg(text)
         else:
             caller.msg(
-                "No help topics are available. "
-                "Try |whelp <topic>|n or |whelpsearch <query>|n."
+                "No help topics are available. " "Try |whelp <topic>|n or |whelpsearch <query>|n."
             )
 
     helper.msg_help = msg_help
@@ -92,9 +92,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
                 )
             )
             return
-        cmd_help_topics = collect_action_help_topics(
-            actor, mode="list", staff_reference=True
-        )
+        cmd_help_topics = collect_action_help_topics(actor, mode="list", staff_reference=True)
         cmd_help_by_category = defaultdict(list)
         for key, cmd in cmd_help_topics.items():
             cmd_help_by_category[cmd.help_category].append(key)
@@ -120,9 +118,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
 
     cmd_help_topics = {}
     if actor_is_staff_for_help(actor):
-        cmd_help_topics = collect_action_help_topics(
-            actor, mode="query", staff_reference=True
-        )
+        cmd_help_topics = collect_action_help_topics(actor, mode="query", staff_reference=True)
         denied_topic, was_denied = lookup_action_help_topic(
             query, actor, include_denied=True, staff_reference=True
         )
@@ -137,9 +133,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
             msg_help(
                 helper.format_help_entry(
                     topic=denied_topic.key,
-                    help_text=(
-                        f"|rYou do not have access to this command.|n\n|x{req or ''}|n"
-                    ),
+                    help_text=(f"|rYou do not have access to this command.|n\n|x{req or ''}|n"),
                     aliases=list(denied_topic.aliases),
                     suggested=[],
                     click_topics=helper.clickable_topics,
@@ -186,9 +180,8 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
         msg_help(output)
         return
 
-    if inherits_from(match, "evennia.commands.command.Command") or is_action_help_topic(
-        match
-    ):
+    topic = match.key
+    if inherits_from(match, "evennia.commands.command.Command") or is_action_help_topic(match):
         help_text = match.get_help(caller, helper.cmdset)
         aliases = match.aliases
         suggested = suggestions[1:] if suggestions else []
@@ -197,10 +190,50 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
         aliases = match.aliases if isinstance(match.aliases, list) else match.aliases.all()
         suggested = suggestions[1:] if suggestions else []
 
+    # Drill into any requested subtopic path (``help <topic>/<subtopic>/...``).
+    # Subtopic text lives in the entry's ``# SUBTOPICS`` markup; the parser maps
+    # it to a nested dict keyed by subtopic title, with the body under ``None``.
+    subtopic_map = parse_entry_for_subcategories(help_text)
+    help_text = subtopic_map[None]
+    subtopic_index = [sub for sub in subtopic_map if sub is not None]
+    sep = helper.subtopic_separator_char
+
+    for subtopic_query in subtopics:
+        if subtopic_query not in subtopic_map:
+            # exact match failed - try a startswith- then an 'in'-match
+            match_key = next(
+                (key for key in subtopic_map if key and key.startswith(subtopic_query)),
+                None,
+            )
+            if match_key is None:
+                match_key = next(
+                    (key for key in subtopic_map if key and subtopic_query in key), None
+                )
+            if match_key is None:
+                checked = f"{topic}{sep}{subtopic_query}"
+                msg_help(
+                    helper.format_help_entry(
+                        topic=topic,
+                        help_text=f"No help entry found for '{checked}'",
+                        subtopics=subtopic_index,
+                        click_topics=helper.clickable_topics,
+                    )
+                )
+                return
+            subtopic_query = match_key
+        subtopic_map = subtopic_map.pop(subtopic_query)
+        subtopic_index = [sub for sub in subtopic_map if sub is not None]
+        topic = f"{topic}{sep}{subtopic_query}"
+    if subtopics:
+        # below the top level we render the subtopic body, not the entry aliases
+        help_text = subtopic_map[None]
+        aliases = None
+
     output = helper.format_help_entry(
-        topic=match.key,
+        topic=topic,
         help_text=help_text,
         aliases=aliases,
+        subtopics=subtopic_index,
         suggested=suggested,
         click_topics=helper.clickable_topics,
     )

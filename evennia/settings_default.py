@@ -471,14 +471,6 @@ SEARCH_AT_RESULT = "evennia.utils.utils.at_search_result"
 # cmdset merging and parsing. Costs one regex sweep per dispatched command;
 # set False to skip if you need raw byte-for-byte input through to commands.
 INPUT_FTFY_NORMALIZE = True
-# When True, route each command through the action engine bridge (CM1) at the
-# top of cmdhandler, before the legacy cmdset path. The bridge dispatches typed
-# actions whose verbs are registered and falls through (returns False) for every
-# unported verb, so the legacy path stays byte-for-byte identical until verbs
-# are ported. Default False — the bridge is inert in production until a deploy
-# opts in. See evennia.actions.dispatch.try_action_dispatch.
-# Deprecated (CM1 Phase 8): cmdhandler always uses try_action_dispatch first.
-ACTION_ENGINE_ENABLED = True
 # The module holding text strings for the connection screen.
 # This module should contain one or more variables
 # with strings defining the look of the screen.
@@ -856,7 +848,7 @@ FILE_HELP_ENTRY_MODULES = ["world.help_entries"]
 # if topics listed in help should be clickable
 # clickable links only work on clients that support MXP.
 HELP_CLICKABLE_TOPICS = True
-# When ACTION_ENGINE_ENABLED, action registry topics in help (CM1 Phase 8).
+# When True, bare help mixes action-registry topics into the index (CM1 Phase 8).
 # False = bare help lists file/DB topics only (player-facing docs written by staff).
 HELP_INDEX_ACTIONS = False
 # Staff (effective Builder+) also see an ACL-filtered command index on bare help.

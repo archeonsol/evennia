@@ -276,8 +276,8 @@ class TutorialRoom(DefaultRoom):
             # currently running batchcommand
             return
 
-        if new_arrival.has_account and not new_arrival.ndb.batch_batchmode:
-            # this is a character
+        if new_arrival.is_puppeted and not new_arrival.ndb.batch_batchmode:
+            # this is a live player character
             for obj in self.contents_get(exclude=new_arrival):
                 if hasattr(obj, "at_new_arrival"):
                     obj.at_new_arrival(new_arrival)
@@ -468,7 +468,7 @@ class IntroRoom(TutorialRoom):
         # setup character for the tutorial
         health = self.db.char_health or 20
 
-        if character.has_account:
+        if character.is_puppeted:
             character.db.health = health
             character.db.health_max = health
 
@@ -654,7 +654,7 @@ class CmdLookBridge(Command):
             random.choice(BRIDGE_MOODS),
         )
 
-        chars = [obj for obj in self.obj.contents_get(exclude=caller) if obj.has_account]
+        chars = [obj for obj in self.obj.contents_get(exclude=caller) if obj.is_puppeted]
         if chars:
             # we create the You see: message manually here
             message += "\n You see: %s" % ", ".join("|c%s|n" % char.key for char in chars)
@@ -788,8 +788,8 @@ class BridgeRoom(WeatherRoom):
             # currently running batchcommand
             return
 
-        if character.has_account:
-            # we only run this if the entered object is indeed a player object.
+        if character.is_puppeted:
+            # we only run this if the entered object is indeed a live player object.
             # check so our east/west exits are correctly defined.
             wexit = search_object(self.db.west_exit)
             eexit = search_object(self.db.east_exit)
@@ -813,7 +813,7 @@ class BridgeRoom(WeatherRoom):
         """
         This is triggered when the player is about to leave the bridge room.
         """
-        if character.has_account:
+        if character.is_puppeted:
             # clean up the position attribute
             del character.db.tutorial_bridge_position
         return True
@@ -1038,7 +1038,7 @@ class DarkRoom(TutorialRoom):
             self.locks.add("view:all()")
             self.cmdset.remove(DarkCmdSet)
             self.db.is_lit = True
-            for char in (obj for obj in self.contents if obj.has_account):
+            for char in (obj for obj in self.contents if obj.is_puppeted):
                 # this won't do anything if it is already removed
                 char.msg("The room is lit up.")
         else:
@@ -1046,7 +1046,7 @@ class DarkRoom(TutorialRoom):
             self.db.is_lit = False
             self.locks.add("view:false()")
             self.cmdset.add(DarkCmdSet, persistent=True)
-            for char in (obj for obj in self.contents if obj.has_account):
+            for char in (obj for obj in self.contents if obj.is_puppeted):
                 if char.is_superuser:
                     char.msg("You are Superuser, so you are not affected by the dark state.")
                 else:
@@ -1061,7 +1061,7 @@ class DarkRoom(TutorialRoom):
             # currently running batchcommand
             self.check_light_state()  # this should remove the DarkCmdSet
 
-        if obj.has_account:
+        if obj.is_puppeted:
             # a puppeted object, that is, a Character
             self._heal(obj)
             # in case the new guy carries light with them
@@ -1128,8 +1128,8 @@ class TeleportRoom(TutorialRoom):
         This hook is called by the engine whenever the player is moved into
         this room.
         """
-        if not character.has_account or character.ndb.batch_batchmode:
-            # only act on player characters or when not building.
+        if not character.is_puppeted or character.ndb.batch_batchmode:
+            # only act on live player characters or when not building.
             return
 
         # determine if the puzzle is a success or not
@@ -1196,7 +1196,7 @@ class OutroRoom(TutorialRoom):
             # currently running batchcommand
             return
 
-        if character.has_account:
+        if character.is_puppeted:
             del character.db.health_max
             del character.db.health
             del character.db.last_climbed

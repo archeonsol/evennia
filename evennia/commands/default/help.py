@@ -8,21 +8,24 @@ outside the game in modules given by ``settings.FILE_HELP_ENTRY_MODULES``.
 
 """
 
-from collections import defaultdict
 from dataclasses import dataclass
 
 from django.conf import settings
 
 from evennia.help.filehelp import FILE_HELP_ENTRIES
 from evennia.help.models import HelpEntry
-from evennia.help.utils import (help_search_with_index,
-                                parse_entry_for_subcategories)
+from evennia.help.utils import help_search_with_index
 from evennia.locks.lockhandler import LockException
 from evennia.utils import create, evmore
 from evennia.utils.ansi import ANSIString
 from evennia.utils.eveditor import EvEditor
-from evennia.utils.utils import (class_from_module, dedent, format_grid,
-                                 inherits_from, pad)
+from evennia.utils.utils import (
+    class_from_module,
+    dedent,
+    format_grid,
+    inherits_from,
+    pad,
+)
 
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 HELP_MORE_ENABLED = settings.HELP_MORE_ENABLED
@@ -420,35 +423,19 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                 `({key: cmd,...}, {key: dbentry,...}, {key: fileentry,...}`
 
         """
-        engine_help = getattr(settings, "ACTION_ENGINE_ENABLED", False)
-        if engine_help:
-            from evennia.help.catalog import (
-                actor_for_help,
-                collect_action_help_topics,
-                should_include_action_topics_in_index,
-            )
+        from evennia.help.catalog import (
+            actor_for_help,
+            collect_action_help_topics,
+            should_include_action_topics_in_index,
+        )
 
-            actor = actor_for_help(caller, self.session)
-            cmd_help_topics = {}
-            if should_include_action_topics_in_index(actor):
-                cmd_help_topics = collect_action_help_topics(
-                    actor, mode=mode, staff_reference=True
-                )
-        else:
-            cmdset = self.cmdset
-            cmdset.make_unique(caller)
-            cmd_help_topics = [
-                cmd for cmd in cmdset if cmd and cmd.access(caller, "cmd", session=self.session)
-            ]
+        actor = actor_for_help(caller, self.session)
+        cmd_help_topics = {}
+        if should_include_action_topics_in_index(actor):
+            cmd_help_topics = collect_action_help_topics(actor, mode=mode, staff_reference=True)
         file_help_topics = {topic.key.lower().strip(): topic for topic in FILE_HELP_ENTRIES.all()}
         db_help_topics = {topic.key.lower().strip(): topic for topic in HelpEntry.objects.all()}
         if mode == "list":
-            if not engine_help:
-                cmd_help_topics = {
-                    cmd.auto_help_display_key if hasattr(cmd, "auto_help_display_key") else cmd.key: cmd
-                    for cmd in cmd_help_topics
-                    if self.can_list_topic(cmd, caller)
-                }
             db_help_topics = {
                 key: entry
                 for key, entry in db_help_topics.items()
@@ -460,12 +447,6 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                 if self.can_list_topic(entry, caller)
             }
         else:
-            if not engine_help:
-                cmd_help_topics = {
-                    cmd.auto_help_display_key if hasattr(cmd, "auto_help_display_key") else cmd.key: cmd
-                    for cmd in cmd_help_topics
-                    if self.can_read_topic(cmd, caller)
-                }
             db_help_topics = {
                 key: entry
                 for key, entry in db_help_topics.items()
@@ -516,9 +497,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
                 if not isinstance(m, HelpCategory):
                     # Aliases for help created with 'sethelp' is an AliasHandler
                     aliases += (
-                        list(m.aliases)
-                        if isinstance(m.aliases, (list, tuple))
-                        else m.aliases.all()
+                        list(m.aliases) if isinstance(m.aliases, (list, tuple)) else m.aliases.all()
                     )
                 if query in aliases:
                     matches.remove(m)
@@ -566,220 +545,15 @@ class CmdHelp(COMMAND_DEFAULT_CLASS):
         """
         Run the dynamic help entry creator.
         """
-        if getattr(settings, "ACTION_ENGINE_ENABLED", False):
-            from evennia.help.renderer import render_help
+        from evennia.help.renderer import render_help
 
-            render_help(
-                self.caller,
-                topic=self.topic,
-                subtopics=self.subtopics,
-                cmdset=self.cmdset,
-                session=self.session,
-            )
-            return
-
-        caller = self.caller
-        query, subtopics, cmdset = self.topic, self.subtopics, self.cmdset
-        clickable_topics = self.clickable_topics
-
-        if not query:
-            # list all available help entries, grouped by category. We want to
-            # build dictionaries {category: [topic, topic, ...], ...}
-
-            cmd_help_topics, db_help_topics, file_help_topics = self.collect_topics(
-                caller, mode="list"
-            )
-
-            # db-topics override file-based ones
-            file_db_help_topics = {**file_help_topics, **db_help_topics}
-
-            # group by category (cmds are listed separately)
-            cmd_help_by_category = defaultdict(list)
-            file_db_help_by_category = defaultdict(list)
-
-            for key, cmd in cmd_help_topics.items():
-                cmd_help_by_category[cmd.help_category].append(key)
-            for key, entry in file_db_help_topics.items():
-                file_db_help_by_category[entry.help_category].append(key)
-
-            # generate the index and display
-            output = self.format_help_index(
-                cmd_help_by_category, file_db_help_by_category, click_topics=clickable_topics
-            )
-            self.msg_help(output)
-
-            return
-
-        # search for a specific entry. We need to check for 'read' access here before
-        # building the set of possibilities.
-        cmd_help_topics, db_help_topics, file_help_topics = self.collect_topics(
-            caller, mode="query"
+        render_help(
+            self.caller,
+            topic=self.topic,
+            subtopics=self.subtopics,
+            cmdset=self.cmdset,
+            session=self.session,
         )
-
-        # db-help topics takes priority over file-help
-        file_db_help_topics = {**file_help_topics, **db_help_topics}
-
-        # commands take priority over the other types
-        all_topics = {**file_db_help_topics, **cmd_help_topics}
-
-        # get all categories
-        all_categories = list(
-            set(HelpCategory(topic.help_category) for topic in all_topics.values())
-        )
-
-        # all available help options - will be searched in order. We also check # the
-        # read-permission here.
-        entries = list(all_topics.values()) + all_categories
-
-        # lunr search fields/boosts
-        match, suggestions = self.do_search(query, entries)
-
-        if not match:
-            # no topic matches found. Only give suggestions.
-            help_text = f"There is no help topic matching '{query}'."
-
-            if not suggestions:
-                # we don't even have a good suggestion. Run a second search,
-                # doing a full-text search in the actual texts of the help
-                # entries
-
-                search_fields = [
-                    {"field_name": "text", "boost": 1},
-                ]
-
-                for match_query in [query, f"{query}*", f"*{query}"]:
-                    _, suggestions = help_search_with_index(
-                        match_query,
-                        entries,
-                        suggestion_maxnum=self.suggestion_maxnum,
-                        fields=search_fields,
-                    )
-                    if suggestions:
-                        help_text += (
-                            "\n... But matches were found within the help "
-                            "texts of the suggestions below."
-                        )
-                        break
-
-            output = self.format_help_entry(
-                topic=None,  # this will give a no-match style title
-                help_text=help_text,
-                suggested=suggestions,
-                click_topics=clickable_topics,
-            )
-
-            self.msg_help(output)
-            return
-
-        if isinstance(match, HelpCategory):
-            # no subtopics for categories - these are just lists of topics
-            category = match.key
-            category_lower = category.lower()
-            cmds_in_category = [
-                key for key, cmd in cmd_help_topics.items() if category_lower == cmd.help_category
-            ]
-            topics_in_category = [
-                key
-                for key, topic in file_db_help_topics.items()
-                if category_lower == topic.help_category
-            ]
-            output = self.format_help_index(
-                {category: cmds_in_category},
-                {category: topics_in_category},
-                title_lone_category=True,
-                click_topics=clickable_topics,
-            )
-            self.msg_help(output)
-            return
-
-        if inherits_from(match, "evennia.commands.command.Command"):
-            topic = match.key
-            help_text = match.get_help(caller, cmdset)
-            aliases = match.aliases
-            suggested = suggestions[1:]
-        else:
-            from evennia.help.catalog import is_action_help_topic
-
-            if is_action_help_topic(match):
-                topic = match.key
-                help_text = match.get_help(caller, cmdset)
-                aliases = match.aliases
-                suggested = suggestions[1:] if suggestions else []
-            else:
-                topic = match.key
-                help_text = match.entrytext
-                aliases = (
-                    list(match.aliases)
-                    if isinstance(match.aliases, (list, tuple))
-                    else match.aliases.all()
-                )
-                suggested = suggestions[1:] if suggestions else []
-
-        # parse for subtopics. The subtopic_map is a dict with the current topic/subtopic
-        # text is stored under a `None` key and all other keys are subtopic titles pointing
-        # to nested dicts.
-
-        subtopic_map = parse_entry_for_subcategories(help_text)
-        help_text = subtopic_map[None]
-        subtopic_index = [subtopic for subtopic in subtopic_map if subtopic is not None]
-
-        if subtopics:
-            # if we asked for subtopics, parse the found topic_text to see if any match.
-            # the subtopics is a list describing the path through the subtopic_map.
-
-            for subtopic_query in subtopics:
-                if subtopic_query not in subtopic_map:
-                    # exact match failed. Try startswith-match
-                    fuzzy_match = False
-                    for key in subtopic_map:
-                        if key and key.startswith(subtopic_query):
-                            subtopic_query = key
-                            fuzzy_match = True
-                            break
-
-                    if not fuzzy_match:
-                        # startswith failed - try an 'in' match
-                        for key in subtopic_map:
-                            if key and subtopic_query in key:
-                                subtopic_query = key
-                                fuzzy_match = True
-                                break
-
-                    if not fuzzy_match:
-                        # no match found - give up
-                        checked_topic = topic + f"{self.subtopic_separator_char}{subtopic_query}"
-                        output = self.format_help_entry(
-                            topic=topic,
-                            help_text=f"No help entry found for '{checked_topic}'",
-                            subtopics=subtopic_index,
-                            click_topics=clickable_topics,
-                        )
-                        self.msg_help(output)
-                        return
-
-                # if we get here we have an exact or fuzzy match
-
-                subtopic_map = subtopic_map.pop(subtopic_query)
-                subtopic_index = [subtopic for subtopic in subtopic_map if subtopic is not None]
-                # keep stepping down into the tree, append path to show position
-                topic = topic + f"{self.subtopic_separator_char}{subtopic_query}"
-
-            # we reached the bottom of the topic tree
-            help_text = subtopic_map[None]
-
-        if subtopics:
-            aliases = None
-
-        output = self.format_help_entry(
-            topic=topic,
-            help_text=help_text,
-            aliases=aliases,
-            subtopics=subtopic_index,
-            suggested=suggested,
-            click_topics=clickable_topics,
-        )
-
-        self.msg_help(output)
 
 
 def _loadhelp(caller):

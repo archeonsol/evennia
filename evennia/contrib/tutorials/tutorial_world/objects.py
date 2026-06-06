@@ -957,7 +957,7 @@ class TutorialWeapon(TutorialObject):
         When reset, the weapon is simply deleted, unless it has a place
         to return to.
         """
-        if self.location.has_account and self.home == self.location:
+        if self.location.is_puppeted and self.home == self.location:
             self.location.msg_contents(
                 "%s suddenly and magically fades into nothingness, as if it was never there ..."
                 % self.key

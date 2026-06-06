@@ -215,7 +215,7 @@ class Mob(tut_objects.TutorialObject):
         targets = [
             obj
             for obj in location.contents_get(exclude=self)
-            if obj.has_account and not obj.is_superuser
+            if obj.is_puppeted and not obj.is_superuser
         ]
         return targets[0] if targets else None
 

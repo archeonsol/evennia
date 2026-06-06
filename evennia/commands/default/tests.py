@@ -223,7 +223,12 @@ class TestHelp(BaseEvenniaCommandTest):
         logging.disable(level=logging.ERROR)
 
     def test_help(self):
-        self.call(help_module.CmdHelp(), "", "Commands", cmdset=CharacterCmdSet())
+        # The bare ``help`` index lists staff-authored file/DB topics. Assert a
+        # created DB topic shows up, rather than matching a header word (the
+        # index chrome is style, not contract).
+        create.create_help_entry("stabletopic", "Some help body.", category="General")
+        output = self.call(help_module.CmdHelp(), "", cmdset=CharacterCmdSet())
+        self.assertIn("stabletopic", output)
 
     def test_set_help(self):
         self.call(
@@ -324,55 +329,36 @@ class TestHelp(BaseEvenniaCommandTest):
         ]
     )
     def test_subtopic_fetch(self, helparg, expected):
+        """Subtopic navigation through the action-engine help renderer.
+
+        The entry's ``# SUBTOPICS`` markup is parsed and navigated by
+        :func:`evennia.help.renderer.render_help` (exact, startswith, ``in``,
+        and case-insensitive matching at each depth). Sourced from a DB help
+        entry, which the renderer surfaces (a bare cmdset ``Command`` is not).
         """
-        Check retrieval of subtopics.
-
-        """
-
-        class TestCmd(Command):
-            """
-            Main help text
-
-            # SUBTOPICS
-
-                ## creating extra stuff
-
-                Help on creating extra stuff.
-
-                    ### subsubtopic
-
-                    A subsubtopic text
-
-                ## Something else
-
-                Something else
-
-                ## More
-
-                Another text
-
-                    ### Second-More
-
-                    The Second More text.
-
-                            #### More again
-
-                            Even more text.
-
-                            #### Third more
-
-                            Third more text
-
-            """
-
-            key = "test"
-
-        class TestCmdSet(CmdSet):
-            def at_cmdset_creation(self):
-                self.add(TestCmd())
-                self.add(help_module.CmdHelp())
-
-        self.call(help_module.CmdHelp(), helparg, expected, cmdset=TestCmdSet())
+        create.create_help_entry(
+            "test",
+            (
+                "Main help text\n\n"
+                "# SUBTOPICS\n\n"
+                "## creating extra stuff\n\n"
+                "Help on creating extra stuff.\n\n"
+                "### subsubtopic\n\n"
+                "A subsubtopic text\n\n"
+                "## Something else\n\n"
+                "Something else\n\n"
+                "## More\n\n"
+                "Another text\n\n"
+                "### Second-More\n\n"
+                "The Second More text.\n\n"
+                "#### More again\n\n"
+                "Even more text.\n\n"
+                "#### Third more\n\n"
+                "Third more text\n"
+            ),
+            category="General",
+        )
+        self.call(help_module.CmdHelp(), helparg, expected, cmdset=CharacterCmdSet())
 
 
 class TestSystem(BaseEvenniaCommandTest):
