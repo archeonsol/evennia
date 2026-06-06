@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.76 — mux-style argument parser for the action engine
+
+New helper that gives the action engine the lhs/rhs/objdef structure the legacy
+command classes derived in `Command.parse`. The action parser strips the verb and
+`/switches`; this splits the remaining free-text args so actions hosting former
+mux/objmanip commands can carry the same structured arguments. No schema changes.
+
+### Engine — `evennia/actions/muxargs.py` (new)
+
+- [`evennia/actions/muxargs.py`](evennia/actions/muxargs.py): adds `MuxArgs`
+  (a dataclass holding `args`/`arglist`/`lhs`/`rhs`/`lhslist`/`rhslist`/
+  `lhs_objs`/`rhs_objs`) and `mux_parse(raw_args, rhs_split="=")`. The lhs/rhs
+  split mirrors [`Command.parse`](evennia/commands/command.py); each
+  comma-separated objdef is broken down as `name;alias;alias:option` exactly as
+  [`ObjManipCommand.parse`](evennia/commands/default/building.py) does. The
+  `rhs_split` argument accepts a single delimiter or an iterable tried in order
+  (first present wins), matching `Command.rhs_split`. Switch extraction is
+  intentionally not duplicated: the action parser owns the verb and switches.
+- Named `muxargs` rather than `argparse` to avoid shadowing the stdlib module.
+- [`evennia/actions/__init__.py`](evennia/actions/__init__.py): `MuxArgs` and
+  `mux_parse` flat-exported.
+
+### Tests
+
+- [`evennia/actions/tests/test_muxargs.py`](evennia/actions/tests/test_muxargs.py):
+  16 no-DB unit tests covering empty/`None` input, the no-rhs case, first-`=`-only
+  split, comma lists, the empty-rhs-vs-no-rhs distinction, objdef
+  alias/option/rightmost-colon parsing, and custom/iterable `rhs_split`
+  delimiters.
+
+---
+
 ## 6.0.0+underspire.75 — remove dead tag-search wrappers
 
 Parallel cleanup to `.74`'s attribute-wrapper removal, for the tag-search facade.

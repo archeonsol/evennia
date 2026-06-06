@@ -10,137 +10,122 @@ Flat re-exports are added here as each module stabilizes. For now only the
 permission lattice and predicate algebra are public.
 """
 
-from .permission import (
-    Capability,
-    DefaultCapability,
-    Scope,
-    STAFF,
-    get_capability_enum,
-    rank_order,
-    resolve_capabilities,
-    capability_for_name,
-)
-from .predicate import (
-    Predicate,
-    HasCapability,
-    Holds,
-    HasTag,
-    HasAttr,
-    IsSelf,
-    IsObject,
-    And,
-    Or,
-    Not,
-    Builder,
-    Admin,
-    Developer,
-    Player,
-    Helper,
-    Guest,
-    IsAlive,
-    InSameRoom,
-    ALWAYS,
-    NEVER,
-    coerce_predicate,
-    from_lockstring,
-    LegacyLock,
-)
-from .exceptions import (
-    ActionError,
-    RuleConflict,
-    ParseError,
-    AmbiguousTarget,
-)
-from .result import (
-    RuleResult,
-    PASS,
-    SKIP,
-    CLAIM,
-    SILENT_FAIL,
-    FAIL,
-    REDIRECT,
-    PhaseTrace,
-    ActionTrace,
-)
-from .rule import rule, RuleSpec, PHASES
-from .registry import (
-    ActionRegistry,
-    RuleRegistry,
-    action_registry,
-    rule_registry,
-)
-from .action import Action, action, GameObject
-from .context import ActionContext, ActionContextBuilder, build_context
-from .engine import RuleEngine, engine
-from .events import Event, subscribe, EventSpec, EventRegistry, event_registry
-from .process import (
-    Activity,
-    start_activity,
-    cancel_activity,
-    get_activities,
-    active_activity,
-    is_active,
-)
-from .parser import (
-    ParseResult,
-    ActionParser,
-    parser,
-    NoInputAction,
-    NoMatchAction,
-    LoginStartAction,
-    DynamicVerbResolver,
-)
-from .state import (
-    StateProvider,
-    enter_state,
-    exit_state,
-    has_state,
-    get_states,
-)
+from .action import Action, GameObject, action
 from .actor import Actor
-from .perception import (
-    set_visibility_filter,
-    get_visibility_filter,
-    is_visible,
-    filter_visible,
+from .context import ActionContext, ActionContextBuilder, build_context
+from .default import (
+    Arrived,
+    CharacterMovementRules,
+    CharacterObjectRules,
+    ContainerPutRules,
+    Departed,
+    Drop,
+    Enter,
+    Enterable,
+    EnterableObjectRules,
+    ExitTraversalRules,
+    Get,
+    Give,
+    Locomotion,
+    Move,
+    Moved,
+    Put,
+    exit_resolver,
+    register_exit_resolver,
 )
+from .dispatch import (
+    DispatchMiddleware,
+    ProfilingMiddleware,
+    clear_middlewares,
+    get_middlewares,
+    register_middleware,
+    try_action_dispatch,
+)
+from .engine import RuleEngine, engine
+from .events import Event, EventRegistry, EventSpec, event_registry, subscribe
+from .exceptions import ActionError, AmbiguousTarget, ParseError, RuleConflict
 from .menus import (
+    DisambiguationState,
+    EvMenuState,
+    InputCaptureState,
     MenuInputAction,
     MenuPrompt,
-    InputCaptureState,
-    EvMenuState,
-    DisambiguationState,
     format_menu_prompt,
     parse_menu_choice,
 )
-from .default import (
-    Moved,
-    Departed,
-    Arrived,
-    Move,
-    Locomotion,
-    ExitTraversalRules,
-    CharacterMovementRules,
-    exit_resolver,
-    register_exit_resolver,
-    Enterable,
-    Get,
-    Drop,
-    Give,
-    Put,
-    Enter,
-    CharacterObjectRules,
-    ContainerPutRules,
-    EnterableObjectRules,
+from .muxargs import MuxArgs, mux_parse
+from .parser import (
+    ActionParser,
+    DynamicVerbResolver,
+    LoginStartAction,
+    NoInputAction,
+    NoMatchAction,
+    ParseResult,
+    parser,
 )
-from .dispatch import (
-    try_action_dispatch,
-    DispatchMiddleware,
-    ProfilingMiddleware,
-    register_middleware,
-    clear_middlewares,
-    get_middlewares,
+from .perception import (
+    filter_visible,
+    get_visibility_filter,
+    is_visible,
+    set_visibility_filter,
 )
+from .permission import (
+    STAFF,
+    Capability,
+    DefaultCapability,
+    Scope,
+    capability_for_name,
+    get_capability_enum,
+    rank_order,
+    resolve_capabilities,
+)
+from .predicate import (
+    ALWAYS,
+    NEVER,
+    Admin,
+    And,
+    Builder,
+    Developer,
+    Guest,
+    HasAttr,
+    HasCapability,
+    HasTag,
+    Helper,
+    Holds,
+    InSameRoom,
+    IsAlive,
+    IsObject,
+    IsSelf,
+    LegacyLock,
+    Not,
+    Or,
+    Player,
+    Predicate,
+    coerce_predicate,
+    from_lockstring,
+)
+from .process import (
+    Activity,
+    active_activity,
+    cancel_activity,
+    get_activities,
+    is_active,
+    start_activity,
+)
+from .registry import ActionRegistry, RuleRegistry, action_registry, rule_registry
+from .result import (
+    CLAIM,
+    FAIL,
+    PASS,
+    REDIRECT,
+    SILENT_FAIL,
+    SKIP,
+    ActionTrace,
+    PhaseTrace,
+    RuleResult,
+)
+from .rule import PHASES, RuleSpec, rule
+from .state import StateProvider, enter_state, exit_state, get_states, has_state
 
 __all__ = [
     "Capability",
@@ -227,6 +212,9 @@ __all__ = [
     "NoMatchAction",
     "LoginStartAction",
     "DynamicVerbResolver",
+    # mux-style argument parsing
+    "MuxArgs",
+    "mux_parse",
     # actor + state
     "Actor",
     "set_visibility_filter",
