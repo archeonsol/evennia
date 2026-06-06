@@ -13,7 +13,8 @@ from django.db.models.functions import Cast
 
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
-from evennia.utils.utils import class_from_module, make_iter, variable_from_module
+from evennia.utils.utils import (class_from_module, make_iter,
+                                 variable_from_module)
 
 __all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__
@@ -81,23 +82,6 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
 
     def get_queryset(self):
         return super().get_queryset()
-
-    def get_by_attribute(self, key=None, category=None, value=None, **kwargs):
-        """Find objects where attribute *key* (in *category*) equals *value*.
-
-        On PostgreSQL this uses GIN-indexed JSONB ``@>`` containment; on other
-        backends it falls back to an unindexed Python scan. *value* must not be
-        None (key-only existence checks are not needed by current callers).
-        """
-        if key is None or value is None:
-            return self.none()
-        _flush_attr_writes()
-        cat_key = "~" if category is None else str(category).lower()
-        if connection.vendor == "postgresql":
-            from evennia.typeclasses.jsonb_util import to_jsonb
-
-            return self.filter(db_attrs__contains={cat_key: {"_d": {key: to_jsonb(value)}}})
-        return self.filter(pk__in=_jsonb_match_pks(self.all(), key, category, value))
 
     # common methods for all typed managers. These are used
     # in other methods. Returns querysets.

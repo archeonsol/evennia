@@ -25,6 +25,52 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.74 — drop dead attribute-value search wrappers
+
+Removes the four convenience wrappers that backed attribute-value search from
+the flat `evennia.utils.search` API and the now-orphaned manager primitive
+beneath them. No schema changes.
+
+### Engine — `search.py` wrappers removed
+
+The downstream game migrated every reverse lookup (Discord link id/token,
+tailoring web-edit tokens, web-write draft-by-title) to indexed tags, so these
+wrappers have no remaining callers anywhere in the engine, contribs, or the
+game. Each backed every call with a process-wide `flush_all_dirty()`
+write-behind flush, which is why they were deprecated.
+
+- [`utils/search.py`](evennia/utils/search.py): deleted `search_object_attribute`,
+  `search_account_attribute`, `search_script_attribute`, and
+  `search_channel_attribute`. None were in `__all__`.
+- [`typeclasses/managers.py`](evennia/typeclasses/managers.py):
+  `TypedObjectManager.get_by_attribute` deleted. Its only callers were the four
+  wrappers above (the account/script/channel managers expose no `attribute_name`
+  search path), so it was fully dead once they were gone.
+
+### Kept
+
+- `ObjectDB.objects.get_objs_with_attr_value`
+  ([`objects/manager.py`](evennia/objects/manager.py)) stays: it is the live,
+  GIN-indexed path behind `search_object(attribute_name=…, attribute_value=…)`,
+  the documented flat-API attribute search. Its `flush_all_dirty()` there is a
+  write-behind-cache correctness requirement, not the discouraged
+  convenience-wrapper pattern.
+
+### Migration notes
+
+Downstream code that still calls `search.search_<type>_attribute(...)` must move
+to `search_object(attribute_name=…, attribute_value=…)` for objects, or (better)
+to indexed tags for any reverse lookup. Direct callers of
+`Manager.get_by_attribute(...)` should use `get_objs_with_attr_value(...)` on the
+ObjectDB manager or tag-based lookup.
+
+### Tests
+
+- [`utils/tests/test_search.py`](evennia/utils/tests/test_search.py): dropped the
+  four wrapper tests (`test_search_object_attribute[_wrong]`,
+  `test_search_script_attribute[_wrong]`) and their imports. Remaining search
+  suite plus `evennia.typeclasses` and `evennia.objects` (295 tests) pass.
+
 ## 6.0.0+underspire.73 — action engine is the sole player-input dispatch path
 
 Makes the CM1 action engine unconditional and starts the one-version deprecation

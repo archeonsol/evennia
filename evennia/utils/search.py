@@ -294,50 +294,6 @@ help_entry_search = search_help
 help_entries = search_help
 
 
-def search_object_attribute(
-    key=None, category=None, value=None, strvalue=None, attrtype=None, **kwargs
-):
-    """
-    Search for objects by their attributes.
-    """
-    return ObjectDB.objects.get_by_attribute(
-        key=key, category=category, value=value, strvalue=strvalue, attrtype=attrtype, **kwargs
-    )
-
-
-def search_account_attribute(
-    key=None, category=None, value=None, strvalue=None, attrtype=None, **kwargs
-):
-    """
-    Search for accounts by their attributes.
-    """
-    return AccountDB.objects.get_by_attribute(
-        key=key, category=category, value=value, strvalue=strvalue, attrtype=attrtype, **kwargs
-    )
-
-
-def search_script_attribute(
-    key=None, category=None, value=None, strvalue=None, attrtype=None, **kwargs
-):
-    """
-    Search for scripts by their attributes.
-    """
-    return ScriptDB.objects.get_by_attribute(
-        key=key, category=category, value=value, strvalue=strvalue, attrtype=attrtype, **kwargs
-    )
-
-
-def search_channel_attribute(
-    key=None, category=None, value=None, strvalue=None, attrtype=None, **kwargs
-):
-    """
-    Search for channels by their attributes.
-    """
-    return ChannelDB.objects.get_by_attribute(
-        key=key, category=category, value=value, strvalue=strvalue, attrtype=attrtype, **kwargs
-    )
-
-
 def search_attribute_object(*args, **kwargs):
     """
     Stub. The Attribute model was removed in the JSONB migration. Returns [].
