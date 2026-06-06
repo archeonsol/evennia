@@ -447,6 +447,14 @@ class Command(metaclass=CommandMeta):
     # ``self.caller`` to the Account and exposes ``self.character`` as the
     # puppet for ``self.session``. See ``AccountCommand`` and
     # ``cmdhandler._normalize_account_command_caller``.
+    #
+    # DEPRECATED (CM1 I1 closeout): this flag and its normalisation run only on
+    # the legacy ``cmdobj=`` dispatch path; engine-routed input derives the same
+    # account-vs-character context from ``Actor.from_caller(callertype=...)``
+    # (``evennia/actions/actor.py``). Delete the flag and the normalisation when
+    # the legacy cmdset dispatch path is removed — the finish line of the CM1
+    # input-capture migration (``.agents/prompts/CM1-input-capture-migration.md``;
+    # promised by the ``.73`` changelog deprecation note).
     account_command_caller = False
 
     def at_pre_parse(self):
@@ -985,6 +993,17 @@ class AccountCommand(Command):
     so the attribute always exists on the instance.
 
     Shipped in ``6.0.0+underspire.3``.
+
+    CM1 I1 closeout: the action engine derives the same account-vs-character
+    context from ``Actor.from_caller(callertype=...)``
+    (``evennia/actions/actor.py``), so the ``account_command_caller``
+    normalisation above is now legacy-path-only and is slated for removal with
+    the legacy cmdset dispatch path (see the flag's note in :class:`Command`).
+    This class is intentionally kept as the "runs in account context" marker for
+    its consumers (CmdOOC/CmdIC, comms, contribs); whether it survives as a bare
+    marker is decided when those commands port to native actions (the builder /
+    command-group migration). Treat ``Actor`` as the source of truth for who is
+    acting.
     """
 
     account_command_caller = True

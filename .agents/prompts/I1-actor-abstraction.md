@@ -18,18 +18,29 @@ computed wrapper (not a replacement), constructed per dispatch from
 
 ## Remaining to close (a reconciliation, not new substrate)
 
-1. **`AccountCommand` fate** (`evennia/commands/command.py:964`) —
-   `Actor.from_caller(callertype=...)` now derives account-vs-character
-   context, so its disambiguation role is largely subsumed. Decide: retire,
-   reframe as a routing hint, or keep. **Discussion-first.**
-2. **`self.caller` migration** — still used by the remaining legacy default
-   command modules; tangled with the builder/command-group port (those modules
-   are slated for migration anyway). Sequence after that port, not before.
-3. **Stale self-references** — `actor.py`'s "until I1 lands" docstring framing.
+1. **`AccountCommand` fate — DECIDED: reframe as a marker.** Keep the class as
+   the "runs in account context" base for its consumers (CmdOOC/CmdIC, comms,
+   contribs); `Actor` is the source of truth. The `account_command_caller` flag
+   + `cmdhandler._normalize_account_command_caller` are legacy-path-only and
+   **retire with the legacy cmdset dispatch path** — the finish line of
+   [CM1-input-capture-migration](CM1-input-capture-migration.md). Whether the
+   bare marker class itself survives is settled when account/comms commands port
+   in the **builder/command-group migration**. Marked `DEPRECATED (CM1 I1
+   closeout)` in `commands/command.py` (flag + `AccountCommand`) and
+   `commands/cmdhandler.py`.
+2. **`self.caller` migration — DECIDED: defer.** It dies with the legacy default
+   command modules as they port to native actions (the builder/command-group
+   migration); do not pre-migrate. Intent recorded in the `Actor` class docstring
+   (`evennia/actions/actor.py`).
+3. **Stale self-references — DONE.** `actor.py`'s "until I1 lands" framing
+   updated; this prompt + the arch-doc I1 entry reconciled.
 4. L1 / R1 / I2 consume the `Actor` only nominally (not yet built; separate
    items, each unblocked by this substrate).
 
-The original full prompt below is retained for the design rationale.
+Net: I1's substrate is shipped and documented; the two residual items are
+tracked under existing work (legacy-dispatch removal; command-group port), so
+nothing new starts under the I1 banner. The original full prompt below is
+retained for the design rationale.
 
 ## Goal
 

@@ -63,11 +63,19 @@ class FocusChanged(Event):
 class Actor:
     """The acting entity: a control-graph view.
 
-    The legacy ``(session, account, character)`` triple still populates an actor
-    built without a :attr:`binding` (the path everything uses until I1 lands),
-    and every derived view below is identical to the old puppet behavior in that
-    case. When a :class:`~evennia.accounts.models.ControlBinding` is attached,
-    identity/focus/effective resolve from the durable focus stack instead.
+    An actor built without a :attr:`binding` falls back to the legacy
+    ``(session, account, character)`` triple, with every derived view below
+    identical to the old puppet behavior (the path for bindingless / programmatic
+    actors). When a :class:`~evennia.accounts.models.ControlBinding` is attached
+    — the normal player-dispatch case since ``.71`` — identity/focus/effective
+    resolve from the durable focus stack instead.
+
+    CM1 I1 closeout: this is the substrate that retires piecemeal
+    ``self.caller``. Legacy ``self.caller`` consumers migrate onto ``Actor`` as
+    their command modules port to native actions (the builder / command-group
+    migration), not pre-emptively — so the remaining ``self.caller`` uses are
+    expected to disappear with those modules. New engine code should take an
+    ``Actor``.
 
     Attributes:
         session: the originating ``ServerSession`` (or ``None`` for system /
@@ -302,9 +310,7 @@ class Actor:
     def _emit_focus(self, body, change):
         from .engine import engine as _engine
 
-        _engine.emit(
-            FocusChanged(actor=self, body=body, change=change, focus=self.focus)
-        )
+        _engine.emit(FocusChanged(actor=self, body=body, change=change, focus=self.focus))
 
     # -- multi-session race guard -------------------------------------------
     def snapshot_focus(self):

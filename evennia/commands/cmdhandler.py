@@ -238,6 +238,13 @@ def _resolve_signal_session(session, cmdset_providers):
 def _normalize_account_command_caller(cmd, caller, cmdset_providers):
     """Normalise runtime attrs for ``AccountCommand`` dispatch.
 
+    DEPRECATED (CM1 I1 closeout): only reached on the legacy ``cmdobj=`` /
+    ``_run_command`` path; engine-routed input gets the same context from
+    ``Actor.from_caller(callertype=...)`` (``evennia/actions/actor.py``). Delete
+    this together with the ``account_command_caller`` flag when the legacy cmdset
+    dispatch path is removed (CM1 input-capture migration finish line; ``.73``
+    deprecation note).
+
     No-op unless ``cmd.account_command_caller`` is truthy. For account
     commands, rewrites:
 
