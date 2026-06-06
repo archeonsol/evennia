@@ -93,7 +93,6 @@ backlog.
 
 - [F13: contribs half-policy](F13-contribs-policy.md)
 - [F18: unused engine handlers](F18-unused-engine-handlers.md)
-- [F19: tag-search facade gaps](F19-tag-search-facade-gaps.md)
 - [F20: ownership-change provenance](F20-ownership-provenance-audit.md)
   — follow-on to the `.71` ControlBinding rework; a cold-path audit
   trail for past ownership, engine-vs-game placement to decide.

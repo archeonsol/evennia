@@ -25,6 +25,31 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.75 — remove dead tag-search wrappers
+
+Parallel cleanup to `.74`'s attribute-wrapper removal, for the tag-search facade.
+The flat tag API kept four model-specific wrappers for symmetry, but three had no
+callers anywhere. No schema changes.
+
+### Engine — `search.py` wrappers removed
+
+- [`utils/search.py`](evennia/utils/search.py): deleted `search_account_tag`,
+  `search_script_tag`, and `search_channel_tag`, and dropped them from `__all__`.
+  None were re-exported in the flat `evennia.*` API (only `search_tag` is).
+  `search_account_tag`/`search_channel_tag` had zero callers; `search_script_tag`
+  was referenced only by its own tests.
+- `search_object_by_tag` (aliased as `search_tag`) stays: it backs the common
+  `ObjectDB` case and has live engine callers. Engine code that searches tags on
+  other models (`Msg`, `DbPrototype`) continues to use the managers directly,
+  which is the correct path for non-`ObjectDB` reverse lookups.
+
+### Tests
+
+- [`utils/tests/test_search.py`](evennia/utils/tests/test_search.py): removed the
+  four `search_script_tag` tests covering the deleted wrapper.
+
+---
+
 ## 6.0.0+underspire.74 — remove dead attribute-search wrappers, force-gate the rest
 
 Attribute search forces a process-wide `flush_all_dirty()` on every call. This

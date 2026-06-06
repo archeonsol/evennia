@@ -34,9 +34,6 @@ __all__ = (
     "search_channel",
     "search_help_entry",
     "search_tag",
-    "search_script_tag",
-    "search_account_tag",
-    "search_channel_tag",
     "search_typeclass",
 )
 
@@ -325,27 +322,6 @@ def search_object_by_tag(key=None, category=None, tagtype=None, **kwargs):
 
 
 search_tag = search_object_by_tag  # this is the most common case
-
-
-def search_account_tag(key=None, category=None, tagtype=None, **kwargs):
-    """
-    Find account based on tag or category.
-    """
-    return AccountDB.objects.get_by_tag(key=key, category=category, tagtype=tagtype, **kwargs)
-
-
-def search_script_tag(key=None, category=None, tagtype=None, **kwargs):
-    """
-    Find script based on tag or category.
-    """
-    return ScriptDB.objects.get_by_tag(key=key, category=category, tagtype=tagtype, **kwargs)
-
-
-def search_channel_tag(key=None, category=None, tagtype=None, **kwargs):
-    """
-    Find channel based on tag or category.
-    """
-    return ChannelDB.objects.get_by_tag(key=key, category=category, tagtype=tagtype, **kwargs)
 
 
 # Replace direct assignment with function
