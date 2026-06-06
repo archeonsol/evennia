@@ -1521,9 +1521,8 @@ def get_input(caller, prompt, callback, session=None, *args, **kwargs):
             the prompt will remain and continue to accept input.
         session (Session, optional): This allows to specify the
             session to send the prompt to. It's usually only needed if `caller`
-            is an Account in multisession modes greater than 2. The session is
-            then updated by the command and is available (for example in
-            callbacks) through `caller.ndb.getinput._session`.
+            is an Account in multisession modes greater than 2. Pass it through
+            `kwargs` if the callback itself needs the answering session.
         *args (any): Extra arguments to pass to `callback`.  To utilise `*args`
             (and `**kwargs`), a value for the `session` argument must also be
             provided.
@@ -1538,19 +1537,13 @@ def get_input(caller, prompt, callback, session=None, *args, **kwargs):
         most types of client inputs. So make sure to strip that before doing a
         comparison.
 
-        When the prompt is running, a temporary object `caller.ndb._getinput`
-        is stored; this will be removed when the prompt finishes.
+        While the prompt is running it is backed by a `GetInputState`
+        capturing state on the caller's actor (not an ndb attribute or a
+        cmdset); the action engine routes the next input line to it.
 
-        If you need the specific Session of the caller (which may not be easy
-        to get if caller is an account in higher multisession modes), then it
-        is available in the callback through `caller.ndb._getinput._session`.
-        This is why the `session` is required as input.
-
-        It's not recommended to 'chain' `get_input` into a sequence of
-        questions. This will result in the caller stacking ever more instances
-        of InputCmdSets. While they will all be cleared on concluding the
-        get_input chain, EvMenu should be considered for anything beyond a
-        single question.
+        A new `get_input` on the same caller replaces any still-active one
+        (exit-before-enter), so it will not stack; even so, prefer `EvMenu`
+        for anything beyond a single question.
 
     """
     if not callable(callback):

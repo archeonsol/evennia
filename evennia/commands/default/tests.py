@@ -1272,10 +1272,16 @@ class TestBuilding(BaseEvenniaCommandTest):
     def test_name_clears_plural(self):
         box, _ = DefaultObject.create("Opened Box", location=self.char1)
 
-        # Force update of plural aliases (set in get_numbered_name)
-        self.char1.execute_cmd("inventory")
+        # get_numbered_name (called during inventory/appearance rendering)
+        # populates the plural-alias cache. Exercise it directly rather than via
+        # the `inventory` command, which is not an engine action.
+        box.get_numbered_name(1, self.char1)
         self.assertIn("one opened box", box.aliases.get(category=box.plural_category))
-        self.char1.execute_cmd("@name box=closed box")
+
+        # A rename fires at_post_rename, which clears the plural-alias cache.
+        # `obj.key = ...` is exactly what CmdName does internally; drive it
+        # directly since `@name` is not an engine action.
+        box.key = "closed box"
         self.assertIsNone(box.aliases.get(category=box.plural_category))
 
     def test_desc(self):

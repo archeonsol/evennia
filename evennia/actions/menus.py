@@ -244,7 +244,7 @@ class YesNoState(StateProvider):
         caller = self.caller
         session = self.session or getattr(actor, "session", None)
         raw = (action.raw or "").strip()
-        inp = raw.lower() if raw else (self.default or "")
+        inp = raw if raw else (self.default or "")
         if isinstance(inp, str):
             inp = inp.lower()
         try:
@@ -264,12 +264,14 @@ class YesNoState(StateProvider):
                 return CLAIM
             actor.exit_state(YesNoState)
         except Exception:
+            # Mirror GetInputState: log the trace (not silent) and notify the
+            # answerer, then exit the prompt. Don't re-raise — a buggy callback
+            # shouldn't cascade a second untrapped-error message on top.
             from evennia.utils import logger
 
             caller.msg("|rError in ask_yes_no. Choice not confirmed (report to admin)|n")
             logger.log_trace("Error in ask_yes_no")
             actor.exit_state(YesNoState)
-            raise
         return CLAIM
 
 
