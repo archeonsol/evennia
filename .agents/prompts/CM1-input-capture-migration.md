@@ -52,7 +52,9 @@ Confirmed cmdset-capture sites (grep `CMD_NOMATCH` / `CMD_NOINPUT` /
 
 - **EvEditor** ([`evennia/utils/eveditor.py`](../../evennia/utils/eveditor.py)):
   the line-editor cmdset plus `CmdSaveYesNo` (key=`CMD_NOMATCH`,
-  alias=`CMD_NOINPUT`). Captures every editor line + the save y/n prompt.
+  alias=`CMD_NOINPUT`). Captures every editor line + the save y/n prompt. Plus
+  `persistent=True` reload survival. **Design decided — see "EvEditor design" and
+  "Persistent-capture rehydration seam" below.**
 - **Custom `CMD_NOMATCH` / `CMD_NOINPUT` overrides** anywhere else in the engine
   or contrib that relied on cmdset capture (grep to enumerate). Note the engine
   already ships native nomatch handling
@@ -126,14 +128,100 @@ Retrofitted across `get_input`, `ask_yes_no`, `@interactive`
 Covered by `test_evmore.py::test_other_session_input_is_not_captured` /
 `test_same_session_input_is_captured`; add the equivalent for EvEditor.
 
+## EvEditor design (decided; build to this)
+
+EvEditor is a big module (~1200 lines) but the migration surface is small — the
+buffer/undo/display/load-save logic is untouched. Two parts:
+
+**Part A — capture substrate (EvMore-shaped + command resolution).**
+- Delete `EvEditorCmdSet`, `CmdLineInput`, `CmdEditorGroup`-as-cmdset,
+  `CmdSaveYesNo`, `SaveYesNoCmdSet`. Add an `EvEditorState(StateProvider)`:
+  `capture_input` (REDIRECT to `MenuInputAction`, with the `session_mismatch`
+  guard) + `deliver_input` that routes the line. Install via `capture_holder` in
+  `EvEditor.__init__`, exit in `EvEditor.quit()`. **Do not** auto-exit per line —
+  the editor stays active until quit.
+- **Command resolution:** EvEditor has ~30 `:`-commands with `arg_regex`
+  longest-match + a NOMATCH fallback (any non-`:` line → append to buffer). Do
+  **not** rewrite the ~360-line `CmdEditorGroup.func`. Drive the existing command
+  objects from the state: reuse `cmdparser.build_matches` against an
+  `EvEditorCmdSet` *instance* (pure string matching, not cmdset dispatch) to get
+  cmdstring/args, then call the command's `parse()`/`func()`. No match → the
+  buffer-insert path.
+- **The one coupling to reroute:** `CmdEditorGroup.func`'s `:q` branch does
+  `caller.cmdset.add(SaveYesNoCmdSet)` (cmdset manipulation in a command body).
+  Replace with a state sub-mode (a save-confirm flag the next `deliver_input`
+  reads) or reuse the engine `ask_yes_no`/`YesNoState`. This is the only spot you
+  can't reuse verbatim.
+
+**Part B — `persistent=True` survival across reload (use the shared seam below).**
+`persistent=True` is the stock default for the help/attr/`@py` editors, so
+dropping reload survival is a visible regression — keep it. The rebuild
+machinery already exists (`_load_editor` recreates the whole `EvEditor` from the
+persisted `_eveditor_saved` / `_eveditor_buffer_temp` attributes; recreating it
+re-installs the state for free). What's gone is the *trigger*: today it rides the
+persistent-cmdset reimport + lazy `_load_editor` in `parse()`, all of which we
+delete. Re-point it through the rehydration seam.
+
+## Persistent-capture rehydration seam (shared with the EvMenu migration)
+
+**Two concurrent consumers, so build one seam, not two ad-hoc hooks.** EvMenu
+(migrated in parallel by someone else) has the *identical* pattern: `persistent=True`,
+a `_menutree_saved` attribute, and a `_restore(caller)` function that rebuilds
+the menu — same dead trigger once its cmdset is deleted. Without a shared seam,
+both migrations would each bolt a subsystem-specific block onto the base
+`at_post_load` (merge collision + duplicated layering smell). Agree this contract
+with the EvMenu owner before building.
+
+States are non-persistent by design (`state.py`), and there is no generic
+"reinstall persisted StateProviders on reload" path. Add a small **declarative,
+attribute-keyed** one (attribute-keyed so the hook is cheap and imports the util
+lazily *only* when an object actually has a suspended capture — a plain
+register-on-import registry silently no-ops if the util module wasn't imported
+before the reload):
+
+```python
+# evennia/actions/state.py (always loaded)
+_CAPTURE_REHYDRATORS = [
+    ("_eveditor_saved", "evennia.utils.eveditor.rehydrate"),
+    ("_menutree_saved", "evennia.utils.evmenu.rehydrate"),
+]
+def rehydrate_captures(holder):
+    """Reinstall any persisted capture state on `holder` after a reload.
+    Idempotent + cheap: checks the marker attribute before importing."""
+    from evennia.utils.utils import class_from_module
+    for attr, path in _CAPTURE_REHYDRATORS:
+        if holder.attributes.has(attr):
+            try:
+                class_from_module(path)(holder)
+            except Exception:
+                from evennia.utils import logger
+                logger.log_trace()
+```
+
+- `at_post_load` (base typeclass — `typeclasses/models.py` covers objects; mirror
+  in `accounts/accounts.py`, which overrides it) calls `rehydrate_captures(self)`
+  alongside the existing schema-migration call. It "fires on every cache load …
+  after every server reload" and must stay idempotent — so each `rehydrate` must
+  no-op when the capture is already live (guard on `holder.ndb._eveditor` /
+  `ndb._evmenu`).
+- Each util exposes a thin idempotent `rehydrate(holder)` wrapping its existing
+  restore (`_load_editor` / `_restore`).
+- The table names consumers as **data**, not behavior; the two migrations both
+  append their one row.
+
+Reload test (no existing coverage — current `test_eveditor.py` is all
+func-direct): start a `persistent=True` editor, simulate reload (drop `ndb`, call
+`at_post_load`/`rehydrate_captures`), then dispatch a line through the engine and
+assert it is still captured into the buffer.
+
 ## Approach (design-first, per this folder's convention)
 
-1. Propose the design before editing: one `StateProvider` per subsystem (e.g.
-   `PagerState`, `LineEditorState`), what each captures, how it interprets keys,
-   and its enter/exit lifecycle. Get review.
+1. The `StateProvider` design is settled (`EvMoreState` shipped; `EvEditorState`
+   specified in "EvEditor design" above). Build to it; only re-open if you hit a
+   contradiction.
 2. For each subsystem, **engine-routed failing test first**, then migrate, then
    delete the dead cmdset, then confirm the new test passes and the old
-   func-direct tests still pass.
+   func-direct tests still pass. For `persistent=True`, add the reload test too.
 3. Keep the public API stable (`EvMore(...)`, `EvEditor(...)` call signatures and
    behavior) — only the capture substrate changes.
 
@@ -181,6 +269,10 @@ finish line but needs its own care (do **not** fold it into a subsystem PR):
 - EvEditor installs/exits via `capture_holder` and session-guards its capture
   rule with `session_mismatch` (the holder + session-scope model decided in
   `.78`; already applied to `get_input`/`ask_yes_no`/`@interactive`/`EvMore`).
+- `persistent=True` editors survive a reload via the shared
+  `state.rehydrate_captures` seam wired into `at_post_load`, **proven by a reload
+  test** (not just func-direct). Seam contract agreed with the EvMenu owner so
+  both subsystems append to one `_CAPTURE_REHYDRATORS` table.
 - The dead capture cmdsets (`CmdSetMore`, the EvEditor cmdset, `CmdSaveYesNo`,
   etc.) are deleted.
 - The `.73` nits are resolved.
