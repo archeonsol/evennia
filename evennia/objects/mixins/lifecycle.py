@@ -470,7 +470,7 @@ class LifecycleMixin:
         discipline="public",
         fires_from=("SharedMemoryModel.__init__",),
         state_cache_state="rehydrated",
-        notes="Stub override of TypedObject.at_post_load. Fires on every cache load; overrides must be idempotent.",
+        notes="Object override of TypedObject.at_post_load (shadows it; apply_schema_migrations does not run for objects). Reinstalls persisted input-capture states. Fires on every cache load; overrides must be idempotent.",
     )
     def at_post_load(self):
         """
@@ -481,7 +481,9 @@ class LifecycleMixin:
         restart or reload.
 
         """
-        pass
+        from evennia.actions.state import rehydrate_captures
+
+        rehydrate_captures(self)
 
     @hook(
         event="cmdset",

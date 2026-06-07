@@ -46,7 +46,12 @@ from django.conf import settings
 from django.utils.translation import gettext as _
 
 from evennia import CmdSet
-from evennia.commands import cmdhandler
+from evennia.actions.action import Action
+from evennia.actions.menus import MenuInputAction, session_mismatch
+from evennia.actions.result import CLAIM, PASS, REDIRECT
+from evennia.actions.rule import rule
+from evennia.actions.state import StateProvider, capture_holder, enter_state, exit_state
+from evennia.commands import cmdhandler, cmdparser
 from evennia.utils import dedent, fill, is_iter, justify, logger, to_str, utils
 from evennia.utils.ansi import raw
 
@@ -164,54 +169,62 @@ _MSG_REDO = _("Redid one step.")
 
 # -------------------------------------------------------------
 #
-# Handle yes/no quit question
+# Engine-native input capture
 #
 # -------------------------------------------------------------
 
 
-class CmdSaveYesNo(_COMMAND_DEFAULT_CLASS):
-    """
-    Save the editor state on quit. This catches
-    nomatches (defaults to Yes), and avoid saves only if
-    command was given specifically as "no" or "n".
-    """
+class EvEditorState(StateProvider):
+    """Engine-native input capture for the EvEditor line editor.
 
-    key = _CMD_NOMATCH
-    aliases = _CMD_NOINPUT
-    locks = "cmd:all()"
-    help_cateogory = "LineEditor"
+    Replaces the legacy ``EvEditorCmdSet`` (``CmdLineInput`` / ``CmdEditorGroup``)
+    and ``SaveYesNoCmdSet``: the editor no longer merges a cmdset into dispatch.
+    While an editor is active this state seizes every input line through the
+    action engine and hands it to :meth:`EvEditor.handle_input`, which runs the
+    existing editor Command objects by pure string matching. The save-on-quit
+    confirmation that the old code modeled with a stacked ``SaveYesNoCmdSet`` is
+    handled here as an in-state sub-mode (the :attr:`_save_confirm` flag).
 
-    def func(self):
-        """
-        Implement the yes/no choice.
-
-        """
-        # this is only called from inside the lineeditor
-        # so caller.ndb._lineditor must be set.
-
-        self.caller.cmdset.remove(SaveYesNoCmdSet)
-        if self.raw_string.strip().lower() in ("no", "n"):
-            # answered no
-            self.caller.msg(self.caller.ndb._eveditor.quit())
-        else:
-            # answered yes (default)
-            self.caller.ndb._eveditor.save_buffer()
-            self.caller.ndb._eveditor.quit()
-
-
-class SaveYesNoCmdSet(CmdSet):
-    """
-    Stores the yesno question
-
+    Modeled on :class:`evennia.utils.evmore.EvMoreState`.
     """
 
-    key = "quitsave_yesno"
-    priority = 150  # override other cmdsets.
-    mergetype = "Replace"
+    def __init__(self, editor):
+        self._editor = editor
+        # When set, the next captured line is read as the save-before-quit
+        # answer rather than as editor input (replaces SaveYesNoCmdSet).
+        self._save_confirm = False
 
-    def at_cmdset_creation(self):
-        """at cmdset creation"""
-        self.add(CmdSaveYesNo())
+    @rule(Action, phase="before", priority=9999)
+    def capture_input(self, action, actor):
+        """Seize the next input line, redirecting it into a MenuInputAction the
+        :meth:`deliver_input` carry_out rule consumes."""
+        if isinstance(action, MenuInputAction):
+            return PASS
+        if session_mismatch(self._editor._session, actor):
+            return PASS
+        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
+
+    @rule(MenuInputAction, phase="carry_out", priority=9999)
+    def deliver_input(self, action, actor):
+        if action.menu is not self:
+            return PASS
+        self._route(action.raw or "")
+        return CLAIM
+
+    def _route(self, raw):
+        """Route the captured line to the editor (or resolve a pending save)."""
+        editor = self._editor
+        if self._save_confirm:
+            # Answering the save-before-quit prompt. Default (empty / anything
+            # not 'no') is yes, matching the legacy CmdSaveYesNo behavior.
+            self._save_confirm = False
+            if raw.strip().lower() in ("no", "n"):
+                editor.quit()
+            else:
+                editor.save_buffer()
+                editor.quit()
+            return
+        editor.handle_input(raw)
 
 
 # -------------------------------------------------------------
@@ -389,7 +402,28 @@ def _load_editor(caller):
             setattr(eveditor, key, value)
     else:
         # something went wrong. Cleanup.
-        caller.cmdset.remove(EvEditorCmdSet)
+        exit_state(capture_holder(caller), EvEditorState)
+
+
+def rehydrate(holder):
+    """Reinstall a persisted EvEditor capture after a server reload.
+
+    Called via the :data:`evennia.actions.state._CAPTURE_REHYDRATORS` seam from
+    ``at_post_load``. States are non-persistent by design, so a
+    ``persistent=True`` editor opened before a ``@reload`` loses its live
+    :class:`EvEditorState` even though its rebuild data survives in Attributes.
+    :func:`_load_editor` rebuilds the whole ``EvEditor`` from those Attributes,
+    which re-installs the capture state for free.
+
+    Idempotent: no-ops when an editor is already live on ``holder`` (the hook
+    fires on every cache load, so this must be safe to call repeatedly).
+
+    Args:
+        holder (Object or Account): the body whose persisted editor to restore.
+    """
+    if getattr(holder.ndb, "_eveditor", None) is not None:
+        return
+    _load_editor(holder)
 
 
 class CmdLineInput(CmdEditorBase):
@@ -501,7 +535,7 @@ class CmdEditorGroup(CmdEditorBase):
         elif cmd == ":q":
             # quit. If not saved, will ask
             if self.editor._unsaved:
-                caller.cmdset.add(SaveYesNoCmdSet)
+                editor.request_save_confirm()
                 caller.msg(_("Save before quitting?") + " |lcyes|lt[Y]|le/|lcno|ltN|le")
             else:
                 editor.quit()
@@ -896,6 +930,19 @@ class EvEditor:
         self._key = key
         self._caller = caller
         self._caller.ndb._eveditor = self
+        # Input is captured engine-side (EvEditorState), not via a cmdset. The
+        # capture installs on the focus body the engine reads for the next line.
+        # Session-agnostic (state.session left None): EvEditor output is
+        # broadcast to all of the caller's sessions, so input is not scoped to
+        # one session - body scoping (the holder) is enough for the realistic
+        # multi-puppet cases.
+        self._session = None
+        self._holder = capture_holder(caller)
+        self._state = None
+        # A match-only cmdset instance: build_matches uses it for pure string
+        # matching of the ":"-commands; it is never merged into dispatch.
+        self._cmdset = EvEditorCmdSet()
+        self._nomatch_cmd = CmdLineInput()
         self._buffer = ""
         self._unsaved = False
         self._persistent = persistent
@@ -953,14 +1000,57 @@ class EvEditor:
                 logger.log_trace(_TRACE_PERSISTENT_SAVING)
                 persistent = False
 
-        # Create the commands we need
-        caller.cmdset.add(EvEditorCmdSet, persistent=persistent)
+        # Install the engine-native input capture (replaces the old
+        # EvEditorCmdSet registration). exit_state first to avoid stacking if a
+        # prior editor was still active on this body.
+        exit_state(self._holder, EvEditorState)
+        self._state = enter_state(self._holder, EvEditorState(self))
 
         # echo inserted text back to caller
         self._echo_mode = True
 
         # show the buffer ui
         self.display_buffer()
+
+    def handle_input(self, raw):
+        """Resolve a captured input line and run it against the editor.
+
+        Drives the existing editor Command objects with pure string matching
+        (:func:`evennia.commands.cmdparser.build_matches` against the match-only
+        :attr:`_cmdset`) - no cmdset is merged into dispatch. A matched
+        ``:``-command runs its Command's ``parse``/``func``; any other line falls
+        through to the buffer-insert command (the former ``CMD_NOMATCH`` path).
+
+        Args:
+            raw (str): the raw input line the player typed.
+        """
+        matches = cmdparser.build_matches(raw, self._cmdset)
+        if matches:
+            # longest command-name wins (e.g. ':wq' over ':w'); build_matches
+            # yields one match per command, so this is also a no-op tie-break.
+            cmdname, args, cmd, _cmdlen, _mratio, raw_cmdname = max(matches, key=lambda m: m[3])
+        else:
+            cmd, cmdname, args, raw_cmdname = self._nomatch_cmd, "", "", ""
+        cmd.caller = self._caller
+        cmd.cmdname = cmdname
+        cmd.cmdstring = cmdname
+        cmd.raw_cmdname = raw_cmdname or cmdname
+        cmd.args = args
+        cmd.raw_string = raw
+        cmd.session = self._session
+        cmd.account = getattr(self._caller, "account", None)
+        cmd.cmdset = self._cmdset
+        cmd.parse()
+        cmd.func()
+
+    def request_save_confirm(self):
+        """Enter the save-before-quit sub-mode (replaces ``SaveYesNoCmdSet``).
+
+        The next captured line is read by :meth:`EvEditorState._route` as the
+        yes/no answer instead of as editor input.
+        """
+        if self._state is not None:
+            self._state._save_confirm = True
 
     def load_buffer(self):
         """
@@ -1027,7 +1117,7 @@ class EvEditor:
         self._caller.attributes.remove("_eveditor_saved")
         self._caller.attributes.remove("_eveditor_unsaved")
         self._caller.attributes.remove("_eveditor_indent")
-        self._caller.cmdset.remove(EvEditorCmdSet)
+        exit_state(self._holder, EvEditorState)
 
     def save_buffer(self):
         """

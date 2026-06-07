@@ -52,13 +52,13 @@ Currently parallel-startable (no unresolved dependencies):
   burndown tracker for the roadmap; update it in the same commit as each
   port batch.
 - [CM1: input-capture migration](CM1-input-capture-migration.md) —
-  medium, todo. Follow-on to the `.73` engine-only-dispatch release.
-  Migrate EvMore / EvEditor (and any remaining cmdset
-  `CMD_NOMATCH`/`CMD_NOINPUT` capture) onto engine `StateProvider`s,
-  modeled on `.73`'s `GetInputState`/`YesNoState`. These are silently
-  bypassed by the engine bridge today; their func-direct tests don't
-  prove routing. Clears the blockers for removing the legacy cmdset
-  dispatch path.
+  in-progress. Follow-on to the `.73` engine-only-dispatch release.
+  EvMore (`.77`) and **EvEditor** are done — both on engine
+  `StateProvider`s, modeled on `.73`'s `GetInputState`/`YesNoState`, with
+  a shared reload-rehydration seam. Remaining: **EvMenu** migration (then
+  it appends its row to `_CAPTURE_REHYDRATORS`), any other cmdset
+  `CMD_NOMATCH`/`CMD_NOINPUT` capture, and finally removing the legacy
+  cmdset dispatch path (gated on `cmdobj=` rehoming + sign-off).
 
 **Alpha-promotion audit (read-only whole-engine audit, 2026-06-06):**
 
@@ -141,6 +141,12 @@ backlog.
 - [F20: ownership-change provenance](F20-ownership-provenance-audit.md)
   — follow-on to the `.71` ControlBinding rework; a cold-path audit
   trail for past ownership, engine-vs-game placement to decide.
+- [F22: at_post_load schema-migration trap](F22-at-post-load-schema-migration-trap.md)
+  — surfaced by the EvEditor capture migration. `apply_schema_migrations`
+  is dead for every typeclass (every `at_post_load` override shadows the
+  base without `super()`); decide fix/delete/document, plus whether to
+  promote newmoo's startup-backfill pattern into the engine. Overlaps
+  F21's backfill-machinery sweep.
 
 **Mechanical / verification:**
 

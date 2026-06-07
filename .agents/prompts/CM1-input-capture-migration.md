@@ -1,6 +1,7 @@
 # CM1: migrate cmdset-based input-capture to engine StateProviders
 
-Status: todo
+Status: EvEditor done. Remaining: EvMenu migration, then legacy cmdset-dispatch
+removal (both gated, see below).
 
 CM1 follow-on. Companion to [`CM1-action-system-roadmap.md`](CM1-action-system-roadmap.md)
 (Phase 1–8 shipped) and the `6.0.0+underspire.73` release. Read the `.73`
@@ -62,12 +63,33 @@ Confirmed cmdset-capture sites (grep `CMD_NOMATCH` / `CMD_NOINPUT` /
   a game layers its own as `@rule(NoMatchAction, ...)` providers.
 
 Already done — do **not** redo:
-- `.73`: `get_input`, `ask_yes_no`, `@interactive`.
+- `.73`: `get_input`, `ask_yes_no`, `@interactive`. The `.73` nits in "Adjacent
+  cleanups" below were also already resolved in `.73`/`.77` (verified) — skip them.
 - `.77`: **EvMore** ([`evennia/utils/evmore.py`](../../evennia/utils/evmore.py)).
   `CmdSetMore`/`CmdMore`/`CmdMoreExit` deleted; replaced by `EvMoreState`
   (modeled on `GetInputState`/`YesNoState`). Engine-routed test in
   [`evennia/utils/tests/test_evmore.py`](../../evennia/utils/tests/test_evmore.py).
   Behavior change: `quit` now quits the pager (legacy quirk paged it forward).
+- **EvEditor** ([`evennia/utils/eveditor.py`](../../evennia/utils/eveditor.py)).
+  `EvEditorState` (modeled on `EvMoreState`) replaces the cmdset registration;
+  `CmdSaveYesNo`/`SaveYesNoCmdSet` deleted, save-on-quit is now an in-state
+  `_save_confirm` sub-mode. `CmdEditorGroup`/`CmdLineInput`/`EvEditorCmdSet` kept
+  but the cmdset is now match-only (`build_matches`), never merged into dispatch.
+  Chose **session-agnostic** capture (Option B): EvEditor output is broadcast,
+  so input is body-scoped via `capture_holder` only (no `session=` API change).
+  Engine-routed + real-`cmdhandler`-bridge + reload tests in
+  [`test_eveditor.py`](../../evennia/utils/tests/test_eveditor.py).
+  The shared rehydration seam (`state.rehydrate_captures` +
+  `_CAPTURE_REHYDRATORS`) shipped with **only the eveditor row** — EvMenu still
+  has working cmdset-reimport persistence, so its row is added by *its* migration
+  (adding it now would `log_trace` on every menu reload). Seam wired into
+  `LifecycleMixin.at_post_load` (objects) + `DefaultAccount.at_post_load`
+  (accounts), **not** `TypedObject.at_post_load`: the mixin/account overrides
+  *shadow* the base one (so `apply_schema_migrations` never runs for objects via
+  at_post_load — a pre-existing engine fact; games like newmoo run their own
+  startup backfills instead). Gate uses the cache-free `backend.query_key`, not
+  `attributes.has`, so it doesn't cache a negative marker lookup on every
+  captureless object.
 
 ## The worked example to model on
 

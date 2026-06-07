@@ -25,6 +25,87 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.82 — EvEditor input-capture on the action engine
+
+### Engine
+
+EvEditor ([`evennia/utils/eveditor.py`](evennia/utils/eveditor.py)) no longer
+captures input through a cmdset. Following the `.77` EvMore migration, it now
+installs an engine-native `EvEditorState(StateProvider)` (modeled on
+`EvMoreState`) that seizes the next input line through the action engine and
+routes it to the editor. This matters because the `.73` engine bridge is the
+sole player-input dispatch path and **never merges the editor's cmdset** — so
+under the engine the line-editor was silently broken: typed lines went to the
+engine's NoMatch/NoInput handling and never reached the editor. Its existing
+tests didn't catch this because they call the command `func`s directly rather
+than routing through `cmdhandler` (green ≠ working).
+
+What changed:
+
+- `EvEditorState` replaces the `caller.cmdset.add(EvEditorCmdSet)` registration;
+  install via `capture_holder` + `enter_state` in `EvEditor.__init__`, removed
+  via `exit_state` in `EvEditor.quit()`.
+- `CmdSaveYesNo` / `SaveYesNoCmdSet` are deleted. The save-before-quit prompt
+  (`:q` on an unsaved buffer) is now an in-state `_save_confirm` sub-mode the
+  next captured line resolves, preserving the legacy "unknown answer defaults to
+  yes" behavior.
+- `CmdEditorGroup` / `CmdLineInput` / `EvEditorCmdSet` are kept, but the cmdset
+  is now **match-only**: `EvEditor.handle_input` resolves a captured line with
+  `cmdparser.build_matches` against an `EvEditorCmdSet` instance (pure string
+  matching, never merged into dispatch) and drives the matched command's
+  `parse`/`func`. The ~360-line command body is untouched.
+- Capture is **session-agnostic** (the state's session is left `None`). EvEditor
+  output is broadcast to all of the caller's sessions, so input is scoped to the
+  focus *body* via `capture_holder` only; there is no `session=` API change.
+
+Public `EvEditor(...)` signature and behavior are unchanged.
+
+### Engine — persistent-capture rehydration seam
+
+States are non-persistent by design, so a `persistent=True` editor (the stock
+default for the help/attr/`@py` editors) lost its live capture across a
+`@reload`. New shared seam in
+[`evennia/actions/state.py`](evennia/actions/state.py): a declarative
+`_CAPTURE_REHYDRATORS` table + `rehydrate_captures(holder)`, called from
+`at_post_load` to re-install any persisted capture whose marker Attribute is
+present. The editor's rebuild data already survives in Attributes; the seam
+re-points the lost *trigger* through `eveditor.rehydrate`, which wraps the
+existing `_load_editor`.
+
+Notes for the next consumer (EvMenu migration):
+
+- The table ships with **only the eveditor row**. EvMenu still uses working
+  cmdset-reimport persistence; its row is added by *its* migration (adding it now
+  would `log_trace` on every menu reload).
+- The seam is wired into `LifecycleMixin.at_post_load`
+  ([`evennia/objects/mixins/lifecycle.py`](evennia/objects/mixins/lifecycle.py))
+  for objects and `DefaultAccount.at_post_load`
+  ([`evennia/accounts/accounts.py`](evennia/accounts/accounts.py)) for accounts,
+  **not** `TypedObject.at_post_load`: those overrides shadow the base hook
+  without `super()` (a pre-existing fact — `apply_schema_migrations` likewise
+  never runs for objects via `at_post_load`; see
+  [`.agents/prompts/F22-at-post-load-schema-migration-trap.md`](.agents/prompts/F22-at-post-load-schema-migration-trap.md)).
+- The marker is probed with the backend's cache-free `query_key`, not
+  `attributes.has`: this runs on every object load, and `has` would cache a
+  negative marker lookup on every captureless object. On the default JSONB
+  backend `query_key` is a membership check against the already-loaded row, so
+  the gate costs no extra query.
+
+### Tests
+
+[`evennia/utils/tests/test_eveditor.py`](evennia/utils/tests/test_eveditor.py)
+gains engine-routed coverage that drives input the way dispatch does, including a
+test through the **real `cmdhandler` bridge** (`execute_cmd`), a session-scope
+test, install/quit lifecycle, and a `persistent=True` reload test (drop `ndb`,
+call `at_post_load`, assert input is captured again). The existing func-direct
+tests still pass.
+
+### Migration notes
+
+No downstream changes required: the public `EvEditor` / `EvMore` API is
+unchanged. Games that subclassed or imported `CmdSaveYesNo` / `SaveYesNoCmdSet`
+(neither is a documented extension point) must drop those references.
+
 ## 6.0.0+underspire.81 — check_database error exits use a non-zero status
 
 ### Engine

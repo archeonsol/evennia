@@ -32,6 +32,7 @@ __all__ = [
     "has_state",
     "get_states",
     "capture_holder",
+    "rehydrate_captures",
 ]
 
 
@@ -145,3 +146,56 @@ def capture_holder(caller, session=None):
     from .actor import Actor
 
     return Actor.from_caller(caller, session=session).holder or caller
+
+
+# --------------------------------------------------------------------------- #
+# Persistent-capture rehydration seam
+# --------------------------------------------------------------------------- #
+
+# Declarative table of persisted input-captures: ``(marker_attribute, dotted
+# path to a rehydrate(holder) callable)``. Each migrated capture util appends
+# one row. The marker attribute is the Attribute the util persists its rebuild
+# data under, so the (lazy) import below only happens for a holder that actually
+# has a suspended capture of that kind.
+_CAPTURE_REHYDRATORS = [
+    ("_eveditor_saved", "evennia.utils.eveditor.rehydrate"),
+]
+
+
+def rehydrate_captures(holder):
+    """Reinstall any persisted input-capture state on ``holder`` after a reload.
+
+    States are non-persistent by design, so a ``persistent=True`` capture (e.g.
+    an EvEditor open across a ``@reload``) loses its live :class:`StateProvider`
+    even though its rebuild data survives in Attributes. This is the declarative
+    seam that re-installs it: ``at_post_load`` calls it on every cache load, and
+    each registered util re-installs its capture iff its marker Attribute is
+    present.
+
+    Cheap and idempotent by contract: the marker check gates the (lazy) import,
+    and each rehydrator must no-op when its capture is already live (the hook
+    fires on every cache load, not just first load).
+
+    The marker is probed with the backend's cache-free ``query_key`` rather than
+    ``attributes.has``: this runs on *every* object load, and ``has`` would cache
+    a negative ``marker`` lookup on every captureless object (the overwhelming
+    majority). On the default JSONB backend ``query_key`` is just a membership
+    check against the already-loaded row, so the gate costs no extra query.
+
+    Args:
+        holder: the character / account being loaded into the idmapper cache.
+    """
+    attrhandler = getattr(holder, "attributes", None)
+    if attrhandler is None:
+        return
+    backend = attrhandler.backend
+    for attr, path in _CAPTURE_REHYDRATORS:
+        if backend.query_key(attr, None):
+            try:
+                from evennia.utils.utils import class_from_module
+
+                class_from_module(path)(holder)
+            except Exception:
+                from evennia.utils import logger
+
+                logger.log_trace()

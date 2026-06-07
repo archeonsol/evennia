@@ -3,8 +3,48 @@ Test eveditor
 
 """
 
+import unittest
+from dataclasses import dataclass
+
+from evennia.actions.action import Action
+from evennia.actions.actor import Actor
+from evennia.actions.context import ActionContext
+from evennia.actions.engine import RuleEngine
+from evennia.actions.menus import MenuInputAction
+from evennia.actions.result import PASS
 from evennia.commands.default.tests import BaseEvenniaCommandTest
 from evennia.utils import eveditor
+from evennia.utils.eveditor import EvEditor, EvEditorState
+
+_ENGINE = RuleEngine()
+
+
+def _sync(d):
+    """Extract an already-fired Deferred's result, re-raising on failure."""
+    out = {}
+    d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
+    if "fail" in out:
+        out["fail"].raiseException()
+    if "result" not in out:
+        raise AssertionError("dispatch Deferred did not fire synchronously")
+    return out["result"]
+
+
+@dataclass
+class _Line(Action):
+    """A neutral action carrying a raw input line (mimics the bridge carrier)."""
+
+
+def _line(raw):
+    action = _Line()
+    action._raw_string = raw
+    return action
+
+
+def _dispatch_line(actor, state, raw):
+    """Dispatch a raw line through the engine while ``state`` is active."""
+    ctx = ActionContext(providers=[state])
+    return _sync(_ENGINE.dispatch(_line(raw), actor, ctx))
 
 
 class TestEvEditor(BaseEvenniaCommandTest):
@@ -411,3 +451,166 @@ class TestEvEditor(BaseEvenniaCommandTest):
         #     msg="Valid justifications are [f]ull (default), [c]enter, [r]right or [l]eft"
         # )
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "line 1.")
+
+
+def _persistent_savefunc(caller, buf):
+    """Module-level (picklable) savefunc for the persistent-editor reload test."""
+    caller.db.desc = buf
+    return True
+
+
+class _FakeNDB:
+    """Bare attribute bag standing in for Evennia's non-persistent handler."""
+
+
+class _FakeCaller:
+    """Minimal caller exposing the .ndb a state install needs."""
+
+    def __init__(self):
+        self.account = None
+        self.ndb = _FakeNDB()
+
+
+class _StubEditor:
+    """Records routing decisions so EvEditorState can be tested in isolation."""
+
+    def __init__(self, session=None):
+        self._session = session
+        self.inputs = []
+        self.calls = []
+
+    def handle_input(self, raw):
+        self.inputs.append(raw)
+
+    def save_buffer(self):
+        self.calls.append("save")
+
+    def quit(self):
+        self.calls.append("quit")
+
+
+class TestEvEditorStateRouting(unittest.TestCase):
+    """EvEditorState routing, driven through the real engine (no cmdset)."""
+
+    def setUp(self):
+        self.session = object()  # sentinel shared by the editor and the actor
+        self.caller = _FakeCaller()
+        self.actor = Actor(character=self.caller, session=self.session)
+        self.editor = _StubEditor(session=None)  # session-agnostic capture
+        self.state = EvEditorState(self.editor)
+        self.actor.enter_state(self.state)
+
+    def test_line_is_routed_to_handle_input(self):
+        _dispatch_line(self.actor, self.state, "some buffer line")
+        self.assertEqual(self.editor.inputs, ["some buffer line"])
+
+    def test_colon_command_is_routed_verbatim(self):
+        # the state forwards the raw line; command resolution is handle_input's job
+        _dispatch_line(self.actor, self.state, ":wq")
+        self.assertEqual(self.editor.inputs, [":wq"])
+
+    def test_menuinput_falls_through_capture(self):
+        # capture_input must PASS a MenuInputAction (else infinite REDIRECT).
+        result = self.state.capture_input(MenuInputAction(raw="x", menu=self.state), self.actor)
+        self.assertIs(result, PASS)
+
+    def test_save_confirm_yes_saves_and_quits(self):
+        self.state._save_confirm = True
+        _dispatch_line(self.actor, self.state, "")  # empty / anything but 'no' = yes
+        self.assertEqual(self.editor.calls, ["save", "quit"])
+        self.assertEqual(self.editor.inputs, [])  # not routed as editor input
+        self.assertFalse(self.state._save_confirm)
+
+    def test_save_confirm_no_quits_without_saving(self):
+        self.state._save_confirm = True
+        _dispatch_line(self.actor, self.state, "n")
+        self.assertEqual(self.editor.calls, ["quit"])
+        self.assertFalse(self.state._save_confirm)
+
+
+class TestEvEditorStateSessionScope(unittest.TestCase):
+    """A session-scoped editor would only capture its own session's input. The
+    shipped editor is session-agnostic (output is broadcast), so it captures
+    regardless of the dispatching session - assert that contract explicitly."""
+
+    def setUp(self):
+        self.caller = _FakeCaller()
+        self.editor = _StubEditor(session=None)
+        self.state = EvEditorState(self.editor)
+
+    def test_any_session_is_captured(self):
+        actor = Actor(character=self.caller, session=object())
+        result = self.state.capture_input(_line("hi"), actor)
+        self.assertIsNot(result, PASS)
+
+
+class TestEvEditorEngineRouted(BaseEvenniaCommandTest):
+    """End-to-end: a real EvEditor captures input dispatched through the engine.
+
+    This is the test the cmdset-based editor failed: the engine bridge never
+    merged the editor cmdset, so a line routed through dispatch never reached the
+    editor. It must pass now that capture is an engine StateProvider.
+    """
+
+    def _actor_and_state(self):
+        actor = Actor(character=self.char1, session=self.session)
+        self.assertTrue(actor.has_state(EvEditorState))
+        return actor, actor.state_objects[-1]
+
+    def test_buffer_line_is_captured_through_engine(self):
+        EvEditor(self.char1)
+        actor, state = self._actor_and_state()
+        _dispatch_line(actor, state, "hello buffer")
+        self.assertIn("hello buffer", self.char1.ndb._eveditor.get_buffer())
+
+    def test_colon_command_runs_through_engine(self):
+        EvEditor(self.char1)
+        actor, state = self._actor_and_state()
+        _dispatch_line(actor, state, "first line")
+        _dispatch_line(actor, state, ":DD")  # clear buffer
+        self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "")
+
+    def test_quit_removes_capture_state(self):
+        EvEditor(self.char1)
+        actor, _state = self._actor_and_state()
+        self.char1.ndb._eveditor.quit()
+        self.assertFalse(actor.has_state(EvEditorState))
+
+    def test_line_captured_through_real_cmdhandler_bridge(self):
+        # The strongest proof against the "verification trap": a line driven
+        # through the real cmdhandler -> action-engine bridge (execute_cmd), not
+        # a hand-built ActionContext, must still reach the editor.
+        EvEditor(self.char1)
+        self.char1.execute_cmd("bridged line", session=self.session)
+        self.assertIn("bridged line", self.char1.ndb._eveditor.get_buffer())
+
+
+class TestEvEditorReload(BaseEvenniaCommandTest):
+    """A persistent editor survives a reload via the rehydrate_captures seam."""
+
+    def test_persistent_editor_rehydrated_and_recaptures(self):
+        EvEditor(self.char1, savefunc=_persistent_savefunc, persistent=True)
+        _dispatch_line(*self._first(), "before reload")
+        self.assertIn("before reload", self.char1.ndb._eveditor.get_buffer())
+
+        # Simulate a reload: the non-persistent state and ndb editor are gone,
+        # but the persisted Attributes remain.
+        self.char1.ndb._eveditor = None
+        self.char1.ndb.active_states = None
+        actor = Actor(character=self.char1, session=self.session)
+        self.assertFalse(actor.has_state(EvEditorState))
+
+        # at_post_load fires on cache load after a reload; it drives the seam.
+        self.char1.at_post_load()
+        self.assertIsNotNone(self.char1.ndb._eveditor)
+        actor = Actor(character=self.char1, session=self.session)
+        self.assertTrue(actor.has_state(EvEditorState))
+
+        # input is captured again after rehydration
+        state = actor.state_objects[-1]
+        _dispatch_line(actor, state, "after reload")
+        self.assertIn("after reload", self.char1.ndb._eveditor.get_buffer())
+
+    def _first(self):
+        actor = Actor(character=self.char1, session=self.session)
+        return actor, actor.state_objects[-1]

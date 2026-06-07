@@ -2026,7 +2026,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         reload.
 
         """
-        pass
+        from evennia.actions.state import rehydrate_captures
+
+        rehydrate_captures(self)
 
     # Note that the hooks below also exist in the character object's
     # typeclass. You can often ignore these and rely on the character
