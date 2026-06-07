@@ -66,8 +66,8 @@ from twisted.internet.task import deferLater
 
 from .context import ActionContext
 from .exceptions import ActionError
-from .result import ActionTrace, PhaseTrace, RuleResult, PASS, SKIP, FAIL
 from .registry import rule_registry
+from .result import FAIL, PASS, SKIP, ActionTrace, PhaseTrace, RuleResult
 
 __all__ = ["RuleEngine", "engine"]
 
@@ -113,7 +113,7 @@ def _get_input_deferred(actor, prompt) -> Deferred:
     caller = _caller_for(actor)
     if prompt:
         caller.msg(prompt)
-    actor.enter_state(InputCaptureState(d))
+    actor.enter_state(InputCaptureState(d, session=getattr(actor, "session", None)))
     return d
 
 
@@ -227,9 +227,7 @@ class RuleEngine:
             plan = self._build_plan(context, action_type)
 
             # --- before (synchronous) ------------------------------------
-            signal, payload = self._phase_before(
-                action, actor, plan, trace, memo, dry_run
-            )
+            signal, payload = self._phase_before(action, actor, plan, trace, memo, dry_run)
             if signal == "redirect":
                 redirects += 1
                 if redirects > REDIRECT_LIMIT:
@@ -254,9 +252,7 @@ class RuleEngine:
             # ``before`` already ran (state capture / interception), and the owning
             # ``carry_out`` rule swallows the unresolved action quietly.
             if not action._unresolved:
-                blocking = self._phase_check(
-                    action, actor, plan, trace, memo, dry_run
-                )
+                blocking = self._phase_check(action, actor, plan, trace, memo, dry_run)
                 if blocking is not None:
                     trace.outcome = "blocked"
                     trace.block_message = blocking.message
@@ -267,18 +263,14 @@ class RuleEngine:
             # In dry-run, ``_eval_rule_async`` records each rule (PASS/SKIP from
             # its ``requires`` gate) without firing the body, so the trace still
             # reflects all four phases for ``explain()``.
-            aborted = yield self._run_phase(
-                action, actor, plan, trace, memo, "carry_out", dry_run
-            )
+            aborted = yield self._run_phase(action, actor, plan, trace, memo, "carry_out", dry_run)
             if aborted:
                 # The focus body this dispatch acted for was popped/collapsed by
                 # another session while a carry_out rule was suspended. Stop —
                 # don't narrate (report) work that no longer has a valid body.
                 trace.outcome = "aborted"
                 return trace
-            yield self._run_phase(
-                action, actor, plan, trace, memo, "report", dry_run
-            )
+            yield self._run_phase(action, actor, plan, trace, memo, "report", dry_run)
 
             trace.outcome = self._final_outcome(trace)
             return trace

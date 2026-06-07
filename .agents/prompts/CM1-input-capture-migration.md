@@ -50,11 +50,6 @@ entirely (the next step after this).
 Confirmed cmdset-capture sites (grep `CMD_NOMATCH` / `CMD_NOINPUT` /
 `cmdset.add` to find any others, including contrib):
 
-- **EvMore** ([`evennia/utils/evmore.py`](../../evennia/utils/evmore.py)):
-  `CmdSetMore` (`CmdMore` key=`CMD_NOINPUT`, `CmdMoreExit` key=`CMD_NOMATCH`),
-  added at `self._caller.cmdset.add(CmdSetMore)`. Captures paging keys
-  (next/back/quit/jump). Paging is everywhere (`return_appearance`, big lists),
-  so this is the highest-impact one.
 - **EvEditor** ([`evennia/utils/eveditor.py`](../../evennia/utils/eveditor.py)):
   the line-editor cmdset plus `CmdSaveYesNo` (key=`CMD_NOMATCH`,
   alias=`CMD_NOINPUT`). Captures every editor line + the save y/n prompt.
@@ -64,8 +59,13 @@ Confirmed cmdset-capture sites (grep `CMD_NOMATCH` / `CMD_NOINPUT` /
   ([`evennia/actions/default/nomatch.py`](../../evennia/actions/default/nomatch.py));
   a game layers its own as `@rule(NoMatchAction, ...)` providers.
 
-Already done in `.73` (do **not** redo): `get_input`, `ask_yes_no`,
-`@interactive`.
+Already done — do **not** redo:
+- `.73`: `get_input`, `ask_yes_no`, `@interactive`.
+- `.78`: **EvMore** ([`evennia/utils/evmore.py`](../../evennia/utils/evmore.py)).
+  `CmdSetMore`/`CmdMore`/`CmdMoreExit` deleted; replaced by `EvMoreState`
+  (modeled on `GetInputState`/`YesNoState`). Engine-routed test in
+  [`evennia/utils/tests/test_evmore.py`](../../evennia/utils/tests/test_evmore.py).
+  Behavior change: `quit` now quits the pager (legacy quirk paged it forward).
 
 ## The worked example to model on
 
@@ -79,12 +79,52 @@ Already done in `.73` (do **not** redo): `get_input`, `ask_yes_no`,
 - The utility enters/exits via
   [`evennia/actions/state.py`](../../evennia/actions/state.py)'s
   `enter_state` / `exit_state` (call `exit_state` first to avoid stacking), on
-  the **caller** (which resolves to its actor).
+  the **focus body** resolved by `capture_holder(caller, session)` — *not* the
+  raw caller (see the holder/session-scope section below).
 - EvMenu itself (`EvMenuState`) is the prior, larger example of the same pattern.
 
-EvMore/EvEditor each capture a *richer* keyset than a single line, but the shape
-is identical: a capturing `StateProvider` that interprets the line and either
-stays active (more paging / more editor input) or exits (quit / save-done).
+EvEditor captures a *richer* keyset than a single line, but the shape is
+identical (and EvMore's shipped `EvMoreState` is a worked example of exactly
+this): a capturing `StateProvider` that interprets the line and either stays
+active (more editor input) or exits (quit / save-done).
+
+## Capture-state holder + session scope (decided `.78` — follow this for EvEditor)
+
+Input-capture is logically scoped to the **session** the prompt was shown to,
+even though a state physically lives on a body. The engine reads active states
+from `actor.holder` = `actor.focus` (the puppeted character IC, the account
+OOC). The pre-`.78` sites installed on the **raw caller**, which silently misses
+when caller ≠ focus (e.g. `EvMore(account, ...)` / `get_input(account, ...)`
+while a character is puppeted — installed on the account, but the next line's
+actor reads `holder = character`). Multi-puppet (`MULTISESSION_MODE` 2) also
+rules out attaching to the account: a pager opened by session S1 must not seize
+S2's unrelated input on a different character.
+
+The decided model (do **not** re-litigate; apply it to EvEditor):
+
+1. **Install on the focus, resolved like dispatch does.**
+   `state.capture_holder(caller, session)`
+   ([`evennia/actions/state.py`](../../evennia/actions/state.py)) returns
+   `Actor.from_caller(caller, session=session).holder` — the exact body the next
+   line's actor will read. Use it for both the `exit_state` (anti-stack) and
+   `enter_state`. Body-scoped; **no `state_objects` aggregation / no engine
+   semantics change** (the rejected "aggregate at read" alternative would have
+   needed symmetric read/write across the focus stack + a snapshot race fix —
+   more surgery, less correct).
+2. **Session-guard the capture `before` rule.**
+   `menus.session_mismatch(state_session, actor)` returns True when the state
+   carries a session and it isn't the dispatching `actor.session`; the rule
+   `return PASS`es so the other session's line falls through to normal dispatch.
+   A `None` state-session is session-agnostic (legacy behavior). This makes the
+   capture truly session-scoped even when two sessions drive the *same* body
+   (mode 3): only the asking session's line is seized.
+
+Retrofitted across `get_input`, `ask_yes_no`, `@interactive`
+(`InputCaptureState` now takes `session`, threaded from `actor.session` in
+`engine._get_input_deferred`), and `EvMore` (`.78`). EvEditor must do the same:
+`capture_holder` for install/exit + `session_mismatch` in its capture rule.
+Covered by `test_evmore.py::test_other_session_input_is_not_captured` /
+`test_same_session_input_is_captured`; add the equivalent for EvEditor.
 
 ## Approach (design-first, per this folder's convention)
 
@@ -119,12 +159,14 @@ finish line but needs its own care (do **not** fold it into a subsystem PR):
   that path explicitly before deleting the surrounding legacy block.
 - Per the roadmap, the `CMD_NOINPUT` / `CMD_NOMATCH` / `CMD_LOGINSTART` /
   `CMD_CHANNEL` constants retire with the legacy path. Confirm nothing still
-  imports them (EvMore/EvEditor do today — that's why they come first).
+  imports them (EvEditor still does today — that's why it comes first; EvMore no
+  longer does as of `.78`).
 
 ## Scope boundary
 
-- **In scope:** EvMore, EvEditor, and any remaining cmdset `CMD_NOMATCH` /
-  `CMD_NOINPUT` capture; the `.73` nits above; planning the legacy-path removal.
+- **In scope:** EvEditor, the cross-cutting holder-consistency decision above,
+  and any remaining cmdset `CMD_NOMATCH` / `CMD_NOINPUT` capture; the `.73` nits
+  above; planning the legacy-path removal. (EvMore done in `.78`.)
 - **Out of scope:** migrating the unported **command groups** (`@dig`/`@tunnel`,
   `@set`/`@name`, batch processor) to native actions — that is a separate track
   (the `TestBuilding` / `TestBatchProcess` reds). Also out: the standalone
@@ -133,9 +175,12 @@ finish line but needs its own care (do **not** fold it into a subsystem PR):
 
 ## Done means
 
-- EvMore and EvEditor (and any other cmdset-capture site) capture input via an
-  engine `StateProvider`, **proven by an engine-routed test** that drives input
-  through `cmdhandler` (not just the capture `func`).
+- EvEditor (and any other cmdset-capture site) captures input via an engine
+  `StateProvider`, **proven by an engine-routed test** that drives input through
+  `cmdhandler` (not just the capture `func`). (EvMore done in `.78`.)
+- EvEditor installs/exits via `capture_holder` and session-guards its capture
+  rule with `session_mismatch` (the holder + session-scope model decided in
+  `.78`; already applied to `get_input`/`ask_yes_no`/`@interactive`/`EvMore`).
 - The dead capture cmdsets (`CmdSetMore`, the EvEditor cmdset, `CmdSaveYesNo`,
   etc.) are deleted.
 - The `.73` nits are resolved.

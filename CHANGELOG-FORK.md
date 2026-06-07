@@ -25,6 +25,69 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.78 — EvMore paging migrated to an engine StateProvider; capture states scoped to focus + session
+
+EvMore's interactive paging input no longer rides a cmdset. The `.73`
+deprecation flagged it as bypassed by the engine bridge; it now captures input
+through `EvMoreState`, an engine-native `StateProvider` modeled on
+`GetInputState`/`YesNoState`. No public signature change: `EvMore(...)` and
+`evmore.msg(...)` callers are unaffected.
+
+This release also fixes a latent holder/session-scoping bug shared by all
+input-capture states (surfaced migrating EvMore). Captures now install on the
+**focus body** the engine actually reads (not the raw caller, which diverges
+from the focus when e.g. an account-level caller opens a capture while a
+character is puppeted), and the capture only fires for input from the **session**
+the prompt was shown to (so in multisession a second session driving the same or
+another body is not hijacked).
+
+### Engine — EvMore
+
+- [`evennia/utils/evmore.py`](evennia/utils/evmore.py): deleted `CmdMore`,
+  `CmdMoreExit`, and `CmdSetMore`; added `EvMoreState`. `EvMore.start()` now
+  `enter_state`s the pager state (exit-before-enter to avoid stacking) instead of
+  `cmdset.add(CmdSetMore)`, and `page_quit()` `exit_state`s it instead of
+  `cmdset.remove`. Recognized paging keys (`n`/`p`/`t`/`e`/`q`/...) drive the
+  pager; an empty line pages forward; any other line exits the pager and is
+  re-dispatched normally (the legacy `CMD_NOMATCH` behavior). Behavior change vs
+  legacy: `quit` now quits the pager (the old `CmdMore` left `quit` out of its
+  quit tuple, so it paged *forward*); `q`/`a`/`abort` quit as before.
+- [`evennia/utils/tests/test_evmore.py`](evennia/utils/tests/test_evmore.py):
+  new. Routes input through the real `RuleEngine` (`ENGINE.dispatch`) with the
+  state active, not by calling command funcs directly, so it proves capture
+  survives the bridge's before/carry_out REDIRECT loop. Covers paging keys,
+  empty-line next, quit, unknown-command exit + re-fire, install/remove
+  lifecycle through a real `EvMore`, and session-scoped capture (a different
+  session's line is not seized).
+
+### Engine — capture-state holder + session scope
+
+- [`evennia/actions/state.py`](evennia/actions/state.py): new `capture_holder(caller,
+  session)` returns `Actor.from_caller(caller, session=session).holder` — the
+  body the next line's actor will read. Capture utilities install/exit on this,
+  not the raw caller. Body-scoped; no `state_objects` aggregation or engine
+  semantics change.
+- [`evennia/actions/menus.py`](evennia/actions/menus.py): new `session_mismatch(state_session,
+  actor)` helper; `InputCaptureState`/`GetInputState`/`YesNoState` capture rules
+  now `PASS` when the line's session isn't the one the prompt was opened on
+  (`None` session = agnostic, the prior behavior). `InputCaptureState` gained a
+  `session` arg.
+- [`evennia/actions/engine.py`](evennia/actions/engine.py): `_get_input_deferred`
+  threads `actor.session` into `InputCaptureState`, scoping `@interactive`
+  prompts to the asking session.
+- [`evennia/utils/evmenu.py`](evennia/utils/evmenu.py): `get_input` / `ask_yes_no`
+  install via `capture_holder` instead of the raw caller.
+- [`evennia/utils/evmore.py`](evennia/utils/evmore.py): `EvMore` resolves
+  `self._holder = capture_holder(caller, session)` once and enters/exits the
+  state on it; `EvMoreState.capture_input` session-guards via `session_mismatch`.
+
+### Deprecation — still pending
+
+- **EvEditor** ([`utils/eveditor.py`](evennia/utils/eveditor.py)) and any custom
+  `CMD_NOMATCH`/`CMD_NOINPUT` overrides remain on the bypassed cmdset-capture
+  path and must migrate before the legacy cmdset dispatch path is removed. See
+  the `.73` deprecation note.
+
 ## 6.0.0+underspire.77 — account rename db_key sync; retire bridge-dead default commands
 
 Account renames now keep the `db_key` identity column in sync and fire the rename

@@ -42,15 +42,13 @@ from django.core.paginator import Paginator
 from django.db.models.query import QuerySet
 from django.utils.translation import gettext as _
 
-import evennia
-from evennia.commands import cmdhandler
-from evennia.commands.cmdset import CmdSet
-from evennia.commands.command import Command
+from evennia.actions.action import Action
+from evennia.actions.menus import MenuInputAction, session_mismatch
+from evennia.actions.result import CLAIM, PASS, REDIRECT
+from evennia.actions.rule import rule
+from evennia.actions.state import StateProvider, capture_holder, enter_state, exit_state
 from evennia.utils.ansi import ANSIString
 from evennia.utils.utils import dedent, inherits_from, justify, make_iter
-
-_CMD_NOMATCH = cmdhandler.CMD_NOMATCH
-_CMD_NOINPUT = cmdhandler.CMD_NOINPUT
 
 _EVTABLE = None
 
@@ -62,77 +60,68 @@ _DISPLAY = """{text}
 |n(|wPage|n [{pageno}/{pagemax}] |wn|next|n || |wp|nrevious || |wt|nop || |we|nnd || |wq|nuit)"""
 
 
-class CmdMore(Command):
+# Paging keys the pager owns while active. Anything not listed here exits the
+# pager and is re-dispatched as a normal command (the legacy CMD_NOMATCH path).
+_PAGE_QUIT = frozenset(("quit", "abort", "a", "q"))
+_PAGE_BACK = frozenset(("previous", "p"))
+_PAGE_TOP = frozenset(("top", "t"))
+_PAGE_END = frozenset(("end", "e"))
+_PAGE_NEXT = frozenset(("next", "n"))
+_PAGE_KEYS = _PAGE_QUIT | _PAGE_BACK | _PAGE_TOP | _PAGE_END | _PAGE_NEXT
+
+
+class EvMoreState(StateProvider):
+    """Engine-native input capture for the EvMore pager.
+
+    Replaces the legacy ``CmdSetMore`` (``CmdMore`` / ``CmdMoreExit``). While a
+    pager is active this state seizes the next input line through the action
+    engine: recognized paging keys drive the pager, an empty line pages forward,
+    and any other line exits the pager and is re-dispatched as a normal command
+    (the legacy ``CMD_NOMATCH`` behavior).
     """
-    Manipulate the text paging. Catch no-input with aliases.
-    """
 
-    key = _CMD_NOINPUT
-    aliases = ["quit", "q", "abort", "a", "next", "n", "previous", "p", "top", "t", "end", "e"]
-    auto_help = False
+    def __init__(self, more):
+        self._more = more
 
-    def func(self):
-        """
-        Implement the command
-        """
-        more = self.caller.ndb._more
-        if not more and hasattr(self.caller, "account") and self.caller.account:
-            more = self.caller.account.ndb._more
-        if not more:
-            self.caller.msg("Error in loading the pager. Contact an admin.")
-            return
+    @rule(Action, phase="before", priority=9999)
+    def capture_input(self, action, actor):
+        """Seize the next input line, redirecting it into a MenuInputAction the
+        :meth:`deliver_input` carry_out rule consumes. Only input from the
+        session the pager was shown to is captured (a different session driving
+        the same body pages its own output independently)."""
+        if isinstance(action, MenuInputAction):
+            return PASS
+        if session_mismatch(self._more._session, actor):
+            return PASS
+        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
 
-        cmd = self.cmdstring
+    @rule(MenuInputAction, phase="carry_out", priority=9999)
+    def deliver_input(self, action, actor):
+        if action.menu is not self:
+            return PASS
+        self._route(action.raw or "")
+        return CLAIM
 
-        if cmd in ("abort", "a", "q"):
+    def _route(self, raw):
+        """Map the captured line to a pager move (or exit + re-fire)."""
+        more = self._more
+        token = raw.strip().lower()
+        if token and token not in _PAGE_KEYS:
+            # Unknown command: leave the pager and run the line normally. The
+            # pager state is gone by the time the re-fired line is dispatched.
             more.page_quit()
-        elif cmd in ("previous", "p"):
+            more._caller.execute_cmd(raw, session=more._session)
+        elif token in _PAGE_QUIT:
+            more.page_quit()
+        elif token in _PAGE_BACK:
             more.page_back()
-        elif cmd in ("top", "t", "look", "l"):
+        elif token in _PAGE_TOP:
             more.page_top()
-        elif cmd in ("end", "e"):
+        elif token in _PAGE_END:
             more.page_end()
         else:
-            # return or n, next
+            # Empty line or 'next'/'n'.
             more.page_next()
-
-
-class CmdMoreExit(Command):
-    """
-    Any non-more command will exit the pager.
-
-    """
-
-    key = _CMD_NOMATCH
-
-    def func(self):
-        """
-        Exit pager and re-fire the failed command.
-        """
-        more = self.caller.ndb._more
-        if not more and hasattr(self.caller, "account") and self.caller.account:
-            more = self.caller.account.ndb._more
-        if not more:
-            self.caller.msg("Error in exiting the pager. Contact an admin.")
-            return
-        more.page_quit()
-
-        # re-fire the command (in new cmdset)
-        self.caller.execute_cmd(self.raw_string, session=self.session)
-
-
-class CmdSetMore(CmdSet):
-    """
-    Stores the more command
-    """
-
-    key = "more_commands"
-    priority = 110
-    mergetype = "Replace"
-
-    def at_cmdset_creation(self):
-        self.add(CmdMore())
-        self.add(CmdMoreExit())
 
 
 # resources for handling queryset inputs
@@ -233,6 +222,9 @@ class EvMore(object):
                 return
             session = sessions[0]
         self._session = session
+        # The body the action engine will read for paging input from this
+        # session (the focus), which is what the capture state must install on.
+        self._holder = capture_holder(caller, session)
 
         self._justify = justify
         self._justify_kwargs = justify_kwargs
@@ -340,7 +332,7 @@ class EvMore(object):
         del self._caller.ndb._more
         if not quiet:
             self._caller.msg(text=self._exit_msg, **self._kwargs)
-        self._caller.cmdset.remove(CmdSetMore)
+        exit_state(self._holder, EvMoreState)
         if self.exit_cmd:
             self._caller.execute_cmd(self.exit_cmd, session=self._session)
 
@@ -355,7 +347,9 @@ class EvMore(object):
             # go into paging mode
             # first pass on the msg kwargs
             self._caller.ndb._more = self
-            self._caller.cmdset.add(CmdSetMore)
+            # avoid stacking if a prior pager was still active
+            exit_state(self._holder, EvMoreState)
+            enter_state(self._holder, EvMoreState(self))
 
             # goto top of the text
             self.page_top()

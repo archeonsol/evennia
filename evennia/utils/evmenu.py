@@ -1549,12 +1549,16 @@ def get_input(caller, prompt, callback, session=None, *args, **kwargs):
     if not callable(callback):
         raise RuntimeError("get_input: input callback is not callable.")
     from evennia.actions.menus import GetInputState
-    from evennia.actions.state import enter_state, exit_state
+    from evennia.actions.state import capture_holder, enter_state, exit_state
 
+    # Install on the focus body the engine will read for the next line (not the
+    # raw caller, which can differ from the focus - e.g. an account caller while
+    # a character is puppeted). See capture_holder.
+    holder = capture_holder(caller, session)
     # Avoid stacking; the legacy InputCmdSet used Replace for the same reason.
-    exit_state(caller, GetInputState)
+    exit_state(holder, GetInputState)
     enter_state(
-        caller,
+        holder,
         GetInputState(caller, prompt, callback, session=session, args=args, kwargs=kwargs),
     )
     caller.msg(prompt, session=session)
@@ -1650,12 +1654,15 @@ def ask_yes_no(
     prompt = prompt.format(options=options)
 
     from evennia.actions.menus import YesNoState
-    from evennia.actions.state import enter_state, exit_state
+    from evennia.actions.state import capture_holder, enter_state, exit_state
 
+    # Install on the focus body the engine will read for the next line; see
+    # capture_holder (and get_input above) for why the raw caller is wrong.
+    holder = capture_holder(caller, session)
     # Avoid stacking; the legacy YesNoQuestionCmdSet used Replace for the same reason.
-    exit_state(caller, YesNoState)
+    exit_state(holder, YesNoState)
     enter_state(
-        caller,
+        holder,
         YesNoState(
             caller,
             prompt,

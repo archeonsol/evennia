@@ -38,6 +38,7 @@ __all__ = [
     "DisambiguationState",
     "format_menu_prompt",
     "parse_menu_choice",
+    "session_mismatch",
 ]
 
 
@@ -75,6 +76,21 @@ class MenuPrompt:
     options: list = field(default_factory=list)
     allow_quit: bool = True
     allow_look: bool = False
+
+
+def session_mismatch(state_session, actor) -> bool:
+    """True when a session-scoped capture should let this actor's input pass.
+
+    Input-capture (a pager, a yes/no, an editor) is logically scoped to the
+    *session* the prompt was shown to, even though the state physically lives on
+    a body. When ``state_session`` is set, only input from that same session
+    drives the capture; lines from another session controlling the same body
+    fall through to normal dispatch. A ``None`` ``state_session`` is
+    session-agnostic (any session triggers it - the legacy behavior).
+    """
+    if state_session is None:
+        return False
+    return state_session is not getattr(actor, "session", None)
 
 
 _EXIT_KEYS = frozenset({"q", "quit", "exit"})
@@ -130,12 +146,15 @@ class InputCaptureState(StateProvider):
     line is delivered to the waiting ``Deferred`` and the state exits.
     """
 
-    def __init__(self, deferred):
+    def __init__(self, deferred, session=None):
         self.deferred = deferred
+        self.session = session
 
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
         if isinstance(action, MenuInputAction):
+            return PASS
+        if session_mismatch(self.session, actor):
             return PASS
         return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
 
@@ -177,6 +196,8 @@ class GetInputState(StateProvider):
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
         if isinstance(action, MenuInputAction):
+            return PASS
+        if session_mismatch(self.session, actor):
             return PASS
         return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
 
@@ -234,6 +255,8 @@ class YesNoState(StateProvider):
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
         if isinstance(action, MenuInputAction):
+            return PASS
+        if session_mismatch(self.session, actor):
             return PASS
         return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
 

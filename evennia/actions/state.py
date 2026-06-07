@@ -31,6 +31,7 @@ __all__ = [
     "exit_state",
     "has_state",
     "get_states",
+    "capture_holder",
 ]
 
 
@@ -118,3 +119,29 @@ def get_states(holder):
     """Return a copy of ``holder``'s active states (newest last); ``[]`` if none."""
     states = _active_list(holder)
     return list(states) if states else []
+
+
+def capture_holder(caller, session=None):
+    """The body an input-capture state must attach to so the engine sees it.
+
+    Input-capture (``get_input``, ``ask_yes_no``, EvMore, EvEditor, ...) must
+    install its state on the same body the action engine reads for the *next*
+    line from ``session``: the actor's focus (the puppeted character when IC, the
+    account when OOC). Installing on the raw ``caller`` silently misses whenever
+    caller and focus differ - e.g. an account-level caller while a character is
+    puppeted - because dispatch reads states from ``Actor.holder`` (the focus),
+    not from the caller. Resolving through :meth:`Actor.from_caller` guarantees
+    the install target matches the dispatch-time read.
+
+    Args:
+        caller: the character / account / session that opened the capture.
+        session: the originating session, if known. Disambiguates the focus body
+            in multisession setups (which puppet this capture belongs to).
+
+    Returns:
+        The focus body to install the capture state on (falls back to ``caller``
+        if no focus can be resolved).
+    """
+    from .actor import Actor
+
+    return Actor.from_caller(caller, session=session).holder or caller
