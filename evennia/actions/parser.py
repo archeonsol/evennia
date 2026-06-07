@@ -68,8 +68,7 @@ class DynamicVerbResolver(Protocol):
     exactly as ``@action`` verbs register at import time.
     """
 
-    def __call__(self, stripped: str, actor) -> Optional[Action]:
-        ...
+    def __call__(self, stripped: str, actor) -> Optional[Action]: ...
 
 
 @dataclass
@@ -177,6 +176,23 @@ class ActionParser:
         switches = [p for p in parts[1:] if p]
         return verb, switches
 
+    @classmethod
+    def _split_candidate_tokens(cls, tokens):
+        """Return verb-match tokens with any inline switches separated.
+
+        Slash switches may appear on any word of a multi-word verb
+        (``deck deal/faceup``). All tokens are normalized for matching, but
+        switches are only consumed from the final matched verb span so slashes
+        in arguments remain ordinary argument text.
+        """
+        match_tokens = []
+        token_switches = []
+        for token in tokens:
+            verb_part, switches = cls._split_verb(token)
+            match_tokens.append(verb_part)
+            token_switches.append(switches)
+        return match_tokens, token_switches
+
     def _match_symbol_prefix(self, stripped):
         """Match a no-space symbol-prefix verb glued to its arguments.
 
@@ -192,7 +208,7 @@ class ActionParser:
                 match = self._registry.match_verb(sym)
                 if match is None:
                     continue
-                return sym, [], match, stripped[len(sym):].strip()
+                return sym, [], match, stripped[len(sym) :].strip()
         return None
 
     def parse(self, raw_string, actor, context=None):
@@ -217,9 +233,9 @@ class ActionParser:
         if not stripped:
             return None
 
-        tokens = stripped.split()
-        verb, switches = self._split_verb(tokens[0])
-        tokens[0] = verb
+        raw_tokens = stripped.split()
+        tokens, token_switches = self._split_candidate_tokens(raw_tokens)
+        verb = tokens[0]
 
         vm = self._registry.match_tokens(tokens)
         # Single-char lines are often compass exit aliases; prefer a dynamic
@@ -236,7 +252,8 @@ class ActionParser:
                 )
         if vm is not None:
             raw_verb = " ".join(tokens[: vm.span])
-            raw_args = " ".join(tokens[vm.span :])
+            raw_args = " ".join(raw_tokens[vm.span :])
+            switches = [switch for switches in token_switches[: vm.span] for switch in switches]
             canonical = vm.canonical
             action_cls = vm.action_cls
             confidence = vm.confidence
@@ -264,9 +281,7 @@ class ActionParser:
             raw_verb = verb
 
         try:
-            built = action_cls.parse(
-                raw_args, actor, context, switches=switches, verb=canonical
-            )
+            built = action_cls.parse(raw_args, actor, context, switches=switches, verb=canonical)
         except ParseError as err:
             return self._nomatch(raw_string, verb, error=getattr(err, "message", str(err)))
         # AmbiguousTarget intentionally NOT caught here.

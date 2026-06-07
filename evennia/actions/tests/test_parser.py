@@ -267,9 +267,7 @@ class TestDynamicResolver(unittest.TestCase):
         def resolve(stripped, actor):
             token = stripped.lower()
             if token in ambiguous:
-                raise AmbiguousTarget(
-                    candidates=[_Obj("a"), _Obj("b")], original_raw=stripped
-                )
+                raise AmbiguousTarget(candidates=[_Obj("a"), _Obj("b")], original_raw=stripped)
             if token in known:
                 return Move(direction=token)
             return None
@@ -344,7 +342,11 @@ class Go(Action):
 
 @dataclass
 class GoShard(Action):
-    pass
+    switches: tuple = ()
+
+    @classmethod
+    def parse(cls, raw_args, actor, context=None, switches=(), verb=None):
+        return cls(switches=tuple(switches or ()))
 
 
 @dataclass
@@ -411,6 +413,13 @@ class TestPhraseVerbs(unittest.TestCase):
         self.assertEqual(res.confidence, 1.0)
         self.assertEqual(res.raw_verb, "go shard")
         self.assertEqual(res.raw_args, "")
+
+    def test_switch_on_second_word_of_phrase(self):
+        res = _phrase_parser().parse("go shard/all north/east", _actor())
+        self.assertIsInstance(res.action, GoShard)
+        self.assertEqual(res.raw_verb, "go shard")
+        self.assertEqual(res.raw_args, "north/east")
+        self.assertEqual(res.action.switches, ("all",))
 
     def test_shorter_verb_when_longer_phrase_missing(self):
         res = _phrase_parser().parse("go north", _actor())
