@@ -1520,19 +1520,20 @@ def check_database(always_return=False):
     from django.db import connection
     from django.db.utils import OperationalError
 
-    # Reachability first: opening the connection runs the backend handshake and
-    # any connection_created session-init (the PostgreSQL statement_timeout SET).
-    # A failure here is connectivity, not schema, and must be reported as such
-    # rather than escaping as a raw traceback or violating always_return.
+    # Reachability via the first real query, not just opening the connection.
+    # A connection pooler (e.g. PgBouncer) accepts the client handshake and only
+    # dials its Postgres backend when a query needs a server, so a dead backend
+    # surfaces here, not at connect time. ``get_table_list`` is that first query
+    # (a SELECT against pg_catalog); an OperationalError from it is connectivity,
+    # not schema, and must be reported as such rather than escaping as a raw
+    # traceback or violating always_return.
     try:
-        connection.ensure_connection()
+        tables = connection.introspection.get_table_list(connection.cursor())
     except OperationalError as err:
         if always_return:
             return False
         print(ERROR_DATABASE_UNREACHABLE.format(traceback=err))
         sys.exit()
-
-    tables = connection.introspection.get_table_list(connection.cursor())
     if not tables or not isinstance(tables[0], str):  # django 1.8+
         tables = [tableinfo.name for tableinfo in tables]
     if tables and "accounts_accountdb" in tables:

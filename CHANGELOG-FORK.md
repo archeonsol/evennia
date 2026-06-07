@@ -25,6 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.79 — launcher reachability probe runs a real query (pooler-aware)
+
+### Engine
+
+Corrects the `.78` reachability probe in
+[`evennia/server/evennia_launcher.py`](evennia/server/evennia_launcher.py).
+`.78` probed with `connection.ensure_connection()`, which only performs the
+transport + auth handshake. A connection pooler (e.g. PgBouncer) accepts that
+handshake immediately and only dials its Postgres backend when a query needs a
+server, so a dead/unreachable backend slipped past the probe and the failure
+still escaped as a raw `OperationalError` traceback at the first real query.
+
+The probe is now that first real query itself: `get_table_list` (a `SELECT`
+against `pg_catalog`) is wrapped in the `OperationalError` handler. This forces
+the pooler to bind a backend, so backend-down surfaces as
+`ERROR_DATABASE_UNREACHABLE` (or a quiet `False` under `always_return=True`)
+rather than a traceback. The redundant `ensure_connection()` call is removed.
+`ProgrammingError` and other schema-shaped failures still fall through to the
+existing `ERROR_DATABASE` + `evennia migrate` path.
+
+### Migration
+
+None. No settings or API change.
+
 ## 6.0.0+underspire.78 — launcher reports DB connectivity failures as connectivity
 
 ### Engine
