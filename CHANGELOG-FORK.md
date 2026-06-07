@@ -25,6 +25,32 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.81 — check_database error exits use a non-zero status
+
+### Engine
+
+The error-exit paths in `check_database`
+([`evennia/server/evennia_launcher.py`](evennia/server/evennia_launcher.py))
+called bare `sys.exit()`, which exits with status **0**. A deploy/CI runner
+that gates on exit code therefore saw a *passing* run even though the launcher
+had just printed a fatal database error: the build shipped on top of an
+unreachable or broken database. (Introduced for the unreachable case in `.80`;
+the schema-error paths had carried it latently.)
+
+All three error exits now use `sys.exit(1)`:
+- `ERROR_DATABASE_UNREACHABLE` (connectivity failure, `.80`)
+- `ERROR_DATABASE` (schema missing/broken on the `AccountDB` lookup)
+- the non-interactive "could not create Account#1 superuser" failure
+
+The interactive "user answered N to the superuser-move prompt" exit is left at
+status 0: that is an operator-chosen abort, not an error.
+
+### Migration
+
+None. Behavior delta: `evennia` commands that fail on a database error now
+return a non-zero exit status, so deploy/CI pipelines correctly mark the run as
+failed instead of passing on a printed error.
+
 ## 6.0.0+underspire.80 — unreachable DB is fatal even under always_return
 
 ### Engine

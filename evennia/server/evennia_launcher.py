@@ -1538,7 +1538,7 @@ def check_database(always_return=False):
         tables = connection.introspection.get_table_list(connection.cursor())
     except OperationalError as err:
         print(ERROR_DATABASE_UNREACHABLE.format(traceback=err))
-        sys.exit()
+        sys.exit(1)
     if not tables or not isinstance(tables[0], str):  # django 1.8+
         tables = [tableinfo.name for tableinfo in tables]
     if tables and "accounts_accountdb" in tables:
@@ -1553,7 +1553,7 @@ def check_database(always_return=False):
         if always_return:
             return False
         print(ERROR_DATABASE.format(traceback=e))
-        sys.exit()
+        sys.exit(1)
     except AccountDB.DoesNotExist:
         # no superuser yet. We need to create it.
 
@@ -1602,7 +1602,7 @@ def check_database(always_return=False):
                         )
                     )
                 )
-                sys.exit()
+                sys.exit(1)
     return True
 
 
