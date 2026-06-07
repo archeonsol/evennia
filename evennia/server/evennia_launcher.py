@@ -1509,8 +1509,12 @@ def check_database(always_return=False):
     Check so the database exists.
 
     Args:
-        always_return (bool, optional): If set, will always return True/False
-            also on critical errors. No output will be printed.
+        always_return (bool, optional): If set, return ``True``/``False`` rather
+            than printing and exiting on the "database not set up yet" case (so
+            first-run ``evennia migrate`` can fall through and create the
+            schema). A genuine connectivity failure is *not* covered by this: an
+            unreachable database is never migrate-fixable, so it always reports
+            and exits regardless of this flag.
     Returns:
         exists (bool): `True` if the database exists, otherwise `False`.
 
@@ -1526,12 +1530,13 @@ def check_database(always_return=False):
     # surfaces here, not at connect time. ``get_table_list`` is that first query
     # (a SELECT against pg_catalog); an OperationalError from it is connectivity,
     # not schema, and must be reported as such rather than escaping as a raw
-    # traceback or violating always_return.
+    # traceback. This is reported and exits even under always_return: an
+    # unreachable database is never migrate-fixable, so falling through to a
+    # migrate attempt (which would only re-fail on the same dead connection)
+    # is always wrong. The not-set-up case below still honors always_return.
     try:
         tables = connection.introspection.get_table_list(connection.cursor())
     except OperationalError as err:
-        if always_return:
-            return False
         print(ERROR_DATABASE_UNREACHABLE.format(traceback=err))
         sys.exit()
     if not tables or not isinstance(tables[0], str):  # django 1.8+

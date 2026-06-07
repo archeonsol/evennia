@@ -25,6 +25,37 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.80 — unreachable DB is fatal even under always_return
+
+### Engine
+
+`check_database` in [`evennia/server/evennia_launcher.py`](evennia/server/evennia_launcher.py)
+previously returned `False` quietly on a connectivity failure when called with
+`always_return=True`. The only such caller is the `migrate` branch of `main`
+([line 2402](evennia/server/evennia_launcher.py)), which interprets `False` as
+"DB not set up yet" and falls through to running `evennia migrate`. Against an
+*unreachable* DB that fall-through reused the already-severed connection and
+died with a misleading `InterfaceError: connection already closed` deep inside
+a migration module, instead of the clear connectivity message.
+
+The reachability `OperationalError` now prints `ERROR_DATABASE_UNREACHABLE` and
+exits **regardless of `always_return`**. An unreachable database is never
+migrate-fixable, so falling through to a migrate attempt is always wrong. The
+"not set up yet" case (`ProgrammingError` on the `AccountDB` lookup) still
+honors `always_return` and returns `False`, so first-run `evennia migrate`
+against a reachable-but-empty DB is unchanged.
+
+This is the third of three `.78`–`.80` commits hardening the launcher's
+database-error reporting; together they ensure every entry point (`start`,
+plain commands, and `migrate`) reports a dead/unreachable database as a clear
+connectivity error rather than a raw traceback.
+
+### Migration
+
+None. No settings or API change. `always_return`'s documented contract is
+narrowed: it suppresses output only for the not-set-up case, never for a
+connectivity failure.
+
 ## 6.0.0+underspire.79 — launcher reachability probe runs a real query (pooler-aware)
 
 ### Engine
