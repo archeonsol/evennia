@@ -92,6 +92,10 @@ parallel-startable now.
    finish line; after the in-flight EvMenu removal **and** #5. Audit every cmdset
    consumer, then delete the cmdset machinery (`CmdSet`, handler, parser,
    syscommands, `CMD_*`, anchors, the dead `commands/default/` tree).
+- [ALPHA: engine minimal-set inventory](ALPHA-engine-minimal-inventory.md) —
+   reference, not a task. The "what's actually left" companion to #6: confirms the
+   engine modules are clean and the dead `commands/default/` tree is the only large
+   removable mass. Read before re-deriving whether game-shaped code hides in `evennia/`.
 7. [ALPHA: migration squash](ALPHA-migration-squash.md) — last; meticulous,
    cross-repo. Coordinate after #4. Per-app squash plan; hazards: scripts/0019
    reads the deleted Attribute model, GIN ops must stay `atomic=False`,
