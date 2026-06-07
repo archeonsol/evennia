@@ -25,6 +25,40 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.78 — launcher reports DB connectivity failures as connectivity
+
+### Engine
+
+`check_database` in [`evennia/server/evennia_launcher.py`](evennia/server/evennia_launcher.py)
+now probes reachability with `connection.ensure_connection()` before any
+schema introspection. Previously the first DB touch
+(`connection.introspection.get_table_list(connection.cursor())`) sat outside
+the error handler, so a connection-level failure escaped as a raw
+`OperationalError` traceback and also violated the `always_return=True`
+contract (documented to return `True`/`False` quietly on critical errors
+rather than raise).
+
+The probe catches `OperationalError` specifically. With `always_return=True`
+it returns `False`; otherwise it prints the new `ERROR_DATABASE_UNREACHABLE`
+message and exits. `ProgrammingError` and other schema-shaped failures still
+fall through to the existing `ERROR_DATABASE` + `evennia migrate` path, so the
+"can't connect" and "schema not set up" cases stay distinct.
+
+`ERROR_DATABASE_UNREACHABLE` states outright that the failure is connectivity
+(not a missing/out-of-date schema, so `migrate` will not help) and names the
+common causes: server down/unreachable, a pooler up but its backend down, bad
+credentials, or a session-init statement the server/pooler rejects. The last
+case points at `ENGINE_DATABASE_STATEMENT_TIMEOUT_MS` and
+[`evennia/server/database_postgres.py`](evennia/server/database_postgres.py),
+whose `connection_created` receiver issues a `SET statement_timeout` on each
+new connection: a fragile spot behind PgBouncer transaction-pool mode (see
+that module's own caveat).
+
+### Migration
+
+None. No settings or API change. The behavior delta is limited to clearer
+output and `always_return` being honored on connection failure.
+
 ## 6.0.0+underspire.77 — EvMore→StateProvider + focus/session-scoped captures; account rename db_key sync; retire bridge-dead default commands
 
 EvMore's interactive paging input no longer rides a cmdset. The `.73`

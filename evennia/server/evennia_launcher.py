@@ -20,8 +20,7 @@ import shutil
 import signal
 import sys
 from argparse import ArgumentParser
-from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
-                        check_output)
+from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
 
 import django
 from django.core.management import execute_from_command_line
@@ -255,6 +254,25 @@ ERROR_DATABASE = """
        evennia migrate
 
     to initialize/update the database according to your settings.
+    """
+
+ERROR_DATABASE_UNREACHABLE = """
+    ERROR: Could not connect to the database.
+    (error was '{traceback}')
+
+    This is a connectivity problem, not a missing or out-of-date schema, so
+    running `evennia migrate` will NOT fix it. The connection was accepted or
+    refused at the transport level but no usable database session could be
+    established. Common causes:
+      - the database server is down or unreachable from this host
+      - a connection pooler (e.g. PgBouncer) is up but its own backend is not
+      - bad credentials in your DATABASES settings
+      - a session-init statement the server/pooler rejects (Underspire issues
+        one on connect; see ENGINE_DATABASE_STATEMENT_TIMEOUT_MS and
+        evennia/server/database_postgres.py)
+
+    Verify the database server, any pooler in front of it, and your DATABASES
+    settings, then retry.
     """
 
 CMDLINE_HELP = """Starts, initializes, manages and operates the Evennia MU* server.
@@ -1500,6 +1518,19 @@ def check_database(always_return=False):
     """
     # Check so a database exists and is accessible
     from django.db import connection
+    from django.db.utils import OperationalError
+
+    # Reachability first: opening the connection runs the backend handshake and
+    # any connection_created session-init (the PostgreSQL statement_timeout SET).
+    # A failure here is connectivity, not schema, and must be reported as such
+    # rather than escaping as a raw traceback or violating always_return.
+    try:
+        connection.ensure_connection()
+    except OperationalError as err:
+        if always_return:
+            return False
+        print(ERROR_DATABASE_UNREACHABLE.format(traceback=err))
+        sys.exit()
 
     tables = connection.introspection.get_table_list(connection.cursor())
     if not tables or not isinstance(tables[0], str):  # django 1.8+
