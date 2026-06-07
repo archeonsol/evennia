@@ -25,6 +25,25 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.83 — phrase action switches on multi-word verbs
+
+### Engine
+
+The action parser now recognizes slash switches on any word in a matched
+multi-word verb phrase, not only the first token. This fixes inputs such as
+`deck deal/faceup prismodal 2`, which should resolve as the `deck deal` action
+with the `faceup` switch instead of falling through as an unknown
+`deck deal/faceup` verb.
+
+Argument tokens outside the matched verb span keep their original slash text,
+so commands can still accept values like `north/east` without the parser
+mistaking them for switches.
+
+### Tests
+
+- Added a parser regression test for a switch on the second word of a phrase
+  verb, including an argument containing a slash.
+
 ## 6.0.0+underspire.82 — EvEditor input-capture on the action engine
 
 ### Engine
