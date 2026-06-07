@@ -63,7 +63,7 @@ Confirmed cmdset-capture sites (grep `CMD_NOMATCH` / `CMD_NOINPUT` /
 
 Already done — do **not** redo:
 - `.73`: `get_input`, `ask_yes_no`, `@interactive`.
-- `.78`: **EvMore** ([`evennia/utils/evmore.py`](../../evennia/utils/evmore.py)).
+- `.77`: **EvMore** ([`evennia/utils/evmore.py`](../../evennia/utils/evmore.py)).
   `CmdSetMore`/`CmdMore`/`CmdMoreExit` deleted; replaced by `EvMoreState`
   (modeled on `GetInputState`/`YesNoState`). Engine-routed test in
   [`evennia/utils/tests/test_evmore.py`](../../evennia/utils/tests/test_evmore.py).
@@ -90,12 +90,12 @@ identical (and EvMore's shipped `EvMoreState` is a worked example of exactly
 this): a capturing `StateProvider` that interprets the line and either stays
 active (more editor input) or exits (quit / save-done).
 
-## Capture-state holder + session scope (decided `.78` — follow this for EvEditor)
+## Capture-state holder + session scope (decided `.77` — follow this for EvEditor)
 
 Input-capture is logically scoped to the **session** the prompt was shown to,
 even though a state physically lives on a body. The engine reads active states
 from `actor.holder` = `actor.focus` (the puppeted character IC, the account
-OOC). The pre-`.78` sites installed on the **raw caller**, which silently misses
+OOC). The pre-`.77` sites installed on the **raw caller**, which silently misses
 when caller ≠ focus (e.g. `EvMore(account, ...)` / `get_input(account, ...)`
 while a character is puppeted — installed on the account, but the next line's
 actor reads `holder = character`). Multi-puppet (`MULTISESSION_MODE` 2) also
@@ -121,10 +121,15 @@ The decided model (do **not** re-litigate; apply it to EvEditor):
    capture truly session-scoped even when two sessions drive the *same* body
    (mode 3): only the asking session's line is seized.
 
-Retrofitted across `get_input`, `ask_yes_no`, `@interactive`
-(`InputCaptureState` now takes `session`, threaded from `actor.session` in
-`engine._get_input_deferred`), and `EvMore` (`.78`). EvEditor must do the same:
-`capture_holder` for install/exit + `session_mismatch` in its capture rule.
+Retrofitted across `get_input`, `ask_yes_no`, and `EvMore` (`.77`).
+`InputCaptureState` gained a `session` arg but `@interactive`
+(`engine._get_input_deferred`) leaves it `None` *on purpose*: that prompt is
+broadcast to all sessions (`caller.msg(prompt)` with no `session=`), so scoping
+its input would strand the answer under `MULTISESSION_MODE` 1 (the player could
+answer from a window that can't reach it). Rule of thumb: **scope input only
+where output is session-targeted.** EvEditor must do the same: `capture_holder`
+for install/exit + `session_mismatch` in its capture rule (its prompts are
+session-targeted, so it scopes).
 Covered by `test_evmore.py::test_other_session_input_is_not_captured` /
 `test_same_session_input_is_captured`; add the equivalent for EvEditor.
 
@@ -248,13 +253,13 @@ finish line but needs its own care (do **not** fold it into a subsystem PR):
 - Per the roadmap, the `CMD_NOINPUT` / `CMD_NOMATCH` / `CMD_LOGINSTART` /
   `CMD_CHANNEL` constants retire with the legacy path. Confirm nothing still
   imports them (EvEditor still does today — that's why it comes first; EvMore no
-  longer does as of `.78`).
+  longer does as of `.77`).
 
 ## Scope boundary
 
 - **In scope:** EvEditor, the cross-cutting holder-consistency decision above,
   and any remaining cmdset `CMD_NOMATCH` / `CMD_NOINPUT` capture; the `.73` nits
-  above; planning the legacy-path removal. (EvMore done in `.78`.)
+  above; planning the legacy-path removal. (EvMore done in `.77`.)
 - **Out of scope:** migrating the unported **command groups** (`@dig`/`@tunnel`,
   `@set`/`@name`, batch processor) to native actions — that is a separate track
   (the `TestBuilding` / `TestBatchProcess` reds). Also out: the standalone
@@ -265,10 +270,10 @@ finish line but needs its own care (do **not** fold it into a subsystem PR):
 
 - EvEditor (and any other cmdset-capture site) captures input via an engine
   `StateProvider`, **proven by an engine-routed test** that drives input through
-  `cmdhandler` (not just the capture `func`). (EvMore done in `.78`.)
+  `cmdhandler` (not just the capture `func`). (EvMore done in `.77`.)
 - EvEditor installs/exits via `capture_holder` and session-guards its capture
   rule with `session_mismatch` (the holder + session-scope model decided in
-  `.78`; already applied to `get_input`/`ask_yes_no`/`@interactive`/`EvMore`).
+  `.77`; already applied to `get_input`/`ask_yes_no`/`EvMore`).
 - `persistent=True` editors survive a reload via the shared
   `state.rehydrate_captures` seam wired into `at_post_load`, **proven by a reload
   test** (not just func-direct). Seam contract agreed with the EvMenu owner so

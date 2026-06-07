@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.78 — EvMore paging migrated to an engine StateProvider; capture states scoped to focus + session
+## 6.0.0+underspire.77 — EvMore→StateProvider + focus/session-scoped captures; account rename db_key sync; retire bridge-dead default commands
 
 EvMore's interactive paging input no longer rides a cmdset. The `.73`
 deprecation flagged it as bypassed by the engine bridge; it now captures input
@@ -71,10 +71,11 @@ another body is not hijacked).
   actor)` helper; `InputCaptureState`/`GetInputState`/`YesNoState` capture rules
   now `PASS` when the line's session isn't the one the prompt was opened on
   (`None` session = agnostic, the prior behavior). `InputCaptureState` gained a
-  `session` arg.
-- [`evennia/actions/engine.py`](evennia/actions/engine.py): `_get_input_deferred`
-  threads `actor.session` into `InputCaptureState`, scoping `@interactive`
-  prompts to the asking session.
+  `session` arg. Scoping applies only to captures whose output is
+  session-targeted: `@interactive` (`_get_input_deferred` in `engine.py`)
+  broadcasts its prompt to all sessions, so it leaves the session `None` — any of
+  a player's windows may answer (correct under `MULTISESSION_MODE` 1; distinct
+  puppets are already isolated by body).
 - [`evennia/utils/evmenu.py`](evennia/utils/evmenu.py): `get_input` / `ask_yes_no`
   install via `capture_holder` instead of the raw caller.
 - [`evennia/utils/evmore.py`](evennia/utils/evmore.py): `EvMore` resolves
@@ -88,13 +89,11 @@ another body is not hijacked).
   path and must migrate before the legacy cmdset dispatch path is removed. See
   the `.73` deprecation note.
 
-## 6.0.0+underspire.77 — account rename db_key sync; retire bridge-dead default commands
+### Engine — account rename
 
 Account renames now keep the `db_key` identity column in sync and fire the rename
 signal, and three default commands that the action-engine bridge had already made
 unreachable are removed. No schema changes.
-
-### Engine — account rename
 
 - [`evennia/accounts/models.py`](evennia/accounts/models.py): `AccountDB`'s
   `key`/`name`/`username` property setter (`__username_set`) now also writes the

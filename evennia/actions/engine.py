@@ -113,7 +113,12 @@ def _get_input_deferred(actor, prompt) -> Deferred:
     caller = _caller_for(actor)
     if prompt:
         caller.msg(prompt)
-    actor.enter_state(InputCaptureState(d, session=getattr(actor, "session", None)))
+    # Agnostic capture (no session scope): the prompt above is broadcast to every
+    # session (no session= on msg), so under MULTISESSION_MODE 1 the player may
+    # answer from any of their windows. Body isolation already separates distinct
+    # puppets (mode 2), so @interactive needs no session guard. Session-scoping is
+    # for captures whose output is session-targeted (get_input/ask_yes_no/EvMore).
+    actor.enter_state(InputCaptureState(d))
     return d
 
 
