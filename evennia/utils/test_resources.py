@@ -653,7 +653,6 @@ class EvenniaTest(EvenniaTestMixin, TestCase):
 
 @patch("evennia.commands.account.COMMAND_DEFAULT_CLASS", Command)
 @patch("evennia.commands.admin.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.batchprocess.COMMAND_DEFAULT_CLASS", Command)
 @patch("evennia.commands.building.COMMAND_DEFAULT_CLASS", Command)
 @patch("evennia.commands.comms.COMMAND_DEFAULT_CLASS", Command)
 @patch("evennia.commands.general.COMMAND_DEFAULT_CLASS", Command)

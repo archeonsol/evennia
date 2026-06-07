@@ -165,7 +165,10 @@ class AccountDB(TypedObject, AbstractUser):
     def __username_set(self, value):
         old_name = self.username
         self.username = value
-        self.save(update_fields=["username"])
+        # username and db_key are aliases for the same account identity; keep the
+        # TypedObject key column in sync so a rename never leaves it stale.
+        self.db_key = value
+        self.save(update_fields=["username", "db_key"])
         SIGNAL_ACCOUNT_POST_RENAME.send(self, old_name=old_name, new_name=value)
 
     def __username_del(self):

@@ -60,13 +60,54 @@ Currently parallel-startable (no unresolved dependencies):
   prove routing. Clears the blockers for removing the legacy cmdset
   dispatch path.
 
-**Boundary work (depends on architecture-doc substrate):**
+**Alpha-promotion audit (read-only whole-engine audit, 2026-06-06):**
 
-- [C1 + C2: boundary work finalization](C1-C2-boundary-finalization.md)
-  — small. Last two items in
-  [`engine-boundary-migration.md`](../docs/engine-boundary-migration.md).
-  C1 depends on M1; C2 depends on R1. Prompt includes a dependency
-  check to confirm path before starting.
+Output of a verified 6-system audit (smells, incomplete refactors, shims,
+dead code, stale migrations, inefficiency) gating pre-alpha → alpha. Listed in
+**recommended execution order**: independent low-risk cleanups first, then the
+cross-repo decisions, then the dependent removals, squash last. 1-3 are
+parallel-startable now.
+
+1. [ALPHA: dead-code batch](ALPHA-dead-code-batch.md) — start here. Low-risk
+   grep-verified removals (run_async, orphaned session/predicate/lock code, M2M
+   cache dead paths); shrinks the surface for everything after. Independent.
+   Routes incomplete-refactor seams to I1/AS2/cmdset tracks.
+2. [ALPHA: shim + except cleanup](ALPHA-shim-except-cleanup.md) — low-risk and
+   independent. Remove AMP/ondemand pickle shims (security: pickle on the wire),
+   the `get_objs_with_attr` shim, and four bug-hiding `except: pass` cache/metrics
+   sites.
+3. [ALPHA: ssh.py portal boundary](ALPHA-ssh-portal-boundary.md) — self-contained
+   decision: the one ORM bleed into the Portal process; remove SSH or delegate
+   auth over AMP.
+4. [ALPHA: jobs/ + event bus boundary](ALPHA-jobs-eventbus-boundary.md) —
+   cross-repo decision; settle before the squash (it owns the `server/0004`
+   model). Two fully-built-but-unconsumed subsystems + an `evennia.events` vs
+   `evennia.actions.events` name collision. Wire (machinery in engine, usage in
+   game) or cut.
+5. [ALPHA: login engine ownership](ALPHA-login-engine-ownership.md) — cross-repo;
+   must land before cmdset retirement can delete the `cmdobj=` login path. Move
+   login fully into the engine (a promote-to-engine smell); kill the phantom
+   `LoginSessionMixin` comment; unify the web/REST path.
+6. [ALPHA: cmdset retirement audit](ALPHA-cmdset-retirement-audit.md) — the CM1
+   finish line; after the in-flight EvMenu removal **and** #5. Audit every cmdset
+   consumer, then delete the cmdset machinery (`CmdSet`, handler, parser,
+   syscommands, `CMD_*`, anchors, the dead `commands/default/` tree).
+7. [ALPHA: migration squash](ALPHA-migration-squash.md) — last; meticulous,
+   cross-repo. Coordinate after #4. Per-app squash plan; hazards: scripts/0019
+   reads the deleted Attribute model, GIN ops must stay `atomic=False`,
+   typeclasses squashes last.
+8. [ALPHA: engine ↔ game cross-review](ALPHA-engine-game-cross-review.md) — stub;
+   after the known items above land. Bidirectional pass the repo-locked audit
+   couldn't do: engine surfaces the game never uses, and game logic that should
+   be promoted to the engine. Produces follow-up prompts of its own.
+
+**Re-decide (parked questions with new signal):**
+
+- [Engine metrics / observability surface](engine-metrics-surface.md) — a metrics
+  path (`attribute_metrics`) crept into the tree undecided and error-swallowed.
+  Drop it or commit to a deliberate surface. (The engine/game boundary migration
+  is complete; its outcome is recorded in
+  [`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md).)
 
 Each prompt invites the agent to propose a design before
 implementing. The user reviews the design before the agent starts
@@ -114,12 +155,12 @@ backlog.
 
 ## Cross-references
 
-- [Engine API Architecture](../docs/engine-api-architecture.md) —
-  Level 2 target; canonical definition of every item here.
-- [Engine Boundary Migration](../docs/engine-boundary-migration.md) —
-  fork/engine boundary work (different doc, different scope).
-- [Engine Long-Horizon Sketch](../docs/engine-long-horizon.md) —
-  Level 3 sketch (post-Level 2; not parallelizable yet).
+- [Engine Architecture](../docs/engine-architecture/index.md) —
+  decisions record; canonical definition of every item here
+  ([decisions](../docs/engine-architecture/decisions.md) shipped,
+  [committed](../docs/engine-architecture/committed.md) not-yet-built,
+  [horizon](../docs/engine-architecture/horizon.md) speculative).
+- [Core Beliefs](../docs/core-beliefs.md) — the engine/game placement rule.
 - [Typeclass Hooks Contracts](../../docs/source/Components/Typeclass-Hooks.md) +
   [Reference Tables](../../docs/source/Components/Typeclass-Hooks-Reference.md) — B1's
   output; consumed by H1, M1, R1, CM1.

@@ -54,9 +54,9 @@ P3 (one canonical answer) applied to the identity space.
 
 ## Background
 
-Target item I1 in
-[`engine-api-architecture.md`](../docs/engine-api-architecture.md).
-Migrated there from the boundary-migration doc as substrate.
+Recorded as a decision in
+[`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md)
+(Actor abstraction — substrate shipped, closeout pending).
 
 Current state: `self.caller` in a command can be Session, Account,
 or Object depending on cmdset routing. `AccountCommand` exists to

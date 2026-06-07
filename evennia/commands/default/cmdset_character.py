@@ -8,7 +8,6 @@ Account cmdset. Account commands remain available also to Characters.
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.default import (
     admin,
-    batchprocess,
     building,
     general,
     help,
@@ -74,7 +73,6 @@ class CharacterCmdSet(CmdSet):
         self.add(building.CmdName())
         self.add(building.CmdDesc())
         self.add(building.CmdCpAttr())
-        self.add(building.CmdMvAttr())
         self.add(building.CmdCopy())
         self.add(building.CmdFind())
         self.add(building.CmdOpen())
@@ -82,7 +80,6 @@ class CharacterCmdSet(CmdSet):
         self.add(building.CmdUnLink())
         self.add(building.CmdCreate())
         self.add(building.CmdDig())
-        self.add(building.CmdTunnel())
         self.add(building.CmdDestroy())
         self.add(building.CmdExamine())
         self.add(building.CmdTypeclass())
@@ -92,7 +89,3 @@ class CharacterCmdSet(CmdSet):
         self.add(building.CmdSpawn())
         self.add(building.CmdScripts())
         self.add(building.CmdObjects())
-
-        # Batchprocessor commands
-        self.add(batchprocess.CmdBatchCommands())
-        self.add(batchprocess.CmdBatchCode())

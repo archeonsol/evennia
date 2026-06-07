@@ -61,7 +61,7 @@ def check_line_budget(agents_md, docs_dir, repo_root, **_kw):
         warnings += 1
 
     if docs_dir.exists():
-        for doc in sorted(docs_dir.glob("*.md")):
+        for doc in sorted(docs_dir.rglob("*.md")):
             lines = doc.read_text().splitlines()
             count = len(lines)
             if count > MAX_DOC_LINES:
@@ -92,9 +92,10 @@ def check_broken_links(agents_md, docs_dir, repo_root, **_kw):
             warn("BROKEN_LINK", f"AGENTS.md links to '{target}' ({label}) — file not found.")
             warnings += 1
 
-    # Also check links inside .agents/docs/
+    # Also check links inside .agents/docs/ (recursively, so nested doc
+    # directories stay link-checked instead of becoming rot blind spots)
     if docs_dir.exists():
-        for doc in docs_dir.glob("*.md"):
+        for doc in docs_dir.rglob("*.md"):
             doc_text = doc.read_text()
             for match in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", doc_text):
                 label, target = match.group(1), match.group(2)
@@ -110,19 +111,34 @@ def check_broken_links(agents_md, docs_dir, repo_root, **_kw):
 
 
 def check_orphan_docs(agents_md, docs_dir, repo_root, **_kw):
-    """Every file in .agents/docs/ should be referenced from AGENTS.md."""
+    """Every doc should be reachable by progressive disclosure: referenced from
+    AGENTS.md or from another doc. This allows a doc directory whose sub-files are
+    linked from its own index rather than listed individually in AGENTS.md."""
     warnings = 0
     if not docs_dir.exists() or not agents_md.exists():
         return 0
 
+    docs = sorted(docs_dir.rglob("*.md"))
+    # Reference corpus: AGENTS.md + every doc except the one being checked.
     agents_text = agents_md.read_text()
-    for doc in sorted(docs_dir.glob("*.md")):
+    doc_texts = {doc: doc.read_text() for doc in docs}
+
+    for doc in docs:
         rel_path = str(doc.relative_to(repo_root))
-        # Check both with and without leading ./
-        if rel_path not in agents_text and f"./{rel_path}" not in agents_text:
+        name = doc.name
+        referenced = False
+        for source, text in [(agents_md, agents_text), *doc_texts.items()]:
+            if source == doc:
+                continue
+            # Match the full repo-relative path or a path ending in this file
+            # (sibling/relative links inside the docs tree use shorter forms).
+            if rel_path in text or f"./{rel_path}" in text or f"]({name}" in text or f"/{name}" in text:
+                referenced = True
+                break
+        if not referenced:
             warn(
                 "ORPHAN",
-                f"{rel_path} is not referenced from AGENTS.md — "
+                f"{rel_path} is not referenced from AGENTS.md or any other doc — "
                 f"agents won't discover it via progressive disclosure.",
             )
             warnings += 1
@@ -164,7 +180,7 @@ def check_duplication(agents_md, docs_dir, repo_root, **_kw):
 
     agents_paragraphs = _extract_paragraphs(agents_md.read_text())
 
-    for doc in sorted(docs_dir.glob("*.md")):
+    for doc in sorted(docs_dir.rglob("*.md")):
         doc_paragraphs = _extract_paragraphs(doc.read_text())
         rel = doc.relative_to(repo_root)
 
@@ -196,7 +212,7 @@ def check_stale_references(agents_md, docs_dir, repo_root, src_dir, **_kw):
     if agents_md.exists():
         all_docs.append(agents_md)
     if docs_dir.exists():
-        all_docs.extend(docs_dir.glob("*.md"))
+        all_docs.extend(docs_dir.rglob("*.md"))
 
     for doc in all_docs:
         text = doc.read_text()

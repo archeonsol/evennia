@@ -61,11 +61,10 @@ prior one.
 ## Existing code to study
 
 - The nine files listed above, in `evennia/`.
-- [`core-beliefs.md`](../docs/core-beliefs.md) for the lane
-  test.
-- [`engine-boundary-migration-archive.md`](../docs/engine-boundary-migration-archive.md)
-  for past boundary judgments — useful precedent for what counts
-  as which lane.
+- [`core-beliefs.md`](../docs/core-beliefs.md) for the lane test
+  (framing test + agnostic-by-opt-out) — the rule for what counts as
+  which lane. (Prior worked boundary judgments are in git history,
+  in the retired `engine-boundary-migration` docs.)
 
 ## Done means
 

@@ -11,10 +11,9 @@ uv pip install -e .                          # dev install
 make format                                  # black + isort
 make lint                                    # black --check
 make cleanrot                                # check agent context for rot
-uv run pytest .agents/tools/tests/ -v        # agent tooling tests (pytest)
 ```
 
-**Running Evennia tests**: `make test` requires `evennia` on PATH. With `uv run`, init a test game dir first and run from inside it. See [Testing](.agents/docs/testing.md).
+**Running tests**: `make test` requires `evennia` on PATH — with `uv run`, init a test game dir first and run from inside it. Agent tooling tests live in `.agents/tools/tests/` (pytest). See [Testing](.agents/docs/testing.md).
 
 ## Key Rules
 
@@ -37,6 +36,5 @@ Vendor-agnostic skills live in `.agents/skills/`. Vendor directories (`.claude/s
 - [Releases & Versioning](.agents/docs/releases.md) — when to cut a release, files to update, changelog + tag procedure
 - [CI/CD](.agents/docs/ci.md) — GitHub Actions workflows, test matrix, database configs, Docker, secrets
 - [GitHub Issues & PRs](.agents/docs/github.md) — listing, searching, and reviewing issues/PRs with `gh` CLI
-- [Future Ideas](FUTURE-IDEAS.md), [Engine Boundary Migration](.agents/docs/engine-boundary-migration.md) (history + disposed items in [archive](.agents/docs/engine-boundary-migration-archive.md)) — deferred design directions and the upstream PR plan for engine/game boundary moves; check before re-deriving. Hygiene findings live as one-prompt-per-finding under [`.agents/prompts/`](.agents/prompts/) (F-prefixed).
-- [Engine API Architecture](.agents/docs/engine-api-architecture.md) — two-layer engine target, render/deliver pipeline, lock objects, hook registry, etc. Gated on Underspire launch as API-freeze deadline. Companion to the boundary migration doc.
-- [Engine Long-Horizon Sketch](.agents/docs/engine-long-horizon.md) — speculative 2.0-scale items (typeclass decoupling, headless mode, package split). Sketch-level, not committed; exists so Level 2 decisions don't close off Level 3 paths.
+- [Future Ideas](FUTURE-IDEAS.md) — deferred design directions; check before re-deriving. The engine/game placement rule lives in [Core Beliefs](.agents/docs/core-beliefs.md). Hygiene + architecture findings live as one-prompt-per-finding under [`.agents/prompts/`](.agents/prompts/).
+- [Engine Architecture](.agents/docs/engine-architecture/index.md) — the engine's decisions record (two-layer thesis, P1-P3 principles): [decisions](.agents/docs/engine-architecture/decisions.md) (shipped), [committed](.agents/docs/engine-architecture/committed.md) (R1/L1/W1 not yet built), [horizon](.agents/docs/engine-architecture/horizon.md) (speculative). Check before re-deriving architecture.

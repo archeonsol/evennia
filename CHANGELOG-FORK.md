@@ -25,6 +25,69 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.77 — account rename db_key sync; retire bridge-dead default commands
+
+Account renames now keep the `db_key` identity column in sync and fire the rename
+signal, and three default commands that the action-engine bridge had already made
+unreachable are removed. No schema changes.
+
+### Engine — account rename
+
+- [`evennia/accounts/models.py`](evennia/accounts/models.py): `AccountDB`'s
+  `key`/`name`/`username` property setter (`__username_set`) now also writes the
+  `db_key` column in the same save, so a rename no longer leaves `db_key` stranded
+  at the creation-time value. The setter already fired
+  [`SIGNAL_ACCOUNT_POST_RENAME`](evennia/server/signals.py); routing renames
+  through the property is the supported path.
+- [`evennia/commands/default/building.py`](evennia/commands/default/building.py):
+  `CmdName`'s account branch (`@name *acct=new`) now sets `obj.key` instead of
+  writing `obj.username` directly, so the db_key sync and signal fire.
+
+### Engine — remove action-bridge-dead default commands
+
+Since the action engine became the sole input dispatcher, a legacy command that
+delegated to another via an in-process `self.execute_cmd("@othercmd ...")` string
+re-dispatch can no longer resolve that verb (the bridge owns input and the target
+is not a registered action). These commands were already broken for normal input
+and are removed rather than left as dead surface.
+
+- [`evennia/commands/default/building.py`](evennia/commands/default/building.py):
+  removed `CmdMvAttr` (delegated to `@cpattr`) and `CmdTunnel` (delegated to
+  `@dig`), plus their `__all__` entries and the
+  [`cmdset_character.py`](evennia/commands/default/cmdset_character.py)
+  registrations.
+- `evennia/commands/default/batchprocess.py` **deleted** —
+  `CmdBatchCommands`/`CmdBatchCode` ran each `.ev` line via
+  `caller.execute_cmd(line)` (bridge-dead in core), and their interactive mode was
+  built on the cmdset-capture machinery now being retired. The `.ev` file *parser*
+  ([`evennia/utils/batchprocessors.py`](evennia/utils/batchprocessors.py)) is
+  retained. Removed the flat-API registration in
+  [`evennia/__init__.py`](evennia/__init__.py) and the test-base patch in
+  [`evennia/utils/test_resources.py`](evennia/utils/test_resources.py).
+
+### Migration notes
+
+- Downstream code that wraps or subclasses
+  `evennia.commands.default.batchprocess` (`CmdBatchCommands`/`CmdBatchCode`) must
+  rehome the batch processor into the game; the `.ev` parser in
+  `evennia.utils.batchprocessors` is unaffected.
+- Account renames must go through the `account.key`/`account.name` property, not a
+  raw `account.username =` write, to pick up the `db_key` sync and
+  `SIGNAL_ACCOUNT_POST_RENAME`.
+
+### Tests
+
+- [`evennia/accounts/tests.py`](evennia/accounts/tests.py): new
+  `test_rename_syncs_db_key_and_fires_signal` (rename via the property asserts
+  `db_key`/`username` aligned and persisted, and the signal fired with old/new
+  names).
+- [`evennia/commands/default/tests.py`](evennia/commands/default/tests.py):
+  `test_name` now asserts `db_key` syncs on `@name *acct`; removed `test_tunnel`,
+  `test_tunnel_exit_typeclass`, `TestBatchProcess`, and the `CmdMvAttr` assertions
+  in `test_attribute_commands`.
+
+---
+
 ## 6.0.0+underspire.76 — mux-style argument parser for the action engine
 
 New helper that gives the action engine the lhs/rhs/objdef structure the legacy

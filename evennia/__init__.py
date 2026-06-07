@@ -356,7 +356,6 @@ def _init(portal_mode=False):
             from .commands.default import (
                 account,
                 admin,
-                batchprocess,
                 building,
                 comms,
                 general,
@@ -366,8 +365,6 @@ def _init(portal_mode=False):
             )
 
             add_cmds(admin)
-            add_cmds(building)
-            add_cmds(batchprocess)
             add_cmds(building)
             add_cmds(comms)
             add_cmds(general)

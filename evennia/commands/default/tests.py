@@ -28,7 +28,6 @@ from evennia.commands.command import Command, InterruptCommand
 from evennia.commands.default import (
     account,
     admin,
-    batchprocess,
     building,
     comms,
     general,
@@ -898,8 +897,6 @@ class TestBuilding(BaseEvenniaCommandTest):
                 "(value: 'value2')"
             ),
         )
-        self.call(building.CmdMvAttr(), "", "Usage: ")
-        self.call(building.CmdMvAttr(), "Obj2/test2 = Obj/test3", "Moved Obj2.test2 -> Obj.test3")
         self.call(building.CmdCpAttr(), "", "Usage: ")
         self.call(building.CmdCpAttr(), "Obj/test1 = Obj2/test3", "Copied Obj.test1 -> Obj2.test3")
 
@@ -1263,6 +1260,9 @@ class TestBuilding(BaseEvenniaCommandTest):
             "*TestAccount=TestAccountRenamed",
             "Account's name changed to 'TestAccountRenamed'.",
         )
+        # rename must sync both the username alias and the db_key identity column
+        self.assertEqual(self.account.username, "TestAccountRenamed")
+        self.assertEqual(self.account.db_key, "TestAccountRenamed")
         self.call(building.CmdName(), "*NotFound=TestAccountRenamed", "Could not find '*NotFound'")
         self.call(
             building.CmdName(), "Obj3=Obj4;foo;bar", "Object's name changed to 'Obj4' (foo, bar)."
@@ -1358,22 +1358,6 @@ class TestBuilding(BaseEvenniaCommandTest):
     def test_dig(self):
         self.call(building.CmdDig(), "TestRoom1=testroom;tr,back;b", "Created room TestRoom1")
         self.call(building.CmdDig(), "", "Usage: ")
-
-    def test_tunnel(self):
-        self.call(building.CmdTunnel(), "n = TestRoom2;test2", "Created room TestRoom2")
-        self.call(building.CmdTunnel(), "", "Usage: ")
-        self.call(building.CmdTunnel(), "foo = TestRoom2;test2", "tunnel can only understand the")
-        self.call(building.CmdTunnel(), "/tel e = TestRoom3;test3", "Created room TestRoom3")
-        DefaultRoom.objects.get_family(db_key="TestRoom3")
-        exits = DefaultExit.objects.filter_family(db_key__in=("east", "west"))
-        self.assertEqual(len(exits), 2)
-
-    def test_tunnel_exit_typeclass(self):
-        self.call(
-            building.CmdTunnel(),
-            "n:evennia.objects.exit.DefaultExit = TestRoom3",
-            "Created room TestRoom3",
-        )
 
     def test_exit_commands(self):
         self.call(
@@ -2232,35 +2216,6 @@ class TestDiscord(BaseEvenniaCommandTest):
         self.call(cmdobj, "testchannel", None)
         self.assertIn("testchannel", self.out)
         self.assertIn("5555555", self.out)
-
-
-class TestBatchProcess(BaseEvenniaCommandTest):
-    """
-    Test the batch processor.
-
-    """
-
-    # there is some sort of issue with the mock; it needs to loaded once to work
-    from evennia.contrib.tutorials.red_button import red_button  # noqa
-
-    @patch("evennia.contrib.tutorials.red_button.red_button.repeat")
-    @patch("evennia.contrib.tutorials.red_button.red_button.delay")
-    def test_batch_commands(self, mock_tutorials, mock_repeat):
-        # cannot test batchcode here, it must run inside the server process
-        self.call(
-            batchprocess.CmdBatchCommands(),
-            "batchprocessor.example_batch_cmds_test",
-            (
-                "Running Batch-command processor - Automatic mode for"
-                " batchprocessor.example_batch_cmds"
-            ),
-        )
-        # we make sure to delete the button again here to stop the running reactor
-        confirm = building.CmdDestroy.confirm
-        building.CmdDestroy.confirm = False
-        self.call(building.CmdDestroy(), "button", "button was destroyed.")
-        building.CmdDestroy.confirm = confirm
-        mock_repeat.assert_called()
 
 
 class CmdInterrupt(Command):

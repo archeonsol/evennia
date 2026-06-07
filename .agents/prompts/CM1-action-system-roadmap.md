@@ -313,7 +313,7 @@ code gate `requires=Builder` and a persisted `perm(Builder)` agree by constructi
 permission store. `from_lockstring` (+ `LegacyLock` fallback) is a migration aid for
 *code* lockstrings, not a mandate to convert every runtime lock. The architecture
 doc's I1 and L1 entries become "outputs of CM1" rather than "dependencies of CM1."
-Update `engine-api-architecture.md` when these phases ship.
+Update `engine-architecture/decisions.md` when these phases ship.
 
 ---
 
@@ -1899,7 +1899,7 @@ cmdset substrate once no command needs it.*
    format for runtime/persisted per-object locks, and `perm()`/`pperm()` remain as
    thin shims over the shared `resolve_capabilities`. Do not remove the DSL; only
    confirm the code-gate authoring surface no longer constructs `LegacyLock` leaves.
-7. Update `engine-api-architecture.md` CM1 entry to "done." Mark I1 and L1
+7. Update `engine-architecture/decisions.md` CM1 entry to "done." Mark I1 and L1
    initial-scope items as "shipped via CM1" (L1 = `Capability`/`Predicate` for code
    gates; one shared permission model; persisted-lock DSL retained).
 
@@ -2046,5 +2046,5 @@ target 0% by Phase 8.
 - [ ] `docs/writing_commands.md` rewritten for new model.
 - [ ] `docs/architecture.md` command system section updated.
 - [ ] Engine pin bumped at each phase boundary.
-- [ ] `engine-api-architecture.md` CM1 entry marked done; I1/L1 initial scope noted as shipped via CM1.
+- [ ] `engine-architecture/decisions.md` CM1 entry marked done; I1/L1 initial scope noted as shipped via CM1.
 - [ ] PR description links this roadmap.

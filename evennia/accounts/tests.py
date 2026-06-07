@@ -167,6 +167,35 @@ class TestDefaultAccountAuth(BaseEvenniaTest):
             "Failed logins should have been throttled.",
         )
 
+    def test_rename_syncs_db_key_and_fires_signal(self):
+        """Renaming an account keeps db_key in sync with username and fires
+        the rename signal (the key/name/username properties are aliases for
+        the same identity)."""
+        from evennia.accounts.models import AccountDB
+        from evennia.server.signals import SIGNAL_ACCOUNT_POST_RENAME
+
+        captured = []
+
+        def _receiver(sender, old_name, new_name, **kwargs):
+            captured.append((old_name, new_name))
+
+        old_name = self.account.username
+        new_name = f"Renamed{randint(100000, 999999)}"
+        SIGNAL_ACCOUNT_POST_RENAME.connect(_receiver, weak=False)
+        try:
+            self.account.key = new_name
+        finally:
+            SIGNAL_ACCOUNT_POST_RENAME.disconnect(_receiver)
+
+        # property reads reflect the new name
+        self.assertEqual(self.account.username, new_name)
+        self.assertEqual(self.account.key, new_name)
+        # db_key is synced and persisted, not left at the creation-time value
+        self.assertEqual(self.account.db_key, new_name)
+        self.assertEqual(AccountDB.objects.get(pk=self.account.pk).db_key, new_name)
+        # signal fired with the correct names
+        self.assertEqual(captured, [(old_name, new_name)])
+
     def test_username_validation(self):
         "Check username validators deny relevant usernames"
         # Should not accept Unicode by default, lest users pick names like this

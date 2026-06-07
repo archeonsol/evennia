@@ -24,11 +24,15 @@ outcome.
 
 ## Background
 
-Target item A1 in
-[`engine-api-architecture.md`](../docs/engine-api-architecture.md).
-The architecture-doc entry still states the old "descriptors are
-canonical (P3)" framing; treat that as the *prior* proposal this
-prompt is re-examining, not as settled.
+Background in
+[`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md)
+(JSONB attribute storage). **JSONB shipped and solved the storage core** of A1:
+the M2M `Attribute` model is gone, values live in `db_attrs` with GIN indexes,
+behind an `IAttributeBackend` interface. So the row-count / queryability problem
+described below is largely *historical context*. What remains open for A1 is the
+typed attribute **API** question (descriptors vs. component bags vs. nothing) —
+re-examined here, not settled. The old "descriptors are canonical (P3)" framing
+is the prior proposal, not the answer.
 
 The driving problem is **performance and queryability, not just
 ergonomics.** "Everything is an Attribute" pins almost all state into
@@ -89,7 +93,7 @@ X." It is also a **massive** change: effectively a second storage
 substrate beside the typeclass+Attribute model, and almost certainly
 too large for this item. Name it as the long horizon so the A1 design
 does not foreclose it (keep any new primitive backend-agnostic per the
-discipline in [`engine-long-horizon.md`](../docs/engine-long-horizon.md)),
+discipline in [`engine-architecture/committed.md`](../docs/engine-architecture/committed.md)),
 but do not commit to building it here without explicit user direction.
 
 ## Approach
