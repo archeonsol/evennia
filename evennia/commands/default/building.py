@@ -15,7 +15,6 @@ from evennia.commands.cmdhandler import generate_cmdset_providers, get_and_merge
 from evennia.locks.lockhandler import LockException
 from evennia.objects.models import ObjectDB
 from evennia.objects.search_result import Ambiguous, Found, NotFound
-from evennia.prototypes import menus as olc_menus
 from evennia.prototypes import prototypes as protlib
 from evennia.prototypes import spawner
 from evennia.scripts.models import ScriptDB
@@ -4001,8 +4000,6 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
       spawn/update <prototype_key>
 
       spawn/save <prototype_dict>
-      spawn/edit [<prototype_key>]
-      olc     - equivalent to spawn/edit
 
     Switches:
       noloc - allow location to be None if not specified explicitly. Otherwise,
@@ -4017,7 +4014,6 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
                them with latest version of given prototype. If given with /save,
                will auto-update all objects with the old version of the prototype
                without asking first.
-      edit, menu, olc - create/manipulate prototype in a menu interface.
 
     Example:
       spawn GOBLIN
@@ -4053,7 +4049,6 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@spawn"
-    aliases = ["@olc"]
     switch_options = (
         "noloc",
         "search",
@@ -4063,10 +4058,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
         "examine",
         "save",
         "delete",
-        "menu",
-        "olc",
         "update",
-        "edit",
     )
     locks = "cmd:perm(spawn) or perm(Builder)"
     help_category = "Building"
@@ -4260,23 +4252,6 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
 
         caller = self.caller
         noloc = "noloc" in self.switches
-
-        # run the menu/olc
-        if (
-            self.cmdstring == "olc"
-            or "menu" in self.switches
-            or "olc" in self.switches
-            or "edit" in self.switches
-        ):
-            # OLC menu mode
-            prototype = None
-            if self.lhs:
-                prototype_key = self.lhs
-                prototype = self._search_prototype(prototype_key)
-                if not prototype:
-                    return
-            olc_menus.start_olc(caller, session=self.session, prototype=prototype)
-            return
 
         if "search" in self.switches:
             # query for a key match. The arg is a search query or nothing.
