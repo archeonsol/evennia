@@ -68,10 +68,14 @@ dead code, stale migrations, inefficiency) gating pre-alpha → alpha. Listed in
 cross-repo decisions, then the dependent removals, squash last. 1-3 are
 parallel-startable now.
 
-1. [ALPHA: dead-code batch](ALPHA-dead-code-batch.md) — start here. Low-risk
-   grep-verified removals (run_async, orphaned session/predicate/lock code, M2M
-   cache dead paths); shrinks the surface for everything after. Independent.
-   Routes incomplete-refactor seams to I1/AS2/cmdset tracks.
+1. [ALPHA: dead-code batch](ALPHA-dead-code-batch.md) — **re-verified 2026-06-07,
+   list had drifted.** Tier 1 is the safe removal set (run_async, orphaned
+   session methods, init_new_account, _next_task_id, nomatch alias,
+   remove_attributes_on_delete, south branch, clean_senddata residue,
+   cumulative_rank_mask). Tier 2 claims are stale, do NOT remove (from_lockstring/
+   LegacyLock and the middleware/noinput path are live; the Redis L2 cache is
+   already gone). Tier 3 (webclient legacy, context account branch, base
+   _get_cache_key) are behavior changes needing their own trace/test. Independent.
 2. [ALPHA: shim + except cleanup](ALPHA-shim-except-cleanup.md) — low-risk and
    independent. Remove AMP/ondemand pickle shims (security: pickle on the wire),
    the `get_objs_with_attr` shim, and four bug-hiding `except: pass` cache/metrics
