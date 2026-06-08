@@ -96,7 +96,6 @@ _LAZY_EXPORTS = {
     "ansi": ".utils.ansi:",
     "spawn": ".prototypes.spawner:spawn",
     "contrib": ".contrib:",
-    "EvMenu": ".utils.evmenu:EvMenu",
     "EvTable": ".utils.evtable:EvTable",
     "EvForm": ".utils.evform:EvForm",
     "EvEditor": ".utils.eveditor:EvEditor",
