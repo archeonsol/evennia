@@ -312,7 +312,7 @@ the authoritative roster.
 | `at_object_post_copy` | `LifecycleMixin` | source | Fires on the SOURCE object (not the new copy). |
 | `at_object_post_creation` | `LifecycleMixin` | self | Fires after at_object_creation, lets game-side code run final setup. |
 | `at_post_access` | `LifecycleMixin` | target | Fires after a lock check resolves. Gets the result and the accessing object. |
-| `at_post_load` | `LifecycleMixin` | self | Stub override of TypedObject.at_post_load. Fires on every cache load; overrides must be idempotent. |
+| `at_post_load` | `LifecycleMixin` | self | Object override of TypedObject.at_post_load (shadows it; apply_schema_migrations does not run for objects). Reinstalls persisted input-capture states. Fires on every cache load; overrides must be idempotent. |
 | `at_post_puppet` | `LifecycleMixin` | target | Reattach path fires with reattach=True kwarg. |
 | `at_post_unpuppet` | `LifecycleMixin` | target | Fires after the session detaches. The focus stack has collapsed off this body. |
 | `at_prototype_spawn` | `LifecycleMixin` | self | Spawner-only. Fires when an object is created via a prototype, after at_object_creation. |
