@@ -1298,8 +1298,7 @@ def repeat(
     """
     global _TICKER_HANDLER
     if _TICKER_HANDLER is None:
-        from evennia.scripts.tickerhandler import \
-            TICKER_HANDLER as _TICKER_HANDLER
+        from evennia.scripts.tickerhandler import TICKER_HANDLER as _TICKER_HANDLER
 
     if stop:
         # we pass all args, but only store_key matters if given
@@ -2493,10 +2492,14 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
         checking multimatches for (e.g. Objects or Commands)
 
     """
-    from evennia.utils.multimatch import (apply_multimatch_template,
-                                          format_multimatch_footer,
-                                          invalid_other_message, location_hint,
-                                          multimatch_label, try_autopick)
+    from evennia.utils.multimatch import (
+        apply_multimatch_template,
+        format_multimatch_footer,
+        invalid_other_message,
+        location_hint,
+        multimatch_label,
+        try_autopick,
+    )
 
     if not quiet and len(matches) > 1 and not kwargs.get("_search_had_qualifier"):
         picked = try_autopick(matches, caller)
@@ -2739,7 +2742,7 @@ def interactive(func):
        This turns the decorated function or method into a generator.
 
     """
-    from evennia.utils.evmenu import get_input
+    from evennia.actions.menus import get_input
 
     def _process_input(caller, prompt, result, generator):
         deferLater(reactor, 0, _iterate, generator, caller, response=result)
@@ -2929,8 +2932,7 @@ def strip_unsafe_input(txt, session=None, bypass_perms=None):
     """
     global _STRIP_UNSAFE_TOKENS
     if not _STRIP_UNSAFE_TOKENS:
-        from evennia.utils.ansi import \
-            strip_unsafe_tokens as _STRIP_UNSAFE_TOKENS
+        from evennia.utils.ansi import strip_unsafe_tokens as _STRIP_UNSAFE_TOKENS
 
     if session:
         _puppet = session.get_puppet()

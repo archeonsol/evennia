@@ -38,9 +38,8 @@ Cache contract (per-cmdset trie attached as ``_trie_command_trie``):
   detected by the cheap key alone — callers must
   ``del cmdset._trie_command_trie`` to force a rebuild. The in-place
   mutation API (``Command.set_key`` / ``set_aliases``) was audited
-  (F-5, cache audit) and has **zero live in-tree callers** — the one
-  call inside ``evmenu._update_aliases`` is itself reachable only via
-  two commented-out invocation sites. Footgun stays documented.
+  (F-5, cache audit) and has **zero live in-tree callers**. Footgun
+  stays documented.
 
 Opt-out: set ``settings.COMMAND_PARSER`` to
 ``"evennia.commands.cmdparser.cmdparser"`` to fall back to the linear

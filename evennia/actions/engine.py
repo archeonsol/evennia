@@ -39,7 +39,7 @@ now, full stop — a body that tries to suspend (returns a generator or
    shape). It ``yield``\\s a prompt string (ask the player), a number (pause that
    many seconds), or a ``Deferred`` (await it); the value it eventually
    ``return``\\s is coerced to a ``RuleResult``. The engine drives it with
-   :func:`_drive_generator`, built on the same ``evmenu.get_input`` + ``deferLater``
+   :func:`_drive_generator`, built on the same ``get_input`` + ``deferLater``
    primitives ``evennia.utils.utils.interactive`` uses — but, unlike that
    fire-and-forget helper, the driver returns a ``Deferred`` that fires with the
    generator's return value so the phase can resume deterministically.
@@ -105,7 +105,7 @@ def _get_input_deferred(actor, prompt) -> Deferred:
     """Ask the actor for one line; fires the Deferred when input arrives.
 
     Uses :class:`~evennia.actions.menus.InputCaptureState` (engine-native capture)
-    instead of legacy ``evmenu.get_input`` / ``InputCmdSet``.
+    instead of a legacy capture ``InputCmdSet``.
     """
     from .menus import InputCaptureState
 

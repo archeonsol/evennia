@@ -49,8 +49,10 @@ from .menus import (
     InputCaptureState,
     MenuInputAction,
     MenuPrompt,
+    ask_yes_no,
     confirm,
     format_menu_prompt,
+    get_input,
     paginate,
     parse_menu_choice,
 )
@@ -236,6 +238,8 @@ __all__ = [
     "parse_menu_choice",
     "confirm",
     "paginate",
+    "get_input",
+    "ask_yes_no",
     # default actions (shipped movement substrate)
     "Moved",
     "Departed",

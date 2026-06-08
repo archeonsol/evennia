@@ -401,7 +401,7 @@ class EvenniaCommandTestMixin:
                 This can be used for testing on-object Command interactions.
             inputs (list, optional): A list of strings to pass to functions that pause to
                 take input from the user (normally using `@interactive` and
-                `ret = yield(question)` or `evmenu.get_input`). Each  element of the
+                `ret = yield(question)` or `get_input`). Each  element of the
                 list will be passed into the command as if the user answered each prompt
                 in that order.
             raw_string (str, optional): Normally the `.raw_string` property  is set as

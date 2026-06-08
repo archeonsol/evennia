@@ -12,9 +12,9 @@ The menu layer has two halves:
 
 * **Input-capturing states** for the callback-style patterns the cmdset world
   handled with special command instances: :class:`InputCaptureState`,
-  :class:`GetInputState` (``evmenu.get_input``), :class:`YesNoState`
-  (``evmenu.ask_yes_no``), and :class:`DisambiguationState` (installed when the
-  parser raises :class:`AmbiguousTarget`).
+  :class:`GetInputState` (backing :func:`get_input`), :class:`YesNoState`
+  (backing :func:`ask_yes_no`), and :class:`DisambiguationState` (installed when
+  the parser raises :class:`AmbiguousTarget`).
 
 The states work purely through the rule engine: a catch-all ``before`` rule at
 priority 9999 (ahead of any normal rule) fires first and seizes the input. The
@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from .action import Action, action
 from .result import CLAIM, PASS, REDIRECT, SILENT_FAIL
 from .rule import rule
-from .state import StateProvider
+from .state import StateProvider, capture_holder, enter_state, exit_state
 
 __all__ = [
     "MenuInputAction",
@@ -42,6 +42,8 @@ __all__ = [
     "session_mismatch",
     "confirm",
     "paginate",
+    "get_input",
+    "ask_yes_no",
 ]
 
 
@@ -202,12 +204,12 @@ class InputCaptureState(StateProvider):
 
 
 # --------------------------------------------------------------------------- #
-# GetInputState / YesNoState (engine-native evmenu.get_input / ask_yes_no)
+# GetInputState / YesNoState (+ the get_input / ask_yes_no entry points)
 # --------------------------------------------------------------------------- #
 
 
 class GetInputState(StateProvider):
-    """Engine-native replacement for :func:`evennia.utils.evmenu.get_input`.
+    """Capturing state backing :func:`get_input`.
 
     Captures the next input line and runs
     ``callback(caller, prompt, result, *args, **kwargs)``. A falsy return ends the
@@ -253,7 +255,7 @@ class GetInputState(StateProvider):
 
 
 class YesNoState(StateProvider):
-    """Engine-native replacement for :func:`evennia.utils.evmenu.ask_yes_no`.
+    """Capturing state backing :func:`ask_yes_no`.
 
     Captures the next input line and resolves it as a yes/no/abort choice,
     invoking ``yes_callable`` / ``no_callable`` with ``(caller, *args, **kwargs)``
@@ -328,6 +330,145 @@ class YesNoState(StateProvider):
             logger.log_trace("Error in ask_yes_no")
             actor.exit_state(YesNoState)
         return CLAIM
+
+
+def get_input(caller, prompt, callback, session=None, *args, **kwargs):
+    """Ask ``caller`` for a line of input and route the reply to ``callback``.
+
+    Args:
+        caller (Account or Object): The entity being asked. Usually a
+            user-controlled object.
+        prompt (str): Shown to the user to indicate input is needed.
+        callback (callable): Called as ``callback(caller, prompt, result)`` when
+            the user replies. Return falsy (or nothing) to clean up and exit the
+            prompt; return True to keep the prompt active and accept another line.
+        session (Session, optional): The session to send the prompt to. Usually
+            only needed when ``caller`` is an Account in multisession modes > 2.
+        *args (any): Extra positional args passed to ``callback``.
+        **kwargs (any): Extra keyword args passed to ``callback``.
+
+    Raises:
+        RuntimeError: If ``callback`` is not callable.
+
+    Notes:
+        The result is raw (it usually keeps the trailing newline from the
+        client), so strip before comparing. While running, the prompt is backed
+        by a :class:`GetInputState` on the caller's focus body (not an ndb
+        attribute or a cmdset); the action engine routes the next input line to
+        it. A new ``get_input`` on the same caller replaces any active one
+        (exit-before-enter), so prompts do not stack.
+
+    """
+    if not callable(callback):
+        raise RuntimeError("get_input: input callback is not callable.")
+    # Install on the focus body the engine will read for the next line (not the
+    # raw caller, which can differ from the focus - e.g. an account caller while
+    # a character is puppeted). See capture_holder.
+    holder = capture_holder(caller, session)
+    # Avoid stacking; the legacy InputCmdSet used Replace for the same reason.
+    exit_state(holder, GetInputState)
+    enter_state(
+        holder,
+        GetInputState(caller, prompt, callback, session=session, args=args, kwargs=kwargs),
+    )
+    caller.msg(prompt, session=session)
+
+
+def ask_yes_no(
+    caller,
+    prompt="Yes or No {options}?",
+    yes_action="Yes",
+    no_action="No",
+    default=None,
+    allow_abort=False,
+    session=None,
+    *args,
+    **kwargs,
+):
+    """Ask ``caller`` a simple yes/no question and act on the reply.
+
+    Args:
+        caller (Object): The entity being asked.
+        prompt (str): The question. An optional ``{options}`` marker is filled
+            with 'Y/N', '[Y]/N' or 'Y/[N]' per ``default`` (plus '/Abort' or
+            '/[A]bort' when ``allow_abort`` is set).
+        yes_action (callable or str): If callable, called as
+            ``yes_action(caller, *args, **kwargs)`` on a Yes; if a string, that
+            string is echoed back.
+        no_action (callable or str): As ``yes_action`` but for a No.
+        default (str, optional): Used when the user just presses return. One of
+            'N', 'Y', 'A' or ``None`` (an explicit choice is required). 'A'
+            implies ``allow_abort``.
+        allow_abort (bool, optional): If set, an 'A(bort)' option exits the
+            prompt without choosing yes or no.
+        session (Session, optional): The session to send the prompt to. Usually
+            only needed when ``caller`` is an Account in multisession modes > 2.
+            The answering session is passed to callbacks as
+            ``kwargs["caller_session"]``.
+        *args: Additional args passed into the callables.
+        **kwargs: Additional keyword args passed into the callables.
+
+    Example:
+        ::
+
+            # echo strings
+            ask_yes_no(caller, "Are you happy {options}?",
+                       "you answered yes", "you answered no")
+            # trigger callables
+            ask_yes_no(caller, "Are you sad {options}?",
+                       _callable_yes, _callable_no, allow_abort=True)
+
+    """
+
+    def _callable_yes_txt(caller, *args, **kwargs):
+        caller.msg(kwargs["yes_txt"], session=kwargs["caller_session"])
+
+    def _callable_no_txt(caller, *args, **kwargs):
+        caller.msg(kwargs["no_txt"], session=kwargs["caller_session"])
+
+    if not callable(yes_action):
+        kwargs["yes_txt"] = str(yes_action)
+        yes_action = _callable_yes_txt
+
+    if not callable(no_action):
+        kwargs["no_txt"] = str(no_action)
+        no_action = _callable_no_txt
+
+    # prepare the prompt with options
+    options = "Y/N"
+    abort_txt = "/Abort" if allow_abort else ""
+    if default:
+        default = default.lower()
+        if default == "y":
+            options = "[Y]/N"
+        elif default == "n":
+            options = "Y/[N]"
+        elif default == "a":
+            allow_abort = True
+            abort_txt = "/[A]bort"
+    options += abort_txt
+    prompt = prompt.format(options=options)
+
+    # Install on the focus body the engine will read for the next line; see
+    # capture_holder (and get_input above) for why the raw caller is wrong.
+    holder = capture_holder(caller, session)
+    # Avoid stacking; the legacy YesNoQuestionCmdSet used Replace for the same reason.
+    exit_state(holder, YesNoState)
+    enter_state(
+        holder,
+        YesNoState(
+            caller,
+            prompt,
+            yes_action,
+            no_action,
+            default=default,
+            allow_abort=allow_abort,
+            session=session,
+            args=args,
+            kwargs=kwargs,
+        ),
+    )
+    caller.msg(prompt, session=session)
 
 
 # --------------------------------------------------------------------------- #

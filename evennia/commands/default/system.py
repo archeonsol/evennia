@@ -21,7 +21,7 @@ from evennia.accounts.models import AccountDB
 from evennia.scripts.taskhandler import TaskHandlerTask
 from evennia.utils import gametime, logger, search, utils
 from evennia.utils.eveditor import EvEditor
-from evennia.utils.evmenu import ask_yes_no
+from evennia.actions.menus import ask_yes_no
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import class_from_module, iter_to_str
 
@@ -1034,8 +1034,7 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         # get a reference of the global task handler
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import \
-                TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
 
         # verify manipulating the correct task
         task_args = _TASK_HANDLER.tasks.get(task_id, False)
@@ -1058,8 +1057,7 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         # get a reference of the global task handler
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import \
-                TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
         # handle no tasks active.
         if not _TASK_HANDLER.tasks:
             self.msg("There are no active tasks.")

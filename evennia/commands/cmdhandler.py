@@ -321,7 +321,7 @@ def _progressive_cmd_run(cmd, generator, response=None):
     """
     global _GET_INPUT
     if not _GET_INPUT:
-        from evennia.utils.evmenu import get_input as _GET_INPUT
+        from evennia.actions.menus import get_input as _GET_INPUT
 
     try:
         if response is None:

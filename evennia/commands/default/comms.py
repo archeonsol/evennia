@@ -16,7 +16,7 @@ from evennia.comms.comms import DefaultChannel
 from evennia.comms.models import Msg
 from evennia.locks.lockhandler import LockException
 from evennia.utils import create, logger, search, utils
-from evennia.utils.evmenu import ask_yes_no
+from evennia.actions.menus import ask_yes_no
 from evennia.utils.logger import tail_log_file
 from evennia.utils.utils import class_from_module, strip_unsafe_input
 

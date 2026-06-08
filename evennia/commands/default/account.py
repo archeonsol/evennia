@@ -198,7 +198,7 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
             )
             return
         else:  # one match
-            from evennia.utils.evmenu import get_input
+            from evennia.actions.menus import get_input
 
             def _callback(caller, callback_prompt, result):
                 if result.lower() == "yes":
