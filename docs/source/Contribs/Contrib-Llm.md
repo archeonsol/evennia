@@ -53,8 +53,6 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
 
 ```
 
-See this [the tutorial on adding commands](../Howtos/Beginner-Tutorial/Part1/Beginner-Tutorial-Adding-Commands.md) for more info. 
-
 The default LLM api config should work with the `text-generation-webui` LLM server running its API on port 5000. You can also customize it via settings (if a setting is not added, the default below is used):
 
 ```python

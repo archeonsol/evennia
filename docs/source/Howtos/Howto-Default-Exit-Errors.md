@@ -25,7 +25,7 @@ Since we for our particular game *know* that west is an exit direction, it would
      > west 
      You cannot move west.
 
-The way to do this is to give Evennia an _alternative_ Command to use when no Exit-Command is found in the room. See [Adding Commands](Beginner-Tutorial/Part1/Beginner-Tutorial-Adding-Commands.md) for more info about the  process of adding new Commands to Evennia.
+The way to do this is to give Evennia an _alternative_ Command to use when no Exit-Command is found in the room.
 
 In this example we will just echo an error message, but you could do everything (maybe you lose health if you bump into a wall?)
 

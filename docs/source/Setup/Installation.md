@@ -122,4 +122,4 @@ See [here](./Evennia-Game-Index.md) for more instructions and please [check out 
 
 You are good to go!
 
-Next, why not head over to the [Starting Tutorial](../Howtos/Beginner-Tutorial/Beginner-Tutorial-Overview.md) to learn how to begin making your new game!
+Next, why not head over to the [Tutorials and Howto's](../Howtos/Howtos-Overview.md) to learn how to begin making your new game!

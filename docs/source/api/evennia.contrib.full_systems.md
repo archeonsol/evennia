@@ -11,6 +11,4 @@ evennia.contrib.full\_systems
 .. toctree::
    :maxdepth: 6
 
-   evennia.contrib.full_systems.evscaperoom
-
 ```

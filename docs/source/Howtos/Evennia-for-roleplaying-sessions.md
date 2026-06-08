@@ -29,7 +29,7 @@ defaults for our particular use-case. Below we will flesh out these components f
 We will assume you start from scratch. You need Evennia installed, as per the [Setup Quickstart](../Setup/Installation.md) 
 instructions. Initialize a new game directory with `evennia init
 <gamedirname>`. In this tutorial we assume your game dir is simply named `mygame`. You can use the default database and keep all other settings to default for now. Familiarize yourself with the
-`mygame` folder before continuing. You might want to browse the  [Beginner Tutorial](Beginner-Tutorial/Part1/Beginner-Tutorial-Part1-Overview.md) tutorial, just to see roughly where things are modified.
+`mygame` folder before continuing.
 
 ## The Game Master role
 
@@ -639,7 +639,7 @@ Use `help dice` to see what syntax is supported or look at `evennia/contrib/dice
 
 ## Rooms
 
-Evennia comes with rooms out of the box, so no extra work needed. A GM will automatically have all needed building commands available. A fuller go-through is found in the [Building tutorial](Beginner-Tutorial/Part1/Beginner-Tutorial-Building-Quickstart.md).
+Evennia comes with rooms out of the box, so no extra work needed. A GM will automatically have all needed building commands available.
 Here are some useful highlights:
 
 * `dig roomname;alias = exit_there;alias, exit_back;alias` - this is the basic command for digging a new room. You can specify any exit-names and just enter the name of that exit to go there.

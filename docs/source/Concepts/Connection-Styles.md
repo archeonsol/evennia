@@ -8,10 +8,9 @@ Evennia supports multiple ways for players to connect to the game. This allows E
 
 ## Changing the login screen
 
-This is done by modifying `mygame/server/conf/connection_screens.py` and reloading. If you don't like the default login, there are two contribs to check out as inspiration.
+This is done by modifying `mygame/server/conf/connection_screens.py` and reloading. If you don't like the default login, there is a contrib to check out as inspiration.
 
 - [Email login](../Contribs/Contrib-Email-Login.md) - require email during install, use email for login.
-- [Menu login](../Contribs/Contrib-Menu-Login.md) - login using several prompts, asking to enter username and password in sequence.
 
 ## Customizing the login command
 
@@ -122,7 +121,7 @@ To control this behavior, you need to tweak the settings. These are the defaults
     AUTO_PUPPET_ON_LOGIN = True 
     MAX_NR_CHARACTERS = 1
     
-There is a default `charcreate` command. This heeds the `MAX_NR_CHARACTERS`; and if you make your own character-creation command, you should do the same. It needs to be at least `1`. Set to `None` for no limit. See the [Beginner Tutorial](../Howtos/Beginner-Tutorial/Beginner-Tutorial-Overview.md) for ideas on how to make a more advanced character generation system.
+There is a default `charcreate` command. This heeds the `MAX_NR_CHARACTERS`; and if you make your own character-creation command, you should do the same. It needs to be at least `1`. Set to `None` for no limit.
 
 ```{sidebar}
 Combining these settings with `MAX_NR_SIMULTANEOUS_PUPPETS` could allow for a game where (for example) a player can create a 'stable' of Characters, but only be able to play one at a time. 

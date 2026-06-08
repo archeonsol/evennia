@@ -225,5 +225,3 @@ To search your new custom database table you need to use its database *manager* 
      for match in matches2:
         self.caller.msg(match.db_text)
 ```
-
-See the [Beginner Tutorial lesson on Django querying](../Howtos/Beginner-Tutorial/Part1/Beginner-Tutorial-Django-queries.md) for a lot more information about querying the database.

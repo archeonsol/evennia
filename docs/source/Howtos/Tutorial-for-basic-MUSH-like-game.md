@@ -7,8 +7,7 @@ focused on free form storytelling. Even if you are not interested in MUSH:es, th
 first game-type to try since it's not so code heavy. You will be able to use the same principles for
 building other types of games.
 
-The tutorial starts from scratch. If you did the [First Steps Coding](Beginner-Tutorial/Part1/Beginner-Tutorial-Part1-Overview.md) tutorial
-already you should have some ideas about how to do some of the steps already.
+The tutorial starts from scratch.
 
 The following are the (very simplistic and cut-down) features we will implement (this was taken from
 a feature request from a MUSH user new to Evennia). A Character in this system should:
@@ -658,6 +657,5 @@ The simple "Power" game mechanic should be easily expandable to something more f
 useful, same is true for the combat score principle. The `+attack` could be made to target a
 specific player (or npc) and automatically compare their relevant attributes to determine a result.
 
-To continue from here, you can take a look at the [Tutorial World](Beginner-Tutorial/Part1/Beginner-Tutorial-Tutorial-World.md). For
-more specific ideas, see the [other tutorials and hints](./Howtos-Overview.md) as well
+To continue from here, see the [other tutorials and hints](./Howtos-Overview.md) as well
 as the [Evennia Component overview](../Components/Components-Overview.md).

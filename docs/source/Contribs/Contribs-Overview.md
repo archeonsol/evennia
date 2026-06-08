@@ -7,7 +7,7 @@ in the [Community Contribs & Snippets][forum] forum.
 _Contribs_ are optional code snippets and systems contributed by
 the Evennia community. They vary in size and complexity and
 may be more specific about game types and styles than 'core' Evennia.
-This page is auto-generated and summarizes all **53** contribs currently included
+This page is auto-generated and summarizes all **43** contribs currently included
 with the Evennia distribution.
 
 All contrib categories are imported from `evennia.contrib`, such as
@@ -23,22 +23,20 @@ If you want to add a contrib, see [the contrib guidelines](./Contribs-Guidelines
 [forum]: https://github.com/evennia/evennia/discussions/categories/community-contribs-snippets
 
 ## Index
-| | | | | | | |
-|---|---|---|---|---|---|---|
-| [base_systems](#base_systems) | [full_systems](#full_systems) | [game_systems](#game_systems) | [grid](#grid) | [rpg](#rpg) | [tutorials](#tutorials) | [utils](#utils) |
+| | | | | | |
+|---|---|---|---|---|---|
+| [base_systems](#base_systems) | [game_systems](#game_systems) | [grid](#grid) | [rpg](#rpg) | [tutorials](#tutorials) | [utils](#utils) |
 
 | | | | | |
 |---|---|---|---|---|
 | [achievements](#achievements) | [auditing](#auditing) | [awsstorage](#awsstorage) | [barter](#barter) | [batchprocessor](#batchprocessor) |
-| [bodyfunctions](#bodyfunctions) | [buffs](#buffs) | [building_menu](#building_menu) | [character_creator](#character_creator) | [clothing](#clothing) |
-| [color_markups](#color_markups) | [components](#components) | [containers](#containers) | [cooldowns](#cooldowns) | [crafting](#crafting) |
-| [custom_gametime](#custom_gametime) | [debugpy](#debugpy) | [dice](#dice) | [email_login](#email_login) | [evadventure](#evadventure) |
-| [evscaperoom](#evscaperoom) | [extended_room](#extended_room) | [fieldfill](#fieldfill) | [gendersub](#gendersub) | [git_integration](#git_integration) |
-| [godotwebsocket](#godotwebsocket) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [ingame_reports](#ingame_reports) |
-| [llm](#llm) | [mail](#mail) | [mapbuilder](#mapbuilder) | [menu_login](#menu_login) | [mirror](#mirror) |
-| [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) | [name_generator](#name_generator) | [puzzles](#puzzles) | [random_string_generator](#random_string_generator) |
-| [red_button](#red_button) | [rpsystem](#rpsystem) | [simpledoor](#simpledoor) | [slow_exit](#slow_exit) | [storage](#storage) |
-| [talking_npc](#talking_npc) | [traits](#traits) | [tree_select](#tree_select) | [turnbattle](#turnbattle) | [tutorial_world](#tutorial_world) |
+| [bodyfunctions](#bodyfunctions) | [buffs](#buffs) | [building_menu](#building_menu) | [clothing](#clothing) | [color_markups](#color_markups) |
+| [components](#components) | [containers](#containers) | [cooldowns](#cooldowns) | [crafting](#crafting) | [custom_gametime](#custom_gametime) |
+| [debugpy](#debugpy) | [dice](#dice) | [email_login](#email_login) | [extended_room](#extended_room) | [gendersub](#gendersub) |
+| [git_integration](#git_integration) | [godotwebsocket](#godotwebsocket) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [llm](#llm) |
+| [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) | [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) |
+| [name_generator](#name_generator) | [puzzles](#puzzles) | [random_string_generator](#random_string_generator) | [red_button](#red_button) | [rpsystem](#rpsystem) |
+| [simpledoor](#simpledoor) | [slow_exit](#slow_exit) | [storage](#storage) | [traits](#traits) | [turnbattle](#turnbattle) |
 | [unixcommand](#unixcommand) | [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
 
 
@@ -64,8 +62,6 @@ Contrib-Components.md
 Contrib-Custom-Gametime.md
 Contrib-Email-Login.md
 Contrib-Godotwebsocket.md
-Contrib-Ingame-Reports.md
-Contrib-Menu-Login.md
 Contrib-Mux-Comms-Cmds.md
 Contrib-Unixcommand.md
 ```
@@ -158,28 +154,6 @@ You can use Godot to provide advanced functionality with proper Evennia support.
 
 
 
-### `ingame_reports`
-
-_Contrib by InspectorCaracal, 2024_
-
-This contrib provides an in-game reports system, handling bug reports, player reports, and idea submissions by default. It also supports adding your own types of reports, or removing any of the default report types.
-
-[Read the documentation](./Contrib-Ingame-Reports.md) - [Browse the Code](evennia.contrib.base_systems.ingame_reports)
-
-
-
-### `menu_login`
-
-_Contribution by Vincent-lg 2016. Reworked for modern EvMenu by Griatch, 2019._
-
-This changes the Evennia login to ask for the account name and password as a series
-of questions instead of requiring you to enter both at once. It uses Evennia's 
-menu system `EvMenu` under the hood.
-
-[Read the documentation](./Contrib-Menu-Login.md) - [Browse the Code](evennia.contrib.base_systems.menu_login)
-
-
-
 ### `mux_comms_cmds`
 
 _Contribution by Griatch 2021_
@@ -206,40 +180,6 @@ many things with many options. It uses the `ArgumentParser` from Python's standa
 library under the hood.
 
 [Read the documentation](./Contrib-Unixcommand.md) - [Browse the Code](evennia.contrib.base_systems.unixcommand)
-
-
-
-
-
-
-## full_systems
-
-_'Complete' game engines that can be used directly to start creating content
-without no further additions (unless you want to)._
-
-
-```{toctree}
-:hidden:
-Contribs-Guidelines.md
-```
-```{toctree}
-:maxdepth: 1
-
-Contrib-Evscaperoom.md
-```
-
-
-### `evscaperoom`
-
-_Contribution by Griatch, 2019_
-
-A full engine for creating multiplayer escape-rooms in Evennia. Allows players to
-spawn and join puzzle rooms that track their state independently. Any number of players
-can join to solve a room together. This is the engine created for 'EvscapeRoom', which won
-the MUD Coders Guild "One Room" Game Jam in April-May, 2019. The contrib has only
-very minimal game content, it contains the utilities and base classes and an empty example room.
-
-[Read the documentation](./Contrib-Evscaperoom.md) - [Browse the Code](evennia.contrib.full_systems.evscaperoom)
 
 
 
@@ -566,7 +506,6 @@ Contribs-Guidelines.md
 :maxdepth: 1
 
 Contrib-Buffs.md
-Contrib-Character-Creator.md
 Contrib-Dice.md
 Contrib-Health-Bar.md
 Contrib-Llm.md
@@ -583,16 +522,6 @@ A buff is a timed object, attached to a game entity. It is capable of modifying 
 It is a common design pattern in RPGs, particularly action games.
 
 [Read the documentation](./Contrib-Buffs.md) - [Browse the Code](evennia.contrib.rpg.buffs)
-
-
-
-### `character_creator`
-
-_Contribution by InspectorCaracal, 2022_
-
-Commands for managing and initiating an in-game character-creation menu.
-
-[Read the documentation](./Contrib-Character-Creator.md) - [Browse the Code](evennia.contrib.rpg.character_creator)
 
 
 
@@ -665,8 +594,7 @@ healed).
 
 _Helper resources specifically meant to teach a development concept or
 to exemplify an Evennia system. Any extra resources tied to documentation
-tutorials are found here. Also the home of the Tutorial-World and Evadventure
-demo codes._
+tutorials are found here._
 
 
 ```{toctree}
@@ -678,11 +606,8 @@ Contribs-Guidelines.md
 
 Contrib-Batchprocessor.md
 Contrib-Bodyfunctions.md
-Contrib-Evadventure.md
 Contrib-Mirror.md
 Contrib-Red-Button.md
-Contrib-Talking-Npc.md
-Contrib-Tutorial-World.md
 ```
 
 
@@ -709,20 +634,6 @@ character make small verbal observations at irregular intervals.
 
 
 
-### `evadventure`
-
-_Contrib by Griatch 2023-_
-
-
-```{warning}
-NOTE - this tutorial is WIP and NOT complete yet! You will still learn
-things from it, but don't expect perfection.
-```
-
-[Read the documentation](./Contrib-Evadventure.md) - [Browse the Code](evennia.contrib.tutorials.evadventure)
-
-
-
 ### `mirror`
 
 _Contribution by Griatch, 2017_
@@ -744,35 +655,6 @@ object with its own functionality and state tracking.
 
 
 
-### `talking_npc`
-
-_Contribution by Griatch 2011. Updated by grungies1138, 2016_
-
-This is an example of a static NPC object capable of holding a simple menu-driven
-conversation. Suitable for example as a quest giver or merchant.
-
-[Read the documentation](./Contrib-Talking-Npc.md) - [Browse the Code](evennia.contrib.tutorials.talking_npc)
-
-
-
-### `tutorial_world`
-
-_Contribution by Griatch 2011, 2015_
-
-A stand-alone tutorial area for an unmodified Evennia install.
-Think of it as a sort of single-player adventure rather than a
-full-fledged multi-player game world. The various rooms and objects
-are designed to show off features of Evennia, not to be a
-very challenging (nor long) gaming experience. As such it's of course
-only skimming the surface of what is possible. Taking this apart 
-is a great way to start learning the system.
-
-[Read the documentation](./Contrib-Tutorial-World.md) - [Browse the Code](evennia.contrib.tutorials.tutorial_world)
-
-
-
-
-
 
 ## utils
 
@@ -788,11 +670,9 @@ Contribs-Guidelines.md
 
 Contrib-Auditing.md
 Contrib-Debugpy.md
-Contrib-Fieldfill.md
 Contrib-Git-Integration.md
 Contrib-Name-Generator.md
 Contrib-Random-String-Generator.md
-Contrib-Tree-Select.md
 ```
 
 
@@ -816,22 +696,6 @@ This registers an in-game command `debugpy` which starts the debugpy debugger an
 For now this is only available for Visual Studio Code (VS Code).
 
 [Read the documentation](./Contrib-Debugpy.md) - [Browse the Code](evennia.contrib.utils.debugpy)
-
-
-
-### `fieldfill`
-
-_Contribution by Tim Ashley Jenkins, 2018_
-
-This module contains a function that generates an `EvMenu` for you - this
-menu presents the player with a form of fields that can be filled
-out in any order (e.g. for character generation or building). Each field's value can 
-be verified, with the function allowing easy checks for text and integer input, 
-minimum and maximum values / character lengths, or can even be verified by a custom 
-function. Once the form is submitted, the form's data is submitted as a dictionary 
-to any callable of your choice.
-
-[Read the documentation](./Contrib-Fieldfill.md) - [Browse the Code](evennia.contrib.utils.fieldfill)
 
 
 
@@ -868,19 +732,6 @@ phone numbers, license plate numbers, validation codes, in-game security
 passwords and so on. The strings generated will be stored and won't be repeated.
 
 [Read the documentation](./Contrib-Random-String-Generator.md) - [Browse the Code](evennia.contrib.utils.random_string_generator)
-
-
-
-### `tree_select`
-
-_Contribution by Tim Ashley Jenkins, 2017_
-
-This utility allows you to create and initialize an entire branching EvMenu
-instance from a multi-line string passed to one function.
-
-[Read the documentation](./Contrib-Tree-Select.md) - [Browse the Code](evennia.contrib.utils.tree_select)
-
-
 
 
 

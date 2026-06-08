@@ -229,7 +229,3 @@ character.quests.check_progress()
 ```
 
 and be sure that quest data is not lost between reloads.
-
-You can find a full-fledged quest-handler example as  [EvAdventure
-quests](evennia.contrib.tutorials.evadventure.quests) contrib in the Evennia
-repository.

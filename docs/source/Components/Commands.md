@@ -13,7 +13,7 @@ There are two components to having a command running - the *Command* class and t
 1. A *Command* is a python class containing all the functioning code for what a command does - for example, a *get* command would contain code for picking up objects.
 1. A *Command Set* (often referred to as a CmdSet or cmdset) is like a container for one or more Commands. A given Command can go into any number of different command sets. Only by putting the command set on a character object you will make all the commands therein available to use by that character. You can also store command sets on normal objects if you want users to be able to use the object in various ways. Consider a "Tree" object with a cmdset defining the commands *climb* and *chop down*. Or a "Clock" with a cmdset containing the single command *check time*.
 
-This page goes into full detail about how to use Commands. To fully use them you must also read the page detailing [Command Sets](./Command-Sets.md).  There is also a step-by-step [Adding Command Tutorial](../Howtos/Beginner-Tutorial/Part1/Beginner-Tutorial-Adding-Commands.md) that will get you started quickly without the extra explanations.
+This page goes into full detail about how to use Commands. To fully use them you must also read the page detailing [Command Sets](./Command-Sets.md).
 
 ## Defining Commands
 
@@ -303,7 +303,7 @@ class CmdConfirm(Command):
 
 This time, when the user enters the 'confirm' command, she will be asked if she wants to go on. Entering 'yes' or "y" (regardless of case) will give the first reply, otherwise the second reply will show. 
 
-> Note again that the `yield` keyword does not store state.  If the game reloads while waiting for the user to answer, the user will have to start over. It is not a good idea to use `yield` for important or complex choices, a persistent [EvMenu](./EvMenu.md) might be more appropriate in this case. 
+> Note again that the `yield` keyword does not store state.  If the game reloads while waiting for the user to answer, the user will have to start over. It is not a good idea to use `yield` for important or complex choices that must survive a reload.
 
 ## System commands
 

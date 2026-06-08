@@ -56,6 +56,3 @@ The process of traversing an exit is as follows:
 
 If the move fails for whatever reason, the Exit will look for an Attribute `err_traverse` on itself and display this as an error message. If this is not found, the Exit will instead call `at_failed_traverse(obj)` on itself. 
 
-### Creating Exits in code
-
-For an example of how to create Exits programatically please see [this guide](../Howtos/Beginner-Tutorial/Part1/Beginner-Tutorial-Creating-Things.md#linking-exits-and-rooms-in-code).

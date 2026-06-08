@@ -23,7 +23,7 @@ Evennia has a [contrib](./Contribs-Overview.md) directory which contains optiona
 | `game_systems/` | _In-game gameplay systems like crafting, mail, combat and more. Each system is meant to be adopted piecemeal and adopted for your game. This does not include roleplaying-specific systems, those are found in the `rpg` category._ |
 | `grid/` | _Systems related to the game world’s topology and structure. Contribs related to rooms, exits and map building._ |
 | `rpg/` | _Systems specifically related to roleplaying and rule implementation like character traits, dice rolling and emoting._ | 
-| `tutorials/` | _Helper resources specifically meant to teach a development concept or to exemplify an Evennia system. Any extra resources tied to documentation tutorials are found here. Also the home of the Tutorial-World and Evadventure demo codes._ | 
+| `tutorials/` | _Helper resources specifically meant to teach a development concept or to exemplify an Evennia system. Any extra resources tied to documentation tutorials are found here._ | 
 | `utils/` | _Miscellaneous tools for manipulating text, security auditing, and more._|
 
 

@@ -439,7 +439,7 @@ class CmdAttack(Command):
             target.msg(f"{self.caller} attacks you! You are in combat.")       
 ```
 
-The `attack` command will not go into the combat cmdset but rather into the default cmdset. See e.g. the [Adding Command Tutorial](Beginner-Tutorial/Part1/Beginner-Tutorial-Adding-Commands.md) if you are unsure about how to do this.
+The `attack` command will not go into the combat cmdset but rather into the default cmdset.
 
 ## Expanding the example
 

@@ -72,7 +72,6 @@ The flat API is defined in `__init__.py` [viewable here](github:evennia/__init__
 - [evennia.ansi](evennia.utils.ansi) - ansi coloring tools
 - [evennia.spawn](evennia.prototypes.spawner.spawn) - spawn/prototype system ([docs](Components/Prototypes.md))
 - [evennia.lockfuncs](evennia.locks.lockfuncs) - default lock functions for access control ([docs](Components/Locks.md))
-- [evennia.EvMenu](evennia.utils.evmenu.EvMenu) - menu system ([docs](Components/EvMenu.md))
 - [evennia.EvTable](evennia.utils.evtable.EvTable) - text table creater
 - [evennia.EvForm](evennia.utils.evform.EvForm) - text form creator
 - Evennia.EvMore - text paginator

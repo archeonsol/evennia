@@ -55,7 +55,6 @@ Evennia provides a library of code resources to help the creation of a game.
 Coding-Utils.md
 EvEditor.md
 EvForm.md
-EvMenu.md
 EvMore.md
 EvTable.md
 FuncParser.md

@@ -21,7 +21,6 @@ at the root of `evennia/docs/source/`.
 - `source/Contribs/` holds documentation specifically for packages in the `evennia/contribs/` folder. Any contrib-specific tutorials will be found here instead of in `Howtos`
 - `source/Howtos/` holds docs that describe how to achieve a specific goal, effect or
   result in Evennia. This is often on a tutorial or FAQ form and will refer to the rest of the documentation for further reading.
-- `source/Howtos/Beginner-Tutorial/` holds all documents part of the initial tutorial sequence.
 
  Other files and folders:
   - `source/api/` contains the auto-generated API documentation as `.html` files. Don't edit these files manually, they are auto-generated from sources.

@@ -21,7 +21,7 @@ pip install python-twitter
 
 ### A basic tweet command
 
-Evennia doesn't have a `tweet` command out of the box so you need to write your own little [Command](../Components/Commands.md) in order to tweet. If you are unsure about how commands work and how to add them, it can be an idea to go through the [Adding a Command Tutorial](../Howtos/Beginner-Tutorial/Part1/Beginner-Tutorial-Adding-Commands.md) before continuing.
+Evennia doesn't have a `tweet` command out of the box so you need to write your own little [Command](../Components/Commands.md) in order to tweet.
 
 You can create the command in a separate command module (something like `mygame/commands/tweet.py`) or together with your other custom commands, as you prefer. 
 This is how it can look: 

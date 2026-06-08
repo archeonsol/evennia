@@ -49,7 +49,7 @@ to compare to.
 A new folder `myarx` should appear next to the ones you already had. You could rename this to
 something else if you want.
 
-`cd` into `myarx`. If you wonder about the structure of the game dir, you can [read more about it here](Beginner-Tutorial/Part1/Beginner-Tutorial-Gamedir-Overview.md).
+`cd` into `myarx`.
 
 ### Clean up settings
 
@@ -74,7 +74,7 @@ except ImportError:
     print("secret_settings.py file not found or failed to import.")
 ```
 
-> Note: Indents and capitalization matter in Python. Make indents 4 spaces (not tabs) for your own sanity. If you want a starter on Python in Evennia, [you can look here](Beginner-Tutorial-Python-basic- introduction).
+> Note: Indents and capitalization matter in Python. Make indents 4 spaces (not tabs) for your own sanity.
 
 This will import Arx' base settings and override them with the Evennia-default telnet port and give the game a name. The slogan changes the sub-text shown under the name of your game in the website header. You can tweak these to your own liking later.
 

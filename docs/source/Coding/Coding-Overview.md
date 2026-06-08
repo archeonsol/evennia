@@ -3,8 +3,6 @@
 This documentation aims to help you set up a sane development environment to
 make your game, also if you never coded before.
 
-See also the [Beginner Tutorial](../Howtos/Beginner-Tutorial/Beginner-Tutorial-Overview.md).
-
 ```{toctree}
 :maxdepth: 2
 

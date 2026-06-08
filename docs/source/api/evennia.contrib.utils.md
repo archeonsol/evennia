@@ -13,10 +13,8 @@ evennia.contrib.utils
 
    evennia.contrib.utils.auditing
    evennia.contrib.utils.debugpy
-   evennia.contrib.utils.fieldfill
    evennia.contrib.utils.git_integration
    evennia.contrib.utils.name_generator
    evennia.contrib.utils.random_string_generator
-   evennia.contrib.utils.tree_select
 
 ```
