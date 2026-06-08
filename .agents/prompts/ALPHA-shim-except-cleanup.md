@@ -46,7 +46,6 @@ expected backend-down exception and `logger.log_trace()` the rest, matching the
 sibling sites that already do (e.g. `bus.py`/`queue.py`):
 
 - `utils/idmapper/models.py:557` — `flush_all_keys()` then `except: pass`.
-- `typeclasses/attributes.py:82` — `record_attribute_flush_stats(...)` then `except: pass`.
 - `comms/models.py:616` — `add_subscriber(...)` then `except: pass` (silent cache desync).
 - `comms/models.py:699` — `clear_channel(...)` then `except: pass`.
 

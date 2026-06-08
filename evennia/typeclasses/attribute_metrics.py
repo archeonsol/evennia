@@ -1,28 +1,15 @@
 """
-Metrics and logging helpers for attribute write-behind flush.
+Log helpers for attribute write-behind flush.
+
+Prometheus counters live in ``evennia.server.prometheus_metrics``; this module
+owns only the human-readable log output for the same flush stats.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
 from django.conf import settings
 
 from evennia.utils import logger
-
-
-def record_attribute_flush_stats(stats: dict, *, duration_seconds: Optional[float] = None) -> None:
-    """
-    Record flush stats to Prometheus and leave log lines to ``maybe_log_flush_metrics``.
-    """
-    if not stats:
-        return
-    try:
-        from evennia.server.prometheus_metrics import record_attribute_flush
-
-        record_attribute_flush(stats, duration_seconds=duration_seconds)
-    except Exception:
-        pass
 
 
 def maybe_warn_pending_dirty(stats: dict, tick_count: int) -> None:

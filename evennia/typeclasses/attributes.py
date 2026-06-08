@@ -75,12 +75,9 @@ def flush_all_dirty():
         "total": backends,
         "pending": pending_stats["pending"],
     }
-    try:
-        from evennia.typeclasses.attribute_metrics import record_attribute_flush_stats
+    from evennia.server.prometheus_metrics import record_attribute_flush
 
-        record_attribute_flush_stats(stats, duration_seconds=duration)
-    except Exception:
-        pass
+    record_attribute_flush(stats, duration_seconds=duration)
     return stats
 
 

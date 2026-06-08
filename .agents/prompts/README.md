@@ -107,10 +107,12 @@ parallel-startable now.
 
 **Re-decide (parked questions with new signal):**
 
-- [Engine metrics / observability surface](engine-metrics-surface.md) — a metrics
-  path (`attribute_metrics`) crept into the tree undecided and error-swallowed.
-  Drop it or commit to a deliberate surface. (The engine/game boundary migration
-  is complete; its outcome is recorded in
+- [Engine metrics / observability surface](engine-metrics-surface.md) — **resolved
+  (shipped):** committed to the Prometheus surface already in the tree
+  (`server/prometheus_metrics.py`, `/metrics`, gated by
+  `ENGINE_PROMETHEUS_METRICS_ENABLED`); removed the redundant swallow at the flush
+  site, collapsed the forwarder, wired the dead backlog-warn helper. (The
+  engine/game boundary migration is complete; its outcome is recorded in
   [`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md).)
 
 Each prompt invites the agent to propose a design before
