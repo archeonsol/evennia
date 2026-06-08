@@ -25,19 +25,9 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command, InterruptCommand
-from evennia.commands.default import (
-    account,
-    admin,
-    building,
-    comms,
-    general,
-)
+from evennia.commands.default import account, admin, building, comms, general
 from evennia.commands.default import help as help_module
-from evennia.commands.default import (
-    syscommands,
-    system,
-    unloggedin,
-)
+from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.objects.models import ObjectDB
 from evennia.objects.objects import (
@@ -870,7 +860,7 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Attribute Obj2/notfound [category:None] does not exist.",
         )
 
-        with patch("evennia.commands.default.building.EvEditor") as mock_ed:
+        with patch.object(building, "EvEditor") as mock_ed:
             self.call(building.CmdSetAttribute(), "/edit Obj2/test3")
             mock_ed.assert_called_with(self.char1, Anything, Anything, key="Obj2/test3")
 
@@ -1289,7 +1279,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdDesc(), "Obj2=TestDesc", "The description was set on Obj2.")
         self.call(building.CmdDesc(), "", "Usage: ")
 
-        with patch("evennia.commands.default.building.EvEditor") as mock_ed:
+        with patch.object(building, "EvEditor") as mock_ed:
             self.call(building.CmdDesc(), "/edit")
             mock_ed.assert_called_with(
                 self.char1,
@@ -1504,8 +1494,9 @@ class TestBuilding(BaseEvenniaCommandTest):
                 }
             )
         ]
-        with patch(
-            "evennia.commands.default.building.protlib.search_prototype",
+        with patch.object(
+            protlib,
+            "search_prototype",
             new=MagicMock(return_value=test_prototype),
         ) as mprot:
             self.call(
@@ -1576,8 +1567,9 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdFind(), "/exact Obj", "One Match")
 
         # Test multitype filtering
-        with patch(
-            "evennia.commands.default.building.CHAR_TYPECLASS",
+        with patch.object(
+            building,
+            "CHAR_TYPECLASS",
             "evennia.objects.character.DefaultCharacter",
         ):
             self.call(building.CmdFind(), "/char/room Obj", "No Matches")
@@ -1966,7 +1958,7 @@ from evennia.comms.comms import DefaultChannel  # noqa
 from evennia.utils.create import create_channel  # noqa
 
 
-@patch("evennia.commands.default.comms.CHANNEL_DEFAULT_TYPECLASS", DefaultChannel)
+@patch.object(comms, "CHANNEL_DEFAULT_TYPECLASS", DefaultChannel)
 class TestCommsChannel(BaseEvenniaCommandTest):
     """
     Test the central `channel` command.
@@ -2006,7 +1998,7 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.call(self.cmdchannel(), "/all", "Available channels")
 
     def test_channel__history(self):
-        with patch("evennia.commands.default.comms.tail_log_file") as mock_tail:
+        with patch.object(comms, "tail_log_file") as mock_tail:
             self.call(self.cmdchannel(), "/history testchannel", "")
             mock_tail.assert_called()
 

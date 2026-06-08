@@ -22,13 +22,17 @@ from twisted.test import proto_helpers
 from twisted.trial.unittest import TestCase as TwistedTestCase
 
 import evennia
-from evennia.server.portal import irc
+from evennia.server.portal import irc, portalsessionhandler
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
 from evennia.utils.test_resources import BaseEvenniaTest
 
-from .amp import (AMP_MAXLEN, AMPMultiConnectionProtocol, MsgPortal2Server,
-                  MsgServer2Portal)
+from .amp import (
+    AMP_MAXLEN,
+    AMPMultiConnectionProtocol,
+    MsgPortal2Server,
+    MsgServer2Portal,
+)
 from .amp_server import AMPServerFactory
 from .mccp import MCCP
 from .mssp import MSSP
@@ -235,7 +239,7 @@ class TestTelnet(TwistedTestCase):
         self.transport = proto_helpers.StringTransport()
         self.addCleanup(factory.sessionhandler.disconnect_all)
 
-    @mock.patch("evennia.server.portal.portalsessionhandler.reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
     def test_command_stacking_no_type_error(self):
         self.transport.client = ["localhost"]
         self.transport.setTcpKeepAlive = Mock()
@@ -251,7 +255,7 @@ class TestTelnet(TwistedTestCase):
         self.proto._handshake_delay.cancel()
         return d
 
-    @mock.patch("evennia.server.portal.portalsessionhandler.reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
     def test_mudlet_ttype(self):
         self.transport.client = ["localhost"]
         self.transport.setTcpKeepAlive = Mock()
@@ -340,7 +344,7 @@ class TestTelnet(TwistedTestCase):
         self.assertIn("fish & chips", result)
         self.assertNotIn("&amp;", result)
 
-    @mock.patch("evennia.server.portal.portalsessionhandler.reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
     def test_naws_resize_syncs_updated_width(self):
         """
         Verify that a NAWS resize packet causes sessionhandler.sync to be called
@@ -408,7 +412,7 @@ class TestWebSocket(BaseEvenniaTest):
     def tearDown(self):
         super().tearDown()
 
-    @mock.patch("evennia.server.portal.portalsessionhandler.reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
     def test_data_in(self):
         self.proto.sessionhandler.data_in = MagicMock()
         self.proto.onOpen()
@@ -420,7 +424,7 @@ class TestWebSocket(BaseEvenniaTest):
         self.proto.onMessage(msg, isBinary=False)
         self.proto.sessionhandler.data_in.assert_called_with(self.proto, text=[[sendStr], {}])
 
-    @mock.patch("evennia.server.portal.portalsessionhandler.reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
     def test_data_out(self):
         self.proto.onOpen()
         self.proto.sendEncoded = MagicMock()

@@ -8,6 +8,7 @@ from unittest import TestCase, mock
 
 from evennia import DefaultScript
 from evennia.objects.objects import DefaultObject
+from evennia.scripts import scripts
 from evennia.scripts.manager import ScriptDBManager
 from evennia.scripts.models import ObjectDoesNotExist, ScriptDB
 from evennia.scripts.monitorhandler import MonitorHandler
@@ -23,7 +24,7 @@ from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTest
 class TestScript(BaseEvenniaTest):
     def test_create(self):
         "Check the script can be created via the convenience method."
-        with mock.patch("evennia.scripts.scripts.DefaultScript.at_post_load") as mockinit:
+        with mock.patch.object(DefaultScript, "at_post_load") as mockinit:
             obj, errors = DefaultScript.create("useless-machine")
             self.assertTrue(obj, errors)
             self.assertFalse(errors, errors)
@@ -164,13 +165,14 @@ class TestScriptDB(TestCase):
         # Check the script is not recreated as a side-effect
         self.assertFalse(self.scr in ScriptDB.objects.get_all_scripts())
 
+
 class TestExtendedLoopingCall(TestCase):
     """
     Test the ExtendedLoopingCall class.
 
     """
 
-    @mock.patch("evennia.scripts.scripts.LoopingCall")
+    @mock.patch.object(scripts, "LoopingCall")
     def test_start__nodelay(self, MockClass):
         """Test the .start method with no delay"""
 
@@ -183,7 +185,7 @@ class TestExtendedLoopingCall(TestCase):
         loopcall.start(20, now=True, start_delay=None, count_start=1)
         loopcall._scheduleFrom.assert_not_called()
 
-    @mock.patch("evennia.scripts.scripts.LoopingCall")
+    @mock.patch.object(scripts, "LoopingCall")
     def test_start__delay(self, MockLoopingCall):
         """Test the .start method with delay"""
 
@@ -409,7 +411,7 @@ class TestOnDemandTask(EvenniaTest):
 
     """
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_no_stages__no_autostart(self, mock_runtime):
         mock_runtime.return_value = 1000
         task = OnDemandTask("rose", "flower", autostart=False)
@@ -428,7 +430,7 @@ class TestOnDemandTask(EvenniaTest):
         self.assertEqual(task.get_stage(), None)
         self.assertEqual(task.start_time, 1000)
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_stages_autostart(self, mock_runtime):
         START_TIME = 1000
         mock_runtime.return_value = START_TIME
@@ -475,7 +477,7 @@ class TestOnDemandTask(EvenniaTest):
         mock_runtime.return_value = START_TIME + 10000
         self.assertEqual(task.get_stage(), "dead")
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_stagefuncs(self, mock_runtime):
         START_TIME = 0
         mock_runtime.return_value = START_TIME
@@ -500,7 +502,7 @@ class TestOnDemandTask(EvenniaTest):
         self.assertEqual(task.get_stage(), "dead")
         self.assertEqual(task.start_time, 2000)
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_stagefunc_loop(self, mock_runtime):
         START_TIME = 0
         mock_runtime.return_value = START_TIME
@@ -536,7 +538,7 @@ class TestOnDemandTask(EvenniaTest):
         self.assertEqual(task.iterations, 20)
         self.assertEqual(task.get_stage(), "flower")
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_stagefunc_bounce(self, mock_runtime):
         START_TIME = 0
         mock_runtime.return_value = START_TIME
@@ -682,7 +684,7 @@ class TestOnDemandHandler(EvenniaTest):
         self.assertEqual((task1.key, task1.category), ("rose", "flower"))
         self.assertEqual((task2.key, task2.category), ("daffodil", "flower"))
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_get_dt_and_stage(self, mock_runtime):
         START_TIME = 0
 
@@ -719,7 +721,7 @@ class TestOnDemandHandler(EvenniaTest):
         self.assertEqual(self.handler.get_stage("rose", "flower"), "dead")
         self.assertEqual(self.handler.get_stage("daffodil", "flower"), "dead")
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_set_dt(self, mock_runtime):
         START_TIME = 0
 
@@ -743,7 +745,7 @@ class TestOnDemandHandler(EvenniaTest):
         self.assertEqual(self.handler.get_stage("rose", "flower"), "bud")
         self.assertEqual(self.handler.get_stage("daffodil", "flower"), "wilted")
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_set_stage(self, mock_runtime):
         START_TIME = 0
 
@@ -843,7 +845,7 @@ class TestOnDemandHandler(EvenniaTest):
             },
         )
 
-    @mock.patch("evennia.scripts.ondemandhandler.OnDemandTask.runtime")
+    @mock.patch.object(OnDemandTask, "runtime")
     def test_call_staging_function_with_kwargs(self, mock_runtime):
         """ """
 

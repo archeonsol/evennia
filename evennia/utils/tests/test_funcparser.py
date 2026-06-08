@@ -125,7 +125,7 @@ class TestFuncParser(TestCase):
         # Ignores callables that aren't actual functions.
         parser = funcparser.FuncParser({"foo": 1, "bar": "baz"})
 
-    @patch("evennia.utils.funcparser.variable_from_module")
+    @patch.object(funcparser, "variable_from_module")
     def test_constructor_raises(self, patched_variable_from_module):
         # Patched variable from module returns FUNCPARSER_CALLABLES that isn't dict.
         patched_variable_from_module.return_value = ["foo"]

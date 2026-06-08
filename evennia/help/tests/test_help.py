@@ -129,7 +129,7 @@ class TestFileHelp(TestCase):
 
     """
 
-    @mock.patch("evennia.help.filehelp.variable_from_module")
+    @mock.patch.object(filehelp, "variable_from_module")
     def test_file_help(self, mock_variable_from_module):
         mock_variable_from_module.return_value = HELP_ENTRY_DICTS
 

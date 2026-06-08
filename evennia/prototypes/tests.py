@@ -18,6 +18,7 @@ from evennia.prototypes import protfuncs as protofuncs
 from evennia.prototypes import prototypes as protlib
 from evennia.prototypes import spawner
 from evennia.prototypes.prototypes import _PROTOTYPE_TAG_META_CATEGORY
+from evennia.utils import utils
 from evennia.utils.create import create_object
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaCommandTest
 from evennia.utils.tests.test_evmenu import TestEvMenu
@@ -520,7 +521,7 @@ class TestPrototypeStorage(BaseEvenniaTest):
         prot3 = protlib.create_prototype(self.prot3)
 
         # partial match
-        with mock.patch("evennia.prototypes.prototypes._MODULE_PROTOTYPES", {}):
+        with mock.patch.object(protlib, "_MODULE_PROTOTYPES", {}):
             self.assertCountEqual(protlib.search_prototype("prot"), [prot1b, prot2, prot3])
             self.assertCountEqual(protlib.search_prototype(tags="foo1"), [prot1b, prot2, prot3])
 
@@ -611,8 +612,9 @@ class TestMenuModule(BaseEvenniaTest):
     def test_node_helpers(self):
         caller = self.caller
 
-        with mock.patch(
-            "evennia.prototypes.menus.protlib.search_prototype",
+        with mock.patch.object(
+            protlib,
+            "search_prototype",
             new=mock.MagicMock(return_value=[self.test_prot]),
         ):
             # prototype_key helpers
@@ -628,8 +630,9 @@ class TestMenuModule(BaseEvenniaTest):
             #     "\n|cdesc:|n None \n|cprototype:|n "
             #     "{\n  'typeclass': 'evennia.objects.object.DefaultObject', \n}")
 
-        with mock.patch(
-            "evennia.prototypes.menus.protlib.search_prototype",
+        with mock.patch.object(
+            protlib,
+            "search_prototype",
             new=mock.MagicMock(return_value=[_PROTPARENTS["GOBLIN"]]),
         ):
             self.assertEqual(
@@ -647,8 +650,9 @@ class TestMenuModule(BaseEvenniaTest):
         )
 
         # typeclass helpers
-        with mock.patch(
-            "evennia.utils.utils.get_all_typeclasses",
+        with mock.patch.object(
+            utils,
+            "get_all_typeclasses",
             new=mock.MagicMock(return_value={"foo": None, "bar": None}),
         ):
             self.assertEqual(olc_menus._all_typeclasses(caller), ["bar", "foo"])
@@ -734,8 +738,9 @@ class TestMenuModule(BaseEvenniaTest):
         self.assertEqual(olc_menus._get_menu_prototype(caller)["prototype_tags"], ["foo", "foo2"])
 
         # spawn helpers
-        with mock.patch(
-            "evennia.prototypes.menus.protlib.search_prototype",
+        with mock.patch.object(
+            protlib,
+            "search_prototype",
             new=mock.MagicMock(return_value=[_PROTPARENTS["GOBLIN"]]),
         ):
             self.assertEqual(olc_menus._spawn(caller, prototype=self.test_prot), Something)
@@ -836,16 +841,18 @@ class TestMenuModule(BaseEvenniaTest):
         )
 
 
-@mock.patch(
-    "evennia.prototypes.menus.protlib.search_prototype",
+@mock.patch.object(
+    protlib,
+    "search_prototype",
     new=mock.MagicMock(
         return_value=[
             {"prototype_key": "TestPrototype", "typeclass": "TypeClassTest", "key": "TestObj"}
         ]
     ),
 )
-@mock.patch(
-    "evennia.utils.utils.get_all_typeclasses",
+@mock.patch.object(
+    utils,
+    "get_all_typeclasses",
     new=mock.MagicMock(return_value={"TypeclassTest": None}),
 )
 class TestOLCMenu(TestEvMenu):

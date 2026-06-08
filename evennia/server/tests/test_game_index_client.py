@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from twisted.internet import defer
 
+from evennia.server.game_index_client import client as game_index_client
 from evennia.server.game_index_client.client import EvenniaGameIndexClient
 
 
@@ -40,7 +41,7 @@ class TestGameIndexClient(TestCase):
         "evennia.server.game_index_client.client.evennia.SESSION_HANDLER.account_count",
         return_value=0,
     )
-    @patch("evennia.server.game_index_client.client.Agent", _RecordingAgent)
+    @patch.object(game_index_client, "Agent", _RecordingAgent)
     def test_backslash_n_in_long_description_becomes_newline(self, *_):
         client = EvenniaGameIndexClient()
         d = client._form_and_send_request()

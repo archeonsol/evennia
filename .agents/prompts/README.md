@@ -149,12 +149,18 @@ backlog.
   base without `super()`); decide fix/delete/document, plus whether to
   promote newmoo's startup-backfill pattern into the engine. Overlaps
   F21's backfill-machinery sweep.
+- [F23: dead `COMMAND_DEFAULT_CLASS` test patches](F23-dead-command-default-class-patches.md)
+  — surfaced by F17. Nine stacked `@patch` decorators on
+  `BaseEvenniaCommandTest` are doubly dead (stale `evennia.commands.account`
+  path + a base class with no test methods, so they never start). Decide
+  fix-vs-delete; fixing would silently activate 9 dormant patches.
 
 **Mechanical / verification:**
 
 - [F3: doc rot sweep in `docs/source/`](F3-doc-rot-sweep.md) —
   gated on a newmoo PR.
-- [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md)
+- [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md) —
+  **shipped** (`underspire.85`); 84 sites rewritten, dead remainder carved to F23.
 - [F21: migration-scaffolding carveout](F21-migration-scaffolding-carveout.md)
   — in-progress. The I1 reconcile scaffolding was removed in `.72`; the
   broader sweep for one-time backfill machinery remains.

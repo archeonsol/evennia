@@ -8,17 +8,18 @@ from . import general_context
 class TestGeneralContext(TestCase):
     maxDiff = None
 
-    @patch("evennia.web.utils.general_context.GAME_NAME", "test_name")
-    @patch("evennia.web.utils.general_context.GAME_SLOGAN", "test_game_slogan")
-    @patch("evennia.web.utils.general_context.REGISTER_ENABLED", "register_enabled_testvalue")
-    @patch(
-        "evennia.web.utils.general_context.WEBSOCKET_CLIENT_ENABLED",
+    @patch.object(general_context, "GAME_NAME", "test_name")
+    @patch.object(general_context, "GAME_SLOGAN", "test_game_slogan")
+    @patch.object(general_context, "REGISTER_ENABLED", "register_enabled_testvalue")
+    @patch.object(
+        general_context,
+        "WEBSOCKET_CLIENT_ENABLED",
         "websocket_client_enabled_testvalue",
     )
-    @patch("evennia.web.utils.general_context.WEBCLIENT_ENABLED", "webclient_enabled_testvalue")
-    @patch("evennia.web.utils.general_context.WEBSOCKET_PORT", "websocket_client_port_testvalue")
-    @patch("evennia.web.utils.general_context.WEBSOCKET_URL", "websocket_client_url_testvalue")
-    @patch("evennia.web.utils.general_context.REST_API_ENABLED", True)
+    @patch.object(general_context, "WEBCLIENT_ENABLED", "webclient_enabled_testvalue")
+    @patch.object(general_context, "WEBSOCKET_PORT", "websocket_client_port_testvalue")
+    @patch.object(general_context, "WEBSOCKET_URL", "websocket_client_url_testvalue")
+    @patch.object(general_context, "REST_API_ENABLED", True)
     def test_general_context(self):
         request = RequestFactory().get("/")
         request.user = AnonymousUser()

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
+from evennia.server import at_init_scheduler
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -28,8 +29,9 @@ class TestAtInitScheduler(BaseEvenniaTest):
 
         entity = MagicMock()
         with (
-            patch(
-                "evennia.server.at_init_scheduler._collect_cached_entities",
+            patch.object(
+                at_init_scheduler,
+                "_collect_cached_entities",
                 return_value=[entity, entity, entity],
             ),
             patch("twisted.internet.reactor.callLater", _sync_call_later),

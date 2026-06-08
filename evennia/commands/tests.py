@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
+import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
@@ -1236,7 +1237,7 @@ class TestCmdParser(TestCase):
             ("look at", " target", dummy, 7, 0.5, "look"),
         )
 
-    @patch("evennia.commands.cmdparser.log_trace")
+    @patch.object(cmdparser, "log_trace")
     def test_build_matches_masks_sensitive_input_on_error(self, mock_log_trace):
         class _BrokenCmdSet:
             def __iter__(self):
@@ -1508,7 +1509,7 @@ class TestIssue2627(TwistedTestCase, BaseEvenniaTest):
         self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
         super().setUp()
 
-    @patch("evennia.commands.cmdhandler.logger.log_err")
+    @patch.object(cmdhandler.logger, "log_err")
     def test_cmdhandler_masks_sensitive_input_in_error_log(self, mock_log_err):
         d = cmdhandler.cmdhandler(
             self.session, " johnny password123", cmdobj=_CmdCrash(), cmdobj_key="connect"
@@ -2928,7 +2929,7 @@ class TestCmdsetMergeWarmup(BaseEvenniaTest):
         fake_handler = MagicMock()
         fake_handler.get_sessions.return_value = [unpuppeted]
         with (
-            patch("evennia.SESSION_HANDLER", fake_handler),
+            patch.object(evennia, "SESSION_HANDLER", fake_handler),
             patch.object(cmdset_merge_warmup, "warm_cmdset_merge_for_session") as warm_mock,
         ):
             cmdset_merge_warmup.warm_all_logged_in_puppet_sessions()

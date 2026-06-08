@@ -42,7 +42,9 @@ from evennia.objects.objects import (
     DefaultObject,
     DefaultRoom,
 )
+from evennia.scripts import taskhandler
 from evennia.scripts.scripts import DefaultScript
+from evennia.server.portal import portal as portal_module
 from evennia.server.serversession import ServerSession
 from evennia.typeclasses.attributes import discard_dirty_backends
 from evennia.utils import ansi, create
@@ -256,7 +258,7 @@ class EvenniaTestMixin:
         if hasattr(self, "sessions"):
             del evennia.SESSION_HANDLER[self.session.sessid]
 
-    @patch("evennia.scripts.taskhandler.deferLater", _mock_deferlater)
+    @patch.object(taskhandler, "deferLater", _mock_deferlater)
     def setUp(self):
         """
         Sets up testing environment
@@ -298,7 +300,7 @@ class EvenniaTestMixin:
         super().tearDown()
 
 
-@patch("evennia.server.portal.portal.LoopingCall", new=MagicMock())
+@patch.object(portal_module, "LoopingCall", new=MagicMock())
 class EvenniaCommandTestMixin:
     """
     Mixin to add to a test in order to provide the `.call` helper for
@@ -651,6 +653,12 @@ class EvenniaTest(EvenniaTestMixin, TestCase):
     script_typeclass = settings.BASE_SCRIPT_TYPECLASS
 
 
+# NOTE: these path-string patches are dead and intentionally NOT rewritten to
+# patch.object. The path `evennia.commands.account` is stale (real module is
+# `evennia.commands.default.account`) AND the decorators sit on a base class
+# with no test methods, so patch's class-decorator wraps nothing and they never
+# start. Fixing the path would silently activate 9 dormant patches (a behavior
+# change). Fix-vs-delete is tracked in .agents/prompts/F23.
 @patch("evennia.commands.account.COMMAND_DEFAULT_CLASS", Command)
 @patch("evennia.commands.admin.COMMAND_DEFAULT_CLASS", Command)
 @patch("evennia.commands.building.COMMAND_DEFAULT_CLASS", Command)

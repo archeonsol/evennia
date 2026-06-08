@@ -7,6 +7,7 @@ auto-answering ``get_input`` / ``_sleep`` (so dispatch still completes inline) o
 by holding a rule's ``Deferred`` unfired to assert phase serialization.
 """
 
+import sys
 import unittest
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -14,22 +15,22 @@ from unittest import mock
 
 from twisted.internet.defer import Deferred, succeed
 
-import sys
-
 from evennia.actions.action import Action
-from evennia.actions.rule import rule
 from evennia.actions.engine import RuleEngine
 from evennia.actions.menus import MenuPrompt, format_menu_prompt
+from evennia.actions.rule import rule
 
 # The package re-exports the ``engine`` *instance*, which shadows the ``engine``
 # submodule attribute on the package — so ``import evennia.actions.engine`` would
 # bind the instance, not the module. Grab the module object from sys.modules.
 engine_mod = sys.modules["evennia.actions.engine"]
+from evennia.actions.actor import Actor
 from evennia.actions.context import ActionContext
 from evennia.actions.exceptions import ActionError
-from evennia.actions.result import PASS, CLAIM, FAIL, REDIRECT
 from evennia.actions.predicate import Builder, HasTag
-from evennia.actions.actor import Actor
+from evennia.actions.result import CLAIM, FAIL, PASS, REDIRECT
+from evennia.locks import lockhandler
+from evennia.utils import logger
 
 
 # --- test action types ------------------------------------------------------
@@ -309,7 +310,7 @@ class TestCheckPhase(unittest.TestCase):
         self.assertEqual(actor.messages, ["no kicking"])
 
     def test_check_claim_is_contract_violation_and_warns(self):
-        with mock.patch("evennia.utils.logger.log_warn") as warn:
+        with mock.patch.object(logger, "log_warn") as warn:
             trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(BadCheckClaim())))
         self.assertEqual(warn.call_count, 1)
         self.assertNotEqual(trace.outcome, "blocked")
@@ -327,7 +328,7 @@ class TestCarryOutPhase(unittest.TestCase):
 
     def test_exception_does_not_stop_other_rules(self):
         fired = []
-        with mock.patch("evennia.utils.logger.log_trace"):
+        with mock.patch.object(logger, "log_trace"):
             trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Faulty(fired))))
         self.assertEqual(fired, ["boom", "still_runs"])
         self.assertEqual(trace.outcome, "succeeded")
@@ -371,7 +372,7 @@ class TestRequiresGate(unittest.TestCase):
         self.assertEqual(fired, ["staff_work"])
 
     def test_capability_predicate_does_not_parse_lockstrings(self):
-        with mock.patch("evennia.locks.lockhandler.check_lockstring") as chk:
+        with mock.patch.object(lockhandler, "check_lockstring") as chk:
             _sync(ENGINE.dispatch(Kick(), _actor(perms=["Builder"]), _ctx(StaffOnly([]))))
         self.assertEqual(chk.call_count, 0)
 
@@ -396,9 +397,7 @@ class TestDryRunAndExplain(unittest.TestCase):
         self.assertTrue(any(pt.result.is_pass for pt in trace.phases))
 
     def test_dry_run_requires_false_still_skips(self):
-        trace = _sync(
-            ENGINE.dispatch(Kick(), _actor(perms=[]), _ctx(StaffOnly([])), dry_run=True)
-        )
+        trace = _sync(ENGINE.dispatch(Kick(), _actor(perms=[]), _ctx(StaffOnly([])), dry_run=True))
         self.assertTrue(any(pt.result.is_skip for pt in trace.phases))
 
     def test_explain_returns_full_trace_all_phases(self):
@@ -436,7 +435,7 @@ class TestInteractiveRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch("evennia.actions.engine._get_input_deferred", side_effect=fake_deferred)
+        return mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_deferred)
 
     def test_interactive_resumes_with_input_and_claim_stops_phase(self):
         fired = []
@@ -485,7 +484,7 @@ class TestMenuPromptRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch("evennia.actions.engine._get_input_deferred", side_effect=fake_deferred)
+        return mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_deferred)
 
     def test_menu_prompt_resumes_with_numeric_choice(self):
         fired = []

@@ -5,27 +5,29 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from unittest import mock
 
-from evennia.actions.permission import Capability, DefaultCapability
 from evennia.actions import predicate as P
+from evennia.actions.permission import Capability, DefaultCapability
 from evennia.actions.predicate import (
-    Predicate,
-    HasCapability,
-    Holds,
-    HasTag,
-    HasAttr,
-    IsSelf,
-    IsObject,
-    And,
-    Or,
-    Not,
-    Builder,
-    Admin,
     ALWAYS,
     NEVER,
+    Admin,
+    And,
+    Builder,
+    HasAttr,
+    HasCapability,
+    HasTag,
+    Holds,
+    IsObject,
+    IsSelf,
+    LegacyLock,
+    Not,
+    Or,
+    Predicate,
     coerce_predicate,
     from_lockstring,
-    LegacyLock,
 )
+from evennia.locks import lockhandler
+from evennia.utils import logger
 
 
 class _Perms:
@@ -278,9 +280,10 @@ class TestLegacyLock(unittest.TestCase):
     def test_fallback_calls_evaluator_and_warns_once(self):
         actor = _actor(effective=SimpleNamespace(id=1))
         lock = LegacyLock("cmd:frobnicate()", "cmd")
-        with mock.patch(
-            "evennia.locks.lockhandler.check_lockstring", return_value=True
-        ) as chk, mock.patch("evennia.utils.logger.log_warn") as warn:
+        with (
+            mock.patch.object(lockhandler, "check_lockstring", return_value=True) as chk,
+            mock.patch.object(logger, "log_warn") as warn,
+        ):
             self.assertTrue(lock(None, actor))
             self.assertTrue(lock(None, actor))
             self.assertEqual(chk.call_count, 2)

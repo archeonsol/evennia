@@ -12,6 +12,7 @@ from evennia.accounts.accounts import (
     DefaultAccount,
     DefaultGuest,
 )
+from evennia.accounts.models import ControlBinding
 from evennia.utils import create
 from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.utils.utils import uses_database
@@ -352,7 +353,7 @@ class TestDefaultAccount(TestCase):
         # the focus stack / ControlBinding internals are exercised by the
         # dedicated binding tests; here we only assert the takeover messaging
         # and the at_post_puppet hook, so stub the durable binding lookup.
-        with patch("evennia.accounts.models.ControlBinding.for_identity") as for_identity:
+        with patch.object(ControlBinding, "for_identity") as for_identity:
             for_identity.return_value = MagicMock()
             account.puppet_object(self.s1, obj)
         # works because django.conf.settings.MULTISESSION_MODE is not in (1, 3)

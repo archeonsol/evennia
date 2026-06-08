@@ -16,6 +16,7 @@ from twisted.internet.defer import Deferred, succeed
 
 from evennia.actions import process
 from evennia.actions.process import Activity
+from evennia.utils import logger
 
 
 def _holder():
@@ -117,7 +118,7 @@ class TestActivityLifecycle(unittest.TestCase):
 
     def test_crashing_body_is_contained(self):
         holder, log = _holder(), []
-        with mock.patch("evennia.utils.logger.log_trace"):
+        with mock.patch.object(logger, "log_trace"):
             process.start_activity(holder, Crasher(log))
         self.assertEqual(log, ["boom"])
         self.assertEqual(process.get_activities(holder), [])

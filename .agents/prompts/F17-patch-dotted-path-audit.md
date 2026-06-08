@@ -1,6 +1,17 @@
 # F17: `@patch("dotted.path")` audit
 
-Status: todo
+Status: shipped (`underspire.85`)
+
+Rewrote 84 string-literal `patch(...)` sites across 22 engine test files to
+`patch.object()` (first-party module/class containers, incl. imported references
+like `Popen`/`LoopingCall`/`reactor` and module globals). Left ~40 as-is, all
+verified correct by resolving every path under a configured Django env: builtins
+injected into a namespace (`print`, `str`/`int`/`exec` — need `create=True`),
+stdlib/third-party containers (`os`, `time`, `importlib`, twisted `reactor` and
+`amp.AMP`), Django `.objects` managers, and the `SESSION_HANDLER` runtime
+singleton. The only genuinely-dead patches the sweep surfaced (9
+`COMMAND_DEFAULT_CLASS` decorators) are carved out to
+[F23](F23-dead-command-default-class-patches.md).
 
 ## Goal
 

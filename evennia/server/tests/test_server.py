@@ -9,9 +9,10 @@ from django.test import override_settings
 from mock import DEFAULT, MagicMock, call, patch
 
 import evennia
+from evennia.server import service
 
 
-@patch("evennia.server.service.LoopingCall", new=MagicMock())
+@patch.object(service, "LoopingCall", new=MagicMock())
 class TestServer(TestCase):
     """
     Test server module.

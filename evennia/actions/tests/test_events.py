@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from unittest import mock
 
 from evennia.actions.engine import RuleEngine
-from evennia.actions.events import Event, subscribe, event_registry
-
+from evennia.actions.events import Event, event_registry, subscribe
+from evennia.utils import logger
 
 ENGINE = RuleEngine()
 
@@ -115,7 +115,7 @@ class TestEmit(unittest.TestCase):
     def test_handler_exception_does_not_stop_emit(self):
         log = []
         g = Guard(log, "g1")
-        with mock.patch("evennia.utils.logger.log_trace"):
+        with mock.patch.object(logger, "log_trace"):
             fired = ENGINE.emit(Departed(mover="bob", scope=(Boom(), g)))
         # Boom raised but Guard still fired; count reflects only successes
         self.assertEqual(log, [("guard", "g1", "bob")])
@@ -136,8 +136,7 @@ class TestEventRegistry(unittest.TestCase):
     def test_override_without_subscribe_shadows_base(self):
         class Base:
             @subscribe(Departed)
-            def react(self, event):
-                ...
+            def react(self, event): ...
 
         class Derived(Base):
             def react(self, event):  # overrides, no @subscribe → unsubscribed

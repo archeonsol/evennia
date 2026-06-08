@@ -2,8 +2,7 @@
 
 from unittest.mock import patch
 
-from evennia.utils.test_resources import EvenniaTest
-
+from evennia.narrative import emote
 from evennia.narrative.emote import (
     build_emote_segment_plans,
     find_targets_in_text,
@@ -11,6 +10,7 @@ from evennia.narrative.emote import (
     parse_quoted_speech,
     split_emote_segments,
 )
+from evennia.utils.test_resources import EvenniaTest
 
 
 class TestBuildEmoteSegmentPlans(EvenniaTest):
@@ -46,8 +46,8 @@ class TestBuildEmoteSegmentPlans(EvenniaTest):
         plans = build_emote_segment_plans(segments, self.char1, [])
         self.assertEqual(len(plans), len(segments))
 
-    @patch("evennia.narrative.emote.find_targets_in_text")
-    @patch("evennia.narrative.emote.first_to_third", return_value="waves.")
+    @patch.object(emote, "find_targets_in_text")
+    @patch.object(emote, "first_to_third", return_value="waves.")
     def test_called_once_per_segment_not_per_viewer(self, mock_third, mock_find):
         mock_find.return_value = []
         segments = ["I wave", "I nod"]
