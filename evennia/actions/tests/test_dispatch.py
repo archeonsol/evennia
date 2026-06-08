@@ -19,7 +19,7 @@ from evennia.actions.dispatch import (
 )
 from evennia.actions.engine import RuleEngine
 from evennia.actions.exceptions import AmbiguousTarget
-from evennia.actions.menus import DisambiguationState, EvMenuState
+from evennia.actions.menus import DisambiguationState
 from evennia.actions.parser import ActionParser, NoMatchAction
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import CLAIM
@@ -260,25 +260,6 @@ class TestDisambiguation(unittest.TestCase):
         self.assertFalse(self.actor.has_state(DisambiguationState))
         self.assertIn("Invalid choice. Cancelled.", self.char.messages)
         self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)
-
-
-# --- active capturing state -------------------------------------------------
-class TestActiveState(unittest.TestCase):
-    def test_menu_state_captures_unknown_input(self):
-        parser = ActionParser(registry=_make_registry())
-        char = FakeChar()
-        actor = Actor(character=char)
-        routed = []
-
-        def node_start(actor_, raw):
-            routed.append(raw)
-            return None  # exit
-
-        actor.enter_state(EvMenuState({"start": node_start}))
-        handled = _dispatch(actor, "some free text", parser)
-        self.assertTrue(handled)
-        self.assertEqual(routed, ["some free text"])
-        self.assertFalse(actor.has_state(EvMenuState))
 
 
 # --- profiling middleware ---------------------------------------------------

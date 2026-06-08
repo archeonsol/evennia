@@ -46,11 +46,12 @@ from .events import Event, EventRegistry, EventSpec, event_registry, subscribe
 from .exceptions import ActionError, AmbiguousTarget, ParseError, RuleConflict
 from .menus import (
     DisambiguationState,
-    EvMenuState,
     InputCaptureState,
     MenuInputAction,
     MenuPrompt,
+    confirm,
     format_menu_prompt,
+    paginate,
     parse_menu_choice,
 )
 from .muxargs import MuxArgs, mux_parse
@@ -230,10 +231,11 @@ __all__ = [
     "MenuInputAction",
     "MenuPrompt",
     "InputCaptureState",
-    "EvMenuState",
     "DisambiguationState",
     "format_menu_prompt",
     "parse_menu_choice",
+    "confirm",
+    "paginate",
     # default actions (shipped movement substrate)
     "Moved",
     "Departed",

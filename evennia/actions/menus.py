@@ -1,24 +1,26 @@
 """
-Interaction states (CM1 Phase 3e / Gate 4): the two engine-level states that
-intercept the *next* line of input.
+Generator-flow menu helpers and input-capturing interaction states.
 
-Both back patterns the cmdset world handled with special command instances:
+The menu layer has two halves:
 
-* :class:`EvMenuState` — captures every input line and routes it to a menu node,
-  the action-engine equivalent of the cmdset-based ``EvMenu``. New linear flows
-  should prefer an ``@interactive`` ``carry_out`` rule (``resp = yield "prompt"``,
-  driven by the engine's generator machinery — see Phase 1g); this state exists
-  so the legacy node-graph API keeps working unchanged.
-* :class:`DisambiguationState` — installed when the parser raises
-  :class:`AmbiguousTarget`. Its high-priority ``before`` rule reads the next line
-  as a choice, patches the pending action's target, and ``REDIRECT``s it.
+* **Generator-flow helpers** for ``@interactive`` ``carry_out`` rules driven by
+  the engine's generator machinery: :class:`MenuPrompt` (+
+  :func:`format_menu_prompt` / :func:`parse_menu_choice`) for numbered menus,
+  :func:`confirm` for a yes/no sub-flow, and :func:`paginate` for slicing long
+  lists. A flow ``yield``\\s these and resumes with the player's choice
+  (``resp = yield "prompt"`` / ``choice = yield MenuPrompt(...)``).
 
-Both work purely through the rule engine: a catch-all ``before`` rule at priority
-9999 (ahead of any normal rule) fires first and seizes the input. The states sit
-at the front of the provider list (``actor.state_objects``), so their rules win.
+* **Input-capturing states** for the callback-style patterns the cmdset world
+  handled with special command instances: :class:`InputCaptureState`,
+  :class:`GetInputState` (``evmenu.get_input``), :class:`YesNoState`
+  (``evmenu.ask_yes_no``), and :class:`DisambiguationState` (installed when the
+  parser raises :class:`AmbiguousTarget`).
 
-``MenuInputAction`` is the internal action ``EvMenuState`` redirects raw input
-into; it is a system action (``__menuinput__``), excluded from the verb trie.
+The states work purely through the rule engine: a catch-all ``before`` rule at
+priority 9999 (ahead of any normal rule) fires first and seizes the input. The
+states sit at the front of the provider list (``actor.state_objects``), so their
+rules win. :class:`MenuInputAction` is the internal system action that captured
+raw input is redirected into (``__menuinput__``, excluded from the verb trie).
 """
 
 from dataclasses import dataclass, field
@@ -34,11 +36,12 @@ __all__ = [
     "InputCaptureState",
     "GetInputState",
     "YesNoState",
-    "EvMenuState",
     "DisambiguationState",
     "format_menu_prompt",
     "parse_menu_choice",
     "session_mismatch",
+    "confirm",
+    "paginate",
 ]
 
 
@@ -49,7 +52,7 @@ class MenuInputAction(Action):
 
     Attributes:
         raw (str): the line the player typed.
-        menu (EvMenuState): the capturing menu state.
+        menu (StateProvider): the capturing input state (e.g. GetInputState).
     """
 
     raw: str = ""
@@ -137,6 +140,35 @@ def parse_menu_choice(raw, menu: MenuPrompt):
         if str(key).lower() == lowered:
             return key
     return "__invalid__"
+
+
+# --------------------------------------------------------------------------- #
+# Generator-flow combinators (for ``@interactive`` carry_out rules)
+# --------------------------------------------------------------------------- #
+
+
+def confirm(prompt, yes_label="Yes", no_label="No"):
+    """Yes/no sub-flow for an ``@interactive`` generator.
+
+    Use as ``ok = yield from confirm("Leave group?")``. Returns ``True`` only on
+    the yes option; declining or quitting (``q``) is ``False``. Yields a
+    :class:`MenuPrompt`, so it composes inside any flow the engine drives.
+    """
+    choice = yield MenuPrompt(prompt, options=[("y", yes_label), ("n", no_label)])
+    return choice == "y"
+
+
+def paginate(items, page_size, page=0):
+    """Pure slice helper for long lists in a flow.
+
+    Returns ``(page_items, page, total_pages)``; ``page`` is clamped into range.
+    Replaces the hand-rolled ``items[:N]`` / ``limit=N`` slicing in menu screens.
+    """
+    items = list(items)
+    total = max(1, (len(items) + page_size - 1) // page_size)
+    page = max(0, min(page, total - 1))
+    start = page * page_size
+    return items[start : start + page_size], page, total
 
 
 class InputCaptureState(StateProvider):
@@ -296,53 +328,6 @@ class YesNoState(StateProvider):
             logger.log_trace("Error in ask_yes_no")
             actor.exit_state(YesNoState)
         return CLAIM
-
-
-# --------------------------------------------------------------------------- #
-# EvMenuState
-# --------------------------------------------------------------------------- #
-
-
-class EvMenuState(StateProvider):
-    """Captures all input and routes it through a menu node graph.
-
-    The node graph is a ``{node_name: callable}`` map. A node callable receives
-    ``(actor, raw_input)`` and returns the *next* node name, or ``None`` to end
-    the menu (which exits the state). This is a deliberately small routing model;
-    the full legacy ``EvMenu(caller, menudata)`` constructor is preserved as a
-    thin wrapper that installs an ``EvMenuState`` (wired in Phase 4).
-    """
-
-    def __init__(self, menutree=None, startnode="start", **kwargs):
-        self.menutree = dict(menutree or {})
-        self.current_node = startnode
-        self.kwargs = kwargs
-
-    @rule(Action, phase="before", priority=9999)
-    def capture_input(self, action, actor):
-        """Seize the next input line — unless it's the MenuInputAction we just
-        produced (which must fall through to :meth:`run_node`)."""
-        if isinstance(action, MenuInputAction):
-            return PASS
-        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
-
-    @rule(MenuInputAction, phase="carry_out", priority=9999)
-    def run_node(self, action, actor):
-        """Execute the current node with the captured input and claim."""
-        self.route(action.raw, actor)
-        return CLAIM
-
-    def route(self, raw, actor):
-        """Run the current node callable and advance (or exit on ``None``)."""
-        node = self.menutree.get(self.current_node)
-        if node is None:
-            actor.exit_state(EvMenuState)
-            return
-        nxt = node(actor, raw)
-        if nxt is None:
-            actor.exit_state(EvMenuState)
-        else:
-            self.current_node = nxt
 
 
 # --------------------------------------------------------------------------- #
