@@ -1,7 +1,21 @@
 # CM1: migrate cmdset-based input-capture to engine StateProviders
 
-Status: EvEditor done. Remaining: EvMenu migration, then legacy cmdset-dispatch
-removal (both gated, see below).
+Status: EvEditor done. EvMenu **not migrated — deleted** in `.85` (it had no
+remaining consumer once the game moved to native generator screens; see the
+"EvMenu was deleted, not migrated" note below). Remaining: legacy cmdset-dispatch
+removal (gated, see below).
+
+> **`.85` update — read this before trusting the EvMenu sections.** The plan
+> below (written when EvMenu was still in the tree) calls for *migrating* EvMenu
+> onto a `StateProvider` and adding a `_menutree_saved` row to the
+> `_CAPTURE_REHYDRATORS` seam. That did **not** happen. EvMenu, its cmdset
+> plumbing (`EvMenuCmdSet` / `CmdEvMenuNode` / `CMD_NOMATCH` / `CMD_NOINPUT`),
+> the OLC prototype builder, and the 9 EvMenu-dependent contribs were **deleted**
+> instead (commits `d74d0e386`, `f873f34c2`, `b1f0cd02e`). The two survivors,
+> `get_input` / `ask_yes_no`, moved into `evennia/actions/menus.py` (commit
+> `80c21e95b`); `evennia/utils/evmenu.py` no longer exists. So: the seam has only
+> the `_eveditor` row and never needed an EvMenu one, and the EvMenu-specific
+> instructions below are historical.
 
 CM1 follow-on. Companion to [`CM1-action-system-roadmap.md`](CM1-action-system-roadmap.md)
 (Phase 1–8 shipped) and the `6.0.0+underspire.73` release. Read the `.73`
@@ -189,15 +203,13 @@ re-installs the state for free). What's gone is the *trigger*: today it rides th
 persistent-cmdset reimport + lazy `_load_editor` in `parse()`, all of which we
 delete. Re-point it through the rehydration seam.
 
-## Persistent-capture rehydration seam (shared with the EvMenu migration)
+## Persistent-capture rehydration seam
 
-**Two concurrent consumers, so build one seam, not two ad-hoc hooks.** EvMenu
-(migrated in parallel by someone else) has the *identical* pattern: `persistent=True`,
-a `_menutree_saved` attribute, and a `_restore(caller)` function that rebuilds
-the menu — same dead trigger once its cmdset is deleted. Without a shared seam,
-both migrations would each bolt a subsystem-specific block onto the base
-`at_post_load` (merge collision + duplicated layering smell). Agree this contract
-with the EvMenu owner before building.
+> **`.85`:** this was originally scoped as a seam *shared* with an EvMenu
+> migration (EvMenu had the identical `persistent=True` / `_menutree_saved` /
+> `_restore` pattern). EvMenu was deleted instead, so the seam has a single
+> consumer — EvEditor's `_eveditor_saved` row — and no `_menutree_saved` row was
+> ever added. The declarative design below still stands; it just has one row.
 
 States are non-persistent by design (`state.py`), and there is no generic
 "reinstall persisted StateProviders on reload" path. Add a small **declarative,
