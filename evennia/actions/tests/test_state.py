@@ -1,5 +1,5 @@
 """Tests for Actor, ActionContextBuilder, StateProvider, and the interaction
-states EvMenuState / DisambiguationState (CM1 Phase 3).
+states (DisambiguationState et al.).
 
 State and dispatch behaviors are exercised through the real ``RuleEngine`` (its
 ``dispatch`` returns a ``Deferred`` that fires synchronously here), so these
@@ -17,8 +17,6 @@ from evennia.actions.engine import RuleEngine
 from evennia.actions.exceptions import AmbiguousTarget
 from evennia.actions.menus import (
     DisambiguationState,
-    EvMenuState,
-    MenuInputAction,
 )
 from evennia.actions.parser import ActionParser
 from evennia.actions.registry import ActionRegistry
@@ -317,68 +315,38 @@ class TestDisambiguation(unittest.TestCase):
         self.assertTrue(actor.has_state(DisambiguationState))
 
 
-# --- EvMenuState ------------------------------------------------------------
-class TestEvMenuState(unittest.TestCase):
-    def test_captures_and_routes_single_node(self):
-        char = FakeChar()
-        actor = Actor(character=char)
-        routed = []
+# --- generator-flow combinators ---------------------------------------------
+class TestMenuCombinators(unittest.TestCase):
+    def test_confirm_yes(self):
+        from evennia.actions.menus import MenuPrompt, confirm
 
-        def node_start(actor_, raw):
-            routed.append(raw)
-            actor_.msg(f"got {raw}")
-            return None  # exit
+        gen = confirm("ok?")
+        prompt = gen.send(None)
+        self.assertIsInstance(prompt, MenuPrompt)
+        with self.assertRaises(StopIteration) as cm:
+            gen.send("y")
+        self.assertIs(cm.exception.value, True)
 
-        menu = EvMenuState({"start": node_start})
-        actor.enter_state(menu)
-        ctx = ActionContext(providers=[menu])
+    def test_confirm_no_and_quit(self):
+        from evennia.actions.menus import confirm
 
-        choice = Choice()
-        choice._raw_string = "hello"
-        trace = _sync(ENGINE.dispatch(choice, actor, ctx))
+        for reply in ("n", None):
+            gen = confirm("ok?")
+            gen.send(None)
+            with self.assertRaises(StopIteration) as cm:
+                gen.send(reply)
+            self.assertIs(cm.exception.value, False)
 
-        self.assertEqual(routed, ["hello"])
-        self.assertFalse(actor.has_state(EvMenuState))
-        self.assertIn("got hello", char.messages)
-        self.assertEqual(trace.outcome, "succeeded")
+    def test_paginate(self):
+        from evennia.actions.menus import paginate
 
-    def test_routes_across_multiple_nodes(self):
-        char = FakeChar()
-        actor = Actor(character=char)
-        routed = []
-
-        def n_start(actor_, raw):
-            routed.append(("start", raw))
-            return "second"
-
-        def n_second(actor_, raw):
-            routed.append(("second", raw))
-            return None
-
-        menu = EvMenuState({"start": n_start, "second": n_second})
-        actor.enter_state(menu)
-        ctx = ActionContext(providers=[menu])
-
-        first = Choice()
-        first._raw_string = "a"
-        _sync(ENGINE.dispatch(first, actor, ctx))
-        self.assertTrue(actor.has_state(EvMenuState))  # still in menu
-
-        second = Choice()
-        second._raw_string = "b"
-        _sync(ENGINE.dispatch(second, actor, ctx))
-
-        self.assertEqual(routed, [("start", "a"), ("second", "b")])
-        self.assertFalse(actor.has_state(EvMenuState))
-
-    def test_menuinput_action_falls_through_capture(self):
-        # capture_input must PASS MenuInputAction (else infinite REDIRECT).
-        menu = EvMenuState({})
-        actor = Actor(character=FakeChar())
-        result = menu.capture_input(MenuInputAction(raw="x", menu=menu), actor)
-        from evennia.actions.result import PASS
-
-        self.assertIs(result, PASS)
+        items = list(range(25))
+        page0, p, total = paginate(items, 10, 0)
+        self.assertEqual(page0, list(range(10)))
+        self.assertEqual((p, total), (0, 3))
+        page9, p, _ = paginate(items, 10, 9)  # clamps to last page
+        self.assertEqual(page9, [20, 21, 22, 23, 24])
+        self.assertEqual(p, 2)
 
 
 if __name__ == "__main__":

@@ -21,8 +21,9 @@ three lifecycle operations:
 so rule bodies can write ``actor.exit_state(DisambiguationState)``.
 
 Concrete game states (FlatlinedState, GrappledState, …) live game-side, not in
-the engine; the engine ships only the base plus the two generic interaction
-states in ``menus.py`` (EvMenuState, DisambiguationState).
+the engine; the engine ships only the base plus the generic interaction states
+in ``menus.py`` (InputCaptureState, GetInputState, YesNoState,
+DisambiguationState).
 """
 
 __all__ = [
