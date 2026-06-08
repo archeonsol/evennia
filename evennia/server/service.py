@@ -164,6 +164,15 @@ class EvenniaServerService(MultiService):
             # (see https://github.com/evennia/evennia/issues/1376)
             connection.close()
 
+        # Probe the optional Redis job-queue backend so a real outage stays
+        # visible in the log without flooding it (see evennia.jobs.queue).
+        try:
+            from evennia.jobs.queue import check_redis_backend
+
+            check_redis_backend()
+        except Exception:
+            logger.log_trace("server_maintenance redis liveness check")
+
         self.process_idle_timeouts()
 
         # Link-dead puppets (a body whose session died on a crash) no longer
