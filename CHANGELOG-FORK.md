@@ -25,6 +25,99 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.85 — delete the legacy EvMenu menu system
+
+### Engine
+
+The legacy `EvMenu` node-graph menu and its cmdset-based input capture are
+removed. Under the action engine the menu's `EvMenuCmdSet` (the `CMD_NOMATCH` /
+`CMD_NOINPUT` catch-all commands) was never merged into dispatch, so a line
+typed into an open `EvMenu` reached the engine and the menu command never ran:
+the whole node-graph menu had been silently non-functional. Branching
+interactive flows are now native `@interactive` generator screens that
+`yield` an [`evennia.actions.menus.MenuPrompt`](evennia/actions/menus.py) (plus
+the `confirm` / `paginate` combinators added in `.84`).
+
+- Deleted `EvMenu`, `EvMenuCmdSet`, `CmdEvMenuNode`, `list_node`, and the
+  menu-template parser. The [`evennia/utils/evmenu.py`](evennia/utils/evmenu.py)
+  module no longer exists.
+- The two survivors, `get_input` and `ask_yes_no` (StateProvider-backed since
+  `.73`), moved into [`evennia.actions.menus`](evennia/actions/menus.py) beside
+  the `GetInputState` / `YesNoState` they install, and are exported from
+  `evennia.actions`.
+- Removed the OLC prototype builder (`@olc`, `@spawn/menu`, `@spawn/edit`) from
+  [`CmdSpawn`](evennia/commands/default/building.py) and deleted
+  `evennia/prototypes/menus.py`. `@spawn` and its non-menu switches
+  (`list`/`search`/`show`/`raw`/`save`/`update`/`delete`) are unchanged;
+  prototypes are authored as `.py`/YAML.
+- Dropped the `evennia.EvMenu` flat-API export.
+
+### Engine (metrics)
+
+Committed the attribute-flush observability path to the Prometheus surface
+(`server/prometheus_metrics.py`, `/metrics`,
+`ENGINE_PROMETHEUS_METRICS_ENABLED`). `flush_all_dirty` now calls
+`record_attribute_flush` directly: the redundant outer `except: pass` is gone,
+so a genuine metrics bug surfaces instead of vanishing (the metrics function is
+safe-by-construction — init gate, None-guards, int coercion). The
+`record_attribute_flush_stats` forwarder is collapsed, and the previously-dead
+`maybe_warn_pending_dirty` is wired into `server_maintenance`
+(off by default; `ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD = 0`).
+
+### Contrib
+
+Deleted the nine contribs that depended on the `EvMenu` class:
+`character_creator`, `evscaperoom`, `fieldfill`, `tree_select`, `menu_login`,
+`ingame_reports`, `talking_npc`, `evadventure`, `tutorial_world`. All were
+already non-functional under the action engine.
+
+### Docs
+
+Removed `Components/EvMenu.md`, the entire Beginner Tutorial (built on the
+deleted `evadventure` / `tutorial_world` contribs and stock cmdset dispatch),
+the nine contribs' narrative + autodoc pages, and the EvMenu-based
+NPC-Merchants howto, pruning every inbound cross-link and toctree entry.
+
+### Tests
+
+Rewrote 84 path-string `@patch("a.b.c")` sites across 22 test files to
+`patch.object(container, "c")`, which fails loudly when a patched target is
+renamed or moved instead of silently no-opping against unpatched code. ~40 sites
+targeting builtins, stdlib/third-party containers, Django managers, and runtime
+singletons were intentionally left as path-strings (documented in
+`.agents/prompts/F17`, with the dead `COMMAND_DEFAULT_CLASS` decorators carved
+out to `F23`).
+
+### Migration notes
+
+- `from evennia.utils.evmenu import get_input, ask_yes_no` becomes
+  `from evennia.actions.menus import get_input, ask_yes_no`. The
+  `evennia.utils.evmenu` module and the `EvMenu` class are gone; convert any
+  node-graph menu to an `@interactive` generator that yields `MenuPrompt`.
+- Games using any deleted contrib or the `@olc` / `@spawn/menu` prototype
+  builder must remove those references. See
+  [`.agents/prompts/CM1-input-capture-migration.md`](.agents/prompts/CM1-input-capture-migration.md)
+  for the full migration context.
+
+---
+
+## 6.0.0+underspire.84 — generator-flow menu combinators
+
+> Tagged `underspire.84` but shipped without a version-file bump or changelog
+> entry; this entry backfills it (the bump lands in `.85`).
+
+### Engine
+
+Added `confirm()` (a yes/no sub-flow over `MenuPrompt`, used as
+`ok = yield from confirm(...)`) and `paginate()` (pure list slicing) to
+[`evennia.actions.menus`](evennia/actions/menus.py), exported from
+`evennia.actions` — the generic `@interactive` flow combinators native menu
+screens use. Deleted the engine-native `EvMenuState` node-graph router state;
+no engine consumer remained once the game moved its menus to native generator
+screens.
+
+---
+
 ## 6.0.0+underspire.83 — phrase action switches on multi-word verbs
 
 ### Engine
