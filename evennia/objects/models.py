@@ -391,7 +391,13 @@ class ObjectDB(TypedObject):
     def from_db(cls, db, field_names, values):
         """Override to track the location as loaded from DB for targeted cache invalidation."""
         instance = super().from_db(db, field_names, values)
-        instance._loaded_location_id = instance.db_location_id
+        try:
+            # Read from the row values, not instance.db_location_id — deferred FK
+            # access triggers refresh_from_db → recursive from_db during partial loads
+            # (e.g. BulkTickContext.gather_objectdb using .only("id", "db_attrs")).
+            instance._loaded_location_id = values[field_names.index("db_location_id")]
+        except ValueError:
+            instance._loaded_location_id = None
         return instance
 
     @hook(

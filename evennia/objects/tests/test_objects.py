@@ -1377,3 +1377,26 @@ class TestListEndsep(BaseEvenniaTest):
             out = strip_ansi(self.room1.get_display_exits(self.char1))
         self.assertIn(" | ", out)
         self.assertNotIn(", and ", out)
+
+
+class TestObjectDBFromDbPartialLoad(BaseEvenniaTest):
+    """ObjectDB.from_db must not touch deferred FK fields during partial loads."""
+
+    def test_only_db_attrs_does_not_recursively_refresh(self):
+        room = self.room1
+        char = self.char1
+        char.move_to(room, quiet=True)
+
+        partial = ObjectDB.objects.filter(id=char.id).only("id", "db_attrs").first()
+        self.assertIsNotNone(partial)
+        self.assertEqual(getattr(partial, "_loaded_location_id", object()), None)
+        # Deferred db_location_id must not be resolved by the partial load itself.
+        self.assertNotIn("db_location_id", partial.__dict__)
+
+    def test_full_load_tracks_location_id(self):
+        room = self.room1
+        char = self.char1
+        char.move_to(room, quiet=True)
+
+        full = ObjectDB.objects.get(id=char.id)
+        self.assertEqual(full._loaded_location_id, room.id)
