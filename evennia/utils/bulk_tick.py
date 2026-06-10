@@ -118,6 +118,14 @@ class BulkTickContext:
                 uncached_ids.append(obj_id)
                 continue
             try:
+                if "db_attrs" not in obj.__dict__:
+                    # Cached instances may have db_attrs deferred; touching the
+                    # descriptor triggers refresh_from_db and can KeyError during
+                    # partial loads. Seed __dict__ directly from SQL instead.
+                    row = ObjectDB.objects.filter(pk=obj_id).values_list(
+                        "db_attrs", flat=True
+                    ).first()
+                    obj.__dict__["db_attrs"] = row if isinstance(row, dict) else {}
                 backend = obj.attributes.backend
             except AttributeError:
                 continue
@@ -137,10 +145,12 @@ class BulkTickContext:
         """Read db_attrs from Postgres for objects not in the idmapper cache."""
         from evennia.objects.models import ObjectDB
 
-        for obj in ObjectDB.objects.filter(id__in=uncached_ids).only("id", "db_attrs"):
-            attrs = getattr(obj, "db_attrs", None) or {}
-            self._uncached_ids.add(obj.id)
-            self.rows.append(snapshot_fn(obj.id, attrs))
+        for obj_id, attrs in ObjectDB.objects.filter(id__in=uncached_ids).values_list(
+            "id", "db_attrs"
+        ):
+            attrs = attrs if isinstance(attrs, dict) else {}
+            self._uncached_ids.add(obj_id)
+            self.rows.append(snapshot_fn(obj_id, attrs))
 
     # ------------------------------------------------------------------
     # Phase 3
