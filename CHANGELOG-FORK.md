@@ -25,6 +25,46 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.86 — calm, honest Redis job-queue liveness logging
+
+### Engine
+
+The background job queue treated a Redis *connection* failure exactly like a
+genuine per-job bug: [`_dequeue_redis`](evennia/jobs/queue.py) logged a full
+`log_trace` stack every time the polled dequeue hit an unreachable Redis. On the
+maintenance ticker that meant a brief Redis outage flooded `server.log` with one
+traceback per poll (~360/hour). [`_enqueue_redis`](evennia/jobs/queue.py) had the
+same exposure on the enqueue path.
+
+Redis is an optional backend (the default `JOB_QUEUE_BACKEND`), so an outage and
+a not-installed environment now share one availability state machine:
+
+- **Never seen alive** (not installed, or down since boot): complained about
+  exactly once, then silent.
+- **Was alive, then lost:** logged on first loss, then re-stated at most once
+  per 10 minutes while the outage persists.
+- **Recovery** is detected by a real successful probe (PING / round-trip), not a
+  timer, and logged once. Connection/availability errors are matched
+  structurally (by exception module + name, plus `ImportError`) so the engine
+  needn't import the optional `redis` package; genuinely unexpected errors keep
+  their full `log_trace`. Per-job failure logging in the run loop is unchanged.
+
+New [`check_redis_backend`](evennia/jobs/queue.py) performs an active `PING` and
+drives the cadence. It is wired into
+[`server_maintenance`](evennia/server/service.py) (the existing 60s
+`LoopingCall`, which starts with `now=True`), so Redis is probed at boot and
+every 60s thereafter: a boot-time status line is emitted, recovery is detected
+within ~60s while the queue is idle, and an ongoing outage stays visible without
+flooding.
+
+### Tests
+
+Added [`TestRedisBackoff`](evennia/jobs/tests.py): a redis-shaped `ConnectionError`
+synthesized without the optional dependency, asserting one warning (not a
+traceback) across 20 failed polls, the not-installed (`ImportError`) path, a
+preserved `log_trace` for unexpected errors, boot-live logging, and the
+recheck/heartbeat/recovery cadence under a controlled clock.
+
 ## 6.0.0+underspire.85 — delete the legacy EvMenu menu system
 
 ### Engine
