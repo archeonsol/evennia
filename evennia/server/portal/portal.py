@@ -40,3 +40,4 @@ if "--nodaemon" not in sys.argv and "test" not in sys.argv:
         max_size=settings.PORTAL_LOG_MAX_SIZE,
     )
     globalLogPublisher.addObserver(logger.GetPortalLogObserver()(logfile))
+    logger.prune_rotated_logs(force=True)

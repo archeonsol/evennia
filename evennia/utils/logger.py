@@ -420,6 +420,7 @@ class WeeklyLogFile(logfile.DailyLogFile):
     def rotate(self):
         try:
             super().rotate()
+            prune_rotated_logs()
         except Exception:
             log_trace(f"Could not rotate the log file {self.name}.")
 
@@ -621,6 +622,81 @@ def rotate_log_file(filename="game.log", num_lines_to_append=None):
         file_handle = _open_log_file(filename)
         if file_handle:
             file_handle.rotate(num_lines_to_append=num_lines_to_append)
+
+
+_LOG_PRUNE_LAST_RUN = 0
+
+
+def prune_rotated_logs(force=False):
+    """
+    Delete old rotated log backups in settings.LOG_DIR.
+
+    Keeps at most LOG_ROTATED_MAX_BACKUPS newest rotated files per base log
+    name and removes any older than LOG_ROTATED_RETENTION_DAYS. The active
+    log files (e.g. server.log) are never touched.
+
+    Args:
+        force (bool): If True, run even if LOG_ROTATED_PRUNE_MIN_INTERVAL has
+            not elapsed since the last prune.
+
+    Returns:
+        int: Number of files deleted.
+
+    """
+    global _LOGDIR, _LOG_PRUNE_LAST_RUN
+
+    from django.conf import settings
+
+    retention_days = getattr(settings, "LOG_ROTATED_RETENTION_DAYS", 14)
+    max_backups = getattr(settings, "LOG_ROTATED_MAX_BACKUPS", 30)
+    prune_names = getattr(
+        settings,
+        "LOG_ROTATED_PRUNE_NAMES",
+        ("server.log", "portal.log", "http_requests.log", "lockwarnings.log"),
+    )
+    min_interval = getattr(settings, "LOG_ROTATED_PRUNE_MIN_INTERVAL", 3600)
+
+    if retention_days <= 0 and max_backups <= 0:
+        return 0
+
+    now = time.time()
+    if not force and (now - _LOG_PRUNE_LAST_RUN) < max(0, min_interval):
+        return 0
+
+    if not _LOGDIR:
+        _LOGDIR = settings.LOG_DIR
+
+    log_dir = _LOGDIR
+    if not os.path.isdir(log_dir):
+        return 0
+
+    cutoff = now - (retention_days * 86400) if retention_days > 0 else None
+    deleted = 0
+
+    for base_name in prune_names:
+        prefix = f"{base_name}."
+        rotated = []
+        for entry in os.listdir(log_dir):
+            if not entry.startswith(prefix):
+                continue
+            path = os.path.join(log_dir, entry)
+            if os.path.isfile(path):
+                rotated.append((os.path.getmtime(path), path))
+
+        rotated.sort(reverse=True)
+        for index, (mtime, path) in enumerate(rotated):
+            too_old = cutoff is not None and mtime < cutoff
+            too_many = max_backups > 0 and index >= max_backups
+            if not (too_old or too_many):
+                continue
+            try:
+                os.remove(path)
+                deleted += 1
+            except OSError:
+                pass
+
+    _LOG_PRUNE_LAST_RUN = now
+    return deleted
 
 
 def delete_log_file(filename):

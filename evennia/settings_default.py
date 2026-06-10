@@ -201,6 +201,19 @@ CHANNEL_LOG_NUM_TAIL_LINES = 20
 # Max size (in bytes) of channel log files before they rotate.
 # Minimum is 1000 (1kB) but should usually be larger.
 CHANNEL_LOG_ROTATE_SIZE = 1000000
+# Rotated server/portal logs (e.g. server.log.2026_06_10__1) are never removed by
+# Twisted rotation alone. These settings prune old backups automatically.
+# Set both retention and max_backups to 0 to disable pruning entirely.
+LOG_ROTATED_RETENTION_DAYS = 14
+LOG_ROTATED_MAX_BACKUPS = 30
+LOG_ROTATED_PRUNE_NAMES = (
+    "server.log",
+    "portal.log",
+    "http_requests.log",
+    "lockwarnings.log",
+)
+# Minimum seconds between prune scans during active rotation (startup always prunes).
+LOG_ROTATED_PRUNE_MIN_INTERVAL = 3600
 # Unused by default, but used by e.g. the MapSystem contrib. A place for storing
 # semi-permanent data and avoid it being rebuilt over and over. It is created
 # on-demand only.
