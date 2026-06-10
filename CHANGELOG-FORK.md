@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.87 — log retention and bulk-tick deferred-field fixes
+
+### Engine
+
+Evennia rotated `server.log` / `portal.log` at size/time but never deleted old
+backups (`server.log.2026_06_10__N`), so error-loop storms could fill the disk.
+[`prune_rotated_logs`](evennia/utils/logger.py) runs on server/portal startup
+and after rotation; settings `LOG_ROTATED_RETENTION_DAYS`, `LOG_ROTATED_MAX_BACKUPS`,
+and `LOG_ROTATED_PRUNE_MIN_INTERVAL` control retention (defaults: 14 days, 30
+backups, 3600s between scans during rotation).
+
+[`ObjectDB.from_db`](evennia/objects/models.py) no longer reads
+`instance.db_location_id` when hydrating partial ORM rows. Deferred FK access
+triggered `refresh_from_db` → recursive `from_db` during
+[`BulkTickContext.gather_objectdb`](evennia/utils/bulk_tick.py) `.only("id",
+"db_attrs")` loads, flooding logs with `RecursionError` every global tick.
+
+[`gather_objectdb`](evennia/utils/bulk_tick.py) seeds `db_attrs` on cached
+instances via `values_list` instead of the deferred descriptor, and reads
+uncached rows the same way, avoiding `KeyError: 'db_attrs'` on partially loaded
+idmapper cache entries.
+
+### Migration notes
+
+Games may override log retention in `server/conf/settings.py` (Underspire uses
+7 days / 20 backups). No other downstream changes required.
+
+---
+
 ## 6.0.0+underspire.86 — calm, honest Redis job-queue liveness logging
 
 ### Engine
