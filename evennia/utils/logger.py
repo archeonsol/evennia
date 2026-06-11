@@ -680,8 +680,13 @@ def prune_rotated_logs(force=False):
             if not entry.startswith(prefix):
                 continue
             path = os.path.join(log_dir, entry)
-            if os.path.isfile(path):
-                rotated.append((os.path.getmtime(path), path))
+            try:
+                if os.path.isfile(path):
+                    rotated.append((os.path.getmtime(path), path))
+            except OSError:
+                # file vanished between listdir and stat (e.g. the portal and
+                # server processes both prune at startup)
+                continue
 
         rotated.sort(reverse=True)
         for index, (mtime, path) in enumerate(rotated):
