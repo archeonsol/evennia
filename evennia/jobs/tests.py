@@ -149,3 +149,21 @@ class TestRedisBackoff(BaseEvenniaTest):
         with mock.patch.object(queue, "_redis_ping") as mock_ping:
             self.assertTrue(queue.check_redis_backend())
         mock_ping.assert_not_called()
+
+    @override_settings(JOB_QUEUE_ENABLED=True, JOB_QUEUE_BACKEND="redis")
+    def test_enqueue_returns_none_while_down_and_id_after_recovery(self):
+        # A dropped job must not be reported as queued: enqueue_job returns
+        # None during an outage and a real id again once Redis answers.
+        register_job_type("backoff_sample", "evennia.jobs.tests._sample_job")
+        module, conn = self._fake_redis()
+        conn.lpush.side_effect = _RedisConnError("connection refused")
+        with (
+            mock.patch.dict(sys.modules, {"django_redis": module}),
+            mock.patch.object(queue.logger, "log_warn") as mock_warn,
+        ):
+            for _ in range(5):
+                self.assertIsNone(enqueue_job("backoff_sample", {"n": 1}))
+            self.assertEqual(mock_warn.call_count, 1)  # complain once, not per drop
+
+            conn.lpush.side_effect = None
+            self.assertIsNotNone(enqueue_job("backoff_sample", {"n": 2}))

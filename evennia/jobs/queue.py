@@ -61,7 +61,9 @@ def enqueue_job(
     job_type: str, payload: Optional[dict] = None, *, priority: int = 0
 ) -> Optional[str]:
     """
-    Enqueue a whitelisted job. Returns job id or None if disabled/rejected.
+    Enqueue a whitelisted job. Returns the job id, or None if the queue is
+    disabled, the job is rejected, or the backend is unavailable (the job is
+    dropped, not deferred).
     """
     if not _enabled():
         return None
@@ -87,8 +89,8 @@ def enqueue_job(
     backend = _backend()
     if backend == "postgres":
         _enqueue_db(record)
-    else:
-        _enqueue_redis(record)
+    elif not _enqueue_redis(record):
+        return None
     return job_id
 
 
@@ -197,7 +199,8 @@ def check_redis_backend() -> bool:
     return False
 
 
-def _enqueue_redis(record: dict) -> None:
+def _enqueue_redis(record: dict) -> bool:
+    """Push a job record to Redis. True if accepted, False if the job was dropped."""
     try:
         from django_redis import get_redis_connection
 
@@ -211,9 +214,10 @@ def _enqueue_redis(record: dict) -> None:
         # every enqueue during an outage. Genuine bugs still propagate.
         if _is_redis_unavailable(exc):
             _on_redis_down()
-            return
+            return False
         raise
     _on_redis_alive()
+    return True
 
 
 def _enqueue_db(record: dict) -> None:
