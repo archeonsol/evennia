@@ -25,6 +25,66 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.88 — idmapper partial-load correctness and queue-drop honesty
+
+### Engine
+
+The `.87` `from_db` fix stopped the recursive refresh but left a regression:
+its fallback set `_loaded_location_id = None` whenever `db_location_id` was
+absent from the row. Under idmapper a partial `.only()` query returns the
+*cached, fully-loaded* instance, so a missing field means "no information",
+not "reset tracking". The clobber degraded targeted contents-cache
+invalidation to the full-reinit-all-objects fallback (plus a spurious
+warning) on the next direct `db_location` save.
+[`ObjectDB.from_db`](evennia/objects/models.py) now reads the value from the
+row when present and only initializes `None` when nothing is already tracked.
+
+[`BulkTickContext._apply_uncached`](evennia/utils/bulk_tick.py) no longer
+loads uncached objects with `.only("id", "db_attrs")` + `bulk_update`. Partial
+instantiation of an uncached idmapper model is unsupported (construction reads
+deferred fields, and idmapper can never refresh a deferred field because the
+refresh query resolves to the same cached instance without applying values),
+and crashed with `KeyError: 'db_attrs'` in production. The write-back now reads
+rows via `values_list` and writes them with a single `CASE`/`WHEN` `update()`,
+never instantiating a model. The invariant is recorded in the
+[engine decisions doc](.agents/docs/engine-architecture/decisions.md).
+
+### Jobs
+
+[`enqueue_job`](evennia/jobs/queue.py) returned a fresh job id even when a
+Redis outage caused the record to be dropped, so callers could not distinguish
+a queued job from a lost one. [`_enqueue_redis`](evennia/jobs/queue.py) now
+returns a bool and `enqueue_job` returns `None` when the push did not happen,
+matching its documented "id or None" contract. The outage logging cadence (the
+`.86` state machine) is unchanged.
+
+### Logs
+
+[`prune_rotated_logs`](evennia/utils/logger.py) stat-ed each candidate file
+outside its per-file error handling. The server and portal processes both
+prune at startup, so a backup can vanish between `os.listdir` and
+`os.path.getmtime`; the loser of that race raised an uncaught `OSError`. The
+stat is now inside a `try/except OSError`.
+
+### Tests
+
+New [`test_bulk_tick.py`](evennia/utils/tests/test_bulk_tick.py) covers the
+uncached write-back path cold (object evicted from the idmapper cache). The
+`.87` `TestObjectDBFromDbPartialLoad` test, which asserted the clobbering
+behavior and failed deterministically, is replaced with one asserting cached
+partial loads preserve tracking. `prune_rotated_logs` gains full coverage
+(retention, per-name `max_backups`, active-log safety, disabling, throttle,
+mid-scan race), and `TestRedisBackoff` gains the enqueue-drop case.
+
+### Migration notes
+
+No downstream changes required. The `enqueue_job` return change is contract-
+tightening: code that already handled `None` (the disabled/rejected cases)
+needs nothing; code that assumed a truthy return now correctly learns when a
+job was dropped during an outage.
+
+---
+
 ## 6.0.0+underspire.87 — log retention and bulk-tick deferred-field fixes
 
 ### Engine
