@@ -1,12 +1,15 @@
 from mock import MagicMock, patch
 
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.typeclasses.attributes import AttributeProperty
-from evennia.typeclasses.tags import (AliasProperty, PermissionProperty,
-                                      TagCategoryProperty, TagProperty)
+from evennia.typeclasses.tags import (
+    AliasProperty,
+    PermissionProperty,
+    TagCategoryProperty,
+    TagProperty,
+)
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
@@ -1380,23 +1383,30 @@ class TestListEndsep(BaseEvenniaTest):
 
 
 class TestObjectDBFromDbPartialLoad(BaseEvenniaTest):
-    """ObjectDB.from_db must not touch deferred FK fields during partial loads."""
+    """Partial loads must never clobber location tracking on cached instances.
 
-    def test_only_db_attrs_does_not_recursively_refresh(self):
-        room = self.room1
-        char = self.char1
-        char.move_to(room, quiet=True)
+    A partial query on a cached object returns the cached instance itself
+    (idmapper resolves ``cls(*values)`` to a cache hit), so ``from_db`` sees
+    row data describing an instance fuller than the row. Missing fields mean
+    "no information", never "reset tracking". Partial *instantiation* of an
+    uncached ObjectDB is unsupported outright: construction reads deferred
+    fields, and idmapper cannot refresh a deferred field (the refresh query
+    returns the same cached instance without applying values).
+    """
+
+    def test_cached_partial_load_preserves_tracking(self):
+        char, room2 = self.char1, self.room2
+        char.move_to(room2, quiet=True)
+        self.assertEqual(char._loaded_location_id, room2.id)
 
         partial = ObjectDB.objects.filter(id=char.id).only("id", "db_attrs").first()
-        self.assertIsNotNone(partial)
-        self.assertEqual(getattr(partial, "_loaded_location_id", object()), None)
-        # Deferred db_location_id must not be resolved by the partial load itself.
-        self.assertNotIn("db_location_id", partial.__dict__)
+
+        self.assertIs(partial, char)
+        self.assertEqual(char._loaded_location_id, room2.id)
 
     def test_full_load_tracks_location_id(self):
-        room = self.room1
-        char = self.char1
-        char.move_to(room, quiet=True)
+        char, room2 = self.char1, self.room2
+        char.move_to(room2, quiet=True)
 
         full = ObjectDB.objects.get(id=char.id)
-        self.assertEqual(full._loaded_location_id, room.id)
+        self.assertEqual(full._loaded_location_id, room2.id)

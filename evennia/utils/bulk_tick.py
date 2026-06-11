@@ -30,8 +30,10 @@ Why not bypass write-behind with direct SQL for cached objects?
     two caches coherent and lets write-behind do its normal job.
 
     For *uncached* objects there is no conflicting L1, so direct DB writes are
-    safe.  _apply_uncached reads all uncached objects in one query and uses
-    bulk_update for a single write round-trip regardless of batch size.
+    safe.  _apply_uncached reads all uncached rows in one query and writes back
+    with a single CASE/WHEN UPDATE — one round-trip regardless of batch size.
+    All uncached access goes through values_list/update, never model instances:
+    partial instantiation of idmapper models is unsupported.
 """
 
 from __future__ import annotations
@@ -122,9 +124,11 @@ class BulkTickContext:
                     # Cached instances may have db_attrs deferred; touching the
                     # descriptor triggers refresh_from_db and can KeyError during
                     # partial loads. Seed __dict__ directly from SQL instead.
-                    row = ObjectDB.objects.filter(pk=obj_id).values_list(
-                        "db_attrs", flat=True
-                    ).first()
+                    row = (
+                        ObjectDB.objects.filter(pk=obj_id)
+                        .values_list("db_attrs", flat=True)
+                        .first()
+                    )
                     obj.__dict__["db_attrs"] = row if isinstance(row, dict) else {}
                 backend = obj.attributes.backend
             except AttributeError:
@@ -221,23 +225,37 @@ class BulkTickContext:
         Write back to db_attrs for objects not in the idmapper cache.
 
         Safe because there is no in-process L1 to conflict with these writes.
-        Reads all objects in one query, merges in Python, then bulk_update —
-        one round-trip regardless of batch size.
+        Reads all rows in one values_list query, merges in Python, then writes
+        back with a single CASE/WHEN UPDATE (the same SQL bulk_update emits) —
+        one round-trip regardless of batch size. Never instantiates ObjectDB
+        from partial rows: partial instantiation of idmapper models is
+        unsupported (construction reads deferred fields, and idmapper cannot
+        refresh a deferred field).
         """
+        from django.db.models import Case, Value, When
+
         from evennia.objects.models import ObjectDB
 
-        qs = list(ObjectDB.objects.filter(id__in=batch.keys()).only("id", "db_attrs"))
-        to_save = []
-        for obj in qs:
-            updates = batch.get(obj.id)
+        docs: dict[int, dict] = {}
+        for obj_id, attrs in ObjectDB.objects.filter(id__in=batch.keys()).values_list(
+            "id", "db_attrs"
+        ):
+            updates = batch.get(obj_id)
             if not updates:
                 continue
-            doc = dict(obj.db_attrs or {})
+            doc = dict(attrs) if isinstance(attrs, dict) else {}
             doc.setdefault(_NULL_CAT, {}).setdefault("_d", {}).update(updates)
-            obj.db_attrs = doc
-            to_save.append(obj)
+            docs[obj_id] = doc
 
-        if to_save:
-            ObjectDB.objects.bulk_update(to_save, ["db_attrs"])
+        if docs:
+            field = ObjectDB._meta.get_field("db_attrs")
+            ObjectDB.objects.filter(pk__in=docs).update(
+                db_attrs=Case(
+                    *(
+                        When(pk=obj_id, then=Value(doc, output_field=field))
+                        for obj_id, doc in docs.items()
+                    )
+                )
+            )
 
-        return len(to_save)
+        return len(docs)
