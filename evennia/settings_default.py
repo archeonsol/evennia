@@ -517,6 +517,12 @@ AT_INITIAL_SETUP_HOOK_MODULE = "server.conf.at_initial_setup"
 # respectively. Can be given as a single path or a list of paths. If a list,
 # each module's hooks will be called in list order.
 AT_SERVER_STARTSTOP_MODULE = "server.conf.at_server_startstop"
+# Module paths declaring recurring systems for the system scheduler
+# (evennia.utils.systems). Each module must define a register_systems()
+# callable that registers at least one system; a listed module that fails to
+# import or registers nothing is a startup error. Engine-owned systems load
+# first regardless of this setting.
+SYSTEM_MODULES = []
 # List of one or more module paths to modules containing a function start_
 # plugin_services(application). This module will be called with the main
 # Evennia Server application when the Server is initiated.
@@ -606,14 +612,15 @@ CMDSET_MERGE_CACHE_MAXSIZE = 1000
 # permissions/locks change without a cmdset update. Command classes that override
 # .access() are auto-skipped (see cmd_access_cache._command_uses_base_access).
 COMMAND_ACCESS_CACHE_ENABLED = True
-# Log attribute flush batch sizes every N global ticks (0 = off). Uses
-# evennia.typeclasses.attribute_metrics.maybe_log_flush_metrics.
+# Log attribute flush batch sizes every N fires of the flush-attributes
+# system (0 = off). Uses attribute_metrics.maybe_log_flush_metrics.
 ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60
-# Flush write-behind attrs every server_maintenance (60s). Bounds cross-process
-# Redis staleness to the maintenance window since the Redis L2 cache only
-# republishes after a successful PG flush. Game ticks may also call
-# flush_all_dirty() on their global tick for finer cadence.
-ATTRIBUTE_FLUSH_ON_MAINTENANCE = True
+# Seconds between fires of the engine's flush-attributes system (the
+# write-behind attribute flush, run by the system scheduler). Bounds
+# cross-process Redis staleness to this window since the Redis L2 cache only
+# republishes after a successful PG flush. 0 disables proactive flushing
+# (the query barriers still guarantee read-your-writes).
+ATTRIBUTE_FLUSH_INTERVAL = 60
 # Log a warning when flush_all_dirty() reports pending dirty rows above this (0 = off).
 ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD = 0
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).

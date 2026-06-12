@@ -70,8 +70,6 @@ from evennia.utils.utils import (
 
 __all__ = ("TypedObject",)
 
-TICKER_HANDLER = None
-
 _GA = object.__getattribute__
 _SA = object.__setattr__
 
@@ -807,7 +805,6 @@ class TypedObject(SharedMemoryModel):
         Cleaning up handlers on the typeclass level
 
         """
-        global TICKER_HANDLER
         self.permissions.clear()
         self.attributes.clear()
         self.aliases.clear()

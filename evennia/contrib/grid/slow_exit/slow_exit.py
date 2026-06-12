@@ -50,8 +50,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
 This implementation is efficient but not persistent; so incomplete
 movement will be lost in a server reload. This is acceptable for most
 game types - to simulate longer travel times (more than the couple of
-seconds assumed here), a more persistent variant using Scripts or the
-TickerHandler might be better.
+seconds assumed here), a persistent variant would be needed.
 
 """
 

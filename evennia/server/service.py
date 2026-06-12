@@ -64,10 +64,10 @@ class EvenniaServerService(MultiService):
         self._last_server_time_snapshot = 0
         self.maintenance_task = None
         self.stall_watchdog = None
+        self.system_driver = None
         self._runtime_config_row = None  # cached ServerConfig row for "runtime"
         self._shutdown_deferred = None
         self._shutdown_in_progress = False
-        self._consecutive_flush_failures = 0
 
         # Database-specific startup optimizations.
         self.sqlite3_prep()
@@ -93,8 +93,7 @@ class EvenniaServerService(MultiService):
         the server needs to do. It is called every minute.
         """
         if not self._flush_cache:
-            from evennia.utils.idmapper.models import \
-                conditional_flush as _FLUSH_CACHE
+            from evennia.utils.idmapper.models import conditional_flush as _FLUSH_CACHE
 
             self._flush_cache = _FLUSH_CACHE
 
@@ -129,32 +128,6 @@ class EvenniaServerService(MultiService):
             self._runtime_config_row.save(update_fields=["db_value"])
         else:
             evennia.ServerConfig.objects.conf("runtime", evennia.gametime.SERVER_RUNTIME)
-
-        if getattr(settings, "ATTRIBUTE_FLUSH_ON_MAINTENANCE", False):
-            try:
-                from evennia.typeclasses.attribute_metrics import (
-                    maybe_log_flush_metrics, maybe_warn_pending_dirty)
-                from evennia.typeclasses.attributes import flush_all_dirty
-
-                stats = flush_all_dirty()
-                maybe_log_flush_metrics(stats, self.maintenance_count)
-                maybe_warn_pending_dirty(stats, self.maintenance_count)
-                self._consecutive_flush_failures = 0
-            except Exception:
-                self._consecutive_flush_failures += 1
-                logger.log_err(
-                    f"server_maintenance attribute flush failed "
-                    f"(consecutive failure #{self._consecutive_flush_failures})"
-                )
-                logger.log_trace("server_maintenance attribute flush")
-                if self._consecutive_flush_failures >= 3:
-                    # Write-behind cache is not making it to PG; phantom data
-                    # may be served from Redis until TTL expires.
-                    logger.log_err(
-                        f"CRITICAL: attribute flush has failed "
-                        f"{self._consecutive_flush_failures} consecutive cycles; "
-                        f"write-behind cache is not persisting to the database."
-                    )
 
         if self.maintenance_count % 5 == 0:
             # check cache size every 5 minutes
@@ -236,8 +209,7 @@ class EvenniaServerService(MultiService):
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
-            from evennia.server.game_index_client.service import \
-                EvenniaGameIndexService
+            from evennia.server.game_index_client.service import EvenniaGameIndexService
 
             egi_service = EvenniaGameIndexService()
             egi_service.setServiceParent(self)
@@ -290,10 +262,13 @@ class EvenniaServerService(MultiService):
     def register_webserver(self):
         # Start a django-compatible webserver.
 
-        from evennia.server.webserver import (DjangoWebRoot,
-                                              LockableThreadPool,
-                                              PrivateStaticRoot, Website,
-                                              WSGIWebServer)
+        from evennia.server.webserver import (
+            DjangoWebRoot,
+            LockableThreadPool,
+            PrivateStaticRoot,
+            Website,
+            WSGIWebServer,
+        )
 
         # start a thread pool and define the root url (/) as a wsgi resource
         # recognized by Django
@@ -521,6 +496,18 @@ class EvenniaServerService(MultiService):
         self.maintenance_task = LoopingCall(self.server_maintenance)
         self.maintenance_task.start(60, now=True)  # call every minute
 
+        # load declared system modules and start the system-scheduler driver
+        # (engine systems first, then settings.SYSTEM_MODULES; a broken
+        # declared module is a loud startup failure by design). Stop-and-
+        # replace so a repeat init (tests) never leaves two drivers ticking.
+        from evennia.utils import systems
+
+        if self.system_driver is not None:
+            self.system_driver.stop()
+        systems.load_system_modules()
+        self.system_driver = systems.SystemDriver()
+        self.system_driver.start()
+
         # start the reactor-stall watchdog (no-op if REACTOR_STALL_WARNING_MS is 0)
         from evennia.utils.reactor_watchdog import ReactorStallWatchdog
 
@@ -602,7 +589,7 @@ class EvenniaServerService(MultiService):
         # us with ``_reactor_stopping=True``; skip the overlap guard in that
         # case so the first SIGINT-driven shutdown still runs. The guard only
         # applies to fresh SRELOAD/SRESET/SSHUTD entries, which can otherwise
-        # race ServerConfig writes and MONITOR/TICKER saves.
+        # race ServerConfig writes and MONITOR/ON_DEMAND saves.
         if not _reactor_stopping:
             if self._shutdown_in_progress:
                 return
@@ -673,13 +660,17 @@ class EvenniaServerService(MultiService):
         if self.stall_watchdog is not None:
             self.stall_watchdog.stop()
 
-        # tickerhandler state should always be saved.
-        from evennia.scripts.tickerhandler import TICKER_HANDLER
-
+        # stop the system-scheduler driver, then drain the write-behind
+        # attribute cache one final time so no dirty rows are lost on exit
+        # (the flush-attributes system stops with the driver).
+        if self.system_driver is not None:
+            self.system_driver.stop()
         try:
-            TICKER_HANDLER.save()
-        except Exception as err:
-            logger.log_trace(f"Error saving TickerHandler state: {err}")
+            from evennia.typeclasses.attributes import flush_all_dirty
+
+            flush_all_dirty()
+        except Exception:
+            logger.log_trace("final attribute flush at shutdown")
 
         # on-demand handler state should always be saved.
         from evennia.scripts.ondemandhandler import ON_DEMAND_HANDLER
@@ -767,10 +758,6 @@ class EvenniaServerService(MultiService):
 
         MONITOR_HANDLER.restore(mode == "reload")
 
-        from evennia.scripts.tickerhandler import TICKER_HANDLER
-
-        TICKER_HANDLER.restore(mode == "reload")
-
         # Un-pause all scripts, stop non-persistent timers
         evennia.ScriptDB.objects.update_scripts_after_server_start()
 
@@ -794,8 +781,7 @@ class EvenniaServerService(MultiService):
         # Prime the cmdset merge cache for every already-puppeted session so
         # the first typed command after reload does not pay the cold merge.
         if mode == "reload":
-            from evennia.commands.cmdset_merge_warmup import \
-                warm_all_logged_in_puppet_sessions
+            from evennia.commands.cmdset_merge_warmup import warm_all_logged_in_puppet_sessions
 
             try:
                 warm_all_logged_in_puppet_sessions()

@@ -43,8 +43,8 @@ __all__ = (
     "CmdAbout",
     "CmdTime",
     "CmdServerLoad",
+    "CmdSystems",
     "CmdTasks",
-    "CmdTickers",
 )
 
 
@@ -939,44 +939,47 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
         self.msg(string)
 
 
-class CmdTickers(COMMAND_DEFAULT_CLASS):
+class CmdSystems(COMMAND_DEFAULT_CLASS):
     """
-    View running tickers
+    View registered scheduler systems.
 
     Usage:
-      tickers
+      systems
 
-    Note: Tickers are created, stopped and manipulated in Python code
-    using the TickerHandler. This is merely a convenience function for
-    inspecting the current status.
+    Lists every system registered with the system scheduler
+    (evennia.utils.systems): its cadence, scope, last fire time, fire
+    count and whether a fire is currently in flight. Systems are
+    declared in code (SYSTEM_MODULES); this is inspection only.
 
     """
 
-    key = "@tickers"
+    key = "@systems"
     help_category = "System"
-    locks = "cmd:perm(tickers) or perm(Builder)"
+    locks = "cmd:perm(systems) or perm(Builder)"
 
     def func(self):
-        from evennia.scripts.tickerhandler import TICKER_HANDLER
+        from evennia.utils import systems
+        from evennia.utils.utils import datetime_format
 
-        all_subs = TICKER_HANDLER.all_display()
-        if not all_subs:
-            self.msg("No tickers are currently active.")
+        registered = systems.all_systems()
+        if not registered:
+            self.msg("No systems are registered with the scheduler.")
             return
-        table = self.styled_table("interval (s)", "object", "path/methodname", "idstring", "db")
-        for sub in all_subs:
+        table = self.styled_table("system", "cadence", "scope", "last fired", "fires", "in flight")
+        for system in registered:
+            if system.last_run:
+                last_fired = datetime_format(datetime.datetime.fromtimestamp(system.last_run))
+            else:
+                last_fired = "-"
             table.add_row(
-                sub[3],
-                "%s%s"
-                % (
-                    sub[0] or "[None]",
-                    sub[0] and " (#%s)" % (sub[0].id if hasattr(sub[0], "id") else "") or "",
-                ),
-                sub[1] if sub[1] else sub[2],
-                sub[4] or "[Unset]",
-                "*" if sub[5] else "-",
+                system.name,
+                system.cadence.describe(),
+                system.scope.describe(),
+                last_fired,
+                system.fire_count,
+                "*" if system.in_flight else "-",
             )
-        self.msg("|wActive tickers|n:\n" + str(table))
+        self.msg("|wRegistered systems|n:\n" + str(table))
 
 
 class CmdTasks(COMMAND_DEFAULT_CLASS):
