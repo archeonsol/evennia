@@ -25,6 +25,117 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.89 — unified system scheduler (AS2) and TickerHandler removal
+
+### Engine
+
+New [`evennia/utils/systems.py`](evennia/utils/systems.py): the unified
+System Scheduler, the engine's single answer to "run this every N seconds /
+at time T". A **System** declares a cadence (`every(seconds)`,
+`calendar(daily|weekly|monthly)` on UTC boundaries, or `every_tick`) and a
+scope (`global_scope`, `online_puppets`, `all_entities(component=...)`), and
+a `run(ctx)` body called once per fire on the reactor with `ctx.now`,
+`ctx.dt` (real elapsed, system-level only) and the entity set
+(`ctx.entities` live puppets gathered on-reactor / `ctx.entity_ids` plain
+pks fetched off-reactor via `defer.in_thread`). A dedicated 1 Hz
+`LoopingCall` driver (started/stopped by
+[`service.py`](evennia/server/service.py) alongside the maintenance task)
+checks cadences with an injected clock; fires never overlap (due-while-in-
+flight skips and warns, escalating to an error after three consecutive
+skips so a wedged system cannot hide as a warning trickle); the whole fire
+chain runs under `maybeDeferred`, so a synchronous raise in entity
+selection clears the in-flight marker instead of wedging the system; a
+failing system logs its traceback and never kills the driver or peers. The
+durable calendar store happens before state is consumed, so a store failure
+retries the boundary next tick rather than recording a fire that never ran.
+Last-run persistence is split by cadence: durable
+(ServerConfig) for `calendar` — a boundary crossed during downtime fires
+once on the next tick, never replays — in-memory for `every`, none for
+`every_tick`. Discovery is a settings-declared module list
+(`SYSTEM_MODULES`); each module must define `register_systems()` and
+register at least one system, and a broken entry is a loud startup error.
+Registration is declared-startup-only by design: there is no runtime
+per-object timer API, and the module docstring documents where one-shots go
+instead (`delay`, lazy expiry, the job queue). This is the systems-plus-
+clock half of a future ECS; component storage is deliberately not built.
+
+The write-behind attribute flush moved out of `server_maintenance` and is
+now the engine's first registered system,
+[`flush-attributes`](evennia/server/engine_systems.py) (scope `global`,
+cadence `every(ATTRIBUTE_FLUSH_INTERVAL)`, default 60s), keeping the
+consecutive-failure CRITICAL escalation. The shutdown path now stops the
+driver and runs one final `flush_all_dirty()` in all modes — previously
+nothing drained the write-behind cache at shutdown, so dirty rows survived
+teardown only if a query barrier happened to fire during it. The query
+barriers themselves are untouched.
+
+### Deletions (AS2 tranche A)
+
+TickerHandler and its whole surface: the per-object timer model ("tick this
+mob every 15s") is superseded by systems that select their entities.
+Removed: `evennia/scripts/tickerhandler.py`, `utils.repeat`/`utils.unrepeat`,
+the `repeat`/`unrepeat` inputfuncs and the GMCP `Char.Repeat.Update`
+mapping, the `@tickers` command, the save/restore calls in `service.py`,
+vestigial `TICKER_HANDLER` hooks in `typeclasses/models.py`, the
+`TICKER_HANDLER` flat-API entry, the `turnbattle` contrib wholesale
+(its `tb_items` depended on TickerHandler; EvMenu-precedent deletion rather
+than porting a contrib slated for removal), and the dedicated doc pages for
+all of the above. The `red_button` tutorial's blink loop became a
+self-rescheduling persistent `delay`. A new `@systems` builder command
+([`CmdSystems`](evennia/commands/default/system.py)) replaces `@tickers`'
+introspection role, listing every registered system with cadence, scope,
+last fire, fire count and in-flight state. Tranche B (`Script.interval`
+machinery removal) is deferred until the game's five interval scripts
+migrate.
+
+### Review hardening
+
+An adversarial fleet review of the branch surfaced one real bug and a set
+of robustness gaps, all fixed before release: `_select_online_puppets` read
+the legacy `session.puppet` attribute this fork removed (the scope would
+have returned `[]` forever) and now uses the canonical `get_puppet()`
+accessor, with a real-selector test so the seam can't silently regress;
+the overlap guard escalation, `maybeDeferred` fire chain and
+store-before-consume ordering above; the flush system's CRITICAL line is
+rate-limited past the threshold (every 10th failure) instead of flooding;
+and `calendar()`/`all_entities()` docstrings now state the
+boundary-forfeit-on-error, name-keyed persistence (rename = fresh prime +
+orphaned row) and exact-path (no subclass) matching semantics.
+
+### Tests
+
+New [`test_systems.py`](evennia/utils/tests/test_systems.py) (54 tests):
+cadence boundaries against an injected clock, late-tick re-anchoring,
+calendar crossing/catch-up-by-one/no-replay/persistence for daily, weekly
+and monthly, short-month clamping and year-wrap, store-failure retry,
+`ctx.dt` across gaps, error isolation, the overlap guard on both the sync
+and async (`all_entities` pending-id-query) paths with skip escalation,
+the real online-puppets selector, registry introspection and duplicate
+rejection, scope selection paths, settings-declared discovery failure
+modes (including a raising game module not displacing engine systems),
+idempotent reload, and the flush-attributes system (cadence from setting,
+disable-at-zero, flush called, escalation, counter reset, CRITICAL
+rate-limit, sibling isolation under driver). `CmdSystems` is covered in
+the default-command tests. Full suite green; the lone pre-existing
+`DirtyReactorAggregateError` when `test_server` runs before twisted-trial
+tests reproduces on `.88` and is tracked separately.
+
+### Migration notes
+
+- `ATTRIBUTE_FLUSH_ON_MAINTENANCE` (bool) is retired; use
+  `ATTRIBUTE_FLUSH_INTERVAL` (seconds, default 60, 0 disables).
+  `ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS` now counts flush fires.
+- Any game-side `flush_all_dirty()` calls on the game's global tick should
+  be deleted; the engine system owns flush cadence (tune the setting).
+- `TICKER_HANDLER`, `utils.repeat`/`unrepeat`, the `repeat` inputfunc,
+  `@tickers` and `contrib.game_systems.turnbattle` no longer exist.
+- Declare game systems in `SYSTEM_MODULES`; the downstream migration of
+  `global_tick` handlers, interval scripts and APScheduler jobs is specced
+  in [`AS2-system-scheduler.md`](.agents/prompts/AS2-system-scheduler.md)
+  section 5.
+
+---
+
 ## 6.0.0+underspire.88 — idmapper partial-load correctness and queue-drop honesty
 
 ### Engine
