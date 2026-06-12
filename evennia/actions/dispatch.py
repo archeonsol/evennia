@@ -285,7 +285,7 @@ def _fail_closed_fallback(action, actor, trace, raw_string):
 
         logger.log_sec(
             f"Denied (fail-closed): {type(final_action).__name__} "
-            f"by {trace.actor_key}: input {raw_string!r}, "
+            f"by {trace.actor_key}: input {logger.mask_sensitive_input(raw_string)!r}, "
             f"{trace.carry_out_gated} gated carry_out path(s)."
         )
         # No suggestions: computing them would offer the hidden verb back.

@@ -105,7 +105,7 @@ class ActionTrace:
     action: object
     actor_key: str
     phases: list = field(default_factory=list)
-    outcome: Literal["succeeded", "blocked", "no_rules", "redirected"] = "no_rules"
+    outcome: Literal["succeeded", "blocked", "no_rules", "redirected", "aborted"] = "no_rules"
     block_message: Optional[str] = None
     redirect_count: int = 0
     #: B3 lazy tracing — when False the engine skips building PhaseTrace records

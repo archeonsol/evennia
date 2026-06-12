@@ -210,6 +210,24 @@ class TestFailClosedFeedback(unittest.TestCase):
         self.assertEqual(trace.carry_out_gated, 1)
         self.assertEqual(trace.carry_out_fired, 0)
 
+    def test_gated_verb_masks_sensitive_input_in_seclog(self):
+        # A password typed at the wrong prompt into a gated verb must not land
+        # verbatim in the security log: the raw input is masked the same way
+        # the legacy command path masks it.
+        from unittest import mock
+
+        from evennia.utils import logger as ev_logger
+
+        reg = _make_full_registry()
+        reg.register(Zap, ("password",))
+        parser = ActionParser(registry=reg)
+        with mock.patch.object(ev_logger, "log_sec") as log_sec:
+            _dispatch(self.actor, "password hunter2secret", parser)
+        log_sec.assert_called_once()
+        logged = log_sec.call_args.args[0]
+        self.assertNotIn("hunter2secret", logged)
+        self.assertIn("*", logged)
+
     def test_verb_with_no_rules_sends_default_feedback(self):
         trace = _dispatch(self.actor, "void", self.parser)
         self.assertIn("You can't do that.", self.char.messages)
