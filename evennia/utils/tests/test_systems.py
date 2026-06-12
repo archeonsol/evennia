@@ -16,19 +16,10 @@ from django.test import override_settings
 from twisted.internet.defer import Deferred, succeed
 
 from evennia.utils import systems
-from evennia.utils.systems import (
-    SystemDriver,
-    SystemRegistrationError,
-    all_entities,
-    all_systems,
-    calendar,
-    every,
-    every_tick,
-    get_system,
-    global_scope,
-    online_puppets,
-    register,
-)
+from evennia.utils.systems import (SystemDriver, SystemRegistrationError,
+                                   all_entities, all_systems, calendar, every,
+                                   every_tick, get_system, global_scope,
+                                   online_puppets, register)
 from evennia.utils.test_resources import BaseEvenniaTestCase
 
 
@@ -201,7 +192,9 @@ class TestEveryTickCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
 class TestCalendarCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_first_ever_check_primes_and_persists_without_firing(self):
         register(
-            name="cal", cadence=calendar(daily="12:00"), scope=global_scope(),
+            name="cal",
+            cadence=calendar(daily="12:00"),
+            scope=global_scope(),
             run=self._recording_run,
         )
         self.clock.set(_epoch(2026, 3, 10, 13, 0))  # past today's boundary
@@ -211,7 +204,9 @@ class TestCalendarCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_fires_once_on_boundary_crossing(self):
         register(
-            name="cal", cadence=calendar(daily="12:00"), scope=global_scope(),
+            name="cal",
+            cadence=calendar(daily="12:00"),
+            scope=global_scope(),
             run=self._recording_run,
         )
         self.clock.set(_epoch(2026, 3, 10, 11, 59))
@@ -230,7 +225,9 @@ class TestCalendarCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
         # a previous incarnation last ran on day 1 at 13:00...
         systems._store_last_run("cal", _epoch(2026, 3, 1, 13, 0))
         register(
-            name="cal", cadence=calendar(daily="12:00"), scope=global_scope(),
+            name="cal",
+            cadence=calendar(daily="12:00"),
+            scope=global_scope(),
             run=self._recording_run,
         )
         # ...the server was down for days; boot on day 4 at 09:00.
@@ -243,7 +240,9 @@ class TestCalendarCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_fire_persists_last_run(self):
         register(
-            name="cal", cadence=calendar(daily="12:00"), scope=global_scope(),
+            name="cal",
+            cadence=calendar(daily="12:00"),
+            scope=global_scope(),
             run=self._recording_run,
         )
         self.clock.set(_epoch(2026, 3, 10, 11, 0))
@@ -260,8 +259,7 @@ class TestErrorIsolation(_SchedulerTestMixin, BaseEvenniaTestCase):
             raise RuntimeError("kaboom")
 
         register(name="bad", cadence=every_tick(), scope=global_scope(), run=_boom)
-        register(name="good", cadence=every_tick(), scope=global_scope(),
-                 run=self._recording_run)
+        register(name="good", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
 
         with patch.object(systems, "logger") as mock_logger:
             self.driver.tick()
@@ -301,8 +299,7 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_async_failure_clears_in_flight_and_logs(self):
         pending = Deferred()
-        register(name="slow", cadence=every_tick(), scope=global_scope(),
-                 run=lambda ctx: pending)
+        register(name="slow", cadence=every_tick(), scope=global_scope(), run=lambda ctx: pending)
         self.driver.tick()
         with patch.object(systems, "logger") as mock_logger:
             pending.errback(RuntimeError("async kaboom"))
@@ -314,8 +311,7 @@ class TestRegistry(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_duplicate_name_raises(self):
         register(name="s", cadence=every(5), scope=global_scope(), run=self._recording_run)
         with self.assertRaises(SystemRegistrationError):
-            register(name="s", cadence=every(9), scope=global_scope(),
-                     run=self._recording_run)
+            register(name="s", cadence=every(9), scope=global_scope(), run=self._recording_run)
 
     def test_introspection(self):
         register(name="s", cadence=every(5), scope=global_scope(), run=self._recording_run)
@@ -333,15 +329,18 @@ class TestRegistry(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_dangerous_cell_warns_at_registration(self):
         with patch.object(systems, "logger") as mock_logger:
-            register(name="killer", cadence=every_tick(),
-                     scope=all_entities(component="foo.Bar"), run=self._recording_run)
+            register(
+                name="killer",
+                cadence=every_tick(),
+                scope=all_entities(component="foo.Bar"),
+                run=self._recording_run,
+            )
         self.assertTrue(mock_logger.log_warn.called)
 
 
 class TestScopeSelection(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_global_scope_gets_no_entities(self):
-        register(name="g", cadence=every_tick(), scope=global_scope(),
-                 run=self._recording_run)
+        register(name="g", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
         self.driver.tick()
         ctx = self.fires[0]
         self.assertIsNone(ctx.entities)
@@ -349,8 +348,7 @@ class TestScopeSelection(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_online_puppets_uses_session_handler(self):
         puppets = ["puppet1", "puppet2"]
-        register(name="p", cadence=every_tick(), scope=online_puppets(),
-                 run=self._recording_run)
+        register(name="p", cadence=every_tick(), scope=online_puppets(), run=self._recording_run)
         with patch.object(systems, "_select_online_puppets", return_value=puppets) as sel:
             self.driver.tick()
         sel.assert_called_once()
@@ -358,9 +356,12 @@ class TestScopeSelection(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.assertIsNone(self.fires[0].entity_ids)
 
     def test_all_entities_fetches_ids_off_reactor(self):
-        register(name="a", cadence=every(5),
-                 scope=all_entities(component="typeclasses.objects.Thing"),
-                 run=self._recording_run)
+        register(
+            name="a",
+            cadence=every(5),
+            scope=all_entities(component="typeclasses.objects.Thing"),
+            run=self._recording_run,
+        )
         with patch.object(
             systems, "_entity_ids_deferred", return_value=succeed([1, 2, 3])
         ) as fetch:
@@ -402,8 +403,9 @@ class TestDiscovery(_SchedulerTestMixin, BaseEvenniaTestCase):
     @override_settings(SYSTEM_MODULES=["fake_systems_good"])
     def test_registering_module_loads(self):
         def _register():
-            register(name="from-module", cadence=every(5), scope=global_scope(),
-                     run=lambda ctx: None)
+            register(
+                name="from-module", cadence=every(5), scope=global_scope(), run=lambda ctx: None
+            )
 
         self._fake_module("fake_systems_good", register_fn=_register)
         systems.load_system_modules()
@@ -452,9 +454,7 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
         engine_systems = self._register_flush()
         system = get_system("flush-attributes")
         ctx = systems.SystemContext(now=0.0, dt=30.0)
-        with patch.object(
-            engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")
-        ):
+        with patch.object(engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")):
             with patch.object(engine_systems, "logger") as mock_logger:
                 for _ in range(3):
                     system.run(ctx)  # must not raise

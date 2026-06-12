@@ -358,67 +358,6 @@ def get_value(session, *args, **kwargs):
         session.msg(get_value={"name": name, "value": _gettable[name](obj)})
 
 
-def _testrepeat(**kwargs):
-    """
-    This is a test function for using with the repeat
-    inputfunc.
-
-    Keyword Args:
-        session (Session): Session to return to.
-    """
-    import time
-
-    kwargs["session"].msg(repeat="Repeat called: %s" % time.time())
-
-
-_repeatable = {"test1": _testrepeat, "test2": _testrepeat}  # example only  # "
-
-
-def repeat(session, *args, **kwargs):
-    """
-    Call a named function repeatedly. Note that
-    this is meant as an example of limiting the number of
-    possible call functions.
-
-    Keyword Args:
-        callback (str): The function to call. Only functions
-            from the _repeatable dictionary earlier in this
-            module are available.
-        interval (int): How often to call function (s).
-            Defaults to once every 60 seconds with a minimum
-                of 5 seconds.
-        stop (bool): Stop a previously assigned ticker with
-            the above settings.
-
-    """
-    from evennia.scripts.tickerhandler import TICKER_HANDLER
-
-    name = kwargs.get("callback", "")
-    interval = max(5, int(kwargs.get("interval", 60)))
-
-    if name in _repeatable:
-        if kwargs.get("stop", False):
-            TICKER_HANDLER.remove(
-                interval, _repeatable[name], idstring=session.sessid, persistent=False
-            )
-        else:
-            TICKER_HANDLER.add(
-                interval,
-                _repeatable[name],
-                idstring=session.sessid,
-                persistent=False,
-                session=session,
-            )
-    else:
-        session.msg("Allowed repeating functions are: %s" % (", ".join(_repeatable)))
-
-
-def unrepeat(session, *args, **kwargs):
-    "Wrapper for OOB use"
-    kwargs["stop"] = True
-    repeat(session, *args, **kwargs)
-
-
 _monitorable = {"name": "db_key", "location": "db_location", "desc": "desc"}
 
 

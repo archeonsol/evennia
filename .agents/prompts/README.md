@@ -55,10 +55,11 @@ Currently parallel-startable (no unresolved dependencies):
   in-progress. Follow-on to the `.73` engine-only-dispatch release.
   EvMore (`.77`) and **EvEditor** are done — both on engine
   `StateProvider`s, modeled on `.73`'s `GetInputState`/`YesNoState`, with
-  a shared reload-rehydration seam. Remaining: **EvMenu** migration (then
-  it appends its row to `_CAPTURE_REHYDRATORS`), any other cmdset
-  `CMD_NOMATCH`/`CMD_NOINPUT` capture, and finally removing the legacy
-  cmdset dispatch path (gated on `cmdobj=` rehoming + sign-off).
+  a shared reload-rehydration seam. EvMenu was deleted in `.85`, not
+  migrated (the `_CAPTURE_REHYDRATORS` seam shipped with only the eveditor
+  row). Remaining: any other cmdset `CMD_NOMATCH`/`CMD_NOINPUT` capture,
+  then removing the legacy cmdset dispatch path (gated on `cmdobj=`
+  rehoming + sign-off).
 
 **Alpha-promotion audit (read-only whole-engine audit, 2026-06-06):**
 
@@ -93,7 +94,7 @@ parallel-startable now.
    login fully into the engine (a promote-to-engine smell); kill the phantom
    `LoginSessionMixin` comment; unify the web/REST path.
 6. [ALPHA: cmdset retirement audit](ALPHA-cmdset-retirement-audit.md) — the CM1
-   finish line; after the in-flight EvMenu removal **and** #5. Audit every cmdset
+   finish line; after #5 (EvMenu removal landed in `.85`). Audit every cmdset
    consumer, then delete the cmdset machinery (`CmdSet`, handler, parser,
    syscommands, `CMD_*`, anchors, the dead `commands/default/` tree).
 - [ALPHA: engine minimal-set inventory](ALPHA-engine-minimal-inventory.md) —

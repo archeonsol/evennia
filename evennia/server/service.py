@@ -93,8 +93,7 @@ class EvenniaServerService(MultiService):
         the server needs to do. It is called every minute.
         """
         if not self._flush_cache:
-            from evennia.utils.idmapper.models import \
-                conditional_flush as _FLUSH_CACHE
+            from evennia.utils.idmapper.models import conditional_flush as _FLUSH_CACHE
 
             self._flush_cache = _FLUSH_CACHE
 
@@ -210,8 +209,7 @@ class EvenniaServerService(MultiService):
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
-            from evennia.server.game_index_client.service import \
-                EvenniaGameIndexService
+            from evennia.server.game_index_client.service import EvenniaGameIndexService
 
             egi_service = EvenniaGameIndexService()
             egi_service.setServiceParent(self)
@@ -264,10 +262,13 @@ class EvenniaServerService(MultiService):
     def register_webserver(self):
         # Start a django-compatible webserver.
 
-        from evennia.server.webserver import (DjangoWebRoot,
-                                              LockableThreadPool,
-                                              PrivateStaticRoot, Website,
-                                              WSGIWebServer)
+        from evennia.server.webserver import (
+            DjangoWebRoot,
+            LockableThreadPool,
+            PrivateStaticRoot,
+            Website,
+            WSGIWebServer,
+        )
 
         # start a thread pool and define the root url (/) as a wsgi resource
         # recognized by Django
@@ -777,8 +778,7 @@ class EvenniaServerService(MultiService):
         # Prime the cmdset merge cache for every already-puppeted session so
         # the first typed command after reload does not pay the cold merge.
         if mode == "reload":
-            from evennia.commands.cmdset_merge_warmup import \
-                warm_all_logged_in_puppet_sessions
+            from evennia.commands.cmdset_merge_warmup import warm_all_logged_in_puppet_sessions
 
             try:
                 warm_all_logged_in_puppet_sessions()

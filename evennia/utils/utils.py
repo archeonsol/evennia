@@ -54,7 +54,6 @@ _IS_MAIN_THREAD = threading.current_thread().name == "MainThread"
 ENCODINGS = settings.ENCODINGS
 
 _TASK_HANDLER = None
-_TICKER_HANDLER = None
 _STRIP_UNSAFE_TOKENS = None
 _ANSISTRING = None
 
@@ -1262,79 +1261,6 @@ def delay(timedelay, callback, *args, **kwargs):
         from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
 
     return _TASK_HANDLER.add(timedelay, callback, *args, **kwargs)
-
-
-def repeat(
-    interval, callback, persistent=True, idstring="", stop=False, store_key=None, *args, **kwargs
-):
-    """
-    Start a repeating task using the TickerHandler.
-
-    Args:
-        interval (int): How often to call callback.
-        callback (callable): This will be called with `*args, **kwargs` every
-            `interval` seconds. This must be possible to pickle regardless
-            of if `persistent` is set or not!
-        persistent (bool, optional): If ticker survives a server reload.
-        idstring (str, optional): Separates multiple tickers. This is useful
-            mainly if wanting to set up multiple repeats for the same
-            interval/callback but with different args/kwargs.
-        stop (bool, optional): If set, use the given parameters to _stop_ a running
-            ticker instead of creating a new one.
-        store_key (tuple, optional): This is only used in combination with `stop` and
-            should be the return given from the original `repeat` call. If this
-            is given, all other args except `stop` are ignored.
-        *args: Used as arguments to `callback`.
-        **kwargs: Keyword-arguments to pass to `callback`.
-
-    Returns:
-        tuple or None: The tuple is the `store_key` - the identifier for the
-        created ticker.  Store this and pass into unrepat() in order to to stop
-        this ticker later. Returns `None` if `stop=True`.
-
-    Raises:
-        KeyError: If trying to stop a ticker that was not found.
-
-    """
-    global _TICKER_HANDLER
-    if _TICKER_HANDLER is None:
-        from evennia.scripts.tickerhandler import TICKER_HANDLER as _TICKER_HANDLER
-
-    if stop:
-        # we pass all args, but only store_key matters if given
-        _TICKER_HANDLER.remove(
-            interval=interval,
-            callback=callback,
-            idstring=idstring,
-            persistent=persistent,
-            store_key=store_key,
-        )
-    else:
-        return _TICKER_HANDLER.add(
-            interval=interval, callback=callback, idstring=idstring, persistent=persistent
-        )
-
-
-def unrepeat(store_key):
-    """
-    This is used to stop a ticker previously started with `repeat`.
-
-    Args:
-        store_key (tuple): This is the return from `repeat`, used to uniquely
-            identify the ticker to stop. Without the store_key, the ticker
-            must be stopped by passing its parameters to `TICKER_HANDLER.remove`
-            directly.
-
-    Returns:
-        bool: True if a ticker was stopped, False if not (for example because no
-            matching ticker was found or it was already stopped).
-
-    """
-    try:
-        repeat(None, None, stop=True, store_key=store_key)
-        return True
-    except KeyError:
-        return False
 
 
 _PPOOL = None

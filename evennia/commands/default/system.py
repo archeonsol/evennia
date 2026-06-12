@@ -44,7 +44,6 @@ __all__ = (
     "CmdTime",
     "CmdServerLoad",
     "CmdTasks",
-    "CmdTickers",
 )
 
 
@@ -937,46 +936,6 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
 
         # return to caller
         self.msg(string)
-
-
-class CmdTickers(COMMAND_DEFAULT_CLASS):
-    """
-    View running tickers
-
-    Usage:
-      tickers
-
-    Note: Tickers are created, stopped and manipulated in Python code
-    using the TickerHandler. This is merely a convenience function for
-    inspecting the current status.
-
-    """
-
-    key = "@tickers"
-    help_category = "System"
-    locks = "cmd:perm(tickers) or perm(Builder)"
-
-    def func(self):
-        from evennia.scripts.tickerhandler import TICKER_HANDLER
-
-        all_subs = TICKER_HANDLER.all_display()
-        if not all_subs:
-            self.msg("No tickers are currently active.")
-            return
-        table = self.styled_table("interval (s)", "object", "path/methodname", "idstring", "db")
-        for sub in all_subs:
-            table.add_row(
-                sub[3],
-                "%s%s"
-                % (
-                    sub[0] or "[None]",
-                    sub[0] and " (#%s)" % (sub[0].id if hasattr(sub[0], "id") else "") or "",
-                ),
-                sub[1] if sub[1] else sub[2],
-                sub[4] or "[Unset]",
-                "*" if sub[5] else "-",
-            )
-        self.msg("|wActive tickers|n:\n" + str(table))
 
 
 class CmdTasks(COMMAND_DEFAULT_CLASS):

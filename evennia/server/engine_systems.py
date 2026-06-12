@@ -52,8 +52,7 @@ def _run_flush(ctx):
         _consecutive_flush_failures += 1
         logger.log_trace("flush-attributes system")
         logger.log_err(
-            f"flush-attributes failed (consecutive failure "
-            f"#{_consecutive_flush_failures})"
+            f"flush-attributes failed (consecutive failure " f"#{_consecutive_flush_failures})"
         )
         if _consecutive_flush_failures >= 3:
             logger.log_err(

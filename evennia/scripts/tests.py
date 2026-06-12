@@ -15,7 +15,6 @@ from evennia.scripts.monitorhandler import MonitorHandler
 from evennia.scripts.ondemandhandler import OnDemandHandler, OnDemandTask
 from evennia.scripts.scripts import DoNothing, ExtendedLoopingCall
 from evennia.scripts.taskhandler import TASK_HANDLER
-from evennia.scripts.tickerhandler import TickerHandler
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils.create import create_script
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTest
@@ -29,36 +28,6 @@ class TestScript(BaseEvenniaTest):
             self.assertTrue(obj, errors)
             self.assertFalse(errors, errors)
             mockinit.assert_called()
-
-
-class TestTickerHandler(TestCase):
-    """Test the TickerHandler class"""
-
-    def test_store_key_raises_RunTimeError(self):
-        """Test _store_key method raises RuntimeError for interval < 1"""
-        with self.assertRaises(RuntimeError):
-            th = TickerHandler()
-            th._store_key(None, None, 0, None)
-
-    def test_remove_raises_RunTimeError(self):
-        """Test remove method raises RuntimeError for catching old ordering of arguments"""
-        with self.assertRaises(RuntimeError):
-            th = TickerHandler()
-            th.remove(callback=1)
-
-    def test_removing_ticker_using_store_key_in_attribute(self):
-        """
-        Test adding a ticker, storing the store_key in an attribute, and then removing it
-        using that same store_key.
-
-        https://github.com/evennia/evennia/pull/3765
-        """
-        obj = DefaultObject.create("test_object")[0]
-        th = TickerHandler()
-        obj.db.ticker = th.add(60, obj.msg, idstring="ticker_test", persistent=True)
-        self.assertTrue(len(th.all()), 1)
-        th.remove(store_key=obj.db.ticker)
-        self.assertTrue(len(th.all()), 0)
 
 
 class TestScriptDBManager(TestCase):

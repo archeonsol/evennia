@@ -107,7 +107,6 @@ _LAZY_EXPORTS = {
     "OnDemandTask": ".scripts.ondemandhandler:OnDemandTask",
     # Handlers (singletons exposed as module attributes)
     "TASK_HANDLER": ".scripts.taskhandler:TASK_HANDLER",
-    "TICKER_HANDLER": ".scripts.tickerhandler:TICKER_HANDLER",
     "MONITOR_HANDLER": ".scripts.monitorhandler:MONITOR_HANDLER",
     "ON_DEMAND_HANDLER": ".scripts.ondemandhandler:ON_DEMAND_HANDLER",
 }

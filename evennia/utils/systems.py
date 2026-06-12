@@ -345,7 +345,11 @@ def _most_recent_occurrence(cadence, now):
         def _clamped(year, month):
             last_day = _stdlib_calendar.monthrange(year, month)[1]
             return datetime(
-                year, month, min(cadence.monthday, last_day), hour, minute,
+                year,
+                month,
+                min(cadence.monthday, last_day),
+                hour,
+                minute,
                 tzinfo=timezone.utc,
             )
 
@@ -669,9 +673,7 @@ def _query_entity_ids(component):
     from evennia.objects.models import ObjectDB
 
     paths = [component] if isinstance(component, str) else list(component)
-    return list(
-        ObjectDB.objects.filter(db_typeclass_path__in=paths).values_list("id", flat=True)
-    )
+    return list(ObjectDB.objects.filter(db_typeclass_path__in=paths).values_list("id", flat=True))
 
 
 def _entity_ids_deferred(component):
@@ -866,9 +868,7 @@ def _load_one_module(path, require_registration):
     try:
         module = importlib.import_module(path)
     except Exception as err:
-        raise SystemRegistrationError(
-            f"SYSTEM_MODULES: could not import '{path}': {err}"
-        ) from err
+        raise SystemRegistrationError(f"SYSTEM_MODULES: could not import '{path}': {err}") from err
     register_fn = getattr(module, "register_systems", None)
     if not callable(register_fn):
         raise SystemRegistrationError(
