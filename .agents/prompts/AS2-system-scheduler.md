@@ -1,9 +1,11 @@
 # AS2: Unified System Scheduler — Engine Primitive
 
-**Status:** Engine build in progress on `as2-system-scheduler`
-(2026-06-11). Design refined and settled 2026-06-11; this prompt is the
-build spec. The substrate AS2 builds on is already shipped — see
-"Substrate already shipped" below.
+**Status:** Engine side shipped in `6.0.0+underspire.89` (2026-06-11):
+`evennia/utils/systems.py`, `evennia/server/engine_systems.py`
+(`flush-attributes`), service wiring, tranche A deletions, tests.
+Remaining: the downstream migration (section 5, game repo) and tranche B
+(`Script.interval` machinery removal, gated on the game's 5 interval
+scripts migrating — section 4.6).
 
 **Audience:** an engine contributor (agent or human) implementing in the
 `archeonsol/evennia` fork. The companion downstream migration happens in the

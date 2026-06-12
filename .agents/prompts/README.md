@@ -28,10 +28,13 @@ Currently parallel-startable (no unresolved dependencies):
   delivers I1 or leaves a distinct remaining scope (legacy `self.caller`
   migration, L1/R1/I2 consuming that `Actor`) is unresolved; the
   architecture-doc I1 entry is stale on this. Confirm before starting.
-- [AS2: unified system scheduler](AS2-system-scheduler.md) — large,
-  not started; design approved, prompt is the build spec. One engine
-  primitive replacing the game's `global_tick` / `Script.interval` /
-  APScheduler. Companion downstream migration is game-repo work.
+- [AS2: unified system scheduler](AS2-system-scheduler.md) — engine side
+  shipped in `6.0.0+underspire.89` (`evennia.utils.systems` + the
+  `flush-attributes` system + TickerHandler deletion, tranche A). One
+  engine primitive replacing the game's `global_tick` / `Script.interval`
+  / APScheduler. Remaining: the downstream migration (game-repo work) and
+  engine tranche B (`Script.interval` machinery removal, gated on the
+  game's 5 interval scripts migrating).
 
 **Shipped:**
 
