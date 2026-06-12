@@ -19,7 +19,6 @@ EVENNIA_TO_GMCP = {
     "client_options": "Core.Supports.Get",
     "get_inputfuncs": "Core.Commands.Get",
     "get_value": "Char.Value.Get",
-    "repeat": "Char.Repeat.Update",
     "monitor": "Char.Monitor.Update",
 }
 

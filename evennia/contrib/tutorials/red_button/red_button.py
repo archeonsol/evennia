@@ -35,7 +35,7 @@ such as when closing the lid and un-blinding a character.
 import random
 
 from evennia import CmdSet, Command, DefaultObject
-from evennia.utils.utils import delay, interactive, repeat
+from evennia.utils.utils import delay, interactive
 
 # Commands on the button (not all awailable at the same time)
 
@@ -460,16 +460,18 @@ class RedButton(DefaultObject):
         self.to_closed_state()
 
         # start blinking every 35s.
-        repeat(35, self._do_blink, persistent=True)
+        delay(35, self._do_blink, persistent=True)
 
     def _do_blink(self):
         """
-        Have the button blink invitingly unless it's broken.
+        Have the button blink invitingly unless it's broken, then schedule
+        the next blink (a self-rescheduling persistent delay).
 
         """
         if self.location and self.db.lamp_works:
             possible_messages = self.db.blink_msgs or self.blink_msgs
             self.location.msg_contents(random.choice(possible_messages))
+        delay(35, self._do_blink, persistent=True)
 
     def _set_desc(self, attrname=None):
         """

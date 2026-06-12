@@ -498,9 +498,12 @@ class EvenniaServerService(MultiService):
 
         # load declared system modules and start the system-scheduler driver
         # (engine systems first, then settings.SYSTEM_MODULES; a broken
-        # declared module is a loud startup failure by design)
+        # declared module is a loud startup failure by design). Stop-and-
+        # replace so a repeat init (tests) never leaves two drivers ticking.
         from evennia.utils import systems
 
+        if self.system_driver is not None:
+            self.system_driver.stop()
         systems.load_system_modules()
         self.system_driver = systems.SystemDriver()
         self.system_driver.start()

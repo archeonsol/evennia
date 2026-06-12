@@ -16,10 +16,19 @@ from django.test import override_settings
 from twisted.internet.defer import Deferred, succeed
 
 from evennia.utils import systems
-from evennia.utils.systems import (SystemDriver, SystemRegistrationError,
-                                   all_entities, all_systems, calendar, every,
-                                   every_tick, get_system, global_scope,
-                                   online_puppets, register)
+from evennia.utils.systems import (
+    SystemDriver,
+    SystemRegistrationError,
+    all_entities,
+    all_systems,
+    calendar,
+    every,
+    every_tick,
+    get_system,
+    global_scope,
+    online_puppets,
+    register,
+)
 from evennia.utils.test_resources import BaseEvenniaTestCase
 
 
@@ -413,6 +422,14 @@ class TestDiscovery(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     @override_settings(SYSTEM_MODULES=[])
     def test_engine_systems_always_load(self):
+        systems.load_system_modules()
+        self.assertIsNotNone(get_system("flush-attributes"))
+
+    @override_settings(SYSTEM_MODULES=[])
+    def test_load_is_idempotent(self):
+        # server init hooks may run more than once in a test process; a
+        # repeat load rebuilds the registry instead of raising on duplicates
+        systems.load_system_modules()
         systems.load_system_modules()
         self.assertIsNotNone(get_system("flush-attributes"))
 

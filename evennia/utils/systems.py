@@ -887,14 +887,19 @@ def load_system_modules():
     Load all declared system modules: engine-owned first, then
     `settings.SYSTEM_MODULES`.
 
-    Called once at server start, before the driver starts. Any broken entry
-    raises so a misdeclared module is a loud startup failure rather than a
-    silently absent system.
+    Called at server start, before the driver starts. Idempotent: the
+    registry is rebuilt from the declared modules on every call, so a repeat
+    call (server init hooks may run more than once in one test process)
+    replaces rather than duplicates. Durable calendar last-run state lives in
+    ServerConfig and is unaffected by a rebuild. Any broken entry raises so a
+    misdeclared module is a loud startup failure rather than a silently
+    absent system.
 
     Raises:
         SystemRegistrationError: If any declared module is broken.
 
     """
+    _SYSTEM_REGISTRY.clear()
     for path in _ENGINE_SYSTEM_MODULES:
         _load_one_module(path, require_registration=False)
     for path in getattr(settings, "SYSTEM_MODULES", None) or []:
