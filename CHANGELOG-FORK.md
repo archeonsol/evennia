@@ -25,6 +25,34 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.90 — idempotent init-hook loops; dirty-reactor test fix
+
+### Engine
+
+[`run_init_hooks`](evennia/server/service.py) now stop-and-replaces the
+`maintenance_task` (60s server-maintenance `LoopingCall`) and the
+`stall_watchdog` ([`ReactorStallWatchdog`](evennia/utils/reactor_watchdog.py))
+before reassigning them, mirroring the existing `system_driver`
+stop-and-replace. Previously a repeat init reassigned those two attributes
+without stopping the prior instance, orphaning live `LoopingCall`s with
+pending `DelayedCall`s in the reactor. Single-boot production reloads were
+unaffected (the Server process is replaced on reload), but any in-process
+repeat init leaked loops.
+
+### Tests
+
+[`TestInitHooks.tearDown`](evennia/server/tests/test_server.py) stops the
+three init-hook loops (`maintenance_task`, `stall_watchdog`,
+`system_driver`) after each test. `test_run_init_hooks` calls
+`run_init_hooks` three times in one process, leaking pending `DelayedCall`s;
+when server tests shared a process with a twisted.trial test (e.g.
+`evennia test evennia.server.tests.test_server evennia.commands.tests`),
+trial reported `DirtyReactorAggregateError` citing the watchdog's
+`LoopingCall`. Pre-existing (reproduced on `feb57acd6`, before the AS2
+scheduler work); the engine change above plus this teardown clear it.
+
+---
+
 ## 6.0.0+underspire.89 — unified system scheduler (AS2) and TickerHandler removal
 
 ### Engine

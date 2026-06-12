@@ -492,7 +492,10 @@ class EvenniaServerService(MultiService):
 
         _hook_lint()
 
-        # start server time and maintenance task
+        # start server time and maintenance task. Stop-and-replace so a
+        # repeat init (tests) never leaves an orphaned task ticking.
+        if self.maintenance_task is not None and self.maintenance_task.running:
+            self.maintenance_task.stop()
         self.maintenance_task = LoopingCall(self.server_maintenance)
         self.maintenance_task.start(60, now=True)  # call every minute
 
@@ -508,9 +511,12 @@ class EvenniaServerService(MultiService):
         self.system_driver = systems.SystemDriver()
         self.system_driver.start()
 
-        # start the reactor-stall watchdog (no-op if REACTOR_STALL_WARNING_MS is 0)
+        # start the reactor-stall watchdog (no-op if REACTOR_STALL_WARNING_MS is 0).
+        # Stop-and-replace so a repeat init (tests) never orphans a watchdog.
         from evennia.utils.reactor_watchdog import ReactorStallWatchdog
 
+        if self.stall_watchdog is not None:
+            self.stall_watchdog.stop()
         self.stall_watchdog = ReactorStallWatchdog()
         self.stall_watchdog.start()
 

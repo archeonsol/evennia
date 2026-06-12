@@ -225,6 +225,17 @@ class TestInitHooks(TestCase):
             obj.at_post_load = MagicMock()
 
     def tearDown(self):
+        # run_init_hooks starts real LoopingCalls (maintenance task, stall
+        # watchdog, system-scheduler driver); stop them so they don't leak
+        # pending DelayedCalls into the reactor and trip trial's dirty-reactor
+        # check when server tests share a process with trial-based tests.
+        if self.server.maintenance_task is not None and self.server.maintenance_task.running:
+            self.server.maintenance_task.stop()
+        if self.server.stall_watchdog is not None:
+            self.server.stall_watchdog.stop()
+        if self.server.system_driver is not None:
+            self.server.system_driver.stop()
+
         for obj in self.objects:
             obj.delete()
 
