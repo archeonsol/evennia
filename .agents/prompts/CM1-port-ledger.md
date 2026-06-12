@@ -38,7 +38,7 @@ needs before it can port. Build each before (or with) its dependent family.
 |---|---|---|---|
 | Typed actions / `@rule` phases / `RuleResult` | `engine.py`, `action.py`, `rule.py`, `result.py` | `[x]` | everything |
 | Parser + verb trie + symbol prefixes + multi-word phrase match (longest exact, then prefix) | `parser.py`, `registry.py` | `[x]` | everything |
-| Bridge seam (`try_action_dispatch`, cmdhandler:902) | `dispatch.py` | `[x]` | everything |
+| Bridge seam (`try_action_dispatch`, cmdhandler `cmdobj is None` branch) | `dispatch.py` | `[x]` | everything |
 | Actor / context / providers | `actor.py`, `context.py` | `[x]` | everything |
 | Account provider when `callertype="account"` (OOC staff verbs while puppeted) | `context.py`, `dispatch.py`, `engine.py` | `[x]` | `__primary_handler__` inserts Account on session dispatch while puppeted |
 | States (EvMenu, Disambiguation) | `menus.py`, `state.py` | `[x]` | menu-driven verbs |

@@ -46,12 +46,8 @@ from twisted.internet.task import deferLater
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
-from evennia.commands.signals import (
-    on_cmdset_merge_error,
-    on_command_error,
-    on_command_post,
-    on_command_pre,
-)
+from evennia.commands.signals import (on_cmdset_merge_error, on_command_error,
+                                      on_command_post, on_command_pre)
 from evennia.utils import logger, utils
 from evennia.utils.command_trace import get_trace_id
 
@@ -471,10 +467,8 @@ def get_and_merge_cmdsets(
                     location = None
                 if location:
                     from evennia.commands.location_cmdset_cache import (
-                        get_cached_location_cmdsets,
-                        make_cache_key,
-                        set_cached_location_cmdsets,
-                    )
+                        get_cached_location_cmdsets, make_cache_key,
+                        set_cached_location_cmdsets)
 
                     loc_cache_key = make_cache_key(caller, location)
                     local_objlist = get_cached_location_cmdsets(loc_cache_key)
@@ -911,15 +905,21 @@ def cmdhandler(
     # through the engine and never merges cmdsets. The legacy cmdset path below
     # is reached only for ``cmdobj=`` injection (a specific Command run directly,
     # e.g. the login ``connect`` command or contrib menu commands), which must
-    # bypass the bridge so its ``func`` actually runs.
+    # bypass the bridge so its ``func`` actually runs. An exception escaping
+    # the bridge is reported here (player notice + logged traceback), exactly
+    # like the legacy path's ErrorReported flow — it must not surface as a
+    # failed Deferred nobody consumes.
     from evennia.actions.dispatch import try_action_dispatch
 
     if cmdobj is None:
-        handled = yield try_action_dispatch(
-            called_by, raw_string, session=session, callertype=callertype, **kwargs
-        )
-        if handled:
-            return
+        try:
+            yield try_action_dispatch(
+                called_by, raw_string, session=session, callertype=callertype, **kwargs
+            )
+        except Exception:
+            logger.log_err("User input was: '%s'." % logger.mask_sensitive_input(raw_string))
+            _msg_err(called_by, _ERROR_UNTRAPPED, cmdid=cmdid)
+        return
 
     (
         cmdset_providers,
@@ -1023,9 +1023,8 @@ def cmdhandler(
                         )
                         suggestions = []
                         if getattr(settings, "COMMAND_FUZZY_SUGGESTIONS_ENABLED", True):
-                            from evennia.commands.cmdparser_trie import (
-                                fuzzy_command_suggestions,
-                            )
+                            from evennia.commands.cmdparser_trie import \
+                                fuzzy_command_suggestions
 
                             suggestions = fuzzy_command_suggestions(raw_string, cmdset)
                         if suggestions:

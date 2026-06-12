@@ -11,12 +11,8 @@ from dataclasses import dataclass
 
 from evennia.actions.action import Action, GameObject
 from evennia.actions.actor import Actor
-from evennia.actions.dispatch import (
-    ProfilingMiddleware,
-    clear_middlewares,
-    register_middleware,
-    try_action_dispatch,
-)
+from evennia.actions.dispatch import (ProfilingMiddleware, clear_middlewares,
+                                      register_middleware, try_action_dispatch)
 from evennia.actions.engine import RuleEngine
 from evennia.actions.exceptions import AmbiguousTarget
 from evennia.actions.menus import DisambiguationState
@@ -24,7 +20,8 @@ from evennia.actions.parser import ActionParser, NoMatchAction
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import CLAIM
 from evennia.actions.rule import rule
-from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
+from evennia.commands.signals import (on_command_error, on_command_post,
+                                      on_command_pre)
 
 ENGINE = RuleEngine()
 
@@ -44,6 +41,32 @@ def _sync(d):
 @dataclass
 class Kick(Action):
     target: GameObject = None
+
+
+@dataclass
+class Zap(Action):
+    """A verb whose only carry_out path is permission-gated."""
+
+
+@dataclass
+class Void(Action):
+    """A registered verb no provider carries any rule for."""
+
+
+@dataclass
+class Poke(Action):
+    """A verb whose parse always fails target resolution."""
+
+    @classmethod
+    def parse(cls, raw_args, actor, context=None, switches=(), verb=None):
+        act = cls()
+        act._unresolved = True
+        return act
+
+
+@dataclass
+class Boom(Action):
+    """A verb whose carry_out body raises."""
 
 
 class RuleTarget:
@@ -90,6 +113,16 @@ def _make_registry():
     return reg
 
 
+def _make_full_registry():
+    """Registry with the fail-closed fixture verbs alongside ``kick``."""
+    reg = _make_registry()
+    reg.register(Zap, ("zap",))
+    reg.register(Void, ("void",))
+    reg.register(Poke, ("poke",))
+    reg.register(Boom, ("boom",))
+    return reg
+
+
 def _dispatch(actor, raw, parser):
     return _sync(
         try_action_dispatch(actor.effective, raw, actor=actor, engine=ENGINE, parser=parser)
@@ -104,10 +137,13 @@ class TestRouting(unittest.TestCase):
         self.actor = Actor(character=self.char)
 
     def test_known_verb_dispatches_through_engine(self):
+        from evennia.actions.result import ActionTrace
+
         goblin = RuleTarget("goblin")
         self.char._search_hook = lambda name: goblin
-        handled = _dispatch(self.actor, "kick goblin", self.parser)
-        self.assertTrue(handled)
+        trace = _dispatch(self.actor, "kick goblin", self.parser)
+        self.assertIsInstance(trace, ActionTrace)
+        self.assertEqual(trace.outcome, "succeeded")
         self.assertEqual(len(goblin.kicked), 1)
 
     def test_unknown_verb_returns_handled_with_nomatch(self):
@@ -118,6 +154,106 @@ class TestRouting(unittest.TestCase):
     def test_empty_line_handled_by_engine(self):
         handled = _dispatch(self.actor, "", self.parser)
         self.assertTrue(handled)
+
+
+# --- fail-closed feedback (dispatch honesty) ---------------------------------
+class FailClosedChar(FakeChar):
+    """Effective object whose class carries the fail-closed fixture rules."""
+
+    @rule(Zap, phase="carry_out", requires=lambda action, actor: False)
+    def do_zap(self, action, actor):
+        return CLAIM
+
+    @rule(Poke, phase="carry_out")
+    def do_poke(self, action, actor):
+        from evennia.actions.result import SKIP
+
+        if action._unresolved:
+            return SKIP
+        return CLAIM
+
+    @rule(Boom, phase="carry_out")
+    def do_boom(self, action, actor):
+        raise RuntimeError("kapow")
+
+
+class TestFailClosedFeedback(unittest.TestCase):
+    """A parsed verb dispatch must never end in silence: a fully gated verb is
+    indistinguishable from a nonexistent one (no-match feedback + security
+    log), a verb with no responding rules produces a direct refusal, and
+    legitimately-quiet outcomes (resolved carry_out, unresolved target,
+    nomatch/noinput with their own providers) stay as-is."""
+
+    def setUp(self):
+        self.parser = ActionParser(registry=_make_full_registry())
+        self.char = FailClosedChar()
+        self.actor = Actor(character=self.char)
+
+    def test_gated_verb_is_indistinguishable_from_unknown(self):
+        from unittest import mock
+
+        from evennia.utils import logger as ev_logger
+
+        with mock.patch.object(ev_logger, "log_sec") as log_sec:
+            trace = _dispatch(self.actor, "zap", self.parser)
+        # Player-facing: exactly what an unknown verb produces, with no
+        # suggestions (they would offer the hidden verb back), and no
+        # permission message naming a real command.
+        self.assertIn("Huh?", self.char.messages[-1])
+        joined = "\n".join(str(m) for m in self.char.messages)
+        self.assertNotIn("permission", joined.lower())
+        self.assertNotIn("zap", joined.lower())
+        # Staff-facing: the attempt lands in the security log.
+        log_sec.assert_called_once()
+        self.assertIn("Zap", log_sec.call_args.args[0])
+        # The returned trace describes the typed verb, not the feedback.
+        self.assertEqual(trace.carry_out_gated, 1)
+        self.assertEqual(trace.carry_out_fired, 0)
+
+    def test_verb_with_no_rules_sends_default_feedback(self):
+        trace = _dispatch(self.actor, "void", self.parser)
+        self.assertIn("You can't do that.", self.char.messages)
+        self.assertEqual(trace.outcome, "no_rules")
+
+    def test_successful_carry_out_adds_no_feedback(self):
+        goblin = RuleTarget("goblin")
+        self.char._search_hook = lambda name: goblin
+        trace = _dispatch(self.actor, "kick goblin", self.parser)
+        self.assertEqual(self.char.messages, [])
+        self.assertEqual(trace.carry_out_fired, 1)
+
+    def test_unresolved_action_stays_quiet(self):
+        # parse() set _unresolved (search already reported the miss in the real
+        # flow); the fail-closed fallback must not pile on.
+        _dispatch(self.actor, "poke ghost", self.parser)
+        self.assertEqual(self.char.messages, [])
+
+    def test_nomatch_keeps_its_own_feedback(self):
+        _dispatch(self.actor, "frobnicate", self.parser)
+        self.assertIn("Huh?", self.char.messages[-1])
+        self.assertNotIn("You can't do that.", self.char.messages)
+
+    def test_empty_line_stays_silent(self):
+        _dispatch(self.actor, "", self.parser)
+        self.assertEqual(self.char.messages, [])
+
+
+class TestRuleExceptionFeedback(unittest.TestCase):
+    """A carry_out body that raises must reach the player, not just the log."""
+
+    def setUp(self):
+        self.parser = ActionParser(registry=_make_full_registry())
+        self.char = FailClosedChar()
+        self.actor = Actor(character=self.char)
+
+    def test_carry_out_exception_messages_actor(self):
+        trace = _dispatch(self.actor, "boom", self.parser)
+        joined = "\n".join(str(m) for m in self.char.messages)
+        self.assertIn("untrapped error", joined.lower())
+        # The errored rule fired (recorded as FAIL), so the fail-closed
+        # fallback must not also fire.
+        self.assertNotIn("You can't do that.", self.char.messages)
+        self.assertEqual(trace.carry_out_fired, 1)
 
 
 # --- signals ----------------------------------------------------------------
@@ -189,7 +325,8 @@ class TestSignals(unittest.TestCase):
     def test_signals_carry_session_and_shared_trace_id(self):
         # The session passed to dispatch surfaces verbatim in signal kwargs, and
         # pre/post share the single trace_id read at the top of the dispatch.
-        from evennia.utils.command_trace import begin_command_trace, end_command_trace
+        from evennia.utils.command_trace import (begin_command_trace,
+                                                 end_command_trace)
 
         goblin = RuleTarget("goblin")
         self.char._search_hook = lambda name: goblin
@@ -228,8 +365,10 @@ class TestDisambiguation(unittest.TestCase):
             raise AmbiguousTarget(candidates=candidates, original_raw=name)
 
         self.char._search_hook = _ambiguous
+        # The bridge consumed the line (prompt sent) without an engine
+        # dispatch, so there is no trace.
         handled = _dispatch(self.actor, "kick goblin", self.parser)
-        self.assertTrue(handled)
+        self.assertIsNone(handled)
         self.assertTrue(self.actor.has_state(DisambiguationState))
         prompt = "\n".join(self.char.messages)
         self.assertIn("Which one did you mean?", prompt)
@@ -244,8 +383,9 @@ class TestDisambiguation(unittest.TestCase):
         self.actor.enter_state(
             DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
         )
-        handled = _dispatch(self.actor, "2", self.parser)
-        self.assertTrue(handled)
+        # The replayed dispatch's trace comes back through the resolution.
+        trace = _dispatch(self.actor, "2", self.parser)
+        self.assertEqual(trace.outcome, "succeeded")
         self.assertFalse(self.actor.has_state(DisambiguationState))
         self.assertEqual(len(c2.kicked), 1)
         self.assertEqual(len(c1.kicked), 0)
@@ -255,8 +395,9 @@ class TestDisambiguation(unittest.TestCase):
         self.actor.enter_state(
             DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
         )
+        # Cancelled choice: the bridge consumed the line, no engine dispatch.
         handled = _dispatch(self.actor, "99", self.parser)
-        self.assertTrue(handled)
+        self.assertIsNone(handled)
         self.assertFalse(self.actor.has_state(DisambiguationState))
         self.assertIn("Invalid choice. Cancelled.", self.char.messages)
         self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)

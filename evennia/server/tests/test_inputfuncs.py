@@ -3,6 +3,7 @@ Tests for server input functions.
 """
 
 import pickle
+import unittest
 
 import evennia
 from evennia.server import inputfuncs
@@ -32,3 +33,25 @@ class TestMonitoredInputfunc(BaseEvenniaTest):
         self.assertIn("session", monitor_kwargs)
         self.assertIsInstance(monitor_kwargs["session"], str)
         pickle.dumps((self.session.sessid, sent_kwargs), pickle.HIGHEST_PROTOCOL)
+
+
+class TestTextDispatchErrback(unittest.TestCase):
+    """``text`` must consume a failed cmdhandler Deferred by logging it, not
+    leave it for Twisted's garbage collector to maybe-report."""
+
+    def test_failed_dispatch_deferred_is_logged(self):
+        from unittest import mock
+
+        from twisted.internet import defer
+
+        session = mock.MagicMock()
+        session.account = None
+        failing = defer.fail(RuntimeError("dispatch kaboom"))
+        with (
+            mock.patch.object(inputfuncs, "cmdhandler", return_value=failing),
+            mock.patch.object(inputfuncs, "log_err") as log_mock,
+        ):
+            inputfuncs.text(session, "look")
+        log_mock.assert_called()
+        logged = " ".join(str(a) for c in log_mock.call_args_list for a in c.args)
+        self.assertIn("dispatch kaboom", logged)

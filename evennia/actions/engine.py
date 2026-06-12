@@ -424,6 +424,8 @@ class RuleEngine:
         if not self._actor_type_ok(spec, actor):
             return _NA, False
         if spec.requires is not None and not spec.requires.eval(action, actor, memo):
+            if phase == "carry_out":
+                trace.carry_out_gated += 1
             self._record(trace, phase, provider, spec, SKIP)
             return SKIP, False
         if dry_run:
@@ -447,6 +449,7 @@ class RuleEngine:
 
             logger.log_trace(f"action rule {spec.rule_name!r} raised during {phase} phase")
             self._record(trace, phase, provider, spec, FAIL(f"exception: {exc}"))
+            self._notify_rule_error(actor)
             return PASS, suspended
         self._record(trace, phase, provider, spec, result)
         return result, suspended
@@ -515,9 +518,14 @@ class RuleEngine:
     @staticmethod
     def _record(trace, phase, provider, spec, result):
         # B3: a non-skip rule "fired" — track it cheaply so ``_final_outcome``
-        # is correct even when phase recording is off.
+        # is correct even when phase recording is off. The per-phase slices
+        # feed the dispatch bridge's fail-closed feedback.
         if not result.is_skip:
             trace.fired += 1
+            if phase == "carry_out":
+                trace.carry_out_fired += 1
+            elif phase == "report":
+                trace.report_fired += 1
         if not trace.record_phases:
             return
         trace.record(
@@ -545,6 +553,25 @@ class RuleEngine:
             if key:
                 return key
         return repr(actor)
+
+    @classmethod
+    def _notify_rule_error(cls, actor):
+        """Player-facing notice for a rule body that raised. The traceback is
+        already logged; this keeps the failure from being silent at the prompt.
+        ``IN_GAME_ERRORS`` includes the traceback, mirroring the legacy command
+        path's ``_msg_err``."""
+        from traceback import format_exc
+
+        from django.conf import settings
+
+        if getattr(settings, "IN_GAME_ERRORS", False):
+            text = f"{format_exc().strip()}\nAn untrapped error occurred."
+        else:
+            text = (
+                "An untrapped error occurred. Please file a bug report "
+                "detailing the steps to reproduce."
+            )
+        cls._send(actor, text, False)
 
     @staticmethod
     def _send(actor, message, dry_run):

@@ -1319,6 +1319,23 @@ in `settings_default.py`; `action.py` gained `targets`/`_object_field_names`;
 `pending_raw`/`ambiguous_name`. 11 tests in `tests/test_dispatch.py` (165 actions
 total + 146 commands, all green).
 
+> **Superseded — current bridge contract (dispatch-honesty fix, 2026-06).** The
+> `Deferred[bool]` / `return False` / fall-through contract described in this
+> Phase 4/5 record was the flag-OFF transitional design and is **no longer
+> live**. The engine is the sole player-input dispatch path; `cmdhandler`'s
+> `cmdobj is None` branch dispatches and returns unconditionally (no
+> `if handled` fall-through, no `ACTION_ENGINE_ENABLED` flag). `try_action_dispatch`
+> now returns `Deferred[ActionTrace | None]` (`None` only when the bridge
+> consumed the line without an engine dispatch — disambiguation prompt installed
+> or pending choice cancelled). A parsed verb that fires no `carry_out`/`report`
+> rule fails closed: a fully `requires`-gated verb is logged to the security log
+> and re-dispatched as a suggestion-free `NoMatchAction` (indistinguishable from
+> an unknown verb, so it leaks nothing), and a verb with no responding rules at
+> all gets a direct refusal. Bodies that raise are reported to the player
+> (engine `_notify_rule_error` for rule bodies; `cmdhandler` wraps the bridge in
+> `_msg_err`; `inputfuncs.text` adds an errback backstop). See
+> `evennia/actions/dispatch.py` module docstring for the authoritative statement.
+
 * **Flag-gated shim, default OFF.** The bridge is inert in production until a deploy
   flips `ACTION_ENGINE_ENABLED`. With the flag off the legacy cmdset body is reached
   byte-for-byte unchanged (146 commands tests still green) — the shim is a single
@@ -1351,11 +1368,13 @@ total + 146 commands, all green).
 * **No bridge (revised Phase 5):** the original §4a sketch gated on
   `not isinstance(parse_result.action, LegacyAction)`, assuming a `CmdSetBridge`
   would wrap legacy commands as actions. That design is dropped (see the revised
-  Phase 5 — Gate Overlap). The shipped `dispatch.py` instead returns False for any
-  unported verb (the `_is_system_action` / no-match fall-through), so the legacy
-  cmdset path handles it directly. This is now the **permanent** design, not a
-  placeholder: unported commands keep running on the legacy path until they are
-  ported, and gate-overlap (Phase 5) keeps them correctly gated meanwhile.
+  Phase 5 — Gate Overlap). While the flag was OFF, the shipped `dispatch.py`
+  returned False for any unported verb so the legacy cmdset path handled it,
+  keeping unported commands gated by the firewall (Phase 5) meanwhile. This
+  fall-through was the **transition** mechanism, not the end state: once every
+  verb was ported and the flag turned on (`.73`), it became unreachable, and the
+  dispatch-honesty fix (see the superseded-contract note under Phase 4 Status)
+  retired the bool return entirely.
 
 *Original design notes below (4a–4d) retained for reference. Note the §4a
 `LegacyAction` gate is superseded — see the revised Phase 5.*

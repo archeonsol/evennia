@@ -115,6 +115,15 @@ class ActionTrace:
     #: count of non-skip rules that fired; the cheap signal ``_final_outcome``
     #: uses so the outcome is correct even when ``record_phases`` is False.
     fired: int = 0
+    #: per-phase slices of ``fired`` for the dispatch bridge's fail-closed
+    #: feedback: a parsed verb whose dispatch fires neither a ``carry_out`` nor
+    #: a ``report`` rule ended in silence and needs default feedback. Kept as
+    #: cheap counters so they work with ``record_phases=False``.
+    carry_out_fired: int = 0
+    report_fired: int = 0
+    #: ``carry_out`` rules whose ``requires`` gate failed — distinguishes "no
+    #: permitted path" (permission denial) from "no path at all".
+    carry_out_gated: int = 0
 
     def record(self, phase_trace: PhaseTrace) -> None:
         self.phases.append(phase_trace)

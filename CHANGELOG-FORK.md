@@ -25,6 +25,125 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.91 — honest action dispatch: fail-closed feedback, trace return, surfaced errors
+
+A parsed verb dispatch can no longer end in silence, and the cmdhandler bridge
+no longer lies about what happened. Three coupled leaks are closed: the bridge
+discarded the dispatch trace and hardcoded a `True` return (so a no-op dispatch
+read as "handled" and suppressed any feedback); a fully permission-gated verb
+dispatched "successfully" with no output (a quelled staffer typing a staff verb
+got nothing); and an exception thrown by a `carry_out` body escaped the bridge
+as an unconsumed failed `Deferred` that vanished until Twisted's GC maybe-logged
+it. None produced a useful signal for staff, and the silent-gated case leaked
+the existence of a real verb to anyone who guessed its name.
+
+### Engine
+
+[`try_action_dispatch`](evennia/actions/dispatch.py) now returns
+`Deferred[ActionTrace | None]` instead of `Deferred[bool]`. It fires with the
+dispatch's [`ActionTrace`](evennia/actions/result.py), or `None` when the bridge
+consumed the line without an engine dispatch (a disambiguation prompt was
+installed, or a pending choice was cancelled). The `return True` on every path
+and the "`False` → fall through to legacy" contract are gone — the engine is the
+sole player-input dispatch path and the bool was vestigial.
+
+[`ActionTrace`](evennia/actions/result.py) gained three cheap counters that work
+with `record_phases=False` (the production bridge's mode): `carry_out_fired`,
+`report_fired`, and `carry_out_gated` (carry_out rules whose `requires` gate
+failed). [`RuleEngine._record`](evennia/actions/engine.py) increments the
+per-phase fired counts; the `requires`-gate site increments `carry_out_gated`.
+These let the bridge distinguish "no permitted path" from "no path at all"
+without re-walking the rule registry per dispatch (which is what the game's
+`StaffAccessCheckRules` did — see Migration).
+
+**Fail-closed feedback.** When a parsed verb fires no `carry_out`/`report` rule,
+[`_fail_closed_fallback`](evennia/actions/dispatch.py) guarantees a response:
+
+- **Fully `requires`-gated** (every carry_out path SKIPped on its gate): the
+  attempt is written to the security log via
+  [`logger.log_sec`](evennia/utils/logger.py) (actor, action type, raw input,
+  gated-path count) and the line is re-dispatched as a **suggestion-free**
+  [`NoMatchAction`](evennia/actions/parser.py). The player sees exactly what an
+  unknown verb produces, so a gated verb is indistinguishable from one that does
+  not exist and its name is never confirmed. Gates are the security boundary;
+  this makes that boundary leak-free. (A quelled superuser therefore gets `Huh?`
+  for a staff verb — correct quell semantics. A game wanting softer treatment
+  for its own staff layers a `check`-phase rule, as the game already did.)
+- **No responding rules at all** (registered verb, nothing in context carries a
+  rule for it): a direct `You can't do that.` This case is inapplicable, not
+  secret, so an honest message is right. Rule of thumb this enforces:
+  visibility-sensitive verbs must be hidden by `requires=` gates, never by
+  provider absence.
+
+System actions (`NoMatchAction`/`NoInputAction`/`LoginStartAction`, which ship
+their own default providers) and `_unresolved` actions (target miss already
+reported by `search`) are exempt.
+
+**Rule-body exceptions reach the player.** A `carry_out`/`report` body that
+raises was logged but produced no player-facing output.
+[`RuleEngine._notify_rule_error`](evennia/actions/engine.py) now sends an
+untrapped-error notice (full traceback under `IN_GAME_ERRORS`, generic message
+otherwise), mirroring the legacy command path's `_msg_err`. The errored rule is
+still recorded as a FAIL and the phase continues; the fail-closed fallback does
+not also fire (the rule counts as fired).
+
+### Commands
+
+[`cmdhandler`](evennia/commands/cmdhandler.py) wraps the bridge call in
+try/except: an exception escaping `try_action_dispatch` now logs the masked
+input and reports `_ERROR_UNTRAPPED` to the caller, exactly like the legacy
+path's `ErrorReported` flow, instead of propagating as a failed `Deferred` that
+nobody consumes. The `cmdobj is None` branch dispatches and returns
+unconditionally (the dead `if handled:` fall-through is removed); `cmdobj=`
+injection still bypasses the bridge so a directly-run Command's `func` executes.
+
+### Server
+
+[`inputfuncs.text`](evennia/server/inputfuncs.py) adds an errback backstop on
+the dispatch `Deferred` ([`_log_dispatch_failure`](evennia/server/inputfuncs.py))
+so any failure that still reaches the top of the input path is logged rather
+than dropped — defense in depth behind cmdhandler's own reporting.
+
+### Migration
+
+- **Downstream callers of `try_action_dispatch`** that branched on a truthy
+  return must adapt: it returns an `ActionTrace | None` now, not a bool. A
+  truthiness check still works as "did the engine dispatch" (a trace is truthy,
+  `None` is falsy), but the value is the trace.
+- **Game-side fail-closed gates are now redundant.** A game that re-implemented
+  "block when no permitted carry_out path exists" (e.g. `StaffAccessCheckRules`,
+  a `check`-phase rule walking the registry to emit a permission message) can
+  drop it. The engine fails closed uniformly across all three callertypes. Note
+  the **message changes**: the engine emits no-match (verb hidden), not
+  `You don't have permission to do that.` — the permission message itself leaked
+  verb existence and is deliberately not reproduced.
+
+### Known follow-up
+
+Fuzzy "did you mean…?" suggestions
+([`registry.suggest_verbs`](evennia/actions/registry.py)) still exclude only
+system verbs, not gated ones, so a near-miss typo (`@dgi` → `@dig`) can surface
+a gated verb name through the normal no-match path. The fail-closed fallback
+sidesteps this (it synthesizes a suggestion-free no-match), but the typo path
+remains; filtering suggestions by whether the actor has a non-gated path is
+deferred.
+
+### Tests
+
+New fail-closed and honesty coverage in
+[`test_dispatch.py`](evennia/actions/tests/test_dispatch.py): a gated verb is
+indistinguishable from unknown (no-match text, no suggestions, no permission
+message, `log_sec` called); a no-rules verb gets the direct refusal; a
+successful carry_out and an `_unresolved` target stay silent; a raising
+carry_out messages the actor; the known-verb and disambiguation paths assert on
+the returned trace (and `None` where the bridge consumes the line).
+[`TestBridgeErrorSurfacing`](evennia/commands/tests.py) proves a bridge
+exception reports rather than escaping as a failed `Deferred`;
+[`TestTextDispatchErrback`](evennia/server/tests/test_inputfuncs.py) proves the
+input-path backstop logs a failed dispatch.
+
+---
+
 ## 6.0.0+underspire.90 — idempotent init-hook loops; dirty-reactor test fix
 
 ### Engine

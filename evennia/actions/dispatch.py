@@ -3,9 +3,15 @@ The cmdhandler bridge (CM1 Phase 4): the seam between Evennia's ``cmdhandler``
 and the action engine.
 
 ``cmdhandler`` calls :func:`try_action_dispatch` on every normal input line
-(CM1 Phase 8). The bridge always dispatches through the engine and returns a
-truthy result so legacy cmdset merge is not used for puppet/account/session input.
-The legacy cmdset path remains only for ``cmdobj=`` injection and similar.
+(CM1 Phase 8). The engine is the sole dispatch path for player input; the
+legacy cmdset machinery in ``cmdhandler`` remains only for ``cmdobj=``
+injection (running a specific Command instance directly). The bridge returns
+the dispatch's :class:`~evennia.actions.result.ActionTrace` so callers can see
+what actually happened, and guarantees a parsed verb never ends in silence:
+when a dispatch fires no ``carry_out``/``report`` rule, a fully
+``requires``-gated verb is logged to the security log and re-dispatched as a
+no-match (indistinguishable from a verb that does not exist), while a verb
+with no responding rules at all gets a direct refusal message.
 
 Routing rules (Phase 4, before any game verb is ported):
 
@@ -31,9 +37,11 @@ dispatch for timing/instrumentation.
 import time
 from collections import defaultdict
 
+from django.utils.translation import gettext as _
 from twisted.internet.defer import inlineCallbacks
 
-from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
+from evennia.commands.signals import (on_command_error, on_command_post,
+                                      on_command_pre)
 from evennia.utils.command_trace import get_trace_id
 
 from .actor import Actor
@@ -63,11 +71,9 @@ class DispatchMiddleware:
     :func:`register_middleware`. Both hooks are best-effort (exceptions are
     swallowed so instrumentation never breaks a dispatch)."""
 
-    def before_dispatch(self, action, actor, context):
-        ...
+    def before_dispatch(self, action, actor, context): ...
 
-    def after_dispatch(self, action, actor, context, trace):
-        ...
+    def after_dispatch(self, action, actor, context, trace): ...
 
 
 _middlewares = []
@@ -122,9 +128,7 @@ class ProfilingMiddleware(DispatchMiddleware):
 
 
 def _format_disambiguation(candidates, looker=None) -> str:
-    lines = [
-        f"  {i + 1}: {_candidate_label(c, looker)}" for i, c in enumerate(candidates)
-    ]
+    lines = [f"  {i + 1}: {_candidate_label(c, looker)}" for i, c in enumerate(candidates)]
     return "Which one did you mean?\n" + "\n".join(lines)
 
 
@@ -164,8 +168,10 @@ def try_action_dispatch(
             discriminator, used to build the actor unambiguously.
 
     Returns:
-        Deferred[bool]: fires ``True`` if the engine handled the input,
-        ``False`` to fall through to the legacy cmdset path.
+        Deferred[ActionTrace | None]: fires with the dispatch's trace, or
+        ``None`` when the bridge consumed the line without an engine dispatch
+        (a disambiguation prompt was installed, or a pending choice was
+        cancelled).
     """
     engine = engine or _default_engine
     parser = parser or _default_parser
@@ -176,10 +182,10 @@ def try_action_dispatch(
     #    replayed with a search override; see Actor.search).
     disambig = _active_disambiguation(actor)
     if disambig is not None and disambig.pending_raw is not None:
-        handled = yield _resolve_disambiguation(
+        trace = yield _resolve_disambiguation(
             called_by, raw_string, session, actor, disambig, engine, parser, callertype, **kwargs
         )
-        return handled
+        return trace
 
     # 2) Parse. AmbiguousTarget mid-parse → install state + prompt.
     try:
@@ -192,10 +198,8 @@ def try_action_dispatch(
                 ambiguous_name=exc.original_raw,
             )
         )
-        actor.msg(
-            _format_disambiguation(exc.candidates, looker=getattr(actor, "character", None))
-        )
-        return True
+        actor.msg(_format_disambiguation(exc.candidates, looker=getattr(actor, "character", None)))
+        return None
 
     states_active = bool(actor.state_objects)
 
@@ -224,12 +228,70 @@ def try_action_dispatch(
         if stripped == CMD_LOGINSTART:
             action = LoginStartAction()
 
-    yield _dispatch_with_signals(action, actor, raw_string, session, engine, callertype=callertype)
-    return True
+    trace = yield _dispatch_with_signals(
+        action, actor, raw_string, session, engine, callertype=callertype
+    )
+    fallback = _fail_closed_fallback(action, actor, trace, raw_string)
+    if fallback is not None:
+        # A gated verb must be indistinguishable from a nonexistent one: route
+        # the line through the real no-match pipeline (game NoMatchRules +
+        # defaults). The trace returned is still the typed verb's — that's
+        # what truthfully describes this input; the feedback dispatch is an
+        # implementation detail.
+        yield _dispatch_with_signals(
+            fallback, actor, raw_string, session, engine, callertype=callertype
+        )
+    return trace
 
 
 def _is_unloggedin(actor) -> bool:
     return actor is not None and actor.account is None and actor.session is not None
+
+
+def _fail_closed_fallback(action, actor, trace, raw_string):
+    """Guarantee a parsed verb dispatch never ends in silence (fail closed).
+
+    ``requires``-gated ``carry_out`` rules only SKIP, so without this a verb
+    whose every carry_out path is permission-gated (e.g. a staff verb typed by
+    a player, or by quelled staff) dispatches "successfully" with no output at
+    all. Gates are the security boundary, so a fully-gated verb must look like
+    a verb that does not exist: the attempt goes to the security log and the
+    line is re-dispatched as a suggestion-free :class:`NoMatchAction` (returned
+    here for the caller to dispatch). A verb with no responding rules at all
+    is not a secret, just inapplicable — message it directly.
+
+    System actions (no-match, no-input, login-start) ship their own default
+    providers, and an ``_unresolved`` action's target miss was already
+    reported by ``search``.
+
+    Returns:
+        NoMatchAction | None: the fallback action to dispatch, or ``None``
+        when no fallback dispatch is needed.
+    """
+    from .parser import LoginStartAction, NoInputAction, NoMatchAction
+
+    if trace is None or trace.outcome in ("blocked", "aborted"):
+        return None
+    # REDIRECTs swap the action mid-dispatch; judge what actually ran.
+    final_action = trace.action if trace.action is not None else action
+    if isinstance(final_action, (NoMatchAction, NoInputAction, LoginStartAction)):
+        return None
+    if final_action._unresolved:
+        return None
+    if trace.carry_out_fired or trace.report_fired:
+        return None
+    if trace.carry_out_gated:
+        from evennia.utils import logger
+
+        logger.log_sec(
+            f"Denied (fail-closed): {type(final_action).__name__} "
+            f"by {trace.actor_key}: input {raw_string!r}, "
+            f"{trace.carry_out_gated} gated carry_out path(s)."
+        )
+        # No suggestions: computing them would offer the hidden verb back.
+        return NoMatchAction(raw_string=raw_string)
+    actor.msg(_("You can't do that."))
+    return None
 
 
 @inlineCallbacks
@@ -237,15 +299,13 @@ def _resolve_disambiguation(
     called_by, raw_string, session, actor, state, engine, parser, callertype=None, **kwargs
 ):
     """Resolve a pending disambiguation from the player's choice line."""
-    choice = _parse_choice(
-        raw_string, state.candidates, looker=getattr(actor, "character", None)
-    )
+    choice = _parse_choice(raw_string, state.candidates, looker=getattr(actor, "character", None))
     actor.exit_state(DisambiguationState)
     if choice is None:
         actor.msg("Invalid choice. Cancelled.")
-        return True
+        return None
     actor.set_search_override(state.ambiguous_name, choice)
-    handled = yield try_action_dispatch(
+    trace = yield try_action_dispatch(
         called_by,
         state.pending_raw,
         session=session,
@@ -255,7 +315,7 @@ def _resolve_disambiguation(
         callertype=callertype,
         **kwargs,
     )
-    return handled
+    return trace
 
 
 @inlineCallbacks

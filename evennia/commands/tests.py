@@ -11,11 +11,8 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import (
-    BaseEvenniaCommandTest,
-    BaseEvenniaTest,
-    TestCase,
-)
+from evennia.utils.test_resources import (BaseEvenniaCommandTest,
+                                          BaseEvenniaTest, TestCase)
 
 # Testing-command sets
 
@@ -1670,9 +1667,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
     @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
         from evennia.commands.cmd_access_cache import (
-            cached_cmd_access,
-            invalidate_cmd_access_cache,
-        )
+            cached_cmd_access, invalidate_cmd_access_cache)
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -2144,7 +2139,8 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import begin_command_trace, end_command_trace
+        from evennia.utils.command_trace import (begin_command_trace,
+                                                 end_command_trace)
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2188,13 +2184,8 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation,
-    clear_location_cmdset_cache,
-    cmdset_generation,
-    get_cached_location_cmdsets,
-    make_cache_key,
-    set_cached_location_cmdsets,
-)
+    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
+    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2934,3 +2925,36 @@ class TestCmdsetMergeWarmup(BaseEvenniaTest):
         ):
             cmdset_merge_warmup.warm_all_logged_in_puppet_sessions()
         warm_mock.assert_not_called()
+
+
+# --- bridge error surfacing (dispatch honesty) -------------------------------
+class _BridgeErrCaller:
+    """Minimal called_by: records what the player would see."""
+
+    def __init__(self):
+        self.key = "Crashee"
+        self.messages = []
+
+    def msg(self, text=None, **kwargs):
+        self.messages.append(text)
+
+
+class TestBridgeErrorSurfacing(TwistedTestCase):
+    """An exception escaping the engine bridge must reach the player and be
+    reported, never vanish into an unconsumed failed Deferred."""
+
+    def test_bridge_exception_reports_untrapped_error(self):
+        called_by = _BridgeErrCaller()
+        out = {}
+        with patch(
+            "evennia.actions.dispatch.try_action_dispatch",
+            side_effect=RuntimeError("bridge kaboom"),
+        ):
+            d = cmdhandler.cmdhandler(called_by, "kick goblin", callertype="object")
+            d.addCallbacks(
+                lambda r: out.__setitem__("result", r),
+                lambda f: out.__setitem__("fail", f),
+            )
+        self.assertNotIn("fail", out, "bridge exception escaped as a failed Deferred")
+        joined = "\n".join(str(m) for m in called_by.messages)
+        self.assertIn("untrapped error", joined.lower())
