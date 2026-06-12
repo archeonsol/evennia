@@ -17,9 +17,10 @@ operational detail.
 
 ### The engine/game line
 
-Test: if a hypothetical second consumer could not reasonably
-re-implement this from scratch, it belongs in the engine. Everything
-else is game-shaped, no matter how generic it looks.
+The test (could a second consumer re-implement it from scratch? if not,
+it's engine) lives in [`core-beliefs.md`](.agents/docs/core-beliefs.md);
+core-beliefs points back here for the lane breakdown and direction
+signals below.
 
 Three lanes:
 
@@ -65,16 +66,20 @@ Three lanes:
 ## Plugin system (replacing the `contrib/` namespace)
 
 **Goal:** stop accepting new contribs. Provide a clean seam for
-optional, third-party-publishable extensions. Long-term: contribs that
-survive hygiene either migrate to plugins or get demoted to
-`examples/`.
+optional, third-party-publishable extensions. Surviving contribs would
+in principle migrate to plugins, but in practice they are being deleted
+as hygiene passes catch them, so the migration target is shrinking
+toward zero.
 
 **Why deferred:** the fork has one consumer. Building a plugin
 abstraction before the second consumer exists optimises for an unknown
 shape. The contrib namespace is mostly tolerable today and the deletion
 work in `+underspire.16` shrank it materially. The next forcing
 function (a real second consumer or a third-party plugin author) hasn't
-arrived.
+arrived. Note the surviving-contrib count is likely to reach zero by
+deletion before a plugin seam is built, so "migrate the survivors" is
+not the real driver; third-party plugin authors publishing without
+engine PRs are.
 
 ### MVP shape (2-3 commits, ~500 LOC, real release)
 
@@ -178,41 +183,14 @@ providers agree, and lets game code add new slots without monkey-patching
 the template string. Doc generation could then enumerate the slot
 surface alongside the other appearance hooks.
 
-Deferred from **H1** (hook registry) to keep H1's scope on the hook
-surface itself. The template-slot coupling is a config-registry
-problem orthogonal to hook registration: H1 declares what `at_*` /
-`get_*` / `return_*` methods exist; this would declare what
-`appearance_template` slots exist. Same family of solution (decorator +
-startup lint + doc generation), different metadata. Pick this up after
-H1 lands, when the registry pattern is proven and the second instance
-is justified rather than speculative.
+Sibling of the **H1** hook registry: H1 declares what `at_*` / `get_*`
+/ `return_*` methods exist; this would declare what `appearance_template`
+slots exist. Same family of solution (decorator + startup lint + doc
+generation), different metadata: H1 covers hook *registration*, this
+covers the template-slot *config* coupling. Left as an idea, not
+scheduled.
 
-Cross-refs: H1 entry in
-[`engine-api-architecture.md`](.agents/docs/engine-api-architecture.md);
+Cross-refs: H1 in
+[`decisions.md`](.agents/docs/engine-architecture/decisions.md);
 appearance-mixin §2.10 and §3.3 in
 [`Typeclass-Hooks.md`](docs/source/Components/Typeclass-Hooks.md).
-
----
-
-## Contrib extraction methodology
-
-Operational lessons from `+underspire.16`. Applies to future similar
-moves (further contribs, large-system migrations).
-
-- **Run the contrib's own tests with the moved code before deciding
-  what travels.** Sample/example files inside a contrib often look
-  optional but are load-bearing for the test suite. The `+underspire.16`
-  release notes called `buffs/samplebuffs.py` "probably don't need it";
-  downstream needed it because `StatBuff` from samplebuffs is used by
-  ~half the buffs tests. Travel rule: if the test suite imports from a
-  file, the file is load-bearing.
-- **Partial-extraction friendliness depends on test colocation.**
-  `rpsystem` shipped a single `tests.py` containing tests for
-  `rpsystem.py` + `rplanguage.py` together. The partial extraction had
-  to lift `TestLanguage` out by class name from inside the combined
-  file. Cleaner shape going forward: each submodule has its own test
-  file. Worth keeping in mind when shaping new packages or reshuffling
-  existing ones.
-- **Patching style matters across moves.** See
-  [`testing.md`](.agents/docs/testing.md) "Mocking guidance." Path-based
-  patches break on relocation; module-object patches follow the code.
