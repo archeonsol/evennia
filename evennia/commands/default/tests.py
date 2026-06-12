@@ -369,6 +369,24 @@ class TestSystem(BaseEvenniaCommandTest):
     def test_server_load(self):
         self.call(system.CmdServerLoad(), "", "Server CPU and Memory load:")
 
+    def test_systems(self):
+        from evennia.utils import systems as systems_mod
+
+        systems_mod._clear_registry()
+        self.call(system.CmdSystems(), "", "No systems are registered with the scheduler.")
+        systems_mod.register(
+            name="test-system",
+            cadence=systems_mod.every(60),
+            scope=systems_mod.global_scope(),
+            run=lambda ctx: None,
+        )
+        try:
+            output = self.call(system.CmdSystems(), "")
+            self.assertIn("test-system", output)
+            self.assertIn("every 60s", output)
+        finally:
+            systems_mod._clear_registry()
+
 
 _TASK_HANDLER = None
 

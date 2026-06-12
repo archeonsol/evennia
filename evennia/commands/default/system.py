@@ -43,6 +43,7 @@ __all__ = (
     "CmdAbout",
     "CmdTime",
     "CmdServerLoad",
+    "CmdSystems",
     "CmdTasks",
 )
 
@@ -936,6 +937,49 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
 
         # return to caller
         self.msg(string)
+
+
+class CmdSystems(COMMAND_DEFAULT_CLASS):
+    """
+    View registered scheduler systems.
+
+    Usage:
+      systems
+
+    Lists every system registered with the system scheduler
+    (evennia.utils.systems): its cadence, scope, last fire time, fire
+    count and whether a fire is currently in flight. Systems are
+    declared in code (SYSTEM_MODULES); this is inspection only.
+
+    """
+
+    key = "@systems"
+    help_category = "System"
+    locks = "cmd:perm(systems) or perm(Builder)"
+
+    def func(self):
+        from evennia.utils import systems
+        from evennia.utils.utils import datetime_format
+
+        registered = systems.all_systems()
+        if not registered:
+            self.msg("No systems are registered with the scheduler.")
+            return
+        table = self.styled_table("system", "cadence", "scope", "last fired", "fires", "in flight")
+        for system in registered:
+            if system.last_run:
+                last_fired = datetime_format(datetime.datetime.fromtimestamp(system.last_run))
+            else:
+                last_fired = "-"
+            table.add_row(
+                system.name,
+                system.cadence.describe(),
+                system.scope.describe(),
+                last_fired,
+                system.fire_count,
+                "*" if system.in_flight else "-",
+            )
+        self.msg("|wRegistered systems|n:\n" + str(table))
 
 
 class CmdTasks(COMMAND_DEFAULT_CLASS):

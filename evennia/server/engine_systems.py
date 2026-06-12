@@ -20,13 +20,21 @@ threshold warning; a final drain also runs in the server shutdown path.
 
 from django.conf import settings
 
-from evennia.typeclasses.attribute_metrics import (maybe_log_flush_metrics,
-                                                   maybe_warn_pending_dirty)
+from evennia.typeclasses.attribute_metrics import maybe_log_flush_metrics, maybe_warn_pending_dirty
 from evennia.typeclasses.attributes import flush_all_dirty as _flush_all_dirty
 from evennia.utils import logger, systems
 
+# Plain module-global ints are safe ONLY because the scheduler's overlap
+# guard serializes flush fires on the reactor (the body is synchronous).
+# Not thread-safe: if the body ever moves off-reactor or goes async, these
+# counters need a rethink.
 _consecutive_flush_failures = 0
 _flush_fire_count = 0
+
+#: Escalate at this many consecutive failures, then repeat the CRITICAL
+#: line only every Nth failure so a long outage doesn't flood the log.
+_CRITICAL_THRESHOLD = 3
+_CRITICAL_REPEAT_EVERY = 10
 
 
 def _run_flush(ctx):
@@ -36,6 +44,8 @@ def _run_flush(ctx):
     Failures are handled here (not left to driver isolation) so consecutive
     failures can escalate: three in a row means the write-behind cache is not
     persisting and phantom data may be served from the L2 cache until TTL.
+    Past the threshold the CRITICAL line repeats only every
+    `_CRITICAL_REPEAT_EVERY` failures to avoid flooding.
 
     Args:
         ctx (SystemContext): The per-fire context.
@@ -52,9 +62,10 @@ def _run_flush(ctx):
         _consecutive_flush_failures += 1
         logger.log_trace("flush-attributes system")
         logger.log_err(
-            f"flush-attributes failed (consecutive failure " f"#{_consecutive_flush_failures})"
+            f"flush-attributes failed (consecutive failure #{_consecutive_flush_failures})"
         )
-        if _consecutive_flush_failures >= 3:
+        failures_past_threshold = _consecutive_flush_failures - _CRITICAL_THRESHOLD
+        if failures_past_threshold >= 0 and (failures_past_threshold % _CRITICAL_REPEAT_EVERY == 0):
             logger.log_err(
                 f"CRITICAL: attribute flush has failed "
                 f"{_consecutive_flush_failures} consecutive fires; the "

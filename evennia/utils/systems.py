@@ -115,7 +115,10 @@ Worked example (game-side module listed in `SYSTEM_MODULES`)::
             char.tick_hunger(at=ctx.now)
 
     def _faction_payday(ctx):
-        ...  # advances regardless of who is online; ctx.dt spans downtime
+        # advances regardless of who is online; ctx.dt spans downtime.
+        # still best-effort: a body error forfeits the boundary (no retry),
+        # so a payday that must NEVER be missed belongs on the job queue.
+        ...
 
     def register_systems():
         systems.register(
@@ -147,6 +150,11 @@ from evennia.utils import logger
 #: driver tick; the driver ticks at 1 Hz") — a constant, not a setting,
 #: because changing it silently changes every `every_tick` system's meaning.
 TICK_INTERVAL = 1.0
+
+#: Consecutive due-while-in-flight skips after which the overlap warning
+#: escalates to an error: a wedged system (hung worker, never-firing
+#: Deferred) must not hide as an endless trickle of warnings.
+_SKIP_ESCALATION_THRESHOLD = 3
 
 _EVERY = "every"
 _CALENDAR = "calendar"
@@ -270,6 +278,11 @@ def calendar(daily=None, weekly=None, monthly=None):
 
     Last-run is durable: a boundary that passed while the server was down
     fires once on the next driver tick (catch-up-by-one, never a replay).
+    The fire is still best-effort: last-run is consumed at fire time, so a
+    body that errors forfeits that boundary with no retry. Work that must
+    happen eventually belongs on the job queue, not here. The durable
+    last-run is keyed by system name — renaming a calendar system primes
+    fresh (and orphans the old `system_lastrun_<name>` ServerConfig row).
 
     Args:
         daily (str, optional): "HH:MM" UTC.
@@ -432,7 +445,9 @@ def all_entities(component):
 
     The id query runs off-reactor; the body receives plain pks as
     `ctx.entity_ids`. `component` is the future ECS seam — today a typeclass
-    path matched exactly against `db_typeclass_path`.
+    path matched exactly against `db_typeclass_path`: subclasses and
+    alternate import paths are NOT matched. List every concrete path the
+    sweep should cover.
 
     Args:
         component (str or list): Typeclass path or list of paths.
@@ -487,6 +502,8 @@ class System:
         last_run (float or None): Epoch of the last fire decision.
         fire_count (int): Fires since registration (this process).
         in_flight (bool): Whether a fire is currently executing.
+        skip_count (int): Consecutive fires skipped because the previous one
+            was still in flight; resets on a successful fire decision.
 
     """
 
@@ -506,6 +523,7 @@ class System:
         self.last_run = None
         self.fire_count = 0
         self.in_flight = False
+        self.skip_count = 0
         self._calendar_loaded = False
 
     def __repr__(self):
@@ -648,7 +666,9 @@ def _select_online_puppets():
     seen = set()
     puppets = []
     for session in evennia.SESSION_HANDLER.values():
-        puppet = getattr(session, "puppet", None)
+        # the focus-stack model replaced the old `session.puppet` attribute;
+        # get_puppet() is the canonical accessor
+        puppet = session.get_puppet()
         if puppet is None:
             continue
         pk = getattr(puppet, "id", None)
@@ -736,13 +756,16 @@ class SystemDriver:
             try:
                 self._maybe_fire(system, now)
             except Exception:
-                # cadence/scheduling bug, not a body error (bodies are
-                # isolated via the Deferred errback below)
+                # scheduling-side error (cadence bug or durable-store
+                # failure; the latter retries next tick) — body errors are
+                # isolated via the fire Deferred's errback instead
                 logger.log_trace(f"System scheduler: error scheduling '{system.name}'")
 
-    def _is_due(self, system, now):
+    def _check_due(self, system, now):
         """
-        Decide whether `system` should fire at `now`, priming fresh state.
+        Decide whether `system` should fire at `now`. Not a pure predicate:
+        priming a fresh system mutates `last_run`, and priming a brand-new
+        calendar system also writes its durable last-run (ServerConfig).
 
         Args:
             system (System): The system to check.
@@ -783,20 +806,36 @@ class SystemDriver:
             now (float): Current epoch seconds.
 
         """
-        if not self._is_due(system, now):
+        if not self._check_due(system, now):
             return
         if system.in_flight:
-            logger.log_warn(
+            system.skip_count += 1
+            message = (
                 f"System '{system.name}' is due but its previous fire has not "
-                "completed; skipping this fire (runs never overlap). If this "
-                "recurs, the body is too slow for its cadence."
+                f"completed; skipping this fire (runs never overlap; "
+                f"consecutive skips: {system.skip_count}). If this recurs, "
+                "the body is too slow for its cadence or its Deferred never "
+                "fired."
             )
+            if system.skip_count >= _SKIP_ESCALATION_THRESHOLD:
+                # a wedged system (hung worker, never-firing Deferred) must
+                # not hide as an endless trickle of warnings
+                logger.log_err(message)
+            else:
+                logger.log_warn(message)
             return
+        system.skip_count = 0
+        # last_run is None here only on an every_tick first fire ( _check_due
+        # primes it for every/calendar before they can come due)
         dt = now - system.last_run if system.last_run is not None else TICK_INTERVAL
-        system.last_run = now
-        system.fire_count += 1
+        # persist before consuming state: if the durable store fails, the
+        # exception reaches tick()'s handler with last_run/fire_count
+        # untouched, so the boundary is retried next tick instead of being
+        # recorded as a fire that never ran
         if system.cadence.kind == _CALENDAR:
             _store_last_run(system.name, now)
+        system.last_run = now
+        system.fire_count += 1
         system.in_flight = True
 
         def _on_error(failure):
@@ -810,7 +849,10 @@ class SystemDriver:
             system.in_flight = False
             return result
 
-        d = self._invoke(system, now, dt)
+        # maybeDeferred so a synchronous raise anywhere in _invoke (entity
+        # selection included) routes through the errback and clears in_flight
+        # instead of wedging the system permanently
+        d = maybeDeferred(self._invoke, system, now, dt)
         d.addErrback(_on_error)
         d.addBoth(_clear_in_flight)
 

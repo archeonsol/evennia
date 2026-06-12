@@ -137,6 +137,12 @@ class TestOccurrenceMath(_SchedulerTestMixin, BaseEvenniaTestCase):
         occ = systems._most_recent_occurrence(cad, _epoch(2026, 3, 1, 0, 0))
         self.assertEqual(occ, _epoch(2026, 2, 28, 6, 0))
 
+    def test_monthly_wraps_year_boundary(self):
+        # early January before the boundary -> December of the previous year
+        cad = calendar(monthly=(15, "00:00"))
+        occ = systems._most_recent_occurrence(cad, _epoch(2026, 1, 5))
+        self.assertEqual(occ, _epoch(2025, 12, 15))
+
 
 class TestEveryCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_first_tick_primes_without_firing(self):
@@ -178,6 +184,21 @@ class TestEveryCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.driver.tick()
         self.assertEqual(len(self.fires), 2)
         self.assertEqual(self.fires[1].dt, 12.0)
+
+    def test_late_ticks_reanchor_to_actual_fire_time(self):
+        # cadence is fire-to-fire: a late fire re-anchors the next interval
+        register(name="s", cadence=every(5), scope=global_scope(), run=self._recording_run)
+        self.clock.set(0.0)
+        self.driver.tick()  # prime at 0
+        self.clock.set(7.0)
+        self.driver.tick()  # late fire, dt=7
+        self.clock.set(11.0)
+        self.driver.tick()  # only 4s since the actual fire -> no fire
+        self.assertEqual(len(self.fires), 1)
+        self.clock.set(12.0)
+        self.driver.tick()  # 5s since 7 -> fire
+        self.assertEqual(len(self.fires), 2)
+        self.assertEqual(self.fires[1].dt, 5.0)
 
 
 class TestEveryTickCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
@@ -261,6 +282,62 @@ class TestCalendarCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.driver.tick()
         self.assertEqual(systems._load_last_run("cal"), fire_time)
 
+    def test_weekly_primes_then_fires_once_on_crossing(self):
+        # weekday 0 = Monday; 2026-03-09 is a Monday.
+        register(
+            name="cal",
+            cadence=calendar(weekly=(0, "08:00")),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
+        self.clock.set(_epoch(2026, 3, 8, 12, 0))  # Sunday: prime
+        self.driver.tick()
+        self.assertEqual(len(self.fires), 0)
+        self.clock.set(_epoch(2026, 3, 9, 8, 0, 30))  # Monday boundary crossed
+        self.driver.tick()
+        self.assertEqual(len(self.fires), 1)
+        self.clock.set(_epoch(2026, 3, 10, 8, 0, 30))  # Tuesday: same boundary
+        self.driver.tick()
+        self.assertEqual(len(self.fires), 1)
+
+    def test_monthly_primes_then_fires_once_on_crossing(self):
+        register(
+            name="cal",
+            cadence=calendar(monthly=(1, "00:00")),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
+        self.clock.set(_epoch(2026, 3, 31, 23, 0))  # prime late in March
+        self.driver.tick()
+        self.assertEqual(len(self.fires), 0)
+        self.clock.set(_epoch(2026, 4, 1, 0, 0, 30))  # April boundary crossed
+        self.driver.tick()
+        self.assertEqual(len(self.fires), 1)
+        self.clock.set(_epoch(2026, 4, 15, 0, 0))  # mid-month: no double fire
+        self.driver.tick()
+        self.assertEqual(len(self.fires), 1)
+
+    def test_store_failure_leaves_state_unconsumed_and_retries(self):
+        register(
+            name="cal",
+            cadence=calendar(daily="12:00"),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
+        self.clock.set(_epoch(2026, 3, 10, 11, 0))
+        self.driver.tick()  # prime (store succeeds)
+        system = get_system("cal")
+        self.clock.set(_epoch(2026, 3, 10, 12, 0, 30))
+        with patch.object(systems, "_store_last_run", side_effect=RuntimeError("db down")):
+            self.driver.tick()  # store fails before state advances
+        self.assertEqual(len(self.fires), 0)
+        self.assertEqual(system.fire_count, 0)
+        self.assertEqual(system.last_run, _epoch(2026, 3, 10, 11, 0))
+        self.clock.set(_epoch(2026, 3, 10, 12, 1, 30))
+        self.driver.tick()  # store works again -> boundary retried, fires
+        self.assertEqual(len(self.fires), 1)
+        self.assertEqual(system.fire_count, 1)
+
 
 class TestErrorIsolation(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_failing_system_is_isolated_and_logged(self):
@@ -315,6 +392,80 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.assertTrue(mock_logger.log_err.called)
         self.assertFalse(get_system("slow").in_flight)
 
+    def test_skip_escalates_to_error_after_threshold(self):
+        pending = Deferred()
+        register(name="slow", cadence=every_tick(), scope=global_scope(), run=lambda ctx: pending)
+        self.driver.tick()  # fire; body never completes
+        with patch.object(systems, "logger") as mock_logger:
+            for _ in range(systems._SKIP_ESCALATION_THRESHOLD):
+                self.clock.advance(1.0)
+                self.driver.tick()
+        # the first skips warn; the threshold-th skip escalates to error
+        self.assertEqual(mock_logger.log_warn.call_count, systems._SKIP_ESCALATION_THRESHOLD - 1)
+        self.assertEqual(mock_logger.log_err.call_count, 1)
+        self.assertIn("consecutive skips", str(mock_logger.log_err.call_args))
+
+    def test_all_entities_in_flight_spans_pending_id_query(self):
+        pending_ids = Deferred()
+        register(
+            name="sweep",
+            cadence=every(1),
+            scope=all_entities(component="foo.Bar"),
+            run=self._recording_run,
+        )
+        with patch.object(systems, "_entity_ids_deferred", return_value=pending_ids):
+            self.clock.set(0.0)
+            self.driver.tick()  # prime
+            self.clock.set(1.0)
+            self.driver.tick()  # fire: id query pending, body not yet run
+            self.assertTrue(get_system("sweep").in_flight)
+            self.assertEqual(len(self.fires), 0)
+            with patch.object(systems, "logger") as mock_logger:
+                self.clock.set(2.0)
+                self.driver.tick()  # due again while id query pending -> skip
+            self.assertTrue(mock_logger.log_warn.called)
+            self.assertEqual(len(self.fires), 0)
+            pending_ids.callback([1, 2])  # query completes -> body runs
+        self.assertEqual(len(self.fires), 1)
+        self.assertEqual(self.fires[0].entity_ids, [1, 2])
+        self.assertFalse(get_system("sweep").in_flight)
+
+    def test_all_entities_id_query_failure_clears_in_flight(self):
+        pending_ids = Deferred()
+        register(
+            name="sweep",
+            cadence=every(1),
+            scope=all_entities(component="foo.Bar"),
+            run=self._recording_run,
+        )
+        with patch.object(systems, "_entity_ids_deferred", return_value=pending_ids):
+            self.clock.set(0.0)
+            self.driver.tick()  # prime
+            self.clock.set(1.0)
+            self.driver.tick()  # fire
+            with patch.object(systems, "logger") as mock_logger:
+                pending_ids.errback(RuntimeError("query died"))
+        self.assertTrue(mock_logger.log_err.called)
+        self.assertEqual(len(self.fires), 0)
+        self.assertFalse(get_system("sweep").in_flight)
+
+    def test_sync_raise_in_entity_selection_clears_in_flight(self):
+        register(name="p", cadence=every_tick(), scope=online_puppets(), run=self._recording_run)
+        with (
+            patch.object(
+                systems, "_select_online_puppets", side_effect=RuntimeError("selector died")
+            ),
+            patch.object(systems, "logger") as mock_logger,
+        ):
+            self.driver.tick()
+        self.assertTrue(mock_logger.log_err.called)
+        self.assertFalse(get_system("p").in_flight)
+        # the system recovers once the selector works again
+        with patch.object(systems, "_select_online_puppets", return_value=[]):
+            self.clock.advance(1.0)
+            self.driver.tick()
+        self.assertEqual(len(self.fires), 1)
+
 
 class TestRegistry(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_duplicate_name_raises(self):
@@ -354,6 +505,39 @@ class TestScopeSelection(_SchedulerTestMixin, BaseEvenniaTestCase):
         ctx = self.fires[0]
         self.assertIsNone(ctx.entities)
         self.assertIsNone(ctx.entity_ids)
+
+    def test_select_online_puppets_real_selector(self):
+        # the real selector must use the focus-stack accessor get_puppet()
+        # (this fork removed the legacy session.puppet attribute) and dedup
+        # multi-session puppets by pk
+        import evennia
+
+        class _FakePuppet:
+            def __init__(self, pk):
+                self.id = pk
+
+        class _FakeSession:
+            def __init__(self, puppet):
+                self._puppet = puppet
+
+            def get_puppet(self):
+                return self._puppet
+
+        puppet_a, puppet_b = _FakePuppet(1), _FakePuppet(2)
+        sessions = [
+            _FakeSession(puppet_a),
+            _FakeSession(None),  # OOC session
+            _FakeSession(puppet_b),
+            _FakeSession(_FakePuppet(1)),  # second session on puppet pk 1
+        ]
+
+        class _FakeHandler:
+            def values(self):
+                return sessions
+
+        with patch.object(evennia, "SESSION_HANDLER", _FakeHandler()):
+            result = systems._select_online_puppets()
+        self.assertEqual(result, [puppet_a, puppet_b])
 
     def test_online_puppets_uses_session_handler(self):
         puppets = ["puppet1", "puppet2"]
@@ -433,6 +617,18 @@ class TestDiscovery(_SchedulerTestMixin, BaseEvenniaTestCase):
         systems.load_system_modules()
         self.assertIsNotNone(get_system("flush-attributes"))
 
+    @override_settings(SYSTEM_MODULES=["fake_systems_raising"])
+    def test_engine_systems_register_before_a_broken_game_module(self):
+        # engine modules load first, so engine systems are registered even
+        # when a game module blows up mid-load (the load still fails loud)
+        def _register():
+            raise RuntimeError("game module is broken")
+
+        self._fake_module("fake_systems_raising", register_fn=_register)
+        with self.assertRaises(RuntimeError):
+            systems.load_system_modules()
+        self.assertIsNotNone(get_system("flush-attributes"))
+
 
 class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
     def _register_flush(self):
@@ -477,6 +673,49 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
                     system.run(ctx)  # must not raise
         logged = " ".join(str(c) for c in mock_logger.log_err.call_args_list)
         self.assertIn("CRITICAL", logged)
+
+    @override_settings(ATTRIBUTE_FLUSH_INTERVAL=30)
+    def test_consecutive_counter_resets_on_success(self):
+        engine_systems = self._register_flush()
+        system = get_system("flush-attributes")
+        ctx = systems.SystemContext(now=0.0, dt=30.0)
+        boom = RuntimeError("pg down")
+        # two failures, a success, then two failures: never 3 consecutive
+        sequence = [boom, boom, {"backends": 0, "total": 0}, boom, boom]
+        with patch.object(engine_systems, "_flush_all_dirty", side_effect=sequence):
+            with patch.object(engine_systems, "logger") as mock_logger:
+                for _ in sequence:
+                    system.run(ctx)
+        logged = " ".join(str(c) for c in mock_logger.log_err.call_args_list)
+        self.assertNotIn("CRITICAL", logged)
+
+    @override_settings(ATTRIBUTE_FLUSH_INTERVAL=30)
+    def test_critical_is_rate_limited_past_threshold(self):
+        engine_systems = self._register_flush()
+        system = get_system("flush-attributes")
+        ctx = systems.SystemContext(now=0.0, dt=30.0)
+        fires = engine_systems._CRITICAL_THRESHOLD + engine_systems._CRITICAL_REPEAT_EVERY
+        with patch.object(engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")):
+            with patch.object(engine_systems, "logger") as mock_logger:
+                for _ in range(fires):
+                    system.run(ctx)
+        criticals = [c for c in mock_logger.log_err.call_args_list if "CRITICAL" in str(c)]
+        # once at the threshold, once again after the repeat interval
+        self.assertEqual(len(criticals), 2)
+
+    @override_settings(ATTRIBUTE_FLUSH_INTERVAL=30)
+    def test_driver_isolates_flush_failure_from_siblings(self):
+        engine_systems = self._register_flush()
+        register(name="sibling", cadence=every(30), scope=global_scope(), run=self._recording_run)
+        with (
+            patch.object(engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")),
+            patch.object(engine_systems, "logger"),
+        ):
+            self.clock.set(0.0)
+            self.driver.tick()  # prime both
+            self.clock.set(30.0)
+            self.driver.tick()  # flush fails; sibling must still fire
+        self.assertEqual(len(self.fires), 1)
 
 
 class TestDriverLifecycle(_SchedulerTestMixin, BaseEvenniaTestCase):

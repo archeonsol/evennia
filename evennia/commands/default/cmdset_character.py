@@ -52,6 +52,7 @@ class CharacterCmdSet(CmdSet):
         self.add(system.CmdTime())
         self.add(system.CmdServerLoad())
         # self.add(system.CmdPs())
+        self.add(system.CmdSystems())
         self.add(system.CmdTasks())
 
         # Admin commands
