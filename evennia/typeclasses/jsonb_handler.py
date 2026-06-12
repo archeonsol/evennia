@@ -4,8 +4,9 @@ JSONB attribute backend and public force-flush API.
 Stores all of an object's attributes in a single ``db_attrs JSONField`` on
 the object's own model row.  Reads serve an in-process L1 dict loaded once
 per cache lifetime; writes update the L1 dict and register the backend in
-``_DIRTY_BACKENDS`` so ``flush_all_dirty()`` (called each maintenance tick)
-persists the document in one ``UPDATE`` per dirty object.
+``_DIRTY_BACKENDS`` so ``flush_all_dirty()`` (run by the flush-attributes
+system on the system scheduler, plus once at shutdown) persists the document
+in one ``UPDATE`` per dirty object.
 
 Document layout
 ---------------
