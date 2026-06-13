@@ -86,19 +86,6 @@ def call_at_first_save(sender, instance, created, **kwargs):
         instance.at_first_save()
 
 
-def remove_attributes_on_delete(sender, instance, **kwargs):
-    """
-    Wipe object's Attributes when it's deleted.
-
-    The db_attributes M2M was removed in Phase 1 of the JSONB migration;
-    attributes are now stored in db_attrs (JSONB) and deleted automatically
-    with the row.  This handler is a no-op until Phase 2 removes it entirely.
-    """
-    m2m = getattr(instance, "db_attributes", None)
-    if m2m is not None:
-        m2m.all().delete()
-
-
 # ------------------------------------------------------------
 #
 # Typed Objects
@@ -180,7 +167,6 @@ class TypeclassBase(SharedMemoryModelBase):
 
         # attach signals
         signals.post_save.connect(call_at_first_save, sender=new_class)
-        signals.pre_delete.connect(remove_attributes_on_delete, sender=new_class)
         try:
             from evennia.typeclasses.managers import TypeclassManager
 
