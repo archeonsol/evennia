@@ -83,9 +83,6 @@ These are real but belong elsewhere; listed so they aren't lost:
 - **Predicate actor-view inconsistency / I1 character seam** — `Holds`/`IsSelf`/
   `IsAlive` (`predicate.py:277,311,344`) read `actor.character` while siblings
   use `actor.effective or actor.character`. → [`I1-actor-abstraction.md`](I1-actor-abstraction.md).
-- **Four coexisting schedulers** (global_tick / Script.interval / ondemand /
-  defer) + **Script start-delay dual field** (`db_start_delay` bool vs
-  `db_start_delay_secs`) → [`AS2-system-scheduler.md`](AS2-system-scheduler.md).
 - **help.py half-live formatters** and the **`commands/default/` tree** →
   [`ALPHA-cmdset-retirement-audit.md`](ALPHA-cmdset-retirement-audit.md).
 - **`get_all_attributes` / `.all()` N+1 rehydrate** (uncertain, INEFFICIENT) →
