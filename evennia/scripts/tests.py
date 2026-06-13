@@ -156,6 +156,23 @@ class TestScriptOptionalDefault(TestCase):
         self.assertTrue(issubclass(cls, DefaultScript))
 
 
+class TestScriptOptionalFixture(EvenniaTest):
+    """
+    A non-importable script_typeclass must degrade the test-base script
+    fixture to None rather than erroring every test in setUp.
+    """
+
+    script_typeclass = "evennia.nonexistent_module_xyz.Bogus"
+
+    def test_bogus_path_degrades_gracefully(self):
+        # the script fixture is absent, not silently substituted...
+        self.assertIsNone(self.script)
+        # ...and every other fixture still built.
+        self.assertIsNotNone(self.char1)
+        self.assertIsNotNone(self.room1)
+        self.assertIsNotNone(self.account)
+
+
 class TestExtendedLoopingCall(TestCase):
     """
     Test the ExtendedLoopingCall class.

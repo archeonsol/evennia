@@ -49,7 +49,7 @@ from evennia.server.serversession import ServerSession
 from evennia.typeclasses.attributes import discard_dirty_backends
 from evennia.utils import ansi, create
 from evennia.utils.idmapper.models import flush_cache
-from evennia.utils.utils import all_from_module, inherits_from, to_str
+from evennia.utils.utils import all_from_module, class_from_module, inherits_from, to_str
 
 _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
@@ -241,7 +241,20 @@ class EvenniaTestMixin:
         self.account2.db._last_puppet = self.char2
 
     def create_script(self):
-        self.script = create.create_script(self.script_typeclass, key="Script")
+        # A game may legitimately define zero script typeclasses, so a
+        # non-importable configured path degrades to self.script = None rather
+        # than erroring every test in setUp. A genuine misconfiguration (a
+        # typo'd path) surfaces as a missing fixture, never a silent
+        # substitution. Only an import failure of a string path is tolerated;
+        # any other error from create_script propagates.
+        script_typeclass = self.script_typeclass
+        if isinstance(script_typeclass, str):
+            try:
+                class_from_module(script_typeclass)
+            except ImportError:
+                self.script = None
+                return
+        self.script = create.create_script(script_typeclass, key="Script")
 
     def setup_session(self):
         dummysession = ServerSession()
