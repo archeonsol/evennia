@@ -21,7 +21,7 @@ from .movement import (
     exit_resolver,
     register_exit_resolver,
 )
-from .nomatch import DefaultNoMatchRules, nomatch_provider, nomatch_providers
+from .nomatch import DefaultNoMatchRules, nomatch_providers
 from .objects import (
     CharacterObjectRules,
     ContainerPutRules,
@@ -39,7 +39,6 @@ from .unloggedin import Connect, Create, Encoding, Info, Screenreader, SessionLo
 __all__ = [
     "DefaultNoMatchRules",
     "DefaultEmoteNoMatchRules",
-    "nomatch_provider",
     "nomatch_providers",
     "Pose",
     "Emote",

@@ -10,7 +10,6 @@ from evennia.actions.permission import (
     DefaultCapability,
     Scope,
     capability_for_name,
-    cumulative_rank_mask,
     get_capability_enum,
     rank_order,
     resolve_capabilities,
@@ -109,15 +108,6 @@ class TestCapabilityForName(unittest.TestCase):
         self.assertIsNone(capability_for_name("Janitor"))
         self.assertIsNone(capability_for_name(""))
         self.assertIsNone(capability_for_name(None))
-
-
-class TestCumulativeRankMask(unittest.TestCase):
-    def test_cumulative(self):
-        mask = cumulative_rank_mask(C.HELPER)
-        self.assertEqual(mask, C.GUEST | C.PLAYER | C.HELPER)
-
-    def test_non_rank_returns_empty(self):
-        self.assertEqual(cumulative_rank_mask(C.MODERATE), C(0))
 
 
 class TestResolveNoAccount(unittest.TestCase):

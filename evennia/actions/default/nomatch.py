@@ -21,7 +21,6 @@ from .emote_nomatch import DefaultEmoteNoMatchRules
 __all__ = [
     "DefaultNoMatchRules",
     "DefaultEmoteNoMatchRules",
-    "nomatch_provider",
     "nomatch_providers",
 ]
 
@@ -47,5 +46,3 @@ class DefaultNoMatchRules:
 
 #: Providers prepended for ``NoMatchAction`` dispatches (emote before baseline).
 nomatch_providers = (DefaultEmoteNoMatchRules(), DefaultNoMatchRules())
-#: Back-compat: same tuple (dispatch spreads all providers).
-nomatch_provider = nomatch_providers

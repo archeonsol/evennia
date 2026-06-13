@@ -72,7 +72,6 @@ __all__ = [
     "rank_order",
     "resolve_capabilities",
     "capability_for_name",
-    "cumulative_rank_mask",
 ]
 
 
@@ -234,30 +233,6 @@ def capability_for_name(name, enum=None):
         if singular in aliases:
             return aliases[singular]
     return None
-
-
-def cumulative_rank_mask(rank, enum=None):
-    """Return the mask for ``rank`` plus every rank *below* it.
-
-    A Builder grant yields ``GUEST|PLAYER|HELPER|BUILDER`` so that
-    ``Capability.PLAYER in mask`` is True without any runtime hierarchy walk at the
-    check site (the walk happens here, fresh, when the mask is resolved).
-
-    Args:
-        rank (Capability): A single rank bit from the enum's ``__rank_order__``.
-        enum (type): The capability enum; defaults to the active enum.
-
-    Returns:
-        Capability: The cumulative mask, or the empty flag if ``rank`` is not a
-        recognized rank bit.
-    """
-    enum = enum or get_capability_enum()
-    mask = enum(0)
-    for r in rank_order(enum):
-        mask |= r
-        if r == rank:
-            return mask
-    return enum(0)
 
 
 # ---------------------------------------------------------------------------
