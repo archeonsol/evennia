@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-__all__ = ["MuxArgs", "mux_parse"]
+from .action import Action
+
+__all__ = ["ArgAction", "MuxArgs", "mux_parse"]
 
 
 @dataclass
@@ -43,6 +45,65 @@ class MuxArgs:
     rhslist: list = field(default_factory=list)
     lhs_objs: list = field(default_factory=list)
     rhs_objs: list = field(default_factory=list)
+
+
+@dataclass
+class ArgAction(Action):
+    """Default action shape for mux/objmanip-style verbs: free-text args.
+
+    ``parse`` runs :func:`mux_parse` so the action carries the
+    ``lhs``/``rhs``/objdef structure former ``MuxCommand``/``ObjManipCommand``
+    classes derived in their own ``parse``, plus the extracted switches and the
+    specific verb/alias that matched. Rules read these straight off the action
+    instead of re-deriving them from raw text. Subclasses override
+    :attr:`rhs_split` (a string or an ordered iterable of candidate delimiters,
+    matching ``Command.rhs_split``) to change the lhs/rhs delimiter.
+
+    ``parse`` never raises: malformed args still build an action, and the
+    responding rule messages usage. A gated verb whose parse raised would leak
+    its existence through the parse-error text before the ``requires`` gate
+    ever ran.
+    """
+
+    #: lhs/rhs delimiter(s), as for ``Command.rhs_split``. Not a dataclass field.
+    rhs_split = "="
+
+    args: str = ""
+    switches: tuple = ()
+    verb: str = ""
+    lhs: str = ""
+    rhs: str | None = None
+    lhslist: tuple = ()
+    rhslist: tuple = ()
+    lhs_objs: tuple = ()
+    rhs_objs: tuple = ()
+
+    @classmethod
+    def parse(cls, raw_args, actor, context=None, switches=(), verb=None):
+        """Build the action from free-text args via :func:`mux_parse`.
+
+        Args:
+            raw_args (str): text after the verb and switches.
+            actor: the acting entity (unused; mux args are pure text).
+            context: the dispatch context (unused).
+            switches (iterable): switch tokens from ``verb/sw1/sw2``.
+            verb (str | None): the verb/alias that matched.
+
+        Returns:
+            ArgAction: the populated action.
+        """
+        parsed = mux_parse(raw_args, rhs_split=cls.rhs_split)
+        return cls(
+            args=parsed.args,
+            switches=tuple(switches or ()),
+            verb=(verb or ""),
+            lhs=parsed.lhs,
+            rhs=parsed.rhs,
+            lhslist=tuple(parsed.lhslist),
+            rhslist=tuple(parsed.rhslist),
+            lhs_objs=tuple(parsed.lhs_objs),
+            rhs_objs=tuple(parsed.rhs_objs),
+        )
 
 
 def mux_parse(raw_args: str, rhs_split: str | tuple | list = "=") -> MuxArgs:

@@ -237,11 +237,7 @@ class HasCapability(Predicate):
     cost = 1
 
     def _obj(self, actor):
-        return (
-            getattr(actor, "effective", None)
-            or getattr(actor, "character", None)
-            or actor
-        )
+        return getattr(actor, "effective", None) or getattr(actor, "character", None) or actor
 
     def __call__(self, action, actor) -> bool:
         return self.cap in resolve_capabilities(self._obj(actor), scope=self.scope)
@@ -615,8 +611,10 @@ def _atom(funcstring, access_type, full_lockstring):
         # pperm() is account-scoped; perm() uses the effective (quell-aware) view.
         scope = Scope.ACCOUNT if name == "pperm" else Scope.EFFECTIVE
         cap = capability_for_name(args[0]) if args else None
-        return _intern(HasCapability(cap, scope)) if cap is not None else LegacyLock(
-            full_lockstring, access_type
+        return (
+            _intern(HasCapability(cap, scope))
+            if cap is not None
+            else LegacyLock(full_lockstring, access_type)
         )
     if name in ("perm_above", "pperm_above"):
         scope = Scope.ACCOUNT if name == "pperm_above" else Scope.EFFECTIVE

@@ -15,7 +15,10 @@ from typing import Literal
 from evennia.actions.action import Action, GameObject
 from evennia.actions.exceptions import AmbiguousTarget, ParseError
 from evennia.actions.parser import ActionParser, NoMatchAction, ParseResult
+from evennia.actions.predicate import Builder
 from evennia.actions.registry import ActionRegistry
+from evennia.actions.result import CLAIM
+from evennia.actions.rule import rule
 
 
 # --- test action types ------------------------------------------------------
@@ -68,11 +71,20 @@ class _Obj:
 
 class FakeActor:
     """Minimal actor: ``search`` returns a known object, ``None`` for a miss, or
-    raises :class:`AmbiguousTarget` for a name flagged ambiguous."""
+    raises :class:`AmbiguousTarget` for a name flagged ambiguous. Carries the
+    context-building surface (``effective``/``state_objects``/…) so the
+    suggestion reachability filter can walk providers; the filter fails closed
+    on anything less actor-shaped."""
 
-    def __init__(self, objects=None, ambiguous=()):
+    def __init__(self, objects=None, ambiguous=(), effective=None):
         self._objects = objects or {}
         self._ambiguous = set(ambiguous)
+        self.effective = effective if effective is not None else self
+        self.character = None
+        self.account = None
+        self.location = None
+        self.state_objects = []
+        self.equipped_items = []
 
     def search(self, name):
         if name in self._ambiguous:
@@ -477,6 +489,95 @@ class TestPhraseVerbs(unittest.TestCase):
         res = _phrase_parser().parse("pun ball", _actor())
         self.assertIsInstance(res.action, Punch)
         self.assertLess(res.confidence, 1.0)
+
+
+# --- gated-verb suggestion filtering (fail-closed suggestions) ---------------
+@dataclass
+class Dig(Action):
+    """A staff verb whose only carry_out path is Builder-gated."""
+
+
+@dataclass
+class Wave(Action):
+    """An ungated verb whose carry_out the actor's character carries."""
+
+
+@dataclass
+class Ping(Action):
+    """A registered verb no provider carries any rule for."""
+
+
+class _Perms:
+    def __init__(self, perms):
+        self._perms = list(perms)
+
+    def all(self):
+        return list(self._perms)
+
+
+class _ProviderChar:
+    """Character-like provider: one Builder-gated and one ungated carry_out."""
+
+    def __init__(self, perms=("Player",)):
+        self.permissions = _Perms(perms)
+        self.account = None
+        self.location = None
+
+    @rule(Dig, phase="carry_out", requires=Builder)
+    def carry_out_dig(self, action, actor):
+        return CLAIM
+
+    @rule(Wave, phase="carry_out")
+    def carry_out_wave(self, action, actor):
+        return CLAIM
+
+
+def _gated_parser():
+    reg = ActionRegistry()
+    for cls, verbs in ((Dig, ("@dig",)), (Wave, ("@wig",)), (Ping, ("@pig",))):
+        cls.__action_verbs__ = verbs
+        reg.register(cls, verbs)
+    return ActionParser(registry=reg)
+
+
+def _gated_actor(perms=("Player",)):
+    char = _ProviderChar(perms=perms)
+    actor = FakeActor(effective=char)
+    actor.character = char
+    return actor
+
+
+class TestGatedSuggestions(unittest.TestCase):
+    """A typo must not surface a verb the actor has no non-gated path to —
+    mirroring the .91 fail-closed dispatch boundary: a fully gated verb is
+    indistinguishable from one that does not exist."""
+
+    def test_gated_verb_hidden_from_ungated_actor(self):
+        res = _gated_parser().parse("@dgi", _gated_actor(perms=("Player",)))
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertNotIn("@dig", res.action.suggestions)
+
+    def test_gated_verb_suggested_when_gate_passes(self):
+        res = _gated_parser().parse("@dgi", _gated_actor(perms=("Builder",)))
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertIn("@dig", res.action.suggestions)
+
+    def test_ungated_verb_still_suggested(self):
+        res = _gated_parser().parse("@wgi", _gated_actor(perms=("Player",)))
+        self.assertIn("@wig", res.action.suggestions)
+
+    def test_ruleless_verb_still_suggested(self):
+        # No provider carries a rule for Ping: inapplicable, not secret (the
+        # dispatch path messages it honestly, so suggestions may name it too).
+        res = _gated_parser().parse("@pgi", _gated_actor(perms=("Player",)))
+        self.assertIn("@pig", res.action.suggestions)
+
+    def test_unshaped_actor_fails_closed(self):
+        # An actor without the context surface gets no suggestions rather than
+        # a leak (production actors always carry it).
+        res = _gated_parser().parse("@dgi", _Obj("husk"))
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertEqual(res.action.suggestions, [])
 
 
 if __name__ == "__main__":

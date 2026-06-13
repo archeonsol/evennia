@@ -2,22 +2,22 @@
 
 import unittest
 
-from evennia.actions.result import (
-    RuleResult,
-    PASS,
-    SKIP,
-    CLAIM,
-    SILENT_FAIL,
-    FAIL,
-    REDIRECT,
-    PhaseTrace,
-    ActionTrace,
-)
 from evennia.actions.exceptions import (
     ActionError,
-    RuleConflict,
-    ParseError,
     AmbiguousTarget,
+    ParseError,
+    RuleConflict,
+)
+from evennia.actions.result import (
+    CLAIM,
+    FAIL,
+    PASS,
+    REDIRECT,
+    SILENT_FAIL,
+    SKIP,
+    ActionTrace,
+    PhaseTrace,
+    RuleResult,
 )
 
 

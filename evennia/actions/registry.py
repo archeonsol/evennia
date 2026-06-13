@@ -47,8 +47,8 @@ def levenshtein(a: str, b: str) -> int:
         for j, cb in enumerate(b, 1):
             cur.append(
                 min(
-                    prev[j] + 1,         # deletion
-                    cur[j - 1] + 1,      # insertion
+                    prev[j] + 1,  # deletion
+                    cur[j - 1] + 1,  # insertion
                     prev[j - 1] + (ca != cb),  # substitution
                 )
             )
@@ -272,9 +272,21 @@ class ActionRegistry:
             self._symbol_verbs = syms
         return self._symbol_verbs
 
-    def suggest_verbs(self, token: str, max_dist: int = 2, limit: int = 3):
+    def suggest_verbs(self, token: str, max_dist: int = 2, limit: int = 3, reachable=None):
         """Return up to ``limit`` registered verbs within edit distance
-        ``max_dist`` of ``token``, closest first (for "did you mean…" output)."""
+        ``max_dist`` of ``token``, closest first (for "did you mean…" output).
+
+        Args:
+            token (str): the mistyped verb.
+            max_dist (int): maximum edit distance to consider.
+            limit (int): maximum number of suggestions returned.
+            reachable (callable, optional): ``(verb, action_cls) -> bool``
+                filter applied *during* the closest-first walk, so a rejected
+                near candidate does not crowd an accepted farther one out of
+                the ``limit`` slice. Used to hide verbs the asking actor has
+                no non-gated path to (the suggestion side of the fail-closed
+                dispatch boundary).
+        """
         token = token.lower()
         scored = []
         for verb in self._by_verb:
@@ -284,7 +296,15 @@ class ActionRegistry:
             if dist <= max_dist:
                 scored.append((dist, verb))
         scored.sort(key=lambda pair: (pair[0], pair[1]))
-        return [verb for _, verb in scored[:limit]]
+        if reachable is None:
+            return [verb for _, verb in scored[:limit]]
+        out = []
+        for _, verb in scored:
+            if len(out) >= limit:
+                break
+            if reachable(verb, self._by_verb[verb]):
+                out.append(verb)
+        return out
 
 
 def _is_catch_all(action_type) -> bool:
@@ -305,8 +325,8 @@ class RuleRegistry:
             dict: the ``(action_type, phase) -> [RuleSpec]`` concrete index
             (also stored as ``cls.__evennia_rules__``).
         """
-        concrete = {}            # (action_type, phase) -> list[RuleSpec]
-        catchall = {}            # phase -> list[RuleSpec]
+        concrete = {}  # (action_type, phase) -> list[RuleSpec]
+        catchall = {}  # phase -> list[RuleSpec]
         seen_methods = set()
 
         for klass in cls.__mro__:

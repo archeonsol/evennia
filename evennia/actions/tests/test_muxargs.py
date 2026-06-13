@@ -7,8 +7,9 @@ registry.
 """
 
 import unittest
+from dataclasses import dataclass
 
-from evennia.actions.muxargs import mux_parse
+from evennia.actions.muxargs import ArgAction, mux_parse
 
 
 class TestMuxParse(unittest.TestCase):
@@ -105,6 +106,48 @@ class TestMuxParse(unittest.TestCase):
         result = mux_parse("a = b to c", rhs_split=("=", " to "))
         self.assertEqual(result.lhs, "a")
         self.assertEqual(result.rhs, "b to c")
+
+
+class TestArgAction(unittest.TestCase):
+    """The default action shape for mux/objmanip-style verbs: ``parse`` carries
+    the full :func:`mux_parse` breakdown plus switches and the matched verb."""
+
+    def test_parse_carries_mux_breakdown(self):
+        act = ArgAction.parse("box;crate:container = chest, sack", None)
+        self.assertEqual(act.args, "box;crate:container = chest, sack")
+        self.assertEqual(act.lhs, "box;crate:container")
+        self.assertEqual(act.rhs, "chest, sack")
+        self.assertEqual(act.rhslist, ("chest", "sack"))
+        self.assertEqual(
+            act.lhs_objs,
+            ({"name": "box", "option": "container", "aliases": ["crate"]},),
+        )
+
+    def test_parse_carries_switches_and_verb(self):
+        act = ArgAction.parse("x = y", None, switches=("del", "quiet"), verb="@perm")
+        self.assertEqual(act.switches, ("del", "quiet"))
+        self.assertEqual(act.verb, "@perm")
+
+    def test_no_rhs_is_none(self):
+        act = ArgAction.parse("sword", None)
+        self.assertEqual(act.lhs, "sword")
+        self.assertIsNone(act.rhs)
+        self.assertEqual(act.rhslist, ())
+
+    def test_empty_args(self):
+        act = ArgAction.parse("", None)
+        self.assertEqual(act.args, "")
+        self.assertEqual(act.lhs, "")
+        self.assertIsNone(act.rhs)
+
+    def test_subclass_rhs_split_override(self):
+        @dataclass
+        class _To(ArgAction):
+            rhs_split = ("=", " to ")
+
+        act = _To.parse("a to b", None)
+        self.assertEqual(act.lhs, "a")
+        self.assertEqual(act.rhs, "b")
 
 
 if __name__ == "__main__":

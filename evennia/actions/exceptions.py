@@ -42,6 +42,4 @@ class AmbiguousTarget(ActionError):
     def __init__(self, candidates, original_raw=""):
         self.candidates = list(candidates)
         self.original_raw = original_raw
-        super().__init__(
-            f"ambiguous target {original_raw!r}: {len(self.candidates)} candidates"
-        )
+        super().__init__(f"ambiguous target {original_raw!r}: {len(self.candidates)} candidates")

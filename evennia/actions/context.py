@@ -56,7 +56,9 @@ class ActionContextBuilder:
     caller (the parser knows them after it has resolved the action's fields).
     """
 
-    def build(self, actor, raw_string="", targets=(), trace_id="", callertype=None, action_type=None):
+    def build(
+        self, actor, raw_string="", targets=(), trace_id="", callertype=None, action_type=None
+    ):
         """Return the ordered :class:`ActionContext` for ``actor``.
 
         Args:
@@ -88,9 +90,7 @@ class ActionContextBuilder:
         account = getattr(actor, "account", None)
 
         handler = (
-            getattr(action_type, "__primary_handler__", None)
-            if action_type is not None
-            else None
+            getattr(action_type, "__primary_handler__", None) if action_type is not None else None
         )
 
         actor_providers = []
@@ -118,9 +118,7 @@ class ActionContextBuilder:
         if action_type is not None:
             from .registry import rule_registry
 
-            providers = [
-                p for p in providers if rule_registry.responds(type(p), action_type)
-            ]
+            providers = [p for p in providers if rule_registry.responds(type(p), action_type)]
         return ActionContext(
             providers=providers,
             actor=actor,

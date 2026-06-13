@@ -61,7 +61,7 @@ The headline payoff is introspectability — ``describe()`` / ``unmet()`` /
 proactive UI and the type checker as lock linter — not raw speed.
 """
 
-from enum import IntFlag, Enum, auto, verify, CONTINUOUS
+from enum import CONTINUOUS, Enum, IntFlag, auto, verify
 
 __all__ = [
     "Capability",
@@ -388,7 +388,9 @@ def resolve_capabilities(obj, scope=Scope.EFFECTIVE, enum=None):
         account = _account_of(obj)
         source = account if account is not None else obj
         highest, cross = _split_caps(_perms_all(source), enum)
-        highest = _apply_superuser_rank(highest, source if account is None else account, enum, False)
+        highest = _apply_superuser_rank(
+            highest, source if account is None else account, enum, False
+        )
         return _mask_from(highest, cross, enum)
 
     # EFFECTIVE — mirror perm()

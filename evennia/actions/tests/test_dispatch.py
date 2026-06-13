@@ -11,8 +11,12 @@ from dataclasses import dataclass
 
 from evennia.actions.action import Action, GameObject
 from evennia.actions.actor import Actor
-from evennia.actions.dispatch import (ProfilingMiddleware, clear_middlewares,
-                                      register_middleware, try_action_dispatch)
+from evennia.actions.dispatch import (
+    ProfilingMiddleware,
+    clear_middlewares,
+    register_middleware,
+    try_action_dispatch,
+)
 from evennia.actions.engine import RuleEngine
 from evennia.actions.exceptions import AmbiguousTarget
 from evennia.actions.menus import DisambiguationState
@@ -20,8 +24,7 @@ from evennia.actions.parser import ActionParser, NoMatchAction
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import CLAIM
 from evennia.actions.rule import rule
-from evennia.commands.signals import (on_command_error, on_command_post,
-                                      on_command_pre)
+from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
 
 ENGINE = RuleEngine()
 
@@ -343,8 +346,7 @@ class TestSignals(unittest.TestCase):
     def test_signals_carry_session_and_shared_trace_id(self):
         # The session passed to dispatch surfaces verbatim in signal kwargs, and
         # pre/post share the single trace_id read at the top of the dispatch.
-        from evennia.utils.command_trace import (begin_command_trace,
-                                                 end_command_trace)
+        from evennia.utils.command_trace import begin_command_trace, end_command_trace
 
         goblin = RuleTarget("goblin")
         self.char._search_hook = lambda name: goblin

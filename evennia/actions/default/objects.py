@@ -100,9 +100,7 @@ class Get(Action):
                 act = cls(mode="from")
                 act._usage = True
                 return act
-            return cls(
-                mode="from", count=count, obj_spec=item_spec, container_spec=container_spec
-            )
+            return cls(mode="from", count=count, obj_spec=item_spec, container_spec=container_spec)
         return cls(mode="plain", count=count, obj_spec=rest)
 
 

@@ -21,7 +21,8 @@ may declare required fields (no default) without tripping the dataclass
 "non-default-after-default" ordering rule.
 """
 
-from dataclasses import dataclass, field, fields as dataclass_fields
+from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from typing import ClassVar, Literal, Optional, get_args, get_origin, get_type_hints
 
 from .exceptions import ParseError
@@ -145,9 +146,7 @@ class Action:
         except Exception:
             hints = {}
 
-        init_fields = [
-            f for f in dataclass_fields(cls) if f.init and f.name != "block_reason"
-        ]
+        init_fields = [f for f in dataclass_fields(cls) if f.init and f.name != "block_reason"]
         values = {}
         idx = 0
         last_i = len(init_fields) - 1

@@ -323,9 +323,7 @@ class ExitTraversalRules:
 
         if action.staggered:
             direction = action.direction or (self.key or "away").strip()
-            actor.start_activity(
-                self.locomotion_class(actor, [direction], sneak=action.sneak)
-            )
+            actor.start_activity(self.locomotion_class(actor, [direction], sneak=action.sneak))
             return CLAIM
 
         action._origin = getattr(caller, "location", None)

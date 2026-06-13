@@ -8,9 +8,11 @@ mechanism modules (``action``/``rule``/``engine``/``process``/``events``) free o
 any object-model (room/exit/``move_to``) dependency.
 """
 
-from .events import Arrived, Departed, Moved
+from .account import DefaultAccountRules, Option, Password, UserPassword
+from .admin import Access, CharacterAdminRules, Emit, Force, Perm, Wall
 from .emote_nomatch import DefaultEmoteNoMatchRules
-from .nomatch import DefaultNoMatchRules, nomatch_provider, nomatch_providers
+from .events import Arrived, Departed, Moved
+from .general import CharacterGeneralRules, Help, Home, Nick, NickRules
 from .movement import (
     CharacterMovementRules,
     ExitTraversalRules,
@@ -19,6 +21,7 @@ from .movement import (
     exit_resolver,
     register_exit_resolver,
 )
+from .nomatch import DefaultNoMatchRules, nomatch_provider, nomatch_providers
 from .objects import (
     CharacterObjectRules,
     ContainerPutRules,
@@ -30,6 +33,8 @@ from .objects import (
     Give,
     Put,
 )
+from .system import CharacterSystemRules, Py, PyRules, Systems, Tasks
+from .unloggedin import Connect, Create, Encoding, Info, Screenreader, SessionLoginRules
 
 __all__ = [
     "DefaultNoMatchRules",
@@ -57,6 +62,37 @@ __all__ = [
     "CharacterObjectRules",
     "ContainerPutRules",
     "EnterableObjectRules",
+    # admin verbs
+    "Emit",
+    "Wall",
+    "Force",
+    "Perm",
+    "Access",
+    "CharacterAdminRules",
+    # general verbs
+    "Nick",
+    "Home",
+    "Help",
+    "NickRules",
+    "CharacterGeneralRules",
+    # account-shell verbs
+    "Option",
+    "Password",
+    "UserPassword",
+    "DefaultAccountRules",
+    # system verbs
+    "Systems",
+    "Tasks",
+    "Py",
+    "PyRules",
+    "CharacterSystemRules",
+    # unlogged-in verbs
+    "Connect",
+    "Create",
+    "Info",
+    "Encoding",
+    "Screenreader",
+    "SessionLoginRules",
 ]
 
 

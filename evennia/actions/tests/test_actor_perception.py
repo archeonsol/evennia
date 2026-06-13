@@ -116,9 +116,7 @@ class TestPerceptionFilter(unittest.TestCase):
 
     def test_self_is_always_visible(self):
         # A predicate that hides everything still lets the searcher resolve self.
-        perception.set_visibility_filter(
-            lambda searcher, candidate: candidate is searcher
-        )
+        perception.set_visibility_filter(lambda searcher, candidate: candidate is searcher)
         self.eff._for = lambda name, *a, **k: Found(self.eff)
         self.eff._sugar = lambda name, *a, **k: self.eff
         self.assertIs(self.actor.search("me"), self.eff)

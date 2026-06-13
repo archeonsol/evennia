@@ -275,7 +275,7 @@ class ActionParser:
                         raw_args=" ".join(tokens[1:]),
                         confidence=1.0,
                     )
-                return self._nomatch(raw_string, verb)
+                return self._nomatch(raw_string, verb, actor)
             verb, switches, match, raw_args = symbol
             canonical, action_cls, confidence = match
             raw_verb = verb
@@ -283,7 +283,7 @@ class ActionParser:
         try:
             built = action_cls.parse(raw_args, actor, context, switches=switches, verb=canonical)
         except ParseError as err:
-            return self._nomatch(raw_string, verb, error=getattr(err, "message", str(err)))
+            return self._nomatch(raw_string, verb, actor, error=getattr(err, "message", str(err)))
         # AmbiguousTarget intentionally NOT caught here.
 
         built._raw_string = raw_string
@@ -294,9 +294,17 @@ class ActionParser:
             confidence=confidence,
         )
 
-    def _nomatch(self, raw_string, verb, error=""):
-        """Build a :class:`NoMatchAction` ParseResult with fuzzy suggestions."""
-        suggestions = self._registry.suggest_verbs(verb) if verb else []
+    def _nomatch(self, raw_string, verb, actor=None, error=""):
+        """Build a :class:`NoMatchAction` ParseResult with fuzzy suggestions.
+
+        Suggestions are filtered through :func:`_verb_reachable` so a typo
+        never offers back a verb the actor has no non-gated path to — the
+        suggestion side of the dispatch bridge's fail-closed boundary (a fully
+        permission-gated verb must be indistinguishable from one that does not
+        exist).
+        """
+        reachable = (lambda _v, cls: _verb_reachable(cls, actor)) if actor is not None else None
+        suggestions = self._registry.suggest_verbs(verb, reachable=reachable) if verb else []
         nomatch = NoMatchAction(raw_string=raw_string, suggestions=suggestions, error=error)
         nomatch._raw_string = raw_string
         return ParseResult(
@@ -305,6 +313,51 @@ class ActionParser:
             raw_args=raw_string,
             confidence=0.0,
         )
+
+
+def _verb_reachable(action_cls, actor) -> bool:
+    """True unless every ``carry_out`` path for ``action_cls`` in ``actor``'s
+    provider context is permission-gated against them.
+
+    Mirrors the dispatch bridge's fail-closed boundary
+    (:func:`evennia.actions.dispatch._fail_closed_fallback`): a fully
+    ``requires``-gated verb dispatches to a no-match, so it must not be offered
+    as a suggestion either. A verb with *no* carry_out rules at all is
+    inapplicable, not secret (dispatch messages it honestly), so it stays
+    suggestible. Gate predicates are evaluated without a parsed action; one
+    that needs the action (or raises) does not count as a reachable path, and
+    an actor the provider context cannot be built for gets nothing (fail
+    closed).
+
+    Args:
+        action_cls (type): the candidate :class:`~evennia.actions.action.Action`.
+        actor: the asking actor.
+
+    Returns:
+        bool: whether the verb may be offered to this actor.
+    """
+    from .context import build_context
+    from .engine import RuleEngine
+    from .registry import rule_registry
+
+    try:
+        context = build_context(actor, action_type=action_cls)
+    except Exception:
+        return False
+    gated = False
+    for provider in context.providers:
+        for spec in rule_registry.rules_for(type(provider), action_cls, "carry_out"):
+            if not RuleEngine._actor_type_ok(spec, actor):
+                continue
+            if spec.requires is None:
+                return True
+            gated = True
+            try:
+                if spec.requires.eval(None, actor):
+                    return True
+            except Exception:
+                continue
+    return not gated
 
 
 #: shared parser instance

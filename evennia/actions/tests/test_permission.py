@@ -5,15 +5,15 @@ from enum import IntFlag, auto
 from types import SimpleNamespace
 
 from evennia.actions.permission import (
+    STAFF,
     Capability,
     DefaultCapability,
     Scope,
-    STAFF,
+    capability_for_name,
+    cumulative_rank_mask,
     get_capability_enum,
     rank_order,
     resolve_capabilities,
-    capability_for_name,
-    cumulative_rank_mask,
 )
 
 # Shorthands onto the concrete default lattice.

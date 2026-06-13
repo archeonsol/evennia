@@ -10,14 +10,12 @@ before/check/carry_out phases and the REDIRECT loop.
 import unittest
 from dataclasses import dataclass
 
-from evennia.actions.action import Action
+from evennia.actions.action import Action, GameObject
 from evennia.actions.actor import Actor
 from evennia.actions.context import ActionContext, ActionContextBuilder
 from evennia.actions.engine import RuleEngine
 from evennia.actions.exceptions import AmbiguousTarget
-from evennia.actions.menus import (
-    DisambiguationState,
-)
+from evennia.actions.menus import DisambiguationState
 from evennia.actions.parser import ActionParser
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import FAIL, SKIP
@@ -29,8 +27,6 @@ from evennia.actions.state import (
     get_states,
     has_state,
 )
-from evennia.actions.action import GameObject
-
 
 ENGINE = RuleEngine()
 
@@ -229,9 +225,7 @@ class TestContextBuilder(unittest.TestCase):
         acct = FakeObj("acct")
         char = RuledChar(key="Hero")
         actor = Actor(account=acct, character=char)
-        ctx = ActionContextBuilder().build(
-            actor, "look", callertype="session", action_type=Look
-        )
+        ctx = ActionContextBuilder().build(actor, "look", callertype="session", action_type=Look)
         self.assertEqual(ctx.providers, [char])
 
 

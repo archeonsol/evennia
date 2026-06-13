@@ -16,7 +16,6 @@ from evennia.utils import utils
 from ..parser import NoMatchAction
 from ..result import CLAIM
 from ..rule import rule
-
 from .emote_nomatch import DefaultEmoteNoMatchRules
 
 __all__ = [
@@ -36,13 +35,9 @@ class DefaultNoMatchRules:
             actor.msg(action.error)
             return CLAIM
         if action.suggestions:
-            msg = _("Command '{command}' is not available.").format(
-                command=action.raw_string
-            )
+            msg = _("Command '{command}' is not available.").format(command=action.raw_string)
             msg += _(" Maybe you meant {command}?").format(
-                command=utils.list_to_string(
-                    action.suggestions, endsep=_("or"), addquote=True
-                )
+                command=utils.list_to_string(action.suggestions, endsep=_("or"), addquote=True)
             )
             actor.msg(msg)
             return CLAIM

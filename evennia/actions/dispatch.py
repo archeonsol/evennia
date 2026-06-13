@@ -40,8 +40,7 @@ from collections import defaultdict
 from django.utils.translation import gettext as _
 from twisted.internet.defer import inlineCallbacks
 
-from evennia.commands.signals import (on_command_error, on_command_post,
-                                      on_command_pre)
+from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
 from evennia.utils.command_trace import get_trace_id
 
 from .actor import Actor

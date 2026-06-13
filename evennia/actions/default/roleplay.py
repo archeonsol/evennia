@@ -72,9 +72,7 @@ class DefaultRoleplayRules:
         if not self._is_actor(actor):
             return SKIP
         if not action.text:
-            actor.character.msg(
-                "Usage: emote <text>  (e.g. emote waves his hand at Bob)"
-            )
+            actor.character.msg("Usage: emote <text>  (e.g. emote waves his hand at Bob)")
             return CLAIM
         if not getattr(actor.character, "location", None):
             return CLAIM

@@ -241,9 +241,7 @@ def is_active(holder, key_or_group) -> bool:
     reg = _registry(holder)
     if not reg:
         return False
-    return any(
-        act.key == key_or_group or act.exclusive_group == key_or_group for act in reg
-    )
+    return any(act.key == key_or_group or act.exclusive_group == key_or_group for act in reg)
 
 
 # --------------------------------------------------------------------------- #
@@ -280,9 +278,7 @@ def _drive_activity(activity):
                     activity._pending = value
                     to_send = yield value
                 elif isinstance(value, (int, float)):
-                    activity._pending = deferLater(
-                        reactor, max(0.0, float(value)), lambda: None
-                    )
+                    activity._pending = deferLater(reactor, max(0.0, float(value)), lambda: None)
                     yield activity._pending
                 # else: unknown yield value — resume with None
             except CancelledError:

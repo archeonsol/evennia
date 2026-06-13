@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from evennia.actions.action import Action, action
-from evennia.actions.rule import rule, RuleSpec, PHASES
-from evennia.actions.registry import ActionRegistry, RuleRegistry
 from evennia.actions.exceptions import RuleConflict
-from evennia.actions.result import PASS, CLAIM, FAIL
 from evennia.actions.permission import DefaultCapability as Capability
 from evennia.actions.predicate import Builder, HasCapability
+from evennia.actions.registry import ActionRegistry, RuleRegistry
+from evennia.actions.result import CLAIM, FAIL, PASS
+from evennia.actions.rule import PHASES, RuleSpec, rule
 
 
 # --- test action types (registered on a private registry where possible) ----
@@ -233,6 +233,42 @@ class TestRuleRegistry(unittest.TestCase):
         specs = reg.all_specs(Provider)
         self.assertEqual(len(specs), 4)
         self.assertTrue(all(isinstance(s, RuleSpec) for s in specs))
+
+
+class TestSuggestVerbs(unittest.TestCase):
+    """``suggest_verbs`` filters candidates *during* the nearest-first walk, so
+    a rejected near candidate does not crowd a reachable farther one out of the
+    ``limit`` slice."""
+
+    def _registry(self):
+        reg = ActionRegistry()
+        for verb in ("casa", "case", "cash", "mast"):
+
+            @dataclass
+            class _A(Action):
+                pass
+
+            reg.register(_A, (verb,))
+        return reg
+
+    def test_unfiltered_returns_closest_first(self):
+        reg = self._registry()
+        self.assertEqual(reg.suggest_verbs("cast"), ["casa", "case", "cash"])
+
+    def test_filter_fills_limit_from_remaining_candidates(self):
+        reg = self._registry()
+        rejected = {"casa", "case"}
+        out = reg.suggest_verbs("cast", reachable=lambda v, cls: v not in rejected)
+        self.assertEqual(out, ["cash", "mast"])
+
+    def test_filter_rejecting_all_yields_empty(self):
+        reg = self._registry()
+        self.assertEqual(reg.suggest_verbs("cast", reachable=lambda v, cls: False), [])
+
+    def test_system_verbs_never_suggested(self):
+        reg = self._registry()
+        reg.register(_Kick, ("__cast__",))
+        self.assertNotIn("__cast__", reg.suggest_verbs("__cast__"))
 
 
 class TestPhasesConstant(unittest.TestCase):
