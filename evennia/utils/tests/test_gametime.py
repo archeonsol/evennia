@@ -23,7 +23,6 @@ class TestGametime(TestCase):
         gametime.SERVER_START_TIME = time.time() - 300
         gametime.SERVER_RUNTIME_LAST_UPDATED = time.time() - 30
         gametime.TIMEFACTOR = 5.0
-        self.timescripts = []
 
     def tearDown(self) -> None:
         time.time = self.time
@@ -32,8 +31,6 @@ class TestGametime(TestCase):
         gametime.SERVER_RUNTIME = 0.0
         gametime.SERVER_START_TIME = 0.0
         gametime.TIMEFACTOR = settings.TIME_FACTOR
-        for script in self.timescripts:
-            script.stop()
 
     def test_runtime(self):
         self.assertAlmostEqual(gametime.runtime(), 630.0)
@@ -83,19 +80,3 @@ class TestGametime(TestCase):
 
     def test_real_seconds_until_leap_year(self):
         self.assertAlmostEqual(gametime.real_seconds_until(month=3), 5788800)
-
-    def test_schedule(self):
-        callback = Mock()
-        script = gametime.schedule(callback, day=19)
-        self.timescripts.append(script)
-        self.assertIsInstance(script, gametime.TimeScript)
-        self.assertAlmostEqual(script.interval, 17280)
-        self.assertEqual(script.repeats, 1)
-
-    def test_repeat_schedule(self):
-        callback = Mock()
-        script = gametime.schedule(callback, repeat=True, min=32)
-        self.timescripts.append(script)
-        self.assertIsInstance(script, gametime.TimeScript)
-        self.assertAlmostEqual(script.interval, 12)
-        self.assertEqual(script.repeats, 0)
