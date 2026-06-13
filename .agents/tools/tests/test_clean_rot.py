@@ -14,15 +14,10 @@ import pytest
 # Make the tools package importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from clean_rot import (
-    _extract_paragraphs,
-    check_broken_links,
-    check_duplication,
-    check_index_density,
-    check_line_budget,
-    check_orphan_docs,
-    check_stale_references,
-)
+from clean_rot import (_extract_paragraphs, check_broken_links,
+                       check_duplication, check_index_density,
+                       check_line_budget, check_orphan_docs,
+                       check_stale_references)
 
 
 @pytest.fixture
@@ -69,6 +64,24 @@ class TestLineBudget:
         repo["agents_md"].write_text("# Index\n")
         (repo["docs_dir"] / "small.md").write_text("# Small doc\n\nSome content.\n")
         assert check_line_budget(**repo) == 0
+
+    def test_over_budget_accreting_doc_suggests_split(self, repo, capsys):
+        # an over-budget doc made of many ## entries grows by accretion -> split
+        repo["agents_md"].write_text("# Index\n")
+        body = "\n".join(f"## Entry {i}\n\nsome text" for i in range(10))
+        body += "\n" + "\n".join(f"filler {i}" for i in range(150))
+        (repo["docs_dir"] / "log.md").write_text(body)
+        assert check_line_budget(**repo) == 1
+        assert "split it" in capsys.readouterr().out.lower()
+
+    def test_over_budget_single_topic_doc_suggests_condense(self, repo, capsys):
+        # an over-budget doc with few sections is verbose, not growing -> condense
+        repo["agents_md"].write_text("# Index\n")
+        body = "## Only section\n\n" + "\n".join(f"line {i}" for i in range(150))
+        (repo["docs_dir"] / "prose.md").write_text(body)
+        assert check_line_budget(**repo) == 1
+        out = capsys.readouterr().out.lower()
+        assert "condense" in out and "split it" not in out
 
 
 # ---- check_broken_links ----

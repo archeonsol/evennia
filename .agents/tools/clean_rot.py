@@ -22,6 +22,11 @@ from pathlib import Path
 
 MAX_AGENTS_LINES = 40  # AGENTS.md is an index, not a manual
 MAX_DOC_LINES = 120  # individual docs shouldn't bloat either
+# An over-budget doc with at least this many top-level (##) sections is an
+# accreting collection (a decisions log, a changelog) that will keep growing —
+# splitting it helps. Below this it is a single-topic doc that is merely
+# verbose, where the fix is to condense, not split.
+GROWTH_SECTION_COUNT = 8
 SIMILARITY_THRESHOLD = 0.6  # flag near-duplicate paragraphs between files
 MIN_PARAGRAPH_LEN = 80  # ignore short lines for duplication checks
 
@@ -65,10 +70,18 @@ def check_line_budget(agents_md, docs_dir, repo_root, **_kw):
             lines = doc.read_text().splitlines()
             count = len(lines)
             if count > MAX_DOC_LINES:
+                sections = sum(1 for ln in lines if ln.startswith("## "))
+                if sections >= GROWTH_SECTION_COUNT:
+                    advice = (
+                        f"It has {sections} top-level sections and grows by "
+                        f"accretion; split it (e.g. by era or topic)."
+                    )
+                else:
+                    advice = "Condense it — splitting won't help a single-topic doc."
                 warn(
                     "BLOAT",
                     f"{doc.relative_to(repo_root)} is {count} lines "
-                    f"(budget: {MAX_DOC_LINES}). Consider splitting.",
+                    f"(budget: {MAX_DOC_LINES}). {advice}",
                 )
                 warnings += 1
 
@@ -132,7 +145,12 @@ def check_orphan_docs(agents_md, docs_dir, repo_root, **_kw):
                 continue
             # Match the full repo-relative path or a path ending in this file
             # (sibling/relative links inside the docs tree use shorter forms).
-            if rel_path in text or f"./{rel_path}" in text or f"]({name}" in text or f"/{name}" in text:
+            if (
+                rel_path in text
+                or f"./{rel_path}" in text
+                or f"]({name}" in text
+                or f"/{name}" in text
+            ):
                 referenced = True
                 break
         if not referenced:
@@ -192,7 +210,7 @@ def check_duplication(agents_md, docs_dir, repo_root, **_kw):
                     warn(
                         "DUPLICATION",
                         f"AGENTS.md duplicates content from {rel} "
-                        f"({ratio:.0%} similar): \"{snippet}\"",
+                        f'({ratio:.0%} similar): "{snippet}"',
                     )
                     warnings += 1
 
@@ -221,9 +239,7 @@ def check_stale_references(agents_md, docs_dir, repo_root, src_dir, **_kw):
         # Check backtick-quoted paths that contain a slash (real source paths).
         # e.g. `commands/default/`, `typeclasses/attributes.py`, `server/conf/settings.py`
         # Skips bare filenames like `cmdhandler.py` and tools like `uv`.
-        for match in re.finditer(
-            r"`((?:evennia/)?[a-z_]+/[a-z_/]*(?:\.py)?/?)`", text
-        ):
+        for match in re.finditer(r"`((?:evennia/)?[a-z_]+/[a-z_/]*(?:\.py)?/?)`", text):
             path_ref = match.group(1)
             # Search broadly: repo root, src dir, src/contrib,
             # game_template (for game-dir paths like server/conf/settings.py)
