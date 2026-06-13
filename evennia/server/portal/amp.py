@@ -13,10 +13,8 @@ from functools import wraps
 from io import BytesIO
 from itertools import count
 
-from twisted.internet.defer import Deferred, DeferredList
+from twisted.internet.defer import DeferredList
 from twisted.protocols import amp
-
-from evennia.utils.utils import variable_from_module
 
 # delayed import
 _LOGGER = None
@@ -119,12 +117,6 @@ def loads_admin(data):
     from evennia.server.amp_serde import unpack_admin_message
 
     return unpack_admin_message(data)
-
-
-def session_serde_enabled():
-    from evennia.server.amp_serde import session_serde_enabled as _enabled
-
-    return _enabled()
 
 
 def _get_logger():
@@ -297,26 +289,6 @@ class MsgStatus(amp.Command):
     arguments = [(b"status", amp.String())]
     errors = {Exception: b"EXCEPTION"}
     response = [(b"status", amp.String())]
-
-
-class FunctionCall(amp.Command):
-    """
-    Bidirectional Server <-> Portal
-
-    Sent when either process needs to call an arbitrary function in
-    the other. This does not use the batch-send functionality.
-
-    """
-
-    key = "FunctionCall"
-    arguments = [
-        (b"module", amp.String()),
-        (b"function", amp.String()),
-        (b"args", amp.String()),
-        (b"kwargs", amp.String()),
-    ]
-    errors = {Exception: b"EXCEPTION"}
-    response = [(b"result", amp.String())]
 
 
 # -------------------------------------------------------------
@@ -530,9 +502,9 @@ class AMPMultiConnectionProtocol(amp.AMP):
         Process incoming packed data for Admin* AMP commands.
 
         Detects format by magic prefix:
-          ``A1`` → JSON admin envelope (new path, no pickle)
+          ``A1`` → JSON admin envelope
           ``J1`` → JSON session envelope (should not arrive here, but handled)
-          other  → legacy pickle (only if AMP_SESSION_ACCEPT_LEGACY_PICKLE=True)
+          other  → rejected
 
         Args:
             packed_data (bytes): Wire bytes.
@@ -542,16 +514,7 @@ class AMPMultiConnectionProtocol(amp.AMP):
         raw = bytes(packed_data)
         if raw[:2] in (b"A1", b"J1"):
             return loads_admin(raw)
-        # Legacy pickle path: gated on AMP_SESSION_ACCEPT_LEGACY_PICKLE so it stays
-        # off by default. Only enable transiently for rolling-restart migration.
-        from evennia.server.amp_serde import accept_legacy_session_pickle
-
-        if not accept_legacy_session_pickle():
-            raise ValueError(
-                "refusing legacy pickle AMP admin payload "
-                "(enable AMP_SESSION_ACCEPT_LEGACY_PICKLE only for migration)"
-            )
-        return loads(packed_data)
+        raise ValueError("refusing non-JSON AMP admin payload")
 
     def broadcast(self, command, sessid, **kwargs):
         """
@@ -578,73 +541,3 @@ class AMPMultiConnectionProtocol(amp.AMP):
             )
 
         return DeferredList(deferreds)
-
-    # generic function send/recvs
-
-    def send_FunctionCall(self, modulepath, functionname, *args, **kwargs):
-        """
-        Access method called by either process. This will call an arbitrary
-        function on the other process (On Portal if calling from Server and
-        vice versa).
-
-        Inputs:
-            modulepath (str) - python path to module holding function to call
-            functionname (str) - name of function in given module
-            *args, **kwargs will be used as arguments/keyword args for the
-                            remote function call
-        Returns:
-            A deferred that fires with the return value of the remote
-            function call
-
-        """
-        return (
-            self.callRemote(
-                FunctionCall,
-                module=modulepath,
-                function=functionname,
-                args=dumps(args),
-                kwargs=dumps(kwargs),
-            )
-            .addCallback(lambda r: loads(r["result"]))
-            .addErrback(self.errback, "FunctionCall")
-        )
-
-    @FunctionCall.responder
-    @catch_traceback
-    def receive_functioncall(self, module, function, func_args, func_kwargs):
-        """
-        This allows Portal- and Server-process to call an arbitrary
-        function in the other process. It is intended for use by
-        plugin modules.
-
-        Args:
-            module (str or module): The module containing the
-                `function` to call.
-            function (str): The name of the function to call in
-                `module`.
-            func_args (str): Pickled args tuple for use in `function` call.
-            func_kwargs (str): Pickled kwargs dict for use in `function` call.
-
-        """
-        from django.conf import settings
-
-        allowed = getattr(settings, "AMP_FUNCTIONCALL_MODULES", ())
-        if module not in allowed:
-            raise ValueError(
-                "FunctionCall denied: module '%s' is not in AMP_FUNCTIONCALL_MODULES "
-                "(empty allowlist disables FunctionCall)." % module
-            )
-
-        args = loads(func_args)
-        kwargs = loads(func_kwargs)
-
-        # call the function (don't catch tracebacks here)
-        result = variable_from_module(module, function)(*args, **kwargs)
-
-        if isinstance(result, Deferred):
-            # if result is a deferred, attach handler to properly
-            # wrap the return value
-            result.addCallback(lambda r: {"result": dumps(r)})
-            return result
-        else:
-            return {"result": dumps(result)}

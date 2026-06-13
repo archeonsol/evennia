@@ -153,15 +153,6 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
-# Allowlist of module paths that may be invoked via the AMP FunctionCall command.
-# FunctionCall allows Server↔Portal to call functions in each other's process.
-# Only modules listed here will be callable; an empty tuple disables FunctionCall
-# entirely. Keep AMP_INTERFACE bound to 127.0.0.1 so this channel is never
-# reachable from outside the machine.
-AMP_FUNCTIONCALL_MODULES = (
-    "evennia.server.portal.amp_server",
-    "evennia.server.amp_client",
-)
 
 
 # Path to the lib directory containing the bulk of the codebase's code.
@@ -647,11 +638,7 @@ AT_INIT_BATCH_SIZE = 50
 AT_INIT_BATCH_DELAY = 0
 # On @reload, defer the at_post_load burst to after portal session sync.
 AT_INIT_DEFER_ON_RELOAD = True
-# --- Tier 2: event bus, job queue, channel cache, AMP session serde, Postgres ---
-# Msg* AMP traffic: "json" (secure) or "pickle" (legacy only).
-AMP_SESSION_SERDE = "json"
-# Reject pickle on Msg* unless explicitly enabled for migration.
-AMP_SESSION_ACCEPT_LEGACY_PICKLE = False
+# --- Tier 2: event bus, job queue, channel cache, Postgres ---
 # Engine event bus (in-process listeners + optional Redis stream / Postgres rows).
 EVENT_BUS_ENABLED = True
 EVENT_BUS_BACKEND = "memory"  # memory | redis | postgres | both

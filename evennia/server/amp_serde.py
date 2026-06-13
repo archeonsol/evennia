@@ -1,8 +1,8 @@
 """
 Secure serialization for Portal <-> Server AMP traffic.
 
-Both session (Msg*) and admin (Admin*) messages use a strict JSON envelope.
-Pickle is no longer used on any AMP path.
+Session (Msg*) and admin (Admin*) messages use a strict JSON envelope; pickle is
+never accepted on these paths. A non-JSON payload is rejected outright.
 
 Wire formats:
   ``J1`` + UTF-8 JSON  — session messages (MsgPortal2Server / MsgServer2Portal)
@@ -29,14 +29,6 @@ _MAX_STR_LEN = 65536
 _MAX_LIST_LEN = 256
 _MAX_DICT_KEYS = 128
 _MAX_PAYLOAD_BYTES = 512 * 1024
-
-
-def session_serde_enabled() -> bool:
-    return str(getattr(settings, "AMP_SESSION_SERDE", "json")).lower() != "pickle"
-
-
-def accept_legacy_session_pickle() -> bool:
-    return bool(getattr(settings, "AMP_SESSION_ACCEPT_LEGACY_PICKLE", False))
 
 
 def _max_depth() -> int:
@@ -120,16 +112,7 @@ def unpack_session_message(data: bytes) -> Tuple[int, dict]:
             raise ValueError("invalid kwargs in AMP session envelope")
         return sessid, sanitize_session_kwargs(kwargs)
     if raw[:1] in _PICKLE_REJECT_PREFIXES:
-        if accept_legacy_session_pickle():
-            from evennia.server.portal import amp
-
-            msg = amp.loads(raw)
-            if not isinstance(msg, (list, tuple)) or len(msg) != 2:
-                raise ValueError("legacy pickle session message malformed")
-            return int(msg[0]), sanitize_session_kwargs(msg[1])
-        raise ValueError(
-            "refusing legacy pickle AMP session payload (enable AMP_SESSION_ACCEPT_LEGACY_PICKLE only for migration)"
-        )
+        raise ValueError("refusing non-JSON (pickle-like) AMP session payload")
     raise ValueError("unrecognized AMP session payload format")
 
 
@@ -244,19 +227,8 @@ def unpack_admin_message(data: bytes) -> Tuple[int, dict]:
         if not isinstance(kwargs, dict):
             raise ValueError("invalid kwargs in AMP admin envelope")
         return sessid, _restore_admin_kwargs(kwargs)
-    # Legacy pickle fallback — only during rolling restart migration
     if raw[:1] in _PICKLE_REJECT_PREFIXES:
-        if accept_legacy_session_pickle():
-            from evennia.server.portal import amp as _amp
-
-            msg = _amp.loads(raw)
-            if not isinstance(msg, (list, tuple)) or len(msg) != 2:
-                raise ValueError("legacy pickle admin message malformed")
-            return int(msg[0]), dict(msg[1])
-        raise ValueError(
-            "refusing legacy pickle AMP admin payload "
-            "(enable AMP_SESSION_ACCEPT_LEGACY_PICKLE only for migration)"
-        )
+        raise ValueError("refusing non-JSON (pickle-like) AMP admin payload")
     raise ValueError("unrecognized AMP admin payload format")
 
 

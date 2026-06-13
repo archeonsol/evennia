@@ -148,12 +148,10 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
 
         """
         # print("portal data_to_server: {}, {}, {}".format(command, sessid, kwargs))
-        if command in (amp.MsgPortal2Server,) and amp.session_serde_enabled():
-            packed = amp.dumps_session((sessid, kwargs))
-        elif command in (amp.AdminPortal2Server,) and amp.session_serde_enabled():
+        if command in (amp.AdminPortal2Server,):
             packed = amp.dumps_admin((sessid, kwargs))
         else:
-            packed = amp.dumps((sessid, kwargs))
+            packed = amp.dumps_session((sessid, kwargs))
         if self.factory.server_connection:
             return self.factory.server_connection.callRemote(
                 command, packed_data=packed
