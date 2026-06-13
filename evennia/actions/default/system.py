@@ -13,9 +13,10 @@ The action-engine analogue of ``evennia/commands/default/system.py``'s
 * :class:`Py` — execute a Python snippet, or open the interactive Python
   console (a generator ``carry_out`` rule: the engine's generator driver
   interprets ``yield prompt`` as ask-and-suspend, the same contract the stock
-  ``@interactive`` command used). Developer-gated. The ``/edit`` switch is
-  **not** ported — ``EvEditor``'s cmdset-based input capture does not work
-  through the engine bridge; it lands with the interactive-verb work.
+  ``@interactive`` command used). Developer-gated. The ``/edit`` switch opens
+  the ``EvEditor`` in code mode; the editor's input capture is an engine
+  :class:`~evennia.actions.state.StateProvider`, so it captures on the dispatch
+  path.
 
 :class:`PyRules` is standalone (guarding ``self is actor.effective``) so the
 account shell composes it too, mirroring stock ``CmdPy`` living in both the
@@ -136,9 +137,23 @@ class PyRules:
         switches = action.switches
 
         if "edit" in switches:
-            caller.msg(
-                "The @py/edit editor is not yet available through the action engine; "
-                "use @py <code> or the interactive console (@py with no arguments)."
+            # Open the EvEditor in code mode (its input capture is an engine
+            # StateProvider, so it works on the dispatch path). Reuse the stock
+            # module-level load/save/quit funcs - they are picklable, which the
+            # persistent editor requires.
+            from evennia.commands.default.system import _py_code, _py_load, _py_quit
+            from evennia.utils.eveditor import EvEditor
+
+            caller.db._py_measure_time = "time" in switches
+            caller.db._py_clientraw = "clientraw" in switches
+            EvEditor(
+                caller,
+                loadfunc=_py_load,
+                savefunc=_py_code,
+                quitfunc=_py_quit,
+                key="Python exec: :w  or :!",
+                persistent=True,
+                codefunc=_py_code,
             )
             return CLAIM
 

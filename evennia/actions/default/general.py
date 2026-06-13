@@ -11,10 +11,13 @@ The action-engine analogue of ``evennia/commands/default/general.py``'s
   "show what a nick is set to" block three times; the later copies are
   unreachable and reference an undefined name).
 * :class:`Home` — teleport to ``caller.home`` (Builder-gated, as stock).
-
-``CmdSetHelp`` is **not** ported here: its clash-handling is a yield-based
-confirmation flow and ``/edit`` opens ``EvEditor``, so it lands with the
-interactive-verb work.
+* :class:`SetHelp` — edit the in-DB help database (``@sethelp``), Helper-gated.
+  Its clash-warning branch is a ``yield``-confirm the engine's generator driver
+  fills; ``/edit`` opens ``EvEditor`` (input captured engine-side as a
+  :class:`~evennia.actions.state.StateProvider`). The help redesign authored
+  command help as explicit files, but DB help entries are unchanged, so
+  ``@sethelp`` still edits them. Character-side only, matching the stock
+  ``CmdSetHelp`` living only in the Character cmdset.
 
 :class:`NickRules` is a standalone mixin (guarding ``self is
 actor.effective``) so the account shell can reuse it, mirroring the stock
@@ -26,11 +29,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from django.conf import settings
+
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
 from ..muxargs import ArgAction
 from ..predicate import Builder as BuilderCap
+from ..predicate import Helper as HelperCap
 from ..result import CLAIM, SKIP
 from ..rule import rule
 
@@ -38,6 +44,7 @@ __all__ = [
     "Nick",
     "Home",
     "Help",
+    "SetHelp",
     "NickRules",
     "CharacterGeneralRules",
 ]
@@ -77,6 +84,20 @@ class Nick(ArgAction):
 @dataclass
 class Home(ArgAction):
     """Teleport to your home location (``home``)."""
+
+    __primary_handler__ = DefaultCharacter
+
+
+@action("@sethelp")
+@dataclass
+class SetHelp(ArgAction):
+    """Edit the in-DB help database.
+
+    ``@sethelp[/edit|/replace|/append|/extend|/category|/locks|/delete]
+    <topic>[;alias;alias][,category[,locks]] [= <text or new value>]``. The
+    standard mux lhs/rhs and comma splits apply; aliases are parsed from the
+    topic's ``;``-list in the rule, as the stock command does.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -247,8 +268,29 @@ class NickRules:
         return CLAIM
 
 
+def _sethelp_search_helper(caller, session):
+    """A bare ``CmdHelp`` used purely as a stateless topic-lookup utility.
+
+    ``@sethelp``'s clash warning must search the *same* topic universe the
+    ``help`` command shows (cmd/db/file), so a builder is warned when a new DB
+    entry would be shadowed by a verb, category, or file-help topic. Rather than
+    reimplement that lookup (and risk drift from what players actually see), we
+    reuse ``CmdHelp.collect_topics``/``do_search`` through a throwaway instance.
+    It is never merged into a cmdset or run through the cmdhandler - the verb
+    itself is the native :class:`SetHelp` action; this is the same reuse the
+    EvEditor does with its match-only ``CmdLineInput()``.
+    """
+    from evennia.commands.default.help import CmdHelp
+
+    helper = CmdHelp()
+    helper.caller = caller
+    helper.session = session
+    helper.account = getattr(caller, "account", None)
+    return helper
+
+
 class CharacterGeneralRules(NickRules):
-    """Baseline character-side general rules: nicks plus ``home``."""
+    """Baseline character-side general rules: nicks, ``home``, ``@sethelp``."""
 
     @rule(Home, phase="carry_out", requires=BuilderCap)
     def carry_out_home(self, action, actor):
@@ -266,4 +308,237 @@ class CharacterGeneralRules(NickRules):
         else:
             caller.msg("There's no place like home ...")
             caller.move_to(home, move_type="teleport")
+        return CLAIM
+
+    @rule(SetHelp, phase="carry_out", requires=HelperCap)
+    def carry_out_sethelp(self, action, actor):
+        if self is not getattr(actor, "character", None):
+            return SKIP
+        # Returns a generator the engine drives; it yields only to confirm a
+        # clashing help-entry name, every other path runs straight through.
+        return self._sethelp_flow(self, action, actor)
+
+    @staticmethod
+    def _sethelp_flow(caller, action, actor):
+        """Apply a ``@sethelp`` request (ports ``CmdSetHelp.func``).
+
+        A generator: the only suspension point is the clash-warning confirm,
+        whose ``yield`` the engine's generator driver fills with the player's
+        reply. ``return CLAIM`` ends the flow as for any carry_out rule.
+        """
+        from evennia.commands.default.help import (
+            HelpCategory,
+            _loadhelp,
+            _quithelp,
+            _savehelp,
+        )
+        from evennia.help.catalog import is_action_help_topic
+        from evennia.locks.lockhandler import LockException
+        from evennia.utils import create
+        from evennia.utils.eveditor import EvEditor
+        from evennia.utils.utils import inherits_from
+
+        switches = action.switches
+        lhslist = list(action.lhslist)
+        rhslist = list(action.rhslist)
+        session = getattr(actor, "session", None)
+
+        if not action.args:
+            caller.msg(
+                "Usage: @sethelp[/switches] <topic>[;alias;alias][,category[,locks]]"
+                " [= <text or new category>]"
+            )
+            return CLAIM
+
+        nlist = len(lhslist)
+        topicstr = lhslist[0] if nlist > 0 else ""
+        if not topicstr:
+            caller.msg("You have to define a topic!")
+            return CLAIM
+        topicstrlist = topicstr.split(";")
+        topicstr, aliases = (
+            topicstrlist[0],
+            topicstrlist[1:] if len(topicstr) > 1 else [],
+        )
+        aliastxt = ("(aliases: %s)" % ", ".join(aliases)) if aliases else ""
+        old_entry = None
+
+        helper = _sethelp_search_helper(caller, session)
+        cmd_help_topics, db_help_topics, file_help_topics = helper.collect_topics(
+            caller, mode="query"
+        )
+        # db-help takes priority over file-help; verbs over either.
+        file_db_help_topics = {**file_help_topics, **db_help_topics}
+        all_topics = {**file_db_help_topics, **cmd_help_topics}
+        all_categories = list(
+            set(HelpCategory(topic.help_category) for topic in all_topics.values())
+        )
+        entries = list(all_topics.values()) + all_categories
+
+        category = lhslist[1] if nlist > 1 else settings.DEFAULT_HELP_CATEGORY
+        lockstring = ",".join(lhslist[2:]) if nlist > 2 else "read:all()"
+
+        for querystr in topicstrlist:
+            match, _ = helper.do_search(querystr, entries)
+            if not match:
+                continue
+            warning = None
+            if isinstance(match, HelpCategory):
+                warning = (
+                    f"'{querystr}' matches (or partially matches) the name of "
+                    f"help-category '{match.key}'. If you continue, your help entry will "
+                    "take precedence and the category (or part of its name) *may* not "
+                    "be usable for grouping help entries anymore."
+                )
+            elif is_action_help_topic(match):
+                warning = (
+                    f"'{querystr}' matches (or partially matches) the key/alias of "
+                    f"verb '{match.key}'. Verb-help takes precedence over other "
+                    "help entries so your help *may* be impossible to reach for those "
+                    "with access to that verb."
+                )
+            elif inherits_from(match, "evennia.help.filehelp.FileHelpEntry"):
+                warning = (
+                    f"'{querystr}' matches (or partially matches) the name/alias of the "
+                    f"file-based help topic '{match.key}'. File-help entries cannot be "
+                    "modified from in-game (they are files on-disk). If you continue, "
+                    "your help entry may shadow the file-based one's name partly or "
+                    "completely."
+                )
+            if warning:
+                caller.msg(f"|rWarning:\n|r{warning}|n")
+                repl = yield ("|wDo you still want to continue? Y/[N]?|n")
+                if (repl or "").lower() in ("y", "yes"):
+                    db_topics = {**db_help_topics}
+                    db_categories = list(
+                        set(HelpCategory(topic.help_category) for topic in db_topics.values())
+                    )
+                    db_entries = list(db_topics.values()) + db_categories
+                    match, _ = helper.do_search(querystr, db_entries)
+                    if match:
+                        old_entry = match
+                else:
+                    caller.msg("Aborted.")
+                    return CLAIM
+            else:
+                old_entry = match
+                category = lhslist[1] if nlist > 1 else old_entry.help_category
+                lockstring = ",".join(lhslist[2:]) if nlist > 2 else old_entry.locks.get()
+                break
+
+        category = category.lower()
+
+        if "edit" in switches:
+            if old_entry:
+                topicstr = old_entry.key
+                if action.rhs:
+                    old_entry.entrytext += "\n%s" % action.rhs
+                helpentry = old_entry
+            else:
+                helpentry = create.create_help_entry(
+                    topicstr,
+                    action.rhs if action.rhs is not None else "",
+                    category=category,
+                    locks=lockstring,
+                    aliases=aliases,
+                )
+            caller.db._editing_help = helpentry
+            EvEditor(
+                caller,
+                loadfunc=_loadhelp,
+                savefunc=_savehelp,
+                quitfunc=_quithelp,
+                key="topic {}".format(topicstr),
+                persistent=True,
+            )
+            return CLAIM
+
+        if "append" in switches or "merge" in switches or "extend" in switches:
+            if not old_entry:
+                caller.msg(f"Could not find topic '{topicstr}'. You must give an exact name.")
+                return CLAIM
+            if not action.rhs:
+                caller.msg("You must supply text to append/merge.")
+                return CLAIM
+            if "merge" in switches:
+                old_entry.entrytext += " " + action.rhs
+            else:
+                old_entry.entrytext += "\n%s" % action.rhs
+            old_entry.aliases.add(aliases)
+            caller.msg(f"Entry updated:\n{old_entry.entrytext}{aliastxt}")
+            return CLAIM
+
+        if "category" in switches:
+            if not old_entry:
+                caller.msg(f"Could not find topic '{topicstr}'{aliastxt}.")
+                return CLAIM
+            if not action.rhs:
+                caller.msg("You must supply a category.")
+                return CLAIM
+            category = action.rhs.lower()
+            old_entry.help_category = category
+            caller.msg(f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'.")
+            return CLAIM
+
+        if "locks" in switches:
+            if not old_entry:
+                caller.msg(f"Could not find topic '{topicstr}'{aliastxt}.")
+                return CLAIM
+            show_locks = not rhslist
+            clear_locks = rhslist and not rhslist[0]
+            if show_locks:
+                caller.msg(f"Current locks for entry '{topicstr}'{aliastxt} are: {old_entry.locks}")
+                return CLAIM
+            if clear_locks:
+                old_entry.locks.clear()
+                old_entry.locks.add("read:all()")
+                caller.msg(f"Locks for entry '{topicstr}'{aliastxt} reset to: read:all()")
+                return CLAIM
+            lockstring = ",".join(rhslist)
+            existing_locks = old_entry.locks.all()
+            old_entry.locks.clear()
+            try:
+                old_entry.locks.add(lockstring)
+            except LockException as e:
+                old_entry.locks.add(existing_locks)
+                caller.msg(str(e) + " Locks not changed.")
+            else:
+                caller.msg(f"Locks for entry '{topicstr}'{aliastxt} changed to: {lockstring}")
+            return CLAIM
+
+        if "delete" in switches or "del" in switches:
+            if not old_entry:
+                caller.msg(f"Could not find topic '{topicstr}'{aliastxt}.")
+                return CLAIM
+            old_entry.delete()
+            caller.msg(f"Deleted help entry '{topicstr}'{aliastxt}.")
+            return CLAIM
+
+        # add a new help entry (or /replace an existing one)
+        if not action.rhs:
+            caller.msg("You must supply a help text to add.")
+            return CLAIM
+        if old_entry:
+            if "replace" in switches:
+                old_entry.key = topicstr
+                old_entry.entrytext = action.rhs
+                old_entry.help_category = category
+                old_entry.locks.clear()
+                old_entry.locks.add(lockstring)
+                old_entry.aliases.add(aliases)
+                old_entry.save()
+                caller.msg(f"Overwrote the old topic '{topicstr}'{aliastxt}.")
+            else:
+                caller.msg(
+                    f"Topic '{topicstr}'{aliastxt} already exists. Use /edit to open in editor, "
+                    "or /replace, /append and /merge to modify it directly."
+                )
+        else:
+            new_entry = create.create_help_entry(
+                topicstr, action.rhs, category=category, locks=lockstring, aliases=aliases
+            )
+            if new_entry:
+                caller.msg(f"Topic '{topicstr}'{aliastxt} was successfully created.")
+            else:
+                caller.msg(f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin.")
         return CLAIM

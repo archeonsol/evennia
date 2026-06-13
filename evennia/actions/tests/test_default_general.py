@@ -6,11 +6,18 @@ fake world objects, asserting player-visible messages, nick-handler effects,
 movement, and the ``requires=`` gates.
 """
 
+import sys
 import unittest
+from unittest import mock
 
-from evennia.actions.default.general import CharacterGeneralRules, Home, Nick
+from twisted.internet.defer import Deferred
+
+from evennia.actions.default import general as general_module
+from evennia.actions.default.general import CharacterGeneralRules, Home, Nick, SetHelp
 from evennia.actions.tests.fakes import FakeChar, FakeObj, dispatch, make_actor
 from evennia.typeclasses.attributes import NickTemplateInvalid
+
+engine_mod = sys.modules["evennia.actions.engine"]
 
 
 class FakeNick:
@@ -223,6 +230,248 @@ class TestHome(unittest.TestCase):
         trace = self._home(char, actor)
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
+
+
+# --- @sethelp --------------------------------------------------------------------
+class FakeLocksHandler:
+    """Lock handler stub for a help entry: get/all/clear/add/check."""
+
+    def __init__(self, locks="read:all()"):
+        self._locks = locks
+
+    def get(self):
+        return self._locks
+
+    def all(self):
+        return [self._locks] if self._locks else []
+
+    def clear(self):
+        self._locks = ""
+
+    def add(self, lockstring):
+        self._locks = ",".join(lockstring) if isinstance(lockstring, (list, tuple)) else lockstring
+
+    def __str__(self):
+        return self._locks
+
+
+class FakeAliases:
+    def __init__(self):
+        self.added = []
+
+    def add(self, aliases):
+        self.added.append(aliases)
+
+
+class FakeHelpEntry:
+    """A DB help entry stub: just the attribute surface ``@sethelp`` touches."""
+
+    def __init__(self, key="lore", entrytext="old text", help_category="general"):
+        self.key = key
+        self.entrytext = entrytext
+        self.help_category = help_category
+        self.locks = FakeLocksHandler()
+        self.aliases = FakeAliases()
+        self.saved = False
+        self.deleted = False
+
+    def save(self):
+        self.saved = True
+
+    def delete(self):
+        self.deleted = True
+
+
+class StubHelper:
+    """Stand-in for the throwaway ``CmdHelp`` search utility.
+
+    ``collect_topics`` returns the controlled three-dict universe; ``do_search``
+    pops a scripted result per call so a clash flow can match on the first query
+    and miss the db-only re-search.
+    """
+
+    def __init__(self, search_results=(), topics=((), {}, {})):
+        self._results = list(search_results)
+        self._topics = topics
+
+    def collect_topics(self, caller, mode="query"):
+        cmd, db, file = self._topics
+        return dict(cmd), dict(db), dict(file)
+
+    def do_search(self, query, entries):
+        if self._results:
+            return self._results.pop(0), None
+        return None, None
+
+
+class Helpdesk(CharacterGeneralRules, FakeChar):
+    """Provider fixture: a character carrying the general rules, Helper-ranked."""
+
+    def __init__(self, perms=("Helper",), **kwargs):
+        super().__init__(perms=perms, **kwargs)
+        self.nicks = FakeNicks()
+
+
+class TestSetHelp(unittest.TestCase):
+    def _setup(self, perms=("Helper",)):
+        char = Helpdesk(perms=perms)
+        actor = make_actor(char)
+        return char, actor
+
+    def _sethelp(self, char, actor, raw, switches=(), helper=None):
+        action = SetHelp.parse(raw, actor, switches=switches, verb="@sethelp")
+        patch = mock.patch.object(
+            general_module, "_sethelp_search_helper", return_value=helper or StubHelper()
+        )
+        with patch:
+            return dispatch(action, actor, [char])
+
+    def test_gated_for_player(self):
+        char, actor = self._setup(perms=("Player",))
+        action = SetHelp.parse("lore = text", actor, verb="@sethelp")
+        trace = dispatch(action, actor, [char])
+        self.assertFalse(char.messages)
+        self.assertGreaterEqual(trace.carry_out_gated, 1)
+
+    def test_no_args_usage(self):
+        char, actor = self._setup()
+        self._sethelp(char, actor, "")
+        self.assertTrue(any("Usage: @sethelp" in m for m in char.messages))
+
+    def test_add_new_entry(self):
+        char, actor = self._setup()
+        with mock.patch("evennia.utils.create.create_help_entry", return_value=object()) as mk:
+            self._sethelp(char, actor, "lore = In the beginning")
+        mk.assert_called_once()
+        args, kwargs = mk.call_args
+        self.assertEqual(args[0], "lore")
+        self.assertEqual(args[1], "In the beginning")
+        self.assertTrue(any("successfully created" in m for m in char.messages))
+
+    def test_existing_entry_no_switch_warns(self):
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore")
+        helper = StubHelper(search_results=[entry])
+        self._sethelp(char, actor, "lore = new text", helper=helper)
+        self.assertTrue(any("already exists" in m for m in char.messages))
+
+    def test_replace_overwrites(self):
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore", entrytext="old")
+        helper = StubHelper(search_results=[entry])
+        self._sethelp(char, actor, "lore = brand new", switches=("replace",), helper=helper)
+        self.assertEqual(entry.entrytext, "brand new")
+        self.assertTrue(entry.saved)
+        self.assertTrue(any("Overwrote" in m for m in char.messages))
+
+    def test_append_adds_text(self):
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore", entrytext="line one")
+        helper = StubHelper(search_results=[entry])
+        self._sethelp(char, actor, "lore = line two", switches=("append",), helper=helper)
+        self.assertEqual(entry.entrytext, "line one\nline two")
+        self.assertTrue(any("Entry updated" in m for m in char.messages))
+
+    def test_delete_removes_entry(self):
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore")
+        helper = StubHelper(search_results=[entry])
+        self._sethelp(char, actor, "lore", switches=("delete",), helper=helper)
+        self.assertTrue(entry.deleted)
+        self.assertTrue(any("Deleted help entry" in m for m in char.messages))
+
+    def test_category_change(self):
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore", help_category="general")
+        helper = StubHelper(search_results=[entry])
+        self._sethelp(char, actor, "lore = classes", switches=("category",), helper=helper)
+        self.assertEqual(entry.help_category, "classes")
+        self.assertTrue(any("changed to 'classes'" in m for m in char.messages))
+
+    def test_locks_change(self):
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore")
+        helper = StubHelper(search_results=[entry])
+        self._sethelp(char, actor, "lore = read:perm(Builder)", switches=("locks",), helper=helper)
+        self.assertEqual(entry.locks.get(), "read:perm(Builder)")
+        self.assertTrue(any("changed to: read:perm(Builder)" in m for m in char.messages))
+
+    def test_clash_warning_abort(self):
+        from evennia.commands.default.help import HelpCategory
+
+        char, actor = self._setup()
+        helper = StubHelper(search_results=[HelpCategory("combat")])
+        answers = iter(["n"])
+
+        def fake_input(actor_, prompt):
+            d = Deferred()
+            char.msg(prompt)
+            d.callback(next(answers))
+            return d
+
+        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+            with mock.patch("evennia.utils.create.create_help_entry") as mk:
+                self._sethelp(char, actor, "combat = how to fight", helper=helper)
+        self.assertTrue(any("Warning" in m for m in char.messages))
+        self.assertTrue(any("Aborted" in m for m in char.messages))
+        mk.assert_not_called()
+
+    def test_clash_warning_continue_creates_entry(self):
+        from evennia.commands.default.help import HelpCategory
+
+        char, actor = self._setup()
+        # match the category on the first search, miss the db-only re-search.
+        helper = StubHelper(search_results=[HelpCategory("combat"), None])
+        answers = iter(["y"])
+
+        def fake_input(actor_, prompt):
+            d = Deferred()
+            char.msg(prompt)
+            d.callback(next(answers))
+            return d
+
+        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+            with mock.patch("evennia.utils.create.create_help_entry", return_value=object()) as mk:
+                self._sethelp(char, actor, "combat = how to fight", helper=helper)
+        self.assertTrue(any("Warning" in m for m in char.messages))
+        mk.assert_called_once()
+
+    def test_verb_clash_warning_text(self):
+        from evennia.help.catalog import ActionHelpTopic
+
+        char, actor = self._setup()
+        topic = ActionHelpTopic("look", object, "general", [], "look around", True)
+        helper = StubHelper(search_results=[topic, None])
+        answers = iter(["n"])
+
+        def fake_input(actor_, prompt):
+            d = Deferred()
+            char.msg(prompt)
+            d.callback(next(answers))
+            return d
+
+        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+            self._sethelp(char, actor, "look = my topic", helper=helper)
+        self.assertTrue(any("key/alias of verb 'look'" in m for m in char.messages))
+
+    def test_edit_opens_editor_and_captures_through_engine(self):
+        from evennia.actions.action import Action
+        from evennia.actions.context import ActionContext
+        from evennia.actions.tests.fakes import ENGINE
+        from evennia.utils.eveditor import EvEditorState
+
+        char, actor = self._setup()
+        entry = FakeHelpEntry(key="lore", entrytext="")
+        with mock.patch("evennia.utils.create.create_help_entry", return_value=entry):
+            self._sethelp(char, actor, "lore", switches=("edit",))
+        self.assertTrue(actor.has_state(EvEditorState))
+
+        state = actor.state_objects[-1]
+        line = Action()
+        line._raw_string = "a help line"
+        ctx = ActionContext(providers=[state], actor=actor, raw_string="a help line")
+        ENGINE.dispatch(line, actor, ctx, record_phases=False)
+        self.assertIn("a help line", char.ndb._eveditor.get_buffer())
 
 
 if __name__ == "__main__":
