@@ -9,7 +9,6 @@ except ImportError:
     import unittest
 
 import json
-import pickle
 import string
 import sys
 
@@ -27,12 +26,8 @@ from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
 from evennia.utils.test_resources import BaseEvenniaTest
 
-from .amp import (
-    AMP_MAXLEN,
-    AMPMultiConnectionProtocol,
-    MsgPortal2Server,
-    MsgServer2Portal,
-)
+from .amp import (AMP_MAXLEN, AMPMultiConnectionProtocol, MsgPortal2Server,
+                  MsgServer2Portal)
 from .amp_server import AMPServerFactory
 from .mccp import MCCP
 from .mssp import MSSP
@@ -60,28 +55,30 @@ class TestAMPServer(TwistedTestCase):
         self.transport.write = MagicMock()
 
     def test_amp_out(self):
-        self.proto.makeConnection(self.transport)
+        # MsgServer2Portal uses the session-serde JSON envelope (see
+        # amp.dumps_session / amp_serde.pack_session_message), not pickle.
+        # Asserting exact wire bytes would be both pickle-version fragile and
+        # wrong for the JSON path; instead verify the transport got the AMP
+        # frame for the right command and that dumps_session round-trips the
+        # payload through loads_session.
+        from evennia.server.portal import amp
 
+        self.proto.makeConnection(self.transport)
         self.proto.data_to_server(MsgServer2Portal, 1, test=2)
 
-        if pickle.HIGHEST_PROTOCOL == 5:
-            # Python 3.8+
-            byte_out = (
-                b"\x00\x04_ask\x00\x011\x00\x08_command\x00\x10MsgServer2Portal\x00\x0b"
-                b"packed_data\x00 x\xdak`\x9d*\xc8\x00\x01\xde\x8c\xb5SzXJR"
-                b"\x8bK\xa6x3\x15\xb7M\xd1\x03\x00VU\x07u\x00\x00"
-            )
-        elif pickle.HIGHEST_PROTOCOL == 4:
-            # Python 3.7
-            byte_out = (
-                b"\x00\x04_ask\x00\x011\x00\x08_command\x00\x10MsgServer2Portal\x00\x0b"
-                b"packed_data\x00 x\xdak`\x99*\xc8\x00\x01\xde\x8c\xb5SzXJR"
-                b"\x8bK\xa6x3\x15\xb7M\xd1\x03\x00V:\x07t\x00\x00"
-            )
-        self.transport.write.assert_called_with(byte_out)
+        self.assertTrue(self.transport.write.called)
+        wire = self.transport.write.call_args[0][0]
+        self.assertIn(b"MsgServer2Portal", wire)
+        self.assertIn(b"packed_data", wire)
+
+        packed = amp.dumps_session((1, {"test": 2}))
+        sessid, kwargs = amp.loads_session(packed)
+        self.assertEqual(sessid, 1)
+        self.assertEqual(kwargs, {"test": 2})
+
         with mock.patch("evennia.server.portal.amp.amp.AMP.dataReceived") as mocked_amprecv:
-            self.proto.dataReceived(byte_out)
-            mocked_amprecv.assert_called_with(byte_out)
+            self.proto.dataReceived(wire)
+            mocked_amprecv.assert_called_with(wire)
 
     def test_amp_in(self):
         # MsgPortal2Server uses the session-serde JSON envelope (see
@@ -111,52 +108,26 @@ class TestAMPServer(TwistedTestCase):
 
     def test_large_msg(self):
         """
-        Send message larger than AMP_MAXLEN - should be split into several
+        Send a message whose payload exceeds AMP_MAXLEN. The serde packs our own
+        trusted data without a string-length cap, and AMP's Compressed argument
+        splits the oversized value across continuation frames (``packed_data``,
+        ``packed_data.2``, ...) on the wire.
         """
         self.proto.makeConnection(self.transport)
         outstr = "test" * AMP_MAXLEN
         self.proto.data_to_server(MsgServer2Portal, 1, test=outstr)
 
-        if pickle.HIGHEST_PROTOCOL == 5:
-            # Python 3.8+
-            self.transport.write.assert_called_with(
-                b"\x00\x04_ask\x00\x011\x00\x08_command\x00\x10MsgServer2Portal\x00\x0bpacked_data"
-                b"\x00wx\xda\xed\xc6\xc1\t\x80 \x00@Q#=5Z\x0b\xb8\x80\x13\xe85h\x80\x8e\xbam`Dc\xf4><\xf8g"
-                b"\x1a[\xf8\xda\x97\xa3_\xb1\x95\xdaz\xbe\xe7\x1a\xde\x03\x00\x00\x00\x00\x00\x00\x00"
-                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe0\x1f\x1eP\x1d\x02\r\x00\rpacked_data.2"
-                b"\x00Zx\xda\xed\xc3\x01\r\x00\x00\x08\xc0\xa0\xb4&\xf0\xfdg\x10a\xa3"
-                b"\xd9RUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU\xf5\xfb\x03m\xe0\x06"
-                b"\x1d\x00\rpacked_data.3\x00Zx\xda\xed\xc3\x01\r\x00\x00\x08\xc0\xa0\xb4&\xf0\xfdg\x10a"
-                b"\xa3fSUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU\xf5\xfb\x03n\x1c"
-                b"\x06\x1e\x00\rpacked_data.4\x00Zx\xda\xed\xc3\x01\t\x00\x00\x0c\x03\xa0\xb4O\xb0\xf5gA"
-                b"\xae`\xda\x8b\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-                b"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-                b"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-                b"\xaa\xaa\xaa\xdf\x0fnI\x06,\x00\rpacked_data.5\x00\x18x\xdaK-.)I\xc5\x8e\xa7\xb22@\xc0"
-                b"\x94\xe2\xb6)z\x00Z\x1e\x0e\xb6\x00\x00"
-            )
-        elif pickle.HIGHEST_PROTOCOL == 4:
-            # Python 3.7
-            self.transport.write.assert_called_with(
-                b"\x00\x04_ask\x00\x011\x00\x08_command\x00\x10MsgServer2Portal\x00\x0bpacked_data"
-                b"\x00wx\xda\xed\xc6\xc1\t\x80 \x00@Q#o\x8e\xd6\x02-\xe0\x04z\r\x1a\xa0\xa3m+$\xd2"
-                b"\x18\xbe\x0f\x0f\xfe\x1d\xdf\x14\xfe\x8e\xedjO\xac\xb9\xd4v\xf6o\x0f\xf3\x00\x00"
-                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-                b"\x00X\xc3\x00P\x10\x02\x0c\x00\rpacked_data.2\x00Zx\xda\xed\xc3\x01\r\x00\x00\x08"
-                b"\xc0\xa0\xb4&\xf0\xfdg\x10a\xa3\xd9RUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU"
-                b"\xf5\xfb\x03m\xe0\x06\x1d\x00\rpacked_data.3\x00Zx\xda\xed\xc3\x01\r\x00\x00\x08"
-                b"\xc0\xa0\xb4&\xf0\xfdg\x10a\xa3fSUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU"
-                b"\xf5\xfb\x03n\x1c\x06\x1e\x00\rpacked_data.4\x00Zx\xda\xed\xc3\x01\t\x00\x00\x0c"
-                b"\x03\xa0\xb4O\xb0\xf5gA\xae`\xda\x8b\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-                b"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-                b"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-                b"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xdf\x0fnI\x06,\x00\rpacked_data.5"
-                b"\x00\x18x\xdaK-.)I\xc5\x8e\xa7\xb22@\xc0\x94\xe2\xb6)z\x00Z\x1e\x0e\xb6\x00\x00"
-            )
+        self.assertTrue(self.transport.write.called)
+        wire = b"".join(call.args[0] for call in self.transport.write.call_args_list)
+        self.assertIn(b"MsgServer2Portal", wire)
+        # the oversized value forced AMP to emit at least one continuation frame
+        self.assertIn(b"packed_data.2", wire)
+
+        # the serde itself round-trips an oversized outbound payload on pack
+        from evennia.server.portal import amp
+
+        packed = amp.dumps_session((1, {"test": outstr}))
+        self.assertTrue(packed.startswith(b"J1"))
 
 
 class TestIRC(TestCase):

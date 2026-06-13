@@ -35,11 +35,19 @@ def _max_depth() -> int:
     return int(getattr(settings, "AMP_SESSION_MAX_DEPTH", _MAX_DEPTH) or _MAX_DEPTH)
 
 
-def sanitize_value(value: Any, *, depth: int = 0) -> Any:
+def sanitize_value(value: Any, *, depth: int = 0, enforce_limits: bool = True) -> Any:
     """
-    Allow only JSON-safe primitives and containers with bounded size/depth.
+    Allow only JSON-safe primitives and containers.
+
+    Type safety (no bytes, finite floats, JSON-safe int range, str dict keys) is
+    always enforced. The resource caps (string/list/dict/depth/payload size) are a
+    DoS guard against untrusted *inbound* payloads and are only enforced when
+    ``enforce_limits`` is True. On the *pack* (send) path we serialize our own
+    trusted data and AMP already frames/splits oversized payloads at the wire
+    level, so callers there pass ``enforce_limits=False`` to avoid rejecting
+    legitimate large outbound messages.
     """
-    if depth > _max_depth():
+    if enforce_limits and depth > _max_depth():
         raise ValueError("AMP session payload exceeds max nesting depth")
     if value is None or isinstance(value, bool):
         return value
@@ -52,47 +60,45 @@ def sanitize_value(value: Any, *, depth: int = 0) -> Any:
             raise ValueError("AMP session float must be finite")
         return value
     if isinstance(value, str):
-        if len(value) > _MAX_STR_LEN:
+        if enforce_limits and len(value) > _MAX_STR_LEN:
             raise ValueError("AMP session string exceeds max length")
         return value
     if isinstance(value, (bytes, bytearray)):
         raise TypeError("bytes are not allowed in AMP session payloads")
     if isinstance(value, list):
-        if len(value) > _MAX_LIST_LEN:
+        if enforce_limits and len(value) > _MAX_LIST_LEN:
             raise ValueError("AMP session list exceeds max length")
-        return [sanitize_value(v, depth=depth + 1) for v in value]
+        return [sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits) for v in value]
     if isinstance(value, tuple):
-        if len(value) > _MAX_LIST_LEN:
+        if enforce_limits and len(value) > _MAX_LIST_LEN:
             raise ValueError("AMP session tuple exceeds max length")
-        return [sanitize_value(v, depth=depth + 1) for v in value]
+        return [sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits) for v in value]
     if isinstance(value, dict):
-        if len(value) > _MAX_DICT_KEYS:
+        if enforce_limits and len(value) > _MAX_DICT_KEYS:
             raise ValueError("AMP session dict exceeds max keys")
         out = {}
         for key, val in value.items():
             if not isinstance(key, str):
                 raise TypeError("AMP session dict keys must be str")
-            if len(key) > 128:
+            if enforce_limits and len(key) > 128:
                 raise ValueError("AMP session dict key too long")
-            out[key] = sanitize_value(val, depth=depth + 1)
+            out[key] = sanitize_value(val, depth=depth + 1, enforce_limits=enforce_limits)
         return out
     raise TypeError(f"unsupported AMP session type: {type(value).__name__}")
 
 
-def sanitize_session_kwargs(kwargs: dict) -> dict:
+def sanitize_session_kwargs(kwargs: dict, *, enforce_limits: bool = True) -> dict:
     if not isinstance(kwargs, dict):
         raise TypeError("session kwargs must be a dict")
-    return sanitize_value(kwargs, depth=0)
+    return sanitize_value(kwargs, depth=0, enforce_limits=enforce_limits)
 
 
 def pack_session_message(sessid: int, kwargs: dict) -> bytes:
     """Pack (sessid, kwargs) for Msg* AMP commands."""
     if not isinstance(sessid, int) or sessid < 0:
         raise ValueError("sessid must be a non-negative int")
-    clean = sanitize_session_kwargs(kwargs)
+    clean = sanitize_session_kwargs(kwargs, enforce_limits=False)
     body = json.dumps([sessid, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    if len(body) > _MAX_PAYLOAD_BYTES:
-        raise ValueError("AMP session payload exceeds max size")
     return _SESSION_MAGIC + body
 
 
