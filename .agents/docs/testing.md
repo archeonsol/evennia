@@ -21,6 +21,20 @@ uv run evennia test --keepdb evennia                        # full suite
 
 If `.test_game_dir/` already exists with migrations applied, skip straight to the test command.
 
+### Always pipe test output to a temp file
+
+The full suite is long-running and produces far more output than fits in a single tool result. If you run the test command bare, you only get the **tail** of the output, so the first failure scrolls out of reach and you have to rerun the whole suite to see it. On a large suite that is up to an hour of wasted wall-clock per rerun.
+
+Pipe to a temp file with `tee` (which preserves live streaming) and inspect the file instead of rerunning:
+
+```bash
+uv run evennia test --keepdb evennia 2>&1 | tee /tmp/evennia-test.log
+# then read the file to find failures, e.g.:
+grep -nE 'FAIL|ERROR|Traceback' /tmp/evennia-test.log
+```
+
+Read the saved log for the failure details rather than re-executing the suite.
+
 ### Using `make` (requires `evennia` on PATH)
 
 These targets handle init/migrate automatically but require `evennia` installed in the current environment (e.g., via `pip install -e .` or an activated virtualenv):
