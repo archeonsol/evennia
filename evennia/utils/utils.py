@@ -1263,69 +1263,6 @@ def delay(timedelay, callback, *args, **kwargs):
     return _TASK_HANDLER.add(timedelay, callback, *args, **kwargs)
 
 
-_PPOOL = None
-_PCMD = None
-_PROC_ERR = "A process has ended with a probable error condition: process ended by signal 9."
-
-
-def run_async(to_execute, *args, **kwargs):
-    """
-    Runs a function or executes a code snippet asynchronously.
-
-    Args:
-        to_execute (callable): If this is a callable, it will be
-            executed with `*args` and non-reserved `**kwargs` as arguments.
-            The callable will be executed using ProcPool, or in a thread
-            if ProcPool is not available.
-    Keyword Args:
-        at_return (callable): Should point to a callable with one
-          argument.  It will be called with the return value from
-          to_execute.
-        at_return_kwargs (dict): This dictionary will be used as
-          keyword arguments to the at_return callback.
-        at_err (callable): This will be called with a Failure instance
-          if there is an error in to_execute.
-        at_err_kwargs (dict): This dictionary will be used as keyword
-          arguments to the at_err errback.
-
-    Notes:
-        All other `*args` and `**kwargs` will be passed on to
-        `to_execute`. Run_async will relay executed code to a thread
-        or procpool.
-
-        Use this function with restrain and only for features/commands
-        that you know has no influence on the cause-and-effect order of your
-        game (commands given after the async function might be executed before
-        it has finished). Accessing the same property from different threads
-        can lead to unpredicted behaviour if you are not careful (this is called a
-        "race condition").
-
-        Also note that some databases, notably sqlite3, don't support access from
-        multiple threads simultaneously, so if you do heavy database access from
-        your `to_execute` under sqlite3 you will probably run very slow or even get
-        tracebacks.
-
-    """
-
-    # handle special reserved input kwargs
-    callback = kwargs.pop("at_return", None)
-    errback = kwargs.pop("at_err", None)
-    callback_kwargs = kwargs.pop("at_return_kwargs", {})
-    errback_kwargs = kwargs.pop("at_err_kwargs", {})
-
-    if callable(to_execute):
-        # no process pool available, fall back to old deferToThread mechanism.
-        deferred = threads.deferToThread(to_execute, *args, **kwargs)
-    else:
-        # no appropriate input for this server setup
-        raise RuntimeError("'%s' could not be handled by run_async" % to_execute)
-
-    # attach callbacks
-    if callback:
-        deferred.addCallback(callback, **callback_kwargs)
-    deferred.addErrback(errback, **errback_kwargs)
-
-
 def check_evennia_dependencies():
     """
     Checks the versions of Evennia's dependencies including making
@@ -1343,13 +1280,6 @@ def check_evennia_dependencies():
     not_error = check_main_evennia_dependencies()
 
     errstring = ""
-    # South is no longer used ...
-    if "south" in settings.INSTALLED_APPS:
-        errstring += (
-            "\n ERROR: 'south' found in settings.INSTALLED_APPS. "
-            "\n   South is no longer used. If this was added manually, remove it."
-        )
-        not_error = False
     # IRC support
     if settings.IRC_ENABLED:
         try:
@@ -1699,15 +1629,6 @@ def class_from_module(path, defaultpaths=None, fallback=None):
 
 # alias
 object_from_module = class_from_module
-
-
-def init_new_account(account):
-    """
-    Deprecated.
-    """
-    from evennia.utils import logger
-
-    logger.log_dep("evennia.utils.utils.init_new_account is DEPRECATED and should not be used.")
 
 
 def string_similarity(string1, string2):
