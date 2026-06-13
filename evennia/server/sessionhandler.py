@@ -13,7 +13,6 @@ There are two similar but separate stores of sessions:
 
 """
 
-import time
 from codecs import decode as codecs_decode
 
 from django.conf import settings
@@ -23,13 +22,21 @@ from twisted.internet import defer
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.server.portal import amp
-from evennia.server.signals import (SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
-                                    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
-                                    SIGNAL_ACCOUNT_POST_LOGIN,
-                                    SIGNAL_ACCOUNT_POST_LOGOUT)
+from evennia.server.signals import (
+    SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
+    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
+    SIGNAL_ACCOUNT_POST_LOGIN,
+    SIGNAL_ACCOUNT_POST_LOGOUT,
+)
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import (callables_from_module, class_from_module,
-                                 delay, is_iter, is_veto, make_iter)
+from evennia.utils.utils import (
+    callables_from_module,
+    class_from_module,
+    delay,
+    is_iter,
+    is_veto,
+    make_iter,
+)
 
 
 def _send_admin_to_portal(session, **kwargs):
@@ -211,7 +218,7 @@ class SessionHandler(dict):
 
         def _validate(data):
             """
-            Helper function to convert data to AMP-safe (picketable) values"
+            Helper function to convert data to AMP-safe values.
 
             """
             if isinstance(data, dict):
@@ -230,7 +237,6 @@ class SessionHandler(dict):
                     and isinstance(self, ServerSessionHandler)
                 ):
                     # only apply funcparser on the outgoing path (sessionhandler->)
-                    # data = parse_inlinefunc(data, strip=strip_inlinefunc, session=session)
                     data = _FUNCPARSER.parse(data, strip=strip_inlinefunc, session=session)
 
                 return str(data)
@@ -675,29 +681,6 @@ class ServerSessionHandler(SessionHandler):
         for session in doublet_sessions:
             self.disconnect(session, reason)
 
-    def validate_sessions(self):
-        """
-        Check all currently connected sessions (logged in and not) and
-        see if any are dead or idle.
-
-        .. deprecated::
-            Idle timeout is handled by ``EvenniaServerService.process_idle_timeouts``
-            in ``server/service.py``. This method is never called by the engine and
-            exists only for backward compatibility with any code that called it
-            directly. Use ``service.process_idle_timeouts()`` instead.
-
-        """
-        tcurr = time.time()
-        reason = _("Idle timeout exceeded, disconnecting.")
-        for session in (
-            session
-            for session in self.values()
-            if session.logged_in
-            and settings.IDLE_TIMEOUT > 0
-            and (tcurr - session.cmd_last) > settings.IDLE_TIMEOUT
-        ):
-            self.disconnect(session, reason=reason)
-
     def account_count(self):
         """
         Get the number of connected accounts (not sessions since a
@@ -776,23 +759,6 @@ class ServerSessionHandler(SessionHandler):
         """
         uid = account.uid
         return [session for session in self.values() if session.logged_in and session.uid == uid]
-
-    def sessions_from_puppet(self, puppet):
-        """
-        Given a puppeted object, return all controlling sessions.
-
-        Args:
-            puppet (Object): Object puppeted
-
-        Returns.
-            sessions (Session or list): Can be more than one of Object is controlled by more than
-                one Session (MULTISESSION_MODE > 1).
-
-        """
-        sessions = puppet.sessid.get()
-        return sessions[0] if len(sessions) == 1 else sessions
-
-    sessions_from_character = sessions_from_puppet
 
     def sessions_from_csessid(self, csessid):
         """
