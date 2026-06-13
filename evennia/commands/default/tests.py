@@ -1631,29 +1631,6 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdScripts(), "Obj =", "dbref ")
 
         self.call(
-            building.CmdScripts(), "/start Obj = ", "Script on Obj Started "
-        )  # we allow running start again; this should still happen
-        self.call(building.CmdScripts(), "/stop Obj =", "Script on Obj Stopped - ")
-
-        self.call(
-            building.CmdScripts(),
-            "Obj = scripts.scripts.DefaultScript",
-            "Script scripts.scripts.DefaultScript successfully added",
-            inputs=["Y"],
-        )
-        self.call(
-            building.CmdScripts(),
-            "/start Obj = scripts.scripts.DefaultScript",
-            "Script on Obj Started ",
-            inputs=["Y"],
-        )
-        self.call(
-            building.CmdScripts(),
-            "/stop Obj = scripts.scripts.DefaultScript",
-            "Script on Obj Stopped ",
-            inputs=["Y"],
-        )
-        self.call(
             building.CmdScripts(),
             "/delete Obj = scripts.scripts.DefaultScript",
             "Script on Obj Deleted ",

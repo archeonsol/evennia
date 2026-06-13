@@ -305,7 +305,7 @@ the authoritative roster.
 | `at_post_msg` | `DefaultChannel` | self | Fires once after all receivers processed. Conventional spot for logging. |
 | `at_server_reload` | `DefaultScript` | self | Fired from EvenniaServerService.shutdown on reload-style stops; persist non-persistent state here. |
 | `at_server_shutdown` | `DefaultScript` | self | Fired from EvenniaServerService.shutdown on full-shutdown stops. |
-| `at_server_start` | `DefaultScript` | self | Fired from EvenniaServerService.run_init_hooks. Use for timer-less startup setup. |
+| `at_server_start` | `DefaultScript` | self | Fired from EvenniaServerService.run_init_hooks. |
 | `at_cmdset_get` | `LifecycleMixin` | self | Last-second mutation of the merged cmdset. See command-system.md. |
 | `at_first_save` | `LifecycleMixin` | self | Driven by Django post_save signal (created=True). Override at_object_creation instead. |
 | `at_object_creation` | `LifecycleMixin` | self | One-shot creation hook. Fires once per object via at_first_save. |
@@ -325,12 +325,8 @@ the authoritative roster.
 | `at_post_traverse` | `MovementMixin` | self | Fires on the exit after the move chain has completed. |
 | `at_db_location_postsave` | `ObjectDB` | self | Engine-internal: fires after db_location is saved. Reconciles the contents cache. |
 | `at_first_save` | `ScriptBase` | self | Driven by Django post_save signal (created=True). Override at_script_creation instead. |
-| `at_pause` | `ScriptBase` | self | Fires when the timer pauses (manual or server reload). |
-| `at_repeat` | `ScriptBase` | self | Fires on every interval tick after start(). is_valid()=False stops further repeats. |
 | `at_script_creation` | `ScriptBase` | self | One-shot creation hook. Fires once per script via at_first_save. |
 | `at_script_post_creation` | `ScriptBase` | self | Fires after at_script_creation and _createdict processing. Symmetric to at_object_post_creation. |
-| `at_start` | `ScriptBase` | self | Fires when the timer starts or resumes from pause. |
-| `at_stop` | `ScriptBase` | self | Fires when the timer stops permanently. |
 | `at_cmdset_get` | `ServerSession` | self | Session-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get. |
 | `at_disconnect` | `ServerSession` | self | Session-side disconnect hook. |
 | `at_login` | `ServerSession` | self | Session-side login hook. Updates last_login on the account. |

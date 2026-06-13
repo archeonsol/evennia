@@ -2791,23 +2791,6 @@ class CmdExamine(ObjManipCommand):
         if hasattr(obj, "db_persistent"):
             return "T" if obj.db_persistent else "F"
 
-    def format_script_timer_data(self, obj):
-        if hasattr(obj, "db_interval") and obj.db_interval > 0:
-            start_delay = "T" if obj.db_start_delay else "F"
-            next_repeat = obj.time_until_next_repeat()
-            active = "|grunning|n" if obj.db_is_active and next_repeat else "|rinactive|n"
-            interval = obj.db_interval
-            next_repeat = "N/A" if next_repeat is None else f"{next_repeat}s"
-            repeats = ""
-            if obj.db_repeats:
-                remaining_repeats = obj.remaining_repeats()
-                remaining_repeats = 0 if remaining_repeats is None else remaining_repeats
-                repeats = f" - {remaining_repeats}/{obj.db_repeats} remain"
-            return (
-                f"{active} - interval: {interval}s "
-                f"(next: {next_repeat}{repeats}, start_delay: {start_delay})"
-            )
-
     def format_channel_sub_totals(self, obj):
         if hasattr(obj, "db_account_subscriptions"):
             account_subs = obj.db_account_subscriptions.all()
@@ -2872,7 +2855,6 @@ class CmdExamine(ObjManipCommand):
         if self.object_type == "script":
             objdata["Description"] = self.format_script_desc(obj)
             objdata["Persistent"] = self.format_script_is_persistent(obj)
-            objdata["Script Repeat"] = self.format_script_timer_data(obj)
         objdata["Scripts"] = self.format_scripts(obj)
         objdata["Tags"] = self.format_tags(obj)
         objdata["Persistent Attributes"] = self.format_attributes(obj)
@@ -3305,9 +3287,6 @@ class ScriptEvMore(EvMore):
             "|wdbref|n",
             "|wobj|n",
             "|wkey|n",
-            "|wintval|n",
-            "|wnext|n",
-            "|wrept|n",
             "|wtypeclass|n",
             "|wdesc|n",
             align="r",
@@ -3316,20 +3295,6 @@ class ScriptEvMore(EvMore):
         )
 
         for script in scripts:
-            nextrep = script.time_until_next_repeat()
-            if nextrep is None:
-                nextrep = script.db._paused_time
-                nextrep = f"PAUSED {int(nextrep)}s" if nextrep else "--"
-            else:
-                nextrep = f"{nextrep}s"
-
-            maxrepeat = script.repeats
-            remaining = script.remaining_repeats() or 0
-            if maxrepeat:
-                rept = "%i/%i" % (maxrepeat - remaining, maxrepeat)
-            else:
-                rept = "-/-"
-
             table.add_row(
                 f"#{script.id}",
                 (
@@ -3338,9 +3303,6 @@ class ScriptEvMore(EvMore):
                     else "<Global>"
                 ),
                 script.db_key,
-                script.interval if script.interval > 0 else "--",
-                nextrep,
-                rept,
                 script.typeclass_path.rsplit(".", 1)[-1],
                 crop(script.desc, width=20),
             )
@@ -3350,18 +3312,14 @@ class ScriptEvMore(EvMore):
 
 class CmdScripts(COMMAND_DEFAULT_CLASS):
     """
-    List and manage all running scripts. Allows for creating new global
-    scripts.
+    List and manage all scripts. Allows for creating new global scripts.
 
     Usage:
       script[/switches] [script-#dbref, key, script.path]
-      script[/start||stop] <obj> = [<script.path or script-key>]
+      script[/delete] <obj> = [<script.path or script-key>]
 
     Switches:
-      start  - start/unpause an existing script's timer.
-      stop   - stops an existing script's timer
-      pause  - pause a script's timer
-      delete - deletes script. This will also stop the timer as needed
+      delete - deletes script
 
     Examples:
         script                             - list all scripts
@@ -3369,13 +3327,11 @@ class CmdScripts(COMMAND_DEFAULT_CLASS):
                                              and key 'key'
         script foo.bar.Script              - create a new global Script with typeclass
                                              (key taken from typeclass or auto-generated)
-        script/pause foo.bar.Script        - pause global script
         script typeclass|name|#dbref       - examine named existing global script
         script/delete #dbref[-#dbref]      - delete script or range by #dbref
 
         script myobj =                    - list all scripts on object
         script myobj = foo.bar.Script     - create and assign script to object
-        script/stop myobj = name|#dbref   - stop named script on object
         script/delete myobj = name|#dbref - delete script on object
         script/delete myobj =             - delete ALL scripts on object
 
@@ -3383,29 +3339,24 @@ class CmdScripts(COMMAND_DEFAULT_CLASS):
     assigns a new script to that object. Without an `<obj>`, this
     manages and inspects global scripts.
 
-    If no switches are given, this command just views all active
-    scripts. The argument can be either an object, at which point it
-    will be searched for all scripts defined on it, or a script name
-    or #dbref. For using the /stop switch, a unique script #dbref is
-    required since whole classes of scripts often have the same name.
-
-    Use the `script` build-level command for managing scripts attached to
-    objects.
+    Scripts are storage-only typeclasses with no timer component. If no
+    switches are given, this command just lists scripts. The argument can be
+    either an object, at which point it will be searched for all scripts
+    defined on it, or a script name or #dbref. For using the /delete switch, a
+    unique script #dbref is required since whole classes of scripts often have
+    the same name.
 
     """
 
     key = "@scripts"
     aliases = ["@script"]
-    switch_options = ("start", "stop", "pause", "delete")
+    switch_options = ("delete",)
     locks = "cmd:perm(scripts) or perm(Builder)"
     help_category = "System"
 
     excluded_typeclass_paths = ["evennia.prototypes.prototypes.DbPrototype"]
 
     switch_mapping = {
-        "start": "|gStarted|n",
-        "stop": "|RStopped|n",
-        "pause": "|Paused|n",
         "delete": "|rDeleted|n",
     }
     # never show these script types
@@ -3502,16 +3453,15 @@ class CmdScripts(COMMAND_DEFAULT_CLASS):
                 # we have an object
                 if self.rhs:
                     # creation mode
-                    if obj.scripts.add(self.typeclass_query, key=self.key_query, autostart=True):
+                    if obj.scripts.add(self.typeclass_query, key=self.key_query):
                         caller.msg(
-                            f"Script |w{self.rhs}|n successfully added and "
-                            f"started on {obj.get_display_name(caller)}."
+                            f"Script |w{self.rhs}|n successfully added to "
+                            f"{obj.get_display_name(caller)}."
                         )
                     else:
                         caller.msg(
-                            f"Script {self.rhs} could not be added and/or started "
-                            f"on {obj.get_display_name(caller)} (or it started and "
-                            "immediately shut down)."
+                            f"Script {self.rhs} could not be added "
+                            f"to {obj.get_display_name(caller)}."
                         )
                 else:
                     # just show all scripts on object

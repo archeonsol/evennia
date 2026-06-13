@@ -35,27 +35,15 @@ class BotStarter(DefaultScript):
         self.persistent = True
 
     def at_server_start(self):
-        self.at_start()
+        self._kick_bot()
 
-    def at_start(self):
+    def _kick_bot(self):
         """
         Kick bot into gear.
 
         """
         if not self.account.sessions.all():
             self.account.start()
-
-    def at_repeat(self):
-        """
-        Called self.interval seconds to keep connection. We cannot use
-        the IDLE command from inside the game since the system will
-        not catch it (commands executed from the server side usually
-        has no sessions). So we update the idle counter manually here
-        instead. This keeps the bot getting hit by IDLE_TIMEOUT.
-
-        """
-        for session in evennia.SESSION_HANDLER.sessions_from_account(self.account):
-            session.update_session_counters(idle=True)
 
 
 #

@@ -1586,7 +1586,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 # no puppet to disconnect from
                 pass
             session.sessionhandler.disconnect(session, reason=_("Account being deleted."))
-        self.scripts.stop()
+        self.scripts.delete()
         self.attributes.clear()
         self.nicks.clear()
         self.aliases.clear()

@@ -68,37 +68,3 @@ def run_cached_at_init_burst(mode: str) -> None:
         reactor.callLater(0, _start)
     else:
         _start()
-
-
-def schedule_lazy_global_scripts(scripts) -> None:
-    """
-    Start non-critical global scripts on later reactor ticks (batched).
-    """
-    if not scripts:
-        return
-    batch_size = max(1, int(getattr(settings, "GLOBAL_SCRIPTS_LAZY_BATCH_SIZE", 5) or 5))
-    delay = max(0.0, float(getattr(settings, "GLOBAL_SCRIPTS_LAZY_DELAY", 0) or 0))
-    defer = bool(getattr(settings, "GLOBAL_SCRIPTS_DEFER_LAZY_START", True))
-    if not defer:
-        for script in scripts:
-            try:
-                script.start()
-            except Exception:
-                logger.log_trace("at_init_scheduler: lazy global script start failed")
-        return
-
-    def _start_batch(index: int) -> None:
-        end = min(index + batch_size, len(scripts))
-        for script in scripts[index:end]:
-            try:
-                script.start()
-            except Exception:
-                logger.log_trace("at_init_scheduler: lazy global script start failed")
-        if end < len(scripts):
-            from twisted.internet import reactor
-
-            reactor.callLater(delay, _start_batch, end)
-
-    from twisted.internet import reactor
-
-    reactor.callLater(0, _start_batch, 0)

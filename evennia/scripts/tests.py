@@ -8,12 +8,11 @@ from unittest import TestCase, mock
 
 from evennia import DefaultScript
 from evennia.objects.objects import DefaultObject
-from evennia.scripts import scripts
 from evennia.scripts.manager import ScriptDBManager
 from evennia.scripts.models import ObjectDoesNotExist, ScriptDB
 from evennia.scripts.monitorhandler import MonitorHandler
 from evennia.scripts.ondemandhandler import OnDemandHandler, OnDemandTask
-from evennia.scripts.scripts import DoNothing, ExtendedLoopingCall
+from evennia.scripts.scripts import DoNothing
 from evennia.scripts.taskhandler import TASK_HANDLER
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils.create import create_script
@@ -41,19 +40,17 @@ class TestScriptDBManager(TestCase):
         self.assertEqual(returned_list, [])
 
 
-class TestingListIntervalScript(DefaultScript):
+class TestingStorageScript(DefaultScript):
     """
-    A script that does nothing. Used to test listing of script with nonzero intervals.
+    A storage-only script used to test the ScriptHandler.
     """
 
     def at_script_creation(self):
         """
         Setup the script
         """
-        self.key = "interval_test"
+        self.key = "storage_test"
         self.desc = "This is an empty placeholder script."
-        self.interval = 1
-        self.repeats = 1
 
 
 class ScriptWithStoredRef(DefaultScript):
@@ -68,39 +65,33 @@ class TestScriptHandler(BaseEvenniaTest):
 
     def setUp(self):
         self.obj, self.errors = DefaultObject.create("test_object")
-        self.obj.scripts.add(TestingListIntervalScript)
+        self.obj.scripts.add(TestingStorageScript)
 
     def tearDown(self):
         self.obj.delete()
 
-    def test_start(self):
-        "Check that ScriptHandler start function works correctly"
-        self.num = self.obj.scripts.start(self.obj.scripts.all()[0].key)
-        self.assertEqual(self.num, 1)
-
-    def test_list_script_intervals(self):
-        "Checks that Scripthandler __str__ function lists script intervals correctly"
+    def test_list_scripts(self):
+        "Checks that ScriptHandler __str__ lists scripts by key and desc"
         self.str = str(self.obj.scripts)
-        self.assertTrue("None/1" in self.str)
-        self.assertTrue("1 repeats" in self.str)
+        self.assertTrue("storage_test" in self.str)
 
     def test_get_all_scripts(self):
         "Checks that Scripthandler get_all returns correct number of scripts"
-        self.assertEqual([script.key for script in self.obj.scripts.all()], ["interval_test"])
+        self.assertEqual([script.key for script in self.obj.scripts.all()], ["storage_test"])
 
     def test_get_script(self):
         "Checks that Scripthandler get function returns correct script"
-        script = self.obj.scripts.get("interval_test")
+        script = self.obj.scripts.get("storage_test")
         self.assertTrue(bool(script))
 
     def test_add_already_existing_script(self):
         "Checks that Scripthandler add function adds script correctly"
 
         # make a new script with no obj connection
-        script = create_script(TestingListIntervalScript, key="interval_test2")
+        script = create_script(TestingStorageScript, key="storage_test2")
         self.obj.scripts.add(script)
-        self.assertEqual([script], list(self.obj.scripts.get("interval_test2")))
-        self.assertTrue(bool(self.obj.scripts.get("interval_test")))
+        self.assertEqual([script], list(self.obj.scripts.get("storage_test2")))
+        self.assertTrue(bool(self.obj.scripts.get("storage_test")))
 
 
 class TestScriptDB(TestCase):
@@ -126,14 +117,6 @@ class TestScriptDB(TestCase):
         with self.assertRaises(ObjectDoesNotExist):
             self.scr.delete()
             self.scr.delete()
-
-    def test_deleted_script_fails_start(self):
-        "Would it ever be necessary to start a deleted script?"
-        self.scr.delete()
-        with self.assertRaises(ScriptDB.DoesNotExist):  # See issue #509
-            self.scr.start()
-        # Check the script is not recreated as a side-effect
-        self.assertFalse(self.scr in ScriptDB.objects.get_all_scripts())
 
 
 class TestScriptOptionalDefault(TestCase):
@@ -171,76 +154,6 @@ class TestScriptOptionalFixture(EvenniaTest):
         self.assertIsNotNone(self.char1)
         self.assertIsNotNone(self.room1)
         self.assertIsNotNone(self.account)
-
-
-class TestExtendedLoopingCall(TestCase):
-    """
-    Test the ExtendedLoopingCall class.
-
-    """
-
-    @mock.patch.object(scripts, "LoopingCall")
-    def test_start__nodelay(self, MockClass):
-        """Test the .start method with no delay"""
-
-        callback = mock.MagicMock()
-        loopcall = ExtendedLoopingCall(callback)
-        loopcall.__call__ = mock.MagicMock()
-        loopcall._scheduleFrom = mock.MagicMock()
-        loopcall.clock.seconds = mock.MagicMock(return_value=0)
-
-        loopcall.start(20, now=True, start_delay=None, count_start=1)
-        loopcall._scheduleFrom.assert_not_called()
-
-    @mock.patch.object(scripts, "LoopingCall")
-    def test_start__delay(self, MockLoopingCall):
-        """Test the .start method with delay"""
-
-        callback = mock.MagicMock()
-        MockLoopingCall.clock.seconds = mock.MagicMock(return_value=0)
-
-        loopcall = ExtendedLoopingCall(callback)
-        loopcall.__call__ = mock.MagicMock()
-        loopcall.clock.seconds = mock.MagicMock(return_value=121)
-        loopcall._scheduleFrom = mock.MagicMock()
-
-        loopcall.start(20, now=False, start_delay=10, count_start=1)
-
-        loopcall.__call__.assert_not_called()
-        self.assertEqual(loopcall.interval, 20)
-        loopcall._scheduleFrom.assert_called_with(121)
-
-    def test_start_invalid_interval(self):
-        """Test the .start method with interval less than zero"""
-        with self.assertRaises(ValueError):
-            callback = mock.MagicMock()
-            loopcall = ExtendedLoopingCall(callback)
-            loopcall.start(-1, now=True, start_delay=None, count_start=1)
-
-    def test__call__when_delay(self):
-        """Test __call__ modifies start_delay and starttime if start_delay was previously set"""
-        callback = mock.MagicMock()
-        loopcall = ExtendedLoopingCall(callback)
-        loopcall.clock.seconds = mock.MagicMock(return_value=1)
-        loopcall.start_delay = 2
-        loopcall.starttime = 0
-
-        loopcall()
-
-        self.assertEqual(loopcall.start_delay, None)
-        self.assertEqual(loopcall.starttime, 1)
-
-    def test_force_repeat(self):
-        """Test forcing script to run that is scheduled to run in the future"""
-        callback = mock.MagicMock()
-        loopcall = ExtendedLoopingCall(callback)
-        loopcall.clock.seconds = mock.MagicMock(return_value=0)
-
-        loopcall.start(20, now=False, start_delay=5, count_start=0)
-        loopcall.force_repeat()
-        loopcall.stop()
-
-        callback.assert_called_once()
 
 
 def dummy_func():

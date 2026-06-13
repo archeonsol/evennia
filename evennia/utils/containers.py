@@ -142,7 +142,6 @@ class GlobalScriptContainer(Container):
             elif script_hash != compare_hash:
                 # wipe the old version and create anew
                 logger.log_info(f"GLOBAL_SCRIPTS: Settings changed for {key} ({typeclass}).")
-                script.stop()
                 script.delete()
                 script = None
 
@@ -164,34 +163,20 @@ class GlobalScriptContainer(Container):
         Called last in evennia.__init__ to initialize the container late
         (after script typeclasses have finished loading).
 
-        We include all global scripts in the handler and
-        make sure to auto-load time-based scripts.
+        Ensures every script declared in `settings.GLOBAL_SCRIPTS` exists
+        in the database (creating or recreating it as needed). Scripts are
+        storage-only typeclasses with no timer component, so there is
+        nothing further to "run".
 
         """
         # populate self.typeclass_storage
         if not self.loaded:
             self.load_data()
 
-        # make sure settings-defined scripts are loaded
-        critical_scripts = []
-        lazy_scripts = []
-        for key in self.loaded_data:
-            script = self._load_script(key)
-            if not script:
-                continue
-            priority = (self.loaded_data[key].get("start_priority") or "critical").lower()
-            if priority == "lazy":
-                lazy_scripts.append(script)
-            else:
-                critical_scripts.append(script)
+        # make sure settings-defined scripts exist
         try:
-            for script in critical_scripts:
-                script.start()
-            if lazy_scripts:
-                from evennia.server.at_init_scheduler import \
-                    schedule_lazy_global_scripts
-
-                schedule_lazy_global_scripts(lazy_scripts)
+            for key in self.loaded_data:
+                self._load_script(key)
         except (OperationalError, ProgrammingError):
             # this can happen if db is not loaded yet (such as when building docs)
             pass

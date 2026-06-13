@@ -37,27 +37,10 @@ class ScriptHandler(object):
         scripts = ScriptDB.objects.get_all_scripts_on_obj(self.obj)
         string = ""
         for script in scripts:
-            interval = "inf"
-            next_repeat = "inf"
-            repeats = "inf"
-            if script.interval > 0:
-                interval = script.interval
-                if script.repeats:
-                    repeats = script.repeats
-                try:
-                    next_repeat = script.time_until_next_repeat()
-                except Exception:
-                    next_repeat = "?"
-            string += _("\n '{key}' ({next_repeat}/{interval}, {repeats} repeats): {desc}").format(
-                key=script.key,
-                next_repeat=next_repeat,
-                interval=interval,
-                repeats=repeats,
-                desc=script.desc,
-            )
+            string += _("\n '{key}': {desc}").format(key=script.key, desc=script.desc)
         return string.strip()
 
-    def add(self, scriptclass, key=None, autostart=True):
+    def add(self, scriptclass, key=None):
         """
         Add a script to this object.
 
@@ -67,22 +50,18 @@ class ScriptHandler(object):
                 script object or a python path to such a class object.
             key (str, optional): Identifier for the script (often set
                 in script definition and listings)
-            autostart (bool, optional): Start the script upon adding it.
 
         Returns:
             Script: The newly created Script.
 
         """
         if isinstance(scriptclass, str) or callable(scriptclass):
-            # a str or class to use create before adding to an Object. We wait to autostart
-            # so we can differentiate a failing creation from a script that immediately starts/stops.
+            # a str or class to create before adding to an Object.
             if self.obj.__dbclass__.__name__ == "AccountDB":
                 # we add to an Account, not an Object
-                script = create.create_script(
-                    scriptclass, key=key, account=self.obj, autostart=False
-                )
+                script = create.create_script(scriptclass, key=key, account=self.obj)
             else:
-                script = create.create_script(scriptclass, key=key, obj=self.obj, autostart=False)
+                script = create.create_script(scriptclass, key=key, obj=self.obj)
         else:
             # already an instantiated class
             script = scriptclass
@@ -98,33 +77,7 @@ class ScriptHandler(object):
         if not script:
             logger.log_err(f"Script {scriptclass} failed to be created.")
             return None
-        if autostart:
-            script.start()
-        if not script.id:
-            # this can happen if the script has repeats=1 or calls stop() in at_repeat.
-            logger.log_info(
-                f"Script {scriptclass} started and then immediately stopped; "
-                "it could probably be a normal function."
-            )
         return script
-
-    def start(self, key):
-        """
-        Find scripts and force-start them
-
-        Args:
-            key (str): The script's key or dbref.
-
-        Returns:
-            nr_started (int): The number of started scripts found.
-
-        """
-        scripts = ScriptDB.objects.get_all_scripts_on_obj(self.obj, key=key)
-        num = 0
-        for script in scripts:
-            script.start()
-            num += 1
-        return num
 
     def has(self, key):
         """
@@ -175,9 +128,8 @@ class ScriptHandler(object):
             num += 1
         return num
 
-    # legacy aliases to remove
+    # alias
     delete = remove
-    stop = delete
 
     def all(self):
         """

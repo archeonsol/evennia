@@ -109,7 +109,6 @@ class ScriptDBManager(TypedObjectManager):
         """
         scripts = self.get_id(dbref)
         for script in make_iter(scripts):
-            script.stop()
             script.delete()
 
     def remove_non_persistent(self, obj=None):
@@ -119,32 +118,25 @@ class ScriptDBManager(TypedObjectManager):
         Args:
             obj (Object, optional): If given, only remove non-persistent scripts
                 attached to this object. If not given, all non-persistent scripts
-                in the database are stopped and deleted.
+                in the database are deleted.
 
         """
         qs = self.filter(db_persistent=False)
         if obj is not None:
             qs = qs.filter(db_obj=obj)
         for script in qs:
-            script.stop()
             script.delete()
 
     def update_scripts_after_server_start(self):
         """
-        Update/sync/restart/delete scripts after server shutdown/restart.
+        Fire the `at_server_start` hook on all scripts after a server
+        start/reload.
 
         """
-        for script in self.filter(db_is_active=True, db_persistent=False):
-            script._stop_task()
-
-        for script in self.filter(db_is_active=True):
-            script._unpause_task(auto_unpause=True)
+        for script in self.all():
             script.at_server_start()
 
-        for script in self.filter(db_is_active=False):
-            script.at_server_start()
-
-    def search_script(self, ostring, obj=None, only_timed=False, typeclass=None):
+    def search_script(self, ostring, obj=None, typeclass=None):
         """
         Search for a particular script.
 
@@ -152,8 +144,6 @@ class ScriptDBManager(TypedObjectManager):
             ostring (str): Search criterion - a script dbef or key.
             obj (Object, optional): Limit search to scripts defined on
                 this object
-            only_timed (bool): Limit search only to scripts that run
-                on a timer.
             typeclass (class or str): Typeclass or path to typeclass.
 
         Returns:
@@ -169,7 +159,7 @@ class ScriptDBManager(TypedObjectManager):
             dbref_match = self.dbref_search(dbref)
             if dbref_match:
                 dmatch = dbref_match[0]
-                if (not obj or dmatch.obj == obj) and (not only_timed or dmatch.interval > 0):
+                if not obj or dmatch.obj == obj:
                     return dbref_match
 
         if typeclass:
@@ -180,11 +170,8 @@ class ScriptDBManager(TypedObjectManager):
 
         # not a dbref; normal search
         obj_restriction = obj and Q(db_obj=obj) or Q()
-        timed_restriction = only_timed and Q(db_interval__gt=0) or Q()
         typeclass_restriction = typeclass and Q(db_typeclass_path=typeclass) or Q()
-        scripts = self.filter(
-            timed_restriction & obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring)
-        )
+        scripts = self.filter(obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring))
         return scripts
 
     # back-compatibility alias
@@ -212,9 +199,7 @@ class ScriptDBManager(TypedObjectManager):
 
         from evennia.utils import create
 
-        new_script = create.create_script(
-            typeclass, key=new_key, obj=new_obj, locks=new_locks, autostart=True
-        )
+        new_script = create.create_script(typeclass, key=new_key, obj=new_obj, locks=new_locks)
         return new_script
 
     def create_script(
@@ -224,11 +209,7 @@ class ScriptDBManager(TypedObjectManager):
         obj=None,
         account=None,
         locks=None,
-        interval=None,
-        start_delay=None,
-        repeats=None,
         persistent=None,
-        autostart=True,
         report_to=None,
         desc=None,
         tags=None,
@@ -236,10 +217,9 @@ class ScriptDBManager(TypedObjectManager):
     ):
         """
         Create a new script. All scripts are a combination of a database
-        object that communicates with the database, and an typeclass that
-        'decorates' the database object into being different types of
-        scripts.  It's behaviour is similar to the game objects except
-        scripts has a time component and are more limited in scope.
+        object that communicates with the database, and a typeclass that
+        'decorates' the database object. A Script is a typeclassed storage
+        container with no timer component.
 
         Keyword Args:
             typeclass (class or str): Class or python path to a typeclass.
@@ -250,17 +230,8 @@ class ScriptDBManager(TypedObjectManager):
             account (Account): The account on which this Script sits. It is
                 exclusiv to `obj`.
             locks (str): one or more lockstrings, separated by semicolons.
-            interval (int): The triggering interval for this Script, in
-                seconds. If unset, the Script will not have a timing
-                component.
-            start_delay (bool): If `True`, will wait `interval` seconds
-                before triggering the first time.
-            repeats (int): The number of times to trigger before stopping.
-                If unset, will repeat indefinitely.
             persistent (bool): If this Script survives a server shutdown
                 or not (all Scripts will survive a reload).
-            autostart (bool): If this Script will start immediately when
-                created or if the `start` method must be called explicitly.
             report_to (Object): The object to return error messages to.
             desc (str): Optional description of script
             tags (list): List of tags or tuples (tag, category).
@@ -293,12 +264,6 @@ class ScriptDBManager(TypedObjectManager):
             kwarg["db_account"] = dbid_to_obj(account, _AccountDB)
         if obj:
             kwarg["db_obj"] = dbid_to_obj(obj, _ObjectDB)
-        if interval:
-            kwarg["db_interval"] = max(0, interval)
-        if start_delay:
-            kwarg["db_start_delay"] = start_delay
-        if repeats:
-            kwarg["db_repeats"] = max(0, repeats)
         if persistent:
             kwarg["db_persistent"] = persistent
         if desc:
@@ -315,11 +280,7 @@ class ScriptDBManager(TypedObjectManager):
             obj=obj,
             account=account,
             locks=locks,
-            interval=interval,
-            start_delay=start_delay,
-            repeats=repeats,
             persistent=persistent,
-            autostart=autostart,
             report_to=report_to,
             desc=desc,
             tags=tags,
@@ -331,9 +292,7 @@ class ScriptDBManager(TypedObjectManager):
         new_script.save()
 
         if not new_script.id:
-            # this happens in the case of having a repeating script with `repeats=1` and
-            # `start_delay=False` - the script will run once and immediately stop before
-            # save is over.
+            # defensive: a creation hook may have deleted the script before save completed.
             return None
 
         signals.SIGNAL_SCRIPT_POST_CREATE.send(sender=new_script)

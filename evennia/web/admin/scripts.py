@@ -35,17 +35,9 @@ class ScriptForm(forms.ModelForm):
         "<i>type:lockfunction(args);type2:lockfunction2(args);...",
     )
 
-    db_interval = forms.IntegerField(
-        label="Repeat Interval",
-        help_text="Optional timer component.<BR>How often to call the Script's<BR>`at_repeat` hook, in seconds."
-        "<BR>Set to 0 to disable.",
-    )
-    db_repeats = forms.IntegerField(
-        help_text="Only repeat this many times." "<BR>Set to 0 to run indefinitely."
-    )
-    db_start_delay = forms.BooleanField(help_text="Wait <B>Interval</B> seconds before first call.")
     db_persistent = forms.BooleanField(
-        label="Survives reboot", help_text="If unset, a server reboot will remove the timer."
+        label="Survives reboot",
+        help_text="If unset, a server reboot will remove this script.",
     )
 
 
@@ -71,8 +63,6 @@ class ScriptAdmin(admin.ModelAdmin):
         "db_key",
         "db_typeclass_path",
         "db_obj",
-        "db_interval",
-        "db_repeats",
         "db_persistent",
         "db_date_created",
     )
@@ -93,7 +83,7 @@ class ScriptAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     ("db_key", "db_typeclass_path"),
-                    ("db_interval", "db_repeats", "db_start_delay", "db_persistent"),
+                    "db_persistent",
                     "db_obj",
                     "db_lock_storage",
                     "serialized_string",

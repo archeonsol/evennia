@@ -612,8 +612,6 @@ class EvenniaServerService(MultiService):
                 if not s.id:
                     continue
                 try:
-                    if s.is_active:
-                        await defer.maybeDeferred(s._pause_task, auto_pause=True)
                     await defer.maybeDeferred(s.at_server_reload)
                 except Exception:
                     logger.log_trace(f"Error in at_server_reload on script {s}")
@@ -652,10 +650,9 @@ class EvenniaServerService(MultiService):
                 await self._await_hooks(accounts, "at_server_shutdown")
                 evennia.ObjectDB.objects.clear_all_sessids()
             for s in evennia.ScriptDB.get_all_cached_instances():
-                if not s.id or not s.is_active:
+                if not s.id:
                     continue
                 try:
-                    await defer.maybeDeferred(s._pause_task, auto_pause=True)
                     await defer.maybeDeferred(s.at_server_shutdown)
                 except Exception:
                     logger.log_trace(f"Error in at_server_shutdown on script {s}")
@@ -809,11 +806,10 @@ class EvenniaServerService(MultiService):
         shutdown or a reset.
 
         """
-        # Remove non-persistent scripts
+        # Remove non-persistent scripts (they do not survive a cold start)
         from evennia.scripts.models import ScriptDB
 
-        for script in ScriptDB.objects.filter(db_persistent=False):
-            script._stop_task()
+        ScriptDB.objects.remove_non_persistent()
 
         if settings.GUEST_ENABLED:
             for guest in evennia.AccountDB.objects.all().filter(
