@@ -18,6 +18,7 @@ from evennia.scripts.taskhandler import TASK_HANDLER
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils.create import create_script
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTest
+from evennia.utils.utils import class_from_module
 
 
 class TestScript(BaseEvenniaTest):
@@ -133,6 +134,26 @@ class TestScriptDB(TestCase):
             self.scr.start()
         # Check the script is not recreated as a side-effect
         self.assertFalse(self.scr in ScriptDB.objects.get_all_scripts())
+
+
+class TestScriptOptionalDefault(TestCase):
+    """
+    Scripts are the one BASE_*_TYPECLASS a game may leave undefined, so the
+    shipped default must resolve to an engine class rather than a game-dir
+    path.
+    """
+
+    def test_shipped_default_is_engine_absolute(self):
+        from evennia.settings_default import BASE_SCRIPT_TYPECLASS
+
+        # must be an `evennia.`-rooted path so it resolves with no game dir,
+        # not a `typeclasses.*` path that assumes the game defines one.
+        self.assertTrue(
+            BASE_SCRIPT_TYPECLASS.startswith("evennia."),
+            f"BASE_SCRIPT_TYPECLASS must be an engine-absolute path, got {BASE_SCRIPT_TYPECLASS!r}",
+        )
+        cls = class_from_module(BASE_SCRIPT_TYPECLASS)
+        self.assertTrue(issubclass(cls, DefaultScript))
 
 
 class TestExtendedLoopingCall(TestCase):

@@ -745,9 +745,13 @@ BASE_ROOM_TYPECLASS = "typeclasses.rooms.Room"
 BASE_EXIT_TYPECLASS = "typeclasses.exits.Exit"
 # Typeclass for Channel (fallback).
 BASE_CHANNEL_TYPECLASS = "typeclasses.channels.Channel"
-# Typeclass for Scripts (fallback). You usually don't need to change this
-# but create custom variations of scripts on a per-case basis instead.
-BASE_SCRIPT_TYPECLASS = "typeclasses.scripts.Script"
+# Typeclass for Scripts (fallback). Unlike the other BASE_*_TYPECLASS
+# defaults (objects/characters/rooms/accounts), this points at an engine
+# class rather than a game-dir path: a game may legitimately define zero
+# script typeclasses, so the default must resolve even when
+# `typeclasses/scripts.py` is absent. A game that adds behaviour to its own
+# Script must set this explicitly.
+BASE_SCRIPT_TYPECLASS = "evennia.scripts.scripts.DefaultScript"
 # The default home location used for all objects. This is used as a
 # fallback if an object's normal home location is deleted. Default
 # is Limbo (#2).
