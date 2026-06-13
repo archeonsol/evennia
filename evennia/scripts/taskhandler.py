@@ -256,7 +256,6 @@ class TaskHandler:
         # number of seconds before an uncalled canceled task is removed from TaskHandler
         self.stale_timeout = 60
         self._now = False  # used in unit testing to manually set now time
-        self._next_task_id = 1  # monotonically increasing; avoids O(n) scan for free IDs
 
     def load(self):
         """Load from the ServerConfig.
@@ -396,7 +395,6 @@ class TaskHandler:
         task_id = 1
         while task_id in self.tasks:
             task_id += 1
-        self._next_task_id = task_id + 1
 
         # record the task to the tasks dictionary
         persistent = kwargs.get("persistent", False)
@@ -549,10 +547,6 @@ class TaskHandler:
             self.tasks = {}
         if self.to_save:
             self.to_save = {}
-        # Reset the next-id hint so the scan in add() finds 1 immediately.
-        # (The scan would find it anyway, but this keeps the bookkeeping
-        # in sync with an empty tasks dict.)
-        self._next_task_id = 1
         if save:
             self.save()
         return True
