@@ -544,18 +544,19 @@ def flush_cache(**kwargs):
 
     for cls in class_hierarchy([SharedMemoryModel]):
         cls.flush_instance_cache()
-    # Drop the Redis L2 attribute cache too, otherwise cached Attribute
-    # rows leak across boundaries that already clear the in-process
-    # idmapper (test tearDown, post_migrate, the @reload/flush admin
-    # command). No-op unless ATTRIBUTE_REDIS_CACHE_ENABLED is on and a
-    # Redis connection is reachable. Wrapped so a Redis hiccup never
-    # breaks idmapper flush.
+    # Drop the (retired) Redis L2 attribute cache. flush_all_keys is now a
+    # no-op stub, but the import is guarded so a missing module never breaks
+    # the idmapper flush; a real failure inside the call is a genuine bug and
+    # must surface rather than vanish.
     try:
         from evennia.typeclasses.redis_attr_cache import flush_all_keys
-
-        flush_all_keys()
-    except Exception:
-        pass
+    except ImportError:
+        flush_all_keys = None
+    if flush_all_keys is not None:
+        try:
+            flush_all_keys()
+        except Exception:
+            logger.log_trace("idmapper: redis attr-cache flush failed")
     # run the python garbage collector
     return gc.collect()
 

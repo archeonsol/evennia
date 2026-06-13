@@ -28,6 +28,7 @@ from evennia.comms import managers
 from evennia.locks.lockhandler import LockHandler
 from evennia.typeclasses.models import TypedObject
 from evennia.typeclasses.tags import Tag, TagHandler
+from evennia.utils import logger
 from evennia.utils.idmapper.models import SharedMemoryModel
 from evennia.utils.utils import crop, lazy_property, make_iter
 
@@ -611,10 +612,13 @@ class SubscriptionHandler:
                 elif clsname == "AccountDB":
                     self.obj.db_account_subscriptions.add(subscriber)
                 if add_subscriber is not None:
+                    # add_subscriber absorbs Redis-down internally (returns a
+                    # no-op when the backend is unavailable); anything escaping
+                    # here is a genuine bug, so surface it instead of vanishing.
                     try:
                         add_subscriber(self.obj, subscriber)
                     except Exception:
-                        pass
+                        logger.log_trace("channel subscriber cache add failed for %s" % subscriber)
         self._recache()
 
     def remove(self, entity):
@@ -638,11 +642,16 @@ class SubscriptionHandler:
         try:
             from evennia.comms.channel_subscriber_cache import \
                 remove_subscriber
-
-            for subscriber in make_iter(entity):
-                remove_subscriber(self.obj, subscriber)
         except Exception:
-            pass
+            remove_subscriber = None
+        if remove_subscriber is not None:
+            # remove_subscriber absorbs Redis-down internally; anything escaping
+            # here is a genuine bug, so log it instead of silently dropping it.
+            for subscriber in make_iter(entity):
+                try:
+                    remove_subscriber(self.obj, subscriber)
+                except Exception:
+                    logger.log_trace("channel subscriber cache remove failed for %s" % subscriber)
 
     def all(self):
         """
@@ -694,10 +703,15 @@ class SubscriptionHandler:
         self._cache = None
         try:
             from evennia.comms.channel_subscriber_cache import clear_channel
-
-            clear_channel(self.obj)
         except Exception:
-            pass
+            clear_channel = None
+        if clear_channel is not None:
+            # clear_channel absorbs Redis-down internally; anything escaping
+            # here is a genuine bug, so log it instead of silently dropping it.
+            try:
+                clear_channel(self.obj)
+            except Exception:
+                logger.log_trace("channel subscriber cache clear failed")
 
 
 class ChannelDB(TypedObject):

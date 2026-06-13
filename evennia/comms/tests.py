@@ -180,3 +180,57 @@ class TestRemoveSubscriberFromAllChannels(BaseEvenniaTest):
                     sender=type(instance), instance=instance
                 )
         helper.assert_not_called()
+
+
+class TestSubscriberCacheErrorsAreLogged(BaseEvenniaTest):
+    """A genuine (non-backend-down) cache error must be logged, not swallowed.
+
+    The cache functions absorb Redis-down internally, so anything that escapes
+    them is a real bug. Subscribe/unsubscribe must still complete the DB write
+    while surfacing the error via log_trace instead of vanishing.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.channel, _ = DefaultChannel.create("buggy", description="bug channel")
+
+    def test_add_subscriber_error_is_logged_and_subscription_persists(self):
+        from evennia.comms import models as comms_models
+
+        with patch(
+            "evennia.comms.channel_subscriber_cache.add_subscriber",
+            side_effect=TypeError("boom"),
+        ):
+            with patch.object(comms_models.logger, "log_trace") as log_trace:
+                self.channel.subscriptions.add(self.char1)
+
+        log_trace.assert_called()
+        # The DB-side subscription must still have landed.
+        self.assertTrue(self.channel.subscriptions.has(self.char1))
+
+    def test_remove_subscriber_error_is_logged(self):
+        from evennia.comms import models as comms_models
+
+        self.channel.subscriptions.add(self.char1)
+        with patch(
+            "evennia.comms.channel_subscriber_cache.remove_subscriber",
+            side_effect=TypeError("boom"),
+        ):
+            with patch.object(comms_models.logger, "log_trace") as log_trace:
+                self.channel.subscriptions.remove(self.char1)
+
+        log_trace.assert_called()
+        self.assertFalse(self.channel.subscriptions.has(self.char1))
+
+    def test_clear_channel_error_is_logged(self):
+        from evennia.comms import models as comms_models
+
+        self.channel.subscriptions.add(self.char1)
+        with patch(
+            "evennia.comms.channel_subscriber_cache.clear_channel",
+            side_effect=TypeError("boom"),
+        ):
+            with patch.object(comms_models.logger, "log_trace") as log_trace:
+                self.channel.subscriptions.clear()
+
+        log_trace.assert_called()
