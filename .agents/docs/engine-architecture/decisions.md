@@ -61,10 +61,10 @@ longer recommended. Downstream blocking-site migration is game-repo work.
 
 Recurring work had four answers (`global_tick`, `Script.interval`, a racing
 APScheduler daemon thread, TickerHandler). **Decision:** one primitive,
-`evennia/utils/systems.py`: declared cadence x scope, reactor bodies once per
-fire, overlap-guarded, discovered via `SYSTEM_MODULES`; per-object runtime
-timers unsupported (TickerHandler deleted). The systems-plus-clock half of a
-future ECS. Migration + tranche B: [the AS2 prompt](../../prompts/AS2-system-scheduler.md).
+`evennia/utils/systems.py`: declared cadence x scope, reactor bodies once per fire,
+overlap-guarded via `SYSTEM_MODULES`; per-object runtime timers gone (systems-plus-clock
+half of a future ECS). Both tranches shipped (A: TickerHandler `.89`; B: `Script.interval`
+machinery + timer columns + all consumers, `.93` — **Script is now storage-only**). [AS2 prompt](../../prompts/AS2-system-scheduler.md).
 
 ## Hook registry (H1)
 

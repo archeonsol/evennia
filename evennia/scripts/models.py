@@ -67,11 +67,7 @@ class ScriptDB(TypedObject):
       desc - optional description of script
       obj - the object the script is linked to, if any
       account - the account the script is linked to (exclusive with obj)
-      interval - how often script should run
-      start_delay - if the script should start repeating right away
-      repeats - how many times the script should repeat
       persistent - if script should survive a server reboot
-      is_active - bool if script is currently running
 
     """
 
@@ -112,46 +108,8 @@ class ScriptDB(TypedObject):
         help_text="the account to store this script on (should not be set if db_obj is set)",
     )
 
-    # how often to run Script (secs). -1 means there is no timer
-    db_interval = models.IntegerField(
-        "interval", default=-1, help_text="how often to repeat script, in seconds. <= 0 means off."
-    )
-    # start script right away or wait interval seconds first.
-    # Kept as BooleanField for migration compatibility; use db_start_delay_secs for new code.
-    db_start_delay = models.BooleanField(
-        "start delay", default=False, help_text="pause interval seconds before starting."
-    )
-    # Explicit start delay in seconds (0 = use db_interval, -1 = start immediately).
-    # Supersedes db_start_delay for precise timing.
-    db_start_delay_secs = models.IntegerField(
-        "start delay secs",
-        default=0,
-        help_text="Explicit start-delay in seconds. 0 = use db_interval, -1 = start immediately.",
-    )
-    # how many times this script is to be repeated, if interval!=0.
-    db_repeats = models.IntegerField("number of repeats", default=0, help_text="0 means off.")
     # defines if this script should survive a reboot or not
     db_persistent = models.BooleanField("survive server reboot", default=True)
-    # defines if this script has already been started in this session
-    db_is_active = models.BooleanField("script active", default=False)
-    # Pause state — first-class DB columns so pause survives cache eviction.
-    db_paused_time = models.FloatField(
-        "paused time",
-        null=True,
-        blank=True,
-        help_text="Remaining seconds when script was paused (null = not paused).",
-    )
-    db_paused_callcount = models.IntegerField(
-        "paused callcount",
-        null=True,
-        blank=True,
-        help_text="Task callcount captured when script was paused.",
-    )
-    db_manually_paused = models.BooleanField(
-        "manually paused",
-        default=False,
-        help_text="True when the script was paused explicitly via pause(), not auto-paused.",
-    )
 
     # Database manager
     objects = ScriptDBManager()

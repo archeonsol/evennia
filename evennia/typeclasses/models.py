@@ -681,14 +681,6 @@ class TypedObject(SharedMemoryModel):
 
         # if we get to this point, the class is ok.
 
-        if inherits_from(self, "evennia.scripts.models.ScriptDB"):
-            if self.interval > 0:
-                raise RuntimeError(
-                    "Cannot use swap_typeclass on time-dependent "
-                    "Script '%s'.\nStop and start a new Script of the "
-                    "right type instead." % self.key
-                )
-
         self.typeclass_path = new_typeclass.path
         self.__class__ = new_typeclass
 

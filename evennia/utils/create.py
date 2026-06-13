@@ -120,10 +120,9 @@ def create_object(*args, **kwargs):
 def create_script(*args, **kwargs):
     """
     Create a new script. All scripts are a combination of a database
-    object that communicates with the database, and an typeclass that
-    'decorates' the database object into being different types of
-    scripts.  It's behaviour is similar to the game objects except
-    scripts has a time component and are more limited in scope.
+    object that communicates with the database, and a typeclass that
+    'decorates' the database object. A Script is a typeclassed storage
+    container with no timer component.
 
     Keyword Args:
         typeclass (class or str): Class or python path to a typeclass.
@@ -134,17 +133,8 @@ def create_script(*args, **kwargs):
         account (Account): The account on which this Script sits. It is
             exclusiv to `obj`.
         locks (str): one or more lockstrings, separated by semicolons.
-        interval (int): The triggering interval for this Script, in
-            seconds. If unset, the Script will not have a timing
-            component.
-        start_delay (bool): If `True`, will wait `interval` seconds
-            before triggering the first time.
-        repeats (int): The number of times to trigger before stopping.
-            If unset, will repeat indefinitely.
         persistent (bool): If this Script survives a server shutdown
             or not (all Scripts will survive a reload).
-        autostart (bool): If this Script will start immediately when
-            created or if the `start` method must be called explicitly.
         report_to (Object): The object to return error messages to.
         desc (str): Optional description of script
         tags (list): List of tags or tuples (tag, category).

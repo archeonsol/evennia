@@ -1,13 +1,13 @@
 """
-This module defines Scripts, out-of-character entities that can store
-data both on themselves and on other objects while also having the
-ability to run timers.
+This module defines Scripts, out-of-character entities that store data on
+themselves and on other objects through the typeclass system.
+
+A Script has no in-game presence and no timer component: it is a persistent
+(or non-persistent) typeclassed storage container. Recurring work belongs to
+the System Scheduler (`evennia.utils.systems`); one-shot delayed callbacks
+belong to `evennia.utils.delay`.
 
 """
-
-from django.utils.translation import gettext as _
-from twisted.internet.defer import Deferred, maybeDeferred
-from twisted.internet.task import LoopingCall
 
 from evennia.hooks import hook
 from evennia.scripts.manager import ScriptManager
@@ -18,129 +18,10 @@ from evennia.utils import create, logger
 __all__ = ["DefaultScript", "DoNothing", "Store"]
 
 
-class ExtendedLoopingCall(LoopingCall):
-    """
-    Custom child of LoopingCall that can start at a delay different than
-    `self.interval` and self.count=0. This allows it to support pausing
-    by resuming at a later period.
-
-    """
-
-    start_delay = None
-    callcount = 0
-
-    def start(self, interval, now=True, start_delay=None, count_start=0):
-        """
-        Start running function every interval seconds.
-
-        This overloads the LoopingCall default by offering the
-        start_delay keyword and ability to repeat.
-
-        Args:
-            interval (int): Repeat interval in seconds.
-            now (bool, optional): Whether to start immediately or after
-                `start_delay` seconds.
-            start_delay (int, optional): This only applies is `now=False`. It gives
-                number of seconds to wait before starting. If `None`, use
-                `interval` as this value instead. Internally, this is used as a
-                way to start with a variable start time after a pause.
-            count_start (int): Number of repeats to start at. The  count
-                goes up every time the system repeats. This is used to
-                implement something repeating `N` number of times etc.
-
-        Raises:
-            AssertError: if trying to start a task which is already running.
-            ValueError: If interval is set to an invalid value < 0.
-
-        Notes:
-            As opposed to Twisted's inbuilt count mechanism, this
-            system will count also if force_repeat() was called rather
-            than just the number of `interval` seconds since the start.
-            This allows us to force-step through a limited number of
-            steps if we want.
-
-        """
-        assert not self.running, "Tried to start an already running ExtendedLoopingCall."
-        if interval < 0:
-            raise ValueError("interval must be >= 0")
-        self.running = True
-        deferred = self._deferred = Deferred()
-        self.starttime = self.clock.seconds()
-        self.interval = interval
-        self._runAtStart = now
-        self.callcount = max(0, count_start)
-        self.start_delay = start_delay if start_delay is None else max(0, start_delay)
-
-        if now:
-            # run immediately
-            self()
-        elif start_delay is not None and start_delay >= 0:
-            # start after some time: for this to work we need to
-            # trick _scheduleFrom by temporarily setting a different
-            # self.interval for it to check.
-            real_interval, self.interval = self.interval, start_delay
-            self._scheduleFrom(self.starttime)
-            # re-set the actual interval (this will be picked up
-            # next time it runs
-            self.interval = real_interval
-        else:
-            self._scheduleFrom(self.starttime)
-        return deferred
-
-    def __call__(self):
-        """
-        Tick one step. We update callcount (tracks number of calls) as
-        well as null start_delay (needed in order to correctly
-        estimate next_call_time at all times).
-
-        """
-        self.callcount += 1
-        if self.start_delay:
-            self.start_delay = None
-            self.starttime = self.clock.seconds()
-        if self._deferred:
-            LoopingCall.__call__(self)
-
-    def force_repeat(self):
-        """
-        Force-fire the callback
-
-        Raises:
-            AssertionError: When trying to force a task that is not
-                running.
-
-        """
-        assert self.running, "Tried to fire an ExtendedLoopingCall that was not running."
-        self.call.cancel()
-        self.call = None
-        self.starttime = self.clock.seconds()
-        self()
-
-    def next_call_time(self):
-        """
-        Get the next call time. This also takes the eventual effect
-        of start_delay into account.
-
-        Returns:
-            int or None: The time in seconds until the next call. This
-                takes `start_delay` into account. Returns `None` if
-                the task is not running.
-
-        """
-        if self.running and self.interval > 0:
-            total_runtime = self.clock.seconds() - self.starttime
-            interval = self.start_delay or self.interval
-            if interval <= 0:
-                return 0
-            return max(0, interval - (total_runtime % interval))
-
-
 class ScriptBase(ScriptDB, metaclass=TypeclassBase):
     """
     Base class for scripts. Don't inherit from this, inherit from the
     class `DefaultScript` below instead.
-
-    This handles the timer-component of the Script.
 
     """
 
@@ -151,291 +32,6 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
 
     def __repr__(self):
         return str(self)
-
-    @hook(
-        extends="TypedObject.at_idmapper_flush",
-        notes="Pauses any LoopingCall before allowing the flush.",
-    )
-    def at_idmapper_flush(self):
-        """
-        If we're flushing this object, make sure the LoopingCall is gone too.
-        """
-        ret = super().at_idmapper_flush()
-        if ret and self.ndb._task:
-            self.ndb._pause_task(auto_pause=True)
-        # TODO - restart anew ?
-        return ret
-
-    def _start_task(
-        self,
-        interval=None,
-        start_delay=None,
-        repeats=None,
-        force_restart=False,
-        auto_unpause=False,
-        **kwargs,
-    ):
-        """
-        Start/Unpause task runner, optionally with new values. If given, this will
-        update the Script's fields.
-
-        Keyword Args:
-            interval (int): How often to tick the task, in seconds. If this is <= 0,
-                no task will start and properties will not be updated on the Script.
-            start_delay (int): If the start should be delayed.
-            repeats (int): How many repeats. 0 for infinite repeats.
-            force_restart (bool): If set, always create a new task running even if an
-                old one already was running. Otherwise this will only happen if
-                new script properties were passed.
-            auto_unpause (bool): This is an automatic unpaused (used e.g by Evennia after
-                a reload) and should not un-pause manually paused Script timers.
-        Note:
-            If setting the `start-delay` of a *paused* Script, the Script will
-            restart exactly after that new start-delay, ignoring the time it
-            was paused at. If only changing the `interval`, the Script will
-            come out of pause comparing the time it spent in the *old* interval
-            with the *new* interval in order to determine when next to fire.
-
-        Examples:
-            - Script previously had an interval of 10s and was paused 5s into that interval.
-              Script is now restarted with a 20s interval. It will next fire after 15s.
-            - Same Script is restarted with a 3s interval. It will fire immediately.
-
-        """
-        if self.pk is None:
-            # script object already deleted from db - don't start a new timer
-            raise ScriptDB.DoesNotExist
-
-        # handle setting/updating fields
-        update_fields = []
-        old_interval = self.db_interval
-        if interval is not None:
-            self.db_interval = interval
-            update_fields.append("db_interval")
-        if start_delay is not None:
-            # note that for historical reasons, the start_delay is a boolean field, not an int; the
-            # actual value is only used with the task.
-            self.db_start_delay = bool(start_delay)
-            update_fields.append("db_start_delay")
-        if repeats is not None:
-            self.db_repeats = repeats
-            update_fields.append("db_repeats")
-
-        # validate interval
-        if self.db_interval and self.db_interval > 0:
-            if not self.is_active:
-                self.db_is_active = True
-                update_fields.append("db_is_active")
-        else:
-            # no point in starting a task with no interval.
-            return
-
-        restart = bool(update_fields) or force_restart
-        self.save(update_fields=update_fields)
-
-        if self.ndb._task and self.ndb._task.running:
-            if restart:
-                # a change needed/forced; stop/remove old task
-                self._stop_task()
-            else:
-                # task alreaady running and no changes needed
-                return
-
-        if not self.ndb._task:
-            # we should have a fresh task after this point
-            self.ndb._task = ExtendedLoopingCall(self._step_task)
-
-        self._unpause_task(
-            interval=interval,
-            start_delay=start_delay,
-            auto_unpause=auto_unpause,
-            old_interval=old_interval,
-        )
-
-        if not self.ndb._task.running:
-            # Determine actual start delay: prefer the explicit seconds column, fall back to
-            # the old boolean flag (True → delay by one interval).
-            effective_start_delay = start_delay
-            if effective_start_delay is None:
-                if self.db_start_delay_secs > 0:
-                    effective_start_delay = self.db_start_delay_secs
-                elif self.db_start_delay_secs == -1:
-                    effective_start_delay = None  # start immediately
-                # db_start_delay_secs == 0 means "use db_start_delay boolean"
-            self.ndb._task.start(
-                self.db_interval,
-                now=not (self.db_start_delay or bool(effective_start_delay)),
-                start_delay=effective_start_delay,
-            )
-
-        self.at_start(**kwargs)
-
-    def _pause_task(self, auto_pause=False, **kwargs):
-        """
-        Pause task where it is, saving the current status.
-
-        Args:
-            auto_pause (str):
-
-        """
-        if not self.db_paused_time:
-            # only allow pause if not already paused
-            task = self.ndb._task
-            if task:
-                self.db_paused_time = task.next_call_time()
-                self.db_paused_callcount = task.callcount
-                self.db_manually_paused = not auto_pause
-                if task.running:
-                    task.stop()
-            self.ndb._task = None
-            if self.pk is None:
-                # Test fixtures and pre-start lifecycle paths can call pause()
-                # on a Script that was never saved. save(update_fields=...)
-                # would raise ValueError without a pk; fall back to a full
-                # save (which inserts) when called outside that constraint.
-                self.save()
-            else:
-                self.save(
-                    update_fields=[
-                        "db_paused_time",
-                        "db_paused_callcount",
-                        "db_manually_paused",
-                    ]
-                )
-
-            self.at_pause(auto_pause=auto_pause, **kwargs)
-
-    def _unpause_task(
-        self, interval=None, start_delay=None, auto_unpause=False, old_interval=0, **kwargs
-    ):
-        """
-        Unpause task from paused status. This is used for auto-paused tasks, such
-        as tasks paused on a server reload.
-
-        Args:
-            interval (int): How often to tick the task, in seconds.
-            start_delay (int): If the start should be delayed.
-            auto_unpause (bool): If set, this will only unpause scripts that were unpaused
-                automatically (useful during a system reload/shutdown).
-            old_interval (int): The old Script interval (or current one if nothing changed). Used
-                to recalculate the unpause startup interval.
-
-        """
-        paused_time = self.db_paused_time
-        if paused_time:
-            if auto_unpause and self.db_manually_paused:
-                # this was manually paused.
-                return
-
-            # task was paused. This will use the new values as needed.
-            callcount = self.db_paused_callcount or 0
-            if start_delay is None and interval is not None:
-                # adjust start-delay based on how far we were into previous interval
-                start_delay = max(0, interval - (old_interval - paused_time))
-            else:
-                start_delay = paused_time
-
-            if not self.ndb._task:
-                self.ndb._task = ExtendedLoopingCall(self._step_task)
-
-            self.ndb._task.start(
-                self.db_interval, now=False, start_delay=start_delay, count_start=callcount
-            )
-            self.db_paused_time = None
-            self.db_paused_callcount = None
-            self.db_manually_paused = False
-            self.save(update_fields=["db_paused_time", "db_paused_callcount", "db_manually_paused"])
-
-            self.at_start(**kwargs)
-
-    def _stop_task(self, **kwargs):
-        """
-        Stop task runner and delete the task.
-
-        """
-        task_stopped = False
-        task = self.ndb._task
-        if task and task.running:
-            task.stop()
-            task_stopped = True
-
-        self.ndb._task = None
-        self.db_is_active = False
-
-        # make sure this is not confused as a paused script
-        self.db_paused_time = None
-        self.db_paused_callcount = None
-        self.db_manually_paused = False
-
-        self.save(
-            update_fields=[
-                "db_is_active",
-                "db_paused_time",
-                "db_paused_callcount",
-                "db_manually_paused",
-            ]
-        )
-        if task_stopped:
-            self.at_stop(**kwargs)
-
-    def _step_errback(self, e):
-        """
-        Callback for runner errors
-
-        """
-        cname = self.__class__.__name__
-        estring = _(
-            "Script {key}(#{dbid}) of type '{name}': at_repeat() error '{err}'.".format(
-                key=self.key, dbid=self.dbid, name=cname, err=e.getErrorMessage()
-            )
-        )
-        try:
-            self.db_obj.msg(estring)
-        except Exception:
-            # we must not crash inside the errback, even if db_obj is None.
-            pass
-        logger.log_err(estring)
-
-    def _step_callback(self):
-        """
-        Step task runner. No try..except needed due to defer wrap.
-
-        """
-        if not self.ndb._task:
-            # if there is no task, we have no business using this method
-            return
-
-        if not self.is_valid():
-            self.stop()
-            return
-
-        # call hook
-        try:
-            self.at_repeat()
-        except Exception:
-            logger.log_trace()
-            raise
-
-        # check repeats
-        if self.ndb._task:
-            # we need to check for the task in case stop() was called
-            # inside at_repeat() and it already went away.
-            callcount = self.ndb._task.callcount
-            maxcount = self.db_repeats
-            if maxcount > 0 and maxcount <= callcount:
-                self.stop()
-
-    def _step_task(self):
-        """
-        Step task. This groups error handling.
-        """
-        try:
-            return maybeDeferred(self._step_callback).addErrback(self._step_errback)
-        except Exception:
-            logger.log_trace()
-        return None
-
-    # Access methods / hooks
 
     @hook(
         event="creation",
@@ -481,15 +77,6 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             elif self.db_key != cdict["key"]:
                 self.db_key = cdict["key"]
                 updates.append("db_key")
-            if cdict.get("interval") and self.interval != cdict["interval"]:
-                self.db_interval = max(0, cdict["interval"])
-                updates.append("db_interval")
-            if cdict.get("start_delay") and self.start_delay != cdict["start_delay"]:
-                self.db_start_delay = cdict["start_delay"]
-                updates.append("db_start_delay")
-            if cdict.get("repeats") and self.repeats != cdict["repeats"]:
-                self.db_repeats = max(0, cdict["repeats"])
-                updates.append("db_repeats")
             if cdict.get("persistent") and self.persistent != cdict["persistent"]:
                 self.db_persistent = cdict["persistent"]
                 updates.append("db_persistent")
@@ -514,10 +101,6 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
                 for key, value in cdict["nattributes"].items():
                     self.nattributes.add(key, value)
 
-            if cdict.get("autostart"):
-                # autostart the script
-                self._start_task(force_restart=True)
-
         self.at_script_post_creation()
 
     @hook(
@@ -539,8 +122,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
 
     def delete(self):
         """
-        Delete the Script. Normally stops any timer task. This fires at_pre_delete before
-        deletion.
+        Delete the Script. This fires at_pre_delete before deletion.
 
         Returns:
             bool: If deletion was successful or not. Only time this can fail would be if
@@ -551,7 +133,6 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         if not self.pk or not self.at_pre_delete():
             return False
 
-        self._stop_task()
         # Match ObjectDB/AccountDB/ChannelDB: route attribute removal through
         # the AttributeHandler so backend invalidation (Redis L2) fires
         # per-attr rather than leaving keys orphaned until TTL expiry.
@@ -602,7 +183,7 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
     )
     def at_pre_delete(self):
         """
-        Called when script is deleted, before the script timer stops.
+        Called when script is deleted, before deletion proceeds.
 
         Returns:
             bool: If False, deletion is aborted.
@@ -610,202 +191,14 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
         """
         return True
 
-    def is_valid(self):
-        """
-        If returning False, `at_repeat` will not be called and timer will stop
-        updating.
-        """
-        return True
-
-    @hook(
-        event="script_timer",
-        phase="composite",
-        actor="self",
-        returns="ignored",
-        discipline="public",
-        fires_from=(),
-        notes="Fires on every interval tick after start(). is_valid()=False stops further repeats.",
-    )
-    def at_repeat(self, **kwargs):
-        """
-        Called repeatedly every `interval` seconds, once `.start()` has
-        been called on the Script at least once.
-
-        Args:
-            **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
-
-        """
-        pass
-
-    @hook(
-        event="script_timer",
-        phase="composite",
-        actor="self",
-        returns="ignored",
-        discipline="public",
-        fires_from=("ScriptBase._start_task",),
-        notes="Fires when the timer starts or resumes from pause.",
-    )
-    def at_start(self, **kwargs):
-        pass
-
-    @hook(
-        event="script_timer",
-        phase="composite",
-        actor="self",
-        returns="ignored",
-        discipline="public",
-        fires_from=("ScriptBase._pause_task",),
-        notes="Fires when the timer pauses (manual or server reload).",
-    )
-    def at_pause(self, **kwargs):
-        pass
-
-    @hook(
-        event="script_timer",
-        phase="composite",
-        actor="self",
-        returns="ignored",
-        discipline="public",
-        fires_from=("ScriptBase._stop_task",),
-        notes="Fires when the timer stops permanently.",
-    )
-    def at_stop(self, **kwargs):
-        pass
-
-    def start(self, interval=None, start_delay=None, repeats=None, **kwargs):
-        """
-        Start/Unpause timer component, optionally with new values. If given,
-        this will update the Script's fields. This will start `at_repeat` being
-        called every `interval` seconds.
-
-        Keyword Args:
-            interval (int): How often to fire `at_repeat` in seconds.
-            start_delay (int): If the start of ticking should be delayed and by how much.
-            repeats (int): How many repeats. 0 for infinite repeats.
-            **kwargs: Optional (default unused) kwargs passed on into the `at_start` hook.
-
-        Notes:
-            If setting the `start-delay` of a *paused* Script, the Script will
-            restart exactly after that new start-delay, ignoring the time it
-            was paused at. If only changing the `interval`, the Script will
-            come out of pause comparing the time it spent in the *old* interval
-            with the *new* interval in order to determine when next to fire.
-
-        Examples:
-            - Script previously had an interval of 10s and was paused 5s into that interval.
-              Script is now restarted with a 20s interval. It will next fire after 15s.
-            - Same Script is restarted with a 3s interval. It will fire immediately.
-
-        """
-        self._start_task(interval=interval, start_delay=start_delay, repeats=repeats, **kwargs)
-
-    # legacy alias
-    update = start
-
-    def stop(self, **kwargs):
-        """
-        Stop the Script's timer component. This will not delete the Sctipt,
-        just stop the regular firing of `at_repeat`. Running `.start()` will
-        start the timer anew, optionally with new settings..
-
-        Args:
-            **kwargs: Optional (default unused) kwargs passed on into the `at_stop` hook.
-
-        """
-        self._stop_task(**kwargs)
-
-    def pause(self, **kwargs):
-        """
-        Manually the Script's timer component manually.
-
-        Args:
-            **kwargs: Optional (default unused) kwargs passed on into the `at_pause` hook.
-
-        """
-        self._pause_task(**kwargs)
-
-    def unpause(self, **kwargs):
-        """
-        Manually unpause a Paused Script.
-
-        Args:
-            **kwargs: Optional (default unused) kwargs passed on into the `at_start` hook.
-
-        """
-        self._unpause_task(**kwargs)
-
-    def time_until_next_repeat(self):
-        """
-        Get time until the script fires it `at_repeat` hook again.
-
-        Returns:
-            int or None: Time in seconds until the script runs again.
-                If not a timed script, return `None`.
-
-        Notes:
-            This hook is not used in any way by the script's stepping
-            system; it's only here for the user to be able to check in
-            on their scripts and when they will next be run.
-
-        """
-        task = self.ndb._task
-        if task:
-            try:
-                return int(round(task.next_call_time()))
-            except TypeError:
-                pass
-        return None
-
-    def remaining_repeats(self):
-        """
-        Get the number of returning repeats for limited Scripts.
-
-        Returns:
-            int or None: The number of repeats remaining until the Script
-                stops. Returns `None` if it has unlimited repeats.
-
-        """
-        task = self.ndb._task
-        if task:
-            return max(0, self.db_repeats - task.callcount)
-        return None
-
-    def reset_callcount(self, value=0):
-        """
-        Reset the count of the number of calls done.
-
-        Args:
-            value (int, optional): The repeat value to reset to. Default
-                is to set it all the way back to 0.
-
-        Notes:
-            This is only useful if repeats != 0.
-
-        """
-        task = self.ndb._task
-        if task:
-            task.callcount = max(0, int(value))
-
-    def force_repeat(self):
-        """
-        Fire a premature triggering of the script callback. This
-        will reset the timer and count down repeats as if the script
-        had fired normally.
-        """
-        task = self.ndb._task
-        if task:
-            task.force_repeat()
-
 
 class DefaultScript(ScriptBase):
     """
     This is the base TypeClass for all Scripts. Scripts describe
     all entities/systems without a physical existence in the game world
-    that require database storage (like an economic system or
-    combat tracker). They
-    can also have a timer/ticker component.
+    that require database storage (like an economic system or a combat
+    tracker). A Script is a typeclassed storage container; it has no timer
+    component.
 
     A script type is customized by redefining some or all of its hook
     methods and variables.
@@ -824,14 +217,7 @@ class DefaultScript(ScriptBase):
      desc (string)      - optional description of script, shown in listings
      obj (Object)       - optional object that this script is connected to
                           and acts on (set automatically by obj.scripts.add())
-     interval (int)     - how often script should run, in seconds. <0 turns
-                          off ticker
-     start_delay (bool) - if the script should start repeating right away or
-                          wait self.interval seconds
-     repeats (int)      - how many times the script should repeat before
-                          stopping. 0 means infinite repeats
      persistent (bool)  - if script should survive a server shutdown or not
-     is_active (bool)   - if script is currently running
 
     * Handlers
 
@@ -844,43 +230,17 @@ class DefaultScript(ScriptBase):
     * Helper methods
 
      create(key, **kwargs)
-     start() - start script (this usually happens automatically at creation
-               and obj.script.add() etc)
-     stop()  - stop script, and delete it
-     pause() - put the script on hold, until unpause() is called. If script
-               is persistent, the pause state will survive a shutdown.
-     unpause() - restart a previously paused script. The script will continue
-                 from the paused timer (but at_start() will be called).
-     time_until_next_repeat() - if a timed script (interval>0), returns time
-                 until next tick
+     delete() - delete the script
 
     * Hook methods (should also include self as the first argument):
 
      at_script_creation() - called only once, when an object of this
                             class is first created.
-     is_valid() - is called to check if the script is valid to be running
-                  at the current time. If is_valid() returns False, the running
-                  script is stopped and removed from the game. You can use this
-                  to check state changes (i.e. an script tracking some combat
-                  stats at regular intervals is only valid to run while there is
-                  actual combat going on).
-      at_start() - Called every time the script is started, which for persistent
-                  scripts is at least once every server start. Note that this is
-                  unaffected by self.delay_start, which only delays the first
-                  call to at_repeat().
-      at_repeat() - Called every self.interval seconds. It will be called
-                  immediately upon launch unless self.delay_start is True, which
-                  will delay the first call of this method by self.interval
-                  seconds. If self.interval==0, this method will never
-                  be called.
-      at_pause()
-      at_stop() - Called as the script object is stopped and is about to be
-                  removed from the game, e.g. because is_valid() returned False.
-      at_pre_delete()
-      at_server_reload() - Called when server reloads. Can be used to
-                  save temporary variables you want should survive a reload.
-      at_server_shutdown() - called at a full server shutdown.
-      at_server_start()
+     at_pre_delete()
+     at_server_reload() - Called when server reloads. Can be used to
+                 save temporary variables you want should survive a reload.
+     at_server_shutdown() - called at a full server shutdown.
+     at_server_start()
 
     """
 
@@ -920,67 +280,9 @@ class DefaultScript(ScriptBase):
         """
         pass
 
-    def is_valid(self):
-        """
-        Is called to check if the script's timer is valid to run at this time.
-        Should return a boolean. If False, the timer will be stopped.
-
-        """
-        return True
-
-    def at_start(self, **kwargs):
-        """
-        Called whenever the script timer is started, which for persistent
-        timed scripts is at least once every server start. It will also be
-        called when starting again after a pause (including after a
-        server reload).
-
-        Args:
-            **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
-
-        """
-        pass
-
-    def at_repeat(self, **kwargs):
-        """
-        Called repeatedly if this Script is set to repeat regularly.
-
-        Args:
-            **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
-
-        """
-        pass
-
-    def at_pause(self, manual_pause=True, **kwargs):
-        """
-        Called when this script's timer pauses.
-
-        Args:
-            manual_pause (bool): If set, pausing was done by a direct call. The
-                non-manual pause indicates the script was paused as part of
-                the server reload.
-
-        """
-        pass
-
-    def at_stop(self, **kwargs):
-        """
-        Called whenever when it's time for this script's timer to stop (either
-        because is_valid returned False, it ran out of iterations or it was manuallys
-        stopped.
-
-        Args:
-            **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
-
-        """
-        pass
-
     def at_pre_delete(self):
         """
-        Called when the Script is deleted, before stopping the timer.
+        Called when the Script is deleted, before deletion proceeds.
 
         Returns:
             bool: If False, the deletion is aborted.
@@ -1029,13 +331,12 @@ class DefaultScript(ScriptBase):
         returns="ignored",
         discipline="public",
         fires_from=(),
-        notes="Fired from EvenniaServerService.run_init_hooks. Use for timer-less startup setup.",
+        notes="Fired from EvenniaServerService.run_init_hooks.",
     )
     def at_server_start(self):
         """
         This hook is called after the server has started. It can be used to add
-        post-startup setup for Scripts without a timer component (for which at_start
-        could be used).
+        post-startup setup for Scripts.
 
         """
         pass

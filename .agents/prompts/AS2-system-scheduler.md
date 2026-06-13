@@ -3,9 +3,10 @@
 **Status:** Engine side shipped in `6.0.0+underspire.89` (2026-06-11):
 `evennia/utils/systems.py`, `evennia/server/engine_systems.py`
 (`flush-attributes`), service wiring, tranche A deletions, tests.
-Remaining: the downstream migration (section 5, game repo) and tranche B
-(`Script.interval` machinery removal, gated on the game's 5 interval
-scripts migrating — section 4.6).
+**Tranche B shipped in `6.0.0+underspire.93`**: the `Script.interval` timer
+machinery and all its first-party consumers are removed; Script is now a
+storage-only typeclass (see section 4.6). Remaining: the downstream migration
+(section 5, game repo).
 
 **Audience:** an engine contributor (agent or human) implementing in the
 `archeonsol/evennia` fork. The companion downstream migration happens in the
@@ -35,9 +36,10 @@ or `TickerHandler` ergonomics "just in case." Build the new thing cleanly.
   on the reactor, so a stalling system shows up here with no extra
   instrumentation.
 
-What does NOT exist yet: `evennia/utils/systems.py`, the System/Cadence/Scope
-model, the registry, the `ctx` object, the driver, last-run persistence,
-tests, docs. All of section 4 remains to be built.
+Built on top of that substrate in `.89`/`.93` (see the status header): the
+`evennia/utils/systems.py` System/Cadence/Scope model, the registry, the `ctx`
+object, the driver, last-run persistence, tests, and docs. Section 4 below is
+retained as the build record, not pending work.
 
 ---
 
@@ -394,13 +396,19 @@ timer model is superseded):
   listed all four.
 - `TestTickerHandler` in `evennia/scripts/tests.py`.
 
-Tranche B — after the downstream migration moves the game's 5 interval
-scripts onto the scheduler (same lockstep arc, may be a follow-up commit
-coordinated with the same `EVENNIA_REF` bump): remove the `Script.interval`
-timer machinery (`ExtendedLoopingCall` and the interval/start-delay paths in
-`evennia/scripts/scripts.py`, plus the `db_interval`-driven fields if a
-migration is warranted). Script-as-persistent-object survives only if
-something still uses it; check before keeping.
+Tranche B — **shipped in `underspire.93`.** Removed the `Script.interval`
+timer machinery (`ExtendedLoopingCall` and the `ScriptBase` timer half in
+`evennia/scripts/scripts.py`) and dropped the 8 timer DB columns
+(`db_interval`/`db_repeats`/`db_start_delay`/`db_start_delay_secs`/
+`db_is_active`/`db_paused_*`) via migration `0025`. The planning premise that
+"nothing drives Script timers" was true of the game but false engine-wide:
+five first-party consumers existed and were deleted, not migrated (none map
+onto an AS2 cadence and the game uses none) — `gametime.schedule`/`TimeScript`,
+`server/profiling/memplot`, and the `barter`/`bodyfunctions`/`custom_gametime`
+contribs (EvMenu/turnbattle precedent). Script-as-persistent typeclassed
+storage survives unchanged (wilderness contrib, game LanguageHandler, and the
+storage-only `GLOBAL_SCRIPTS` singletons still rely on it); the container's
+`start()` shrank to ensure-exist (no per-script start, no lazy-batch).
 
 ### 4.7 Tests (engine-side, the helpers themselves)
 

@@ -25,6 +25,91 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.93 — Script becomes a storage-only typeclass
+
+`Script` loses its timer component entirely. The AS2 System Scheduler
+([`underspire.89`](evennia/utils/systems.py)) is the engine's one answer to
+recurring work; `Script.interval` was a second answer and is now gone. `Script`
+remains a persistent typeclassed storage container (used by the wilderness
+contrib, the game's `LanguageHandler`, and the storage-only `GLOBAL_SCRIPTS`
+singletons). This is Tranche B of the AS2 deletion arc; see
+[the AS2 prompt](.agents/prompts/AS2-system-scheduler.md) and
+[the engine-architecture decisions](.agents/docs/engine-architecture/decisions.md).
+
+### Engine
+
+- **`BASE_SCRIPT_TYPECLASS` now defaults to `evennia.scripts.scripts.DefaultScript`**
+  (was `typeclasses.scripts.Script`) in
+  [`settings_default.py`](evennia/settings_default.py). Scripts are the one
+  `BASE_*_TYPECLASS` a game may legitimately leave undefined — a post-AS2 game
+  can define zero script typeclasses — so the default must resolve when
+  `typeclasses/scripts.py` is absent. The other `BASE_*_TYPECLASS` defaults
+  stay game-dir paths (every game has objects/characters/rooms/accounts).
+- **Test-base hardening:** `EvenniaTestMixin.create_script`
+  ([`test_resources.py`](evennia/utils/test_resources.py)) degrades to
+  `self.script = None` when `script_typeclass` is a non-importable path,
+  instead of erroring every `EvenniaTest`-based test in `setUp`. A typo'd path
+  surfaces as a missing fixture, never a silent fallback.
+
+### Deletions (Tranche B)
+
+- Removed the Script timer machinery in
+  [`scripts/scripts.py`](evennia/scripts/scripts.py): `ExtendedLoopingCall` and
+  the `ScriptBase` timer half (`_start_task`/`_step_task`/`_pause_task`/
+  `_unpause_task`/`_stop_task`, `start`/`stop`/`pause`/`unpause`/`force_repeat`/
+  `reset_callcount`/`remaining_repeats`/`time_until_next_repeat`, the
+  `at_repeat`/`at_start`/`at_pause`/`at_stop` hooks, the LoopingCall-pausing
+  `at_idmapper_flush`). Creation, storage, delete, and lifecycle hooks
+  (`at_script_creation`/`at_pre_delete`/`at_server_reload`/`at_server_shutdown`/
+  `at_server_start`) stay.
+- Dropped 8 timer DB columns (`db_interval`, `db_start_delay`,
+  `db_start_delay_secs`, `db_repeats`, `db_is_active`, `db_paused_time`,
+  `db_paused_callcount`, `db_manually_paused`) via migration
+  `0025_remove_scriptdb_timer_fields`. `db_persistent`/`db_obj`/`db_account`/
+  `db_desc`/`db_attrs` stay. Migration `0026` also drops the orphaned
+  `ShopRegistryScript` proxy model (committed without a backing typeclass in
+  `.65`; state-only, no DB change).
+- Deleted every first-party timer consumer (none mapped onto an AS2 cadence and
+  the game uses none):
+  - `gametime.schedule()` + `TimeScript` in
+    [`gametime.py`](evennia/utils/gametime.py). The time-query functions
+    (`runtime`/`uptime`/`gametime`/`real_seconds_until`/`reset_gametime`) stay.
+  - `evennia/server/profiling/memplot.py` (opt-in dev tool, dead without timers).
+  - contribs `barter`, `bodyfunctions`, `custom_gametime` (consistent with the
+    EvMenu/turnbattle precedent for contribs depending on a deleted mechanism).
+- Surface cleanup: `create_script` / `create.create_script` drop
+  `interval`/`start_delay`/`repeats`/`autostart`; `search_script` drops
+  `only_timed`; `ScriptHandler.add` no longer autostarts and loses
+  `start()`/the `stop` alias; `GlobalScriptContainer.start` shrinks to
+  ensure-exist (the `GLOBAL_SCRIPTS_DEFER_LAZY_START`/`_LAZY_BATCH_SIZE`/
+  `_LAZY_DELAY` settings and `schedule_lazy_global_scripts` are gone); `@scripts`
+  is delete-only (start/stop/pause switches removed) and its listing + `@examine`
+  drop the timer columns; the web admin form, REST serializers, and filters drop
+  the timer fields; `bots.BotStarter` loses its dead `at_repeat` keepalive.
+
+### Migration notes (downstream / newmoo)
+
+- Bump `EVENNIA_REF` to `underspire.93` and run `evennia migrate` (drops the 8
+  Script timer columns).
+- **newmoo can drop its `BASE_SCRIPT_TYPECLASS` override** — pointing it at
+  `evennia.scripts.scripts.DefaultScript` is now the engine default.
+- `evennia.utils.gametime.schedule()` and the `barter`/`bodyfunctions`/
+  `custom_gametime` contribs are gone. In-game-time scheduling must move to a
+  game-side mechanism (a re-arming `delay()` or a game system). newmoo uses none
+  of these.
+
+### Tooling
+
+- `clean_rot.py` BLOAT advice is now conditional: an over-budget doc with many
+  `##` sections (an accreting log like `decisions.md`) is told to *split*; a
+  long single-topic doc is told to *condense*.
+
+### Tests
+
+- Falsifiable coverage for both Part-A changes (engine-absolute default;
+  non-importable `script_typeclass` degrades gracefully). Timer tests removed;
+  storage-only create/persist/delete coverage retained.
+
 ## 6.0.0+underspire.92 — native default verbs (staff/account/system/login/help) on the action engine
 
 The remaining stock staff/account/system/login/help verbs are now native

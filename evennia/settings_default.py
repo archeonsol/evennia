@@ -647,10 +647,6 @@ AT_INIT_BATCH_SIZE = 50
 AT_INIT_BATCH_DELAY = 0
 # On @reload, defer the at_post_load burst to after portal session sync.
 AT_INIT_DEFER_ON_RELOAD = True
-# GLOBAL_SCRIPTS entries with start_priority="lazy" start after critical scripts.
-GLOBAL_SCRIPTS_DEFER_LAZY_START = True
-GLOBAL_SCRIPTS_LAZY_BATCH_SIZE = 5
-GLOBAL_SCRIPTS_LAZY_DELAY = 0
 # --- Tier 2: event bus, job queue, channel cache, AMP session serde, Postgres ---
 # Msg* AMP traffic: "json" (secure) or "pickle" (legacy only).
 AMP_SESSION_SERDE = "json"
@@ -745,9 +741,13 @@ BASE_ROOM_TYPECLASS = "typeclasses.rooms.Room"
 BASE_EXIT_TYPECLASS = "typeclasses.exits.Exit"
 # Typeclass for Channel (fallback).
 BASE_CHANNEL_TYPECLASS = "typeclasses.channels.Channel"
-# Typeclass for Scripts (fallback). You usually don't need to change this
-# but create custom variations of scripts on a per-case basis instead.
-BASE_SCRIPT_TYPECLASS = "typeclasses.scripts.Script"
+# Typeclass for Scripts (fallback). Unlike the other BASE_*_TYPECLASS
+# defaults (objects/characters/rooms/accounts), this points at an engine
+# class rather than a game-dir path: a game may legitimately define zero
+# script typeclasses, so the default must resolve even when
+# `typeclasses/scripts.py` is absent. A game that adds behaviour to its own
+# Script must set this explicitly.
+BASE_SCRIPT_TYPECLASS = "evennia.scripts.scripts.DefaultScript"
 # The default home location used for all objects. This is used as a
 # fallback if an object's normal home location is deleted. Default
 # is Limbo (#2).
@@ -917,16 +917,16 @@ FUNCPARSER_PROTOTYPE_PARSING_MODULES = [
 # Global Scripts
 ######################################################################
 
-# Global scripts started here will be available through
-# 'evennia.GLOBAL_SCRIPTS.key'. The scripts will survive a reload and be
-# recreated automatically if deleted. Each entry must have the script keys,
-# whereas all other fields in the specification are optional. If 'typeclass' is
-# not given, BASE_SCRIPT_TYPECLASS will be assumed.  Note that if you change
+# Global scripts declared here will be available through
+# 'evennia.GLOBAL_SCRIPTS.key'. The scripts are storage-only typeclasses
+# (no timer component); they survive a reload and are recreated
+# automatically if deleted. Each entry must have the script key, whereas all
+# other fields in the specification are optional. If 'typeclass' is not
+# given, BASE_SCRIPT_TYPECLASS will be assumed. Note that if you change
 # typeclass for the same key, a new Script will replace the old one on
 # `evennia.GLOBAL_SCRIPTS`.
 GLOBAL_SCRIPTS = {
-    # 'key': {'typeclass': 'typeclass.path.here',
-    #         'repeats': -1, 'interval': 50, 'desc': 'Example script'},
+    # 'key': {'typeclass': 'typeclass.path.here', 'desc': 'Example script'},
 }
 
 ######################################################################

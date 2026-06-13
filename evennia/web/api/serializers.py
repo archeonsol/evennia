@@ -282,11 +282,7 @@ class ScriptDBSerializer(TypeclassSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = ScriptDB
         fields = [
-            "db_interval",
             "db_persistent",
-            "db_start_delay",
-            "db_is_active",
-            "db_repeats",
         ] + TypeclassSerializerMixin.shared_fields
         read_only_fields = ["id"]
 
@@ -300,11 +296,7 @@ class ScriptListSerializer(TypeclassListSerializerMixin, serializers.ModelSerial
     class Meta:
         model = ScriptDB
         fields = [
-            "db_interval",
             "db_persistent",
-            "db_start_delay",
-            "db_is_active",
-            "db_repeats",
         ] + TypeclassListSerializerMixin.shared_fields
         read_only_fields = ["id"]
 

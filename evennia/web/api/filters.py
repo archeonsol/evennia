@@ -132,9 +132,7 @@ class ScriptDBFilterSet(BaseTypeclassFilterSet):
             "db_obj__id",
             "db_account__id",
             "db_account__username",
-            "db_is_active",
             "db_persistent",
-            "db_interval",
         ]
 
 

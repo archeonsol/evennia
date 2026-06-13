@@ -14,9 +14,7 @@ from django.conf import settings
 from django.db.utils import OperationalError
 
 import evennia
-from evennia.scripts.scripts import DefaultScript
 from evennia.server.models import ServerConfig
-from evennia.utils.create import create_script
 
 # Speed-up factor of the in-game time compared
 # to real time.
@@ -45,31 +43,6 @@ SERVER_RUNTIME = 0.0
 # need further processing. Access from server_epoch() and game_epoch().
 _SERVER_EPOCH = None
 _GAME_EPOCH = None
-
-# Helper Script dealing in gametime (created by `schedule` function
-# below).
-
-
-class TimeScript(DefaultScript):
-    """Gametime-sensitive script."""
-
-    def at_script_creation(self):
-        """The script is created."""
-        self.key = "unknown scr"
-        self.interval = 100
-        self.start_delay = True
-        self.persistent = True
-
-    def at_repeat(self):
-        """Call the callback and reset interval."""
-        callback = self.db.callback
-        args = self.db.schedule_args or []
-        kwargs = self.db.schedule_kwargs or {}
-        if callback:
-            callback(*args, **kwargs)
-
-        seconds = real_seconds_until(**self.db.gametime)
-        self.start(interval=seconds, force_restart=True)
 
 
 # Access functions
@@ -217,69 +190,6 @@ def real_seconds_until(sec=None, min=None, hour=None, day=None, month=None, year
     # Get the number of gametime seconds between these two dates
     seconds = (projected - current).total_seconds()
     return seconds / TIMEFACTOR
-
-
-def schedule(
-    callback,
-    repeat=False,
-    sec=None,
-    min=None,
-    hour=None,
-    day=None,
-    month=None,
-    year=None,
-    *args,
-    **kwargs,
-):
-    """
-    Call a callback at a given in-game time.
-
-    Args:
-        callback (function): The callback function that will be called. Note
-            that the callback must be a module-level function, since the script will
-            be persistent. The callable should be on the form `callable(*args, **kwargs)`
-            where args/kwargs are passed into this schedule.
-        repeat (bool, optional): Defines if the callback should be called regularly
-            at the specified time.
-        sec (int or None): Number of absolute game seconds at which to run repeat.
-        min (int or None): Number of absolute minutes.
-        hour (int or None): Number of absolute hours.
-        day (int or None): Number of absolute days.
-        month (int or None): Number of absolute months.
-        year (int or None): Number of absolute years.
-        *args: Passed into the callable. Must be possible to store in Attribute.
-        **kwargs: Passed into the callable. Must be possible to store in Attribute.
-
-    Returns:
-        Script: The created Script handling the scheduling.
-
-    Examples:
-        ::
-            schedule(func, min=5, sec=0)  # Will call 5 minutes past the next (in-game) hour.
-            schedule(func, hour=2, min=30, sec=0)  # Will call the next (in-game) day at 02:30.
-
-    """
-    seconds = real_seconds_until(sec=sec, min=min, hour=hour, day=day, month=month, year=year)
-    script = create_script(
-        "evennia.utils.gametime.TimeScript",
-        key="TimeScript",
-        desc="A gametime-sensitive script",
-        interval=seconds,
-        start_delay=True,
-        repeats=-1 if repeat else 1,
-    )
-    script.db.callback = callback
-    script.db.gametime = {
-        "sec": sec,
-        "min": min,
-        "hour": hour,
-        "day": day,
-        "month": month,
-        "year": year,
-    }
-    script.db.schedule_args = args
-    script.db.schedule_kwargs = kwargs
-    return script
 
 
 def reset_gametime():
