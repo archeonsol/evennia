@@ -502,20 +502,12 @@ class OnDemandHandler:
             self.tasks = {}
             return
         if isinstance(raw, str):
-            # New JSON format (v1): safe to deserialize even if DB is compromised.
+            # JSON format (v1): safe to deserialize even if DB is compromised.
             try:
                 self.tasks = _tasks_from_json(raw)
             except Exception:
                 logger.log_trace("OnDemandHandler: failed to parse task JSON, starting empty")
                 self.tasks = {}
-        elif isinstance(raw, dict):
-            # Legacy pickle format (pre-JSON migration): accept in-place, will be re-saved
-            # as JSON on next shutdown.
-            logger.log_warn(
-                "OnDemandHandler: loading tasks from legacy pickle format — "
-                "will be re-saved as JSON on next shutdown"
-            )
-            self.tasks = raw
         else:
             logger.log_warn("OnDemandHandler: unrecognized task storage format, starting empty")
             self.tasks = {}

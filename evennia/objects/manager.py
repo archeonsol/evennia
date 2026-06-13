@@ -66,7 +66,6 @@ class ObjectDBManager(TypedObjectManager):
     typeclass_search
     get_object_with_account
     get_objs_with_key_and_typeclass
-    get_objs_with_attr
     get_objs_with_attr_value
     get_objs_with_db_property
     get_objs_with_db_property_match
@@ -166,51 +165,6 @@ class ObjectDBManager(TypedObjectManager):
         return self.filter(
             cand_restriction & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
         ).order_by("id")
-
-    def get_objs_with_attr(self, attr_name, candidates=None, force=False):
-        """Find objects that have *attr_name* set (any value).
-
-        Reserved for maintenance (tests, cleanup, migrations): attribute search
-        forces a process-wide flush and must not run in game logic, so callers
-        must opt in with ``force=True`` (see
-        :func:`_require_attribute_search_force`). Use indexed Tags instead.
-
-        .. deprecated::
-            Key-existence search is an **unindexed full scan on every backend**,
-            including PostgreSQL: the query tests ``(db_attrs -> '~' -> '_d') ?
-            attr_name`` against an extracted nested object, which the
-            ``GIN(db_attrs)`` index cannot accelerate (only top-level ``@>`` /
-            ``?`` are indexed, and containment cannot express "any value"). It
-            also tends to return nearly the whole table. Restrict to a known
-            value via :meth:`get_objs_with_attr_value` (GIN-indexed), or pass
-            ``candidates`` to bound the scan. This method will be removed.
-
-        Raises:
-            RuntimeError: If *force* is not True.
-        """
-        from warnings import warn
-
-        _require_attribute_search_force(force, "get_objs_with_attr")
-        warn(
-            "ObjectDB.objects.get_objs_with_attr() is deprecated: it is an "
-            "unindexed full-table scan on all backends (including PostgreSQL) "
-            "and typically matches nearly every object. Use "
-            "get_objs_with_attr_value() or restrict with candidates instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        cand_restriction = (
-            candidates is not None
-            and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
-            or Q()
-        )
-        _flush_attr_writes()
-        qs = self.filter(cand_restriction)
-        if connection.vendor == "postgresql":
-            # In-DB seq scan (unindexed), but avoids streaming every row's
-            # db_attrs blob into Python the way the portable fallback does.
-            return qs.filter(**{"db_attrs__~___d__has_key": attr_name})
-        return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name))
 
     def get_objs_with_attr_value(
         self, attr_name, value, candidates=None, typeclasses=None, force=False
