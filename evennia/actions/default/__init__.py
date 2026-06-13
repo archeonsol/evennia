@@ -12,7 +12,7 @@ from .account import DefaultAccountRules, Option, Password, UserPassword
 from .admin import Access, CharacterAdminRules, Emit, Force, Perm, Wall
 from .emote_nomatch import DefaultEmoteNoMatchRules
 from .events import Arrived, Departed, Moved
-from .general import CharacterGeneralRules, Help, Home, Nick, NickRules
+from .general import CharacterGeneralRules, Help, Home, Nick, NickRules, SetHelp
 from .movement import (
     CharacterMovementRules,
     ExitTraversalRules,
@@ -73,6 +73,7 @@ __all__ = [
     "Nick",
     "Home",
     "Help",
+    "SetHelp",
     "NickRules",
     "CharacterGeneralRules",
     # account-shell verbs

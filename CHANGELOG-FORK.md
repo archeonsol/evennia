@@ -25,6 +25,126 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.92 — native default verbs (staff/account/system/login/help) on the action engine
+
+The remaining stock staff/account/system/login/help verbs are now native
+action-engine verbs under [`evennia/actions/default/`](evennia/actions/default/),
+mirroring the `objects.py`/`movement.py` contract already established for the
+movement and object-manipulation substrate. This groups the native-verb port
+(commit `cc37a5e68`), a fail-closed seclog follow-up (`9d29bd5c9`), and the
+interactive `@py/edit` + `@sethelp` work that finishes the set.
+
+### Engine
+
+Each verb is three things, never a `Command`:
+
+- an `@action(...)` dataclass, usually subclassing the new engine-owned
+  [`ArgAction`](evennia/actions/muxargs.py) base (MuxCommand/ObjManipCommand-style
+  `lhs`/`rhs`/`lhslist`/objdef parsing), replacing the game's hand-rolled
+  `StaffArgAction`;
+- `@rule(Verb, phase="carry_out", requires=<Capability>)` provider methods that
+  output via `caller.msg`/`actor.msg` (the engine's own path, not a stock
+  command's `self.session`);
+- permission gates expressed as `requires=` capability predicates
+  (`Builder`/`Admin`/`Developer`/`Helper` from
+  [`evennia.actions.predicate`](evennia/actions/predicate.py)), quell-aware and
+  uniform across object/account/session callertypes.
+
+New modules and verbs:
+
+- [`admin.py`](evennia/actions/default/admin.py): `@emit`/`@remit`/`@pemit`,
+  `@wall`, `@force`, `@perm`, `@access`.
+- [`general.py`](evennia/actions/default/general.py): `@nick`, `home`, and
+  `@sethelp` (see below), plus the `Help` action type.
+- [`account.py`](evennia/actions/default/account.py): `@option`, `@password`,
+  `@userpassword`.
+- [`system.py`](evennia/actions/default/system.py): `@systems`, `@tasks` (incl.
+  the by-id `ask_yes_no` confirm), `@py` (snippet eval, interactive console via a
+  generator `carry_out` rule, and now `@py/edit`).
+- [`unloggedin.py`](evennia/actions/default/unloggedin.py): `connect`, `create`
+  (yield-confirm), `info`, `encoding`, `screenreader`, unlogged `help` on
+  `SessionLoginRules`.
+
+This kills the downstream misrouting the `run_evennia_command` shim suffered: a
+stock `Command` derived its output session from `self.session`, which never
+matched the engine's `Actor`, so a permitted builder verb ran but the player saw
+nothing.
+
+**Attachment is option 2 (ship provider mixins for games to compose), not option
+1 (rules on the engine base typeclasses).** Option 1 was rejected because the
+action modules import `DefaultCharacter`/`DefaultAccount` as
+`__primary_handler__`; putting the rules on those base classes would cycle a
+base-class import against the action-module import. So the engine ships
+`CharacterAdminRules`/`CharacterGeneralRules`/`CharacterSystemRules`/
+`DefaultAccountRules`/`SessionLoginRules` mixins, and a game composes them into
+its own typeclasses. Each rule guards `self is actor.character`/`.effective`/
+`.account` so the right body answers IC vs OOC.
+
+**Interactive verbs (`@py/edit`, `@sethelp`).** Earlier the EvEditor-backed paths
+were deferred on the belief that EvEditor's input capture was cmdset-based and
+bypassed by the engine bridge. That premise is stale: EvEditor was migrated to an
+engine [`StateProvider`](evennia/actions/state.py) (`EvEditorState`) in
+`underspire.82`, and its capture works on the dispatch path (proven end-to-end by
+`TestEvEditorEngineRouted.test_line_captured_through_real_cmdhandler_bridge`,
+which drives a line through the real `execute_cmd` bridge). So:
+
+- `@py/edit` now opens the EvEditor in code mode from inside its `carry_out` rule,
+  reusing the stock picklable `_py_load`/`_py_code`/`_py_quit` funcs. The
+  placeholder "not yet available" message is gone.
+- `@sethelp` lands as a native [`SetHelp`](evennia/actions/default/general.py)
+  action + `Helper`-gated rule on `CharacterGeneralRules` (character-side only,
+  matching the stock `CmdSetHelp` living only in the Character cmdset). All
+  non-edit paths (add/replace/append/extend/category/locks/delete) are ported;
+  the clash-warning flow is a `yield`-confirm the engine's generator driver fills;
+  `/edit` opens the EvEditor. The clash search reuses `CmdHelp.collect_topics`/
+  `do_search` through a throwaway instance used purely as a stateless lookup
+  utility (never dispatched), so a builder's clash detection cannot drift from
+  what `help` actually shows. The fork's help redesign authored *command* help as
+  explicit files, but DB help entries are unchanged, so `@sethelp` still edits
+  them and still belongs.
+
+**`suggest_verbs` fail-closed fix** (deferred from `.91`): fuzzy verb suggestion
+now filters candidates by actor reachability, so a near-miss typo never surfaces a
+verb the actor has no non-gated `carry_out` path to. This is the suggestion side
+of the fail-closed dispatch boundary; the failing test was written first.
+
+**No generic batch-runner.** `@batchcode`/`@batchcommands` wrap a game's own
+`batch_processor`, which is local game code, not stock engine behavior. Nothing
+game-agnostic falls out cleanly, so the engine deliberately ships no batch-runner
+action: the game ports its own batch body against its own processor.
+
+### Security
+
+`_fail_closed_fallback` ([`dispatch.py`](evennia/actions/dispatch.py)) logged raw
+player input verbatim to `log_sec`; it now wraps it in
+`logger.mask_sensitive_input`, so a password typed at the wrong prompt into a
+gated verb is redacted (matching the legacy cmdhandler path). `ActionTrace.outcome`
+([`result.py`](evennia/actions/result.py)) gained the `"aborted"` Literal member
+that `engine.py` assigns at runtime (focus-body collapsed mid-suspension) and
+`dispatch.py` depends on.
+
+### Tests
+
+Adds [`evennia/actions/tests/fakes.py`](evennia/actions/tests/fakes.py) (shared
+no-DB provider fakes) and full coverage across the new verbs: dispatch through a
+real `RuleEngine` over fake providers, asserting messages, side effects, and the
+fail-closed gate (a non-privileged actor produces zero output and
+`trace.carry_out_gated >= 1`). The `@py/edit` and `@sethelp/edit` tests prove
+EvEditor opens from inside a `carry_out` rule and captures a subsequent line
+dispatched through the engine (not a stubbed editor). Full `evennia.actions` suite
+green.
+
+### Migration
+
+Once this ships, the downstream game (newmoo) drops its `run_evennia_command`
+shims entirely: `world/actions/staff/evennia_admin.py`,
+`world/actions/account/settings.py`, `world/actions/account/system.py`, the
+`world/actions/login/*` shims, `world/actions/general/home.py`, and
+`world/actions/shared/evennia_cmd.py`. It composes the engine mixins into its
+typeclasses, overrides only the verbs it genuinely customizes (its `@remit`/
+`@pemit` remap, its own `batch_processor`), and reverts its `@systems` native port
+to consume the engine's default `@systems`.
+
 ## 6.0.0+underspire.91 — honest action dispatch: fail-closed feedback, trace return, surfaced errors
 
 A parsed verb dispatch can no longer end in silence, and the cmdhandler bridge

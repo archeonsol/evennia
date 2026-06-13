@@ -220,10 +220,27 @@ class TestPy(unittest.TestCase):
         self._py(char, actor, "1+1", switches=("time",))
         self.assertTrue(any("runtime" in m for m in _texts(char)))
 
-    def test_edit_switch_deferred(self):
+    def test_edit_switch_opens_editor_and_captures_through_engine(self):
+        # @py/edit launches EvEditor from inside the carry_out rule. The editor's
+        # capture is an engine StateProvider, so a line dispatched afterwards
+        # through the same engine must reach the editor buffer - proving the
+        # launch-from-carry_out path end to end (no stubbed editor).
+        from evennia.actions.action import Action
+        from evennia.actions.context import ActionContext
+        from evennia.utils.eveditor import EvEditorState
+
         char, actor = _setup()
         self._py(char, actor, "", switches=("edit",))
-        self.assertTrue(any("not yet available" in m for m in _texts(char)))
+        self.assertTrue(actor.has_state(EvEditorState))
+
+        state = actor.state_objects[-1]
+        line = Action()
+        line._raw_string = "my_var = 42"
+        ctx = ActionContext(providers=[state], actor=actor, raw_string="my_var = 42")
+        from evennia.actions.tests.fakes import ENGINE
+
+        ENGINE.dispatch(line, actor, ctx, record_phases=False)
+        self.assertIn("my_var = 42", char.ndb._eveditor.get_buffer())
 
     def test_console_mode_runs_until_exit(self):
         char, actor = _setup()
