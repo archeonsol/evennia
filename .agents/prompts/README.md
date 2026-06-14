@@ -84,9 +84,11 @@ parallel-startable now.
    independent. Remove AMP/ondemand pickle shims (security: pickle on the wire),
    the `get_objs_with_attr` shim, and four bug-hiding `except: pass` cache/metrics
    sites.
-3. [ALPHA: ssh.py portal boundary](ALPHA-ssh-portal-boundary.md) — self-contained
-   decision: the one ORM bleed into the Portal process; remove SSH or delegate
-   auth over AMP.
+3. [RECONSIDER: ssh.py portal boundary](ALPHA-ssh-portal-boundary.md) — **deferred**
+   (2026-06-13): the ORM bleed is latent, not active (SSH defaults off, `ssh.py`
+   never imported), so no live problem. Concrete benefit is dead-code removal;
+   the boundary-guard test is principle-driven. Revisit only on a trigger in the
+   prompt.
 4. [ALPHA: jobs/ + event bus boundary](ALPHA-jobs-eventbus-boundary.md) —
    cross-repo decision; settle before the squash (it owns the `server/0004`
    model). Two fully-built-but-unconsumed subsystems + an `evennia.events` vs
