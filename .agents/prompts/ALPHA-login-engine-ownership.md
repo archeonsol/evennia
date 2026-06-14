@@ -1,8 +1,9 @@
 # ALPHA: move login fully into the engine (engine/game cross-validation)
 
-Status: engine side done; remaining work is the cmdset-retirement coordination
-track (see below). Resolved by composing the login binding into the engine's
-own `ServerSession` plus extracting the login operations as reusable functions.
+Status: shipped (`6.0.0+underspire.95`). Resolved by composing the login binding
+into the engine's own `ServerSession` plus extracting the login operations as
+reusable functions. The only follow-on is cross-track coordination on the
+cmdset-retirement audit (see below); no engine work remains here.
 
 ## Resolution (engine side)
 

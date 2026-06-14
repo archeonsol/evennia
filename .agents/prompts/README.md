@@ -94,10 +94,11 @@ parallel-startable now.
    model). Two fully-built-but-unconsumed subsystems + an `evennia.events` vs
    `evennia.actions.events` name collision. Wire (machinery in engine, usage in
    game) or cut.
-5. [ALPHA: login engine ownership](ALPHA-login-engine-ownership.md) — cross-repo;
-   must land before cmdset retirement can delete the `cmdobj=` login path. Move
-   login fully into the engine (a promote-to-engine smell); kill the phantom
-   `LoginSessionMixin` comment; unify the web/REST path.
+5. [ALPHA: login engine ownership](ALPHA-login-engine-ownership.md) — **shipped
+   (`6.0.0+underspire.95`).** Login is fully engine-owned: `SessionLoginRules` is
+   composed into the engine's `ServerSession`, the phantom `LoginSessionMixin`
+   comment is gone, and the web/REST path routes through the shared
+   `login_session` op. Unblocks the `cmdobj=` login portion of #6.
 6. [ALPHA: cmdset retirement audit](ALPHA-cmdset-retirement-audit.md) — the CM1
    finish line; after #5 (EvMenu removal landed in `.85`). Audit every cmdset
    consumer, then delete the cmdset machinery (`CmdSet`, handler, parser,
@@ -149,6 +150,10 @@ backlog.
 **Discussion-first** (a policy decision before any edits):
 
 - [F13: contribs half-policy](F13-contribs-policy.md)
+- [engine i18n policy](engine-i18n-policy.md) — surfaced by the `.95` login
+  review. The action-engine layer emits player text unwrapped, but two files
+  (`dispatch.py`, `nomatch.py`) use `gettext`. Decide translatable vs.
+  English-only and make the layer consistent.
 - [F18: unused engine handlers](F18-unused-engine-handlers.md)
 - [F20: ownership-change provenance](F20-ownership-provenance-audit.md)
   — follow-on to the `.71` ControlBinding rework; a cold-path audit

@@ -37,20 +37,24 @@ dispatcher since `.73`; this removes the dead substrate it replaced.
    in the engine (grep; contrib excluded). The bridge never merges these, so any
    survivor is silently broken, not working.
 4. **`cmdobj=` injection callers rehomed.** The legacy block in `cmdhandler` is
-   reachable only via `cmdobj=` (login `connect`/`create`, any menu command run
-   directly). Login is its own track
-   ([`ALPHA-login-engine-ownership.md`](ALPHA-login-engine-ownership.md)) and
-   must land first, or the surviving `cmdobj=` path must be preserved explicitly.
+   reachable only via `cmdobj=`. Login **landed engine-owned in
+   `6.0.0+underspire.95`** ([`ALPHA-login-engine-ownership.md`](ALPHA-login-engine-ownership.md)):
+   `connect`/`create` resolve through `SessionLoginRules`, not `cmdobj=`, so they
+   are no longer callers. Audit any other `cmdobj=` caller (e.g. menu command run
+   directly) before deleting the block. Note: a downstream game that registered
+   its own `look`/`quit` `@action` must convert those to *rules on* the engine
+   `Look`/`Quit` (the engine owns those canonical verbs as of `.95`).
 
 ## Then remove (verified-dead surfaces from the alpha audit)
 
 - **`evennia/commands/default/` tree** is unreachable from player input
-  (~15k lines incl. `building.py` at 4,641). **Two carve-outs that are still
-  live and must NOT be deleted blindly:** (a) `CmdHelp`'s formatters in
-  `help.py` are reused by the help renderer (`help.py` is half-live); (b)
-  `unloggedin.create_normal_account` is still imported by the web/REST path
-  (`server/inputfuncs.py:329`) until login is rehomed. Extract the live
-  formatter helpers, then delete the rest.
+  (~15k lines incl. `building.py` at 4,641). **One carve-out that is still
+  live and must NOT be deleted blindly:** `CmdHelp`'s formatters in `help.py`
+  are reused by the help renderer (`help.py` is half-live). (The web/REST path's
+  former dependency on `unloggedin.create_normal_account` is gone as of `.95`;
+  that helper was deleted and `server/inputfuncs.py` now routes through the
+  engine `login_session`.) Extract the live formatter helpers, then delete the
+  rest.
 - **`default_cmds` flat-API container** (`evennia/__init__.py:334-380`)
   advertises dead commands and double-registers `building` (`:369` and `:371`,
   copy-paste). Slim to the still-live help formatters or remove.
