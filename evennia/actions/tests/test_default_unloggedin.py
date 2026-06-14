@@ -21,6 +21,8 @@ from evennia.actions.default.unloggedin import (
     Encoding,
     Help,
     Info,
+    Look,
+    Quit,
     Screenreader,
     SessionLoginRules,
 )
@@ -145,6 +147,83 @@ class TestConnect(unittest.TestCase):
         self.assertEqual(trace.carry_out_fired, 0)
 
 
+# --- login_session (shared engine login op) --------------------------------------
+class TestLoginSession(unittest.TestCase):
+    """The reusable op behind ``connect`` and the web/REST ``login`` inputfunc."""
+
+    def setUp(self):
+        _FakeAccountCls.reset()
+
+    def _login(self, session, name, password):
+        with mock.patch.object(
+            unloggedin_module, "class_from_module", side_effect=_fake_class_from_module
+        ):
+            return unloggedin_module.login_session(session, name, password)
+
+    def test_success_logs_in_and_returns_account(self):
+        session = LoginSession()
+        account = object()
+        _FakeAccountCls.auth_result = (account, None)
+        result = self._login(session, "bob", "hunter2")
+        self.assertIs(result, account)
+        self.assertEqual(_FakeAccountCls.auth_calls, [{"username": "bob", "password": "hunter2"}])
+        self.assertEqual(session.sessionhandler.logins, [(session, account)])
+
+    def test_failure_messages_and_returns_none(self):
+        session = LoginSession()
+        result = self._login(session, "bob", "wrong")
+        self.assertIsNone(result)
+        self.assertTrue(any("Bad credentials" in m for m in session.messages))
+        self.assertEqual(session.sessionhandler.logins, [])
+
+
+# --- engine default binding ------------------------------------------------------
+class TestServerSessionBinding(unittest.TestCase):
+    """The engine's own ``ServerSession`` carries the login rules out of the box."""
+
+    def test_engine_serversession_resolves_login_verbs(self):
+        from evennia.actions.registry import rule_registry
+        from evennia.server.serversession import ServerSession
+
+        for action_type in (Connect, Create, Look, Quit):
+            self.assertTrue(rule_registry.responds(ServerSession, action_type))
+
+
+# --- look / quit (connect-screen rules) ------------------------------------------
+class TestUnloggedLookQuit(unittest.TestCase):
+    """The engine-default connect-screen ``look`` (re-render) and ``quit`` (drop)."""
+
+    def _run(self, session, actor, action_cls, verb):
+        action = action_cls.parse("", actor, verb=verb)
+        return dispatch(action, actor, [session])
+
+    def test_look_rerenders_connection_screen(self):
+        session, actor = _setup()
+        with mock.patch.object(unloggedin_module, "render_connection_screen") as render:
+            self._run(session, actor, Look, "look")
+        render.assert_called_once_with(session)
+
+    def test_look_abstains_when_logged_in(self):
+        session, actor = _setup()
+        actor.account = object()
+        with mock.patch.object(unloggedin_module, "render_connection_screen") as render:
+            trace = self._run(session, actor, Look, "look")
+        render.assert_not_called()
+        self.assertEqual(trace.carry_out_fired, 0)
+
+    def test_quit_disconnects(self):
+        session, actor = _setup()
+        self._run(session, actor, Quit, "quit")
+        self.assertEqual([s for s, _ in session.sessionhandler.disconnects], [session])
+
+    def test_quit_abstains_when_logged_in(self):
+        session, actor = _setup()
+        actor.account = object()
+        trace = self._run(session, actor, Quit, "quit")
+        self.assertEqual(session.sessionhandler.disconnects, [])
+        self.assertEqual(trace.carry_out_fired, 0)
+
+
 # --- create ----------------------------------------------------------------------
 class TestCreate(unittest.TestCase):
     def setUp(self):
@@ -255,6 +334,15 @@ class TestUnloggedMisc(unittest.TestCase):
         out = "\n".join(session.messages)
         self.assertIn("not yet logged into the game", out)
         self.assertIn("|wconnect|n", out)
+
+    def test_unlogged_help_lists_look_and_quit(self):
+        # look / quit are engine-bound connect-screen verbs, so the default
+        # help advertises them.
+        session, actor = _setup()
+        self._run(session, actor, Help, verb="help")
+        out = "\n".join(session.messages)
+        self.assertIn("|wlook|n", out)
+        self.assertIn("|wquit|n", out)
 
     def test_unlogged_help_staff_contact(self):
         session, actor = _setup()

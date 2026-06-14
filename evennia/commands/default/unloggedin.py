@@ -59,36 +59,6 @@ def create_guest_account(session):
         return enabled, None
 
 
-def create_normal_account(session, name, password):
-    """
-    Creates an account with the given name and password.
-
-    Args:
-        session (Session): the session which is requesting to create an account.
-        name (str): the name that the account wants to use for login.
-        password (str): the password desired by this account, for login.
-
-    Returns:
-        account (Account): the account which was created from the name and password.
-    """
-    # Get account class
-    Account = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
-
-    address = session.address
-
-    # Match account name and check password
-    # authenticate() handles all its own throttling
-    account, errors = Account.authenticate(
-        username=name, password=password, ip=address, session=session
-    )
-    if not account:
-        # No accountname or password match
-        session.msg("|R%s|n" % "\n".join(errors))
-        return None
-
-    return account
-
-
 class CmdUnconnectedConnect(COMMAND_DEFAULT_CLASS):
     """
     connect to the game

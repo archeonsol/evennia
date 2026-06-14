@@ -216,8 +216,10 @@ def try_action_dispatch(
         # Dynamic resolver hits (e.g. exit name → Move) use confidence 1.0 and
         # must not fall through to legacy.
 
-    # Unlogged-in sessions: connect/create/help via LoginSessionMixin on ServerSession.
-    # Engine still owns the login-start screen (CMD_LOGINSTART).
+    # Unlogged-in connect/create/etc. parse to normal actions, resolved by
+    # SessionLoginRules (composed into ServerSession). The only special case is
+    # the CMD_LOGINSTART sentinel, mapped to LoginStartAction so the engine
+    # renders the connection screen on connect.
     if _is_unloggedin(actor):
         from evennia.commands.cmdhandler import CMD_LOGINSTART
 

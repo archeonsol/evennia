@@ -1,11 +1,44 @@
 # ALPHA: move login fully into the engine (engine/game cross-validation)
 
-Status: todo (cross-repo: engine + game)
+Status: engine side done; remaining work is the cmdset-retirement coordination
+track (see below). Resolved by composing the login binding into the engine's
+own `ServerSession` plus extracting the login operations as reusable functions.
 
-## Context
+## Resolution (engine side)
 
-Unlogged-in login is currently **not engine-owned**, and this is the likely
-"should be promoted to the engine" smell. Today:
+The design line landed as **engine owns the login *operations* (functions);
+the game owns the *verb syntax* and dispatch ordering**:
+
+- `SessionLoginRules` is composed into the engine's default
+  `ServerSession` (`evennia/server/serversession.py`), so the **full** connect
+  screen (connect/create/look/quit/info/encoding/screenreader/help) resolves
+  out of the box with zero game wiring. A game overrides verb syntax / dispatch
+  order by subclassing and overriding the relevant `carry_out_*` (most-derived
+  definition wins), or adds logged-in rules to the shared action type.
+- Login operations are reusable engine functions: `login_session()`
+  (`actions/default/unloggedin.py`) and `render_connection_screen()`
+  (`actions/default/loginstart.py`); disconnect is `sessionhandler.disconnect`.
+- `Look` (`look`/`l`) and `Quit` (`quit`) are canonical engine actions in
+  `actions/default/general.py` (the `Help` precedent): the engine ships only the
+  unlogged baseline rule (look → re-render screen, quit → disconnect); a game
+  binds logged-in behavior (room look, confirmed/`@quit`) as rules on the same
+  action type. The engine owns these verbs because every game needs a connect
+  screen with look/quit — not because the current consumer uses them.
+- Web/REST `server/inputfuncs.py:login()` now routes through `login_session`;
+  the `commands.default.unloggedin` import is gone, and the orphaned
+  `create_normal_account` helper was deleted.
+- The phantom `LoginSessionMixin` comment in `dispatch.py` is fixed.
+
+Remaining: retiring the legacy `commands/default/unloggedin.py` cmdset on the
+[cmdset-retirement track](ALPHA-cmdset-retirement-audit.md). A downstream game
+that already registered its own `look`/`quit` `@action` must convert those to
+*rules on* the engine `Look`/`Quit` (the framework owns the canonical verb; the
+game adds rules, it does not redefine the verb) — coordinate on that track.
+
+## Original context (kept for history)
+
+Unlogged-in login was **not engine-owned**, and this was the likely
+"should be promoted to the engine" smell. At the time:
 
 - The action bridge intercepts all unlogged-in input and returns handled; the
   only engine rule (`evennia/actions/default/loginstart.py:16-37`) just prints

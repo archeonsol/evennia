@@ -336,11 +336,9 @@ def login(session, *args, **kwargs):
 
     """
     if not session.logged_in and "name" in kwargs and "password" in kwargs:
-        from evennia.commands.default.unloggedin import create_normal_account
+        from evennia.actions.default.unloggedin import login_session
 
-        account = create_normal_account(session, kwargs["name"], kwargs["password"])
-        if account:
-            session.sessionhandler.login(session, account)
+        login_session(session, kwargs["name"], kwargs["password"])
 
 
 _gettable = {

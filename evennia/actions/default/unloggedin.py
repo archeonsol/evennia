@@ -7,11 +7,17 @@ The action-engine analogue of ``evennia/commands/default/unloggedin.py``'s
 handled by :mod:`evennia.actions.default.loginstart`, which the dispatch
 bridge injects; the verbs here are what an unlogged player *types*.
 
-For an unlogged actor the session is the effective object, so these rules
-live on the ServerSession class: a game composes :class:`SessionLoginRules`
-into its session typeclass (``settings.SERVER_SESSION_CLASS``)::
-
-    class ServerSession(SessionLoginRules, BaseServerSession): ...
+For an unlogged actor the session is the effective object, so these rules live
+on the ServerSession class. The engine's default ``ServerSession`` composes
+:class:`SessionLoginRules` so login works out of the box: the full connect
+screen (connect/create/look/quit/info/encoding/screenreader/help) resolves with
+no game wiring. A game overrides verb syntax or dispatch order by subclassing
+the session and overriding the relevant ``carry_out_*`` method (the most-derived
+definition wins), or rebinds a verb (e.g. logged-in ``@quit``) by adding rules
+to the shared action type. The login *operations* (:func:`login_session`,
+:func:`~evennia.actions.default.loginstart.render_connection_screen`,
+``sessionhandler.disconnect``) are reusable functions, so a game never has to
+reimplement the mechanism to change the binding.
 
 Every rule guards "this session, not logged in", so the same class is inert
 once an account is attached. The ``create`` confirmation is a generator rule —
@@ -33,7 +39,8 @@ from ..action import action
 from ..muxargs import ArgAction
 from ..result import CLAIM, SKIP
 from ..rule import rule
-from .general import Help
+from .general import Help, Look, Quit
+from .loginstart import render_connection_screen
 
 __all__ = [
     "Connect",
@@ -42,8 +49,38 @@ __all__ = [
     "Encoding",
     "Screenreader",
     "Help",
+    "Look",
+    "Quit",
     "SessionLoginRules",
+    "login_session",
 ]
+
+
+def login_session(session, name, password):
+    """Authenticate ``name``/``password`` and log ``session`` in on success.
+
+    The shared engine login operation behind the ``connect`` verb and the
+    web/REST ``login`` inputfunc, so both reach an account through the same
+    path. ``Account.authenticate`` handles its own throttling. Authentication
+    errors are messaged to the session.
+
+    Args:
+        session (ServerSession): the unlogged-in session.
+        name (str): account name.
+        password (str): plain-text password.
+
+    Returns:
+        account (Account or None): the account on success, else ``None``.
+    """
+    Account = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
+    account, errors = Account.authenticate(
+        username=name, password=password, ip=session.address, session=session
+    )
+    if account:
+        session.sessionhandler.login(session, account)
+        return account
+    session.msg("|R%s|n" % "\n".join(errors))
+    return None
 
 
 @dataclass
@@ -135,15 +172,7 @@ class SessionLoginRules:
             session.msg("\n\r Usage (without <>): connect <name> <password>")
             return CLAIM
 
-        Account = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
-        name, password = parts
-        account, errors = Account.authenticate(
-            username=name, password=password, ip=address, session=session
-        )
-        if account:
-            session.sessionhandler.login(session, account)
-        else:
-            session.msg("|R%s|n" % "\n".join(errors))
+        login_session(session, parts[0], parts[1])
         return CLAIM
 
     # --- create ------------------------------------------------------------------
@@ -323,4 +352,24 @@ You can use the |wlook|n command if you want to see the connect screen again.
         if settings.STAFF_CONTACT_EMAIL:
             string += "For support, please contact: %s" % settings.STAFF_CONTACT_EMAIL
         self.msg(string)
+        return CLAIM
+
+    # --- look (re-show the connection screen) ------------------------------------
+
+    @rule(Look, phase="carry_out")
+    def carry_out_unlogged_look(self, action, actor):
+        del action
+        if not self._is_unlogged(actor):
+            return SKIP
+        render_connection_screen(self)
+        return CLAIM
+
+    # --- quit (drop the connection) ----------------------------------------------
+
+    @rule(Quit, phase="carry_out")
+    def carry_out_unlogged_quit(self, action, actor):
+        del action
+        if not self._is_unlogged(actor):
+            return SKIP
+        self.sessionhandler.disconnect(self, "Good bye! Disconnecting.")
         return CLAIM

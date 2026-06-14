@@ -40,6 +40,7 @@ from .default import (
     Home,
     Info,
     Locomotion,
+    Look,
     Move,
     Moved,
     Nick,
@@ -50,6 +51,7 @@ from .default import (
     Put,
     Py,
     PyRules,
+    Quit,
     Screenreader,
     SessionLoginRules,
     SetHelp,
@@ -93,12 +95,7 @@ from .parser import (
     ParseResult,
     parser,
 )
-from .perception import (
-    filter_visible,
-    get_visibility_filter,
-    is_visible,
-    set_visibility_filter,
-)
+from .perception import filter_visible, get_visibility_filter, is_visible, set_visibility_filter
 from .permission import (
     STAFF,
     Capability,
@@ -298,6 +295,8 @@ __all__ = [
     "Nick",
     "Home",
     "Help",
+    "Look",
+    "Quit",
     "SetHelp",
     "NickRules",
     "CharacterGeneralRules",

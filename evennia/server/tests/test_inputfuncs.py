@@ -4,10 +4,32 @@ Tests for server input functions.
 
 import pickle
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import evennia
 from evennia.server import inputfuncs
 from evennia.utils.test_resources import BaseEvenniaTest
+
+
+class TestLoginInputfunc(unittest.TestCase):
+    """The web/REST ``login`` inputfunc routes through the engine login op."""
+
+    def test_routes_to_engine_login_session(self):
+        from evennia.actions.default import unloggedin
+
+        session = SimpleNamespace(logged_in=False)
+        with mock.patch.object(unloggedin, "login_session") as login_session:
+            inputfuncs.login(session, name="bob", password="hunter2")
+        login_session.assert_called_once_with(session, "bob", "hunter2")
+
+    def test_noop_when_already_logged_in(self):
+        from evennia.actions.default import unloggedin
+
+        session = SimpleNamespace(logged_in=True)
+        with mock.patch.object(unloggedin, "login_session") as login_session:
+            inputfuncs.login(session, name="bob", password="hunter2")
+        login_session.assert_not_called()
 
 
 class TestMonitoredInputfunc(BaseEvenniaTest):

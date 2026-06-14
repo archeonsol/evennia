@@ -44,6 +44,8 @@ __all__ = [
     "Nick",
     "Home",
     "Help",
+    "Look",
+    "Quit",
     "SetHelp",
     "NickRules",
     "CharacterGeneralRules",
@@ -110,6 +112,30 @@ class Help(ArgAction):
     The engine ships only the unlogged-in baseline rule (see
     :class:`~evennia.actions.default.unloggedin.SessionLoginRules`); a game
     binds its own help system as rules on this action type.
+    """
+
+
+@action("look", "l")
+@dataclass
+class Look(ArgAction):
+    """Look at your surroundings (``look [target]``).
+
+    The engine ships only the unlogged-in baseline rule (re-render the
+    connection screen; see
+    :class:`~evennia.actions.default.unloggedin.SessionLoginRules`); a game
+    binds in-character looking as rules on this action type.
+    """
+
+
+@action("quit")
+@dataclass
+class Quit(ArgAction):
+    """Disconnect from the game (``quit``).
+
+    The engine ships only the unlogged-in baseline rule (drop the connection;
+    see :class:`~evennia.actions.default.unloggedin.SessionLoginRules`); a game
+    binds its logged-in quit (e.g. unpuppet/confirm, or an ``@quit`` syntax) as
+    rules on this action type.
     """
 
 
@@ -326,12 +352,7 @@ class CharacterGeneralRules(NickRules):
         whose ``yield`` the engine's generator driver fills with the player's
         reply. ``return CLAIM`` ends the flow as for any carry_out rule.
         """
-        from evennia.commands.default.help import (
-            HelpCategory,
-            _loadhelp,
-            _quithelp,
-            _savehelp,
-        )
+        from evennia.commands.default.help import HelpCategory, _loadhelp, _quithelp, _savehelp
         from evennia.help.catalog import is_action_help_topic
         from evennia.locks.lockhandler import LockException
         from evennia.utils import create

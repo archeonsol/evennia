@@ -12,15 +12,12 @@ import time
 from django.conf import settings
 from django.utils import timezone
 
+from evennia.actions.default.unloggedin import SessionLoginRules
 from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.comms.models import ChannelDB
 from evennia.hooks import hook
 from evennia.scripts.monitorhandler import MONITOR_HANDLER
-from evennia.typeclasses.attributes import (
-    AttributeHandler,
-    DbHolder,
-    InMemoryAttributeBackend,
-)
+from evennia.typeclasses.attributes import AttributeHandler, DbHolder, InMemoryAttributeBackend
 from evennia.utils import logger
 from evennia.utils.utils import class_from_module, is_veto, lazy_property, make_iter
 
@@ -37,7 +34,13 @@ _BASE_SESSION_CLASS = class_from_module(settings.BASE_SESSION_CLASS)
 # -------------------------------------------------------------
 
 
-class ServerSession(_BASE_SESSION_CLASS):
+# ``SessionLoginRules`` is mixed in first so the engine owns login out of the
+# box: for an unlogged actor the session is the effective rule provider, so the
+# connect/create/etc. verbs resolve against these rules with no game wiring. The
+# rules guard "not logged in" and the session is not a provider once an account
+# is attached, so the mixin is inert post-login. A game overrides verb syntax or
+# dispatch order by subclassing and overriding the relevant ``carry_out_*``.
+class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
     """
     This class represents an account's session and is a template for
     individual protocols to communicate with Evennia.
