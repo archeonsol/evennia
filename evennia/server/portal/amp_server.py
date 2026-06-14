@@ -390,7 +390,9 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
 
         """
         try:
-            sessid, kwargs = amp.loads_session(packed_data)
+            # Server-generated output: trusted and may legitimately exceed the
+            # resource caps (large text, maps), so size limits are not enforced.
+            sessid, kwargs = amp.loads_session(packed_data, enforce_limits=False)
             session = evennia.PORTAL_SESSION_HANDLER.get(sessid, None)
             if session:
                 evennia.PORTAL_SESSION_HANDLER.data_out(session, **kwargs)

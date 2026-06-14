@@ -7,6 +7,19 @@ never accepted on these paths. A non-JSON payload is rejected outright.
 Wire formats:
   ``J1`` + UTF-8 JSON  — session messages (MsgPortal2Server / MsgServer2Portal)
   ``A1`` + UTF-8 JSON  — admin messages  (AdminPortal2Server / AdminServer2Portal)
+
+Two distinct protections apply:
+
+- Type-safety (no bytes, finite floats, JSON-safe ints, str keys) and pickle
+  rejection run on *every* path, in both directions. This is the core hardening.
+- Resource caps (string/list/dict/depth size limits) guard against *untrusted,
+  player-originated* content arriving at the Server. The only such path is the
+  Server unpacking ``MsgPortal2Server`` (a player's command text), so caps are
+  enforced there and nowhere else. Server-generated output (``MsgServer2Portal``)
+  and all admin control-plane traffic are trusted and legitimately large: the
+  ``PSYNC``/``PCONNSYNC`` resync carries one ``sessiondata`` entry per connected
+  session (scaling past any fixed key cap) in both directions. Capping those
+  would reject valid traffic, so callers pass ``enforce_limits=False`` for them.
 """
 
 from __future__ import annotations
@@ -28,7 +41,6 @@ _MAX_DEPTH = 12
 _MAX_STR_LEN = 65536
 _MAX_LIST_LEN = 256
 _MAX_DICT_KEYS = 128
-_MAX_PAYLOAD_BYTES = 512 * 1024
 
 
 def _max_depth() -> int:
@@ -102,8 +114,14 @@ def pack_session_message(sessid: int, kwargs: dict) -> bytes:
     return _SESSION_MAGIC + body
 
 
-def unpack_session_message(data: bytes) -> Tuple[int, dict]:
-    """Unpack session wire bytes to (sessid, kwargs)."""
+def unpack_session_message(data: bytes, *, enforce_limits: bool = True) -> Tuple[int, dict]:
+    """Unpack session wire bytes to (sessid, kwargs).
+
+    ``enforce_limits`` defaults True (the safe choice for untrusted player input
+    arriving at the Server via ``MsgPortal2Server``). The Portal receiving
+    server-generated output (``MsgServer2Portal``) passes False, since that data
+    is trusted and may legitimately exceed the resource caps.
+    """
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("packed_data must be bytes")
     raw = bytes(data)
@@ -116,7 +134,7 @@ def unpack_session_message(data: bytes) -> Tuple[int, dict]:
             raise ValueError("invalid sessid in AMP session envelope")
         if not isinstance(kwargs, dict):
             raise ValueError("invalid kwargs in AMP session envelope")
-        return sessid, sanitize_session_kwargs(kwargs)
+        return sessid, sanitize_session_kwargs(kwargs, enforce_limits=enforce_limits)
     if raw[:1] in _PICKLE_REJECT_PREFIXES:
         raise ValueError("refusing non-JSON (pickle-like) AMP session payload")
     raise ValueError("unrecognized AMP session payload format")
@@ -142,7 +160,7 @@ def _sanitize_admin_kwargs(kwargs: dict) -> dict:
         if k == "sessiondata" and isinstance(v, dict):
             result[k] = _sanitize_admin_sessiondata(v)
         else:
-            result[k] = sanitize_value(v)
+            result[k] = sanitize_value(v, enforce_limits=False)
     return result
 
 
@@ -158,11 +176,9 @@ def _is_int_key(key: Any) -> bool:
 def _sanitize_admin_sessiondata(
     value: dict, *, depth: int = 0, sessid_map: bool | None = None
 ) -> dict:
-    if depth > _max_depth():
-        raise ValueError("AMP admin sessiondata exceeds max nesting depth")
-    if len(value) > _MAX_DICT_KEYS:
-        raise ValueError("AMP admin sessiondata dict exceeds max keys")
-
+    # No resource caps here: this is trusted control-plane data, and the
+    # sessid->sessiondata map holds one entry per connected session, which scales
+    # past any fixed key/size cap. Type-safety is still enforced via sanitize_value.
     if sessid_map is None:
         sessid_map = _is_sessiondata_map(value)
 
@@ -182,7 +198,7 @@ def _sanitize_admin_sessiondata(
         if isinstance(val, dict):
             encoded[clean_key] = _sanitize_admin_sessiondata(val, depth=depth + 1, sessid_map=False)
         else:
-            encoded[clean_key] = sanitize_value(val, depth=depth + 1)
+            encoded[clean_key] = sanitize_value(val, depth=depth + 1, enforce_limits=False)
     return encoded
 
 
@@ -213,13 +229,16 @@ def pack_admin_message(sessid: int, kwargs: dict) -> bytes:
         raise ValueError("admin sessid must be a non-negative int")
     clean = _sanitize_admin_kwargs(kwargs)
     body = json.dumps([sessid, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    if len(body) > _MAX_PAYLOAD_BYTES:
-        raise ValueError("AMP admin payload exceeds max size")
     return _ADMIN_MAGIC + body
 
 
 def unpack_admin_message(data: bytes) -> Tuple[int, dict]:
-    """Unpack Admin* wire bytes to (sessid, kwargs)."""
+    """Unpack Admin* wire bytes to (sessid, kwargs).
+
+    No resource caps are applied: admin is trusted control-plane traffic and the
+    ``PSYNC``/``PCONNSYNC`` resync legitimately carries one ``sessiondata`` entry
+    per session in both directions. Pickle-like payloads are still rejected.
+    """
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("packed_data must be bytes")
     raw = bytes(data)

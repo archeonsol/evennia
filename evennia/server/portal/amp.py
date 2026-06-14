@@ -97,11 +97,15 @@ def dumps_session(data):
     return pack_session_message(sessid, kwargs)
 
 
-def loads_session(data):
-    """Unpack Msg* session wire bytes."""
+def loads_session(data, *, enforce_limits=True):
+    """Unpack Msg* session wire bytes.
+
+    ``enforce_limits`` defaults True for untrusted player input arriving at the
+    Server. The Portal, receiving trusted server output, passes False.
+    """
     from evennia.server.amp_serde import unpack_session_message
 
-    return unpack_session_message(data)
+    return unpack_session_message(data, enforce_limits=enforce_limits)
 
 
 def dumps_admin(data):

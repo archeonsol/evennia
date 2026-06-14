@@ -190,6 +190,8 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
             packed_data (str): Data to receive (a pickled tuple (sessid,kwargs))
 
         """
+        # Untrusted: this carries a player's command text. Resource caps are
+        # enforced (the default) to bound player-driven payloads at the Server.
         sessid, kwargs = amp.loads_session(packed_data)
         session = evennia.SERVER_SESSION_HANDLER.get(sessid, None)
         if session:
