@@ -4,7 +4,6 @@ Test the evennia launcher.
 """
 
 import os
-import pickle
 
 from anything import Something
 from mock import MagicMock, create_autospec, patch
@@ -13,6 +12,7 @@ from twisted.internet.base import DelayedCall
 from twisted.trial.unittest import TestCase as TwistedTestCase
 
 from evennia.server import evennia_launcher
+from evennia.server.amp_serde import pack_status, unpack_status
 from evennia.server.portal import amp
 
 DelayedCall.debug = True
@@ -61,9 +61,10 @@ class TestLauncher(TwistedTestCase):
         mockprint.assert_called()
 
     def test_parse_status(self):
-        response = {"status": pickle.dumps(("teststring",))}
+        # JSON does not preserve tuples; the status round-trips as a list.
+        response = {"status": pack_status(("teststring",))}
         result = evennia_launcher._parse_status(response)
-        self.assertEqual(result, ("teststring",))
+        self.assertEqual(result, ["teststring"])
 
     @patch("evennia.server.evennia_launcher.os.name", new="posix")
     def test_get_twisted_cmdline(self):
@@ -122,10 +123,10 @@ class TestLauncher(TwistedTestCase):
     #     return deferred
 
     def _msend_status_ok(operation, arguments, callback=None, errback=None):
-        callback({"status": pickle.dumps((True, True, 2, 24, "info1", "info2"))})
+        callback({"status": pack_status((True, True, 2, 24, "info1", "info2"))})
 
     def _msend_status_err(operation, arguments, callback=None, errback=None):
-        errback({"status": pickle.dumps((False, False, 3, 25, "info3", "info4"))})
+        errback({"status": pack_status((False, False, 3, 25, "info3", "info4"))})
 
     @patch.object(evennia_launcher, "send_instruction", _msend_status_ok)
     @patch.object(evennia_launcher, "NO_REACTOR_STOP", True)
@@ -148,11 +149,11 @@ class TestLauncher(TwistedTestCase):
         mprint = MagicMock()
 
         def testcall(response):
-            resp = pickle.loads(response["status"])
+            resp = unpack_status(response["status"])
             mprint(resp)
 
         evennia_launcher.query_status(callback=testcall)
-        mprint.assert_called_with((True, True, 2, 24, "info1", "info2"))
+        mprint.assert_called_with([True, True, 2, 24, "info1", "info2"])
 
     @patch.object(evennia_launcher, "AMP_CONNECTION")
     @patch("evennia.server.evennia_launcher.print")

@@ -14,7 +14,6 @@ Run the script with the -h flag to see usage information.
 import argparse
 import importlib
 import os
-import pickle
 import re
 import shutil
 import signal
@@ -37,6 +36,7 @@ CTRL_C_EVENT = 0  # Windows SIGINT-like signal
 EVENNIA_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import evennia  # noqa
+from evennia.server.amp_serde import pack_launcher_args, unpack_status
 
 EVENNIA_LIB = os.path.join(EVENNIA_ROOT, "evennia")
 EVENNIA_SERVER = os.path.join(EVENNIA_LIB, "server")
@@ -524,7 +524,7 @@ def _print_info(portal_info_dict, server_info_dict):
 
 def _parse_status(response):
     "Unpack the status information"
-    return pickle.loads(response["status"])
+    return unpack_status(response["status"])
 
 
 def _get_twistd_cmdline(pprofiler, sprofiler):
@@ -624,9 +624,9 @@ class AMPLauncherProtocol(amp.AMP):
         except IndexError:
             pass
         else:
-            status = pickle.loads(status)
+            status = unpack_status(status)
             callback(status)
-        return {"status": pickle.dumps(b"")}
+        return {"status": b""}
 
 
 def send_instruction(operation, arguments, callback=None, errback=None):
@@ -673,7 +673,7 @@ def send_instruction(operation, arguments, callback=None, errback=None):
             return AMP_CONNECTION.callRemote(
                 MsgLauncher2Portal,
                 operation=bytes(operation, "utf-8"),
-                arguments=pickle.dumps(arguments, pickle.HIGHEST_PROTOCOL),
+                arguments=pack_launcher_args(arguments),
             ).addCallbacks(_callback, _errback)
 
     if AMP_CONNECTION:

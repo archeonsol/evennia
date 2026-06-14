@@ -1,12 +1,15 @@
 """
 Secure serialization for Portal <-> Server AMP traffic.
 
-Session (Msg*) and admin (Admin*) messages use a strict JSON envelope; pickle is
-never accepted on these paths. A non-JSON payload is rejected outright.
+Every AMP payload uses a strict JSON envelope; pickle is never produced or
+accepted on ANY AMP path (session, admin, status, or launcher control). A
+non-JSON payload is rejected outright.
 
 Wire formats:
   ``J1`` + UTF-8 JSON  — session messages (MsgPortal2Server / MsgServer2Portal)
   ``A1`` + UTF-8 JSON  — admin messages  (AdminPortal2Server / AdminServer2Portal)
+  ``S1`` + UTF-8 JSON  — status reports  (MsgStatus, Portal -> launcher)
+  ``L1`` + UTF-8 JSON  — launcher start args (MsgLauncher2Portal, launcher -> Portal)
 
 Two distinct protections apply:
 
@@ -20,6 +23,8 @@ Two distinct protections apply:
   ``PSYNC``/``PCONNSYNC`` resync carries one ``sessiondata`` entry per connected
   session (scaling past any fixed key cap) in both directions. Capping those
   would reject valid traffic, so callers pass ``enforce_limits=False`` for them.
+  Status and launcher-control payloads are likewise trusted (Portal- and
+  launcher-originated) and pack with caps off.
 """
 
 from __future__ import annotations
@@ -255,6 +260,60 @@ def unpack_admin_message(data: bytes) -> Tuple[int, dict]:
     if raw[:1] in _PICKLE_REJECT_PREFIXES:
         raise ValueError("refusing non-JSON (pickle-like) AMP admin payload")
     raise ValueError("unrecognized AMP admin payload format")
+
+
+_STATUS_MAGIC = b"S1"
+_LAUNCHER_MAGIC = b"L1"
+
+
+def pack_status(status: Any) -> bytes:
+    """Pack the Portal/Server status report for ``MsgStatus`` — JSON, no pickle.
+
+    ``status`` is the 6-element tuple returned by ``get_status()``:
+    ``(portal_live, server_live, portal_pid, server_pid, portal_info, server_info)``.
+    It is trusted, Portal-generated control data, so resource caps are off.
+    Tuples serialize as JSON arrays and are restored as lists; the consumer
+    unpacks them positionally, so the distinction does not matter.
+    """
+    clean = sanitize_value(status, enforce_limits=False)
+    body = json.dumps(clean, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return _STATUS_MAGIC + body
+
+
+def unpack_status(data: bytes) -> Any:
+    """Unpack ``MsgStatus`` wire bytes to the status list. Pickle is rejected."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("status payload must be bytes")
+    raw = bytes(data)
+    if raw.startswith(_STATUS_MAGIC):
+        return sanitize_value(json.loads(raw[2:].decode("utf-8")), enforce_limits=False)
+    if raw[:1] in _PICKLE_REJECT_PREFIXES:
+        raise ValueError("refusing non-JSON (pickle-like) AMP status payload")
+    raise ValueError("unrecognized AMP status payload format")
+
+
+def pack_launcher_args(arguments: Any) -> bytes:
+    """Pack launcher start args for ``MsgLauncher2Portal`` — JSON, no pickle.
+
+    ``arguments`` is the server twistd command line (a ``list`` of ``str``) for a
+    (re)start, or an empty ``dict`` for control operations that carry no args. It
+    is trusted, launcher-originated control data, so resource caps are off.
+    """
+    clean = sanitize_value(arguments, enforce_limits=False)
+    body = json.dumps(clean, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return _LAUNCHER_MAGIC + body
+
+
+def unpack_launcher_args(data: bytes) -> Any:
+    """Unpack ``MsgLauncher2Portal`` start-arg wire bytes. Pickle is rejected."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("launcher arguments must be bytes")
+    raw = bytes(data)
+    if raw.startswith(_LAUNCHER_MAGIC):
+        return sanitize_value(json.loads(raw[2:].decode("utf-8")), enforce_limits=False)
+    if raw[:1] in _PICKLE_REJECT_PREFIXES:
+        raise ValueError("refusing non-JSON (pickle-like) AMP launcher payload")
+    raise ValueError("unrecognized AMP launcher payload format")
 
 
 def validate_event_subject(subject: str) -> str:

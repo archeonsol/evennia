@@ -137,14 +137,14 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         Args:
             command (AMP Command): A protocol send command.
             sessid (int): A unique Session id.
-            kwargs (any): Data to send. This will be pickled.
+            kwargs (any): Data to send. This will be JSON-encoded.
 
         Returns:
             deferred (deferred or None): A deferred with an errback.
 
         Notes:
-            Data will be sent across the wire pickled as a tuple
-            (sessid, kwargs).
+            Data is sent across the wire as a strict-JSON envelope
+            wrapping the tuple (sessid, kwargs).
 
         """
         # print("portal data_to_server: {}, {}, {}".format(command, sessid, kwargs))
@@ -260,7 +260,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         # print("self.get_status(): {}".format(self.get_status()))
         if self.factory.launcher_connection:
             self.factory.launcher_connection.callRemote(
-                amp.MsgStatus, status=amp.dumps(self.get_status())
+                amp.MsgStatus, status=amp.dumps_status(self.get_status())
             ).addErrback(self.errback, amp.MsgStatus.key)
 
     def send_MsgPortal2Server(self, session, **kwargs):
@@ -309,7 +309,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
 
         """
         # print('Received PSTATUS request')
-        return {"status": amp.dumps(self.get_status())}
+        return {"status": amp.dumps_status(self.get_status())}
 
     @amp.MsgLauncher2Portal.responder
     @amp.catch_traceback
@@ -336,13 +336,13 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         _, server_connected, _, _, _, _ = self.get_status()
 
         # logger.log_msg("Evennia Launcher->Portal operation %s:%s received" % (ord(operation), arguments))
-        # logger.log_msg("operation == amp.SSTART: {}: {}".format(operation == amp.SSTART, amp.loads(arguments)))
+        # logger.log_msg("operation == amp.SSTART: {}: {}".format(operation == amp.SSTART, amp.loads_launcher_args(arguments)))
 
         if operation == amp.SSTART:  # portal start  #15
             # first, check if server is already running
             if not server_connected:
                 self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads(arguments))
+                self.start_server(amp.loads_launcher_args(arguments))
 
         elif operation == amp.SRELOAD:  # reload server #14
             if server_connected:
@@ -351,7 +351,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
                 self.stop_server(mode="reload")
             else:
                 self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads(arguments))
+                self.start_server(amp.loads_launcher_args(arguments))
 
         elif operation == amp.SRESET:  # reload server #19
             if server_connected:
@@ -359,7 +359,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
                 self.stop_server(mode="reset")
             else:
                 self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads(arguments))
+                self.start_server(amp.loads_launcher_args(arguments))
 
         elif operation == amp.SSHUTD:  # server-only shutdown #17
             if server_connected:
@@ -386,7 +386,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         This method is executed on the Portal.
 
         Args:
-            packed_data (str): Pickled data (sessid, kwargs) coming over the wire.
+            packed_data (bytes): JSON-encoded (sessid, kwargs) coming over the wire.
 
         """
         try:
@@ -409,7 +409,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         This is executed on the Portal.
 
         Args:
-            packed_data (str): Data received, a pickled tuple (sessid, kwargs).
+            packed_data (bytes): Data received, a JSON-encoded tuple (sessid, kwargs).
 
         """
         self.factory.server_connection = self

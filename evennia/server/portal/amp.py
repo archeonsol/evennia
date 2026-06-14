@@ -5,7 +5,6 @@ This module acts as a central place for AMP-servers and -clients to get commands
 
 """
 
-import pickle
 import time
 import zlib  # Used in Compressed class
 from collections import defaultdict, namedtuple
@@ -78,15 +77,35 @@ Content-Type: text/html
 )
 
 
-# Helper functions for pickling.
+# Helper functions for the strict-JSON AMP envelopes. No path uses pickle.
 
 
-def dumps(data):
-    return pickle.dumps(data, pickle.HIGHEST_PROTOCOL)
+def dumps_status(status):
+    """Pack a status report for MsgStatus — JSON envelope, not pickle."""
+    from evennia.server.amp_serde import pack_status
+
+    return pack_status(status)
 
 
-def loads(data):
-    return pickle.loads(data)
+def loads_status(data):
+    """Unpack MsgStatus wire bytes to the status list."""
+    from evennia.server.amp_serde import unpack_status
+
+    return unpack_status(data)
+
+
+def dumps_launcher_args(arguments):
+    """Pack launcher start args for MsgLauncher2Portal — JSON, not pickle."""
+    from evennia.server.amp_serde import pack_launcher_args
+
+    return pack_launcher_args(arguments)
+
+
+def loads_launcher_args(data):
+    """Unpack MsgLauncher2Portal start-arg wire bytes."""
+    from evennia.server.amp_serde import unpack_launcher_args
+
+    return unpack_launcher_args(data)
 
 
 def dumps_session(data):
@@ -532,8 +551,8 @@ class AMPMultiConnectionProtocol(amp.AMP):
             deferred (deferred or None): A deferred with an errback.
 
         Notes:
-            Data will be sent across the wire pickled as a tuple
-            (sessid, kwargs).
+            Data is sent across the wire as a strict-JSON envelope
+            wrapping the tuple (sessid, kwargs).
 
         """
         deferreds = []

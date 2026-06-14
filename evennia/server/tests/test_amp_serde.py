@@ -4,10 +4,17 @@ Tests for secure AMP session serialization.
 
 import pickle
 
-from evennia.server.amp_serde import (pack_admin_message, pack_session_message,
-                                      sanitize_session_kwargs,
-                                      unpack_admin_message,
-                                      unpack_session_message)
+from evennia.server.amp_serde import (
+    pack_admin_message,
+    pack_launcher_args,
+    pack_session_message,
+    pack_status,
+    sanitize_session_kwargs,
+    unpack_admin_message,
+    unpack_launcher_args,
+    unpack_session_message,
+    unpack_status,
+)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -46,6 +53,38 @@ class TestAMPSerde(BaseEvenniaTest):
         wire = pack_session_message(1, {"text": "x" * (65536 * 2)})
         with self.assertRaises(ValueError):
             unpack_session_message(wire)
+
+    def test_status_roundtrip_json(self):
+        # The MsgStatus payload is the get_status() 6-tuple. It packs to a JSON
+        # ``S1`` envelope and restores as a list (tuples are not preserved by
+        # JSON, but the consumer unpacks positionally).
+        status = (True, False, 1234, None, {"servername": "test", "telnet": [1, 2]}, {})
+        wire = pack_status(status)
+        self.assertTrue(wire.startswith(b"S1"))
+        out = unpack_status(wire)
+        self.assertEqual(
+            out, [True, False, 1234, None, {"servername": "test", "telnet": [1, 2]}, {}]
+        )
+
+    def test_status_rejects_pickle(self):
+        blob = pickle.dumps((True, True, 1, 2, {}, {}), pickle.HIGHEST_PROTOCOL)
+        with self.assertRaises(ValueError):
+            unpack_status(blob)
+
+    def test_launcher_args_roundtrip_json(self):
+        # Start args are the twistd command line (list of str) for a (re)start...
+        cmd = ["twistd", "--python=server.py", "--pidfile=server.pid"]
+        wire = pack_launcher_args(cmd)
+        self.assertTrue(wire.startswith(b"L1"))
+        self.assertEqual(unpack_launcher_args(wire), cmd)
+        # ...or an empty dict for control operations that carry no args.
+        wire = pack_launcher_args({})
+        self.assertEqual(unpack_launcher_args(wire), {})
+
+    def test_launcher_args_rejects_pickle(self):
+        blob = pickle.dumps(["twistd", "--python=server.py"], pickle.HIGHEST_PROTOCOL)
+        with self.assertRaises(ValueError):
+            unpack_launcher_args(blob)
 
     def test_admin_sync_with_many_sessions_roundtrips(self):
         # A PSYNC/PCONNSYNC resync carries one sessiondata entry per session;
