@@ -35,7 +35,7 @@ from twisted.internet.defer import Deferred
 import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
-from evennia.commands.command import Command, InterruptCommand
+from evennia.commands.command import InterruptCommand
 from evennia.objects.objects import (
     DefaultCharacter,
     DefaultExit,
@@ -666,21 +666,6 @@ class EvenniaTest(EvenniaTestMixin, TestCase):
     script_typeclass = settings.BASE_SCRIPT_TYPECLASS
 
 
-# NOTE: these path-string patches are dead and intentionally NOT rewritten to
-# patch.object. The path `evennia.commands.account` is stale (real module is
-# `evennia.commands.default.account`) AND the decorators sit on a base class
-# with no test methods, so patch's class-decorator wraps nothing and they never
-# start. Fixing the path would silently activate 9 dormant patches (a behavior
-# change). Fix-vs-delete is tracked in .agents/prompts/F23.
-@patch("evennia.commands.account.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.admin.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.building.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.comms.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.general.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.help.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.syscommands.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.system.COMMAND_DEFAULT_CLASS", Command)
-@patch("evennia.commands.unloggedin.COMMAND_DEFAULT_CLASS", Command)
 @override_settings(**DEFAULT_SETTINGS)
 class BaseEvenniaCommandTest(BaseEvenniaTest, EvenniaCommandTestMixin):
     """
