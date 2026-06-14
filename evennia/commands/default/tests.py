@@ -2195,19 +2195,22 @@ class TestInterruptCommand(BaseEvenniaCommandTest):
 class TestUnconnectedCommand(BaseEvenniaCommandTest):
     def test_info_command(self):
         # instead of using SERVER_START_TIME (0), we use 86400 because Windows won't let us use anything lower
+        original_start_time = gametime.SERVER_START_TIME
         gametime.SERVER_START_TIME = 86400
-        expected = (
-            "## BEGIN INFO 1.1\nName: %s\nUptime: %s\nConnected: %d\nVersion: Evennia %s\n## END"
-            " INFO"
-            % (
-                settings.SERVERNAME,
-                datetime.datetime.fromtimestamp(gametime.SERVER_START_TIME).ctime(),
-                evennia.SESSION_HANDLER.account_count(),
-                utils.get_evennia_version(),
+        try:
+            expected = (
+                "## BEGIN INFO 1.1\nName: %s\nUptime: %s\nConnected: %d\nVersion: Evennia %s\n## END"
+                " INFO"
+                % (
+                    settings.SERVERNAME,
+                    datetime.datetime.fromtimestamp(gametime.SERVER_START_TIME).ctime(),
+                    evennia.SESSION_HANDLER.account_count(),
+                    utils.get_evennia_version(),
+                )
             )
-        )
-        self.call(unloggedin.CmdUnconnectedInfo(), "", expected)
-        del gametime.SERVER_START_TIME
+            self.call(unloggedin.CmdUnconnectedInfo(), "", expected)
+        finally:
+            gametime.SERVER_START_TIME = original_start_time
 
     @override_settings(NEW_ACCOUNT_REGISTRATION_ENABLED=False)
     def test_disabled_registration(self):
