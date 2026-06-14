@@ -25,6 +25,109 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.94 — AMP pickle removal, serde cap trust-model, and dead-code cleanup
+
+Removes all pickle deserialization from the inter-process AMP wire (the main
+remaining network-facing attack surface), reworks the JSON serde's resource
+caps into a trust-direction model so they bound untrusted player input without
+rejecting legitimate large traffic, deletes a batch of confirmed-dead engine
+code, narrows three silently-swallowed cache-sync errors, and bumps Django to
+6.0.6. The ssh.py portal-boundary item was evaluated and deferred (it is latent,
+not a live problem); see [the reconsider prompt](.agents/prompts/ALPHA-ssh-portal-boundary.md).
+
+### Engine — AMP / inter-process
+
+- **No pickle anywhere on the AMP wire.** Across
+  [`amp_serde.py`](evennia/server/amp_serde.py),
+  [`portal/amp.py`](evennia/server/portal/amp.py),
+  [`amp_server.py`](evennia/server/portal/amp_server.py), and
+  [`amp_client.py`](evennia/server/amp_client.py): removed the legacy-pickle
+  accept branches on the session/admin paths and the dead `FunctionCall` RPC +
+  `send_FunctionCall` (`56bd0d31d`), then the last pickle uses on the `MsgStatus`
+  and launcher start-arg paths (`288eb7394`, now `S1`/`L1` JSON envelopes). Every
+  AMP path is strict JSON; a non-JSON payload is rejected outright. Type-safety
+  (no bytes, finite floats, JSON-safe ints, str keys) runs on all paths.
+- **Settings removed:** `AMP_SESSION_SERDE`, `AMP_SESSION_ACCEPT_LEGACY_PICKLE`,
+  `AMP_FUNCTIONCALL_MODULES` ([`settings_default.py`](evennia/settings_default.py)).
+- **Serde resource caps are now trust-directional** (`83b99fb2f`, `fbdd7b091`).
+  The string/list/dict/depth caps previously applied symmetrically and rejected
+  legitimate traffic: server output over the per-string cap, and the
+  `PSYNC`/`PCONNSYNC` resync whose `sessiondata` scales past the key cap in both
+  directions. Caps now apply only where untrusted player content reaches the
+  Server (the `MsgPortal2Server` unpack); server output (`MsgServer2Portal`) and
+  all admin control-plane traffic pack/unpack with `enforce_limits=False`.
+  `loads_session`/`unpack_session_message` gained an `enforce_limits` kwarg.
+
+### Deletions (dead code)
+
+- [`utils/utils.py`](evennia/utils/utils.py): `run_async` + `_PPOOL`/`_PCMD`/
+  `_PROC_ERR` (superseded by `utils/defer`), `init_new_account` (deprecation
+  stub), and the South-detection branch (`8ed09b235`).
+- [`server/sessionhandler.py`](evennia/server/sessionhandler.py):
+  `validate_sessions` (idle timeout lives in
+  `EvenniaServerService.process_idle_timeouts`), `sessions_from_puppet` /
+  `sessions_from_character` (orphaned; `sessions_from_account` stays), and stale
+  `clean_senddata` pickle-era residue (`9e658182f`).
+- [`actions/`](evennia/actions): the singular `nomatch_provider` back-compat
+  alias (use `nomatch_providers`) and `cumulative_rank_mask` (`ce1512b74`).
+- [`typeclasses/models.py`](evennia/typeclasses/models.py): the no-op
+  `remove_attributes_on_delete` handler and its `pre_delete` signal (`35c487a5c`).
+- [`scripts/taskhandler.py`](evennia/scripts/taskhandler.py): unread
+  `TaskHandler._next_task_id` bookkeeping (`a2f19c38e`).
+- [`objects/manager.py`](evennia/objects/manager.py) /
+  [`scripts/ondemandhandler.py`](evennia/scripts/ondemandhandler.py): the
+  deprecated force-gated `get_objs_with_attr` and the legacy-pickle ondemand load
+  branch (`29e90ac78`).
+
+### Fixes
+
+- **comms cache-sync errors no longer vanish** (`ad55427f2`). In
+  [`comms/models.py`](evennia/comms/models.py) and
+  [`utils/idmapper/models.py`](evennia/utils/idmapper/models.py) the
+  `add_subscriber`/`remove_subscriber`/`clear_channel`/`flush_all_keys` call
+  sites did `except Exception: pass`; they now `log_trace` escaping errors. The
+  backends already absorb backend-down internally, so a bare pass could only hide
+  genuine bugs (`AttributeError`/`TypeError`).
+
+### Tests
+
+- Removed nine dead `COMMAND_DEFAULT_CLASS` `@patch` decorators on
+  `BaseEvenniaCommandTest` ([`test_resources.py`](evennia/utils/test_resources.py),
+  `16266afe6`): doubly-dead (stale module path `evennia.commands.account`, and
+  decorators on a class with no test methods, so they never started).
+- Added serde trust-direction coverage in
+  [`test_amp_serde.py`](evennia/server/tests/test_amp_serde.py) (large output
+  round-trips, oversized player input rejected at the Server, 200-session admin
+  sync round-trips) and rewrote the brittle AMP byte-blob assertions to decoded
+  round-trips in [`portal/tests.py`](evennia/server/portal/tests.py).
+
+### Documentation
+
+- Documented why `MONITOR_HANDLER`/`ON_DEMAND_HANDLER`/MSDP inputfuncs load
+  despite empty game state (`7a645c765`), and deferred the ssh.py portal-boundary
+  item to a reconsider prompt (`313dd226d`).
+
+### Dependencies
+
+- Django `6.0.4 → 6.0.6` (`1f6dbf0c1`).
+
+### Migration notes
+
+For downstream games:
+
+- **Remove these settings if set:** `AMP_SESSION_SERDE`,
+  `AMP_SESSION_ACCEPT_LEGACY_PICKLE`, `AMP_FUNCTIONCALL_MODULES`.
+- **Replace any use of removed APIs:** `run_async` (use `utils/defer`),
+  `get_objs_with_attr` (use `get_objs_with_attr_value` or attribute search),
+  `validate_sessions`, `sessions_from_puppet`/`sessions_from_character`
+  (`sessions_from_account` stays), `init_new_account`, `cumulative_rank_mask`,
+  `nomatch_provider` (use `nomatch_providers`), `remove_attributes_on_delete`.
+  The AMP `FunctionCall` RPC is gone.
+- **Custom AMP wiring** that used `amp.dumps`/`amp.loads` (pickle) must move to
+  the JSON envelope helpers.
+- **Align Django** to `6.0.6`.
+- No new engine migrations in this release.
+
 ## 6.0.0+underspire.93 — Script becomes a storage-only typeclass
 
 `Script` loses its timer component entirely. The AS2 System Scheduler
