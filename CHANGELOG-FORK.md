@@ -25,6 +25,74 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.95 — engine-owned login and connect-screen verbs
+
+Makes the unlogged-in login flow fully engine-owned. Previously the engine
+shipped the connect/create actions but did not compose their rules into its own
+`ServerSession`, so out-of-the-box login depended on the downstream game wiring
+them up; `look`/`quit` at the connect screen had no engine path at all. The
+design line is **the engine owns the login *operations* (functions); the game
+owns the *verb syntax* and dispatch ordering** — the game customizes on top of a
+complete engine rather than supplying the core flow.
+
+### Engine — login ownership
+
+- **`SessionLoginRules` is composed into the default `ServerSession`**
+  ([`serversession.py`](evennia/server/serversession.py), `e66b1a066`). For an
+  unlogged actor the session is the effective rule provider, so the full connect
+  screen (connect/create/look/quit/info/encoding/screenreader/help) now resolves
+  with zero game wiring. The mixin is inert post-login (the session is not a
+  provider once an account is attached, and every rule guards "not logged in").
+  A game overrides verb syntax or dispatch order by subclassing the session and
+  overriding the relevant `carry_out_*` (most-derived definition wins).
+- **`Look` (`look`/`l`) and `Quit` (`quit`) are now canonical engine actions**
+  ([`general.py`](evennia/actions/default/general.py)), following the `Help`
+  precedent: the engine ships only the unlogged baseline rule (`look` re-renders
+  the connection screen, `quit` drops the connection); a game binds logged-in
+  behavior (room look, confirmed-quit / `@quit`) as rules on the same action
+  type. The engine owns these verbs because every game needs a connect screen
+  with look/quit.
+- **Reusable login operations.** `login_session()`
+  ([`unloggedin.py`](evennia/actions/default/unloggedin.py)) authenticates and
+  logs in, shared by the `connect` rule and the web/REST `login` inputfunc;
+  `render_connection_screen()`
+  ([`loginstart.py`](evennia/actions/default/loginstart.py)) is de-duplicated
+  from the loginstart rule and the legacy cmdset. Disconnect is the existing
+  `sessionhandler.disconnect`.
+
+### Web / REST
+
+- [`server/inputfuncs.py`](evennia/server/inputfuncs.py) `login()` now routes
+  through `login_session` and no longer imports from
+  `commands.default.unloggedin`; the orphaned `create_normal_account` helper
+  (a thin `Account.authenticate` wrapper) was deleted.
+
+### Fixes
+
+- Fixed the stale phantom `LoginSessionMixin` comment in
+  [`actions/dispatch.py`](evennia/actions/dispatch.py) (the real class is
+  `SessionLoginRules`).
+- **Test isolation** (`7586a97cc`): `TestUnconnectedCommand.test_info_command`
+  deleted the module-level `gametime.SERVER_START_TIME` instead of restoring it,
+  leaking an `AttributeError` into any later test that patched it.
+
+### Tests
+
+- New `login_session`, `render_connection_screen`, and connect-screen
+  `look`/`quit` rule tests, plus a check that the engine `ServerSession` resolves
+  all four login verbs ([`test_default_unloggedin.py`](evennia/actions/tests/test_default_unloggedin.py),
+  [`test_loginstart.py`](evennia/actions/tests/test_loginstart.py),
+  [`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py)).
+
+### Migration notes
+
+- A downstream game that registered its own `look` or `quit` as an `@action`
+  will now hit a `RuleConflict` at startup, because the engine owns those
+  canonical verbs. Convert those to **rules on** the engine `Look`/`Quit` action
+  types (the framework owns the verb; the game adds rules, it does not redefine
+  the verb). The legacy `commands/default/unloggedin.py` cmdset can now be
+  retired; see [`ALPHA-login-engine-ownership.md`](.agents/prompts/ALPHA-login-engine-ownership.md).
+
 ## 6.0.0+underspire.94 — AMP pickle removal, serde cap trust-model, and dead-code cleanup
 
 Removes all pickle deserialization from the inter-process AMP wire (the main
