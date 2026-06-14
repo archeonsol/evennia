@@ -794,4 +794,8 @@ class OnDemandHandler:
 
 
 # Create singleton
+# Instantiated at import; it persists/restores its task table on every reload
+# even with no registered tasks. That empty-state cost is negligible, and the
+# handler is the registration point for any on-demand task, so it loads
+# unconditionally rather than being gated on current usage.
 ON_DEMAND_HANDLER = OnDemandHandler()

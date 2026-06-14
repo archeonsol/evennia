@@ -552,6 +552,10 @@ supports_set = client_options
 # MSDP aliases (some of the the generic MSDP commands defined in the MSDP spec are prefixed
 # by msdp_ at the protocol level)
 # See https://tintin.sourceforge.io/protocols/msdp/
+# These load unconditionally as part of the standard MSDP protocol surface. No
+# bundled client currently speaks MSDP, but the inputfuncs are cheap to define
+# and are kept available for standard third-party clients that do, so they are
+# not gated on current usage.
 
 
 def msdp_list(session, *args, **kwargs):

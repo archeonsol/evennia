@@ -221,4 +221,10 @@ class MonitorHandler(object):
 
 
 # access object
+# Singleton instantiated at import: it persists/restores its monitor table on
+# every reload even when no monitors are registered. That empty-state cost is
+# negligible (save() short-circuits when there are no monitors; restore() is a
+# single ServerConfig read returning None), and it is a live dependency of the
+# `monitor` inputfunc, webclient-option cleanup, and MSDP reporting, so it is
+# not dead code.
 MONITOR_HANDLER = MonitorHandler()
