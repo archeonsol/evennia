@@ -44,13 +44,11 @@ def _format_bare_index(helper, caller, actor, cmd_help_topics, file_db_help_topi
 
 
 def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=None):
-    """Render help using :class:`~evennia.commands.default.help.CmdHelp` formatters.
+    """Render help using :class:`~evennia.help.formatters.HelpFormatter` formatters.
 
     Player-facing topics come from file/DB help entries (staff-authored).
     Staff may also see an ACL-filtered command index and ``help commands``.
     """
-    from evennia.commands.cmdset import CmdSet
-    from evennia.commands.default.help import CmdHelp, HelpCategory
     from evennia.help.catalog import (
         actor_for_help,
         actor_is_staff_for_help,
@@ -59,14 +57,14 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
         is_help_commands_topic,
         lookup_action_help_topic,
     )
+    from evennia.help.formatters import HelpCategory, HelpFormatter
 
     subtopics = list(subtopics or [])
-    helper = CmdHelp()
+    helper = HelpFormatter()
     helper.caller = caller
     helper.session = session
     helper.topic = (topic or "").strip()
     helper.subtopics = subtopics
-    helper.cmdset = cmdset if cmdset is not None else CmdSet()
     helper.clickable_topics = getattr(helper, "clickable_topics", True)
 
     def msg_help(text):
@@ -182,7 +180,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
 
     topic = match.key
     if inherits_from(match, "evennia.commands.command.Command") or is_action_help_topic(match):
-        help_text = match.get_help(caller, helper.cmdset)
+        help_text = match.get_help(caller, cmdset)
         aliases = match.aliases
         suggested = suggestions[1:] if suggestions else []
     else:

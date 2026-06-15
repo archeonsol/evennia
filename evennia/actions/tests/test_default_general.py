@@ -397,7 +397,7 @@ class TestSetHelp(unittest.TestCase):
         self.assertTrue(any("changed to: read:perm(Builder)" in m for m in char.messages))
 
     def test_clash_warning_abort(self):
-        from evennia.commands.default.help import HelpCategory
+        from evennia.help.formatters import HelpCategory
 
         char, actor = self._setup()
         helper = StubHelper(search_results=[HelpCategory("combat")])
@@ -417,7 +417,7 @@ class TestSetHelp(unittest.TestCase):
         mk.assert_not_called()
 
     def test_clash_warning_continue_creates_entry(self):
-        from evennia.commands.default.help import HelpCategory
+        from evennia.help.formatters import HelpCategory
 
         char, actor = self._setup()
         # match the category on the first search, miss the db-only re-search.

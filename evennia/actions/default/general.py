@@ -295,20 +295,20 @@ class NickRules:
 
 
 def _sethelp_search_helper(caller, session):
-    """A bare ``CmdHelp`` used purely as a stateless topic-lookup utility.
+    """A bare ``HelpFormatter`` used purely as a stateless topic-lookup utility.
 
     ``@sethelp``'s clash warning must search the *same* topic universe the
     ``help`` command shows (cmd/db/file), so a builder is warned when a new DB
     entry would be shadowed by a verb, category, or file-help topic. Rather than
     reimplement that lookup (and risk drift from what players actually see), we
-    reuse ``CmdHelp.collect_topics``/``do_search`` through a throwaway instance.
-    It is never merged into a cmdset or run through the cmdhandler - the verb
-    itself is the native :class:`SetHelp` action; this is the same reuse the
-    EvEditor does with its match-only ``CmdLineInput()``.
+    reuse ``HelpFormatter.collect_topics``/``do_search`` through a throwaway
+    instance. It is never merged into a cmdset or run through the cmdhandler -
+    the verb itself is the native :class:`SetHelp` action; this is the same
+    reuse the EvEditor does with its match-only ``CmdLineInput()``.
     """
-    from evennia.commands.default.help import CmdHelp
+    from evennia.help.formatters import HelpFormatter
 
-    helper = CmdHelp()
+    helper = HelpFormatter()
     helper.caller = caller
     helper.session = session
     helper.account = getattr(caller, "account", None)
@@ -352,8 +352,13 @@ class CharacterGeneralRules(NickRules):
         whose ``yield`` the engine's generator driver fills with the player's
         reply. ``return CLAIM`` ends the flow as for any carry_out rule.
         """
-        from evennia.commands.default.help import HelpCategory, _loadhelp, _quithelp, _savehelp
         from evennia.help.catalog import is_action_help_topic
+        from evennia.help.formatters import (
+            HelpCategory,
+            _loadhelp,
+            _quithelp,
+            _savehelp,
+        )
         from evennia.locks.lockhandler import LockException
         from evennia.utils import create
         from evennia.utils.eveditor import EvEditor
