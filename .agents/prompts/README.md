@@ -28,13 +28,6 @@ Currently parallel-startable (no unresolved dependencies):
   delivers I1 or leaves a distinct remaining scope (legacy `self.caller`
   migration, L1/R1/I2 consuming that `Actor`) is unresolved; the
   architecture-doc I1 entry is stale on this. Confirm before starting.
-- [AS2: unified system scheduler](AS2-system-scheduler.md) — engine side
-  shipped in `6.0.0+underspire.89` (`evennia.utils.systems` + the
-  `flush-attributes` system + TickerHandler deletion, tranche A). One
-  engine primitive replacing the game's `global_tick` / `Script.interval`
-  / APScheduler. Remaining: the downstream migration (game-repo work) and
-  engine tranche B (`Script.interval` machinery removal, gated on the
-  game's 5 interval scripts migrating).
 
 **Shipped:**
 
@@ -42,6 +35,11 @@ Currently parallel-startable (no unresolved dependencies):
   shipped in `6.0.0+underspire.50` (`evennia.utils.defer` + reactor-stall
   watchdog). Phase 2 (downstream blocking-site migration) is game-repo
   work, tracked there. Settles the rule-body contract CM1 builds on.
+
+**Shipped (prompts removed; see git log):** AS2 unified system scheduler (both
+tranches, `.89`/`.93`; rationale in
+[`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md)),
+engine metrics/observability surface.
 
 **CM1 action system (active; replaces the old cmdset rethink):**
 
@@ -68,63 +66,41 @@ Currently parallel-startable (no unresolved dependencies):
 
 Output of a verified 6-system audit (smells, incomplete refactors, shims,
 dead code, stale migrations, inefficiency) gating pre-alpha → alpha. Listed in
-**recommended execution order**: independent low-risk cleanups first, then the
-cross-repo decisions, then the dependent removals, squash last. 1-3 are
-parallel-startable now.
+**recommended execution order**: independent decisions first, then the dependent
+removals, squash last. Items 1-2 are parallel-startable now.
 
-1. [ALPHA: dead-code batch](ALPHA-dead-code-batch.md) — **re-verified 2026-06-07,
-   list had drifted.** Tier 1 is the safe removal set (run_async, orphaned
-   session methods, init_new_account, _next_task_id, nomatch alias,
-   remove_attributes_on_delete, south branch, clean_senddata residue,
-   cumulative_rank_mask). Tier 2 claims are stale, do NOT remove (from_lockstring/
-   LegacyLock and the middleware/noinput path are live; the Redis L2 cache is
-   already gone). Tier 3 (webclient legacy, context account branch, base
-   _get_cache_key) are behavior changes needing their own trace/test. Independent.
-2. [ALPHA: shim + except cleanup](ALPHA-shim-except-cleanup.md) — low-risk and
-   independent. Remove AMP/ondemand pickle shims (security: pickle on the wire),
-   the `get_objs_with_attr` shim, and four bug-hiding `except: pass` cache/metrics
-   sites.
-3. [RECONSIDER: ssh.py portal boundary](ALPHA-ssh-portal-boundary.md) — **deferred**
+**Shipped (prompts removed; see git log):** ALPHA dead-code batch (Tier 1),
+shim + except cleanup, login engine ownership (`.95`).
+
+1. [RECONSIDER: ssh.py portal boundary](ALPHA-ssh-portal-boundary.md) — **deferred**
    (2026-06-13): the ORM bleed is latent, not active (SSH defaults off, `ssh.py`
    never imported), so no live problem. Concrete benefit is dead-code removal;
    the boundary-guard test is principle-driven. Revisit only on a trigger in the
    prompt.
-4. [ALPHA: jobs/ + event bus boundary](ALPHA-jobs-eventbus-boundary.md) —
+2. [ALPHA: jobs/ + event bus boundary](ALPHA-jobs-eventbus-boundary.md) —
    cross-repo decision; settle before the squash (it owns the `server/0004`
    model). Two fully-built-but-unconsumed subsystems + an `evennia.events` vs
    `evennia.actions.events` name collision. Wire (machinery in engine, usage in
    game) or cut.
-5. [ALPHA: login engine ownership](ALPHA-login-engine-ownership.md) — **shipped
-   (`6.0.0+underspire.95`).** Login is fully engine-owned: `SessionLoginRules` is
-   composed into the engine's `ServerSession`, the phantom `LoginSessionMixin`
-   comment is gone, and the web/REST path routes through the shared
-   `login_session` op. Unblocks the `cmdobj=` login portion of #6.
-6. [ALPHA: cmdset retirement audit](ALPHA-cmdset-retirement-audit.md) — the CM1
-   finish line; after #5 (EvMenu removal landed in `.85`). Audit every cmdset
-   consumer, then delete the cmdset machinery (`CmdSet`, handler, parser,
-   syscommands, `CMD_*`, anchors, the dead `commands/default/` tree).
+3. [ALPHA: cmdset retirement audit](ALPHA-cmdset-retirement-audit.md) — the CM1
+   finish line, **now unblocked**: its gates (EvMore/EvEditor capture migration,
+   EvMenu removal in `.85`, login engine ownership in `.95`) are all cleared.
+   Audit every cmdset consumer, then delete the cmdset machinery (`CmdSet`,
+   handler, parser, syscommands, `CMD_*`, anchors, the dead `commands/default/`
+   tree).
 - [ALPHA: engine minimal-set inventory](ALPHA-engine-minimal-inventory.md) —
-   reference, not a task. The "what's actually left" companion to #6: confirms the
-   engine modules are clean and the dead `commands/default/` tree is the only large
-   removable mass. Read before re-deriving whether game-shaped code hides in `evennia/`.
-7. [ALPHA: migration squash](ALPHA-migration-squash.md) — last; meticulous,
-   cross-repo. Coordinate after #4. Per-app squash plan; hazards: scripts/0019
-   reads the deleted Attribute model, GIN ops must stay `atomic=False`,
-   typeclasses squashes last.
-8. [ALPHA: engine ↔ game cross-review](ALPHA-engine-game-cross-review.md) — stub;
+   reference, not a task. The "what's actually left" companion to the cmdset
+   retirement audit: confirms the engine modules are clean and the dead
+   `commands/default/` tree is the only large removable mass. Read before
+   re-deriving whether game-shaped code hides in `evennia/`.
+4. [ALPHA: migration squash](ALPHA-migration-squash.md) — last; meticulous,
+   cross-repo. Coordinate after the jobs/event-bus decision. Per-app squash plan;
+   hazards: scripts/0019 reads the deleted Attribute model, GIN ops must stay
+   `atomic=False`, typeclasses squashes last.
+5. [ALPHA: engine ↔ game cross-review](ALPHA-engine-game-cross-review.md) — stub;
    after the known items above land. Bidirectional pass the repo-locked audit
    couldn't do: engine surfaces the game never uses, and game logic that should
    be promoted to the engine. Produces follow-up prompts of its own.
-
-**Re-decide (parked questions with new signal):**
-
-- [Engine metrics / observability surface](engine-metrics-surface.md) — **resolved
-  (shipped):** committed to the Prometheus surface already in the tree
-  (`server/prometheus_metrics.py`, `/metrics`, gated by
-  `ENGINE_PROMETHEUS_METRICS_ENABLED`); removed the redundant swallow at the flush
-  site, collapsed the forwarder, wired the dead backlog-warn helper. (The
-  engine/game boundary migration is complete; its outcome is recorded in
-  [`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md).)
 
 Each prompt invites the agent to propose a design before
 implementing. The user reviews the design before the agent starts
@@ -147,6 +123,9 @@ above. Each one is independent; pick whichever has appetite.
 F-numbers are stable IDs carried over from the retired hygiene
 backlog.
 
+**Shipped (prompts removed; see git log):** F17 patch-path audit (`.85`),
+F18 unused engine handlers, F23 dead `COMMAND_DEFAULT_CLASS` patches.
+
 **Discussion-first** (a policy decision before any edits):
 
 - [F13: contribs half-policy](F13-contribs-policy.md)
@@ -154,7 +133,6 @@ backlog.
   review. The action-engine layer emits player text unwrapped, but two files
   (`dispatch.py`, `nomatch.py`) use `gettext`. Decide translatable vs.
   English-only and make the layer consistent.
-- [F18: unused engine handlers](F18-unused-engine-handlers.md)
 - [F20: ownership-change provenance](F20-ownership-provenance-audit.md)
   — follow-on to the `.71` ControlBinding rework; a cold-path audit
   trail for past ownership, engine-vs-game placement to decide.
@@ -164,18 +142,11 @@ backlog.
   base without `super()`); decide fix/delete/document, plus whether to
   promote newmoo's startup-backfill pattern into the engine. Overlaps
   F21's backfill-machinery sweep.
-- [F23: dead `COMMAND_DEFAULT_CLASS` test patches](F23-dead-command-default-class-patches.md)
-  — surfaced by F17. Nine stacked `@patch` decorators on
-  `BaseEvenniaCommandTest` are doubly dead (stale `evennia.commands.account`
-  path + a base class with no test methods, so they never start). Decide
-  fix-vs-delete; fixing would silently activate 9 dormant patches.
 
 **Mechanical / verification:**
 
 - [F3: doc rot sweep in `docs/source/`](F3-doc-rot-sweep.md) —
   gated on a newmoo PR.
-- [F17: `@patch("dotted.path")` audit](F17-patch-dotted-path-audit.md) —
-  **shipped** (`underspire.85`); 84 sites rewritten, dead remainder carved to F23.
 - [F21: migration-scaffolding carveout](F21-migration-scaffolding-carveout.md)
   — in-progress. The I1 reconcile scaffolding was removed in `.72`; the
   broader sweep for one-time backfill machinery remains.

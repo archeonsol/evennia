@@ -24,7 +24,7 @@ Do this **after** the known, named alpha items are resolved (the rest of the
 [alpha-promotion audit](README.md) list), so the cross-review measures a settled
 engine surface rather than chasing code that's already slated to move or die. Two
 promote-to-engine cases are already broken out and should NOT be re-litigated
-here: [login](ALPHA-login-engine-ownership.md) and
+here: login (shipped in `.95`; prompt removed) and
 [jobs/event-bus](ALPHA-jobs-eventbus-boundary.md).
 
 ## Goal

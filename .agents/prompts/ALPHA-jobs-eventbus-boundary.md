@@ -55,7 +55,8 @@ and the settings keys). Either way, resolve the `evennia.events` vs.
 - **In scope:** wire-or-cut decision for `jobs/` and `events/bus.py`, the name
   collision, the backing model/settings, and the engine↔game usage contract.
 - **Out of scope:** `evennia/actions/events.py` (the live in-process system —
-  leave it); the unified scheduler ([`AS2-system-scheduler.md`](AS2-system-scheduler.md)).
+  leave it); the unified scheduler (shipped; see
+  [`engine-architecture/decisions.md`](../docs/engine-architecture/decisions.md)).
 
 ## Done means
 

@@ -64,7 +64,7 @@ APScheduler daemon thread, TickerHandler). **Decision:** one primitive,
 `evennia/utils/systems.py`: declared cadence x scope, reactor bodies once per fire,
 overlap-guarded via `SYSTEM_MODULES`; per-object runtime timers gone (systems-plus-clock
 half of a future ECS). Both tranches shipped (A: TickerHandler `.89`; B: `Script.interval`
-machinery + timer columns + all consumers, `.93` — **Script is now storage-only**). [AS2 prompt](../../prompts/AS2-system-scheduler.md).
+machinery + timer columns + all consumers, `.93` — **Script is now storage-only**).
 
 ## Hook registry (H1)
 

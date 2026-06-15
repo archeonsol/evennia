@@ -1,14 +1,14 @@
 # ALPHA: audit cmdset removal + retire cmdset machinery
 
-Status: todo (depends on colleague's in-flight EvMenu removal)
+Status: todo (unblocked — all gates cleared)
 
-The CM1 finish line. Predecessors:
+The CM1 finish line, now ready to start. Its gates are all done:
 [`CM1-action-system-roadmap.md`](CM1-action-system-roadmap.md) (Phase 1-8
 shipped), [`CM1-input-capture-migration.md`](CM1-input-capture-migration.md)
-(EvMore/EvEditor StateProvider migration), and an **in-flight EvMenu removal
-being done in a separate context.** Do not start the EvMenu work here; this
-prompt **audits** that it (and every other cmdset-dependent subsystem) is
-actually gone, then removes the cmdset machinery itself.
+(EvMore/EvEditor StateProvider migration shipped), EvMenu removal landed in
+`.85`, and login is engine-owned as of `6.0.0+underspire.95`. This prompt
+**audits** that every cmdset-dependent subsystem is actually gone, then removes
+the cmdset machinery itself.
 
 ## Goal
 
@@ -21,7 +21,7 @@ dispatcher since `.73`; this removes the dead substrate it replaced.
 
 ## Audit checklist (each must be true before any deletion)
 
-1. **EvMenu removal landed.** Confirm the colleague's work: `EvMenuCmdSet` is
+1. **EvMenu removal landed (`.85`).** Confirm: `EvMenuCmdSet` is
    gone from [`evennia/utils/evmenu.py`](../../evennia/utils/evmenu.py) (was at
    `:450`, `:693`, `:1003`) and EvMenu either routes through an engine
    `StateProvider` or is gone. The orphaned `EvMenuState` scaffold
@@ -38,7 +38,7 @@ dispatcher since `.73`; this removes the dead substrate it replaced.
    survivor is silently broken, not working.
 4. **`cmdobj=` injection callers rehomed.** The legacy block in `cmdhandler` is
    reachable only via `cmdobj=`. Login **landed engine-owned in
-   `6.0.0+underspire.95`** ([`ALPHA-login-engine-ownership.md`](ALPHA-login-engine-ownership.md)):
+   `6.0.0+underspire.95`** (prompt removed; see git log):
    `connect`/`create` resolve through `SessionLoginRules`, not `cmdobj=`, so they
    are no longer callers. Audit any other `cmdobj=` caller (e.g. menu command run
    directly) before deleting the block. Note: a downstream game that registered
@@ -79,7 +79,7 @@ per stage.
 - **In scope:** the audit, then cmdset-machinery removal and the verified-dead
   surfaces above.
 - **Out of scope:** the EvMenu/EvMore/EvEditor migrations themselves (their own
-  tracks); login rehoming ([`ALPHA-login-engine-ownership.md`](ALPHA-login-engine-ownership.md)).
+  tracks); login rehoming (shipped in `.95`; prompt removed).
 - **Ask before:** deleting the `cmdobj=`-reachable block (needs login landed +
   sign-off).
 
