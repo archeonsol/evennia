@@ -43,9 +43,10 @@ contribs excluded):
 4. `help/renderer.py:47,53` — imports `CmdHelp`/`HelpCategory` **formatters** from
    `commands/default/help.py` (help carve-out).
 
-Deletion is the ALPHA-cmdset-retirement track, gated on EvMore (done, 367626c8b) +
-EvEditor (design settled, 5eaed1366) + **EvMenu (in-flight elsewhere)** capture
-migrations and login rehoming landing first.
+Deletion is the [ALPHA-cmdset-retirement](ALPHA-cmdset-retirement-audit.md) track
+(now chunked into six PRs). Its gates are all cleared: EvMore (done, 367626c8b),
+EvEditor (`.82`), EvMenu (**deleted** in `.85`, not migrated), and login
+(engine-owned, `.95`).
 
 ## Module layer
 

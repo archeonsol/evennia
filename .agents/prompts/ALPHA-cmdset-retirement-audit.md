@@ -1,91 +1,63 @@
-# ALPHA: audit cmdset removal + retire cmdset machinery
+# ALPHA: cmdset retirement (the CM1 finish line) — chunk index
 
-Status: todo (unblocked — all gates cleared)
-
-The CM1 finish line, now ready to start. Its gates are all done:
+Status: in-progress (chunked 2026-06-15). Gates cleared. This is the parent
+index; the work is split into six self-contained chunk prompts. Predecessors:
 [`CM1-action-system-roadmap.md`](CM1-action-system-roadmap.md) (Phase 1-8
 shipped), [`CM1-input-capture-migration.md`](CM1-input-capture-migration.md)
-(EvMore/EvEditor StateProvider migration shipped), EvMenu removal landed in
-`.85`, and login is engine-owned as of `6.0.0+underspire.95`. This prompt
-**audits** that every cmdset-dependent subsystem is actually gone, then removes
-the cmdset machinery itself.
+(EvMore/EvEditor migrated; EvMenu **deleted** in `.85`, not migrated), login
+engine-owned in `6.0.0+underspire.95`.
 
-## Goal
+## Gates — all cleared
 
-Verify there are no remaining consumers of the legacy cmdset dispatch/capture
-machinery, then delete it entirely: `CmdSet`, `cmdsethandler`, the legacy
-merge/match block in `cmdhandler`, `cmdparser.py`, `syscommands.py`, the
-`CMD_*` constants, the `cmdset_*.py` anchors, and the `CmdSet` export from
-`evennia/__init__.py`. The action engine has been the sole player-input
-dispatcher since `.73`; this removes the dead substrate it replaced.
+The action engine has been the sole player-input dispatch path since `.73`. The
+historical blockers are resolved: EvMore (`.77`) + EvEditor (`.82`) capture
+migrated; EvMenu **deleted** in `.85` (no consumer remained, so the
+`TestEvMenuState`/`EvMenuState` scaffold concern is moot — both are gone); login
+engine-owned in `.95`. No precondition remains before starting.
 
-## Audit checklist (each must be true before any deletion)
+## The consumer-tier finding (why this is six chunks, not one)
 
-1. **EvMenu removal landed (`.85`).** Confirm: `EvMenuCmdSet` is
-   gone from [`evennia/utils/evmenu.py`](../../evennia/utils/evmenu.py) (was at
-   `:450`, `:693`, `:1003`) and EvMenu either routes through an engine
-   `StateProvider` or is gone. The orphaned `EvMenuState` scaffold
-   ([`evennia/actions/menus.py:283`](../../evennia/actions/menus.py)) is either
-   wired as EvMenu's substrate or deleted (its docstring promises a "thin
-   wrapper" on EvMenu that was never written). The `TestEvMenuState` suite must
-   now drive input **through `cmdhandler`**, not via direct `enter_state` (the
-   current tests are green-but-bypassed: green ≠ working).
-2. **EvMore / EvEditor migrated** per `CM1-input-capture-migration.md`. Confirm
-   `CmdSetMore`, the EvEditor cmdset, and `CmdSaveYesNo` are deleted and capture
-   is engine-routed (proven by a `cmdhandler`-driven test).
-3. **No remaining `CMD_NOMATCH` / `CMD_NOINPUT` / `cmdset.add` capture** anywhere
-   in the engine (grep; contrib excluded). The bridge never merges these, so any
-   survivor is silently broken, not working.
-4. **`cmdobj=` injection callers rehomed.** The legacy block in `cmdhandler` is
-   reachable only via `cmdobj=`. Login **landed engine-owned in
-   `6.0.0+underspire.95`** (prompt removed; see git log):
-   `connect`/`create` resolve through `SessionLoginRules`, not `cmdobj=`, so they
-   are no longer callers. Audit any other `cmdobj=` caller (e.g. menu command run
-   directly) before deleting the block. Note: a downstream game that registered
-   its own `look`/`quit` `@action` must convert those to *rules on* the engine
-   `Look`/`Quit` (the engine owns those canonical verbs as of `.95`).
+The original "delete `CmdSet`/`Command`/handler" framing was wrong: the substrate
+has **three tiers of consumer** that must be peeled in order, and contrib is a
+large external tier the repo-locked audit set aside.
 
-## Then remove (verified-dead surfaces from the alpha audit)
+1. **Dead default tree** (`commands/default/*`, 14.2k lines) — no live consumer
+   except one help-formatter carve-out (`CmdHelp`/`HelpCategory` reused by
+   `help/renderer.py` and the engine `Help`/`SetHelp` actions).
+2. **Engine-internal `CmdSet`/`Command` users** — `utils/eveditor.py`
+   (`:`-command match via `cmdparser.build_matches`) and `help/renderer.py`.
+3. **Contrib** (~16 modules) + the `db_cmdset_storage` column + the `.cmdset`
+   handler. `CmdSet`/handler/`Command` cannot die until contrib is cleaned up.
 
-- **`evennia/commands/default/` tree** is unreachable from player input
-  (~15k lines incl. `building.py` at 4,641). **One carve-out that is still
-  live and must NOT be deleted blindly:** `CmdHelp`'s formatters in `help.py`
-  are reused by the help renderer (`help.py` is half-live). (The web/REST path's
-  former dependency on `unloggedin.create_normal_account` is gone as of `.95`;
-  that helper was deleted and `server/inputfuncs.py` now routes through the
-  engine `login_session`.) Extract the live formatter helpers, then delete the
-  rest.
-- **`default_cmds` flat-API container** (`evennia/__init__.py:334-380`)
-  advertises dead commands and double-registers `building` (`:369` and `:371`,
-  copy-paste). Slim to the still-live help formatters or remove.
-- **`cmdparser.py`** (linear parser) — only a settings-comment fallback +
-  one test patch (`commands/tests.py:1239`); the default is `cmdparser_trie`.
-- **`syscommands.py`** (SystemNoInput/NoMatch/Multimatch) — reached only inside
-  the dead `cmdobj`-only block; the engine owns no-input/no-match.
-- **`cmdset_merge_warmup`** primes a merge cache nothing on the hot path reads
-  (medium/small INEFFICIENT) — dies with the cmdset machinery.
+Decided forks: **Fork A** — drop the `db_cmdset_storage` column (yes, via
+migration, coordinated with the squash). **Contrib** — clean it up rather than
+keep inert `CmdSet`/`Command` shims (option C1); it is its own chunk, not a
+permanent blocker.
 
-## Approach
+## Chunks (one reviewable PR each; folder convention — drop into a fresh context)
 
-Design/discussion first (folder convention). Audit (checklist above) before
-touching anything; report what is and isn't clear. Removal is large and
-high-blast-radius: stage it (extract live help formatters → delete default tree
-→ remove `cmdobj=`-only block once login lands → delete `CmdSet`/handler/parser/
-constants/anchors → drop the `evennia/__init__.py` export). One reviewable PR
-per stage.
+| # | Chunk | Gated on | Startable now |
+|---|---|---|---|
+| 1 | [help formatters → `evennia/help/`](ALPHA-cmdset-1-help-formatters.md) | — | ✅ |
+| 2 | [EvEditor off `CmdSet`/`cmdparser`](ALPHA-cmdset-2-eveditor-cmdset.md) | — | ✅ |
+| 3 | [delete `commands/default/` tree](ALPHA-cmdset-3-default-tree.md) | 1 | after 1 |
+| 4 | [delete legacy dispatch machinery](ALPHA-cmdset-4-dispatch-machinery.md) | 2, 3 | after 2,3 |
+| 5 | [contrib cmdset cleanup](ALPHA-cmdset-5-contrib-cleanup.md) | — (∥ 1-4) | ✅ |
+| 6 | [delete the substrate + DB column](ALPHA-cmdset-6-substrate.md) | 4, 5 | gated |
 
-## Scope boundary
+Chunks **1-4 and 5 are all startable now in parallel**; only 6 is gated.
 
-- **In scope:** the audit, then cmdset-machinery removal and the verified-dead
-  surfaces above.
-- **Out of scope:** the EvMenu/EvMore/EvEditor migrations themselves (their own
-  tracks); login rehoming (shipped in `.95`; prompt removed).
-- **Ask before:** deleting the `cmdobj=`-reachable block (needs login landed +
-  sign-off).
+## Scheduling note (affects the alpha critical path)
 
-## Done means
+Chunk 6 carries the `db_cmdset_storage` migration, so it touches
+[`ALPHA-migration-squash.md`](ALPHA-migration-squash.md). And chunk 6 gates on
+chunk 5 (contrib). **Therefore contrib cleanup is on the critical path to the
+squash**, not a side quest — the burn-down's single "CM1 cmdset retirement" node
+should expand to: engine-internal (1-4, now) + contrib gate (5) + final
+substrate (6, gates squash).
 
-cmdset capture and dispatch have zero engine consumers; `CmdSet`, the handler,
-the legacy parser/syscommands, the `CMD_*` constants, and the anchors are gone;
-`evennia.default_cmds` / `CmdSet` no longer in the flat API; live help
-formatters preserved; the suite is green driving input through `cmdhandler`.
+## Companion
+
+[`ALPHA-engine-minimal-inventory.md`](ALPHA-engine-minimal-inventory.md) — the
+read-only "what's actually left" finding (the `default/` tree is the only large
+removable mass; no game-shaped code hides in the engine). Reference, not a task.

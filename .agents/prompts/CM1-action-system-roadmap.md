@@ -1,6 +1,6 @@
 # CM1 Action System — Implementation Roadmap
 
-Status: **Phase 1–8 complete: engine bridge is the only player dispatch path; status gates on StateProviders and room rules; player cmdsets are empty anchors in `world/cmdsets/anchors.py`; legacy `commands/*_cmds` tree deleted. Remaining (optional): archive `evennia/commands/cmdset.py` substrate to `legacy/` and retire `CmdSet` from `evennia/__init__.py`.**
+Status: **Phase 1–8 complete: engine bridge is the only player dispatch path; status gates on StateProviders and room rules; the game's player cmdsets are empty anchors in `world/cmdsets/anchors.py`. Remaining: retire the engine-side cmdset substrate — the `commands/default/` tree (14.2k lines, still present), `CmdSet`/`cmdsethandler`/the `.cmdset` handler, the parsers, and the `db_cmdset_storage` column. Not optional and not small; chunked into six sequenced PRs on the [`ALPHA-cmdset-retirement-audit.md`](ALPHA-cmdset-retirement-audit.md) track.**
 
 Replaces `CM1-cmdset-rethink.md`. This document is the authoritative design
 and implementation plan for replacing Evennia's cmdset model with a

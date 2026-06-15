@@ -45,10 +45,12 @@ engine metrics/observability surface.
 
 - [CM1: action-system roadmap](CM1-action-system-roadmap.md) —
   authoritative design + status. Phase 1–8 complete: the engine action
-  bridge is the sole player-input dispatch path, player cmdsets are empty
-  anchors, the legacy `commands/*_cmds` tree is deleted. Remaining is
-  optional substrate archival (retire `evennia/commands/cmdset.py` /
-  `CmdSet` from `evennia/__init__.py`).
+  bridge is the sole player-input dispatch path; the *game's* player
+  cmdsets are empty anchors. The *engine* `commands/default/` tree
+  (14.2k lines), `CmdSet`/handler, parsers, and `db_cmdset_storage`
+  column are all still present — their removal is the chunked
+  [cmdset retirement track](ALPHA-cmdset-retirement-audit.md), not
+  optional archival.
 - [CM1: cmdset-elimination port ledger](CM1-port-ledger.md) — the live
   burndown tracker for the roadmap; update it in the same commit as each
   port batch.
@@ -82,12 +84,14 @@ shim + except cleanup, login engine ownership (`.95`).
    model). Two fully-built-but-unconsumed subsystems + an `evennia.events` vs
    `evennia.actions.events` name collision. Wire (machinery in engine, usage in
    game) or cut.
-3. [ALPHA: cmdset retirement audit](ALPHA-cmdset-retirement-audit.md) — the CM1
-   finish line, **now unblocked**: its gates (EvMore/EvEditor capture migration,
-   EvMenu removal in `.85`, login engine ownership in `.95`) are all cleared.
-   Audit every cmdset consumer, then delete the cmdset machinery (`CmdSet`,
-   handler, parser, syscommands, `CMD_*`, anchors, the dead `commands/default/`
-   tree).
+3. [ALPHA: cmdset retirement](ALPHA-cmdset-retirement-audit.md) — the CM1 finish
+   line, **unblocked and chunked** (2026-06-15) into six self-contained PRs
+   (`ALPHA-cmdset-1-*` … `-6-*`). Gates (EvMore/EvEditor, EvMenu removal `.85`,
+   login `.95`) all cleared. The substrate has three consumer tiers (dead default
+   tree → engine-internal `eveditor`/`help` users → contrib + the `db_cmdset_storage`
+   column); chunks 1-4 + 5 are startable now in parallel, chunk 6 (substrate +
+   DB migration) is gated on 4+5. **Contrib cleanup (chunk 5) is on the critical
+   path to the squash** via chunk 6's column migration.
 - [ALPHA: engine minimal-set inventory](ALPHA-engine-minimal-inventory.md) —
    reference, not a task. The "what's actually left" companion to the cmdset
    retirement audit: confirms the engine modules are clean and the dead
