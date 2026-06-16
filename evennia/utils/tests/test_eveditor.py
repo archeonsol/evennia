@@ -3,8 +3,10 @@ Test eveditor
 
 """
 
+import re
 import unittest
 from dataclasses import dataclass
+from unittest.mock import Mock
 
 from evennia.actions.action import Action
 from evennia.actions.actor import Actor
@@ -13,10 +15,13 @@ from evennia.actions.engine import RuleEngine
 from evennia.actions.menus import MenuInputAction
 from evennia.actions.result import PASS
 from evennia.commands.default.tests import BaseEvenniaCommandTest
-from evennia.utils import eveditor
+from evennia.utils import ansi, eveditor
 from evennia.utils.eveditor import EvEditor, EvEditorState
 
 _ENGINE = RuleEngine()
+
+# Mirror test_resources.call: strip EvMenu border decorations before comparing.
+_RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
 
 def _sync(d):
@@ -48,330 +53,256 @@ def _dispatch_line(actor, state, raw):
 
 
 class TestEvEditor(BaseEvenniaCommandTest):
+    """Drive the editor's ``:``-command dispatch through ``handle_input``.
+
+    The editor no longer routes through the command dispatcher, so these tests
+    feed raw lines to :meth:`EvEditor.handle_input` (as :class:`EvEditorState`
+    does in production) and assert on the messages the caller receives, instead
+    of constructing ``Command`` instances and using ``self.call``.
+    """
+
+    def _drive(self, raw, msg=None):
+        """Feed a raw line to the live editor and assert on caller output.
+
+        Mirrors ``test_resources.call``'s comparison: every ``caller.msg`` call
+        made while the line runs is collected, joined with ``|``, ANSI-stripped
+        and EvMenu-border-stripped, then checked with ``startswith(msg)``.
+
+        Args:
+            raw (str): the raw input line to feed to ``handle_input``.
+            msg (str, optional): expected start of the joined caller output. If
+                ``None``, no assertion is made.
+
+        Returns:
+            str: the joined, stripped caller output.
+        """
+        editor = self.char1.ndb._eveditor
+        unmocked = self.char1.msg
+        self.char1.msg = Mock()
+        try:
+            editor.handle_input(raw)
+            stored = [
+                args[0] if args and args[0] else kwargs.get("text", "")
+                for _name, args, kwargs in self.char1.msg.mock_calls
+            ]
+        finally:
+            self.char1.msg = unmocked
+        stored = [str(smsg[0]) if isinstance(smsg, tuple) else str(smsg) for smsg in stored]
+        returned = "|".join(
+            _RE_STRIP_EVMENU.sub("", ansi.parse_ansi(mess, strip_ansi=True)) for mess in stored
+        ).strip()
+        if msg is not None and not returned.startswith(msg):
+            raise AssertionError(f"Expected:\n{msg!r}\nGot:\n{returned!r}")
+        return returned
+
+    def test_eveditor_prefix_and_case_resolution(self):
+        """A ``:``-command and its prefix both resolve through the matcher.
+
+        Guards the longest-name-wins tiebreak (``:wq`` over ``:w``) and the
+        case recovery that keeps ``:uu`` (redo) distinct from ``:UU`` (revert).
+        """
+        saved = []
+        quit_called = []
+        eveditor.EvEditor(
+            self.char1,
+            savefunc=lambda caller, buf: saved.append(buf) or True,
+            quitfunc=lambda caller: quit_called.append(True),
+        )
+        self._drive("alpha")
+
+        # ':w' saves without quitting; ':wq' (longer) saves and quits.
+        self._drive(":w")
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(quit_called, [])
+        self._drive("beta")
+        self._drive(":wq")
+        self.assertEqual(len(saved), 2)
+        self.assertEqual(quit_called, [True])
+
+    def test_eveditor_uu_vs_UU_case_recovery(self):
+        """``:uu`` redoes, ``:UU`` reverts: case recovery must distinguish them."""
+        eveditor.EvEditor(self.char1)
+        self._drive("first")
+        self._drive("second")
+        self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "first\nsecond")
+        # ':UU' reverts everything to the (empty) pristine buffer.
+        self._drive(":UU", msg="Reverted all changes to the buffer back to original state.")
+        self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "")
+
     def test_eveditor_ranges(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(eveditor.CmdLineInput(), "line 1", raw_string="line 1", msg="01line 1")
-        self.call(eveditor.CmdLineInput(), "line 2", raw_string="line 2", msg="02line 2")
-        self.call(eveditor.CmdLineInput(), "line 3", raw_string="line 3", msg="03line 3")
-        self.call(eveditor.CmdLineInput(), "line 4", raw_string="line 4", msg="04line 4")
-        self.call(eveditor.CmdLineInput(), "line 5", raw_string="line 5", msg="05line 5")
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",  # list whole buffer
-            raw_string=":",
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive("line 1", msg="01line 1")
+        self._drive("line 2", msg="02line 2")
+        self._drive("line 3", msg="03line 3")
+        self._drive("line 4", msg="04line 4")
+        self._drive("line 5", msg="05line 5")
+        self._drive(
+            ":",  # list whole buffer
             msg="Line Editor []\n01line 1\n02line 2\n"
             "03line 3\n04line 4\n05line 5\n"
             "[l:05 w:010 c:0034](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            ":",  # list empty range
-            raw_string=":",
+        self._drive(
+            ": :",  # list empty range
             msg="Line Editor []\n01line 1\n02line 2\n"
             "03line 3\n04line 4\n05line 5\n"
             "[l:05 w:010 c:0034](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            ":4",  # list from start to line 4
-            raw_string=":",
+        self._drive(
+            ": :4",  # list from start to line 4
             msg="Line Editor []\n01line 1\n02line 2\n"
             "03line 3\n04line 4\n"
             "[l:04 w:008 c:0027](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2:",  # list from line 2 to end
-            raw_string=":",
+        self._drive(
+            ": 2:",  # list from line 2 to end
             msg="Line Editor []\n02line 2\n03line 3\n"
             "04line 4\n05line 5\n"
             "[l:04 w:008 c:0027](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "-10:10",  # try to list invalid range (too large)
-            raw_string=":",
+        self._drive(
+            ": -10:10",  # try to list invalid range (too large)
             msg="Line Editor []\n01line 1\n02line 2\n"
             "03line 3\n04line 4\n05line 5\n"
             "[l:05 w:010 c:0034](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "3:1",  # try to list invalid range (reversed)
-            raw_string=":",
+        self._drive(
+            ": 3:1",  # try to list invalid range (reversed)
             msg="Line Editor []\n03line 3\n" "[l:01 w:002 c:0006](:h for help)",
         )
 
     def test_eveditor_view_cmd(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":h",
+        self._drive(
+            ":h",
             msg="<txt>  - any non-command is appended to the end of the buffer.",
         )
         # empty buffer
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
         # input a string
-        self.call(
-            eveditor.CmdLineInput(),
-            "First test line",
-            raw_string="First test line",
-            msg="01First test line",
-        )
-        self.call(
-            eveditor.CmdLineInput(),
-            "Second test line",
-            raw_string="Second test line",
-            msg="02Second test line",
-        )
+        self._drive("First test line", msg="01First test line")
+        self._drive("Second test line", msg="02Second test line")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "First test line\nSecond test line")
 
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",  # view buffer
+        self._drive(
+            ":",  # view buffer
             msg="Line Editor []\n01First test line\n"
             "02Second test line\n[l:02 w:006 c:0032](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string="::",  # view buffer, no linenums
+        self._drive(
+            "::",  # view buffer, no linenums
             msg="Line Editor []\nFirst test line\n"
             "Second test line\n[l:02 w:006 c:0032](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":::",  # add single : alone on row
-            msg="Single ':' added to buffer.",
-        )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
+        self._drive(":::", msg="Single ':' added to buffer.")  # add single : alone on row
+        self._drive(
+            ":",
             msg="Line Editor []\n01First test line\n"
             "02Second test line\n03:\n[l:03 w:007 c:0034](:h for help)",
         )
 
-        self.call(
-            eveditor.CmdEditorGroup(), "", raw_string=":dd", msg="Deleted line 3."  # delete line
-        )
+        self._drive(":dd", msg="Deleted line 3.")  # delete line
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "First test line\nSecond test line")
-        self.call(eveditor.CmdEditorGroup(), "", raw_string=":u", msg="Undid one step.")  # undo
+        self._drive(":u", msg="Undid one step.")  # undo
         self.assertEqual(
             self.char1.ndb._eveditor.get_buffer(), "First test line\nSecond test line\n:"
         )
-        self.call(eveditor.CmdEditorGroup(), "", raw_string=":uu", msg="Redid one step.")  # redo
+        self._drive(":uu", msg="Redid one step.")  # redo
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "First test line\nSecond test line")
-        self.call(eveditor.CmdEditorGroup(), "", raw_string=":u", msg="Undid one step.")  # undo
+        self._drive(":u", msg="Undid one step.")  # undo
         self.assertEqual(
             self.char1.ndb._eveditor.get_buffer(), "First test line\nSecond test line\n:"
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
+        self._drive(
+            ":",
             msg="Line Editor []\n01First test line\n"
             "02Second test line\n03:\n[l:03 w:007 c:0034](:h for help)",
         )
 
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "Second",
-            raw_string=":dw",  # delete by word
-            msg="Removed Second for lines 1-4.",
-        )
-        self.call(eveditor.CmdEditorGroup(), "", raw_string=":u", msg="Undid one step.")  # undo
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2 Second",
-            raw_string=":dw",  # delete by word/line
-            msg="Removed Second for line 2.",
-        )
+        self._drive(":dw Second", msg="Removed Second for lines 1-4.")  # delete by word
+        self._drive(":u", msg="Undid one step.")  # undo
+        self._drive(":dw 2 Second", msg="Removed Second for line 2.")  # delete by word/line
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "First test line\n test line\n:")
 
-        self.call(
-            eveditor.CmdEditorGroup(), "2", raw_string=":p", msg="Copy buffer is empty."  # paste
-        )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2",
-            raw_string=":y",  # yank
-            msg="Line 2, [' test line'] yanked.",
-        )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2",
-            raw_string=":p",  # paste
-            msg="Pasted buffer [' test line'] to line 2.",
-        )
+        self._drive(":p 2", msg="Copy buffer is empty.")  # paste
+        self._drive(":y 2", msg="Line 2, [' test line'] yanked.")  # yank
+        self._drive(":p 2", msg="Pasted buffer [' test line'] to line 2.")  # paste
         self.assertEqual(
             self.char1.ndb._eveditor.get_buffer(), "First test line\n test line\n test line\n:"
         )
 
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "3",
-            raw_string=":x",
-            msg="Line 3, [' test line'] cut.",  # cut
-        )
+        self._drive(":x 3", msg="Line 3, [' test line'] cut.")  # cut
 
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2 New Second line",
-            raw_string=":i",  # insert
-            msg="Inserted 1 new line(s) at line 2.",
+        self._drive(":i 2 New Second line", msg="Inserted 1 new line(s) at line 2.")  # insert
+        self._drive(":r 2 New Replaced Second line", msg="Replaced 1 line(s) at line 2.")  # replace
+        self._drive(
+            ":I 2 Inserted-", msg="Inserted text at beginning of line 2."  # insert beginning line
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2 New Replaced Second line",  # replace
-            raw_string=":r",
-            msg="Replaced 1 line(s) at line 2.",
-        )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2 Inserted-",  # insert beginning line
-            raw_string=":I",
-            msg="Inserted text at beginning of line 2.",
-        )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2 -End",  # append end line
-            raw_string=":A",
-            msg="Appended text to end of line 2.",
-        )
+        self._drive(":A 2 -End", msg="Appended text to end of line 2.")  # append end line
 
         self.assertEqual(
             self.char1.ndb._eveditor.get_buffer(),
             "First test line\nInserted-New Replaced Second line-End\n test line\n:",
         )
 
-        self.call(
-            eveditor.CmdLineInput(),
+        self._drive(
             "  Whitespace   echo    test     line.",
-            raw_string="  Whitespace   echo    test     line.",
             msg="05  Whitespace   echo    test     line.",
         )
 
     def test_eveditor_COLON_UU(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(
-            eveditor.CmdLineInput(),
-            'First test "line".',
-            raw_string='First test "line".',
-            msg='01First test "line".',
-        )
-        self.call(
-            eveditor.CmdLineInput(),
-            "Second 'line'.",
-            raw_string="Second 'line'.",
-            msg="02Second 'line'.",
-        )
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive('First test "line".', msg='01First test "line".')
+        self._drive("Second 'line'.", msg="02Second 'line'.")
         self.assertEqual(
             self.char1.ndb._eveditor.get_buffer(), "First test \"line\".\nSecond 'line'."
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":UU",
-            msg="Reverted all changes to the buffer back to original state.",
-        )
+        self._drive(":UU", msg="Reverted all changes to the buffer back to original state.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "")
 
     def test_eveditor_search_and_replace(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(eveditor.CmdLineInput(), "line 1.", raw_string="line 1.", msg="01line 1.")
-        self.call(eveditor.CmdLineInput(), "line 2.", raw_string="line 2.", msg="02line 2.")
-        self.call(eveditor.CmdLineInput(), "line 3.", raw_string="line 3.", msg="03line 3.")
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "2:3",
-            raw_string=":",
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive("line 1.", msg="01line 1.")
+        self._drive("line 2.", msg="02line 2.")
+        self._drive("line 3.", msg="03line 3.")
+        self._drive(
+            ": 2:3",
             msg="Line Editor []\n02line 2.\n03line 3.\n[l:02 w:004 c:0015](:h for help)",
         )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "1:2 line LINE",
-            raw_string=":s",
-            msg="Search-replaced line -> LINE for lines 1-2.",
-        )
+        self._drive(":s 1:2 line LINE", msg="Search-replaced line -> LINE for lines 1-2.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "LINE 1.\nLINE 2.\nline 3.")
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "line MINE",
-            raw_string=":s",
-            msg="Search-replaced line -> MINE for lines 1-3.",
-        )
+        self._drive(":s line MINE", msg="Search-replaced line -> MINE for lines 1-3.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "LINE 1.\nLINE 2.\nMINE 3.")
 
     def test_eveditor_COLON_DD(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(eveditor.CmdLineInput(), "line 1.", raw_string="line 1.", msg="01line 1.")
-        self.call(eveditor.CmdLineInput(), "line 2.", raw_string="line 2.", msg="02line 2.")
-        self.call(eveditor.CmdLineInput(), "line 3.", raw_string="line 3.", msg="03line 3.")
-        self.call(
-            eveditor.CmdEditorGroup(), "", raw_string=":DD", msg="Cleared 3 lines from buffer."
-        )
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive("line 1.", msg="01line 1.")
+        self._drive("line 2.", msg="02line 2.")
+        self._drive("line 3.", msg="03line 3.")
+        self._drive(":DD", msg="Cleared 3 lines from buffer.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "")
 
     def test_eveditor_COLON_F(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(eveditor.CmdLineInput(), "line 1", raw_string="line 1", msg="01line 1")
-        self.call(eveditor.CmdEditorGroup(), "1:2", raw_string=":f", msg="Flood filled line 1.")
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive("line 1", msg="01line 1")
+        self._drive(":f 1:2", msg="Flood filled line 1.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "line 1")
 
     def test_eveditor_COLON_J(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(eveditor.CmdLineInput(), "line 1", raw_string="line 1", msg="01line 1")
-        self.call(eveditor.CmdLineInput(), "l 2", raw_string="l 2", msg="02l 2")
-        self.call(eveditor.CmdLineInput(), "l 3", raw_string="l 3", msg="03l 3")
-        self.call(eveditor.CmdLineInput(), "l 4", raw_string="l 4", msg="04l 4")
-        self.call(eveditor.CmdEditorGroup(), "2 r", raw_string=":j", msg="Right-justified line 2.")
-        self.call(eveditor.CmdEditorGroup(), "3 c", raw_string=":j", msg="Center-justified line 3.")
-        self.call(eveditor.CmdEditorGroup(), "4 f", raw_string=":j", msg="Full-justified line 4.")
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive("line 1", msg="01line 1")
+        self._drive("l 2", msg="02l 2")
+        self._drive("l 3", msg="03l 3")
+        self._drive("l 4", msg="04l 4")
+        self._drive(":j 2 r", msg="Right-justified line 2.")
+        self._drive(":j 3 c", msg="Center-justified line 3.")
+        self._drive(":j 4 f", msg="Full-justified line 4.")
         l1, l2, l3, l4 = tuple(self.char1.ndb._eveditor.get_buffer().split("\n"))
         self.assertEqual(l1, "line 1")
         self.assertEqual(l2, " " * 75 + "l 2")
@@ -383,23 +314,13 @@ class TestEvEditor(BaseEvenniaCommandTest):
         Test to verify fix of issue #3649 (:j command broke input)
         """
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
         text = (
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n\n"
             "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
         )
         self.char1.ndb._eveditor.update_buffer(text)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "=40",
-            raw_string=":j",
-            msg="Left-justified lines 1-3.",
-        )
+        self._drive(":j =40", msg="Left-justified lines 1-3.")
         lines = self.char1.ndb._eveditor.get_buffer().split("\n")
         blank_line_index = lines.index(" " * 40)
         self.assertEqual(blank_line_index, 2)
@@ -407,49 +328,10 @@ class TestEvEditor(BaseEvenniaCommandTest):
 
     def test_eveditor_bad_commands(self):
         eveditor.EvEditor(self.char1)
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":",
-            msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)",
-        )
-        self.call(eveditor.CmdLineInput(), "line 1.", raw_string="line 1.", msg="01line 1.")
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":dw",
-            msg="You must give a search word to delete.",
-        )
-        # self.call(
-        #     eveditor.CmdEditorGroup(),
-        #     raw_string="",
-        #     raw_string=":i",
-        #     msg="You need to enter a new line and where to insert it.",
-        # )
-        # self.call(
-        #     eveditor.CmdEditorGroup(),
-        #     "",
-        #     raw_string=":I",
-        #     msg="You need to enter text to insert.",
-        # )
-        # self.call(
-        #     eveditor.CmdEditorGroup(),
-        #     "",
-        #     raw_string=":r",
-        #     msg="You need to enter a replacement string.",
-        # )
-        self.call(
-            eveditor.CmdEditorGroup(),
-            "",
-            raw_string=":s",
-            msg="You must give a search word and something to replace it with.",
-        )
-        # self.call(
-        #     eveditor.CmdEditorGroup(),
-        #     "",
-        #     raw_string=":f",
-        #     msg="Valid justifications are [f]ull (default), [c]enter, [r]right or [l]eft"
-        # )
+        self._drive(":", msg="Line Editor []\n01\n[l:01 w:000 c:0000](:h for help)")
+        self._drive("line 1.", msg="01line 1.")
+        self._drive(":dw", msg="You must give a search word to delete.")
+        self._drive(":s", msg="You must give a search word and something to replace it with.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "line 1.")
 
 

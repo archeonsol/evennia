@@ -45,23 +45,91 @@ import re
 from django.conf import settings
 from django.utils.translation import gettext as _
 
-from evennia import CmdSet
 from evennia.actions.action import Action
 from evennia.actions.menus import MenuInputAction, session_mismatch
 from evennia.actions.result import CLAIM, PASS, REDIRECT
 from evennia.actions.rule import rule
-from evennia.actions.state import StateProvider, capture_holder, enter_state, exit_state
-from evennia.commands import cmdhandler, cmdparser
+from evennia.actions.state import (StateProvider, capture_holder, enter_state,
+                                   exit_state)
 from evennia.utils import dedent, fill, is_iter, justify, logger, to_str, utils
 from evennia.utils.ansi import raw
 
-# we use cmdhandler instead of evennia.syscmdkeys to
-# avoid some cases of loading before evennia init'd
-_CMD_NOMATCH = cmdhandler.CMD_NOMATCH
-_CMD_NOINPUT = cmdhandler.CMD_NOINPUT
-
 _RE_GROUP = re.compile(r"\".*?\"|\'.*?\'|\S*")
-_COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
+
+# The editor's ``:``-command tokens, sorted longest-first so the matcher in
+# :func:`_match_editor_token` returns the longest match (e.g. ``:wq`` over
+# ``:w``) on first hit. Authored case is preserved (``:UU``, ``:DD``, ``:I``,
+# ``:A``, ``:S``) so :meth:`CmdEditorGroup.func` can recover the true case from
+# ``raw_string[:len(cmdstring)]``; matching itself is case-insensitive.
+_EDITOR_TOKENS = tuple(
+    sorted(
+        [
+            ":",
+            "::",
+            ":::",
+            ":h",
+            ":w",
+            ":wq",
+            ":q",
+            ":q!",
+            ":u",
+            ":uu",
+            ":UU",
+            ":dd",
+            ":dw",
+            ":DD",
+            ":y",
+            ":x",
+            ":p",
+            ":i",
+            ":j",
+            ":r",
+            ":I",
+            ":A",
+            ":s",
+            ":S",
+            ":f",
+            ":fi",
+            ":fd",
+            ":echo",
+            ":!",
+            ":<",
+            ":>",
+            ":=",
+        ],
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def _match_editor_token(raw):
+    """Match a raw input line against the editor's ``:``-command tokens.
+
+    A token matches when the line starts with it (case-insensitively) and the
+    next character is whitespace or end-of-string. Because :data:`_EDITOR_TOKENS`
+    is sorted longest-first, the first hit is the longest match (``:wq`` wins
+    over ``:w``). Matching is case-insensitive but the authored case is
+    returned, so ``:uu`` (redo) and ``:UU`` (revert) stay distinguishable
+    downstream.
+
+    Args:
+        raw (str): the raw input line the player typed.
+
+    Returns:
+        str or None: the matched token in its authored case (so the caller can
+            slice ``raw`` to ``len(token)`` for case recovery), or ``None`` when
+            no token matches.
+    """
+    search = raw.lower()
+    for token in _EDITOR_TOKENS:
+        ltoken = token.lower()
+        if search.startswith(ltoken):
+            rest = search[len(ltoken) :]
+            if rest == "" or rest[0].isspace():
+                return token
+    return None
+
 
 # -------------------------------------------------------------
 #
@@ -177,13 +245,11 @@ _MSG_REDO = _("Redid one step.")
 class EvEditorState(StateProvider):
     """Engine-native input capture for the EvEditor line editor.
 
-    Replaces the legacy ``EvEditorCmdSet`` (``CmdLineInput`` / ``CmdEditorGroup``)
-    and ``SaveYesNoCmdSet``: the editor no longer merges a cmdset into dispatch.
     While an editor is active this state seizes every input line through the
-    action engine and hands it to :meth:`EvEditor.handle_input`, which runs the
-    existing editor Command objects by pure string matching. The save-on-quit
-    confirmation that the old code modeled with a stacked ``SaveYesNoCmdSet`` is
-    handled here as an in-state sub-mode (the :attr:`_save_confirm` flag).
+    action engine and hands it to :meth:`EvEditor.handle_input`, which resolves
+    the editor's ``:``-commands by pure string matching. The save-on-quit
+    confirmation is handled here as an in-state sub-mode (the
+    :attr:`_save_confirm` flag).
 
     Modeled on :class:`evennia.utils.evmore.EvMoreState`.
     """
@@ -191,7 +257,7 @@ class EvEditorState(StateProvider):
     def __init__(self, editor):
         self._editor = editor
         # When set, the next captured line is read as the save-before-quit
-        # answer rather than as editor input (replaces SaveYesNoCmdSet).
+        # answer rather than as editor input.
         self._save_confirm = False
 
     @rule(Action, phase="before", priority=9999)
@@ -234,13 +300,15 @@ class EvEditorState(StateProvider):
 # -------------------------------------------------------------
 
 
-class CmdEditorBase(_COMMAND_DEFAULT_CLASS):
+class CmdEditorBase:
     """
-    Base parent for editor commands
-    """
+    Base parent for editor commands.
 
-    locks = "cmd:all()"
-    help_entry = "LineEditor"
+    These are plain value-holders, not ``Command`` subclasses: the editor no
+    longer routes through the command dispatcher. :meth:`EvEditor.handle_input`
+    sets the needed attributes (``caller``, ``args``, ``raw_string``,
+    ``cmdstring``) imperatively and calls :meth:`parse`/``func`` directly.
+    """
 
     editor = None
 
@@ -432,9 +500,6 @@ class CmdLineInput(CmdEditorBase):
 
     """
 
-    key = _CMD_NOMATCH
-    aliases = _CMD_NOINPUT
-
     def func(self):
         """
         Adds the line without any formatting changes.
@@ -447,45 +512,9 @@ class CmdLineInput(CmdEditorBase):
 
 class CmdEditorGroup(CmdEditorBase):
     """
-    Commands for the editor
+    Commands for the editor. Its tokens live in :data:`_EDITOR_TOKENS` and are
+    matched by :func:`_match_editor_token`.
     """
-
-    key = ":editor_command_group"
-    aliases = [
-        ":",
-        "::",
-        ":::",
-        ":h",
-        ":w",
-        ":wq",
-        ":q",
-        ":q!",
-        ":u",
-        ":uu",
-        ":UU",
-        ":dd",
-        ":dw",
-        ":DD",
-        ":y",
-        ":x",
-        ":p",
-        ":i",
-        ":j",
-        ":r",
-        ":I",
-        ":A",
-        ":s",
-        ":S",
-        ":f",
-        ":fi",
-        ":fd",
-        ":echo",
-        ":!",
-        ":<",
-        ":>",
-        ":=",
-    ]
-    arg_regex = r"\s.*?|$"
 
     def func(self):
         """
@@ -854,18 +883,6 @@ class CmdEditorGroup(CmdEditorBase):
             self.insert_raw_string_into_buffer()
 
 
-class EvEditorCmdSet(CmdSet):
-    """CmdSet for the editor commands"""
-
-    key = "editorcmdset"
-    priority = 150  # override other cmdsets.
-    mergetype = "Replace"
-
-    def at_cmdset_creation(self):
-        self.add(CmdLineInput())
-        self.add(CmdEditorGroup())
-
-
 # -------------------------------------------------------------
 #
 # Main Editor object
@@ -939,9 +956,9 @@ class EvEditor:
         self._session = None
         self._holder = capture_holder(caller)
         self._state = None
-        # A match-only cmdset instance: build_matches uses it for pure string
-        # matching of the ":"-commands; it is never merged into dispatch.
-        self._cmdset = EvEditorCmdSet()
+        # Reusable command instances driven by handle_input via pure string
+        # matching of the ":"-commands; neither is merged into dispatch.
+        self._group_cmd = CmdEditorGroup()
         self._nomatch_cmd = CmdLineInput()
         self._buffer = ""
         self._unsaved = False
@@ -1000,9 +1017,8 @@ class EvEditor:
                 logger.log_trace(_TRACE_PERSISTENT_SAVING)
                 persistent = False
 
-        # Install the engine-native input capture (replaces the old
-        # EvEditorCmdSet registration). exit_state first to avoid stacking if a
-        # prior editor was still active on this body.
+        # Install the engine-native input capture. exit_state first to avoid
+        # stacking if a prior editor was still active on this body.
         exit_state(self._holder, EvEditorState)
         self._state = enter_state(self._holder, EvEditorState(self))
 
@@ -1015,36 +1031,34 @@ class EvEditor:
     def handle_input(self, raw):
         """Resolve a captured input line and run it against the editor.
 
-        Drives the existing editor Command objects with pure string matching
-        (:func:`evennia.commands.cmdparser.build_matches` against the match-only
-        :attr:`_cmdset`) - no cmdset is merged into dispatch. A matched
-        ``:``-command runs its Command's ``parse``/``func``; any other line falls
-        through to the buffer-insert command (the former ``CMD_NOMATCH`` path).
+        Drives the editor's plain command objects with pure string matching via
+        :func:`_match_editor_token` (no cmdset is merged into dispatch). A
+        matched ``:``-command runs :class:`CmdEditorGroup`; any other line falls
+        through to :class:`CmdLineInput`, which appends it to the buffer.
 
         Args:
             raw (str): the raw input line the player typed.
         """
-        matches = cmdparser.build_matches(raw, self._cmdset)
-        if matches:
-            # longest command-name wins (e.g. ':wq' over ':w'); build_matches
-            # yields one match per command, so this is also a no-op tie-break.
-            cmdname, args, cmd, _cmdlen, _mratio, raw_cmdname = max(matches, key=lambda m: m[3])
+        token = _match_editor_token(raw)
+        if token is not None:
+            cmd = self._group_cmd
+            cmdstring = token
+            # args sliced from the case-preserving raw line, not the lowercased copy
+            args = raw[len(token) :]
         else:
-            cmd, cmdname, args, raw_cmdname = self._nomatch_cmd, "", "", ""
+            cmd = self._nomatch_cmd
+            cmdstring = ""
+            args = ""
         cmd.caller = self._caller
-        cmd.cmdname = cmdname
-        cmd.cmdstring = cmdname
-        cmd.raw_cmdname = raw_cmdname or cmdname
+        cmd.cmdstring = cmdstring
         cmd.args = args
         cmd.raw_string = raw
-        cmd.session = self._session
-        cmd.account = getattr(self._caller, "account", None)
-        cmd.cmdset = self._cmdset
+        cmd.editor = None
         cmd.parse()
         cmd.func()
 
     def request_save_confirm(self):
-        """Enter the save-before-quit sub-mode (replaces ``SaveYesNoCmdSet``).
+        """Enter the save-before-quit sub-mode.
 
         The next captured line is read by :meth:`EvEditorState._route` as the
         yes/no answer instead of as editor input.
