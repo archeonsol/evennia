@@ -44,6 +44,26 @@ Delete the `cmdobj=`-only dispatch path and the substrate it pulls in:
 - **Ask before deleting the block** if any non-test `cmdobj=` caller has appeared
   since this prompt was written (re-grep).
 
+## Cross-repo coordination (the game breaks on this chunk)
+
+Deleting `cmdparser.py` / `cmdparser_trie.py` is **not engine-local** — the
+downstream game (`newmoo`, branch `main`) imports them and must land its change
+in the same window or the server fails to boot:
+
+- `server/conf/cmdparser.py` — a custom `COMMAND_PARSER` wrapper importing
+  `try_num_differentiators` from `cmdparser` and `trie_build_matches` from
+  `cmdparser_trie`.
+- `server/conf/settings.py` — `COMMAND_PARSER = "server.conf.cmdparser.cmdparser"`,
+  which the engine imports at startup (`evennia_launcher.py` `_imp(settings.COMMAND_PARSER)`);
+  deleting the engine parser modules → `ImportError` on boot.
+- `server/conf/at_server_startstop.py` (`_MATCH_LRU`) and
+  `world/tests/test_cm1_dispatch_bench.py` (`build_matches`) also consume them.
+
+The wrapper is vestigial: the engine bridge means `COMMAND_PARSER` is never
+consulted for player input. Game-side change is to retire `server/conf/cmdparser.py`,
+drop the `COMMAND_PARSER` setting, and delete the bench's legacy-path arm.
+Sequence the engine deletion and the game retirement together.
+
 ## Done means
 
 `grep -rn "cmdobj=" evennia --include="*.py"` shows no production caller;
