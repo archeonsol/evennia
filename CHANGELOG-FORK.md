@@ -25,6 +25,56 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.96 — cmdset retirement: help formatters + EvEditor matcher
+
+First two chunks of the cmdset-machinery retirement (the CM1 finish line; see
+[`ALPHA-cmdset-retirement-audit.md`](.agents/prompts/ALPHA-cmdset-retirement-audit.md)).
+Both peel engine-internal consumers off the legacy `CmdSet` / `Command` /
+`cmdparser` substrate so it can be deleted in later chunks. No player-visible
+behavior change.
+
+### Engine — help formatters
+
+- **The live help-rendering surface moved out of `commands/default/help.py` into
+  a new [`evennia/help/formatters.py`](evennia/help/formatters.py)** (`c97dd5408`):
+  `HelpFormatter` (a plain class carrying the formatter/search/permission
+  methods, with no `Command`/`CmdSet` shape), `HelpCategory`, and the EvEditor
+  `_loadhelp` / `_savehelp` / `_quithelp` callbacks. The help render path
+  ([`help/renderer.py`](evennia/help/renderer.py)) and the engine `Help` /
+  `SetHelp` actions ([`actions/default/general.py`](evennia/actions/default/general.py))
+  now import from the new home, severing the `actions/` -> `commands/default/`
+  back-dependency, and the throwaway `CmdSet()` construction in the help render
+  path is gone. `commands/default/help.py` keeps `CmdHelp` as a thin
+  `(COMMAND_DEFAULT_CLASS, HelpFormatter)` shell until the default command tree
+  is deleted in a later chunk.
+
+### Engine — EvEditor
+
+- **EvEditor `:`-command matching no longer uses `CmdSet` / `cmdparser` /
+  `Command`** ([`utils/eveditor.py`](evennia/utils/eveditor.py), `c3e67a978`): a
+  self-contained longest-first token matcher (`_match_editor_token`) reproduces
+  the old prefix/boundary, longest-name-wins, case-insensitive behavior exactly.
+  `CmdEditorGroup` / `CmdLineInput` stay as plain value-holders; their
+  `parse()`/`func()` bodies are unchanged. This removes the last live caller of
+  `cmdparser.build_matches`, unblocking that parser's deletion in a later chunk.
+  The input-capture path (`EvEditorState`, an engine `StateProvider` since `.82`)
+  is unchanged.
+
+### Migration
+
+- Code importing help formatters from `evennia.commands.default.help` (`CmdHelp`
+  used as a formatter, `HelpCategory`, `_loadhelp` / `_savehelp` / `_quithelp`)
+  should import from `evennia.help.formatters` instead. `CmdHelp` / `CmdSetHelp`
+  remain in `commands/default/help.py` as command classes until that tree is
+  removed.
+
+### Tests
+
+- Full suite green (2550 tests). New TDD coverage for the EvEditor `:w`/`:wq`
+  longest-match tiebreak and the `:uu`/`:UU` case recovery; the shape-dependent
+  `TestEvEditor` cases now drive `EvEditor.handle_input` (the production path)
+  rather than constructing `Command` instances via `self.call`.
+
 ## 6.0.0+underspire.95 — engine-owned login and connect-screen verbs
 
 Makes the unlogged-in login flow fully engine-owned. Previously the engine
