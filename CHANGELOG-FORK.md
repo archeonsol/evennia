@@ -25,6 +25,75 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.97 — prefetch-aware TagHandler + bulk tag fetch API
+
+Makes bulk tag reads efficient. A caller that loads many objects in one query
+and then reads several single-valued tags per object previously paid one DB
+query per `(object, category)` (~4 queries per room when building a grid
+snapshot, ~123 for 30 rooms). `prefetch_related("db_tags")` had no effect
+because the handler queried the m2m through-table directly and ignored the
+prefetched related cache. The normalized M2M storage is unchanged: tag
+reverse-lookups / tag search ([`get_by_tag`](evennia/typeclasses/managers.py),
+[`get_tag`](evennia/typeclasses/managers.py)) keep working as before.
+
+### Performance / Engine — TagHandler
+
+- **[`TagHandler`](evennia/typeclasses/tags.py) is now prefetch-aware.** New
+  `_populate_from_tags()` is the shared full-load core (used by `_fullcache`,
+  prefetch seeding, and the bulk-prime path); `_cache_from_prefetch()` seeds
+  the cache from `obj._prefetched_objects_cache["db_tags"]` when present,
+  filtered to this handler's `_tagtype` + `_model` (the `db_tags` m2m is shared
+  by tags, aliases and permissions). `_getcache()` gained a one-shot prefetch
+  hook, the category branch now honors the `_cache_complete` flag (not just
+  `_catcache`), and the key branch short-circuits a known-complete miss to `[]`
+  without a query. `AliasHandler`/`PermissionHandler` inherit all of it.
+- **Mutation coherence unchanged:** `_setcache`/`_delcache`/`clear` already
+  reset `_cache_complete`; an explicit `reset_cache()` now also forces a DB
+  read rather than re-reading the (stale) in-memory prefetch snapshot.
+
+### Engine — bulk fetch API
+
+- **Two new methods on [`TypedObjectManager`](evennia/typeclasses/managers.py):**
+  `get_tags_for_objects(objs, tagtype=None)` returns
+  `{obj_id: {category: [Tag, …]}}` in a single query;
+  `prime_tag_caches(objs, tagtype=None)` runs that one query and seeds each
+  object's `tags`/`aliases`/`permissions` handler cache (objects with no tags
+  get an empty complete cache too), after which per-category reads are cache
+  hits.
+
+### Perf numbers
+
+Measured in-repo (5 objects × 4 categories, idmapper `flush_cache()` for cold
+cache, `CaptureQueriesContext`):
+
+| Path | Queries |
+|---|---|
+| N objs × M categories, no prefetch | N×M (unchanged) |
+| Same, after `prefetch_related("db_tags")` | **0** |
+| `prime_tag_caches(objs)` then all reads | **1 + 0** |
+| `get_tags_for_objects(objs)` | **1** |
+
+Existing callers are unchanged: they get the `_cache_complete`-honoring win for
+free, and the prefetch win by adding `prefetch_related("db_tags")` at their
+query. Snapshot-style callers can use `prime_tag_caches`.
+
+### Tests
+
+- New `TestTagBulkPrefetch` in
+  [`test_typeclasses.py`](evennia/typeclasses/tests/test_typeclasses.py) (8
+  tests): N+1 baseline, prefetch→0, prime→1-then-0, bulk shape→1 query,
+  tagtype partitioning under prefetch, `category=None` from primed cache,
+  mutation coherence after prefetch, and `TYPECLASS_AGGRESSIVE_CACHE=False`
+  no-op.
+
+### Migration notes
+
+Downstream consumes this fork via a pinned `EVENNIA_REF` tag. Landing this
+needs the pin bumped to `underspire.97` (game side handles the bump). No API
+removed or renamed; purely additive.
+
+---
+
 ## 6.0.0+underspire.96 — cmdset retirement: help formatters + EvEditor matcher
 
 First two chunks of the cmdset-machinery retirement (the CM1 finish line; see
