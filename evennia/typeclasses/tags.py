@@ -313,6 +313,9 @@ class TagHandler(object):
         self._catcache = {}
         # full cache was run on all tags
         self._cache_complete = False
+        # whether we've already attempted to seed the cache from a
+        # prefetch_related('db_tags') set on the object (done at most once)
+        self._prefetch_checked = False
 
     def _query_all(self):
         """
@@ -331,6 +334,35 @@ class TagHandler(object):
             .filter(**query)
         ]
 
+    def _populate_from_tags(self, tags):
+        """
+        Build the full cache from an iterable of already-fetched Tag objects.
+
+        This is the shared core used by every "full load" path (`_fullcache`,
+        prefetch seeding and the manager's bulk-prime). It rebuilds `_cache`
+        from scratch and marks the cache as complete, so subsequent reads of
+        any category (or a known-absent key) are answered without a query.
+
+        Args:
+            tags (iterable): Tag objects belonging to this handler (already
+                filtered to this handler's `_model`/`_tagtype`).
+
+        """
+        if not settings.TYPECLASS_AGGRESSIVE_CACHE:
+            return
+        self._cache = {
+            "%s-%s"
+            % (
+                to_str(tag.db_key).lower(),
+                tag.db_category.lower() if tag.db_category else None,
+            ): tag
+            for tag in tags
+        }
+        self._cache_complete = True
+        # the cache is now authoritative; never fall back to a (now stale)
+        # in-memory prefetch snapshot after this point
+        self._prefetch_checked = True
+
     def _fullcache(self):
         """
         Cache all tags of this object.
@@ -338,19 +370,34 @@ class TagHandler(object):
         """
         if not settings.TYPECLASS_AGGRESSIVE_CACHE:
             return
-        tags = self._query_all()
-        self._cache = dict(
-            (
-                "%s-%s"
-                % (
-                    to_str(tag.db_key).lower(),
-                    tag.db_category.lower() if tag.db_category else None,
-                ),
-                tag,
-            )
-            for tag in tags
+        self._populate_from_tags(self._query_all())
+
+    def _cache_from_prefetch(self):
+        """
+        Seed the cache from a `prefetch_related('db_tags')` set, if present.
+
+        When the object (or its queryset) was loaded with prefetch on the m2m
+        field, the related Tag objects are already in memory on the instance.
+        Consuming that set populates this handler's cache in full without
+        firing any query. The prefetched set holds *all* tagtypes sharing the
+        `db_tags` m2m (tags, aliases, permissions) across all models, so it is
+        filtered down to this handler's `_tagtype` and `_model`.
+
+        Returns:
+            bool: True if the cache was populated from a prefetched set.
+
+        """
+        if not settings.TYPECLASS_AGGRESSIVE_CACHE:
+            return False
+        prefetched = getattr(self.obj, "_prefetched_objects_cache", None)
+        if not prefetched or self._m2m_fieldname not in prefetched:
+            return False
+        self._populate_from_tags(
+            tag
+            for tag in prefetched[self._m2m_fieldname]
+            if tag.db_tagtype == self._tagtype and tag.db_model == self._model
         )
-        self._cache_complete = True
+        return True
 
     def _getcache(self, key=None, category=None):
         """
@@ -377,6 +424,15 @@ class TagHandler(object):
         """
         key = str(key).strip().lower() if key else None
         category = category.strip().lower() if category else None
+        # one-shot: if this object was loaded with prefetch_related('db_tags'),
+        # seed the full cache from it before falling through to any query
+        if (
+            settings.TYPECLASS_AGGRESSIVE_CACHE
+            and not self._cache_complete
+            and not self._prefetch_checked
+        ):
+            self._prefetch_checked = True
+            self._cache_from_prefetch()
         if key:
             cachekey = "%s-%s" % (key, category)
             tag = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(cachekey, None)
@@ -386,6 +442,9 @@ class TagHandler(object):
                 del self._cache[cachekey]
             if tag:
                 return [tag]  # return cached entity
+            elif settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache_complete:
+                # the full cache is known-complete: a miss means no such tag
+                return []
             else:
                 query = {
                     "%s__id" % self._model: self._objid,
@@ -409,7 +468,9 @@ class TagHandler(object):
             # assume the cache to be complete unless we have queried
             # for this category before
             catkey = "-%s" % category
-            if settings.TYPECLASS_AGGRESSIVE_CACHE and catkey in self._catcache:
+            if settings.TYPECLASS_AGGRESSIVE_CACHE and (
+                self._cache_complete or catkey in self._catcache
+            ):
                 return [tag for key, tag in self._cache.items() if key.endswith(catkey)]
             else:
                 # we have to query to make this category up-date in the cache
@@ -490,6 +551,9 @@ class TagHandler(object):
         self._cache_complete = False
         self._cache = {}
         self._catcache = {}
+        # an explicit reset wants fresh data from the DB, not the in-memory
+        # prefetch snapshot captured at load time
+        self._prefetch_checked = True
 
     def add(self, key=None, category=None, data=None):
         """

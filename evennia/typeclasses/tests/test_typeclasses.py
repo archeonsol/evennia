@@ -3,11 +3,14 @@ Unit tests for typeclass base system
 
 """
 
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from mock import patch
 from parameterized import parameterized
 
 from evennia.objects.objects import DefaultObject
+from evennia.utils.idmapper.models import flush_cache
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
 
 # ------------------------------------------------------------
@@ -372,6 +375,120 @@ class TestTags(BaseEvenniaTest):
             self.obj1.tags.all(return_key_and_category=True),
             [("testing", "testing_category"), ("testing", None)],
         )
+
+
+class TestTagBulkPrefetch(BaseEvenniaTest):
+    """
+    Efficiency of bulk tag reads: prefetch-aware handler + manager bulk API.
+
+    The handler must answer per-category reads from cache when the object was
+    loaded with ``prefetch_related('db_tags')`` or primed via the manager,
+    instead of firing one query per (object, category).
+    """
+
+    CATS = ["cat_a", "cat_b", "cat_c", "cat_d"]
+
+    def setUp(self):
+        super().setUp()
+        for obj in (self.obj1, self.obj2):
+            for cat in self.CATS:
+                obj.tags.add("t_%s" % cat, category=cat)
+        self.ids = [self.obj1.id, self.obj2.id]
+        # use the typeclass manager (proxy model), not base ObjectDB.objects:
+        # the through-table FK is named for the dbclass, so a typeclass manager
+        # is the path that exposes a wrong field-name derivation
+        self.mgr = self.obj1.__class__.objects
+
+    def _read_all_categories(self, objs):
+        for obj in objs:
+            for cat in self.CATS:
+                obj.tags.get(category=cat, return_list=True)
+
+    def test_baseline_is_n_plus_one(self):
+        # documents the per-(object, category) query cost without prefetch
+        flush_cache()
+        objs = list(self.mgr.filter(id__in=self.ids))
+        with CaptureQueriesContext(connection) as ctx:
+            self._read_all_categories(objs)
+        self.assertEqual(len(ctx), len(objs) * len(self.CATS))
+
+    def test_prefetch_makes_reads_free(self):
+        flush_cache()
+        objs = list(self.mgr.filter(id__in=self.ids).prefetch_related("db_tags"))
+        with CaptureQueriesContext(connection) as ctx:
+            self._read_all_categories(objs)
+        self.assertEqual(len(ctx), 0)
+        # and the values are correct
+        for obj in objs:
+            for cat in self.CATS:
+                self.assertEqual(obj.tags.get(category=cat, return_list=True), ["t_%s" % cat])
+
+    def test_prime_tag_caches_one_query_then_free(self):
+        flush_cache()
+        objs = list(self.mgr.filter(id__in=self.ids))
+        with CaptureQueriesContext(connection) as prime_ctx:
+            self.mgr.prime_tag_caches(objs)
+        self.assertEqual(len(prime_ctx), 1)
+        with CaptureQueriesContext(connection) as read_ctx:
+            self._read_all_categories(objs)
+            for obj in objs:
+                obj.tags.all()
+        self.assertEqual(len(read_ctx), 0)
+
+    def test_get_tags_for_objects_shape_and_one_query(self):
+        flush_cache()
+        objs = list(self.mgr.filter(id__in=self.ids))
+        with CaptureQueriesContext(connection) as ctx:
+            mapping = self.mgr.get_tags_for_objects(objs)
+        self.assertEqual(len(ctx), 1)
+        self.assertEqual(set(mapping), set(self.ids))
+        self.assertEqual(set(mapping[self.obj1.id]), set(self.CATS))
+        self.assertEqual([tag.db_key for tag in mapping[self.obj1.id]["cat_a"]], ["t_cat_a"])
+
+    def test_tagtype_partitioning_under_prefetch(self):
+        # tags, aliases and permissions share the db_tags m2m; prefetch must
+        # not bleed one tagtype into another's handler cache
+        self.obj1.aliases.add("an_alias")
+        self.obj1.permissions.add("Builder")
+        flush_cache()
+        obj = self.mgr.filter(id=self.obj1.id).prefetch_related("db_tags").first()
+        self.assertEqual(obj.tags.get(category="cat_a", return_list=True), ["t_cat_a"])
+        self.assertIn("an_alias", obj.aliases.all())
+        self.assertNotIn("t_cat_a", obj.aliases.all())
+        self.assertIn("builder", obj.permissions.all())
+        self.assertNotIn("an_alias", obj.tags.all())
+
+    def test_category_none_from_primed_cache(self):
+        self.obj2.tags.add("uncategorized")
+        flush_cache()
+        objs = list(self.mgr.filter(id__in=self.ids))
+        self.mgr.prime_tag_caches(objs)
+        obj2 = next(o for o in objs if o.id == self.obj2.id)
+        with CaptureQueriesContext(connection) as ctx:
+            self.assertIn("uncategorized", obj2.tags.get(category=None, return_list=True))
+        self.assertEqual(len(ctx), 0)
+
+    def test_mutation_coherence_after_prefetch(self):
+        flush_cache()
+        obj = self.mgr.filter(id=self.obj1.id).prefetch_related("db_tags").first()
+        # seed from prefetch
+        obj.tags.get(category="cat_a", return_list=True)
+        obj.tags.add("added", category="cat_a")
+        self.assertIn("added", obj.tags.get(category="cat_a", return_list=True))
+        obj.tags.remove("added", category="cat_a")
+        self.assertNotIn("added", obj.tags.get(category="cat_a", return_list=True))
+
+    @override_settings(TYPECLASS_AGGRESSIVE_CACHE=False)
+    def test_prime_noop_without_aggressive_cache(self):
+        flush_cache()
+        objs = list(self.mgr.filter(id__in=self.ids))
+        # priming must not populate a cache that is meant to be disabled, but
+        # reads must still return correct values (uncached)
+        self.mgr.prime_tag_caches(objs)
+        for obj in objs:
+            self.assertFalse(obj.tags._cache_complete)
+            for cat in self.CATS:
+                self.assertEqual(obj.tags.get(category=cat, return_list=True), ["t_%s" % cat])
 
 
 class TestNickHandler(BaseEvenniaTest):

@@ -177,6 +177,78 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
         """
         return self.get_tag(key=key, category=category, obj=obj, tagtype="alias")
 
+    # maps a tagtype to the handler attribute it is read through
+    _TAGTYPE_HANDLERS = {None: "tags", "alias": "aliases", "permission": "permissions"}
+
+    def get_tags_for_objects(self, objs, tagtype=None):
+        """
+        Bulk-fetch tags for many objects in a single query.
+
+        This is the efficient counterpart to reading tags one object at a time
+        (which costs one query per object *and* per category). It fetches every
+        matching Tag for the whole set at once and groups them in Python.
+
+        Args:
+            objs (iterable): TypedObjects of this manager's model to fetch tags
+                for. Objects whose `id` is `None` are skipped.
+            tagtype (str, optional): One of `None` (normal tags), "alias" or
+                "permission".
+
+        Returns:
+            dict: Mapping of `{obj_id: {category: [Tag, ...]}}`. Objects with no
+                matching tags are absent from the mapping; the `None` category
+                is preserved as a `None` key.
+
+        """
+        obj_ids = [obj.id for obj in objs if obj.id is not None]
+        result = {}
+        if not obj_ids:
+            return result
+        # the through-table FK and the tag's db_model are both named for the
+        # concrete dbclass (e.g. "objectdb"), not the typeclass proxy
+        dbmodel = self.model.__dbclass__.__name__.lower()
+        through = self.model.db_tags.through
+        conns = through.objects.select_related("tag").filter(
+            **{
+                "%s__id__in" % dbmodel: obj_ids,
+                "tag__db_model": dbmodel,
+                "tag__db_tagtype": tagtype,
+            }
+        )
+        obj_id_field = "%s_id" % dbmodel
+        for conn in conns:
+            tag = conn.tag
+            result.setdefault(getattr(conn, obj_id_field), {}).setdefault(
+                tag.db_category, []
+            ).append(tag)
+        return result
+
+    def prime_tag_caches(self, objs, tagtype=None):
+        """
+        Bulk-fetch tags for many objects and seed each object's tag handler
+        cache, so subsequent `obj.tags.get(...)`/`obj.tags.all()` reads are free.
+
+        This is the efficient path for callers that read several tag categories
+        across many objects (e.g. building a snapshot of a grid): one query
+        primes every handler, after which per-category reads are cache hits.
+        Objects with no tags are still primed (with an empty, complete cache),
+        so their reads also avoid a query.
+
+        Args:
+            objs (iterable): TypedObjects to prime. Consumed once.
+            tagtype (str, optional): One of `None` (normal tags), "alias" or
+                "permission"; selects which handler (`tags`/`aliases`/
+                `permissions`) is primed.
+
+        """
+        objs = list(objs)
+        tags_by_obj = self.get_tags_for_objects(objs, tagtype=tagtype)
+        handler_name = self._TAGTYPE_HANDLERS[tagtype]
+        for obj in objs:
+            by_category = tags_by_obj.get(obj.id, {})
+            tags = [tag for cat_tags in by_category.values() for tag in cat_tags]
+            getattr(obj, handler_name)._populate_from_tags(tags)
+
     def get_by_tag(self, key=None, category=None, tagtype=None, **kwargs):
         """
         Return objects having tags with a given key or category or combination of the two.
