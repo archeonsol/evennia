@@ -126,8 +126,7 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
                 # Limit to tags actually linked to this specific object via the
                 # M2M through table (Tag has no direct FK back to objects).
                 through = self.model.db_tags.through
-                obj_field = self.model.__name__.lower()
-                linked_ids = through.objects.filter(**{"%s__id" % obj_field: obj.id}).values_list(
+                linked_ids = through.objects.filter(**{"%s__id" % dbmodel: obj.id}).values_list(
                     "tag_id", flat=True
                 )
                 qs = qs.filter(id__in=linked_ids)
@@ -136,7 +135,7 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             # search only among tags stored on on this model
             query = [("tag__db_tagtype", tagtype), ("tag__db_model", dbmodel)]
             if obj:
-                query.append(("%s__id" % self.model.__name__.lower(), obj.id))
+                query.append(("%s__id" % dbmodel, obj.id))
             if key:
                 query.append(("tag__db_key", key))
             if category:

@@ -478,6 +478,30 @@ class TestTagBulkPrefetch(BaseEvenniaTest):
         obj.tags.remove("added", category="cat_a")
         self.assertNotIn("added", obj.tags.get(category="cat_a", return_list=True))
 
+    def test_get_tag_with_obj_through_typeclass_manager(self):
+        # the through-table FK is named for the dbclass ("objectdb"), not the
+        # typeclass proxy; deriving it from self.model.__name__ raises FieldError
+        # on a typeclass manager. Covers both the global_search and non-global
+        # branches of get_tag, plus get_alias/get_permission.
+        self.obj1.aliases.add("an_alias")
+        self.obj1.permissions.add("Builder")
+        flush_cache()
+
+        keys = [tag.db_key for tag in self.mgr.get_tag(obj=self.obj1)]
+        self.assertEqual(set(keys), {"t_%s" % cat for cat in self.CATS})
+        # the global_search branch takes the other code path; it defaults to the
+        # None category, so query a specific category to exercise the obj filter
+        gkeys = [
+            tag.db_key
+            for tag in self.mgr.get_tag(obj=self.obj1, category="cat_a", global_search=True)
+        ]
+        self.assertEqual(gkeys, ["t_cat_a"])
+
+        aliases = [tag.db_key for tag in self.mgr.get_alias(obj=self.obj1)]
+        self.assertIn("an_alias", aliases)
+        perms = [tag.db_key for tag in self.mgr.get_permission(obj=self.obj1)]
+        self.assertIn("builder", perms)
+
     @override_settings(TYPECLASS_AGGRESSIVE_CACHE=False)
     def test_prime_noop_without_aggressive_cache(self):
         flush_cache()
