@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.98 — get_tag obj-filter on typeclass managers
+
+Fixes a `FieldError` when `get_tag`/`get_alias`/`get_permission` is called with
+`obj=` through a *typeclass* manager (e.g. `SomeRoom.objects.get_tag(..., obj=room)`)
+rather than the base `ObjectDB.objects` manager. This is the same class of bug
+fixed for [`get_tags_for_objects`](evennia/typeclasses/managers.py) in
+`underspire.97`.
+
+### Engine — TypedObjectManager
+
+- **[`get_tag`](evennia/typeclasses/managers.py) derives the m2m through-table FK
+  field from the concrete dbclass, not the typeclass proxy.** Both the
+  `global_search` and non-global branches built the through-table filter key from
+  `self.model.__name__.lower()`, which on a typeclass manager yields the proxy
+  name (e.g. `"someroom"`) and raises
+  `FieldError: Cannot resolve keyword '<typeclass>' into field. Choices are: …
+  objectdb, objectdb_id …`. They now use the already-computed
+  `dbmodel = self.model.__dbclass__.__name__.lower()` (e.g. `"objectdb"`), the
+  same name the [`TagHandler`](evennia/typeclasses/tags.py) uses for the identical
+  filter. Calling through the base `ObjectDB.objects` manager was unaffected
+  (proxy name == dbclass name there), which is why it went unnoticed.
+
+### Tests
+
+- New `test_get_tag_with_obj_through_typeclass_manager` in `TestTagBulkPrefetch`
+  ([`test_typeclasses.py`](evennia/typeclasses/tests/test_typeclasses.py)) calls
+  `get_tag`/`get_alias`/`get_permission` with `obj=` through a typeclass manager
+  (`self.obj1.__class__.objects`), covering both the global-search and non-global
+  branches. Fails with `FieldError` before the fix.
+
+---
+
 ## 6.0.0+underspire.97 — prefetch-aware TagHandler + bulk tag fetch API
 
 Makes bulk tag reads efficient. A caller that loads many objects in one query
