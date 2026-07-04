@@ -643,3 +643,93 @@ external_discord_hello = _not_implemented
 
 # GMCP Client.Gui is sent by Mudlet for gui setup.
 client_gui = _not_implemented
+
+
+# -------------------------------------------------------------------------
+# Rich editor (EvEditor web frontend) OOB protocol
+#
+# A capable client (the webclient, and later MXP/GMCP clients) drives the
+# in-game editor through these instead of the line-mode ``:``-commands. See
+# evennia/utils/eveditor.py and .agents/docs/engine-architecture/editor.md.
+# -------------------------------------------------------------------------
+
+
+def _find_editor(session):
+    """Return the live EvEditor for ``session``'s puppet/account, if any."""
+    for obj in (session.get_puppet(), session.account):
+        if obj is None:
+            continue
+        editor = getattr(getattr(obj, "ndb", None), "_eveditor", None)
+        if editor is not None:
+            return editor
+    return None
+
+
+def editor_client(session, *args, **kwargs):
+    """Client announces whether it can render the rich editor.
+
+    Sent once by the webclient's editor plugin on connect. Sets a session
+    protocol flag the editor reads to decide whether to open its web frontend
+    for this session (otherwise it falls back to the line editor). This is the
+    capability handshake: without it, no session is web-routed, so the line
+    editor keeps working for every client.
+
+    Kwargs:
+        supported (bool): whether the client provides an editor UI.
+    """
+    supported = bool(kwargs.get("supported", True))
+    session.protocol_flags["CLIENT_EDITOR"] = supported
+    if supported:
+        # If a web editor is already live on this body (e.g. the client just
+        # reconnected after a refresh), re-open it on the new session so the
+        # panel returns with its content instead of being silently stranded.
+        editor = _find_editor(session)
+        if editor is not None and getattr(editor, "_frontend", None) == "web":
+            editor.reopen_web(session)
+
+
+def narrative_client(session, *args, **kwargs):
+    """Client announces whether it renders structured narrative nodes (R1/W1).
+
+    Sets the ``CLIENT_NARRATIVE`` protocol flag that
+    :func:`evennia.narrative.rendernode.deliver_node` reads to decide whether to
+    send an emote/pose as a structured ``narrative`` payload or as a plain text
+    line. Without it, every client keeps getting text, so this never regresses an
+    un-upgraded client.
+
+    Kwargs:
+        supported (bool): whether the client renders narrative nodes.
+    """
+    from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
+
+    session.protocol_flags[CLIENT_NARRATIVE_FLAG] = bool(kwargs.get("supported", True))
+
+
+def editor_save(session, *args, **kwargs):
+    """Save the editor buffer from a rich-client Save action.
+
+    Kwargs:
+        session_id (str): the editor session id from ``editor_open`` (validated).
+        content (str): the full buffer content to save.
+        close (bool): if true, also close the editor after saving.
+    """
+    editor = _find_editor(session)
+    if editor is None:
+        return
+    editor.web_save(
+        kwargs.get("content", ""),
+        session_id=kwargs.get("session_id"),
+        close=bool(kwargs.get("close")),
+    )
+
+
+def editor_cancel(session, *args, **kwargs):
+    """Close the editor without saving, from a rich-client Cancel action.
+
+    Kwargs:
+        session_id (str): the editor session id from ``editor_open`` (validated).
+    """
+    editor = _find_editor(session)
+    if editor is None:
+        return
+    editor.web_cancel(session_id=kwargs.get("session_id"))

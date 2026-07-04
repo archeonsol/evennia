@@ -21,8 +21,23 @@ from .emote import (
     split_emote_segments,
 )
 from .protocols import KeyNameResolver, NameResolver
+from .rendernode import RenderNode, deliver_node
 
 __all__ = ["DefaultEmoteDelivery", "default_emote_delivery"]
+
+
+def _viewer_refs(plan, viewer, resolver):
+    """Per-viewer target references for a RenderNode: name-as-seen + char id."""
+    refs = []
+    seen = set()
+    for sp in plan.segment_plans:
+        for _matched, char in sp.targets:
+            cid = getattr(char, "id", None)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            refs.append({"name": resolver.display_name(char, viewer), "char_id": cid})
+    return refs
 
 
 class DefaultEmoteDelivery:
@@ -110,7 +125,18 @@ class DefaultEmoteDelivery:
             if plan.improvise:
                 msg = "|w%s|n" % msg
             if hasattr(viewer, "msg"):
-                viewer.msg((msg, {"type": plan.msg_type}), from_obj=caller)
+                # R1 seam: wrap the per-viewer string in a RenderNode and let
+                # deliver_node flatten it (text parity) or send it structured
+                # (W1) per client capability.
+                node = RenderNode(
+                    kind="emote",
+                    msg_type=plan.msg_type,
+                    body=msg,
+                    from_id=getattr(caller, "id", None),
+                    refs=_viewer_refs(plan, viewer, self.resolver),
+                    self_echo=(viewer == caller),
+                )
+                deliver_node(node, viewer, from_obj=caller)
             if viewer != caller:
                 delivered_to.append(viewer)
 

@@ -6,6 +6,7 @@ delivery path is :class:`~evennia.narrative.delivery.DefaultEmoteDelivery`.
 """
 
 from .delivery import DefaultEmoteDelivery
+from .rendernode import RenderNode, deliver_node
 from .emote import (
     EmotePlan,
     EmoteResult,
@@ -22,6 +23,8 @@ __all__ = [
     "KeyNameResolver",
     "EmoteDelivery",
     "DefaultEmoteDelivery",
+    "RenderNode",
+    "deliver_node",
     "EmotePlan",
     "EmoteResult",
     "SegmentPlan",
