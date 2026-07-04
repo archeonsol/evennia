@@ -14,6 +14,16 @@ which drifted stale as the work shipped (a roadmap rots; a decisions log doesn't
 - **[horizon.md](horizon.md)** — speculative, **not committed**. Major-version
   shape only, no churn estimates, no gates. Exists so today's decisions don't
   close off these paths, not as a plan to execute.
+- **[editor.md](editor.md)** — design for the hybrid rich text editor (EvEditor
+  successor): one protocol-agnostic core, capability-negotiated telnet /
+  Mudlet / webclient frontends. Depends on R1/W1. Not built.
+- **[r1-first-slice.md](r1-first-slice.md)** — the first narrow R1 seam beyond
+  the emote plan: structured emote delivery (RenderNode v0) + W1 web consumer.
+  Strangler-bounded, touches zero existing overrides. Built + proven.
+- **[r1-universal-pipeline.md](r1-universal-pipeline.md)** — the keystone:
+  finishing R1 so every output path (`msg`/`at_say`/`return_appearance`/
+  `get_display_name`) is sugar over `render → RenderNode → deliver`. Strangler
+  order: say → room look → get_display_name → rest → msg. Design.
 
 If an item moves from speculative to scoped, it graduates from `horizon.md` up to
 `committed.md`, and to `decisions.md` once shipped.
