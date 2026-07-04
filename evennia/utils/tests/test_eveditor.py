@@ -15,6 +15,7 @@ from evennia.actions.engine import RuleEngine
 from evennia.actions.menus import MenuInputAction
 from evennia.actions.result import PASS
 from evennia.commands.default.tests import BaseEvenniaCommandTest
+from evennia.server import inputfuncs
 from evennia.utils import ansi, eveditor
 from evennia.utils.eveditor import EvEditor, EvEditorState
 
@@ -334,6 +335,45 @@ class TestEvEditor(BaseEvenniaCommandTest):
         self._drive(":s", msg="You must give a search word and something to replace it with.")
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "line 1.")
 
+    def _drive_raw(self, raw):
+        """Feed a line and return the caller output *without* stripping markup.
+
+        Used to assert on clickable-command markup that ``_drive`` would strip.
+        """
+        editor = self.char1.ndb._eveditor
+        unmocked = self.char1.msg
+        self.char1.msg = Mock()
+        try:
+            editor.handle_input(raw)
+            stored = [
+                args[0] if args and args[0] else kwargs.get("text", "")
+                for _name, args, kwargs in self.char1.msg.mock_calls
+            ]
+        finally:
+            self.char1.msg = unmocked
+        return "\n".join(
+            str(smsg[0]) if isinstance(smsg, tuple) else str(smsg) for smsg in stored
+        )
+
+    def test_eveditor_rich_view_has_clickable_controls(self):
+        """The default buffer view carries clickable-command markup that
+        degrades to plain text in raw telnet (verified by the parity tests)."""
+        eveditor.EvEditor(self.char1)
+        out = self._drive_raw(":")
+        # the :h hint and the toolbar controls are clickable commands
+        self.assertIn("|lc:h|lt", out)
+        self.assertIn("|lc:w|lt", out)
+        self.assertIn("|lc:wq|lt", out)
+        self.assertIn("|lc:paste|lt", out)
+
+    def test_eveditor_raw_view_omits_clickable_markup(self):
+        """``::`` is the copy-paste-friendly view: no clickable markup, which
+        would otherwise show as literal codes in a raw-mode client."""
+        eveditor.EvEditor(self.char1)
+        self._drive("a line")
+        out = self._drive_raw("::")
+        self.assertNotIn("|lc", out)
+
 
 def _persistent_savefunc(caller, buf):
     """Module-level (picklable) savefunc for the persistent-editor reload test."""
@@ -458,6 +498,19 @@ class TestEvEditorEngineRouted(BaseEvenniaCommandTest):
         self.char1.ndb._eveditor.quit()
         self.assertFalse(actor.has_state(EvEditorState))
 
+    def test_paste_mode_appends_verbatim_until_endpaste(self):
+        # In paste mode even a ``:``-prefixed line is buffer content, and only a
+        # bare ``:endpaste`` leaves the mode.
+        EvEditor(self.char1)
+        actor, state = self._actor_and_state()
+        _dispatch_line(actor, state, ":paste")
+        self.assertTrue(state._paste_mode)
+        _dispatch_line(actor, state, ":dd")  # would normally delete a line
+        _dispatch_line(actor, state, "real content")
+        _dispatch_line(actor, state, ":endpaste")
+        self.assertFalse(state._paste_mode)
+        self.assertEqual(self.char1.ndb._eveditor.get_buffer(), ":dd\nreal content")
+
     def test_line_captured_through_real_cmdhandler_bridge(self):
         # The strongest proof against the "verification trap": a line driven
         # through the real cmdhandler -> action-engine bridge (execute_cmd), not
@@ -465,6 +518,105 @@ class TestEvEditorEngineRouted(BaseEvenniaCommandTest):
         EvEditor(self.char1)
         self.char1.execute_cmd("bridged line", session=self.session)
         self.assertIn("bridged line", self.char1.ndb._eveditor.get_buffer())
+
+
+class TestEvEditorWebFrontend(BaseEvenniaCommandTest):
+    """The rich web frontend: capability routing + the editor OOB protocol.
+
+    A session is web-routed only after its client announces support (the
+    ``CLIENT_EDITOR`` protocol flag). The web frontend shares the same
+    ``EditCore`` and savefunc as the line editor, so saving is identical.
+    """
+
+    def _mark_web(self):
+        """Flag every session puppeting char1 as editor-capable."""
+        for sess in self.char1.sessions.all():
+            sess.protocol_flags["CLIENT_EDITOR"] = True
+
+    def test_non_web_session_uses_line_editor(self):
+        editor = EvEditor(self.char1)
+        self.assertEqual(editor._frontend, "line")
+        actor = Actor(character=self.char1, session=self.session)
+        self.assertTrue(actor.has_state(EvEditorState))
+
+    def test_web_session_routes_to_web_frontend(self):
+        self._mark_web()
+        editor = EvEditor(self.char1)
+        self.assertEqual(editor._frontend, "web")
+        self.assertTrue(editor._session_id)
+        # the web frontend is modal client-side: no line capture is installed
+        actor = Actor(character=self.char1, session=self.session)
+        self.assertFalse(actor.has_state(EvEditorState))
+
+    def test_editor_save_inputfunc_saves_via_savefunc(self):
+        self._mark_web()
+        saved = []
+        editor = EvEditor(self.char1, savefunc=lambda c, b: saved.append(b) or True)
+        inputfuncs.editor_save(
+            self.session, session_id=editor._session_id, content="hello web"
+        )
+        self.assertEqual(saved, ["hello web"])
+        self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "hello web")
+
+    def test_editor_save_wrong_session_id_is_ignored(self):
+        self._mark_web()
+        saved = []
+        EvEditor(self.char1, savefunc=lambda c, b: saved.append(b) or True)
+        inputfuncs.editor_save(self.session, session_id="bogus", content="nope")
+        self.assertEqual(saved, [])
+
+    def test_editor_save_with_close_quits(self):
+        self._mark_web()
+        quit_called = []
+        editor = EvEditor(
+            self.char1,
+            savefunc=lambda c, b: True,
+            quitfunc=lambda c: quit_called.append(True),
+        )
+        inputfuncs.editor_save(
+            self.session, session_id=editor._session_id, content="x", close=True
+        )
+        self.assertEqual(quit_called, [True])
+        self.assertIsNone(self.char1.ndb._eveditor)
+
+    def test_editor_client_reopens_live_web_editor(self):
+        # A reconnecting client re-announces support; a live web editor must be
+        # re-sent (editor_open) and retargeted at the new session.
+        self._mark_web()
+        editor = EvEditor(self.char1)
+        self.assertEqual(editor._frontend, "web")
+
+        unmocked = self.char1.msg
+        self.char1.msg = Mock()
+        try:
+            inputfuncs.editor_client(self.session, supported=True)
+            reopened = any(
+                "editor_open" in kwargs
+                for _name, _args, kwargs in self.char1.msg.mock_calls
+            )
+        finally:
+            self.char1.msg = unmocked
+        self.assertTrue(reopened)
+        self.assertIs(editor._web_session, self.session)
+
+    def test_editor_client_ignores_when_no_editor(self):
+        # No live editor: the handshake just records support, no crash.
+        inputfuncs.editor_client(self.session, supported=True)
+        self.assertTrue(self.session.protocol_flags.get("CLIENT_EDITOR"))
+
+    def test_editor_cancel_inputfunc_quits_without_saving(self):
+        self._mark_web()
+        saved = []
+        quit_called = []
+        editor = EvEditor(
+            self.char1,
+            savefunc=lambda c, b: saved.append(b) or True,
+            quitfunc=lambda c: quit_called.append(True),
+        )
+        inputfuncs.editor_cancel(self.session, session_id=editor._session_id)
+        self.assertEqual(saved, [])
+        self.assertEqual(quit_called, [True])
+        self.assertIsNone(self.char1.ndb._eveditor)
 
 
 class TestEvEditorReload(BaseEvenniaCommandTest):

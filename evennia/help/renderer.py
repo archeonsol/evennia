@@ -107,12 +107,12 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
         _, db_help_topics, file_help_topics = helper.collect_topics(caller, mode="list")
         # Bare ``help`` lists staff-authored file/DB topics only. Action verbs
         # live under ``help commands`` (see ``HELP_INDEX_ACTIONS*`` settings).
-        file_db_help_topics = {**file_help_topics, **db_help_topics}
+        file_db_help_topics = {**db_help_topics, **file_help_topics}
         msg_help(_format_bare_index(helper, caller, actor, {}, file_db_help_topics))
         return
 
     _, db_help_topics, file_help_topics = helper.collect_topics(caller, mode="query")
-    file_db_help_topics = {**file_help_topics, **db_help_topics}
+    file_db_help_topics = {**db_help_topics, **file_help_topics}
 
     cmd_help_topics = {}
     if actor_is_staff_for_help(actor):

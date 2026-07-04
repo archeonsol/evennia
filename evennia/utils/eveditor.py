@@ -41,6 +41,7 @@ survive a reload. See the `EvEditor` class for more details.
 """
 
 import re
+from uuid import uuid4
 
 from django.conf import settings
 from django.utils.translation import gettext as _
@@ -53,6 +54,8 @@ from evennia.actions.state import (StateProvider, capture_holder, enter_state,
                                    exit_state)
 from evennia.utils import dedent, fill, is_iter, justify, logger, to_str, utils
 from evennia.utils.ansi import raw
+from evennia.utils.editor.core import (REDO_NONE, REDO_OK, UNDO_NONE, UNDO_OK,
+                                       EditCore)
 
 _RE_GROUP = re.compile(r"\".*?\"|\'.*?\'|\S*")
 
@@ -96,11 +99,32 @@ _EDITOR_TOKENS = tuple(
             ":<",
             ":>",
             ":=",
+            ":paste",
+            ":endpaste",
         ],
         key=len,
         reverse=True,
     )
 )
+
+
+def _clickable(cmd, text):
+    """Wrap ``text`` in Evennia's clickable-command markup.
+
+    Renders as a clickable control that sends ``cmd`` in clients that support it
+    (the webclient always, and MXP-capable clients such as Mudlet). In raw
+    telnet the markup is stripped and only ``text`` remains, so it degrades to a
+    plain visual hint. This is how the line editor stays capability-aware
+    without branching on per-session protocol flags.
+
+    Args:
+        cmd (str): the editor command to send on click (e.g. ``":w"``).
+        text (str): the visible label (e.g. ``"[Save]"``).
+
+    Returns:
+        str: ``|lc<cmd>|lt<text>|le`` markup.
+    """
+    return "|lc%s|lt%s|le" % (cmd, text)
 
 
 def _match_editor_token(raw):
@@ -164,6 +188,9 @@ _HELP_TEXT = _(f"""
  :r  <l> <txt>  - replace line <l> with text <txt>
  :I  <l> <txt>  - insert text at the beginning of line <l>
  :A  <l> <txt>  - append text after the end of line <l>
+
+ :paste    - enter multi-line paste mode: following lines (even ':'-lines)
+             are appended verbatim until you enter ':endpaste'.
 
  :s <l> <w> <txt> - search/replace word or regex <w> in buffer or on line <l>
 
@@ -259,6 +286,10 @@ class EvEditorState(StateProvider):
         # When set, the next captured line is read as the save-before-quit
         # answer rather than as editor input.
         self._save_confirm = False
+        # When set, captured lines are appended to the buffer verbatim (no
+        # ``:``-command interpretation) until ``:endpaste``. This is the
+        # multi-line paste mode; see EvEditor.request_paste_mode.
+        self._paste_mode = False
 
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
@@ -280,6 +311,15 @@ class EvEditorState(StateProvider):
     def _route(self, raw):
         """Route the captured line to the editor (or resolve a pending save)."""
         editor = self._editor
+        if self._paste_mode:
+            # In paste mode every line is buffer content, even ``:``-prefixed
+            # ones. Only a bare ``:endpaste`` leaves the mode.
+            if raw.strip().lower() == ":endpaste":
+                self._paste_mode = False
+                editor.end_paste_mode()
+            else:
+                editor.append_paste_line(raw)
+            return
         if self._save_confirm:
             # Answering the save-before-quit prompt. Default (empty / anything
             # not 'no') is yes, matching the legacy CmdSaveYesNo behavior.
@@ -828,6 +868,12 @@ class CmdEditorGroup(CmdEditorBase):
             fbuf = dedent(fbuf)
             buf = linebuffer[:lstart] + fbuf.split("\n") + linebuffer[lend:]
             editor.update_buffer(buf)
+        elif cmd == ":paste":
+            # enter multi-line paste mode (bulk input, ``:``-lines included)
+            editor.request_paste_mode()
+        elif cmd == ":endpaste":
+            # only meaningful inside paste mode, where EvEditorState consumes it
+            caller.msg(_("Not in paste mode."))
         elif cmd == ":echo":
             # set echoing on/off
             editor._echo_mode = not editor._echo_mode
@@ -960,16 +1006,13 @@ class EvEditor:
         # matching of the ":"-commands; neither is merged into dispatch.
         self._group_cmd = CmdEditorGroup()
         self._nomatch_cmd = CmdLineInput()
-        self._buffer = ""
-        self._unsaved = False
         self._persistent = persistent
-        self._indent = 0
+        self._codefunc = codefunc
 
         if loadfunc:
             self._loadfunc = loadfunc
         else:
-            self._loadfunc = lambda caller: self._buffer
-        self.load_buffer()
+            self._loadfunc = lambda caller: ""
         if savefunc:
             self._savefunc = savefunc
         else:
@@ -978,19 +1021,31 @@ class EvEditor:
             self._quitfunc = quitfunc
         else:
             self._quitfunc = lambda caller: caller.msg(_DEFAULT_NO_QUITFUNC)
-        self._codefunc = codefunc
 
-        # store the original version
-        self._pristine_buffer = self._buffer
+        # The protocol-agnostic document model (buffer, undo/redo, copy,
+        # indentation). This frontend owns display, capture and persistence and
+        # delegates all buffer state to the core; the ``_buffer``/``_undo_*``/
+        # ``_copy_buffer``/``_pristine_buffer``/``_indent``/``_unsaved``
+        # attributes below are properties bound to it, so the command layer and
+        # the persistence rehydration path stay unchanged.
+        self._core = EditCore(buffer=self.load_buffer(), code_mode=bool(codefunc))
+
         self._sep = "-"
 
-        # undo operation buffer
-        self._undo_buffer = [self._buffer]
-        self._undo_pos = 0
-        self._undo_max = 20
-
-        # copy buffer
-        self._copy_buffer = []
+        # Pick the frontend from client capability. A session that announced
+        # editor support (see the ``editor_client`` inputfunc) gets the rich web
+        # editor: we push the buffer over OOB and do NOT install line capture
+        # (the client is modal). Every other client - raw telnet, Mudlet, or a
+        # webclient that has not announced support - keeps the line editor, so
+        # this is strictly additive.
+        self._session_id = None
+        self._web_session = self._detect_web_session()
+        if self._web_session is not None:
+            self._frontend = "web"
+            self._session_id = uuid4().hex
+            self._open_web()
+            return
+        self._frontend = "line"
 
         if persistent:
             # save in tuple {kwargs, other options}
@@ -1027,6 +1082,68 @@ class EvEditor:
 
         # show the buffer ui
         self.display_buffer()
+
+    # -- document state (delegated to the EditCore) -------------------------
+    # These properties keep the legacy attribute surface the command layer
+    # (CmdEditorGroup/CmdLineInput) and the persistence rehydration path
+    # (_load_editor) read and write directly, while the state itself lives in
+    # the protocol-agnostic core.
+
+    @property
+    def _buffer(self):
+        return self._core.buffer
+
+    @_buffer.setter
+    def _buffer(self, value):
+        self._core.buffer = value
+
+    @property
+    def _pristine_buffer(self):
+        return self._core.pristine
+
+    @_pristine_buffer.setter
+    def _pristine_buffer(self, value):
+        self._core.pristine = value
+
+    @property
+    def _unsaved(self):
+        return self._core.unsaved
+
+    @_unsaved.setter
+    def _unsaved(self, value):
+        self._core.unsaved = value
+
+    @property
+    def _indent(self):
+        return self._core.indent
+
+    @_indent.setter
+    def _indent(self, value):
+        self._core.indent = value
+
+    @property
+    def _copy_buffer(self):
+        return self._core.copy_buffer
+
+    @_copy_buffer.setter
+    def _copy_buffer(self, value):
+        self._core.copy_buffer = value
+
+    @property
+    def _undo_buffer(self):
+        return self._core.undo_buffer
+
+    @_undo_buffer.setter
+    def _undo_buffer(self, value):
+        self._core.undo_buffer = value
+
+    @property
+    def _undo_pos(self):
+        return self._core.undo_pos
+
+    @_undo_pos.setter
+    def _undo_pos(self, value):
+        self._core.undo_pos = value
 
     def handle_input(self, raw):
         """Resolve a captured input line and run it against the editor.
@@ -1066,25 +1183,161 @@ class EvEditor:
         if self._state is not None:
             self._state._save_confirm = True
 
+    def request_paste_mode(self):
+        """Enter multi-line paste mode.
+
+        While active, :meth:`EvEditorState._route` appends every captured line
+        to the buffer verbatim (bypassing ``:``-command matching and
+        auto-indent) until the player enters ``:endpaste``. This is the reliable
+        way to bulk-paste text whose lines may start with ``:`` without them
+        being read as editor commands, and it silences per-line echo.
+        """
+        if self._state is None:
+            self._caller.msg(_("Paste mode is unavailable right now."))
+            return
+        self._state._paste_mode = True
+        self._paste_count = 0
+        self._caller.msg(
+            _(
+                "|gPaste mode.|n Paste or type your text; lines are added "
+                "as-is. Enter |w:endpaste|n on its own line to finish."
+            )
+        )
+
+    def append_paste_line(self, raw):
+        """Append one raw line to the buffer during paste mode (no echo)."""
+        line = raw.rstrip("\r\n")
+        buf = self.get_buffer()
+        self.update_buffer(line if not buf else buf + "\n" + line)
+        self._paste_count = getattr(self, "_paste_count", 0) + 1
+
+    def end_paste_mode(self):
+        """Leave paste mode, report the line count and redraw the buffer."""
+        count = getattr(self, "_paste_count", 0)
+        self._paste_count = 0
+        self._caller.msg(
+            _("Added {count} pasted line(s). Back to the editor.").format(count=count)
+        )
+        self.display_buffer()
+
+    # -- web frontend -------------------------------------------------------
+    # Driven over the editor OOB protocol (editor_open/editor_save/
+    # editor_cancel; see evennia/server/inputfuncs.py). The document lives in
+    # the shared EditCore, so a web save goes through the same savefunc as ``:w``
+    # and telnet parity is preserved.
+
+    def _detect_web_session(self):
+        """Return a session that can render the rich editor, or ``None``.
+
+        A session qualifies only once its client has announced editor support
+        via the ``editor_client`` inputfunc (the ``CLIENT_EDITOR`` protocol
+        flag). Until then every client uses the line editor, so shipping this
+        never regresses an un-upgraded client.
+        """
+        handler = getattr(self._caller, "sessions", None)
+        if handler is None:
+            return None
+        try:
+            sessions = list(handler.all())
+        except Exception:
+            return None
+        for sess in sessions:
+            flags = getattr(sess, "protocol_flags", None) or {}
+            if flags.get("CLIENT_EDITOR"):
+                return sess
+        return None
+
+    def _editor_mode(self):
+        """Editing mode hint for the client (drives highlighting/preview)."""
+        return "code" if self._codefunc else "prose"
+
+    def reopen_web(self, session):
+        """Re-push the buffer to a reconnected web client.
+
+        Called from the ``editor_client`` handshake when a client re-announces
+        support while a web editor is still live on this body (e.g. after a
+        browser refresh). Retargets the frontend at the new session and resends
+        ``editor_open`` so the panel returns with its content intact.
+        """
+        if self._frontend != "web":
+            return
+        self._web_session = session
+        self._open_web()
+
+    def _open_web(self):
+        """Push the buffer to the web client, opening its editor panel."""
+        meta = {
+            "key": self._key,
+            "title": (
+                _("Editing {key}").format(key=self._key) if self._key else _("Editor")
+            ),
+            "mode": self._editor_mode(),
+            "width": settings.CLIENT_DEFAULT_WIDTH,
+        }
+        self._caller.msg(
+            editor_open=([self._session_id, self.get_buffer(), meta], {}),
+            session=self._web_session,
+        )
+
+    def _close_web(self):
+        """Tell the web client to dismiss its editor panel."""
+        if self._web_session is not None:
+            self._caller.msg(
+                editor_close=([self._session_id], {}), session=self._web_session
+            )
+
+    def _valid_web(self, session_id):
+        """Guard: the request must be the web frontend and match its id."""
+        return self._frontend == "web" and (
+            session_id is None or session_id == self._session_id
+        )
+
+    def web_save(self, content, session_id=None, close=False):
+        """Save buffer content received from the web client.
+
+        Runs the same buffer update and savefunc as the line editor, so the
+        two frontends save identically. Optionally closes the panel afterwards.
+        """
+        if not self._valid_web(session_id):
+            return
+        self.update_buffer(content)
+        self.save_buffer()
+        if close:
+            self.web_cancel(session_id=session_id)
+        else:
+            self._caller.msg(editor_status=(["saved"], {}), session=self._web_session)
+
+    def web_cancel(self, session_id=None):
+        """Close the web editor, running the quit hook (no save)."""
+        if not self._valid_web(session_id):
+            return
+        self._close_web()
+        self.quit()
+
     def load_buffer(self):
         """
         Load the buffer using the load function hook.
 
+        Returns:
+            str: the loaded buffer content (used to seed the :class:`EditCore`).
+                Returns an empty string if the load hook raised.
         """
         try:
-            self._buffer = self._loadfunc(self._caller)
-            if not isinstance(self._buffer, str):
+            buffer = self._loadfunc(self._caller)
+            if not isinstance(buffer, str):
                 self._caller.msg(
-                    f"|rBuffer is of type |w{type(self._buffer)})|r. "
+                    f"|rBuffer is of type |w{type(buffer)})|r. "
                     "Continuing, it is converted to a string "
                     "(and will be saved as such)!|n"
                 )
-                self._buffer = to_str(self._buffer)
+                buffer = to_str(buffer)
+            return buffer
         except Exception as e:
             from evennia.utils import logger
 
             logger.log_trace()
             self._caller.msg(_ERROR_LOADFUNC.format(error=e))
+            return ""
 
     def get_buffer(self):
         """
@@ -1092,7 +1345,7 @@ class EvEditor:
             buffer (str): The current buffer.
 
         """
-        return self._buffer
+        return self._core.get_buffer()
 
     def update_buffer(self, buf):
         """
@@ -1103,19 +1356,12 @@ class EvEditor:
             buf (str): The text to update the buffer with.
 
         """
-        if is_iter(buf):
-            buf = "\n".join(buf)
-
-        if buf != self._buffer:
-            self._buffer = buf
-            self.update_undo()
-            self._unsaved = True
-            if self._persistent:
-                self._caller.attributes.add(
-                    "_eveditor_buffer_temp", (self._buffer, self._undo_buffer)
-                )
-                self._caller.attributes.add("_eveditor_unsaved", True)
-                self._caller.attributes.add("_eveditor_indent", self._indent)
+        if self._core.set_buffer(buf) and self._persistent:
+            self._caller.attributes.add(
+                "_eveditor_buffer_temp", (self._core.buffer, self._core.undo_buffer)
+            )
+            self._caller.attributes.add("_eveditor_unsaved", True)
+            self._caller.attributes.add("_eveditor_indent", self._core.indent)
 
     def quit(self):
         """
@@ -1163,30 +1409,15 @@ class EvEditor:
                 a positive value for redo.
 
         """
-        if step and step < 0:
-            # undo
-            if self._undo_pos <= 0:
-                self._caller.msg(_MSG_NO_UNDO)
-            else:
-                self._undo_pos = max(0, self._undo_pos + step)
-                self._buffer = self._undo_buffer[self._undo_pos]
-                self._caller.msg(_MSG_UNDO)
-        elif step and step > 0:
-            # redo
-            if self._undo_pos >= len(self._undo_buffer) - 1 or self._undo_pos + 1 >= self._undo_max:
-                self._caller.msg(_MSG_NO_REDO)
-            else:
-                self._undo_pos = min(
-                    self._undo_pos + step, min(len(self._undo_buffer), self._undo_max) - 1
-                )
-                self._buffer = self._undo_buffer[self._undo_pos]
-                self._caller.msg(_MSG_REDO)
-        if not self._undo_buffer or (
-            self._undo_buffer and self._buffer != self._undo_buffer[self._undo_pos]
-        ):
-            # save undo state
-            self._undo_buffer = self._undo_buffer[: self._undo_pos + 1] + [self._buffer]
-            self._undo_pos = len(self._undo_buffer) - 1
+        token = self._core.navigate_undo(step)
+        if token == UNDO_NONE:
+            self._caller.msg(_MSG_NO_UNDO)
+        elif token == UNDO_OK:
+            self._caller.msg(_MSG_UNDO)
+        elif token == REDO_NONE:
+            self._caller.msg(_MSG_NO_REDO)
+        elif token == REDO_OK:
+            self._caller.msg(_MSG_REDO)
 
     def display_buffer(self, buf=None, offset=0, linenums=True, options={"raw": False}):
         """
@@ -1212,6 +1443,10 @@ class EvEditor:
         nwords = len(buf.split())
         nchars = len(buf)
 
+        # The ``::`` command asks for an unparsed, copy-paste-friendly view; in
+        # that mode we emit no clickable markup (it would show as literal codes).
+        rich = not options.get("raw")
+
         sep = self._sep
         header = (
             "|n"
@@ -1219,12 +1454,13 @@ class EvEditor:
             + _("Line Editor [{name}]").format(name=self._key)
             + sep * (settings.CLIENT_DEFAULT_WIDTH - 24 - len(self._key))
         )
+        help_hint = _("(:h for help)")
         footer = (
             "|n"
             + sep * 10
             + "[l:%02i w:%03i c:%04i]" % (nlines, nwords, nchars)
             + sep * 12
-            + _("(:h for help)")
+            + (_clickable(":h", help_hint) if rich else help_hint)
             + sep * (settings.CLIENT_DEFAULT_WIDTH - 54)
         )
         if linenums:
@@ -1235,7 +1471,28 @@ class EvEditor:
         else:
             main = "\n".join([raw(line) for line in lines])
         string = "%s\n%s\n%s" % (header, main, footer)
+        if rich:
+            string += "\n" + self._toolbar()
         self._caller.msg(string, options=options)
+
+    def _toolbar(self):
+        """Build the clickable control bar shown under the buffer.
+
+        Each control sends a complete editor command, so it is safe to fire on a
+        single click. In raw telnet the :func:`_clickable` markup strips away and
+        the controls read as a plain ``[Save] [Quit] ...`` hint line.
+        """
+        sep = self._sep
+        controls = [
+            _clickable(":w", _("[Save]")),
+            _clickable(":wq", _("[Save&Quit]")),
+            _clickable(":q", _("[Quit]")),
+            _clickable(":u", _("[Undo]")),
+            _clickable(":uu", _("[Redo]")),
+            _clickable(":paste", _("[Paste]")),
+            _clickable(":h", _("[Help]")),
+        ]
+        return "|n" + sep * 3 + " " + "  ".join(controls) + " " + sep * 3
 
     def display_help(self):
         """
@@ -1253,58 +1510,22 @@ class EvEditor:
         Try to deduce the level of indentation of the given line.
 
         """
-        keywords = {
-            "elif ": ["if "],
-            "else:": ["if ", "try"],
-            "except": ["try:"],
-            "finally:": ["try:"],
-        }
-        opening_tags = ("if ", "try:", "for ", "while ")
-
-        # If the line begins by one of the given keywords
-        indent = self._indent
-        if any(line.startswith(kw) for kw in keywords.keys()):
-            # Get the keyword and matching begin tags
-            keyword = [kw for kw in keywords if line.startswith(kw)][0]
-            begin_tags = keywords[keyword]
-            for oline in reversed(buffer.splitlines()):
-                if any(oline.lstrip(" ").startswith(tag) for tag in begin_tags):
-                    # This line begins with a begin tag, takes the identation
-                    indent = (len(oline) - len(oline.lstrip(" "))) / 4
-                    break
-
-            self._indent = indent + 1
-            if self._persistent:
-                self._caller.attributes.add("_eveditor_indent", self._indent)
-        elif any(line.startswith(kw) for kw in opening_tags):
-            self._indent = indent + 1
-            if self._persistent:
-                self._caller.attributes.add("_eveditor_indent", self._indent)
-
-        line = " " * 4 * indent + line
+        line, changed = self._core.deduce_indent(line, buffer)
+        if changed and self._persistent:
+            self._caller.attributes.add("_eveditor_indent", self._core.indent)
         return line
 
     def decrease_indent(self):
         """Decrease automatic indentation by 1 level."""
-        if self._codefunc and self._indent > 0:
-            self._indent -= 1
-            if self._persistent:
-                self._caller.attributes.add("_eveditor_indent", self._indent)
+        if self._core.decrease_indent() and self._persistent:
+            self._caller.attributes.add("_eveditor_indent", self._core.indent)
 
     def increase_indent(self):
         """Increase automatic indentation by 1 level."""
-        if self._codefunc and self._indent >= 0:
-            self._indent += 1
-            if self._persistent:
-                self._caller.attributes.add("_eveditor_indent", self._indent)
+        if self._core.increase_indent() and self._persistent:
+            self._caller.attributes.add("_eveditor_indent", self._core.indent)
 
     def swap_autoindent(self):
         """Swap automatic indentation on or off."""
-        if self._codefunc:
-            if self._indent >= 0:
-                self._indent = -1
-            else:
-                self._indent = 0
-
-            if self._persistent:
-                self._caller.attributes.add("_eveditor_indent", self._indent)
+        if self._core.swap_autoindent() and self._persistent:
+            self._caller.attributes.add("_eveditor_indent", self._core.indent)
