@@ -124,18 +124,41 @@ span-sourced, retire the legacy path.
      photo span tree comes straight from the pipeline. The fragile capture-time
      reverse name-matching regex is retired; `build_photo_spans` still tokenizes
      and `PhotoResolver` still resolves per viewer (retroactive recog + psychosis).
-     (`world/tests/test_photo_capture.py`.) Note: character *detail* freeze still
-     string-swaps (char look is not yet spanned); senses/density gates still run
-     for the photographer at capture.
-3. **`get_display_name`** — the most-called; migrate to a `CharRef` resolve with a
-   string facade. Do late, carefully; it underpins everything.
-4. **Remaining surfaces:** IC mail, channel/comms, TV/broadcast, look-at-object /
-   details, exit lines, system prose.
-5. **`msg` itself** — once its producers emit nodes, `msg` becomes the thin
-   `deliver(Line(...))` sugar; `PsychosisFilter`'s msg-level string distortions
-   retire in favour of the structured passes.
+     (`world/tests/test_photo_capture.py`.)
+   - **Look-at a character: done** — `Character.return_appearance` routes the
+     subject's name through the resolver, so psychosis/perception apply on
+     look-at as in room look/emotes (was undistorted before). `_capture=True`
+     emits the name as a `<<CHAR:id>>` placeholder, so the photo's frozen char
+     *detail* resolves per viewer too — the reverse name-swap in `take_photograph`
+     is retired. (`world/tests/test_look_at_character.py`.)
+3. **`get_display_name`** — stays the identity **base namer** (delegates to
+   `cached_display_name_for_viewer`), which the resolver already wraps. It must
+   *not* itself run psychosis/perception passes (identity ≠ display; mechanics use
+   the real name). "Migration" = ensure viewer-facing surfaces render *through*
+   the resolver, not that `get_display_name` changes. Effectively satisfied.
+4. **Remaining name-bearing surfaces (by identity axis):**
+   - *Physical (sdesc/recog):* room look, emotes, say/whisper, recordings, photos,
+     **look-at** — all done. look-at-object / exit lines carry ~no character
+     names (near-zero value).
+   - *Recog broadcast:* **live camera feed — done** (routes through the recording
+     span path; per-watcher recog, `test_live_broadcast_recog.py`).
+   - *Network handle:* comms/SM — **alias misattribution already exists**
+     (`PsychosisFilter` network path → `_apply_sm_who_alias_misattribute`; a
+     psychotic viewer sees a wrong/decoy callsign). String-based; a span-based
+     version is part of the deferred network-span work.
+   - *OOC:* account channels use real account names — out of R1 scope.
+5. **`msg` itself** — NOT "thin-able": `Character.msg` carries multi-puppet relay,
+   traceback capture, drug color-shift, shared-eye, *then* `PsychosisFilter`.
+   Wholesale rerouting is the forbidden big-bang. The realistic endgame is
+   retiring the msg-level `PsychosisFilter` string distortions (below), gated on
+   prod soak.
 
-## Retirement (the payoff)
+## Retirement (the payoff) — GATED ON PROD SOAK
+
+The span paths for room look / say / look-at / photos only reached prod at
+`EVENNIA_REF underspire.99` (this cycle). Until they have soaked, the string
+paths remain the byte-parity fallback — removing them now trades a
+guaranteed-no-regression state for risk. Defer until validated:
 
 - Legacy `_build_viewer_body` (emote) — after clean prod play.
 - String `PsychosisFilter` name-distortions — as say/room-look/msg migrate.
