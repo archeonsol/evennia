@@ -1174,6 +1174,9 @@ SERVE_MEDIA = False
 # The master urlconf file that contains all of the sub-branches to the
 # applications. Change this to add your own URLs to the website.
 ROOT_URLCONF = "web.urls"
+# ASGI application, the async counterpart to the WSGI path. Used once the web
+# layer is served over ASGI (uvicorn/hypercorn) instead of Twisted-WSGI.
+ASGI_APPLICATION = "evennia.server.asgi.application"
 # Where users are redirected after logging in via contrib.auth.login.
 LOGIN_REDIRECT_URL = "/"
 # Where to redirect users when using the @login_required decorator.
