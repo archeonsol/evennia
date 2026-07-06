@@ -106,6 +106,11 @@ class AzabanFormat(WireFormat):
     def encode_default(self, cmdname, *args, protocol_flags=None, **kwargs):
         if cmdname == "options":
             return None
+        if cmdname == "res":
+            # RPC reply. The webclient protocol has no send_res, so res arrives
+            # here via send_default; hand it to the dedicated encoder so the shell
+            # sees a {t:res, re} frame (not a generic oob event).
+            return self.encode_res(*args, protocol_flags=protocol_flags, **kwargs)
         if cmdname == "narrative":
             # R1 structured narrative. deliver_node sends a list of RenderNode
             # payload dicts, but the outbound path may spread it, so args can be
