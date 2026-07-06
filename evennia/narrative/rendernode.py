@@ -60,21 +60,24 @@ class RenderNode:
     spans: list | None = None
 
     def payload(self) -> dict:
-        """JSON-friendly payload for the structured OOB path (client contract)."""
+        """JSON-friendly payload for the structured OOB path (client contract).
+
+        Keys are snake_case to match the engine's other OOB surfaces (the
+        ``editor_*`` kwargs and the nested ``refs`` ``char_id``), so a client
+        sees one casing convention across all narrative/editor payloads.
+        """
         data = {
             "kind": self.kind,
-            "msgType": self.msg_type,
+            "msg_type": self.msg_type,
             "body": self.body,
-            "fromId": self.from_id,
+            "from_id": self.from_id,
             "refs": self.refs,
-            "selfEcho": self.self_echo,
+            "self_echo": self.self_echo,
         }
         if self.spans is not None:
             from evennia.narrative.render import span_to_dict
 
-            data["spans"] = [
-                [span_to_dict(s) for s in seg] for seg in self.spans
-            ]
+            data["spans"] = [[span_to_dict(s) for s in seg] for seg in self.spans]
         return data
 
 
@@ -86,6 +89,12 @@ def _capable_session(viewer):
     try:
         sessions = list(handler.all())
     except Exception:
+        # The no-handler case is already handled above, so this only fires on a
+        # genuine session-handler fault (e.g. a DB error during _recache). Log it
+        # rather than bury it, then degrade to the text path for this viewer.
+        from evennia.utils import logger
+
+        logger.log_trace()
         return None
     for sess in sessions:
         flags = getattr(sess, "protocol_flags", None) or {}
@@ -94,7 +103,7 @@ def _capable_session(viewer):
     return None
 
 
-def deliver_node(node: RenderNode, viewer, from_obj=None):
+def deliver_node(node: RenderNode, viewer, from_obj=None, refs_builder=None):
     """Deliver ``node`` to ``viewer``, structured or flattened per capability.
 
     When no session announced support, this is byte-identical to the legacy
@@ -105,19 +114,30 @@ def deliver_node(node: RenderNode, viewer, from_obj=None):
         node (RenderNode): the per-viewer node to deliver.
         viewer: the recipient (must expose ``msg``).
         from_obj: the emitter, passed through to ``msg`` as ``from_obj``.
+        refs_builder (callable, optional): a zero-arg callable returning the
+            per-viewer ``refs`` list. Called only when a capable session is
+            found and ``node.refs`` is empty, so an expensive per-viewer resolver
+            is not run for the common text-only (telnet) viewer.
     """
     text_msg = (node.body, {"type": node.msg_type})
     cap = _capable_session(viewer)
     if cap is None:
-        # Unchanged text path — the parity anchor.
+        # Unchanged text path — the parity anchor. No refs built here.
         viewer.msg(text_msg, from_obj=from_obj)
         return
+    if refs_builder is not None and not node.refs:
+        node.refs = refs_builder()
     # Structured to the capable session; text to any other (e.g. telnet) sessions
     # the same viewer has open, so a mixed-client player loses nothing.
     viewer.msg(narrative=([node.payload()], {}), session=cap, from_obj=from_obj)
     try:
         others = [s for s in viewer.sessions.all() if s is not cap]
     except Exception:
+        # cap was just resolved from the same handler, so a fault here is
+        # genuine; log it before degrading to no extra text sends.
+        from evennia.utils import logger
+
+        logger.log_trace()
         others = []
     if others:
         viewer.msg(text_msg, session=others, from_obj=from_obj)

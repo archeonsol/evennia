@@ -9,17 +9,10 @@ from __future__ import annotations
 
 import re
 
-from .emote import (
-    EmotePlan,
-    EmoteResult,
-    build_caller_echo,
-    build_camera_text,
-    build_emote_for_viewer,
-    build_emote_segment_plans,
-    format_emote_message,
-    replace_first_pronoun_with_name,
-    split_emote_segments,
-)
+from .emote import (EmotePlan, EmoteResult, build_caller_echo,
+                    build_camera_text, build_emote_for_viewer,
+                    build_emote_segment_plans, format_emote_message,
+                    replace_first_pronoun_with_name, split_emote_segments)
 from .protocols import KeyNameResolver, NameResolver
 from .rendernode import RenderNode, deliver_node
 
@@ -119,9 +112,7 @@ class DefaultEmoteDelivery:
                     )
                     msg = full_body
                 else:
-                    msg = format_emote_message(
-                        caller, viewer, full_body, resolver=self.resolver
-                    )
+                    msg = format_emote_message(caller, viewer, full_body, resolver=self.resolver)
             if plan.improvise:
                 msg = "|w%s|n" % msg
             if hasattr(viewer, "msg"):
@@ -133,10 +124,17 @@ class DefaultEmoteDelivery:
                     msg_type=plan.msg_type,
                     body=msg,
                     from_id=getattr(caller, "id", None),
-                    refs=_viewer_refs(plan, viewer, self.resolver),
                     self_echo=(viewer == caller),
                 )
-                deliver_node(node, viewer, from_obj=caller)
+                # refs carry the per-viewer resolver output; build them only
+                # when deliver_node finds a capable session (telnet viewers, the
+                # common case, discard them).
+                deliver_node(
+                    node,
+                    viewer,
+                    from_obj=caller,
+                    refs_builder=lambda v=viewer: _viewer_refs(plan, v, self.resolver),
+                )
             if viewer != caller:
                 delivered_to.append(viewer)
 
@@ -178,9 +176,7 @@ class DefaultEmoteDelivery:
                     plain = self.resolver.display_name(caller, caller)
                     msg = f"{plain} {body}".strip()
                 else:
-                    msg = format_emote_message(
-                        caller, viewer, body, resolver=self.resolver
-                    )
+                    msg = format_emote_message(caller, viewer, body, resolver=self.resolver)
                 if improvise:
                     msg = "|w%s|n" % msg
                 if hasattr(viewer, "msg"):

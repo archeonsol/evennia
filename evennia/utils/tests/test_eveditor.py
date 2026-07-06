@@ -351,9 +351,7 @@ class TestEvEditor(BaseEvenniaCommandTest):
             ]
         finally:
             self.char1.msg = unmocked
-        return "\n".join(
-            str(smsg[0]) if isinstance(smsg, tuple) else str(smsg) for smsg in stored
-        )
+        return "\n".join(str(smsg[0]) if isinstance(smsg, tuple) else str(smsg) for smsg in stored)
 
     def test_eveditor_rich_view_has_clickable_controls(self):
         """The default buffer view carries clickable-command markup that
@@ -511,6 +509,20 @@ class TestEvEditorEngineRouted(BaseEvenniaCommandTest):
         self.assertFalse(state._paste_mode)
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), ":dd\nreal content")
 
+    def test_paste_mode_applies_as_single_undo_snapshot(self):
+        # A multi-line paste is applied in one buffer update, so it is one undo
+        # step rather than one per line.
+        EvEditor(self.char1)
+        actor, state = self._actor_and_state()
+        _dispatch_line(actor, state, ":paste")
+        _dispatch_line(actor, state, "line one")
+        _dispatch_line(actor, state, "line two")
+        _dispatch_line(actor, state, "line three")
+        _dispatch_line(actor, state, ":endpaste")
+        editor = self.char1.ndb._eveditor
+        self.assertEqual(editor.get_buffer(), "line one\nline two\nline three")
+        self.assertEqual(editor._undo_buffer, ["", "line one\nline two\nline three"])
+
     def test_line_captured_through_real_cmdhandler_bridge(self):
         # The strongest proof against the "verification trap": a line driven
         # through the real cmdhandler -> action-engine bridge (execute_cmd), not
@@ -552,9 +564,7 @@ class TestEvEditorWebFrontend(BaseEvenniaCommandTest):
         self._mark_web()
         saved = []
         editor = EvEditor(self.char1, savefunc=lambda c, b: saved.append(b) or True)
-        inputfuncs.editor_save(
-            self.session, session_id=editor._session_id, content="hello web"
-        )
+        inputfuncs.editor_save(self.session, session_id=editor._session_id, content="hello web")
         self.assertEqual(saved, ["hello web"])
         self.assertEqual(self.char1.ndb._eveditor.get_buffer(), "hello web")
 
@@ -573,9 +583,7 @@ class TestEvEditorWebFrontend(BaseEvenniaCommandTest):
             savefunc=lambda c, b: True,
             quitfunc=lambda c: quit_called.append(True),
         )
-        inputfuncs.editor_save(
-            self.session, session_id=editor._session_id, content="x", close=True
-        )
+        inputfuncs.editor_save(self.session, session_id=editor._session_id, content="x", close=True)
         self.assertEqual(quit_called, [True])
         self.assertIsNone(self.char1.ndb._eveditor)
 
@@ -591,8 +599,7 @@ class TestEvEditorWebFrontend(BaseEvenniaCommandTest):
         try:
             inputfuncs.editor_client(self.session, supported=True)
             reopened = any(
-                "editor_open" in kwargs
-                for _name, _args, kwargs in self.char1.msg.mock_calls
+                "editor_open" in kwargs for _name, _args, kwargs in self.char1.msg.mock_calls
             )
         finally:
             self.char1.msg = unmocked
@@ -617,6 +624,85 @@ class TestEvEditorWebFrontend(BaseEvenniaCommandTest):
         self.assertEqual(saved, [])
         self.assertEqual(quit_called, [True])
         self.assertIsNone(self.char1.ndb._eveditor)
+
+    def _oob(self, mock, name):
+        """Collect the payloads of OOB sends named ``name`` on a mocked msg."""
+        return [kwargs[name][0] for _n, _a, kwargs in mock.mock_calls if name in kwargs]
+
+    def test_web_save_sends_saved_status(self):
+        self._mark_web()
+        editor = EvEditor(self.char1, savefunc=lambda c, b: True)
+        self.char1.msg = Mock()
+        inputfuncs.editor_save(self.session, session_id=editor._session_id, content="hi")
+        self.assertIn(["saved"], self._oob(self.char1.msg, "editor_status"))
+
+    def test_web_cancel_sends_editor_close(self):
+        self._mark_web()
+        editor = EvEditor(self.char1, savefunc=lambda c, b: True, quitfunc=lambda c: None)
+        self.char1.msg = Mock()
+        inputfuncs.editor_cancel(self.session, session_id=editor._session_id)
+        self.assertTrue(self._oob(self.char1.msg, "editor_close"))
+
+    def test_web_cancel_keeps_unsaved_buffer_without_discard(self):
+        self._mark_web()
+        quit_called = []
+        editor = EvEditor(
+            self.char1,
+            savefunc=lambda c, b: True,
+            quitfunc=lambda c: quit_called.append(True),
+        )
+        editor.update_buffer("dirty")  # now unsaved
+        self.char1.msg = Mock()
+        inputfuncs.editor_cancel(self.session, session_id=editor._session_id)
+        # unsaved work is not torn down without an explicit discard
+        self.assertIsNotNone(self.char1.ndb._eveditor)
+        self.assertEqual(quit_called, [])
+        self.assertIn(["unsaved"], self._oob(self.char1.msg, "editor_status"))
+
+    def test_web_cancel_discard_quits_unsaved_buffer(self):
+        self._mark_web()
+        quit_called = []
+        editor = EvEditor(
+            self.char1,
+            savefunc=lambda c, b: True,
+            quitfunc=lambda c: quit_called.append(True),
+        )
+        editor.update_buffer("dirty")
+        inputfuncs.editor_cancel(self.session, session_id=editor._session_id, discard=True)
+        self.assertEqual(quit_called, [True])
+        self.assertIsNone(self.char1.ndb._eveditor)
+
+    def test_web_save_rejects_missing_session_id(self):
+        self._mark_web()
+        saved = []
+        editor = EvEditor(self.char1, savefunc=lambda c, b: saved.append(b) or True)
+        # an omitted id (None) must not pass the handshake
+        self.assertFalse(editor.web_save("nope", session_id=None))
+        self.assertEqual(saved, [])
+
+    def test_reopen_web_rotates_session_id_rejecting_stale_panel(self):
+        self._mark_web()
+        editor = EvEditor(self.char1)
+        old_id = editor._session_id
+        editor.reopen_web(self.session)
+        self.assertNotEqual(editor._session_id, old_id)
+        # a save carrying the pre-reopen id is now rejected
+        self.assertFalse(editor.web_save("x", session_id=old_id))
+
+    def test_editor_save_no_editor_dismisses_client_panel(self):
+        # no live editor: reconcile the drifted client rather than staying silent
+        self.session.msg = Mock()
+        inputfuncs.editor_save(self.session, session_id="whatever", content="x")
+        self.assertTrue(self._oob(self.session.msg, "editor_close"))
+
+    def test_reopen_web_noop_on_line_editor(self):
+        # reopen_web is a web-only re-announce; on a line editor it must no-op.
+        editor = EvEditor(self.char1)
+        self.assertEqual(editor._frontend, "line")
+        self.char1.msg = Mock()
+        editor.reopen_web(self.session)
+        self.assertEqual(editor._frontend, "line")
+        self.assertFalse(self._oob(self.char1.msg, "editor_open"))
 
 
 class TestEvEditorReload(BaseEvenniaCommandTest):
@@ -648,3 +734,37 @@ class TestEvEditorReload(BaseEvenniaCommandTest):
     def _first(self):
         actor = Actor(character=self.char1, session=self.session)
         return actor, actor.state_objects[-1]
+
+    def test_persistent_web_editor_rehydrated_and_buffer_restored(self):
+        # A persistent editor on a web-capable session must record its
+        # rehydration substrate (despite the web frontend's early return) and,
+        # after a reload, restore the in-progress buffer and re-push the panel
+        # with the restored content, not the stale last-saved buffer.
+        for sess in self.char1.sessions.all():
+            sess.protocol_flags["CLIENT_EDITOR"] = True
+        editor = EvEditor(self.char1, savefunc=_persistent_savefunc, persistent=True)
+        self.assertEqual(editor._frontend, "web")
+        editor.update_buffer("web draft")
+        # the persistence substrate is present even though the frontend is web
+        self.assertIsNotNone(self.char1.attributes.get("_eveditor_saved"))
+        buf, _undo = self.char1.attributes.get("_eveditor_buffer_temp")
+        self.assertEqual(buf, "web draft")
+
+        # simulate a reload: live editor gone, persisted Attributes remain
+        self.char1.ndb._eveditor = None
+        self.char1.ndb.active_states = None
+        self.char1.msg = Mock()
+        self.char1.at_post_load()
+
+        restored = self.char1.ndb._eveditor
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored._frontend, "web")
+        self.assertEqual(restored.get_buffer(), "web draft")
+        # the panel is re-pushed with the restored buffer (last editor_open)
+        opens = [
+            kwargs["editor_open"][0]
+            for _n, _a, kwargs in self.char1.msg.mock_calls
+            if "editor_open" in kwargs
+        ]
+        self.assertTrue(opens)
+        self.assertEqual(opens[-1][1], "web draft")

@@ -678,7 +678,10 @@ def editor_client(session, *args, **kwargs):
         supported (bool): whether the client provides an editor UI.
     """
     supported = bool(kwargs.get("supported", True))
-    session.protocol_flags["CLIENT_EDITOR"] = supported
+    # Route through update_flags so the portal's authoritative copy also carries
+    # the flag; a bare in-place assignment is dropped when portal_sessions_sync
+    # rebuilds this session across ``@reload``, losing the web-editor capability.
+    session.update_flags(CLIENT_EDITOR=supported)
     if supported:
         # If a web editor is already live on this body (e.g. the client just
         # reconnected after a refresh), re-open it on the new session so the
@@ -702,7 +705,8 @@ def narrative_client(session, *args, **kwargs):
     """
     from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
 
-    session.protocol_flags[CLIENT_NARRATIVE_FLAG] = bool(kwargs.get("supported", True))
+    # Sync to the portal (see editor_client) so the flag survives ``@reload``.
+    session.update_flags(**{CLIENT_NARRATIVE_FLAG: bool(kwargs.get("supported", True))})
 
 
 def editor_save(session, *args, **kwargs):
@@ -713,14 +717,16 @@ def editor_save(session, *args, **kwargs):
         content (str): the full buffer content to save.
         close (bool): if true, also close the editor after saving.
     """
+    session_id = kwargs.get("session_id")
     editor = _find_editor(session)
-    if editor is None:
-        return
-    editor.web_save(
+    if editor is None or not editor.web_save(
         kwargs.get("content", ""),
-        session_id=kwargs.get("session_id"),
+        session_id=session_id,
         close=bool(kwargs.get("close")),
-    )
+    ):
+        # No live editor, or a stale/mismatched panel: tell this client to
+        # dismiss its dead panel rather than leaving it stuck open.
+        session.msg(editor_close=([session_id], {}))
 
 
 def editor_cancel(session, *args, **kwargs):
@@ -728,8 +734,12 @@ def editor_cancel(session, *args, **kwargs):
 
     Kwargs:
         session_id (str): the editor session id from ``editor_open`` (validated).
+        discard (bool): confirm discarding unsaved changes. Without it, an
+            unsaved buffer is kept and an ``unsaved`` status is sent instead.
     """
+    session_id = kwargs.get("session_id")
     editor = _find_editor(session)
-    if editor is None:
-        return
-    editor.web_cancel(session_id=kwargs.get("session_id"))
+    if editor is None or not editor.web_cancel(
+        session_id=session_id, discard=bool(kwargs.get("discard"))
+    ):
+        session.msg(editor_close=([session_id], {}))

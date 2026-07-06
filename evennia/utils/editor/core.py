@@ -100,6 +100,11 @@ class EditCore:
         """
         if not self.undo_buffer or self.buffer != self.undo_buffer[self.undo_pos]:
             self.undo_buffer = self.undo_buffer[: self.undo_pos + 1] + [self.buffer]
+            # Cap history at undo_max so undo and redo share one bound: drop the
+            # oldest entries rather than letting undo grow unbounded while redo
+            # stays capped (which would strand the buffer mid-history).
+            if len(self.undo_buffer) > self.undo_max:
+                self.undo_buffer = self.undo_buffer[-self.undo_max :]
             self.undo_pos = len(self.undo_buffer) - 1
 
     def navigate_undo(self, step):
@@ -125,13 +130,12 @@ class EditCore:
                 self.buffer = self.undo_buffer[self.undo_pos]
                 token = UNDO_OK
         elif step and step > 0:
-            # redo
-            if self.undo_pos >= len(self.undo_buffer) - 1 or self.undo_pos + 1 >= self.undo_max:
+            # redo (undo_buffer is bounded by undo_max in _record_undo, so its
+            # length is the only cap needed here)
+            if self.undo_pos >= len(self.undo_buffer) - 1:
                 token = REDO_NONE
             else:
-                self.undo_pos = min(
-                    self.undo_pos + step, min(len(self.undo_buffer), self.undo_max) - 1
-                )
+                self.undo_pos = min(self.undo_pos + step, len(self.undo_buffer) - 1)
                 self.buffer = self.undo_buffer[self.undo_pos]
                 token = REDO_OK
         self._record_undo()
@@ -162,7 +166,7 @@ class EditCore:
             begin_tags = _INDENT_KEYWORDS[keyword]
             for oline in reversed(buffer.splitlines()):
                 if any(oline.lstrip(" ").startswith(tag) for tag in begin_tags):
-                    indent = (len(oline) - len(oline.lstrip(" "))) / 4
+                    indent = (len(oline) - len(oline.lstrip(" "))) // 4
                     break
             self.indent = indent + 1
             changed = True

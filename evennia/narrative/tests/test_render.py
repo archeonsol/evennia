@@ -10,7 +10,8 @@ import unittest
 from evennia.narrative.render import (CharRef, KeyResolver, PipelineResolver,
                                       PronounRef, Section, SectionedView,
                                       SpeechSpan, TextSpan, ViewerContext,
-                                      render_spans, span_from_dict, span_to_dict)
+                                      render_spans, span_from_dict,
+                                      span_to_dict)
 
 
 class _Obj:
@@ -132,8 +133,11 @@ class TestSectionedView(unittest.TestCase):
         # header+desc joined by \n; mid its own block; tail joined by \n.
         view = SectionedView(
             order=("header", "desc", "atmos", "chars", "exits"),
-            header="Room", desc="A place.", atmos="It is raining.",
-            chars="Kade is here.", exits="Exits: north.",
+            header="Room",
+            desc="A place.",
+            atmos="It is raining.",
+            chars="Kade is here.",
+            exits="Exits: north.",
         )
         groups = [["header", "desc"], ["atmos"], ["chars", "exits"]]
         self.assertEqual(
@@ -164,6 +168,7 @@ class TestPipelineResolver(unittest.TestCase):
 
     def _resolver(self):
         r = PipelineResolver()
+
         # namer: self->you (final); concealed->someone (final); else base (not final)
         def namer(ref, ctx):
             if ctx.get("self_id") == ref.char_id:
@@ -171,6 +176,7 @@ class TestPipelineResolver(unittest.TestCase):
             if ref.char_id in ctx.get("unseen", ()):
                 return "someone", True
             return ctx.get("names", {}).get(ref.char_id, str(ref.char_id)), False
+
         r.set_char_namer(namer)
         return r
 
@@ -230,14 +236,25 @@ class TestNamedCore(unittest.TestCase):
             return f"{obj}->{viewer}{punct}"
 
         try:
-            self.assertEqual(
-                pipeline.render("A", "B", kind="greet_test", punct="?"), "A->B?"
-            )
+            self.assertEqual(pipeline.render("A", "B", kind="greet_test", punct="?"), "A->B?")
             self.assertIn("greet_test", pipeline.producers())
             with self.assertRaises(LookupError):
                 pipeline.render("A", "B", kind="no_such_kind_xyz")
         finally:
             pipeline._PRODUCERS.pop("greet_test", None)
+
+    def test_re_registration_raises_without_override(self):
+        from evennia.narrative import pipeline
+
+        pipeline.register_producer("dup_test", lambda o, v: "one")
+        try:
+            with self.assertRaises(ValueError):
+                pipeline.register_producer("dup_test", lambda o, v: "two")
+            # explicit override replaces the producer
+            pipeline.register_producer("dup_test", lambda o, v: "three", override=True)
+            self.assertEqual(pipeline.render("A", "B", kind="dup_test"), "three")
+        finally:
+            pipeline._PRODUCERS.pop("dup_test", None)
 
 
 if __name__ == "__main__":

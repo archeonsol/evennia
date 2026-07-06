@@ -8,8 +8,7 @@ auto-indentation.
 
 import unittest
 
-from evennia.utils.editor.core import (REDO_NONE, REDO_OK, UNDO_NONE, UNDO_OK,
-                                       EditCore)
+from evennia.utils.editor.core import REDO_NONE, REDO_OK, UNDO_NONE, UNDO_OK, EditCore
 
 
 class TestEditCoreBuffer(unittest.TestCase):
@@ -87,6 +86,23 @@ class TestEditCoreUndo(unittest.TestCase):
             redos += 1
         self.assertLessEqual(redos, core.undo_max - 1)
 
+    def test_undo_history_is_bounded_by_undo_max(self):
+        # Recording never lets undo grow past the cap, so undo and redo share
+        # one bound (redo can always return to the latest content).
+        core = EditCore(undo_max=3)
+        for n in range(10):
+            core.set_buffer(f"v{n}")
+        self.assertLessEqual(len(core.undo_buffer), core.undo_max)
+        # the newest entry is still the live buffer, and undo_pos points at it
+        self.assertEqual(core.get_buffer(), "v9")
+        self.assertEqual(core.undo_pos, len(core.undo_buffer) - 1)
+        # after a full undo, redo returns all the way to the latest content
+        while core.navigate_undo(-1) == UNDO_OK:
+            pass
+        while core.navigate_undo(1) == REDO_OK:
+            pass
+        self.assertEqual(core.get_buffer(), "v9")
+
 
 class TestEditCoreIndent(unittest.TestCase):
     def test_indent_ops_noop_outside_code_mode(self):
@@ -118,6 +134,17 @@ class TestEditCoreIndent(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(core.indent, 1)
         self.assertEqual(line, "if x:")  # the opening line itself is not indented
+
+    def test_deduce_indent_dedent_keyword_aligns_to_block(self):
+        # A dedent keyword (``else:``) against an indented ``if`` must align to
+        # that block using integer indent math (floor division), not crash on a
+        # float multiplier.
+        core = EditCore(code_mode=True)
+        line, changed = core.deduce_indent("else:", "    if x:")
+        self.assertTrue(changed)
+        self.assertIsInstance(core.indent, int)
+        self.assertEqual(core.indent, 2)  # one past the opening block's level
+        self.assertEqual(line, "    else:")
 
 
 class TestEditCoreCopyBuffer(unittest.TestCase):

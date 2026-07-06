@@ -37,9 +37,7 @@ class _Viewer:
 
 
 def _node(body="does a thing", refs=None):
-    return RenderNode(
-        kind="emote", msg_type="pose", body=body, from_id=5, refs=refs or []
-    )
+    return RenderNode(kind="emote", msg_type="pose", body=body, from_id=5, refs=refs or [])
 
 
 class TestDeliverNode(unittest.TestCase):
@@ -69,8 +67,8 @@ class TestDeliverNode(unittest.TestCase):
         self.assertIn("narrative", kwargs)
         payload = kwargs["narrative"][0][0]  # (=> [payload], {}) -> payload
         self.assertEqual(payload["body"], "does a thing")
-        self.assertEqual(payload["msgType"], "pose")
-        self.assertEqual(payload["fromId"], 5)
+        self.assertEqual(payload["msg_type"], "pose")
+        self.assertEqual(payload["from_id"], 5)
         self.assertEqual(payload["refs"], [{"name": "Kade", "char_id": 42}])
         self.assertIs(kwargs["session"], cap)
 
@@ -87,6 +85,51 @@ class TestDeliverNode(unittest.TestCase):
         args, kwargs = v.calls[1]
         self.assertEqual(args[0], ("does a thing", {"type": "pose"}))
         self.assertEqual(kwargs["session"], [tel])
+
+    def test_refs_builder_not_called_for_incapable_viewer(self):
+        # The per-viewer resolver behind refs must not run for a text-only viewer.
+        calls = []
+        v = _Viewer(sessions=[_Session({})])
+        deliver_node(_node(), v, refs_builder=lambda: calls.append(True) or [])
+        self.assertEqual(calls, [])
+
+    def test_refs_builder_populates_refs_for_capable_viewer(self):
+        calls = []
+
+        def builder():
+            calls.append(True)
+            return [{"name": "Kade", "char_id": 42}]
+
+        cap = _Session({CLIENT_NARRATIVE_FLAG: True})
+        v = _Viewer(sessions=[cap])
+        deliver_node(_node(), v, refs_builder=builder)
+        self.assertEqual(calls, [True])
+        payload = v.calls[0][1]["narrative"][0][0]
+        self.assertEqual(payload["refs"], [{"name": "Kade", "char_id": 42}])
+
+
+class TestRenderNodePayload(unittest.TestCase):
+    def test_payload_serializes_self_echo(self):
+        node = RenderNode(kind="emote", msg_type="pose", body="b", from_id=1, self_echo=True)
+        self.assertIs(node.payload()["self_echo"], True)
+
+    def test_payload_serializes_spans_as_list_of_lists(self):
+        from evennia.narrative.render import TextSpan
+
+        node = RenderNode(
+            kind="emote",
+            msg_type="pose",
+            body="hi there",
+            spans=[[TextSpan("hi")], [TextSpan("there")]],
+        )
+        payload = node.payload()
+        self.assertEqual(len(payload["spans"]), 2)
+        self.assertEqual(payload["spans"][0][0]["text"], "hi")
+        self.assertEqual(payload["spans"][1][0]["text"], "there")
+
+    def test_payload_omits_spans_when_absent(self):
+        node = RenderNode(kind="emote", msg_type="pose", body="b")
+        self.assertNotIn("spans", node.payload())
 
 
 if __name__ == "__main__":

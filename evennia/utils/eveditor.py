@@ -494,6 +494,7 @@ def _load_editor(caller):
     """
     saved_options = caller.attributes.get("_eveditor_saved")
     saved_buffer, saved_undo = caller.attributes.get("_eveditor_buffer_temp", (None, None))
+    saved_undo_pos = caller.attributes.get("_eveditor_undo_pos", None)
     unsaved = caller.attributes.get("_eveditor_unsaved", False)
     indent = caller.attributes.get("_eveditor_indent", 0)
     if saved_options:
@@ -501,11 +502,24 @@ def _load_editor(caller):
         if saved_buffer:
             # we have to re-save the buffer data so we can handle subsequent restarts
             caller.attributes.add("_eveditor_buffer_temp", (saved_buffer, saved_undo))
+            undo_pos = saved_undo_pos if saved_undo_pos is not None else len(saved_undo) - 1
             setattr(eveditor, "_buffer", saved_buffer)
             setattr(eveditor, "_undo_buffer", saved_undo)
-            setattr(eveditor, "_undo_pos", len(saved_undo) - 1)
+            setattr(eveditor, "_undo_pos", undo_pos)
             setattr(eveditor, "_unsaved", unsaved)
             setattr(eveditor, "_indent", indent)
+            # Re-persist the restored mutable state: __init__ re-seeded these
+            # Attributes to their defaults above, so a *second* reload would
+            # otherwise read undo_pos/unsaved/indent as defaults, not the values
+            # just restored.
+            caller.attributes.add("_eveditor_undo_pos", undo_pos)
+            caller.attributes.add("_eveditor_unsaved", unsaved)
+            caller.attributes.add("_eveditor_indent", indent)
+            # The web frontend already pushed the freshly loaded (last-saved)
+            # buffer to the client in __init__; re-push now that the in-progress
+            # buffer is restored, or the panel would show stale content.
+            if eveditor._frontend == "web":
+                eveditor._open_web()
         for key, value in saved_options[1].items():
             setattr(eveditor, key, value)
     else:
@@ -1032,21 +1046,11 @@ class EvEditor:
 
         self._sep = "-"
 
-        # Pick the frontend from client capability. A session that announced
-        # editor support (see the ``editor_client`` inputfunc) gets the rich web
-        # editor: we push the buffer over OOB and do NOT install line capture
-        # (the client is modal). Every other client - raw telnet, Mudlet, or a
-        # webclient that has not announced support - keeps the line editor, so
-        # this is strictly additive.
-        self._session_id = None
-        self._web_session = self._detect_web_session()
-        if self._web_session is not None:
-            self._frontend = "web"
-            self._session_id = uuid4().hex
-            self._open_web()
-            return
-        self._frontend = "line"
-
+        # Persistence seeding runs before the frontend fork so a persistent
+        # editor records its rehydration substrate regardless of frontend: the
+        # ``_eveditor_saved`` marker is what ``rehydrate_captures`` gates on, so
+        # a web editor that skipped this block would silently survive nothing
+        # across ``@reload``.
         if persistent:
             # save in tuple {kwargs, other options}
             try:
@@ -1065,12 +1069,29 @@ class EvEditor:
                     ),
                 )
                 caller.attributes.add("_eveditor_buffer_temp", (self._buffer, self._undo_buffer))
+                caller.attributes.add("_eveditor_undo_pos", self._undo_pos)
                 caller.attributes.add("_eveditor_unsaved", False)
                 caller.attributes.add("_eveditor_indent", 0)
             except Exception as err:
                 caller.msg(_ERROR_PERSISTENT_SAVING.format(error=err))
                 logger.log_trace(_TRACE_PERSISTENT_SAVING)
                 persistent = False
+                self._persistent = False
+
+        # Pick the frontend from client capability. A session that announced
+        # editor support (see the ``editor_client`` inputfunc) gets the rich web
+        # editor: we push the buffer over OOB and do NOT install line capture
+        # (the client is modal). Every other client - raw telnet, Mudlet, or a
+        # webclient that has not announced support - keeps the line editor, so
+        # this is strictly additive.
+        self._session_id = None
+        self._web_session = self._detect_web_session()
+        if self._web_session is not None:
+            self._frontend = "web"
+            self._session_id = uuid4().hex
+            self._open_web()
+            return
+        self._frontend = "line"
 
         # Install the engine-native input capture. exit_state first to avoid
         # stacking if a prior editor was still active on this body.
@@ -1196,7 +1217,7 @@ class EvEditor:
             self._caller.msg(_("Paste mode is unavailable right now."))
             return
         self._state._paste_mode = True
-        self._paste_count = 0
+        self._paste_lines = []
         self._caller.msg(
             _(
                 "|gPaste mode.|n Paste or type your text; lines are added "
@@ -1205,19 +1226,26 @@ class EvEditor:
         )
 
     def append_paste_line(self, raw):
-        """Append one raw line to the buffer during paste mode (no echo)."""
-        line = raw.rstrip("\r\n")
-        buf = self.get_buffer()
-        self.update_buffer(line if not buf else buf + "\n" + line)
-        self._paste_count = getattr(self, "_paste_count", 0) + 1
+        """Collect one raw line during paste mode; applied in end_paste_mode.
+
+        Accumulating and applying the whole block at once keeps paste O(N) rather
+        than rebuilding the buffer (and taking an undo snapshot + persistence
+        write) per line, which is the point of ``:paste`` for bulk input.
+        """
+        self._paste_lines.append(raw.rstrip("\r\n"))
 
     def end_paste_mode(self):
-        """Leave paste mode, report the line count and redraw the buffer."""
-        count = getattr(self, "_paste_count", 0)
-        self._paste_count = 0
-        self._caller.msg(
-            _("Added {count} pasted line(s). Back to the editor.").format(count=count)
-        )
+        """Leave paste mode: apply the pasted block in one update and redraw."""
+        lines = self._paste_lines
+        self._paste_lines = []
+        before = self.get_buffer()
+        if lines:
+            pasted = "\n".join(lines)
+            self.update_buffer(pasted if not before else before + "\n" + pasted)
+        # count only what actually changed the buffer (a lone empty line into an
+        # empty buffer is a no-op).
+        count = len(lines) if self.get_buffer() != before else 0
+        self._caller.msg(_("Added {count} pasted line(s). Back to the editor.").format(count=count))
         self.display_buffer()
 
     # -- web frontend -------------------------------------------------------
@@ -1240,6 +1268,10 @@ class EvEditor:
         try:
             sessions = list(handler.all())
         except Exception:
+            # The no-handler case is guarded above; a fault here is genuine (e.g.
+            # a DB error during session recache). Log it, then fall back to the
+            # line editor rather than bury it.
+            logger.log_trace()
             return None
         for sess in sessions:
             flags = getattr(sess, "protocol_flags", None) or {}
@@ -1262,15 +1294,16 @@ class EvEditor:
         if self._frontend != "web":
             return
         self._web_session = session
+        # Mint a fresh id so a stale pre-reopen panel (whose id the client no
+        # longer holds) can no longer save or cancel this buffer.
+        self._session_id = uuid4().hex
         self._open_web()
 
     def _open_web(self):
         """Push the buffer to the web client, opening its editor panel."""
         meta = {
             "key": self._key,
-            "title": (
-                _("Editing {key}").format(key=self._key) if self._key else _("Editor")
-            ),
+            "title": (_("Editing {key}").format(key=self._key) if self._key else _("Editor")),
             "mode": self._editor_mode(),
             "width": settings.CLIENT_DEFAULT_WIDTH,
         }
@@ -1282,37 +1315,62 @@ class EvEditor:
     def _close_web(self):
         """Tell the web client to dismiss its editor panel."""
         if self._web_session is not None:
-            self._caller.msg(
-                editor_close=([self._session_id], {}), session=self._web_session
-            )
+            self._caller.msg(editor_close=([self._session_id], {}), session=self._web_session)
 
     def _valid_web(self, session_id):
-        """Guard: the request must be the web frontend and match its id."""
-        return self._frontend == "web" and (
-            session_id is None or session_id == self._session_id
-        )
+        """Guard: the request must be the web frontend and match its exact id.
+
+        A web editor always mints a non-``None`` id and pushes it to the client
+        in ``editor_open``, so a conforming client always echoes it; a missing or
+        mismatched id (a stale or second panel) is rejected.
+        """
+        return self._frontend == "web" and session_id == self._session_id
 
     def web_save(self, content, session_id=None, close=False):
         """Save buffer content received from the web client.
 
         Runs the same buffer update and savefunc as the line editor, so the
         two frontends save identically. Optionally closes the panel afterwards.
+
+        A web editor is scoped to one session at a time (``reopen_web`` retargets
+        and re-ids on reconnect), so saving is last-write-wins with the panel
+        holding the current id: the client sends the full buffer and it replaces
+        the server copy wholesale.
+
+        Returns:
+            bool: ``True`` if the request was accepted (valid frontend + id),
+                ``False`` if it was rejected, so the caller can reconcile a
+                drifted client.
         """
         if not self._valid_web(session_id):
-            return
+            return False
         self.update_buffer(content)
         self.save_buffer()
         if close:
             self.web_cancel(session_id=session_id)
         else:
             self._caller.msg(editor_status=(["saved"], {}), session=self._web_session)
+        return True
 
-    def web_cancel(self, session_id=None):
-        """Close the web editor, running the quit hook (no save)."""
+    def web_cancel(self, session_id=None, discard=False):
+        """Close the web editor, running the quit hook (no save).
+
+        Mirrors the line editor's ``:q`` unsaved-guard: with unsaved changes and
+        no explicit ``discard``, this does not tear down the editor but sends an
+        ``unsaved`` status so the client can confirm before discarding.
+
+        Returns:
+            bool: ``True`` if the request was accepted (valid frontend + id),
+                ``False`` if it was rejected.
+        """
         if not self._valid_web(session_id):
-            return
+            return False
+        if self._unsaved and not discard:
+            self._caller.msg(editor_status=(["unsaved"], {}), session=self._web_session)
+            return True
         self._close_web()
         self.quit()
+        return True
 
     def load_buffer(self):
         """
@@ -1347,6 +1405,22 @@ class EvEditor:
         """
         return self._core.get_buffer()
 
+    def _persist_editor_state(self):
+        """Write the mutable editor state to Attributes (persistent editors only).
+
+        Captures the buffer, undo history *and position*, unsaved flag and indent
+        so a reload restores the editor exactly where it was, mid-undo-history
+        included. A no-op for non-persistent editors.
+        """
+        if not self._persistent:
+            return
+        self._caller.attributes.add(
+            "_eveditor_buffer_temp", (self._core.buffer, self._core.undo_buffer)
+        )
+        self._caller.attributes.add("_eveditor_undo_pos", self._core.undo_pos)
+        self._caller.attributes.add("_eveditor_unsaved", self._core.unsaved)
+        self._caller.attributes.add("_eveditor_indent", self._core.indent)
+
     def update_buffer(self, buf):
         """
         This should be called when the buffer has been changed
@@ -1356,12 +1430,8 @@ class EvEditor:
             buf (str): The text to update the buffer with.
 
         """
-        if self._core.set_buffer(buf) and self._persistent:
-            self._caller.attributes.add(
-                "_eveditor_buffer_temp", (self._core.buffer, self._core.undo_buffer)
-            )
-            self._caller.attributes.add("_eveditor_unsaved", True)
-            self._caller.attributes.add("_eveditor_indent", self._core.indent)
+        if self._core.set_buffer(buf):
+            self._persist_editor_state()
 
     def quit(self):
         """
@@ -1374,6 +1444,7 @@ class EvEditor:
             self._caller.msg(_ERROR_QUITFUNC.format(error=e))
         self._caller.nattributes.remove("_eveditor")
         self._caller.attributes.remove("_eveditor_buffer_temp")
+        self._caller.attributes.remove("_eveditor_undo_pos")
         self._caller.attributes.remove("_eveditor_saved")
         self._caller.attributes.remove("_eveditor_unsaved")
         self._caller.attributes.remove("_eveditor_indent")
@@ -1410,6 +1481,10 @@ class EvEditor:
 
         """
         token = self._core.navigate_undo(step)
+        if token in (UNDO_OK, REDO_OK):
+            # the buffer moved to a historical position; persist it so a reload
+            # restores that position, not the last recorded tip.
+            self._persist_editor_state()
         if token == UNDO_NONE:
             self._caller.msg(_MSG_NO_UNDO)
         elif token == UNDO_OK:
