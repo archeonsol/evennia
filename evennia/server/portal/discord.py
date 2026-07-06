@@ -551,6 +551,63 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
             type="PUT",
         )
 
+    def send_create_thread(self, name, channel_id, job_id, **kwargs):
+        """
+        Create a Discord thread under a parent channel, then report its id back.
+
+        Use with session.msg(create_thread=(name, channel_id, job_id)). On
+        success the portal feeds a THREAD_CREATED event to the server carrying
+        ``job_id`` and the new ``thread_id`` so game code can bind them.
+        """
+        url = f"{DISCORD_API_BASE_URL}/channels/{channel_id}/threads"
+        # type 11 = GUILD_PUBLIC_THREAD; 1440 min = 1 day auto-archive.
+        data = {"name": str(name)[:100], "type": 11, "auto_archive_duration": 1440}
+        data.update(kwargs)
+        body = FileBodyProducer(BytesIO(json.dumps(data).encode("utf-8")))
+
+        d = _AGENT.request(
+            b"POST",
+            url.encode("utf-8"),
+            Headers(
+                {
+                    "User-Agent": [DISCORD_USER_AGENT],
+                    "Authorization": [f"Bot {DISCORD_BOT_TOKEN}"],
+                    "Content-Type": ["application/json"],
+                }
+            ),
+            body,
+        )
+
+        def cbResponse(response):
+            if response.code in (200, 201):
+                bd = readBody(response)
+
+                def _bound(raw):
+                    try:
+                        payload = json.loads(raw)
+                    except Exception:
+                        return
+                    thread_id = payload.get("id")
+                    if thread_id:
+                        self.sessionhandler.data_in(
+                            self,
+                            bot_data_in=(
+                                "",
+                                {
+                                    "type": "THREAD_CREATED",
+                                    "job_id": job_id,
+                                    "thread_id": thread_id,
+                                },
+                            ),
+                        )
+
+                bd.addCallback(_bound)
+                return bd
+            elif should_retry(response.code):
+                delay(300, self.send_create_thread, name, channel_id, job_id, **kwargs)
+
+        d.addCallback(cbResponse)
+
     def send_default(self, *args, **kwargs):
         """
         Ignore other outputfuncs
