@@ -228,6 +228,21 @@ class EvenniaPortalService(MultiService):
                         factory.noisy = False
                         factory.protocol = _websocket_protocol
                         factory.sessionhandler = evennia.PORTAL_SESSION_HANDLER
+
+                        # Enable permessage-deflate compression (RFC 7692): a free
+                        # size win on large structured payloads (room look,
+                        # recordings, scene patches) for clients that offer it.
+                        from autobahn.websocket.compress import (
+                            PerMessageDeflateOffer, PerMessageDeflateOfferAccept)
+
+                        def _accept_compression(offers):
+                            for offer in offers:
+                                if isinstance(offer, PerMessageDeflateOffer):
+                                    return PerMessageDeflateOfferAccept(offer)
+
+                        factory.setProtocolOptions(
+                            perMessageCompressionAccept=_accept_compression)
+
                         websocket_service = internet.TCPServer(port, factory, interface=w_interface)
                         websocket_service.setName("EvenniaWebSocket%s:%s" % (w_ifacestr, port))
                         websocket_service.setServiceParent(self)
@@ -295,6 +310,9 @@ class EvenniaPortalService(MultiService):
         # The AMP protocol handles the communication between
         # the portal and the mud server. Only reason to ever deactivate
         # it would be during testing and debugging.
+        if getattr(settings, "SERVER_PORTAL_BUS", "amp") == "redis":
+            self.register_redis_bus()
+            return
 
         from evennia.server.portal import amp_server
 
@@ -306,6 +324,16 @@ class EvenniaPortalService(MultiService):
         )
         amp_service.setName("PortalAMPServer")
         amp_service.setServiceParent(self)
+
+    def register_redis_bus(self):
+        """Redis-Streams bus in place of AMP (settings.SERVER_PORTAL_BUS='redis')."""
+        from twisted.internet import reactor
+
+        from evennia.server.redis_bus import RedisPortalBus
+
+        self.info_dict["amp"] = "redis bus"
+        self.amp_protocol = RedisPortalBus(self)
+        reactor.callWhenRunning(self.amp_protocol.start_bus)
 
     def _get_backup_server_twistd_cmd(self):
         """

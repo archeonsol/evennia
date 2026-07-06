@@ -245,6 +245,9 @@ class EvenniaServerService(MultiService):
         # The AMP protocol handles the communication between
         # the portal and the mud server. Only reason to ever deactivate
         # it would be during testing and debugging.
+        if getattr(settings, "SERVER_PORTAL_BUS", "amp") == "redis":
+            self.register_redis_bus()
+            return
 
         ifacestr = ""
         if settings.AMP_INTERFACE != "127.0.0.1":
@@ -258,6 +261,15 @@ class EvenniaServerService(MultiService):
         self.amp_service = internet.TCPClient(settings.AMP_HOST, settings.AMP_PORT, factory)
         self.amp_service.setName("ServerAMPClient")
         self.amp_service.setServiceParent(self)
+
+    def register_redis_bus(self):
+        """Redis-Streams bus in place of AMP (settings.SERVER_PORTAL_BUS='redis')."""
+        from evennia.server.redis_bus import RedisServerBus
+
+        self.info_dict["amp"] = "redis bus"
+        self.amp_protocol = RedisServerBus(self)
+        # Start once the reactor is running (redis threads + PSYNC handshake).
+        reactor.callWhenRunning(self.amp_protocol.start_bus)
 
     def register_webserver(self):
         # Start a django-compatible webserver: ASGI (uvicorn) or Twisted-WSGI.

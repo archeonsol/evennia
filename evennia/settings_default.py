@@ -159,6 +159,12 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
+# Portal<->Server transport: "amp" (Twisted AMP over TCP, default) or "redis"
+# (redis Streams; decouples the two sides and enables multiple Server workers).
+SERVER_PORTAL_BUS = "amp"
+REDIS_BUS_URL = "redis://127.0.0.1:6379/1"
+REDIS_BUS_PREFIX = "evennia:bus"
+SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
 # Twisted reactor for the Portal/Server twistd processes. "asyncio" runs Twisted
 # on an asyncio event loop, so engine code can use async/await and asyncio
 # libraries while all existing Twisted APIs (callLater, deferToThread, delay,
