@@ -74,6 +74,7 @@ dependencies = [
   "django-sekizai == 2.0.0",
   "inflect >= 5.2.0",
   "autobahn >= 20.7.1, < 21.0.0",
+  "uvicorn >= 0.30",
   "lunr == 0.7.0.post1",
   "simpleeval == 1.0.5",
   "uritemplate == 4.1.1",

@@ -78,6 +78,9 @@ SSH_INTERFACES = ["0.0.0.0"]
 # (Obs - further web configuration can be found below
 # in the section  'Config for Django web features')
 WEBSERVER_ENABLED = True
+# How Django is served: "wsgi" (Twisted-WSGI, default) or "asgi" (uvicorn in a
+# worker thread, unlocking async views/ORM). Both run in the Server process.
+WEB_SERVER = "wsgi"
 # This is a security setting protecting against host poisoning
 # attacks.  It defaults to allowing all. In production, make
 # sure to change this to your actual host addresses/IPs.

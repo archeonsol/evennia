@@ -10,6 +10,16 @@ Assumes ``django.setup()`` has already run (as it has in server.py / portal.py b
 the time this is imported), exactly like ``django.core.wsgi.get_wsgi_application``.
 """
 
+from django.conf import settings
 from django.core.asgi import get_asgi_application
 
 application = get_asgi_application()
+
+# The Twisted-WSGI path serves /static and /media via Twisted static resources.
+# Under ASGI, Django serves them only if we wrap the app. In DEBUG we use the
+# staticfiles handler; production should front static with a real server/CDN.
+if getattr(settings, "DEBUG", False):
+    from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
+
+    application = ASGIStaticFilesHandler(application)
+

@@ -260,7 +260,10 @@ class EvenniaServerService(MultiService):
         self.amp_service.setServiceParent(self)
 
     def register_webserver(self):
-        # Start a django-compatible webserver.
+        # Start a django-compatible webserver: ASGI (uvicorn) or Twisted-WSGI.
+        if getattr(settings, "WEB_SERVER", "wsgi") == "asgi":
+            self.register_asgi_webserver()
+            return
 
         from evennia.server.webserver import (
             DjangoWebRoot,
@@ -308,6 +311,17 @@ class EvenniaServerService(MultiService):
             webserver.setServiceParent(self)
 
             self.info_dict["webserver"] += "webserver: %s" % serverport
+
+    def register_asgi_webserver(self):
+        """Serve Django over ASGI (uvicorn in a worker thread). See asgi_webserver."""
+        from evennia.server.asgi_webserver import UvicornWebService
+
+        self.info_dict["webserver"] = ""
+        for _proxyport, serverport in settings.WEBSERVER_PORTS:
+            svc = UvicornWebService(serverport, interface="127.0.0.1")
+            svc.setName("EvenniaASGIWebServer%s" % serverport)
+            svc.setServiceParent(self)
+            self.info_dict["webserver"] += "webserver (asgi): %s" % serverport
 
     def sqlite3_prep(self):
         """
