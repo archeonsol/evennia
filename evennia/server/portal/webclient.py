@@ -33,6 +33,8 @@ from the command line and interprets it as an Evennia Command: `["text", ["look"
 """
 
 import json
+import time
+from collections import deque
 
 from autobahn.exception import Disconnected
 from autobahn.twisted.websocket import WebSocketServerProtocol
@@ -41,6 +43,22 @@ from django.conf import settings
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
+
+# --- Resumable sessions ---
+# Each outbound JSON frame is stamped with a monotonic ``s`` (seq). On an unclean
+# close we stash the recent buffer keyed by the client's resume token for a short
+# grace window; when the client reconnects and presents the token + its last seen
+# seq in `hello`, we replay the frames it missed, so a brief blip doesn't drop
+# lines. State events are idempotent, so the parallel fresh-login pushes are safe.
+RESUME_BUFFER_MAX = 400        # frames kept per connection
+RESUME_GRACE_SECONDS = 90      # how long a stash survives a disconnect
+_RESUME_STASH = {}             # token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float}
+
+
+def _prune_resume_stash():
+    now = time.time()
+    for tok in [t for t, s in _RESUME_STASH.items() if s["deadline"] < now]:
+        _RESUME_STASH.pop(tok, None)
 
 # Status Code 1000: Normal Closure
 #   called when the connection was closed through JavaScript
@@ -339,6 +357,39 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
         # sendClose() under autobahn/websocket/interfaces.py
         self.sendClose(CLOSE_NORMAL, reason)
 
+    def _handle_resume(self, resume):
+        """On reconnect: bind the resume token and replay any missed frames."""
+        token = resume.get("token")
+        if not token:
+            return
+        self.resume_token = token
+        _prune_resume_stash()
+        stash = _RESUME_STASH.pop(token, None)
+        if not stash:
+            return
+        # Continue the seq counter across the gap and replay what the client
+        # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
+        self.out_seq = stash["last_seq"]
+        self.out_buffer = deque(stash["frames"], maxlen=RESUME_BUFFER_MAX)
+        last_seen = int(resume.get("last_seq") or 0)
+        for seq, frame in list(self.out_buffer):
+            if seq > last_seen:
+                try:
+                    self.sendMessage(frame.encode())
+                except Exception:
+                    pass
+
+    def _stash_for_resume(self):
+        token = getattr(self, "resume_token", None)
+        buf = getattr(self, "out_buffer", None)
+        if token and buf:
+            _RESUME_STASH[token] = {
+                "frames": list(buf),
+                "last_seq": getattr(self, "out_seq", 0),
+                "deadline": time.time() + RESUME_GRACE_SECONDS,
+            }
+            _prune_resume_stash()
+
     def onClose(self, wasClean, code=None, reason=None):
         """
         This is executed when the connection is lost for whatever
@@ -351,6 +402,7 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             reason (str or None): Close reason as sent by the WebSocket peer.
 
         """
+        self._stash_for_resume()
         if code == CLOSE_NORMAL or code == GOING_AWAY:
             self.disconnect(reason)
         else:
@@ -369,6 +421,16 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
                              UTF-8 encoded text.
 
         """
+        # Peek for a resume request in the client's hello (before decoding), so
+        # we can replay missed frames at the portal without involving the server.
+        if not isBinary:
+            try:
+                raw = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                raw = None
+            if isinstance(raw, dict) and raw.get("t") == "hello":
+                self._handle_resume(raw.get("resume") or {})
+
         if self.wire_format:
             kwargs = self.wire_format.decode_incoming(
                 payload, isBinary, protocol_flags=self.protocol_flags
@@ -384,6 +446,23 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             except (json.JSONDecodeError, UnicodeDecodeError, IndexError):
                 pass
 
+    def _stamp_and_buffer(self, line):
+        """Stamp a monotonic ``s`` seq onto a JSON frame and buffer it for resume."""
+        try:
+            obj = json.loads(line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return line
+        if not isinstance(obj, dict):
+            return line
+        self.out_seq = getattr(self, "out_seq", 0) + 1
+        obj["s"] = self.out_seq
+        line = json.dumps(obj)
+        buf = getattr(self, "out_buffer", None)
+        if buf is None:
+            buf = self.out_buffer = deque(maxlen=RESUME_BUFFER_MAX)
+        buf.append((self.out_seq, line))
+        return line
+
     def sendLine(self, line):
         """
         Send data to client.
@@ -392,6 +471,7 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             line (str): Text to send.
 
         """
+        line = self._stamp_and_buffer(line)
         try:
             return self.sendMessage(line.encode())
         except Disconnected:
