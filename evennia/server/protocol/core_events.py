@@ -1,0 +1,20 @@
+"""Engine-shipped OOB events: session lifecycle, media, and the UI primitive.
+
+Games register their own events in a module listed in
+settings.PROTOCOL_EVENT_MODULES. This is the engine's baseline, always loaded.
+"""
+
+from evennia.server.protocol import register_event
+
+# -- session --------------------------------------------------------------
+register_event("logout", carrier="args", fields={"_": "str"}, doc="args[0] = reason (e.g. 'quit').")
+
+# -- media ----------------------------------------------------------------
+register_event("image", carrier="args", fields={"_": "str"}, doc="args[0] = image URL.")
+register_event("audio", carrier="args", fields={"_": "str"}, doc="args[0] = audio URL.")
+register_event("video", carrier="args", fields={"_": "str"}, doc="args[0] = video URL.")
+register_event("youtube", carrier="args", fields={"_": "str"}, doc="args[0] = YouTube URL.")
+
+# -- server-driven UI primitive (evennia.server.ui) -----------------------
+register_event("ui_component", carrier="args", fields={"_": "dict"}, doc="A UI component spec (see evennia.server.ui).")
+register_event("ui_remove", carrier="args", fields={"id": "str"})

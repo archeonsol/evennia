@@ -532,13 +532,30 @@ def _get_twistd_cmdline(pprofiler, sprofiler):
     Compile the command line for starting a Twisted application using the 'twistd' executable.
 
     """
+    # Optional reactor override (settings.TWISTED_REACTOR, e.g. "asyncio").
+    # twistd installs the reactor before loading the app file, so it must go on
+    # the twistd command line. Skipped on Windows: Twisted's asyncio reactor
+    # can't drive Windows' ProactorEventLoop, so dev on Windows keeps the default
+    # reactor. On Linux (prod) the asyncio reactor uses the normal epoll loop.
+    reactor_opts = []
+    try:
+        from django.conf import settings as _settings
+
+        reactor_name = getattr(_settings, "TWISTED_REACTOR", "")
+        if reactor_name and os.name != "nt":
+            reactor_opts = [f"--reactor={reactor_name}"]
+    except Exception:
+        reactor_opts = []
+
     portal_cmd = [
         TWISTED_BINARY,
+        *reactor_opts,
         f"--python={PORTAL_PY_FILE}",
         "--logger=evennia.utils.logger.GetPortalLogObserver",
     ]
     server_cmd = [
         TWISTED_BINARY,
+        *reactor_opts,
         f"--python={SERVER_PY_FILE}",
         "--logger=evennia.utils.logger.GetServerLogObserver",
     ]

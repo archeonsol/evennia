@@ -137,6 +137,9 @@ WEBSOCKET_CLIENT_URL = None
 # See https://mudstandards.org/websocket/ for details on the standard
 # subprotocols.
 WEBSOCKET_SUBPROTOCOLS = [
+    # Azaban: our own shell protocol (structured RenderNode delivery). First so
+    # the Svelte shell negotiates it when offered; other clients fall through.
+    "azaban.v1",
     "json.mudstandards.org",
     "gmcp.mudstandards.org",
     "terminal.mudstandards.org",
@@ -153,6 +156,11 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
+# Twisted reactor for the Portal/Server twistd processes. "asyncio" runs Twisted
+# on an asyncio event loop, so engine code can use async/await and asyncio
+# libraries while all existing Twisted APIs (callLater, deferToThread, delay,
+# defer.background) keep working unchanged. Set to "" to use Twisted's default.
+TWISTED_REACTOR = "asyncio"
 
 
 # Path to the lib directory containing the bulk of the codebase's code.
@@ -536,6 +544,9 @@ LOCK_FUNC_MODULES = ("evennia.locks.lockfuncs", "server.conf.lockfuncs")
 # will be loaded in order, meaning functions in later modules may overload
 # previous ones if having the same name.
 INPUT_FUNC_MODULES = ["evennia.server.inputfuncs", "server.conf.inputfuncs"]
+# Modules that register OOB events into the protocol catalog (see
+# evennia.server.protocol). The engine's core events plus any game modules.
+PROTOCOL_EVENT_MODULES = ["evennia.server.protocol.core_events"]
 # Modules that contain prototypes for use with the spawner mechanism.
 PROTOTYPE_MODULES = ["world.prototypes"]
 # Modules containining Prototype functions able to be embedded in prototype
@@ -1109,6 +1120,11 @@ DISCORD_BOT_INTENTS = 105985
 DISCORD_BOT_TOKEN = None
 # The account typeclass which the Evennia-side Discord relay bot will use.
 DISCORD_BOT_CLASS = "evennia.accounts.bots.DiscordBot"
+# Unified ticket system: open a Discord thread per ticket and mirror the
+# conversation. Requires DISCORD_TICKET_PARENT_CHANNEL_ID (the parent channel
+# threads are created under) and the send_create_thread portal outputfunc.
+DISCORD_TICKET_THREADS = False
+DISCORD_TICKET_PARENT_CHANNEL_ID = None
 
 ######################################################################
 # Django web features
