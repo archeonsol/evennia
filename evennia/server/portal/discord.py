@@ -608,6 +608,62 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
 
         d.addCallback(cbResponse)
 
+    def send_thread_archive(self, thread_id, archived, **kwargs):
+        """
+        Archive or unarchive a thread via REST PATCH.
+
+        Use with session.msg(thread_archive=(thread_id, True/False)).
+        """
+        self._post_json(
+            f"channels/{thread_id}",
+            {"archived": bool(archived)},
+            type="PATCH",
+        )
+
+    def send_dm(self, user_id, text, **kwargs):
+        """
+        Send a direct message to a user: open (or reuse) their DM channel, then
+        post. Use with session.msg(dm=(user_id, text)).
+        """
+        url = f"{DISCORD_API_BASE_URL}/users/@me/channels"
+        body = FileBodyProducer(
+            BytesIO(json.dumps({"recipient_id": str(user_id)}).encode("utf-8"))
+        )
+        d = _AGENT.request(
+            b"POST",
+            url.encode("utf-8"),
+            Headers(
+                {
+                    "User-Agent": [DISCORD_USER_AGENT],
+                    "Authorization": [f"Bot {DISCORD_BOT_TOKEN}"],
+                    "Content-Type": ["application/json"],
+                }
+            ),
+            body,
+        )
+
+        def cbResponse(response):
+            if response.code in (200, 201):
+                bd = readBody(response)
+
+                def _post_msg(raw):
+                    try:
+                        channel_id = json.loads(raw).get("id")
+                    except Exception:
+                        return
+                    if channel_id:
+                        self._post_json(
+                            f"channels/{channel_id}/messages",
+                            {"content": str(text)[:2000]},
+                        )
+
+                bd.addCallback(_post_msg)
+                return bd
+            elif should_retry(response.code):
+                delay(300, self.send_dm, user_id, text, **kwargs)
+
+        d.addCallback(cbResponse)
+
     def send_default(self, *args, **kwargs):
         """
         Ignore other outputfuncs
