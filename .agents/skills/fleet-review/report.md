@@ -128,4 +128,4 @@ This file has no outer code fence so its sample `` ``` `` evidence fences and JS
 - If a section has no content, omit its header entirely rather than showing "None" (except for Refuted findings, which always gets a line for audit).
 - Detect `{language}` for evidence code blocks from file extension: `.py` → `python`, `.js` / `.jsx` → `javascript`, `.ts` / `.tsx` → `typescript`, `.go` → `go`, `.md` → `markdown`, else blank.
 - Keep `top_themes_paragraph` to 2–4 sentences. Concrete patterns, not platitudes. Hint: dominant categories, most-affected directories, lenses that overlapped on the same findings.
-- JSON sidecar (`report.json`) mirrors the full run: `{mode, run_id, timestamps, lenses_run[], personas_assigned[], confirmed_findings[], unclear_findings[], refuted_findings[], nearby_observations[], lens_coverage{}}`.
+- JSON sidecar (`report.json`) mirrors the full run: `{mode, run_id, timestamps, lenses_run[] (the generated lens plan: name, description, persona, rationale), confirmed_findings[], unclear_findings[], refuted_findings[], nearby_observations[], lens_coverage{}}`.

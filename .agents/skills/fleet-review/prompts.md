@@ -4,6 +4,73 @@ Templates use `{placeholder}` for substitution. Fill all placeholders before dis
 
 ---
 
+## lens_planner
+
+Runs once per review, after scope assembly (stage 2a). Generates the lens set for the
+whole run; chunked reviews reuse the same set for every chunk. `{lens_rules}` is the
+full text of `lenses.md`. `{fleet_band}` is the sizing band the orchestrator computed
+(e.g. "4–6 lenses"). `{pinned_lenses}` is the user's `--lenses` list, or "none".
+
+```
+You are the lens planner for a fleet code review. Design the set of review lenses
+this specific change deserves. Do not review the code yourself.
+
+## Lens design rules
+
+{lens_rules}
+
+## Inputs
+
+**Fleet band (from the orchestrator's sizing):** {fleet_band}
+
+**Pinned lenses (user-specified, must appear in your output):** {pinned_lenses}
+
+**Manifest**
+
+{manifest}
+
+**Change context**
+
+{diff_or_feature_summary}
+
+**Intent**
+
+{intent}
+
+## Method
+
+You have Read, Grep, and Glob available. Read manifest files or diff hunks as needed
+to understand what the change touches — languages, frameworks, trust boundaries,
+domain. Then derive the lens set per the rules above: enumerate the distinct ways
+this change could be wrong, collapse into failure classes, emit one lens per class.
+Include the mandatory correctness lens. Stay within the fleet band unless the rules'
+justified-overflow clause applies.
+
+If pinned lenses were given, include each verbatim by name and write its description,
+persona, and rationale yourself; fill any remaining band budget with generated lenses
+only if coverage demands it.
+
+## Output
+
+Return JSON:
+
+{
+  "lenses": [
+    {
+      "name": "short_snake_case",
+      "description": "2-3 sentences: the failure class this lens hunts and what is in scope",
+      "persona": "one-line stance, e.g. 'ops engineer paged at 3am'",
+      "rationale": "which manifest files or hunks make this lens worth an agent"
+    }
+  ],
+  "coverage_notes": "failure classes you considered and deliberately did NOT staff, and why"
+}
+
+Return only JSON.
+```
+
+---
+
 ## lens_agent
 
 ```
@@ -39,7 +106,7 @@ The files listed in the manifest below are authoritative for this review. Use th
 - Every finding must be grounded with an exact evidence_quote copied verbatim from the source at the cited lines.
 - State your assumptions in assumes[]. List anything that, if wrong, would make your finding a false positive.
 - Calibrate confidence honestly. High = you traced the code path and are sure. Medium = likely but not verified. Low = hunch.
-- No stylistic nits unless your lens is readability, and even then only if the code actively misleads.
+- No stylistic nits unless your lens explicitly covers readability, and even then only if the code actively misleads.
 - If your lens finds nothing, return an empty findings array. Do not invent.
 - Do not report on files outside the manifest.
 
@@ -290,7 +357,7 @@ Used during structural clustering in stage 4. Findings whose categories share a 
 - **error_family**: `swallowed_exception`, `silent_truncation`, `missing_error_path`, `broad_except`
 - **contract_family**: `signature_change`, `compat_break`, `schema_drift`, `missing_migration`
 - **logic_family**: `off_by_one`, `wrong_operator`, `wrong_constant`, `wrong_boolean`, `mis_ordered_args`
-- **persistence_family**: `save_load_mismatch`, `migration_risk`, `attribute_handler_misuse`, `serialization_edge`
-- **balance_family**: `exploit_surface`, `stat_math_error`, `economy_imbalance`, `progression_break`
+- **persistence_family**: `save_load_mismatch`, `migration_risk`, `serialization_edge`
 
-Categories not listed above cluster only with their exact selves.
+Categories not listed above (including any a generated lens invents) cluster only
+with their exact selves.

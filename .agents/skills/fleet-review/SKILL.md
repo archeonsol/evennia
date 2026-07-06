@@ -1,6 +1,6 @@
 ---
 name: fleet-review
-description: Multi-agent code review fleet. Spawns diverse lens-specialized sub-agents, dedupes findings, validates adversarially, produces a grounded report. Two modes: branch (current vs main) and feature (directed at a feature or module).
+description: Multi-agent code review fleet. Generates review lenses tailored to the change, sizes the fleet to the scope, spawns lens-specialized sub-agents, dedupes findings, validates adversarially, produces a grounded report. Two modes: branch (current vs main) and feature (directed at a feature or module).
 ---
 
 # /fleet-review — Multi-Agent Code Review
@@ -10,12 +10,12 @@ Routes by first argument:
 - `branch [base]` → [Branch review](#branch-mode) (default if no args; base defaults to `main`)
 - `feature <signal>` → [Feature review](#feature-mode) (signal: file list, glob, symbol name, directory, or prose description)
 
-Optional flag: `--lenses a,b,c` to restrict the lens set (default: all lenses from `lenses.md`).
+Optional flag: `--lenses a,b,c` to pin lenses. Pinned lenses always run; the lens planner writes their descriptions and fills any remaining fleet budget only if coverage demands it.
 
 Stages 3–6 are identical across modes. Only scope assembly (stage 1) and prompt framing (stage 2) differ.
 
 **Companion files** (read when referenced):
-- `lenses.md` — lens catalog and persona pools
+- `lenses.md` — lens design rules and fleet sizing bands
 - `prompts.md` — sub-agent prompt templates and finding schema
 - `report.md` — final report template
 
@@ -84,19 +84,40 @@ The user's signal may be file list, glob, symbol name, directory, or prose descr
 
 ---
 
-## Stage 2 — Fan out
+## Stage 2 — Plan the fleet, then fan out
+
+### 2a — Fleet plan
+
+The lens set is generated per-review from the scope, not picked from a catalog.
+
+1. Compute the fleet band from the sizing table in `lenses.md` (reviewable size ×
+   mode, with the risk bump/drop adjustments).
+2. Spawn one `lens_planner` agent (template in `prompts.md`), passing the full text
+   of `lenses.md` as `{lens_rules}`, the computed band as `{fleet_band}`, any
+   `--lenses` values as `{pinned_lenses}`, plus the manifest, change context, and
+   intent. It returns the lens set: `{name, description, persona, rationale}` per
+   lens, plus `coverage_notes`.
+3. Sanity-check the plan: the mandatory `correctness` lens is present, every pinned
+   lens is present, the count is within band (or the overflow is justified), and no
+   two lenses share a primary concern. On violation, re-prompt the planner once with
+   the specific problem; on second failure, fall back to a minimal fleet
+   (`correctness` plus any pinned lenses) and note the fallback in the report.
+4. Write the plan to `scope/lenses.json` and show the user a one-line-per-lens
+   summary (name, persona, rationale) before fanning out. This is informational, not
+   a confirmation gate.
+5. Chunked reviews (stage 1 chunking rule): the planner runs once on the full
+   manifest and the same lens set is used for every chunk, so dedupe at stage 4 can
+   join findings across chunks.
+
+### 2b — Fan out
 
 Spawn lens agents in parallel using the Agent tool. Each agent is independent. No shared scratchpad.
 
-1. Read `lenses.md` for the lens catalog. Select lenses:
-   - Default: all standard lenses plus all newmoo-specific lenses
-   - If the user passed `--lenses a,b,c`, use only those
-2. Assign personas. Alternate round-robin between the reviewer-persona pool and the player-archetype pool in `lenses.md`. Each lens agent gets one persona.
-3. For each (lens, persona) pair, spawn one Agent with:
+1. For each lens in the plan, spawn one Agent with:
    - `subagent_type`: `general-purpose`
    - `description`: `Fleet review — <lens>`
-   - `prompt`: the `lens_agent` template from `prompts.md` with `{lens}`, `{lens_description}`, `{persona}`, `{mode}`, `{manifest}`, `{diff_or_feature_summary}`, `{intent}` substituted
-4. Send all spawn tool calls in a **single message** so they run in parallel.
+   - `prompt`: the `lens_agent` template from `prompts.md` with `{lens}`, `{lens_description}`, `{persona}` (all from the plan), `{mode}`, `{manifest}`, `{diff_or_feature_summary}`, `{intent}` substituted
+2. Send all spawn tool calls in a **single message** so they run in parallel.
 
 **Branch mode:** include the `nearby_observations_block` from `prompts.md` in each lens agent prompt. Findings concern the diff only; broader patterns go in `nearby_observations`. `{diff_or_feature_summary}` = embedded diff summary (not the full patch — just changed symbols + hunk count).
 
@@ -173,6 +194,6 @@ Group by file within each severity band.
 
 Write outputs to the run directory:
 - `.fleet-review/run-<id>/report.md` — the human-readable report
-- `.fleet-review/run-<id>/report.json` — sidecar: `{mode, run_id, timestamps, lenses_run[], personas_assigned[], confirmed_findings[], unclear_findings[], refuted_findings[], nearby_observations[], lens_coverage{}}`
+- `.fleet-review/run-<id>/report.json` — sidecar: `{mode, run_id, timestamps, lenses_run[] (the plan objects from scope/lenses.json), confirmed_findings[], unclear_findings[], refuted_findings[], nearby_observations[], lens_coverage{}}`
 
 Tell the user the final report path when done.

@@ -1,80 +1,88 @@
-# Lens Catalog
+# Lens Design Guide
 
-Each lens is a review perspective. Lens agents are instructed to stay strictly within their lens; out-of-lens findings are dropped downstream.
+Lenses are generated per-review by the `lens_planner` agent (template in `prompts.md`),
+not picked from a catalog. This file defines what a good lens is, how many to run, and
+the rules the planner must follow. The orchestrator passes this file's rules to the
+planner via its prompt template.
 
-Default fleet runs all standard lenses plus all newmoo-specific lenses unless restricted by the caller.
+## What a lens is
 
-## Standard lenses
+A lens is a single review perspective defined by the failure class it hunts. A lens
+is well-formed when:
 
-### security
-Authentication bypass, authorization gaps, injection (SQL, command, template), secret leakage, unsafe deserialization, SSRF, crypto misuse, unsafe defaults.
+- **It names a concrete failure class.** "Race conditions in the new cache layer" is
+  a lens; "code quality" is not.
+- **It is falsifiable per-finding.** A finding under the lens can be confirmed or
+  refuted by reading code. "This feels complex" cannot; "this function mutates shared
+  state without a lock" can.
+- **It is scoped to what the change actually touches.** A security lens on a
+  docs-only diff is padding. Every lens must cite, in its `rationale`, which manifest
+  files or diff hunks make it worth running.
+- **Its primary concern does not duplicate another lens in the set.** Overlap at the
+  edges is fine (consensus across lenses is signal, and dedupe handles it); two
+  lenses with the same primary concern is a wasted agent.
 
-### concurrency
-Race conditions, ordering hazards, non-atomic reads/writes, missing locks, deadlock potential, unsafe shared state.
+## Generating the lens set
 
-### error_handling
-Swallowed exceptions, missing failure paths, incorrect retry/backoff, silent truncation, unhandled edge cases, broad `except` clauses that hide real issues.
+The planner derives lenses from the scope artifacts: what languages and frameworks
+appear, what the change does (from `intent.md`), what could plausibly break. The
+process is subtractive, not additive: start from "every way this change could be
+wrong," group into distinct failure classes, and emit one lens per class that
+survives the padding test.
 
-### api_contract
-Backward compatibility breaks, changed signatures without migration, contract violations, versioning, schema drift between producer and consumer.
+**Mandatory baseline:** every fleet includes a `correctness` lens (logic bugs: wrong
+operator, off-by-one, inverted boolean, mis-ordered args, wrong constant). It is the
+catch-all for bugs no specialized lens owns.
 
-### performance
-Quadratic or worse where avoidable, N+1 queries, unbounded memory growth, hot-path allocations, missing indexes, redundant work.
+**Seed dimensions** (inspiration for the planner, not a menu — a generated lens
+should be more specific than these, and dimensions with no purchase on the change
+should produce no lens):
 
-### data_integrity
-Schema/migration risks, referential integrity, transactional boundaries, idempotency, data loss risks, save/load correctness.
+security, concurrency, error handling, API/contract compatibility, performance,
+data integrity and persistence, test adequacy, readability and misleading names,
+dependency and supply-chain risk, resource lifecycle (handles, connections,
+memory), input validation at trust boundaries, domain invariants specific to
+this codebase.
 
-### test_coverage
-Uncovered branches, missing edge cases, tests that pass without exercising the change, over-mocked integration seams, flaky patterns.
+**Domain lenses:** when the repo has a clear domain (a game, a trading system, a
+compiler), the planner should consider one or two lenses for domain-specific
+invariants it can infer from the code and docs (e.g. "economy exploit surfaces,"
+"parser precedence regressions"). These earn their slot the same way: only if the
+change touches that surface.
 
-### readability
-Names that mislead, long functions, dead code, duplication, confusing control flow. NOT stylistic nits (formatting, quote style).
+## Personas
 
-### dependencies
-New deps, version pins that conflict, supply chain smells, unused deps, license concerns.
+Each lens carries a short persona: a stance that shapes tone and emphasis within
+the lens. The planner generates it alongside the lens. Good personas are concrete
+occupants of a viewpoint ("ops engineer paged at 3am," "attacker with a copy of the
+source," "new hire reading this file for the first time," "the user whose data this
+migration moves"). Persona never expands the lens's scope; it only colors what the
+lens emphasizes.
 
-### correctness
-Logic bugs not caught by another lens: off-by-one, wrong operator, wrong constant, incorrect boolean, mis-ordered args.
+## Fleet sizing
 
-## newmoo-specific lenses
+Fleet size scales with reviewable size and risk, within bands. Reviewable size =
+changed lines in the manifest (branch mode) or total LOC of core + integration
+files (feature mode).
 
-### persistence
-Django save/load correctness, migration safety, Script state, AttributeHandler usage, serialization edge cases.
+| Mode | Reviewable size | Lenses |
+|------|-----------------|--------|
+| branch | < 150 lines | 2–3 |
+| branch | 150–1000 lines | 4–6 |
+| branch | 1000–2000 lines | 6–8 |
+| branch | > 2000 lines (chunked) | 4–6, same lens set for every chunk |
+| feature | < 400 LOC | 3–4 |
+| feature | 400–800 LOC | 5–7 |
+| feature | > 800 LOC (chunked) | 4–6, same lens set for every chunk |
 
-### mud_conventions
-Evennia idioms, command class structure, typeclass hierarchy, session handling, locks/permissions. Does the code fit the MUD's conventions?
+Adjustments:
 
-### game_balance
-Stat math, economy, progression curves, exploit surfaces (free XP/credits/items), PvP/PvE fairness. Applies when the feature touches gameplay systems.
-
-## Persona rotation
-
-Personas add variance without changing coverage. Each lens agent gets one persona. Alternate round-robin between the two pools below (reviewer personas for half the fleet, player archetypes for the other half). The combined pool size intentionally does not match the lens count; some personas repeat across a run, which is fine.
-
-A lens is the spine; persona shapes tone and what to emphasize within that lens only. Persona never expands the lens's scope.
-
-### Reviewer personas
-
-Technical perspectives. Bring discipline and skepticism to engineering concerns.
-
-- **Paranoid pentester** — attacker mindset, assumes input is malicious
-- **Grumpy staff engineer** — low tolerance for complexity, favors deletion over addition
-- **New hire, week two** — surfaces what confused them; real readability signal
-- **Ops on-call at 3am** — error handling and observability focus
-- **Migration-scarred DBA** — data integrity with extreme caution
-- **Speed-obsessed gamedev** — performance mindset
-- **Rules-lawyer game designer** — hunts exploits and unintended incentives
-- **Documentation-first architect** — checks contracts, naming, discoverability
-
-### Player archetype personas
-
-Player perspectives. Catch bugs and QoL issues that only matter to certain playstyles, and surface how a change reads from the seat of that archetype.
-
-- **Decker** — hacker archetype. Cares about matrix connectivity, ICE interaction, tool chains during runs. Notices breakage in pacing of hacking actions, information flow, and connection state.
-- **Rigger** — drone / vehicle operator. Cares about remote control loops, signal handling, latency, multi-body awareness. Notices anything that breaks operating at arm's length.
-- **Medic** — support archetype. Cares about healing, status effects, condition tracking, combat triage. Notices failures in applying effects, damage bookkeeping, recovery loops.
-- **Scavenger** — loot / economy archetype. Cares about drops, stacking, storage, trade, progression. Notices exploitable loops, lost items, economy drift.
-- **Staff** — admin / GM. Cares about state inspection, moderation, incident response, reversibility. Notices missing visibility, admin UX gaps, anything that makes the game harder to run.
-- **New player** — first 30 minutes. Cares about onboarding, chargen, discoverability, command legibility. Notices jargon, silent failures, and anything that would make them bounce.
-- **Face** — social archetype. Cares about NPC dialogue, reputation, IC comms, social media mechanics. Notices broken conversations, reputation desync, missing social affordances.
-- **Street samurai** — combat archetype. Cares about combat responsiveness, cyberware interactions, death and revival flow. Notices combat-phase bugs and frustrating combat UX.
+- **Risk bump:** move up one band when the change touches authentication, crypto,
+  schema migrations, concurrency primitives, or a public API surface.
+- **Risk drop:** move down one band for changes that are docs-only, tests-only, or
+  dominated by mechanical edits.
+- **Never pad.** The band is a budget, not a quota. If the change only plausibly
+  fails in three ways, run three lenses and say so.
+- **Justified overflow:** the planner may exceed the band by at most two lenses when
+  the change genuinely spans more distinct risk surfaces than the band allows, and
+  must say which surfaces forced it.
