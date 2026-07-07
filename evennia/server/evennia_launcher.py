@@ -571,13 +571,19 @@ def _launcher_uses_ipc():
     return True
 
 
-def _ensure_ipc_connection():
+def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import LauncherSession, connect_session
+    from evennia.server.launcher_ipc import (
+        COLD_START_DEADLINE,
+        LauncherSession,
+        connect_session,
+    )
 
     if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
         return AMP_CONNECTION
-    AMP_CONNECTION = connect_session(AMP_HOST, AMP_PORT)
+    if connect_timeout is None:
+        connect_timeout = COLD_START_DEADLINE
+    AMP_CONNECTION = connect_session(AMP_HOST, AMP_PORT, connect_timeout=connect_timeout)
     return AMP_CONNECTION
 
 
@@ -590,12 +596,15 @@ def _ensure_ipc_connection():
 
 def _send_instruction_ipc(operation, arguments, callback=None, errback=None):
     try:
-        session = _ensure_ipc_connection()
         if operation == PSTATUS:
+            from evennia.server.launcher_ipc import PSTATUS_PROBE_TIMEOUT
+
+            session = _ensure_ipc_connection(connect_timeout=PSTATUS_PROBE_TIMEOUT)
             status = session.query_status()
             if callback:
                 callback({"status": pack_status(status)})
             return
+        session = _ensure_ipc_connection()
         session.send_command_fire(operation, arguments)
         if callback:
             callback({})
@@ -829,7 +838,7 @@ def wait_for_status(
             callback,
             errback,
             rate=rate,
-            retries=retries,
+            retries=None,
         )
 
     def _schedule_retry():

@@ -25,6 +25,34 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.140 — Cold-start: fast PSTATUS probe, IPC status_push
+
+### Launcher cold boot
+
+- **`PSTATUS_PROBE_TIMEOUT` (5s):** Initial ``PSTATUS`` checks no longer block for the
+  full ``COLD_START_DEADLINE`` (120s) when the portal is not yet listening. Only
+  cold-start ``wait_for_status`` waits the full budget.
+- **`query_status` / `send_command_fire`:** Skip unsolicited ``status_push`` frames
+  that the portal may send on connect before the query ack — fixes spurious
+  ``unexpected launcher IPC response`` failures during status polling.
+- **IPC wait budget:** ``_wait_for_status_ipc`` passes ``retries=None`` so
+  ``wait_until_state`` uses ``COLD_START_DEADLINE`` instead of the legacy
+  30s ``retries * rate`` cap.
+
+### Server reload shutdown
+
+- **`maybe_await` portal sync:** ``all_sessions_portal_sync()`` is awaited via
+  ``clock.maybe_await`` on reload/reset so redis-bus ``IMMEDIATE_RESULT`` does not
+  crash the shutdown coroutine.
+
+### Tests
+
+- ``test_query_status_skips_status_push`` in ``test_launcher_ipc.py``.
+- ``test_shutdown_reload_with_immediate_result_portal_sync`` in
+  ``test_server_shutdown.py``.
+
+---
+
 ## 6.0.0+underspire.139 — Cold-start: portal live when IPC binds
 
 ### Portal status / launcher cold boot

@@ -573,7 +573,7 @@ class EvenniaServerService(MultiService):
                     await clock.maybe_await(s.at_server_reload)
                 except Exception:
                     logger.log_trace(f"Error in at_server_reload on script {s}")
-            await evennia.SESSION_HANDLER.all_sessions_portal_sync()
+            await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
             self.at_server_reload_stop()
             # only save monitor state on reload, not on shutdown/reset
             from evennia.scripts.monitorhandler import MONITOR_HANDLER
@@ -592,7 +592,7 @@ class EvenniaServerService(MultiService):
                     evennia.AccountDB.get_all_cached_instances(), "at_server_shutdown"
                 )
                 if self.portal_bus:
-                    await evennia.SESSION_HANDLER.all_sessions_portal_sync()
+                    await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
             else:  # shutdown
                 accounts = list(evennia.AccountDB.get_all_cached_instances())
                 for p in accounts:

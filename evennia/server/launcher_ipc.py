@@ -129,6 +129,8 @@ class _LauncherIPCProtocol(asyncio.Protocol):
 
 
 COLD_START_DEADLINE = 120.0
+# Quick probe when checking if Portal IPC is already listening (not cold-start wait).
+PSTATUS_PROBE_TIMEOUT = 5.0
 
 
 def connect_session(
@@ -197,10 +199,15 @@ class LauncherSession:
 
     def query_status(self) -> list:
         self._send({"type": "status"})
-        resp = self._read_frame()
-        if resp.get("type") != "status":
+        while True:
+            resp = self._read_frame()
+            ftype = resp.get("type")
+            if ftype == "status":
+                return resp["status"]
+            if ftype == "status_push":
+                # Portal may push status on connect before answering the query.
+                continue
             raise RuntimeError(f"unexpected launcher IPC response: {resp!r}")
-        return resp["status"]
 
     def send_command_fire(self, operation: str, arguments: Any):
         """Send a launcher command and read the immediate ack (not the status push)."""
@@ -214,8 +221,12 @@ class LauncherSession:
                 "arguments": base64.b64encode(args_wire).decode("ascii") if args_wire else "",
             }
         )
-        ack = self._read_frame()
-        if ack.get("type") != "ack":
+        while True:
+            ack = self._read_frame()
+            if ack.get("type") == "ack":
+                return
+            if ack.get("type") == "status_push":
+                continue
             raise RuntimeError(f"unexpected launcher IPC ack: {ack!r}")
 
     def read_push(self, timeout: float | None = None) -> list | None:

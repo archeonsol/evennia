@@ -18,11 +18,40 @@ class ServerShutdownDelayTest(SimpleTestCase):
 
     @patch("evennia.scripts.monitorhandler.MONITOR_HANDLER")
     @patch("evennia.server.service.clock")
-    def test_shutdown_schedules_immediate_stop_loop(self, mock_clock, _monitor):
+    def test_shutdown_reload_with_immediate_result_portal_sync(self, mock_clock, _monitor):
+        from evennia.server.service_registry import IMMEDIATE_RESULT
+        from evennia.utils import clock as real_clock
+
         service = self._service()
         service.stall_watchdog = None
         service.system_driver = None
         service.maintenance_task = None
+        mock_clock.maybe_await = real_clock.maybe_await
+
+        with patch("evennia.server.service.evennia") as mock_evennia:
+            mock_evennia.ObjectDB.get_all_cached_instances.return_value = []
+            mock_evennia.AccountDB.get_all_cached_instances.return_value = []
+            mock_evennia.ScriptDB.get_all_cached_instances.return_value = []
+            mock_evennia.ServerConfig.objects.conf = MagicMock()
+            mock_evennia.gametime.runtime.return_value = 0
+            mock_evennia.SESSION_HANDLER.all_sessions_portal_sync.return_value = (
+                IMMEDIATE_RESULT
+            )
+
+            asyncio.run(service.shutdown(mode="reload"))
+
+        mock_clock.call_later.assert_called_once_with(0, mock_clock.stop_loop)
+
+    @patch("evennia.scripts.monitorhandler.MONITOR_HANDLER")
+    @patch("evennia.server.service.clock")
+    def test_shutdown_reload_with_async_portal_sync(self, mock_clock, _monitor):
+        from evennia.utils import clock as real_clock
+
+        service = self._service()
+        service.stall_watchdog = None
+        service.system_driver = None
+        service.maintenance_task = None
+        mock_clock.maybe_await = real_clock.maybe_await
 
         with patch("evennia.server.service.evennia") as mock_evennia:
             mock_evennia.ObjectDB.get_all_cached_instances.return_value = []

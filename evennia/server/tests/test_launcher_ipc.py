@@ -14,6 +14,18 @@ class LauncherSessionWaitTest(SimpleTestCase):
         self.assertTrue(session._state_matches(status, portal_running=True, server_running=False))
         self.assertFalse(session._state_matches(status, portal_running=True, server_running=True))
 
+    @patch.object(LauncherSession, "_send")
+    @patch.object(LauncherSession, "_read_frame")
+    def test_query_status_skips_status_push(self, mock_read, _mock_send):
+        mock_read.side_effect = [
+            {"type": "status_push", "status": [True, False, 1, None, {}, {}]},
+            {"type": "status", "status": [True, False, 1, None, {}, {}]},
+        ]
+        session = LauncherSession("127.0.0.1", 4006)
+        result = session.query_status()
+        self.assertEqual(result, [True, False, 1, None, {}, {}])
+        self.assertEqual(mock_read.call_count, 2)
+
     @patch.object(LauncherSession, "read_push", return_value=None)
     @patch.object(LauncherSession, "query_status")
     def test_wait_for_state_returns_on_first_match(self, mock_query, _mock_push):
