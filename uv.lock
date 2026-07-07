@@ -730,7 +730,7 @@ wheels = [
 
 [[package]]
 name = "evennia"
-version = "6.0.0+underspire.141"
+version = "6.0.0+underspire.142"
 source = { editable = "." }
 dependencies = [
     { name = "anything" },

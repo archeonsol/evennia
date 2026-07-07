@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.142 — Orphan process reconciliation on stop
+
+### Launcher stop / orphan recovery
+
+- **`_force_kill_local_processes()`:** When graceful IPC shutdown fails or times out,
+  the launcher SIGTERM/SIGKILLs portal and server from pidfiles and waits for IPC
+  :4006 to go down. Prevents ``evennia stop`` / ``systemctl restart`` leaving live
+  orphans after ``No Evennia connection established``.
+- **`_local_pidfiles_alive()`:** Detects live portal/server processes from pidfiles
+  when IPC status query fails.
+- **`wait_for_status_reply(on_fail=...)`:** Optional fallback hook invoked on push
+  timeout or connection errors.
+- **`stop_evennia` / `reboot_evennia`:** Wire ``on_fail=_force_kill_local_processes``
+  on shutdown waits; IPC-unreachable stop path force-kills when pidfiles show live
+  processes.
+
 ## 6.0.0+underspire.141 — Launcher stop/restart reliability
 
 ### Launcher stop / start cycle

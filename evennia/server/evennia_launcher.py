@@ -571,6 +571,50 @@ def _launcher_uses_ipc():
     return True
 
 
+def _local_pidfiles_alive():
+    """Return True if portal or server pidfiles point at live processes."""
+    for pidfile in (SERVER_PIDFILE, PORTAL_PIDFILE):
+        if not pidfile or not os.path.isfile(pidfile):
+            continue
+        try:
+            with open(pidfile) as pidfh:
+                pid = int(pidfh.read().strip())
+            os.kill(pid, 0)
+            return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _force_kill_local_processes():
+    """SIGTERM/SIGKILL portal and server from pidfiles when IPC shutdown failed."""
+    from evennia.server.launcher_ipc import wait_for_portal_ipc_down
+
+    for pidfile in (SERVER_PIDFILE, PORTAL_PIDFILE):
+        if not pidfile or not os.path.isfile(pidfile):
+            continue
+        try:
+            with open(pidfile) as pidfh:
+                pid = int(pidfh.read().strip())
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, ValueError, OSError):
+            pass
+        else:
+            time.sleep(1)
+            try:
+                os.kill(pid, 0)
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            os.remove(pidfile)
+        except OSError:
+            pass
+
+    if AMP_HOST is not None and AMP_PORT is not None:
+        wait_for_portal_ipc_down(AMP_HOST, AMP_PORT)
+
+
 def _cleanup_stale_portal_process():
     """Ensure a previous Portal/IPC listener is gone before spawning a new one."""
     import signal
@@ -746,7 +790,7 @@ def query_status(callback=None):
     send_instruction(PSTATUS, None, _callback, _errback)
 
 
-def wait_for_status_reply(callback):
+def wait_for_status_reply(callback, on_fail=None):
     """
     Wait for an explicit STATUS signal to be sent back from Evennia.
     """
@@ -761,9 +805,13 @@ def wait_for_status_reply(callback):
                 if status is not None:
                     callback(status)
                 else:
+                    if on_fail:
+                        on_fail()
                     _reactor_stop()
             except Exception:
                 print("No Evennia connection established.")
+                if on_fail:
+                    on_fail()
                 _reactor_stop()
 
         threading.Thread(target=_reader, daemon=True).start()
@@ -773,6 +821,8 @@ def wait_for_status_reply(callback):
         AMP_CONNECTION.wait_for_status(callback)
     else:
         print("No Evennia connection established.")
+        if on_fail:
+            on_fail()
 
 
 def _wait_for_status_ipc(
@@ -1106,14 +1156,18 @@ def stop_evennia():
         if srun:
             print("Server stopping ...")
             send_instruction(SSHUTD, {})
-            wait_for_status_reply(_server_stopped)
+            wait_for_status_reply(_server_stopped, on_fail=_force_kill_local_processes)
         else:
             print("Server already stopped.\nStopping Portal ...")
             send_instruction(PSHUTD, {})
-            wait_for_status(False, None, _portal_stopped)
+            wait_for_status(False, None, _portal_stopped, lambda *_: _force_kill_local_processes())
 
     def _portal_not_running(fail):
-        print("Evennia not running.")
+        if _local_pidfiles_alive():
+            print("IPC unreachable; force-stopping local portal/server processes ...")
+            _force_kill_local_processes()
+        else:
+            print("Evennia not running.")
         _reactor_stop()
 
     send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
@@ -1145,11 +1199,11 @@ def reboot_evennia(pprofiler=False, sprofiler=False):
         if srun:
             print("Server stopping ...")
             send_instruction(SSHUTD, {})
-            wait_for_status_reply(_server_stopped)
+            wait_for_status_reply(_server_stopped, on_fail=_force_kill_local_processes)
         else:
             print("Server already stopped.\nStopping Portal ...")
             send_instruction(PSHUTD, {})
-            wait_for_status(False, None, _portal_stopped)
+            wait_for_status(False, None, _portal_stopped, lambda *_: _force_kill_local_processes())
 
     def _portal_not_running(fail):
         print("Evennia not running. Starting ...")
