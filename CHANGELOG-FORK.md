@@ -25,6 +25,33 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.141 — Launcher stop/restart reliability
+
+### Launcher stop / start cycle
+
+- **`SHUTDOWN_WAIT_DEADLINE` (60s):** Portal/server shutdown waits no longer use the
+  legacy 10s ``retries * rate`` cap.
+- **Portal stop detection:** ``wait_until_state`` treats launcher IPC connection
+  refused as portal-down when waiting for ``portal_running=False``; fallback
+  confirms IPC is unreachable before declaring stop complete.
+- **`wait_for_status_reply`:** Push wait timeout and errors now call
+  ``_reactor_stop()`` so ``evennia stop`` does not hang indefinitely.
+- **Restart after stop:** ``_cleanup_stale_portal_process()`` kills a stale
+  portal pidfile process and blocks until IPC :4006 is free before spawning a
+  new portal; fixes immediate ``evennia start`` after ``evennia stop`` timing
+  out while leaving an orphan portal.
+- **Cold-start fallback:** If the portal wait times out but a status probe shows
+  the portal is live, proceed with the start callback.
+- **`AMP_CONNECTION` reset** at the start of ``start_evennia`` / ``stop_evennia``.
+
+### Tests
+
+- ``test_wait_until_state_portal_down_on_ipc_refused``
+- ``test_wait_for_portal_ipc_down``
+- ``test_query_ipc_status``
+
+---
+
 ## 6.0.0+underspire.140 — Cold-start: fast PSTATUS probe, IPC status_push
 
 ### Launcher cold boot

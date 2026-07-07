@@ -571,6 +571,23 @@ def _launcher_uses_ipc():
     return True
 
 
+def _cleanup_stale_portal_process():
+    """Ensure a previous Portal/IPC listener is gone before spawning a new one."""
+    import signal
+
+    from evennia.server.launcher_ipc import wait_for_portal_ipc_down
+
+    if os.path.isfile(PORTAL_PIDFILE):
+        try:
+            with open(PORTAL_PIDFILE) as pidfile:
+                pid = int(pidfile.read().strip())
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, ValueError, OSError):
+            pass
+    wait_for_portal_ipc_down(AMP_HOST, AMP_PORT)
+
+
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
     from evennia.server.launcher_ipc import (
@@ -743,8 +760,11 @@ def wait_for_status_reply(callback):
                 status = session.wait_for_push(timeout=120.0)
                 if status is not None:
                     callback(status)
+                else:
+                    _reactor_stop()
             except Exception:
                 print("No Evennia connection established.")
+                _reactor_stop()
 
         threading.Thread(target=_reader, daemon=True).start()
         return
@@ -763,11 +783,18 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
-    from evennia.server.launcher_ipc import COLD_START_DEADLINE, wait_until_state
+    from evennia.server.launcher_ipc import (
+        COLD_START_DEADLINE,
+        SHUTDOWN_WAIT_DEADLINE,
+        LauncherSession,
+        portal_ipc_reachable,
+        query_ipc_status,
+        wait_until_state,
+    )
 
     if retries is None:
         if portal_running is False or server_running is False:
-            timeout = 20 * rate
+            timeout = SHUTDOWN_WAIT_DEADLINE
         else:
             timeout = COLD_START_DEADLINE
     else:
@@ -788,6 +815,23 @@ def _wait_for_status_ipc(
         if status is None:
             prun = portal_running if portal_running is not None else False
             srun = server_running if server_running is not None else False
+            if portal_running is False and not portal_ipc_reachable(AMP_HOST, AMP_PORT):
+                if callback:
+                    callback(False, srun)
+                else:
+                    _reactor_stop()
+                return
+            if portal_running is True:
+                probe = query_ipc_status(AMP_HOST, AMP_PORT)
+                probe_session = LauncherSession(AMP_HOST, AMP_PORT)
+                if probe and probe_session._state_matches(
+                    probe, portal_running, server_running
+                ):
+                    if callback:
+                        callback(*probe[:2])
+                    else:
+                        _reactor_stop()
+                    return
             if errback:
                 errback(prun, srun)
             else:
@@ -937,6 +981,9 @@ def start_evennia(pprofiler=False, sprofiler=False):
     will start the Server)
 
     """
+    global AMP_CONNECTION
+    AMP_CONNECTION = None
+
     portal_cmd, server_cmd = _get_twistd_cmdline(pprofiler, sprofiler)
 
     def _fail(fail):
@@ -971,6 +1018,7 @@ def start_evennia(pprofiler=False, sprofiler=False):
             send_instruction(SSTART, server_cmd)
 
     def _portal_not_running(fail):
+        _cleanup_stale_portal_process()
         print("Portal starting {}...".format("(under cProfile)" if pprofiler else ""))
         try:
             if _is_windows():
@@ -1041,6 +1089,8 @@ def stop_evennia():
     This instructs the Portal to stop the Server and then itself.
 
     """
+    global AMP_CONNECTION
+    AMP_CONNECTION = None
 
     def _portal_stopped(*args):
         print("... Portal stopped.\nEvennia shut down.")

@@ -129,6 +129,8 @@ class _LauncherIPCProtocol(asyncio.Protocol):
 
 
 COLD_START_DEADLINE = 120.0
+# Shutdown waits: portal teardown can outlast a short status poll.
+SHUTDOWN_WAIT_DEADLINE = 60.0
 # Quick probe when checking if Portal IPC is already listening (not cold-start wait).
 PSTATUS_PROBE_TIMEOUT = 5.0
 
@@ -291,6 +293,47 @@ class LauncherSession:
         return None
 
 
+def portal_ipc_reachable(host: str, port: int, *, timeout: float = 2.0) -> bool:
+    """Return True when launcher IPC accepts a TCP connection."""
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+    except (OSError, ConnectionError, TimeoutError):
+        return False
+    try:
+        sock.close()
+    except OSError:
+        pass
+    return True
+
+
+def wait_for_portal_ipc_down(
+    host: str,
+    port: int,
+    *,
+    deadline: float = 15.0,
+    poll_interval: float = 0.2,
+) -> bool:
+    """Block until launcher IPC is not accepting connections."""
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        if not portal_ipc_reachable(host, port, timeout=min(2.0, poll_interval)):
+            return True
+        time.sleep(poll_interval)
+    return not portal_ipc_reachable(host, port, timeout=2.0)
+
+
+def query_ipc_status(host: str, port: int, *, timeout: float = 5.0) -> list | None:
+    """One-shot launcher IPC status query (connect, ask, close)."""
+    session = LauncherSession(host, port, timeout=timeout)
+    try:
+        session.connect()
+        return session.query_status()
+    except (TimeoutError, OSError, ConnectionError, RuntimeError):
+        return None
+    finally:
+        session.close()
+
+
 def wait_until_state(
     host: str,
     port: int,
@@ -308,6 +351,9 @@ def wait_until_state(
         try:
             session.connect()
         except (OSError, ConnectionError, TimeoutError):
+            if portal_running is False:
+                # Portal IPC listener is gone — portal has exited.
+                return [False, False, None, None, {}, {}]
             session.close()
             session = LauncherSession(host, port)
             time.sleep(min(poll_interval, remaining))

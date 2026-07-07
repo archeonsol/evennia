@@ -53,6 +53,38 @@ class LauncherSessionWaitTest(SimpleTestCase):
             with self.assertRaises(ConnectionError):
                 connect_session("127.0.0.1", 4006, connect_timeout=0.1, retry_interval=0.01)
 
+    @patch.object(LauncherSession, "connect", side_effect=ConnectionError("refused"))
+    def test_wait_until_state_portal_down_on_ipc_refused(self, _mock_connect):
+        with patch("evennia.server.launcher_ipc.time.sleep"):
+            status = wait_until_state(
+                "127.0.0.1",
+                4006,
+                portal_running=False,
+                deadline=1.0,
+                poll_interval=0.01,
+            )
+        self.assertEqual(status, [False, False, None, None, {}, {}])
+
+    @patch("evennia.server.launcher_ipc.portal_ipc_reachable", side_effect=[True, True, False])
+    def test_wait_for_portal_ipc_down(self, _mock_reachable):
+        with patch("evennia.server.launcher_ipc.time.sleep"):
+            from evennia.server.launcher_ipc import wait_for_portal_ipc_down
+
+            self.assertTrue(wait_for_portal_ipc_down("127.0.0.1", 4006, deadline=1.0))
+
+    @patch.object(LauncherSession, "_send")
+    @patch.object(LauncherSession, "_read_frame")
+    @patch.object(LauncherSession, "connect")
+    def test_query_ipc_status(self, _mock_connect, mock_read, _mock_send):
+        from evennia.server.launcher_ipc import query_ipc_status
+
+        mock_read.return_value = {
+            "type": "status",
+            "status": [True, False, 1, None, {}, {}],
+        }
+        result = query_ipc_status("127.0.0.1", 4006)
+        self.assertEqual(result, [True, False, 1, None, {}, {}])
+
     @patch.object(LauncherSession, "wait_for_state", return_value=[True, False, 1, None, {}, {}])
     @patch.object(LauncherSession, "connect")
     def test_wait_until_state_returns_on_connect(self, _mock_connect, _mock_wait):
