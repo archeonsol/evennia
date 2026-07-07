@@ -25,6 +25,14 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.130 — Longer launcher wait for asyncio cold boot
+
+### Hotfix
+- ``wait_for_status()`` defaults to 120 retries (60s) under asyncio bootstrap;
+  direct ``portal.py`` startup needs longer than legacy twistd before IPC listens.
+
+---
+
 ## 6.0.0+underspire.129 — Call privilegedStartService in asyncio bootstrap
 
 ### Hotfix

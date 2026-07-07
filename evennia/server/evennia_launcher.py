@@ -781,7 +781,7 @@ def wait_for_status_reply(callback):
 
 
 def wait_for_status(
-    portal_running=True, server_running=True, callback=None, errback=None, rate=0.5, retries=20
+    portal_running=True, server_running=True, callback=None, errback=None, rate=0.5, retries=None
 ):
     """
     Repeat the status ping until the desired state combination is achieved.
@@ -796,8 +796,12 @@ def wait_for_status(
         errback (callable): Will be called with portal_state, server_state if the
             request is timed out.
         rate (float): How often to retry.
-        retries (int): How many times to retry before timing out and calling `errback`.
+        retries (int): How many times to retry before timing out and calling `errback``.
+            Defaults to 120 for asyncio bootstrap (cold ``portal.py`` import is slow)
+            and 20 for legacy AMP.
     """
+    if retries is None:
+        retries = 120 if _launcher_uses_ipc() else 20
 
     global REACTOR_RUN
     REACTOR_RUN = True
