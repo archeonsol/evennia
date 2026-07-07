@@ -25,6 +25,15 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.127 — Fix bootstrap game-dir sys.path
+
+### Hotfix
+- ``portal.py`` / ``server.py``: after popping the script directory from ``sys.path[0]``,
+  insert the game working directory (``os.getcwd()``) so ``server.conf.settings`` imports
+  when the launcher starts ``python portal.py`` / ``python server.py`` from the game dir.
+
+---
+
 ## 6.0.0+underspire.126 — Fix asyncio bootstrap ssl shadowing crash
 
 ### Hotfix

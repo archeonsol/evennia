@@ -12,12 +12,15 @@ import os
 import sys
 
 # Running as ``python portal.py`` puts this package dir on sys.path[0], which
-# shadows the stdlib ``ssl`` module (we have a legacy ssl.py here). Pop it
-# before any import chain can hit ``import ssl``.
+# shadowed the stdlib ``ssl`` module (legacy ssl.py lived here). Pop it and
+# ensure the game directory is on sys.path — twistd arranged both automatically.
 if __name__ == "__main__":
     _bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
     if sys.path and os.path.abspath(sys.path[0]) == _bootstrap_dir:
         sys.path.pop(0)
+    _game_dir = os.getcwd()
+    if _game_dir and _game_dir not in sys.path:
+        sys.path.insert(0, _game_dir)
 
 import django
 from twisted.logger import globalLogPublisher
