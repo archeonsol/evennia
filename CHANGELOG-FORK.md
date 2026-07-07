@@ -25,6 +25,13 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.118 — ticket thread buttons + forum sync
+
+### Portal / Discord
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): `send_thread_update`
+  (rename thread, refresh forum tags without archiving); `send_thread_message` accepts
+  `components`; `send_interaction_reply` accepts embeds, components, flags, response_type.
+
 ## 6.0.0+underspire.117 — forum thread tags on archive
 
 ### Portal / Discord

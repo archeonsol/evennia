@@ -519,18 +519,23 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
 
     def send_interaction_reply(self, content, interaction_id, token, **kwargs):
         """
-        Respond to a Discord interaction (slash command) via REST.
+        Respond to a Discord interaction (slash command or button) via REST.
 
-        Use with session.msg(interaction_reply=(content, interaction_id, token))
-        Sends an CHANNEL_MESSAGE_WITH_SOURCE (type 4) response.
+        Use with session.msg(interaction_reply=((content, interaction_id, token), opts))
+        Sends an CHANNEL_MESSAGE_WITH_SOURCE (type 4) response by default.
+        Pass response_type=6 for DEFERRED_UPDATE_MESSAGE on component clicks.
         """
-        data = {
-            "type": 4,
-            "data": {"content": content},
-        }
-        # Interaction responses go to a special endpoint that does not require the
-        # bot token — it uses the interaction token for auth.  We still send our
-        # normal Bot auth header; Discord accepts both.
+        data_payload = {}
+        if content:
+            data_payload["content"] = str(content)[:2000]
+        if kwargs.get("embeds"):
+            data_payload["embeds"] = kwargs["embeds"]
+        if kwargs.get("components") is not None:
+            data_payload["components"] = kwargs["components"]
+        response_type = int(kwargs.get("response_type", 4))
+        data = {"type": response_type, "data": data_payload}
+        if kwargs.get("flags"):
+            data["data"]["flags"] = int(kwargs["flags"])
         self._post_json(f"interactions/{interaction_id}/{token}/callback", data)
 
     def send_register_commands(self, commands, app_id, guild_id, **kwargs):
@@ -628,7 +633,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
 
     def send_thread_message(self, thread_id, **kwargs):
         """
-        Post a message (plain content and/or embeds) into a thread.
+        Post a message (plain content, embeds, and/or components) into a thread.
 
         Use with session.msg(thread_message=(thread_id,), embeds=[...]).
         """
@@ -637,8 +642,24 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
             data["content"] = str(kwargs["content"])[:2000]
         if kwargs.get("embeds"):
             data["embeds"] = kwargs["embeds"]
+        if kwargs.get("components") is not None:
+            data["components"] = kwargs["components"]
         if data:
             self._post_json(f"channels/{thread_id}/messages", data)
+
+    def send_thread_update(self, thread_id, **kwargs):
+        """
+        PATCH a thread (rename, forum tags) without archiving.
+
+        Use with session.msg(thread_update=(thread_id,), name=..., applied_tags=[...]).
+        """
+        data = {}
+        if kwargs.get("name"):
+            data["name"] = str(kwargs["name"])[:100]
+        if kwargs.get("applied_tags") is not None:
+            data["applied_tags"] = kwargs["applied_tags"]
+        if data:
+            self._post_json(f"channels/{thread_id}", data, type="PATCH")
 
     def send_thread_archive(self, thread_id, archived, **kwargs):
         """
