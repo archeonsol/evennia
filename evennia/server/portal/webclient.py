@@ -338,7 +338,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         """
         csession = self.get_client_session()
 
-        if csession:
+        # Portal-wide shutdown (deploy reboot) must not wipe the Django session
+        # auto-login stamp — the webclient reconnect loop relies on it.
+        preserve_auth = getattr(self.sessionhandler, "_disconnect_all", False)
+        if csession and not preserve_auth:
             # if the nonce is different, webclient_authenticated_uid has been
             # set *before* this disconnect (disconnect called after a new client
             # connects, which occurs in some 'fast' browsers like Google Chrome
@@ -400,8 +403,12 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
 
         """
         self._stash_for_resume()
-        if code == CLOSE_NORMAL or code == GOING_AWAY:
+        if code == CLOSE_NORMAL:
             self.disconnect(reason)
+        elif code == GOING_AWAY:
+            # Unclean from the portal's POV: keep browser auto-login for reconnect.
+            self.logged_in = False
+            self.sessionhandler.disconnect(self)
         else:
             self.websocket_close_code = code
 

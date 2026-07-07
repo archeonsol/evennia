@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.115 — preserve webclient login across deploy reboot
+
+### Portal / webclient
+
+- [`evennia/server/portal/webclient.py`](evennia/server/portal/webclient.py): do not clear
+  `webclient_authenticated_uid` on portal-wide shutdown (`disconnect_all`) or
+  `GOING_AWAY` closes. Deploy reboot + client reconnect can auto-login from the
+  Django session cookie instead of forcing the login screen.
+
+---
+
 ## 6.0.0+underspire.114 — align VERSION with deploy pin; fix Discord heartbeat cancel
 
 ### Versioning
