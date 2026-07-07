@@ -2,7 +2,7 @@
 
 Returns a Twisted ``Deferred`` so existing reactor callers are unchanged, but the
 request itself runs on ``httpx`` in the reactor thread pool (via
-``clock.defer_to_thread``). That works on any reactor and is dev-testable, unlike
+``defer.in_thread``). That works on any reactor and is dev-testable, unlike
 a reactor-native async client which would need the asyncio reactor. When the
 runtime goes pure-asyncio (T3 end), swap the body here to ``httpx.AsyncClient``
 awaited on the loop; call sites stay put.
@@ -18,7 +18,7 @@ import json as _json
 
 import httpx
 
-from evennia.utils import clock
+from evennia.utils import defer
 
 
 class Response:
@@ -66,7 +66,7 @@ def request(method, url, headers=None, data=None, timeout=30):
         resp = httpx.request(method, url, headers=flat, content=data, timeout=timeout)
         return Response(resp.status_code, resp.content, dict(resp.headers))
 
-    return clock.defer_to_thread(_do)
+    return defer.in_thread(_do)
 
 
 def get(url, **kwargs):

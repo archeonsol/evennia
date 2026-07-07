@@ -25,6 +25,15 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.143 — Discord gateway HTTP callback compat
+
+### Portal / Discord
+
+- **`evennia.utils.http.request`:** Return value now uses ``defer.in_thread()`` so the
+  Future exposes ``.addCallbacks()`` / ``.addErrback()``. Fixes Discord bot offline
+  after asyncio bootstrap: ``get_gateway_url()`` crashed with
+  ``AttributeError: '_asyncio.Future' object has no attribute 'addCallbacks'``.
+
 ## 6.0.0+underspire.142 — Orphan process reconciliation on stop
 
 ### Launcher stop / orphan recovery
