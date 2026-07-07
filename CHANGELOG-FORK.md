@@ -25,6 +25,15 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.132 — Fix launcher IPC server-start deadlock
+
+### Hotfix
+- ``wait_for_status_reply()`` under asyncio IPC now registers the status-push
+  waiter on a background thread (matching legacy AMP). The blocking ``read_push``
+  ran before ``SSTART`` was sent, so the server never launched.
+
+---
+
 ## 6.0.0+underspire.131 — Reset launcher IPC session on connect errors
 
 ### Hotfix

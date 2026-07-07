@@ -767,13 +767,19 @@ def wait_for_status_reply(callback):
     Wait for an explicit STATUS signal to be sent back from Evennia.
     """
     if _launcher_uses_ipc():
-        try:
-            session = _ensure_ipc_connection()
-            status = session.read_push(timeout=120)
-            if status is not None:
-                callback(status)
-        except Exception:
-            print("No Evennia connection established.")
+        global REACTOR_RUN
+        REACTOR_RUN = True
+
+        def _reader():
+            try:
+                session = _ensure_ipc_connection()
+                status = session.read_push(timeout=120)
+                if status is not None:
+                    callback(status)
+            except Exception:
+                print("No Evennia connection established.")
+
+        threading.Thread(target=_reader, daemon=True).start()
         return
 
     if AMP_CONNECTION:
@@ -929,7 +935,8 @@ def start_evennia(pprofiler=False, sprofiler=False):
             _reactor_stop()
         else:
             print("Server starting {}...".format("(under cProfile)" if sprofiler else ""))
-            send_instruction(SSTART, server_cmd, _server_started, _fail)
+            wait_for_status_reply(_server_started)
+            send_instruction(SSTART, server_cmd)
 
     def _portal_not_running(fail):
         print("Portal starting {}...".format("(under cProfile)" if pprofiler else ""))
