@@ -128,12 +128,15 @@ class _LauncherIPCProtocol(asyncio.Protocol):
             logger.log_trace("launcher IPC: write failed")
 
 
+COLD_START_DEADLINE = 120.0
+
+
 def connect_session(
     host: str,
     port: int,
     *,
     timeout: float = 30.0,
-    connect_timeout: float = 60.0,
+    connect_timeout: float = COLD_START_DEADLINE,
     retry_interval: float = 0.5,
 ) -> LauncherSession:
     """Connect to Portal launcher IPC, retrying until timeout (cold-start safe)."""
@@ -277,6 +280,44 @@ class LauncherSession:
         return None
 
 
+def wait_until_state(
+    host: str,
+    port: int,
+    *,
+    portal_running=True,
+    server_running=True,
+    deadline: float = COLD_START_DEADLINE,
+    poll_interval: float = 0.5,
+) -> list | None:
+    """Retry connect + status query until state matches or *deadline* elapses."""
+    end = time.monotonic() + deadline
+    session = LauncherSession(host, port)
+    while time.monotonic() < end:
+        remaining = end - time.monotonic()
+        try:
+            session.connect()
+        except (OSError, ConnectionError, TimeoutError):
+            session.close()
+            session = LauncherSession(host, port)
+            time.sleep(min(poll_interval, remaining))
+            continue
+        try:
+            status = session.wait_for_state(
+                portal_running=portal_running,
+                server_running=server_running,
+                timeout=min(poll_interval, remaining),
+                poll_interval=poll_interval,
+            )
+            if status is not None:
+                return status
+        except (TimeoutError, OSError, ConnectionError, RuntimeError):
+            pass
+        session.close()
+        session = LauncherSession(host, port)
+        time.sleep(min(poll_interval, remaining))
+    return None
+
+
 _servers: list = []
 
 
@@ -300,16 +341,31 @@ async def _start_server(portal, amp_factory, amp_protocol, interface: str, port:
 
 
 def start_launcher_server(portal, amp_factory, amp_protocol, interface: str, port: int):
-    """Schedule the asyncio launcher control server on the bound process loop."""
+    """Start launcher IPC on the bound process loop.
+
+    Binds synchronously when the loop is not yet running (portal cold boot),
+    matching legacy Twisted ``TCPServer`` behaviour so the launcher can connect
+    before telnet/web/plugins finish initializing.
+    """
     loop = clock.get_bound_loop()
+    if loop is None:
+        logger.log_err("Launcher IPC requires a bound asyncio loop.")
+        return
 
-    async def _go():
-        try:
-            await _start_server(portal, amp_factory, amp_protocol, interface, port)
-        except Exception:
-            logger.log_trace("launcher IPC server failed to start")
+    if loop.is_running():
+        async def _go():
+            try:
+                await _start_server(portal, amp_factory, amp_protocol, interface, port)
+            except Exception:
+                logger.log_trace("launcher IPC server failed to start")
 
-    loop.create_task(_go())
+        loop.create_task(_go())
+        return
+
+    try:
+        loop.run_until_complete(_start_server(portal, amp_factory, amp_protocol, interface, port))
+    except Exception:
+        logger.log_trace("launcher IPC server failed to start")
 
 
 async def stop_launcher_servers():

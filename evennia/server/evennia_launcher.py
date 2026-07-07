@@ -76,6 +76,7 @@ ENFORCED_SETTING = False
 REACTOR_RUN = False
 NO_REACTOR_STOP = False
 COLLECTSTATIC_FORCE = False
+LAUNCHER_FAILED = False
 
 # communication constants
 
@@ -559,6 +560,12 @@ def _reactor_stop():
         AMP_CONNECTION = None
 
 
+def _fail_launcher():
+    global LAUNCHER_FAILED
+    LAUNCHER_FAILED = True
+    _reactor_stop()
+
+
 def _launcher_uses_ipc():
     """Launcher always uses asyncio IPC (twistd/AMP launcher path retired)."""
     return True
@@ -747,19 +754,24 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
+    from evennia.server.launcher_ipc import COLD_START_DEADLINE, wait_until_state
+
     if retries is None:
         if portal_running is False or server_running is False:
-            retries = 20
+            timeout = 20 * rate
         else:
-            retries = 120
+            timeout = COLD_START_DEADLINE
+    else:
+        timeout = retries * rate
 
     def _reader():
         try:
-            session = _ensure_ipc_connection()
-            status = session.wait_for_state(
+            status = wait_until_state(
+                AMP_HOST,
+                AMP_PORT,
                 portal_running=portal_running,
                 server_running=server_running,
-                timeout=retries * rate,
+                deadline=timeout,
                 poll_interval=rate,
             )
         except Exception:
@@ -771,7 +783,7 @@ def _wait_for_status_ipc(
                 errback(prun, srun)
             else:
                 print("Connection to Evennia timed out. Try again.")
-                _reactor_stop()
+                _fail_launcher()
             return
         prun, srun, *_ = status
         if callback:
@@ -799,8 +811,7 @@ def wait_for_status(
             request is timed out.
         rate (float): How often to retry.
         retries (int): How many times to retry before timing out and calling `errback``.
-            Defaults to 120 for asyncio bootstrap (cold ``portal.py`` import is slow)
-            and 20 for legacy AMP.
+            Defaults to 240 (120s at rate=0.5) for cold start, 20 for shutdown waits.
     """
     if retries is None:
         if portal_running is False or server_running is False:
@@ -2545,6 +2556,9 @@ def main():
             from twisted.internet import reactor
 
             reactor.run()
+
+    if LAUNCHER_FAILED:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

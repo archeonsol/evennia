@@ -89,12 +89,15 @@ class EvenniaPortalService(MultiService):
 
     def _privileged_start(self):
         self.start_time = time.time()
+
+        # Launcher IPC must bind before telnet/web/plugins so cold-start can
+        # receive SSTART while the rest of the Portal still initializes.
+        if settings.AMP_HOST and settings.AMP_PORT and settings.AMP_INTERFACE:
+            self.register_amp()
+
         self.maintenance_task = clock.looping(60, self.portal_maintenance, now=True)
         self._server_watchdog_task = clock.looping(15, self._maybe_restart_dead_server, now=False)
         clock.register_shutdown_hook(self.shutdown, _reactor_stopping=True, _stop_server=True)
-
-        if settings.AMP_HOST and settings.AMP_PORT and settings.AMP_INTERFACE:
-            self.register_amp()
 
         if settings.TELNET_ENABLED and settings.TELNET_PORTS and settings.TELNET_INTERFACES:
             self.register_telnet()

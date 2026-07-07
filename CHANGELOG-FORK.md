@@ -25,6 +25,34 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.138 — Cold-start: bind launcher IPC first, require server up
+
+### Portal cold boot
+
+- **Launcher IPC binds synchronously** before ``run_forever()`` (``loop.run_until_complete``
+  in ``start_launcher_server``), matching legacy Twisted ``TCPServer`` early-bind
+  behaviour. ``register_amp()`` moved to the top of ``_privileged_start`` so :4006 is
+  live before telnet/web/plugins finish loading.
+
+### Launcher / ops
+
+- **`wait_until_state()``** — single connect+query retry loop with
+  ``COLD_START_DEADLINE`` (120s). ``_wait_for_status_ipc`` uses it instead of
+  separate connect-then-wait (which could exhaust the 60s budget before IPC bound).
+- **``evennia start`` exits 1** on launcher wait timeout (``LAUNCHER_FAILED``) so
+  systemd marks the unit failed instead of "active" with portal-only.
+- **`scripts/evennia_start.sh`** — systemd ``ExecStart`` wrapper waits up to 120s
+  for ``server.py`` after ``evennia start``.
+- **`prod_restart_evennia.sh`** — portal-up/server-down fallback uses
+  ``evennia sstart`` (not another full ``evennia start``).
+
+### Tests
+
+- ``test_start_launcher_server_binds_before_run_forever``,
+  ``test_wait_until_state_returns_on_connect`` in ``test_launcher_ipc.py``.
+
+---
+
 ## 6.0.0+underspire.137 — Fix .135/.136 regressions (duplicate login, defer, cold start)
 
 ### Service lifecycle (.135 regression)
