@@ -43,3 +43,16 @@ class AMPServerGetStatusTest(SimpleTestCase):
 
         live, _, _, _, _, _ = self._protocol(portal).get_status()
         self.assertFalse(live)
+
+    def test_portal_live_when_ipc_ready_before_start_service(self):
+        portal = MagicMock()
+        portal.running = False
+        portal._launcher_ipc_ready = True
+        portal.shutdown_complete = False
+        portal.get_info_dict.return_value = {}
+        portal.server_info_dict = {}
+        portal.server_process_id = 99
+
+        live, _, pid, _, _, _ = self._protocol(portal).get_status()
+        self.assertTrue(live)
+        self.assertEqual(pid, 99)

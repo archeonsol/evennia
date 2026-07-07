@@ -330,6 +330,7 @@ async def _start_server(portal, amp_factory, amp_protocol, interface: str, port:
 
     server = await loop.create_server(protocol_factory, interface, port)
     _servers.append(server)
+    portal._launcher_ipc_ready = True
     portal.info_dict["amp"] = f"launcher-ipc: {port}"
     logger.log_info(f"Launcher IPC listening on {interface}:{port}")
     protocol = getattr(portal, "_launcher_amp_protocol", None)

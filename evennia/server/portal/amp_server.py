@@ -131,7 +131,8 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         server_pid = portal.server_process_id
         portal_pid = os.getpid()
         portal_live = bool(
-            portal.running and not getattr(portal, "shutdown_complete", False)
+            (portal.running or getattr(portal, "_launcher_ipc_ready", False))
+            and not getattr(portal, "shutdown_complete", False)
         )
         return (
             portal_live,

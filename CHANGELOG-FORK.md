@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.139 — Cold-start: portal live when IPC binds
+
+### Portal status / launcher cold boot
+
+- **`_launcher_ipc_ready`:** Set on the portal service when launcher IPC binds
+  (``launcher_ipc._start_server``). ``AMPServerProtocol.get_status()`` reports
+  ``portal_live=True`` once IPC is listening, even before ``startService()`` /
+  ``register_plugins()`` finish — fixes the `.138` gap where the launcher could
+  connect to :4006 but ``wait_until_state`` never saw ``portal_running=True``.
+- **Test:** ``test_portal_live_when_ipc_ready_before_start_service`` in
+  ``test_amp_server_status.py``.
+
+### Ops (mootest)
+
+- **systemd:** ``Type=oneshot`` + ``RemainAfterExit=yes`` (launcher exits after
+  start; portal child stays up). Replaces ``Type=forking`` which never received
+  a fork notify and left the unit in ``activating`` for minutes.
+- **Deploy:** kill orphaned ``evennia reboot`` / ``evennia start`` processes
+  before ``systemctl restart``.
+
+---
+
 ## 6.0.0+underspire.138 — Cold-start: bind launcher IPC first, require server up
 
 ### Portal cold boot
