@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.128 — Bootstrap starts Portal/Server service directly
+
+### Hotfix
+- ``asyncio_bootstrap.run_bootstrap()`` calls ``EVENNIA_PORTAL_SERVICE`` /
+  ``EVENNIA_SERVER_SERVICE.startService()`` instead of ``TWISTED_APPLICATION``,
+  which on current Twisted is a bare ``Componentized`` without ``startService``.
+- ``portal.py`` / ``server.py``: set ``DJANGO_SETTINGS_MODULE`` when run as
+  ``__main__``.
+
+---
+
 ## 6.0.0+underspire.127 — Fix bootstrap game-dir sys.path
 
 ### Hotfix

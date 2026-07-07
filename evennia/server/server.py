@@ -19,6 +19,7 @@ if __name__ == "__main__":
     _game_dir = os.getcwd()
     if _game_dir and _game_dir not in sys.path:
         sys.path.insert(0, _game_dir)
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.conf.settings")
 
 import django
 from twisted.logger import globalLogPublisher

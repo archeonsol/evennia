@@ -48,8 +48,12 @@ class BootstrapRunTest(TestCase):
         loop = MagicMock()
         loop.is_closed.return_value = False
         loop.is_running = True
-        application = MagicMock()
-        application.running = True
+        service = MagicMock()
+        service.running = True
+
+        mock_evennia = MagicMock()
+        mock_evennia._LOADED = True
+        mock_evennia.EVENNIA_PORTAL_SERVICE = service
 
         with (
             patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
@@ -59,10 +63,10 @@ class BootstrapRunTest(TestCase):
             patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
             patch("evennia.server.asyncio_bootstrap._write_pidfile"),
             patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
-            patch("evennia.TWISTED_APPLICATION", application, create=True),
+            patch("evennia.server.asyncio_bootstrap.evennia", mock_evennia, create=True),
         ):
             run_bootstrap(portal_mode=True, argv=[])
 
-        application.startService.assert_called_once()
-        application.stopService.assert_called_once()
+        service.startService.assert_called_once()
+        service.stopService.assert_called_once()
         loop.run_forever.assert_called_once()
