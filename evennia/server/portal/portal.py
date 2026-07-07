@@ -11,6 +11,14 @@ by game/evennia.py).
 import os
 import sys
 
+# Running as ``python portal.py`` puts this package dir on sys.path[0], which
+# shadows the stdlib ``ssl`` module (we have a legacy ssl.py here). Pop it
+# before any import chain can hit ``import ssl``.
+if __name__ == "__main__":
+    _bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
+    if sys.path and os.path.abspath(sys.path[0]) == _bootstrap_dir:
+        sys.path.pop(0)
+
 import django
 from twisted.logger import globalLogPublisher
 

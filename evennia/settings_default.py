@@ -1423,7 +1423,7 @@ BASE_SESSION_CLASS = "evennia.server.session.Session"
 # It is used for all telnet connections, and is also inherited by the SSL Protocol
 # (which is just TLS + Telnet).
 TELNET_PROTOCOL_CLASS = "evennia.server.portal.telnet.TelnetProtocol"
-SSL_PROTOCOL_CLASS = "evennia.server.portal.ssl.SSLProtocol"
+SSL_PROTOCOL_CLASS = "evennia.server.portal.telnet_ssl.SSLProtocol"
 
 # Websocket Client Protocol. This inherits from BASE_SESSION_CLASS. It is used
 # for all webclient connections.

@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.126 — Fix asyncio bootstrap ssl shadowing crash
+
+### Hotfix
+- ``portal.py`` / ``server.py``: pop the script directory from ``sys.path[0]`` when run as
+  ``__main__``, so the legacy ``portal/ssl.py`` module no longer shadows the stdlib
+  ``ssl`` package (broke ``python portal.py`` bootstrap on Linux prod).
+- Deleted ``evennia/server/portal/ssl.py`` (superseded by ``telnet_ssl.py``).
+- ``SSL_PROTOCOL_CLASS`` now points at ``telnet_ssl.SSLProtocol``.
+
+---
+
 ## 6.0.0+underspire.125 — T3 S10: launcher IPC, cleanups, headless mode
 
 ### Launcher control plane (S10)

@@ -11,6 +11,12 @@ evennia/server/server_runner.py).
 import os
 import sys
 
+# Same stdlib shadowing guard as portal.py (see portal/portal.py).
+if __name__ == "__main__":
+    _bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
+    if sys.path and os.path.abspath(sys.path[0]) == _bootstrap_dir:
+        sys.path.pop(0)
+
 import django
 from twisted.logger import globalLogPublisher
 
