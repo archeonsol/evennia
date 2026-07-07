@@ -40,9 +40,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from django.utils.translation import gettext as _
 from simpleeval import simple_eval
-from twisted.internet import reactor, threads
 from twisted.internet.defer import returnValue  # noqa - used as import target
-from twisted.internet.task import deferLater
 
 import evennia
 from evennia.utils import logger
@@ -2592,7 +2590,9 @@ def interactive(func):
     from evennia.actions.menus import get_input
 
     def _process_input(caller, prompt, result, generator):
-        deferLater(reactor, 0, _iterate, generator, caller, response=result)
+        from evennia.utils import clock
+
+        clock.defer_later(0, _iterate, generator, caller, response=result)
         return False
 
     def _iterate(generator, caller=None, response=None):
@@ -2849,8 +2849,20 @@ def run_in_main_thread(function_or_method, *args, **kwargs):
     """
     if _IS_MAIN_THREAD:
         return function_or_method(*args, **kwargs)
-    else:
-        return threads.blockingCallFromThread(reactor, function_or_method, *args, **kwargs)
+    from concurrent.futures import Future
+
+    from evennia.utils import clock
+
+    future = Future()
+
+    def _runner():
+        try:
+            future.set_result(function_or_method(*args, **kwargs))
+        except Exception as exc:
+            future.set_exception(exc)
+
+    clock.call_from_thread(_runner)
+    return future.result()
 
 
 _INT2STR_MAP_NOUN = {

@@ -1,0 +1,25 @@
+{
+  "name": "evennia-webclient-shell",
+  "private": true,
+  "type": "module",
+  "description": "Default Evennia web client shell (Svelte 5). Replaces the Golden Layout client; games extend it via config + composed views.",
+  "scripts": {
+    "gen:palette": "node scripts/gen-palette.mjs",
+    "prebuild": "node scripts/gen-palette.mjs",
+    "prewatch": "node scripts/gen-palette.mjs",
+    "dev": "node scripts/gen-palette.mjs && vite",
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "dockview-core": "^7.0.2"
+  }
+}

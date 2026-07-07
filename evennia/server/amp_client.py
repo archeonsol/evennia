@@ -10,6 +10,7 @@ from django.conf import settings
 from twisted.internet import protocol
 
 import evennia
+from evennia.server import ipc_handlers_server
 from evennia.server.portal import amp
 from evennia.utils import logger
 from evennia.utils.utils import class_from_module
@@ -64,9 +65,10 @@ class AMPClientFactory(protocol.ReconnectingClientFactory):
 
         """
         self.resetDelay()
-        self.server.amp_protocol = AMPServerClientProtocol()
-        self.server.amp_protocol.factory = self
-        return self.server.amp_protocol
+        self.server.portal_bus = AMPServerClientProtocol()
+        self.server.portal_bus.factory = self
+        self.server.amp_protocol = self.server.portal_bus  # deprecated alias
+        return self.server.portal_bus
 
     def clientConnectionLost(self, connector, reason):
         """
@@ -121,57 +123,13 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
         self.factory.server.run_initial_setup()
 
     def data_to_portal(self, command, sessid, **kwargs):
-        """
-        Send data across the wire to the Portal
-
-        Args:
-            command (AMP Command): A protocol send command.
-            sessid (int): A unique Session id.
-            kwargs (any): Any data to pickle into the command.
-
-        Returns:
-            deferred (deferred or None): A deferred with an errback.
-
-        Notes:
-            Data will be sent across the wire pickled as a tuple
-            (sessid, kwargs).
-
-        """
-        # print("server data_to_portal: {}, {}, {}".format(command, sessid, kwargs))
-        if command in (amp.AdminServer2Portal,):
-            packed = amp.dumps_admin((sessid, kwargs))
-        else:
-            packed = amp.dumps_session((sessid, kwargs))
-        return self.callRemote(command, packed_data=packed).addErrback(self.errback, command.key)
+        return ipc_handlers_server.data_to_portal(self, command, sessid, **kwargs)
 
     def send_MsgServer2Portal(self, session, **kwargs):
-        """
-        Access method - executed on the Server for sending data
-            to Portal.
-
-        Args:
-            session (Session): Unique Session.
-            kwargs (any, optiona): Extra data.
-
-        """
-        return self.data_to_portal(amp.MsgServer2Portal, session.sessid, **kwargs)
+        return ipc_handlers_server.send_msgserver2portal(self, session, **kwargs)
 
     def send_AdminServer2Portal(self, session, operation="", **kwargs):
-        """
-        Administrative access method called by the Server to send an
-        instruction to the Portal.
-
-        Args:
-            session (Session): Session.
-            operation (char, optional): Identifier for the server
-                operation, as defined by the global variables in
-                `evennia/server/amp.py`.
-            kwargs (dict, optional): Data going into the adminstrative.
-
-        """
-        return self.data_to_portal(
-            amp.AdminServer2Portal, session.sessid, operation=operation, **kwargs
-        )
+        return ipc_handlers_server.send_adminserver2portal(self, session, operation=operation, **kwargs)
 
     # receiving AMP data
 
@@ -182,83 +140,9 @@ class AMPServerClientProtocol(amp.AMPMultiConnectionProtocol):
     @amp.MsgPortal2Server.responder
     @amp.catch_traceback
     def server_receive_msgportal2server(self, packed_data):
-        """
-        Receives message arriving to server. This method is executed
-        on the Server.
-
-        Args:
-            packed_data (str): Data to receive (a pickled tuple (sessid,kwargs))
-
-        """
-        # Untrusted: this carries a player's command text. Resource caps are
-        # enforced (the default) to bound player-driven payloads at the Server.
-        sessid, kwargs = amp.loads_session(packed_data)
-        session = evennia.SERVER_SESSION_HANDLER.get(sessid, None)
-        if session:
-            evennia.SERVER_SESSION_HANDLER.data_in(session, **kwargs)
-        return {}
+        return ipc_handlers_server.receive_msgportal2server(packed_data)
 
     @amp.AdminPortal2Server.responder
     @amp.catch_traceback
     def server_receive_adminportal2server(self, packed_data):
-        """
-        Receives admin data from the Portal (allows the portal to
-        perform admin operations on the server). This is executed on
-        the Server.
-
-        Args:
-            packed_data (str): Incoming, pickled data.
-
-        """
-        sessid, kwargs = self.data_in(packed_data)
-        operation = kwargs.pop("operation", "")
-
-        if operation == amp.PCONN:  # portal_session_connect
-            # create a new session and sync it
-            evennia.SERVER_SESSION_HANDLER.portal_connect(kwargs.get("sessiondata"))
-
-        elif operation == amp.PCONNSYNC:  # portal_session_sync
-            evennia.SERVER_SESSION_HANDLER.portal_session_sync(kwargs.get("sessiondata"))
-
-        elif operation == amp.PDISCONN:  # portal_session_disconnect
-            # session closed from portal sid
-            session = evennia.SERVER_SESSION_HANDLER.get(sessid)
-            if session:
-                evennia.SERVER_SESSION_HANDLER.portal_disconnect(session)
-
-        elif operation == amp.PDISCONNALL:  # portal_disconnect_all
-            # portal orders all sessions to close
-            evennia.SERVER_SESSION_HANDLER.portal_disconnect_all()
-
-        elif operation == amp.PSYNC:  # portal_session_sync
-            # force a resync of sessions from the portal side. This happens on
-            # first server-connect.
-            server_restart_mode = kwargs.get("server_restart_mode", "shutdown")
-            evennia.EVENNIA_SERVER_SERVICE.run_init_hooks(server_restart_mode)
-            evennia.SERVER_SESSION_HANDLER.portal_sessions_sync(kwargs.get("sessiondata"))
-            evennia.SERVER_SESSION_HANDLER.portal_start_time = kwargs.get("portal_start_time")
-
-        elif operation == amp.SRELOAD:  # server reload
-            # shut down in reload mode
-            evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-            from twisted.internet import defer
-
-            defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"))
-
-        elif operation == amp.SRESET:
-            # shut down in reset mode
-            evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-            from twisted.internet import defer
-
-            defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"))
-
-        elif operation == amp.SSHUTD:  # server shutdown
-            # shutdown in stop mode
-            from twisted.internet import defer
-
-            defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"))
-
-        else:
-            raise Exception("operation %(op)s not recognized." % {"op": operation})
-
-        return {}
+        return ipc_handlers_server.receive_adminportal2server(packed_data)

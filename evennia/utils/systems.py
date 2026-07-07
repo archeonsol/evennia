@@ -141,8 +141,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
-from twisted.internet.defer import maybeDeferred
-from twisted.internet.task import LoopingCall
+
+from evennia.utils import clock
 
 from evennia.utils import logger
 
@@ -734,7 +734,7 @@ class SystemDriver:
 
     def __init__(self, now=time.time):
         self._now = now
-        self._loop = LoopingCall(self.tick)
+        self._loop = clock.make_looping(self.tick)
 
     def start(self):
         """Start ticking at `TICK_INTERVAL`. No-op if already running."""
@@ -838,53 +838,30 @@ class SystemDriver:
         system.fire_count += 1
         system.in_flight = True
 
-        def _on_error(failure):
-            logger.log_err(
-                f"System '{system.name}' errored on fire (run skipped, driver "
-                f"and other systems unaffected):\n{failure.getTraceback()}"
-            )
-            return None
+        async def _run_fire():
+            try:
+                await self._invoke_async(system, now, dt)
+            except Exception as exc:
+                logger.log_err(
+                    f"System '{system.name}' errored on fire (run skipped, driver "
+                    f"and other systems unaffected):\n{exc}"
+                )
+            finally:
+                system.in_flight = False
 
-        def _clear_in_flight(result):
-            system.in_flight = False
-            return result
+        clock.run_coroutine(_run_fire())
 
-        # maybeDeferred so a synchronous raise anywhere in _invoke (entity
-        # selection included) routes through the errback and clears in_flight
-        # instead of wedging the system permanently
-        d = maybeDeferred(self._invoke, system, now, dt)
-        d.addErrback(_on_error)
-        d.addBoth(_clear_in_flight)
-
-    def _invoke(self, system, now, dt):
-        """
-        Build the context per scope and call the body once.
-
-        Args:
-            system (System): The system being fired.
-            now (float): Epoch seconds of this fire.
-            dt (float): Real seconds since the previous fire.
-
-        Returns:
-            Deferred: Fires when the body (and any Deferred it returned)
-                completes.
-
-        """
+    async def _invoke_async(self, system, now, dt):
         scope = system.scope
         if scope.kind == _ONLINE_PUPPETS:
             ctx = SystemContext(now=now, dt=dt, entities=_select_online_puppets())
-            return maybeDeferred(system.run, ctx)
+            return await clock.maybe_await(system.run(ctx))
         if scope.kind == _ALL_ENTITIES:
-            deferred = _entity_ids_deferred(scope.component)
-
-            def _run_with_ids(entity_ids):
-                ctx = SystemContext(now=now, dt=dt, entity_ids=entity_ids)
-                return system.run(ctx)
-
-            deferred.addCallback(_run_with_ids)
-            return deferred
+            entity_ids = await _entity_ids_deferred(scope.component)
+            ctx = SystemContext(now=now, dt=dt, entity_ids=entity_ids)
+            return await clock.maybe_await(system.run(ctx))
         ctx = SystemContext(now=now, dt=dt)
-        return maybeDeferred(system.run, ctx)
+        return await clock.maybe_await(system.run(ctx))
 
 
 # ---------------------------------------------------------------------------

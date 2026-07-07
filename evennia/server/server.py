@@ -11,6 +11,16 @@ evennia/server/server_runner.py).
 import os
 import sys
 
+# Same bootstrap path setup as portal.py (see portal/portal.py).
+if __name__ == "__main__":
+    _bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
+    if sys.path and os.path.abspath(sys.path[0]) == _bootstrap_dir:
+        sys.path.pop(0)
+    _game_dir = os.getcwd()
+    if _game_dir and _game_dir not in sys.path:
+        sys.path.insert(0, _game_dir)
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.conf.settings")
+
 import django
 from twisted.logger import globalLogPublisher
 
@@ -30,7 +40,7 @@ from evennia.utils import logger
 # which is instantiated and attached to application in evennia._init()
 application = evennia.TWISTED_APPLICATION
 
-if "--nodaemon" not in sys.argv and "test" not in sys.argv:
+if __name__ != "__main__" and "--nodaemon" not in sys.argv and "test" not in sys.argv:
     # activate logging for interactive/testing mode
     logfile = logger.WeeklyLogFile(
         os.path.basename(settings.SERVER_LOG_FILE),
@@ -40,3 +50,8 @@ if "--nodaemon" not in sys.argv and "test" not in sys.argv:
     )
     globalLogPublisher.addObserver(logger.GetServerLogObserver()(logfile))
     logger.prune_rotated_logs(force=True)
+
+if __name__ == "__main__":
+    from evennia.server.asyncio_bootstrap import run_server
+
+    run_server()

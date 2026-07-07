@@ -11,11 +11,11 @@ the grapevine client to in-game channels.
 
 import json
 
-from autobahn.twisted.websocket import (WebSocketClientFactory,
-                                        WebSocketClientProtocol, connectWS)
 from django.conf import settings
 from twisted.internet import protocol
 
+from evennia.server.portal.ws_protocol import (WSClientProtocolBase,
+                                               connect_ws)
 from evennia.server.session import Session
 from evennia.utils import get_evennia_version
 from evennia.utils.logger import log_err, log_info
@@ -33,7 +33,7 @@ GRAPEVINE_AUTH_ERROR = 4000
 GRAPEVINE_HEARTBEAT_FAILURE = 4001
 
 
-class RestartingWebsocketServerFactory(WebSocketClientFactory, protocol.ReconnectingClientFactory):
+class RestartingWebsocketServerFactory(protocol.ReconnectingClientFactory):
     """
     A variant of the websocket-factory that auto-reconnects.
 
@@ -42,17 +42,20 @@ class RestartingWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnec
     initialDelay = 1
     factor = 1.5
     maxDelay = 60
+    noisy = False
+
+    # read by connect_ws to build the outbound handshake
+    ws_url = GRAPEVINE_URI
+    ws_subprotocols = ()
+    ws_headers = ()
 
     def __init__(self, sessionhandler, *args, **kwargs):
         self.uid = kwargs.pop("uid")
         self.channel = kwargs.pop("grapevine_channel")
         self.sessionhandler = sessionhandler
 
-        # self.noisy = False
         self.port = None
         self.bot = None
-
-        WebSocketClientFactory.__init__(self, GRAPEVINE_URI, *args, **kwargs)
 
     def buildProtocol(self, addr):
         """
@@ -116,26 +119,16 @@ class RestartingWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnec
 
     def start(self):
         "Connect protocol to remote server"
-
-        try:
-            from twisted.internet import ssl
-        except ImportError:
-            log_err("To use Grapevine, The PyOpenSSL module must be installed.")
-        else:
-            context_factory = ssl.ClientContextFactory() if self.isSecure else None
-            connectWS(self, context_factory)
-            # service.name = "websocket/grapevine"
-            # self.sessionhandler.portal.services.addService(service)
+        connect_ws(self)
 
 
-class GrapevineClient(WebSocketClientProtocol, Session):
+class GrapevineClient(WSClientProtocolBase, Session):
     """
     Implements the grapevine client
     """
 
     def __init__(self):
-        WebSocketClientProtocol.__init__(self)
-        Session.__init__(self)
+        super().__init__()
         self.restart_downtime = None
 
     def at_login(self):
@@ -217,10 +210,7 @@ class GrapevineClient(WebSocketClientProtocol, Session):
 
         """
         self.sessionhandler.disconnect(self)
-        # autobahn-python: 1000 for a normal close, 3000-4999 for app. specific,
-        # in case anyone wants to expose this functionality later.
-        #
-        # sendClose() under autobahn/websocket/interfaces.py
+        # RFC 6455 close codes: 1000 normal, 3000-4999 application-specific.
         self.sendClose(CLOSE_NORMAL, reason)
 
     # send_* method are automatically callable through .msg(heartbeat={}) etc

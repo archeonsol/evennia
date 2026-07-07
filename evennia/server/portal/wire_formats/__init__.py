@@ -15,6 +15,7 @@ Supported subprotocols:
     - terminal.mudstandards.org: Raw ANSI terminal over WebSocket
 """
 
+from .azaban import AzabanFormat
 from .base import WireFormat
 from .evennia_v1 import EvenniaV1Format
 from .gmcp_standard import GmcpStandardFormat
@@ -29,6 +30,7 @@ from .terminal import TerminalFormat
 WIRE_FORMATS = {
     fmt.name: fmt
     for fmt in [
+        AzabanFormat(),
         JsonStandardFormat(),
         GmcpStandardFormat(),
         TerminalFormat(),
@@ -38,6 +40,7 @@ WIRE_FORMATS = {
 
 __all__ = [
     "WireFormat",
+    "AzabanFormat",
     "EvenniaV1Format",
     "JsonStandardFormat",
     "GmcpStandardFormat",

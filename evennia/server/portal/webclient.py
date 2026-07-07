@@ -2,7 +2,8 @@
 Webclient based on websockets with MUD Standards subprotocol support.
 
 This implements a webclient with WebSockets (http://en.wikipedia.org/wiki/WebSocket)
-by use of the autobahn-python package's implementation (https://github.com/crossbario/autobahn-python).
+on top of the sans-io ``wsproto`` state machine driven from a Twisted protocol
+(see ``evennia/server/portal/ws_protocol.py``; this replaced autobahn-python).
 It is used together with evennia/web/media/javascript/evennia_websocket_webclient.js.
 
 Subprotocol Negotiation (RFC 6455 Sec-WebSocket-Protocol):
@@ -32,23 +33,41 @@ from the command line and interprets it as an Evennia Command: `["text", ["look"
 
 """
 
+import asyncio
 import json
+import time
+from collections import deque
 
-from autobahn.exception import Disconnected
-from autobahn.twisted.websocket import WebSocketServerProtocol
 from django.conf import settings
 
+from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+from evennia.server.portal.ws_protocol import (
+    CLOSE_NORMAL,
+    GOING_AWAY,
+    Disconnected,
+    WSProtocolBase,
+)
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 
-# Status Code 1000: Normal Closure
-#   called when the connection was closed through JavaScript
-CLOSE_NORMAL = WebSocketServerProtocol.CLOSE_STATUS_CODE_NORMAL
+# --- Resumable sessions ---
+# Each outbound JSON frame is stamped with a monotonic ``s`` (seq). On an unclean
+# close we stash the recent buffer keyed by the client's resume token for a short
+# grace window; when the client reconnects and presents the token + its last seen
+# seq in `hello`, we replay the frames it missed, so a brief blip doesn't drop
+# lines. State events are idempotent, so the parallel fresh-login pushes are safe.
+RESUME_BUFFER_MAX = 400        # frames kept per connection
+RESUME_GRACE_SECONDS = 90      # how long a stash survives a disconnect
+_RESUME_STASH = {}             # token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float}
 
-# Status Code 1001: Going Away
-#   called when the browser is navigating away from the page
-GOING_AWAY = WebSocketServerProtocol.CLOSE_STATUS_CODE_GOING_AWAY
+
+def _prune_resume_stash():
+    now = time.time()
+    for tok in [t for t, s in _RESUME_STASH.items() if s["deadline"] < now]:
+        _RESUME_STASH.pop(tok, None)
+
+# CLOSE_NORMAL (1000) / GOING_AWAY (1001) are imported from ws_protocol.
 
 _BASE_SESSION_CLASS = class_from_module(settings.BASE_SESSION_CLASS)
 
@@ -125,7 +144,7 @@ def _get_supported_subprotocols():
     return protos
 
 
-class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
+class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
     """
     Implements the server-side of the Websocket connection.
 
@@ -244,8 +263,8 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
         This is called when the WebSocket connection is fully established.
 
         """
-        client_address = self.transport.client
-        client_address = client_address[0] if client_address else None
+        peer = self.transport.getPeer()
+        client_address = getattr(peer, "host", None)
 
         if client_address in settings.UPSTREAM_IPS and "x-forwarded-for" in self.http_headers:
             addresses = [x.strip() for x in self.http_headers["x-forwarded-for"].split(",")]
@@ -319,7 +338,10 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
         """
         csession = self.get_client_session()
 
-        if csession:
+        # Portal-wide shutdown (deploy reboot) must not wipe the Django session
+        # auto-login stamp — the webclient reconnect loop relies on it.
+        preserve_auth = getattr(self.sessionhandler, "_disconnect_all", False)
+        if csession and not preserve_auth:
             # if the nonce is different, webclient_authenticated_uid has been
             # set *before* this disconnect (disconnect called after a new client
             # connects, which occurs in some 'fast' browsers like Google Chrome
@@ -331,13 +353,42 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             self.logged_in = False
 
         self.sessionhandler.disconnect(self)
-        # autobahn-python:
-        # 1000 for a normal close, 1001 if the browser window is closed,
-        # 3000-4999 for app. specific,
-        # in case anyone wants to expose this functionality later.
-        #
-        # sendClose() under autobahn/websocket/interfaces.py
+        # RFC 6455 close codes: 1000 normal, 1001 browser window closed,
+        # 3000-4999 application-specific (in case anyone wants to expose that).
         self.sendClose(CLOSE_NORMAL, reason)
+
+    def _handle_resume(self, resume):
+        """On reconnect: bind the resume token and replay any missed frames."""
+        token = resume.get("token")
+        if not token:
+            return
+        self.resume_token = token
+        _prune_resume_stash()
+        stash = _RESUME_STASH.pop(token, None)
+        if not stash:
+            return
+        # Continue the seq counter across the gap and replay what the client
+        # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
+        self.out_seq = stash["last_seq"]
+        self.out_buffer = deque(stash["frames"], maxlen=RESUME_BUFFER_MAX)
+        last_seen = int(resume.get("last_seq") or 0)
+        for seq, frame in list(self.out_buffer):
+            if seq > last_seen:
+                try:
+                    self.sendMessage(frame.encode())
+                except Exception:
+                    pass
+
+    def _stash_for_resume(self):
+        token = getattr(self, "resume_token", None)
+        buf = getattr(self, "out_buffer", None)
+        if token and buf:
+            _RESUME_STASH[token] = {
+                "frames": list(buf),
+                "last_seq": getattr(self, "out_seq", 0),
+                "deadline": time.time() + RESUME_GRACE_SECONDS,
+            }
+            _prune_resume_stash()
 
     def onClose(self, wasClean, code=None, reason=None):
         """
@@ -351,8 +402,13 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             reason (str or None): Close reason as sent by the WebSocket peer.
 
         """
-        if code == CLOSE_NORMAL or code == GOING_AWAY:
+        self._stash_for_resume()
+        if code == CLOSE_NORMAL:
             self.disconnect(reason)
+        elif code == GOING_AWAY:
+            # Unclean from the portal's POV: keep browser auto-login for reconnect.
+            self.logged_in = False
+            self.sessionhandler.disconnect(self)
         else:
             self.websocket_close_code = code
 
@@ -369,6 +425,16 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
                              UTF-8 encoded text.
 
         """
+        # Peek for a resume request in the client's hello (before decoding), so
+        # we can replay missed frames at the portal without involving the server.
+        if not isBinary:
+            try:
+                raw = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                raw = None
+            if isinstance(raw, dict) and raw.get("t") == "hello":
+                self._handle_resume(raw.get("resume") or {})
+
         if self.wire_format:
             kwargs = self.wire_format.decode_incoming(
                 payload, isBinary, protocol_flags=self.protocol_flags
@@ -384,6 +450,23 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             except (json.JSONDecodeError, UnicodeDecodeError, IndexError):
                 pass
 
+    def _stamp_and_buffer(self, line):
+        """Stamp a monotonic ``s`` seq onto a JSON frame and buffer it for resume."""
+        try:
+            obj = json.loads(line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return line
+        if not isinstance(obj, dict):
+            return line
+        self.out_seq = getattr(self, "out_seq", 0) + 1
+        obj["s"] = self.out_seq
+        line = json.dumps(obj)
+        buf = getattr(self, "out_buffer", None)
+        if buf is None:
+            buf = self.out_buffer = deque(maxlen=RESUME_BUFFER_MAX)
+        buf.append((self.out_seq, line))
+        return line
+
     def sendLine(self, line):
         """
         Send data to client.
@@ -392,6 +475,7 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             line (str): Text to send.
 
         """
+        line = self._stamp_and_buffer(line)
         try:
             return self.sendMessage(line.encode())
         except Disconnected:
@@ -578,3 +662,34 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             # Fallback: legacy behavior
             if not cmdname == "options":
                 self.sendLine(json.dumps([cmdname, args, kwargs]))
+
+
+class AsyncioWebSocketProtocol(asyncio.Protocol):
+    """Run a ``WebSocketClient`` (full webclient session) on a native asyncio loop.
+
+    Composition mirror of ``AsyncioTelnetProtocol``: owns a ``WebSocketClient``,
+    hands it an ``AsyncioTransportShim``, and forwards the loop's transport
+    callbacks. The wsproto core is transport-agnostic and the session layer only
+    touches the (shimmed) transport, so the webclient runs unchanged. Use with
+    ``loop.create_server(lambda: AsyncioWebSocketProtocol(factory), ...)`` where
+    ``factory`` carries ``.sessionhandler`` (as ``WSServerFactory`` does).
+    """
+
+    def __init__(self, factory):
+        self._factory = factory
+        self.ws = None
+
+    def connection_made(self, transport):
+        proto_class = getattr(self._factory, "protocol", None) or WebSocketClient
+        proto = proto_class()
+        proto.factory = self._factory
+        proto.transport = AsyncioTransportShim(transport)
+        self.ws = proto
+        # server role: onConnect/onOpen fire once the client's upgrade arrives
+
+    def data_received(self, data):
+        self.ws.dataReceived(data)
+
+    def connection_lost(self, exc):
+        if self.ws is not None:
+            self.ws.connectionLost(str(exc) if exc else None)

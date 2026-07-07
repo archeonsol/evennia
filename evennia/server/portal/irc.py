@@ -4,6 +4,7 @@ The bot then pipes what is being said between the IRC channel and one or
 more Evennia channels.
 """
 
+import asyncio
 import re
 
 from twisted.application import internet
@@ -348,6 +349,118 @@ class IRCBot(irc.IRCClient, Session):
         pass
 
 
+class _AsyncioIRCClientProtocol(asyncio.Protocol):
+    """Drive an ``IRCBot`` session over a native asyncio transport."""
+
+    def __init__(self, factory, loop):
+        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+
+        self._shim_cls = AsyncioTransportShim
+        self.session = factory.buildProtocol(None)
+        self.closed = loop.create_future()
+
+    def connection_made(self, transport):
+        self.session.transport = self._shim_cls(transport)
+        self.session.connectionMade()
+
+    def data_received(self, data):
+        self.session.dataReceived(data)
+
+    def connection_lost(self, exc):
+        try:
+            self.session.connectionLost(str(exc) if exc else None)
+        finally:
+            if not self.closed.done():
+                self.closed.set_result(True)
+
+
+async def connect_irc_asyncio(factory):
+    """Connect an IRC bot factory over asyncio, with reconnect."""
+    import ssl as _ssl
+
+    def _stopping():
+        if getattr(factory, "stopping", False):
+            return True
+        bot = getattr(factory, "bot", None)
+        return bool(bot is not None and getattr(bot, "stopping", False))
+
+    loop = asyncio.get_event_loop()
+    delay = getattr(factory, "initialDelay", 1)
+    factor = getattr(factory, "factor", 1.5)
+    max_delay = getattr(factory, "maxDelay", 60)
+
+    while not _stopping():
+        logger.log_info("(re)connecting to %s" % factory.channel)
+        try:
+            ssl_ctx = _ssl.create_default_context() if factory.ssl else None
+            _, proto = await loop.create_connection(
+                lambda: _AsyncioIRCClientProtocol(factory, loop),
+                factory.network,
+                int(factory.port),
+                ssl=ssl_ctx,
+            )
+            delay = getattr(factory, "initialDelay", 1)
+            closed_wait = asyncio.ensure_future(proto.closed)
+            while not closed_wait.done():
+                if _stopping():
+                    try:
+                        proto.session.transport.loseConnection()
+                    except Exception:
+                        pass
+                try:
+                    await asyncio.wait_for(asyncio.shield(closed_wait), timeout=0.25)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+        except Exception:
+            logger.log_trace("asyncio IRC client connection failed")
+
+        if _stopping():
+            break
+        await asyncio.sleep(delay)
+        delay = min(max_delay, delay * factor)
+
+
+def connect_irc(factory):
+    """Connect an outbound IRC client factory (Twisted or asyncio per T3 gate)."""
+    from django.conf import settings
+
+    from evennia.server.portal.asyncio_transport import (
+        asyncio_servers_enabled,
+        get_asyncio_loop,
+    )
+
+    if asyncio_servers_enabled():
+        get_asyncio_loop().create_task(connect_irc_asyncio(factory))
+        return None
+
+    if getattr(settings, "PORTAL_ASYNCIO_SERVERS", False):
+        logger.log_err(
+            "PORTAL_ASYNCIO_SERVERS=True requires an asyncio bootstrap loop "
+            "(no shared loop in this process). Outbound IRC client "
+            "will not connect."
+        )
+        return None
+
+    if not factory.port:
+        return None
+
+    if factory.ssl:
+        try:
+            from twisted.internet import ssl
+
+            service = reactor.connectSSL(
+                factory.network, int(factory.port), factory, ssl.ClientContextFactory()
+            )
+        except ImportError:
+            logger.log_err("To use SSL, the PyOpenSSL module must be installed.")
+            return None
+    else:
+        service = internet.TCPClient(factory.network, int(factory.port), factory)
+    factory.sessionhandler.portal.services.addService(service)
+    return service
+
+
 class IRCBotFactory(protocol.ReconnectingClientFactory):
     """
     Creates instances of IRCBot, connecting with a staggered
@@ -464,16 +577,4 @@ class IRCBotFactory(protocol.ReconnectingClientFactory):
         Connect session to sessionhandler.
 
         """
-        if self.port:
-            if self.ssl:
-                try:
-                    from twisted.internet import ssl
-
-                    service = reactor.connectSSL(
-                        self.network, int(self.port), self, ssl.ClientContextFactory()
-                    )
-                except ImportError:
-                    logger.log_err("To use SSL, the PyOpenSSL module must be installed.")
-            else:
-                service = internet.TCPClient(self.network, int(self.port), self)
-            self.sessionhandler.portal.services.addService(service)
+        connect_irc(self)

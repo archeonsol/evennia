@@ -1,0 +1,102 @@
+/* Azaban shell themes - a dead-tech cathedral terminal. Each theme is one set of
+   custom properties on [data-theme]; components read the vars, never hard-coded
+   colours. :root defaults to Haemal so the shell is never unstyled.
+
+   Deliberately NOT a SaaS palette: near-black grounds, one dominant accent, bone
+   text, gold/alert used sparingly. Chrome only - the xterm-256 game-text palette
+   (ansi-palette.css) is separate. */
+
+:root {
+  --font-mono: "Cascadia Mono", "JetBrains Mono", ui-monospace, "SFMono-Regular",
+    Menlo, Consolas, monospace;
+  --shell-font-size: 15px;
+  --bracket: 9px;      /* corner-tick arm length */
+  --hair: 1px;
+  --rule: var(--hair) solid var(--border);
+}
+
+:root,
+[data-theme="haemal"] {
+  --bg: #0a0806;
+  --bg-elev: #100c0a;
+  --bg-deep: #060403;
+  --fg: #cdbfa6;
+  --fg-dim: #8a7d68;
+  --fg-faint: #4c4338;
+  --accent: #b21f1a;
+  --accent-bright: #e0362b;
+  --gold: #c9a44c;
+  --alert: #e0362b;
+  --ok: #7f9a5c;
+  --border: #251a14;
+  --border-bright: #432f24;
+  --glow: rgba(224, 54, 43, 0.45);
+}
+
+[data-theme="amber"] {
+  --bg: #0a0805;
+  --bg-elev: #100d07;
+  --bg-deep: #060402;
+  --fg: #e6b358;
+  --fg-dim: #977028;
+  --fg-faint: #55401a;
+  --accent: #ffb648;
+  --accent-bright: #ffcf7a;
+  --gold: #ffcf7a;
+  --alert: #ff6a3d;
+  --ok: #b7c24a;
+  --border: #2a1f0c;
+  --border-bright: #4a3616;
+  --glow: rgba(255, 182, 72, 0.4);
+}
+
+[data-theme="abyssal"] {
+  --bg: #05070b;
+  --bg-elev: #0a0e15;
+  --bg-deep: #030509;
+  --fg: #a6bccf;
+  --fg-dim: #607689;
+  --fg-faint: #33424f;
+  --accent: #3f8fc5;
+  --accent-bright: #6fc0e8;
+  --gold: #b9a25a;
+  --alert: #d8593f;
+  --ok: #57a58a;
+  --border: #12202c;
+  --border-bright: #22384a;
+  --glow: rgba(111, 192, 232, 0.35);
+}
+
+[data-theme="sanctum"] {
+  --bg: #0b0a07;
+  --bg-elev: #12100b;
+  --bg-deep: #070603;
+  --fg: #ddd1b2;
+  --fg-dim: #948862;
+  --fg-faint: #524a34;
+  --accent: #c9a44c;
+  --accent-bright: #ecc972;
+  --gold: #ecc972;
+  --alert: #cf5a34;
+  --ok: #9aa85c;
+  --border: #241f12;
+  --border-bright: #40371f;
+  --glow: rgba(236, 201, 114, 0.4);
+}
+
+[data-theme="matrix"] {
+  --bg: #030805;
+  --bg-elev: #061009;
+  --bg-deep: #010402;
+  --fg: #5fd97a;
+  --fg-dim: #2f7a45;
+  --fg-faint: #1a4227;
+  --accent: #39ff88;
+  --accent-bright: #8affb0;
+  --gold: #d7ff8a;
+  --alert: #ff5b6a;
+  --ok: #39ff88;
+  --border: #0c2716;
+  --border-bright: #17492a;
+  --glow: rgba(57, 255, 136, 0.4);
+}

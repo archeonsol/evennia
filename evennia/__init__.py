@@ -105,6 +105,8 @@ _LAZY_EXPORTS = {
     "hooks": ".hooks:",
     "FuncParser": ".utils.funcparser:FuncParser",
     "OnDemandTask": ".scripts.ondemandhandler:OnDemandTask",
+    "standalone": ".standalone:standalone",
+    "shutdown_standalone": ".standalone:shutdown_standalone",
     # Handlers (singletons exposed as module attributes)
     "TASK_HANDLER": ".scripts.taskhandler:TASK_HANDLER",
     "MONITOR_HANDLER": ".scripts.monitorhandler:MONITOR_HANDLER",
@@ -231,9 +233,9 @@ def _init(portal_mode=False):
 
     PROCESS_ID = os.getpid()
 
-    from twisted.application.service import Application
+    from evennia.server.service_registry import ServiceCollection
 
-    TWISTED_APPLICATION = Application("Evennia")
+    TWISTED_APPLICATION = ServiceCollection("Evennia")
 
     if portal_mode:
         # Set up the PortalSessionHandler

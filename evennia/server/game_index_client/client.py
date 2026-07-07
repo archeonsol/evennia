@@ -10,15 +10,10 @@ import urllib.request
 
 import django
 from django.conf import settings
-from twisted.internet import defer, protocol, reactor
-from twisted.web.client import Agent, HTTPConnectionPool, _HTTP11ClientFactory
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IBodyProducer
-from zope.interface import implementer
 
 import evennia
 from evennia.accounts.models import AccountDB
-from evennia.utils import get_evennia_version, logger
+from evennia.utils import get_evennia_version, http, logger
 
 _EGI_HOST = "http://evennia-game-index.appspot.com"
 _EGI_REPORT_PATH = "/api/v1/game/check_in"
@@ -42,9 +37,6 @@ class EvenniaGameIndexClient:
         self.logged_first_connect = False
 
         self._on_bad_request = on_bad_request
-        # Oh, the humanity. Silence the factory start/stop messages.
-        self._conn_pool = HTTPConnectionPool(reactor)
-        self._conn_pool._factory = QuietHTTP11ClientFactory
 
     async def send_game_details(self):
         """
@@ -75,10 +67,9 @@ class EvenniaGameIndexClient:
         Build the request to send to the index.
 
         """
-        agent = Agent(reactor, pool=self._conn_pool)
         headers = {
-            b"User-Agent": [b"Evennia Game Index Client"],
-            b"Content-Type": [b"application/x-www-form-urlencoded"],
+            "User-Agent": "Evennia Game Index Client",
+            "Content-Type": "application/x-www-form-urlencoded",
         }
         egi_config = settings.GAME_INDEX_LISTING
         # We are using `or` statements below with dict.get() to avoid sending
@@ -116,68 +107,11 @@ class EvenniaGameIndexClient:
 
         data = urllib.parse.urlencode(values)
 
-        d = agent.request(
-            b"POST",
-            bytes(self.report_url, "utf-8"),
-            headers=Headers(headers),
-            bodyProducer=StringProducer(data),
-        )
-
-        d.addCallback(self.handle_egd_response)
-        return d
+        return http.request(
+            "POST", self.report_url, headers=headers, data=data
+        ).addCallback(self.handle_egd_response)
 
     def handle_egd_response(self, response):
         if 200 <= response.code < 300:
-            d = defer.succeed((response.code, "OK"))
-        else:
-            # Go through the horrifying process of getting the response body
-            # out of Twisted's plumbing.
-            d = defer.Deferred()
-            response.deliverBody(SimpleResponseReceiver(response.code, d))
-        return d
-
-
-class SimpleResponseReceiver(protocol.Protocol):
-    """
-    Used for pulling the response body out of an HTTP response.
-    """
-
-    def __init__(self, status_code, d):
-        self.status_code = status_code
-        self.buf = ""
-        self.d = d
-
-    def dataReceived(self, data):
-        self.buf += data
-
-    def connectionLost(self, reason=protocol.connectionDone):
-        self.d.callback((self.status_code, self.buf))
-
-
-@implementer(IBodyProducer)
-class StringProducer:
-    """
-    Used for feeding a request body to the tx HTTP client.
-    """
-
-    def __init__(self, body):
-        self.body = bytes(body, "utf-8")
-        self.length = len(body)
-
-    def startProducing(self, consumer):
-        consumer.write(self.body)
-        return defer.succeed(None)
-
-    def pauseProducing(self):
-        pass
-
-    def stopProducing(self):
-        pass
-
-
-class QuietHTTP11ClientFactory(_HTTP11ClientFactory):
-    """
-    Silences the obnoxious factory start/stop messages in the default client.
-    """
-
-    noisy = False
+            return (response.code, "OK")
+        return (response.code, response.content.decode("utf-8", "replace"))

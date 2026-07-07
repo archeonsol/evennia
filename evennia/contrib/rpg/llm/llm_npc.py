@@ -14,10 +14,10 @@ from collections import defaultdict
 from random import choice
 
 from django.conf import settings
-from twisted.internet import reactor, task
-from twisted.internet.defer import CancelledError, inlineCallbacks
+from twisted.internet.defer import CancelledError
 
 from evennia import AttributeProperty, Command, DefaultCharacter
+from evennia.utils import clock
 from evennia.utils.utils import make_iter
 
 from .llm_client import LLMClient
@@ -107,8 +107,7 @@ class LLMNPC(DefaultCharacter):
         prompt += "\n" + "\n".join(mem for mem in memory)
         return prompt
 
-    @inlineCallbacks
-    def at_talked_to(self, speech, character):
+    async def at_talked_to(self, speech, character):
         """Called when this NPC is talked to by a character."""
 
         def _respond(response):
@@ -157,8 +156,8 @@ class LLMNPC(DefaultCharacter):
             """Suppress task-cancel errors only"""
             failure.trap(CancelledError)
 
-        thinking_defer = task.deferLater(
-            reactor, self.thinking_timeout, _echo_thinking_message
+        thinking_defer = clock.defer_later(
+            self.thinking_timeout, _echo_thinking_message
         ).addErrback(_handle_cancel_error)
 
         # remember latest input in memory, so it's included in the prompt
@@ -168,7 +167,7 @@ class LLMNPC(DefaultCharacter):
         prompt = self.build_prompt(character, speech)
 
         # get the response from the LLM server
-        yield self.llm_client.get_response(prompt).addCallback(_respond)
+        _respond(await self.llm_client.get_response(prompt))
 
 
 class CmdLLMTalk(Command):
@@ -208,6 +207,6 @@ class CmdLLMTalk(Command):
                 from_obj=self.caller,
             )
         if hasattr(target, "at_talked_to"):
-            target.at_talked_to(self.speech, self.caller)
+            clock.run_coroutine(target.at_talked_to(self.speech, self.caller))
         else:
             self.caller.msg(f"{target.key} doesn't seem to want to talk to you.")

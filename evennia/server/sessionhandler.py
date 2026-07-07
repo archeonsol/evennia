@@ -17,7 +17,7 @@ from codecs import decode as codecs_decode
 
 from django.conf import settings
 from django.utils.translation import gettext as _
-from twisted.internet import defer
+from evennia.server.service_registry import IMMEDIATE_RESULT
 
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
@@ -40,10 +40,12 @@ from evennia.utils.utils import (
 
 
 def _send_admin_to_portal(session, **kwargs):
-    amp_protocol = getattr(evennia.EVENNIA_SERVER_SERVICE, "amp_protocol", None)
-    if not amp_protocol:
-        return defer.succeed(None)
-    return amp_protocol.send_AdminServer2Portal(session, **kwargs)
+    bus = getattr(evennia.EVENNIA_SERVER_SERVICE, "portal_bus", None)
+    if not bus:
+        bus = getattr(evennia.EVENNIA_SERVER_SERVICE, "amp_protocol", None)
+    if not bus:
+        return IMMEDIATE_RESULT
+    return bus.send_AdminServer2Portal(session, **kwargs)
 
 
 # delayed imports
@@ -281,6 +283,16 @@ class SessionHandler(dict):
         if "prompt" in rkwargs:
             prompt = rkwargs.pop("prompt")
             rkwargs["prompt"] = prompt
+        # opt-in typed validation against the outputfunc catalog (log-only; the
+        # frame is still sent). Off by default so the hot path pays nothing.
+        if getattr(settings, "VALIDATE_OUTPUT_FRAMES", False):
+            from evennia.server.protocol.outputfuncs import validate_frame
+
+            ok, err = validate_frame(rkwargs)
+            if not ok:
+                from evennia.utils import logger
+
+                logger.log_warn(f"output frame failed schema validation: {err}")
         return rkwargs
 
 
@@ -407,6 +419,10 @@ class ServerSessionHandler(SessionHandler):
             sess.load_sync_data(sessdict)
             if sess.uid:
                 sess.account = _AccountDB.objects.get_account_from_uid(sess.uid)
+                # invariant: a synced session carrying a uid is authenticated. Guard
+                # against a logged_in flag that got dropped in transit (would land
+                # the player back at the connect screen after a reload).
+                sess.logged_in = True
             self[sessid] = sess
             sess.at_sync()
 
@@ -469,7 +485,7 @@ class ServerSessionHandler(SessionHandler):
             the Server.
 
         """
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.SCONN, protocol_path=protocol_path, config=configdict
         )
 
@@ -478,7 +494,7 @@ class ServerSessionHandler(SessionHandler):
         Called by server when reloading. We tell the portal to start a new server instance.
 
         """
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.SRELOAD
         )
 
@@ -487,7 +503,7 @@ class ServerSessionHandler(SessionHandler):
         Called by server when reloading. We tell the portal to start a new server instance.
 
         """
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.SRESET
         )
 
@@ -497,7 +513,7 @@ class ServerSessionHandler(SessionHandler):
         itself down)
 
         """
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.PSHUTD
         )
 
@@ -556,7 +572,7 @@ class ServerSessionHandler(SessionHandler):
         session.logged_in = True
         # sync the portal to the session
         if not testmode:
-            evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+            evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
                 session, operation=amp.SLOGIN, sessiondata={"logged_in": True, "uid": session.uid}
             )
         account.at_post_login(session=session)
@@ -655,7 +671,7 @@ class ServerSessionHandler(SessionHandler):
             del self._disconnect_all
         self.clear()
         # tell portal to disconnect all sessions
-        evennia.EVENNIA_SERVER_SERVICE.amp_protocol.send_AdminServer2Portal(
+        evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.SDISCONNALL, reason=reason
         )
 
@@ -805,9 +821,9 @@ class ServerSessionHandler(SessionHandler):
         uid = session.sessid
         if uid not in self._outbuf:
             self._outbuf[uid] = []
-            from twisted.internet import reactor as _reactor
+            from evennia.utils import clock
 
-            _reactor.callLater(0, self._flush_outbuf, uid)
+            clock.call_later(0, self._flush_outbuf, uid)
         self._outbuf[uid].append(kwargs)
 
     def _flush_outbuf(self, uid):
@@ -843,18 +859,18 @@ class ServerSessionHandler(SessionHandler):
             elif v is not None:
                 text_parts.append(str(v))
 
-        amp = evennia.EVENNIA_SERVER_SERVICE.amp_protocol
+        bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
 
         if text_parts:
             joined = "\n".join(p for p in text_parts if p)
             if joined:
                 frame = {"text": (joined, text_options) if text_options else joined}
                 frame = self.clean_senddata(session, frame)
-                amp.send_MsgServer2Portal(session, **frame)
+                bus.send_MsgServer2Portal(session, **frame)
 
         for frame in standalone_frames:
             frame = self.clean_senddata(session, frame)
-            amp.send_MsgServer2Portal(session, **frame)
+            bus.send_MsgServer2Portal(session, **frame)
 
     def get_inputfuncs(self):
         """

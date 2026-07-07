@@ -30,7 +30,13 @@ ENGINE = RuleEngine()
 
 
 def _sync(d):
-    """Extract an already-fired Deferred's result, re-raising on failure."""
+    """Extract an already-fired Deferred/coroutine's result, re-raising on failure."""
+    import inspect
+
+    from twisted.internet.defer import ensureDeferred
+
+    if inspect.iscoroutine(d):
+        d = ensureDeferred(d)  # try_action_dispatch is `async def` now
     out = {}
     d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
     if "fail" in out:

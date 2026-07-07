@@ -55,16 +55,16 @@ def run_cached_at_init_burst(mode: str) -> None:
             except Exception:
                 logger.log_trace("at_init_scheduler: entity.at_init failed")
         if end < len(entities):
-            from twisted.internet import reactor
+            from evennia.utils import clock
 
-            reactor.callLater(delay, _run_batch, end)
+            clock.call_later(delay, _run_batch, end)
 
     def _start():
         _run_batch(0)
 
     if mode == "reload" and _defer_on_reload():
-        from twisted.internet import reactor
+        from evennia.utils import clock
 
-        reactor.callLater(0, _start)
+        clock.call_later(0, _start)
     else:
         _start()

@@ -4,6 +4,7 @@ Evennia server. It is instantiated by the evennia/server/server.py module.
 """
 
 import importlib
+import signal
 import time
 import traceback
 
@@ -13,13 +14,10 @@ from django.conf import settings
 from django.db import connection
 from django.db.utils import OperationalError
 from django.utils.translation import gettext as _
-from twisted.application import internet
-from twisted.application.service import MultiService
-from twisted.internet import defer, reactor
-from twisted.internet.defer import Deferred
-from twisted.internet.task import LoopingCall
 
 import evennia
+from evennia.server.service_registry import MultiService
+from evennia.utils import clock
 from evennia.utils import logger
 from evennia.utils.utils import get_evennia_version, make_iter, mod_import
 
@@ -29,27 +27,28 @@ _SA = object.__setattr__
 class EvenniaServerService(MultiService):
     def _wrap_sigint_handler(self, *args):
         if getattr(self, "_shutdown_in_progress", False):
-            reactor.callLater(0, lambda: reactor.stop() if reactor.running else None)
+            clock.call_later(0, clock.stop_loop)
             return
 
         self._shutdown_in_progress = True
-        if hasattr(self, "web_root"):
-            d = self.web_root.empty_threadpool()
-            d.addCallback(
-                lambda _: defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
-            )
-        else:
-            d = defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
-        self._shutdown_deferred = d
-        d.addCallback(lambda _: reactor.stop() if reactor.running else None)
-        d.addBoth(lambda result: (setattr(self, "_shutdown_in_progress", False), result)[1])
-        # Fallback: force-stop after 5 s in case the graceful shutdown hangs.
-        reactor.callLater(5, lambda: reactor.stop() if reactor.running else None)
+
+        async def _graceful_stop():
+            try:
+                if hasattr(self, "web_root"):
+                    await self.web_root.empty_threadpool()
+                await self.shutdown("reload", _reactor_stopping=True)
+            finally:
+                self._shutdown_in_progress = False
+                clock.stop_loop()
+
+        clock.run_coroutine(_graceful_stop())
+        clock.call_later(5, clock.stop_loop)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.maintenance_count = 0
-        self.amp_protocol = None  # set by amp factory
+        self.portal_bus = None  # RedisServerBus (Portal<->Server session IPC)
+        self.amp_protocol = None  # deprecated alias of portal_bus
         self.amp_service = None
         self.info_dict = {
             "servername": settings.SERVERNAME,
@@ -79,7 +78,8 @@ class EvenniaServerService(MultiService):
         # this is necessary over using Twisted's signal handler.
         # (see https://github.com/evennia/evennia/issues/1128)
 
-        reactor.sigInt = self._wrap_sigint_handler
+        if getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", True):
+            signal.signal(signal.SIGINT, self._wrap_sigint_handler)
 
         self.start_stop_modules = [
             mod_import(mod)
@@ -174,10 +174,9 @@ class EvenniaServerService(MultiService):
                 evennia.SESSION_HANDLER.disconnect(session, reason=reason)
 
     # Server startup methods
-    def privilegedStartService(self):
+    def _privileged_start(self):
         self.start_time = time.time()
 
-        # Tell the system the server is starting up; some things are not available yet
         try:
             evennia.ServerConfig.objects.conf("server_starting_mode", True)
         except OperationalError:
@@ -197,15 +196,10 @@ class EvenniaServerService(MultiService):
 
         ENABLED = []
         if settings.IRC_ENABLED:
-            # IRC channel connections
             ENABLED.append("irc")
-
         if settings.RSS_ENABLED:
-            # RSS feed channel connections
             ENABLED.append("rss")
-
         if settings.GRAPEVINE_ENABLED:
-            # Grapevine channel connections
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
@@ -219,17 +213,14 @@ class EvenniaServerService(MultiService):
 
         self.register_plugins()
 
-        super().privilegedStartService()
-
-        # clear server startup mode
         try:
-            # Close stale DB connections inherited from the pre-fork parent
-            # process. Python 3.14's sqlite3 module is not fork-safe and will
-            # raise MemoryError if a pre-fork connection is reused.
             django.db.connections.close_all()
             evennia.ServerConfig.objects.conf("server_starting_mode", delete=True)
         except OperationalError:
             print("Server server_starting_mode couldn't unset - db not set up.")
+
+    def privilegedStartService(self):
+        self._privileged_start()
 
     def register_plugins(self):
         SERVER_SERVICES_PLUGIN_MODULES = make_iter(settings.SERVER_SERVICES_PLUGIN_MODULES)
@@ -242,72 +233,43 @@ class EvenniaServerService(MultiService):
                 print(f"Could not load plugin module {plugin_module}")
 
     def register_amp(self):
-        # The AMP protocol handles the communication between
-        # the portal and the mud server. Only reason to ever deactivate
-        # it would be during testing and debugging.
+        """Register the Portal<->Server redis bus (session/admin IPC).
 
-        ifacestr = ""
-        if settings.AMP_INTERFACE != "127.0.0.1":
-            ifacestr = "-%s" % settings.AMP_INTERFACE
+        The Portal AMP TCP listener (``register_amp`` on the Portal service) is
+        separate and carries launcher control only.
+        """
+        bus = getattr(settings, "SERVER_PORTAL_BUS", "redis")
+        if bus != "redis":
+            logger.log_err(
+                "SERVER_PORTAL_BUS=%r is no longer supported; use 'redis' and set REDIS_BUS_URL."
+                % bus
+            )
+        self.register_redis_bus()
 
-        self.info_dict["amp"] = "amp %s: %s" % (ifacestr, settings.AMP_PORT)
+    def register_redis_bus(self):
+        """Redis Streams bus for Portal<->Server session/admin traffic."""
+        from evennia.server.redis_bus import RedisServerBus
 
-        from evennia.server import amp_client
-
-        factory = amp_client.AMPClientFactory(self)
-        self.amp_service = internet.TCPClient(settings.AMP_HOST, settings.AMP_PORT, factory)
-        self.amp_service.setName("ServerAMPClient")
-        self.amp_service.setServiceParent(self)
+        self.info_dict["amp"] = "redis bus"
+        self.portal_bus = RedisServerBus(self)
+        self.amp_protocol = self.portal_bus  # deprecated alias
+        clock.when_running(self.portal_bus.start_bus)
 
     def register_webserver(self):
-        # Start a django-compatible webserver.
+        # The Server serves Django over ASGI (uvicorn). The legacy Twisted-WSGI
+        # path was retired in the T3 modernization; WEB_SERVER is always "asgi".
+        self.register_asgi_webserver()
 
-        from evennia.server.webserver import (
-            DjangoWebRoot,
-            LockableThreadPool,
-            PrivateStaticRoot,
-            Website,
-            WSGIWebServer,
-        )
-
-        # start a thread pool and define the root url (/) as a wsgi resource
-        # recognized by Django
-        threads = LockableThreadPool(
-            minthreads=max(1, settings.WEBSERVER_THREADPOOL_LIMITS[0]),
-            maxthreads=max(1, settings.WEBSERVER_THREADPOOL_LIMITS[1]),
-        )
-
-        web_root = DjangoWebRoot(threads)
-        # point our media resources to url /media
-        web_root.putChild(b"media", PrivateStaticRoot(settings.MEDIA_ROOT))
-        # point our static resources to url /static
-        web_root.putChild(b"static", PrivateStaticRoot(settings.STATIC_ROOT))
-        self.web_root = web_root
-
-        try:
-            WEB_PLUGINS_MODULE = mod_import(settings.WEB_PLUGINS_MODULE)
-        except ImportError:
-            WEB_PLUGINS_MODULE = None
-            self.info_dict["errors"] = (
-                "WARNING: settings.WEB_PLUGINS_MODULE not found - "
-                "copy 'evennia/game_template/server/conf/web_plugins.py to mygame/server/conf."
-            )
-
-        if WEB_PLUGINS_MODULE:
-            # custom overloads
-            web_root = WEB_PLUGINS_MODULE.at_webserver_root_creation(web_root)
-
-        web_site = Website(web_root, logPath=settings.HTTP_LOG_FILE)
-        web_site.is_portal = False
+    def register_asgi_webserver(self):
+        """Serve Django over ASGI (uvicorn in a worker thread). See asgi_webserver."""
+        from evennia.server.asgi_webserver import UvicornWebService
 
         self.info_dict["webserver"] = ""
-        for proxyport, serverport in settings.WEBSERVER_PORTS:
-            # create the webserver (we only need the port for this)
-            webserver = WSGIWebServer(threads, serverport, web_site, interface="127.0.0.1")
-            webserver.setName("EvenniaWebServer%s" % serverport)
-            webserver.setServiceParent(self)
-
-            self.info_dict["webserver"] += "webserver: %s" % serverport
+        for _proxyport, serverport in settings.WEBSERVER_PORTS:
+            svc = UvicornWebService(serverport, interface="127.0.0.1")
+            svc.setName("EvenniaASGIWebServer%s" % serverport)
+            svc.setServiceParent(self)
+            self.info_dict["webserver"] += "webserver (asgi): %s" % serverport
 
     def sqlite3_prep(self):
         """
@@ -487,17 +449,16 @@ class EvenniaServerService(MultiService):
         # strict enforcement lives in the test suite
         # (test_engine_lint_is_clean) so an engine documentation issue
         # cannot block a game from booting.
-        from evennia.hooks.lint import warn_at_startup as _hook_lint
-        from evennia.typeclasses.models import TypedObject
+        if mode != "reload":
+            from evennia.hooks.lint import warn_at_startup as _hook_lint
 
-        _hook_lint()
+            _hook_lint()
 
         # start server time and maintenance task. Stop-and-replace so a
         # repeat init (tests) never leaves an orphaned task ticking.
         if self.maintenance_task is not None and self.maintenance_task.running:
             self.maintenance_task.stop()
-        self.maintenance_task = LoopingCall(self.server_maintenance)
-        self.maintenance_task.start(60, now=True)  # call every minute
+        self.maintenance_task = clock.looping(60, self.server_maintenance, now=True)  # every minute
 
         # load declared system modules and start the system-scheduler driver
         # (engine systems first, then settings.SYSTEM_MODULES; a broken
@@ -553,22 +514,19 @@ class EvenniaServerService(MultiService):
         evennia.GLOBAL_SCRIPTS.start()
 
     async def _await_hooks(self, instances, hook_name, *args, **kwargs):
-        """Run ``hook_name`` on each instance and await any returned Deferreds.
+        """Run ``hook_name`` on each instance and await any returned awaitables."""
+        import asyncio
 
-        Hooks defined on user typeclasses are free to return a Deferred per the
-        Twisted contract. ``maybeDeferred`` normalizes sync returns to fired
-        Deferreds. Errors are logged per-instance and do not abort siblings.
-        """
-        deferreds = []
+        tasks = []
         for obj in instances:
             try:
-                d = defer.maybeDeferred(getattr(obj, hook_name), *args, **kwargs)
+                result = getattr(obj, hook_name)(*args, **kwargs)
+                tasks.append(clock.maybe_await(result))
             except Exception:
                 logger.log_trace(f"Error invoking {hook_name} on {obj}")
                 continue
-            deferreds.append(d)
-        if deferreds:
-            await defer.DeferredList(deferreds, consumeErrors=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def shutdown(self, mode="reload", _reactor_stopping=False):
         """
@@ -612,10 +570,10 @@ class EvenniaServerService(MultiService):
                 if not s.id:
                     continue
                 try:
-                    await defer.maybeDeferred(s.at_server_reload)
+                    await clock.maybe_await(s.at_server_reload)
                 except Exception:
                     logger.log_trace(f"Error in at_server_reload on script {s}")
-            await evennia.SESSION_HANDLER.all_sessions_portal_sync()
+            await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
             self.at_server_reload_stop()
             # only save monitor state on reload, not on shutdown/reset
             from evennia.scripts.monitorhandler import MONITOR_HANDLER
@@ -633,8 +591,8 @@ class EvenniaServerService(MultiService):
                 await self._await_hooks(
                     evennia.AccountDB.get_all_cached_instances(), "at_server_shutdown"
                 )
-                if self.amp_protocol:
-                    await evennia.SESSION_HANDLER.all_sessions_portal_sync()
+                if self.portal_bus:
+                    await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
             else:  # shutdown
                 accounts = list(evennia.AccountDB.get_all_cached_instances())
                 for p in accounts:
@@ -644,7 +602,7 @@ class EvenniaServerService(MultiService):
                 )
                 for p in accounts:
                     try:
-                        await defer.maybeDeferred(p.unpuppet_all)
+                        await clock.maybe_await(p.unpuppet_all)
                     except Exception:
                         logger.log_trace(f"Error in unpuppet_all on {p}")
                 await self._await_hooks(accounts, "at_server_shutdown")
@@ -653,7 +611,7 @@ class EvenniaServerService(MultiService):
                 if not s.id:
                     continue
                 try:
-                    await defer.maybeDeferred(s.at_server_shutdown)
+                    await clock.maybe_await(s.at_server_shutdown)
                 except Exception:
                     logger.log_trace(f"Error in at_server_shutdown on script {s}")
             evennia.ServerConfig.objects.conf("server_restart_mode", "reset")
@@ -692,7 +650,7 @@ class EvenniaServerService(MultiService):
         if not _reactor_stopping:
             # kill the server
             self.shutdown_complete = True
-            reactor.callLater(1, reactor.stop)
+            clock.call_later(0, clock.stop_loop)
 
         # we make sure the proper gametime is saved as late as possible
         evennia.ServerConfig.objects.conf("runtime", evennia.gametime.runtime())
@@ -775,23 +733,11 @@ class EvenniaServerService(MultiService):
 
         ON_DEMAND_HANDLER.load()
 
-        # create/update channels
-        self.create_default_channels()
+        if mode != "reload":
+            self.create_default_channels()
 
         # delete the temporary setting
         evennia.ServerConfig.objects.conf("server_restart_mode", delete=True)
-
-        # Prime the cmdset merge cache for every already-puppeted session so
-        # the first typed command after reload does not pay the cold merge.
-        if mode == "reload":
-            from evennia.commands.cmdset_merge_warmup import warm_all_logged_in_puppet_sessions
-
-            try:
-                warm_all_logged_in_puppet_sessions()
-            except Exception:
-                from evennia.utils import logger
-
-                logger.log_trace("cmdset merge warmup on reload failed")
 
     def at_server_reload_stop(self):
         """

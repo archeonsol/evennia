@@ -48,7 +48,7 @@ Reference data (prototypes, registries, YAML lookups, constants) is not state an
 
 ## Portal and Server are separate concerns
 
-The Portal handles network protocols and stays running across reloads. The Server handles game logic and can be hot-reloaded. Neither knows the other's internals — they communicate via AMP. Don't leak protocol details into game logic or vice versa.
+The Portal handles network protocols and stays running across reloads. The Server handles game logic and can be hot-reloaded. Neither knows the other's internals — session/admin IPC uses redis Streams (plain XREAD/XADD); the launcher still uses AMP TCP on `AMP_PORT`. Don't leak protocol details into game logic or vice versa.
 
 ## The framework should be complete
 

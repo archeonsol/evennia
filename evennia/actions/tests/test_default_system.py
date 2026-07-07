@@ -237,9 +237,9 @@ class TestPy(unittest.TestCase):
         line = Action()
         line._raw_string = "my_var = 42"
         ctx = ActionContext(providers=[state], actor=actor, raw_string="my_var = 42")
-        from evennia.actions.tests.fakes import ENGINE
+        from evennia.actions.tests.fakes import ENGINE, _sync
 
-        ENGINE.dispatch(line, actor, ctx, record_phases=False)
+        _sync(ENGINE.dispatch(line, actor, ctx, record_phases=False))
         self.assertIn("my_var = 42", char.ndb._eveditor.get_buffer())
 
     def test_console_mode_runs_until_exit(self):

@@ -13,7 +13,7 @@ import string
 import sys
 
 import mock
-from autobahn.twisted.websocket import WebSocketServerFactory
+from evennia.server.portal.ws_protocol import WSServerFactory
 from mock import MagicMock, Mock
 from twisted.conch.telnet import DO, DONT, IAC, NAWS, SB, SE, WILL
 from twisted.internet.base import DelayedCall
@@ -210,7 +210,7 @@ class TestTelnet(TwistedTestCase):
         self.transport = proto_helpers.StringTransport()
         self.addCleanup(factory.sessionhandler.disconnect_all)
 
-    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
     def test_command_stacking_no_type_error(self):
         self.transport.client = ["localhost"]
         self.transport.setTcpKeepAlive = Mock()
@@ -226,7 +226,7 @@ class TestTelnet(TwistedTestCase):
         self.proto._handshake_delay.cancel()
         return d
 
-    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
     def test_mudlet_ttype(self):
         self.transport.client = ["localhost"]
         self.transport.setTcpKeepAlive = Mock()
@@ -315,7 +315,7 @@ class TestTelnet(TwistedTestCase):
         self.assertIn("fish & chips", result)
         self.assertNotIn("&amp;", result)
 
-    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
     def test_naws_resize_syncs_updated_width(self):
         """
         Verify that a NAWS resize packet causes sessionhandler.sync to be called
@@ -367,7 +367,7 @@ class TestWebSocket(BaseEvenniaTest):
         self.amp_server_factory = AMPServerFactory(self.portal)
         self.amp_server = self.amp_server_factory.buildProtocol("127.0.0.1")
         self.proto = WebSocketClient()
-        self.proto.factory = WebSocketServerFactory()
+        self.proto.factory = WSServerFactory()
         evennia.PORTAL_SESSION_HANDLER = PortalSessionHandler()
         self.proto.factory.sessionhandler = evennia.PORTAL_SESSION_HANDLER
         self.proto.sessionhandler = evennia.PORTAL_SESSION_HANDLER
@@ -383,7 +383,7 @@ class TestWebSocket(BaseEvenniaTest):
     def tearDown(self):
         super().tearDown()
 
-    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
     def test_data_in(self):
         self.proto.sessionhandler.data_in = MagicMock()
         self.proto.onOpen()
@@ -395,7 +395,7 @@ class TestWebSocket(BaseEvenniaTest):
         self.proto.onMessage(msg, isBinary=False)
         self.proto.sessionhandler.data_in.assert_called_with(self.proto, text=[[sendStr], {}])
 
-    @mock.patch.object(portalsessionhandler, "reactor", new=MagicMock())
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
     def test_data_out(self):
         self.proto.onOpen()
         self.proto.sendEncoded = MagicMock()

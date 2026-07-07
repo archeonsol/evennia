@@ -29,15 +29,25 @@ class TestLLMClient(BaseEvenniaTestCase):
         super().tearDown()
 
     @override_settings(LLM_PROMPT_PREFIX="You are a test bot.")
-    @patch("evennia.contrib.rpg.llm.llm_npc.task.deferLater")
+    @patch("evennia.utils.clock.task.deferLater")
     def test_npc_at_talked_to(self, mock_deferLater):
         """
         Test the npc's at_talked_to method.
         """
+        from twisted.internet.defer import ensureDeferred
+
         mock_LLMClient = Mock()
+
+        async def _get_response(prompt):
+            return "Test response"
+
+        mock_LLMClient.get_response = Mock(side_effect=_get_response)
         self.npc.ndb.llm_client = mock_LLMClient
 
-        self.npc.at_talked_to("Hello", self.npc)
+        # at_talked_to is now an ``async def``; driving the coroutine to
+        # completion (the awaited get_response Deferred fires synchronously
+        # with no reactor running) runs the body and its assertions.
+        ensureDeferred(self.npc.at_talked_to("Hello", self.npc))
 
         mock_deferLater.assert_called_with(Something, self.npc.thinking_timeout, Something)
         mock_LLMClient.get_response.assert_called_with("You are a test bot.\nTest NPC: Hello")

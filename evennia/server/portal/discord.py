@@ -11,21 +11,15 @@ added to `server/conf/secret_settings.py` as your  DISCORD_BOT_TOKEN
 
 import json
 import os
-from io import BytesIO
 from random import random
 
-from autobahn.twisted.websocket import (
-    WebSocketClientFactory,
-    WebSocketClientProtocol,
-    connectWS,
-)
 from django.conf import settings
-from twisted.internet import protocol, reactor, ssl, task
-from twisted.web.client import Agent, FileBodyProducer, HTTPConnectionPool, readBody
-from twisted.web.http_headers import Headers
+from twisted.internet import protocol
 
+from evennia.server.portal.ws_protocol import (WSClientProtocolBase,
+                                               connect_ws, encode_ws_headers)
 from evennia.server.session import Session
-from evennia.utils import class_from_module, get_evennia_version, logger
+from evennia.utils import class_from_module, get_evennia_version, http, logger
 from evennia.utils.utils import delay
 
 _BASE_SESSION_CLASS = class_from_module(settings.BASE_SESSION_CLASS)
@@ -49,21 +43,6 @@ OP_RECONNECT = 7
 OP_RESUME = 6
 
 
-# create quiet HTTP pool to muffle GET/POST requests
-class QuietConnectionPool(HTTPConnectionPool):
-    """
-    A quiet version of the HTTPConnectionPool which sets the factory's
-    `noisy` property to False to muffle log output.
-    """
-
-    def __init__(self, reactor, persistent=True):
-        super().__init__(reactor, persistent)
-        self._factory.noisy = False
-
-
-_AGENT = Agent(reactor, pool=QuietConnectionPool(reactor))
-
-
 def should_retry(status_code):
     """
     Helper function to check if the request should be retried later.
@@ -83,7 +62,16 @@ def should_retry(status_code):
         return False
 
 
-class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.ReconnectingClientFactory):
+class _ReactorTimer:
+    """Thin adapter: DiscordClient expects ``call_later`` on the factory timer."""
+
+    def call_later(self, delay, func, *args, **kwargs):
+        from evennia.utils import clock
+
+        return clock.call_later(delay, func, *args, **kwargs)
+
+
+class DiscordWebsocketServerFactory(protocol.ReconnectingClientFactory):
     """
     A customized websocket client factory that navigates the Discord gateway process.
 
@@ -97,32 +85,29 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
     resume_url = None
     is_connecting = False
 
+    # read by connect_ws to build the outbound handshake (set in websocket_init)
+    ws_url = None
+    ws_headers = ()
+    ws_subprotocols = ()
+
     def __init__(self, sessionhandler, *args, **kwargs):
         self.uid = kwargs.get("uid")
         self.sessionhandler = sessionhandler
         self.port = None
         self.bot = None
+        self._batched_timer = _ReactorTimer()
 
     def get_gateway_url(self, *args, **kwargs):
         # get the websocket gateway URL from Discord
-        d = _AGENT.request(
-            b"GET",
-            f"{DISCORD_API_BASE_URL}/gateway".encode("utf-8"),
-            Headers(
-                {
-                    "User-Agent": [DISCORD_USER_AGENT],
-                    "Authorization": [f"Bot {DISCORD_BOT_TOKEN}"],
-                    "Content-Type": ["application/json"],
-                }
-            ),
-            None,
-        )
+        headers = {
+            "User-Agent": DISCORD_USER_AGENT,
+            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        }
 
         def cbResponse(response):
             if response.code == 200:
-                d = readBody(response)
-                d.addCallback(self.websocket_init, *args, **kwargs)
-                return d
+                self.websocket_init(response.content, *args, **kwargs)
             else:
                 logger.log_warn(f"Discord gateway request failed (HTTP {response.code}).")
                 # release the connect lock so ReconnectingClientFactory can retry
@@ -133,8 +118,9 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
             # release the connect lock so ReconnectingClientFactory can retry
             self.is_connecting = False
 
-        d.addCallback(cbResponse)
-        d.addErrback(ebFailed)
+        http.request("GET", f"{DISCORD_API_BASE_URL}/gateway", headers=headers).addCallbacks(
+            cbResponse, ebFailed
+        )
 
     def websocket_init(self, payload, *args, **kwargs):
         """
@@ -143,7 +129,7 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
         data = json.loads(str(payload, "utf-8"))
         self.is_connecting = False
         if url := data.get("url"):
-            self.gateway = f"{url}/?v={DISCORD_API_VERSION}&encoding=json".encode("utf-8")
+            self.gateway = f"{url}/?v={DISCORD_API_VERSION}&encoding=json"
             useragent = kwargs.pop("useragent", DISCORD_USER_AGENT)
             headers = kwargs.pop(
                 "headers",
@@ -152,11 +138,12 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
                     "Content-Type": ["application/json"],
                 },
             )
+            headers.setdefault("User-Agent", [useragent])
 
             logger.log_info("Connecting to Discord Gateway...")
-            WebSocketClientFactory.__init__(
-                self, url, *args, headers=headers, useragent=useragent, **kwargs
-            )
+            self.ws_url = self.gateway
+            self.ws_headers = encode_ws_headers(headers)
+            self.ws_subprotocols = ()
             self.start()
         else:
             logger.log_err("Discord did not return a websocket URL; connection cancelled.")
@@ -197,14 +184,11 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
         de-registering the session and then reattaching a new one.
 
         """
-        # set up the reconnection
+        # set up the reconnection target (Discord hands out a resume_gateway_url)
         if self.resume_url:
-            self.url = self.resume_url
+            self.ws_url = self.resume_url
         elif self.gateway:
-            self.url = self.gateway
-        else:
-            # we don't know where to reconnect to! we'll start from the beginning
-            self.url = None
+            self.ws_url = self.gateway
         # reset the internal delay, since this is a deliberate disconnect
         self.delay = self.initialDelay
         # disconnect to allow the reconnection process to kick in
@@ -221,10 +205,10 @@ class DiscordWebsocketServerFactory(WebSocketClientFactory, protocol.Reconnectin
             self.get_gateway_url()
         elif not self.is_connecting:
             # everything is good, connect
-            connectWS(self)
+            connect_ws(self)
 
 
-class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
+class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
     """
     Implements the Discord client
     """
@@ -237,8 +221,7 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
     discord_id = None
 
     def __init__(self):
-        WebSocketClientProtocol.__init__(self)
-        _BASE_SESSION_CLASS.__init__(self)
+        super().__init__()
 
     def at_login(self):
         pass
@@ -283,7 +266,12 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
         if data["op"] == OP_HELLO:
             self.interval = data["d"]["heartbeat_interval"] / 1000  # convert millisec to seconds
             if self.nextHeartbeatCall:
-                self.nextHeartbeatCall.cancel()
+                try:
+                    if self.nextHeartbeatCall.active():
+                        self.nextHeartbeatCall.cancel()
+                except Exception:
+                    pass
+                self.nextHeartbeatCall = None
             self.nextHeartbeatCall = self.factory._batched_timer.call_later(
                 self.interval * random(),
                 self.doHeartbeat,
@@ -334,7 +322,11 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
         """
         self.sessionhandler.disconnect(self)
         if self.nextHeartbeatCall:
-            self.nextHeartbeatCall.cancel()
+            try:
+                if self.nextHeartbeatCall.active():
+                    self.nextHeartbeatCall.cancel()
+            except Exception:
+                pass
             self.nextHeartbeatCall = None
         if wasClean:
             logger.log_info(f"Discord connection closed ({code}) reason: {reason}")
@@ -360,31 +352,21 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
             data (dict) - Content to be sent
         """
         url = f"{DISCORD_API_BASE_URL}/{url}"
-        body = FileBodyProducer(BytesIO(json.dumps(data).encode("utf-8")))
+        body = json.dumps(data).encode("utf-8")
         request_type = kwargs.pop("type", "POST")
-
-        d = _AGENT.request(
-            request_type.encode("utf-8"),
-            url.encode("utf-8"),
-            Headers(
-                {
-                    "User-Agent": [DISCORD_USER_AGENT],
-                    "Authorization": [f"Bot {DISCORD_BOT_TOKEN}"],
-                    "Content-Type": ["application/json"],
-                }
-            ),
-            body,
-        )
+        headers = {
+            "User-Agent": DISCORD_USER_AGENT,
+            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        }
 
         def cbResponse(response):
             if response.code == 200 or response.code == 204:
-                d = readBody(response)
-                d.addCallback(self.post_response)
-                return d
+                self.post_response(response.content)
             elif should_retry(response.code):
                 delay(300, self._post_json, url, data, **kwargs)
 
-        d.addCallback(cbResponse)
+        http.request(request_type, url, headers=headers, data=body).addCallback(cbResponse)
 
     def post_response(self, body, **kwargs):
         """
@@ -473,7 +455,12 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
         """
         if not self.pending_heartbeat or kwargs.get("force"):
             if self.nextHeartbeatCall:
-                self.nextHeartbeatCall.cancel()
+                try:
+                    if self.nextHeartbeatCall.active():
+                        self.nextHeartbeatCall.cancel()
+                except Exception:
+                    pass
+                self.nextHeartbeatCall = None
             # send the heartbeat
             data = {"op": 1, "d": self.last_sequence}
             self._send_json(data)
@@ -524,18 +511,23 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
 
     def send_interaction_reply(self, content, interaction_id, token, **kwargs):
         """
-        Respond to a Discord interaction (slash command) via REST.
+        Respond to a Discord interaction (slash command or button) via REST.
 
-        Use with session.msg(interaction_reply=(content, interaction_id, token))
-        Sends an CHANNEL_MESSAGE_WITH_SOURCE (type 4) response.
+        Use with session.msg(interaction_reply=((content, interaction_id, token), opts))
+        Sends an CHANNEL_MESSAGE_WITH_SOURCE (type 4) response by default.
+        Pass response_type=6 for DEFERRED_UPDATE_MESSAGE on component clicks.
         """
-        data = {
-            "type": 4,
-            "data": {"content": content},
-        }
-        # Interaction responses go to a special endpoint that does not require the
-        # bot token — it uses the interaction token for auth.  We still send our
-        # normal Bot auth header; Discord accepts both.
+        data_payload = {}
+        if content:
+            data_payload["content"] = str(content)[:2000]
+        if kwargs.get("embeds"):
+            data_payload["embeds"] = kwargs["embeds"]
+        if kwargs.get("components") is not None:
+            data_payload["components"] = kwargs["components"]
+        response_type = int(kwargs.get("response_type", 4))
+        data = {"type": response_type, "data": data_payload}
+        if kwargs.get("flags"):
+            data["data"]["flags"] = int(kwargs["flags"])
         self._post_json(f"interactions/{interaction_id}/{token}/callback", data)
 
     def send_register_commands(self, commands, app_id, guild_id, **kwargs):
@@ -550,6 +542,163 @@ class DiscordClient(WebSocketClientProtocol, _BASE_SESSION_CLASS):
             commands,
             type="PUT",
         )
+
+    def send_create_thread(self, name, channel_id, job_id, **kwargs):
+        """
+        Create a Discord thread under a parent channel, then report its id back.
+
+        Use with session.msg(create_thread=(name, channel_id, job_id)). On
+        success the portal feeds a THREAD_CREATED event to the server carrying
+        ``job_id`` and the new ``thread_id`` so game code can bind them.
+
+        Optional kwargs (forum parent or rich opener):
+          applied_tags (list[str]) — forum tag snowflakes
+          message (dict) — initial thread/post body (embeds/content)
+          forum (bool) — omit type 11 (required for forum channel parents)
+        """
+        url = f"{DISCORD_API_BASE_URL}/channels/{channel_id}/threads"
+        forum = kwargs.pop("forum", False)
+        data = {"name": str(name)[:100], "auto_archive_duration": 1440}
+        if not forum and "message" not in kwargs:
+            # type 11 = GUILD_PUBLIC_THREAD in a text channel.
+            data["type"] = 11
+        data.update(kwargs)
+        body = json.dumps(data).encode("utf-8")
+        headers = {
+            "User-Agent": DISCORD_USER_AGENT,
+            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        }
+
+        def cbResponse(response):
+            if response.code in (200, 201):
+                try:
+                    payload = json.loads(response.content)
+                except Exception:
+                    logger.log_err(
+                        f"Discord thread create: invalid JSON for job={job_id}"
+                    )
+                    return
+                thread_id = payload.get("id")
+                if thread_id:
+                    self.sessionhandler.data_in(
+                        self,
+                        bot_data_in=(
+                            "",
+                            {
+                                "type": "THREAD_CREATED",
+                                "job_id": job_id,
+                                "thread_id": thread_id,
+                            },
+                        ),
+                    )
+                else:
+                    logger.log_err(
+                        f"Discord thread create: no thread id in response job={job_id}"
+                    )
+            elif should_retry(response.code):
+                delay(300, self.send_create_thread, name, channel_id, job_id, **kwargs)
+            else:
+                err_body = ""
+                try:
+                    err_body = response.content.decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                logger.log_err(
+                    f"Discord thread create failed job={job_id} HTTP {response.code}: "
+                    f"{err_body}"
+                )
+                self.sessionhandler.data_in(
+                    self,
+                    bot_data_in=(
+                        "",
+                        {
+                            "type": "THREAD_CREATE_FAILED",
+                            "job_id": job_id,
+                            "code": response.code,
+                            "error": err_body,
+                        },
+                    ),
+                )
+
+        http.request("POST", url, headers=headers, data=body).addCallback(cbResponse)
+
+    def send_thread_message(self, thread_id, **kwargs):
+        """
+        Post a message (plain content, embeds, and/or components) into a thread.
+
+        Use with session.msg(thread_message=(thread_id,), embeds=[...]).
+        """
+        data = {}
+        if kwargs.get("content"):
+            data["content"] = str(kwargs["content"])[:2000]
+        if kwargs.get("embeds"):
+            data["embeds"] = kwargs["embeds"]
+        if kwargs.get("components") is not None:
+            data["components"] = kwargs["components"]
+        if data:
+            self._post_json(f"channels/{thread_id}/messages", data)
+
+    def send_thread_update(self, thread_id, **kwargs):
+        """
+        PATCH a thread (rename, forum tags) without archiving.
+
+        Use with session.msg(thread_update=(thread_id,), name=..., applied_tags=[...]).
+        """
+        data = {}
+        if kwargs.get("name"):
+            data["name"] = str(kwargs["name"])[:100]
+        if kwargs.get("applied_tags") is not None:
+            data["applied_tags"] = kwargs["applied_tags"]
+        if data:
+            self._post_json(f"channels/{thread_id}", data, type="PATCH")
+
+    def send_thread_archive(self, thread_id, archived, **kwargs):
+        """
+        Archive or unarchive a thread via REST PATCH.
+
+        Use with session.msg(thread_archive=(thread_id, True/False)).
+        Optional kwargs: applied_tags (list of forum tag snowflakes).
+        """
+        data = {"archived": bool(archived)}
+        if kwargs.get("applied_tags") is not None:
+            data["applied_tags"] = kwargs["applied_tags"]
+        self._post_json(
+            f"channels/{thread_id}",
+            data,
+            type="PATCH",
+        )
+
+    def send_dm(self, user_id, text, **kwargs):
+        """
+        Send a direct message to a user: open (or reuse) their DM channel, then
+        post. Use with session.msg(dm=(user_id, text)).
+        """
+        url = f"{DISCORD_API_BASE_URL}/users/@me/channels"
+        body = json.dumps({"recipient_id": str(user_id)}).encode("utf-8")
+        headers = {
+            "User-Agent": DISCORD_USER_AGENT,
+            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        }
+
+        def cbResponse(response):
+            if response.code in (200, 201):
+                try:
+                    channel_id = json.loads(response.content).get("id")
+                except Exception:
+                    return
+                if channel_id:
+                    self._post_json(
+                        f"channels/{channel_id}/messages",
+                        {"content": str(text)[:2000]},
+                    )
+            elif should_retry(response.code):
+                delay(300, self.send_dm, user_id, text, **kwargs)
+
+        http.request("POST", url, headers=headers, data=body).addCallback(cbResponse)
+
+        d.addCallback(cbResponse)
 
     def send_default(self, *args, **kwargs):
         """

@@ -8,7 +8,7 @@ from collections import deque, namedtuple
 
 from django.conf import settings
 from django.utils.translation import gettext as _
-from twisted.internet import reactor
+from evennia.utils import clock
 
 import evennia
 from evennia.server.portal.amp import PCONN, PCONNSYNC, PDISCONN, PDISCONNALL
@@ -128,9 +128,9 @@ class PortalSessionHandler(SessionHandler):
         now = time.time()
         if (
             now - self.connection_last < _MIN_TIME_BETWEEN_CONNECTS
-        ) or not evennia.EVENNIA_PORTAL_SERVICE.amp_protocol:
+        ) or not evennia.EVENNIA_PORTAL_SERVICE.server_amp:
             if not session or not self.connection_task:
-                self.connection_task = reactor.callLater(
+                self.connection_task = clock.call_later(
                     _MIN_TIME_BETWEEN_CONNECTS, self.connect, None
                 )
             self.connection_last = now
@@ -138,7 +138,7 @@ class PortalSessionHandler(SessionHandler):
         elif not session:
             if _CONNECTION_QUEUE:
                 # keep launching tasks until queue is empty
-                self.connection_task = reactor.callLater(
+                self.connection_task = clock.call_later(
                     _MIN_TIME_BETWEEN_CONNECTS, self.connect, None
                 )
             else:
@@ -152,7 +152,7 @@ class PortalSessionHandler(SessionHandler):
 
             self[session.sessid] = session
             session.server_connected = True
-            evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_AdminPortal2Server(
+            evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
                 session, operation=PCONN, sessiondata=sessdata
             )
 
@@ -171,7 +171,7 @@ class PortalSessionHandler(SessionHandler):
             # once to the server - if so we must re-sync woth the server, otherwise
             # we skip this step.
             sessdata = session.get_sync_data()
-            if evennia.EVENNIA_PORTAL_SERVICE.amp_protocol:
+            if evennia.EVENNIA_PORTAL_SERVICE.server_amp:
                 # we only send sessdata that should not have changed
                 # at the server level at this point
                 sessdata = dict(
@@ -188,7 +188,7 @@ class PortalSessionHandler(SessionHandler):
                         "server_data",
                     )
                 )
-                evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_AdminPortal2Server(
+                evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
                     session, operation=PCONNSYNC, sessiondata=sessdata
                 )
 
@@ -219,8 +219,8 @@ class PortalSessionHandler(SessionHandler):
 
         # Tell the Server to disconnect its version of the Session as well.
         # Guard against AMP not yet being established (e.g. very early disconnects).
-        if evennia.EVENNIA_PORTAL_SERVICE.amp_protocol:
-            evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_AdminPortal2Server(
+        if evennia.EVENNIA_PORTAL_SERVICE.server_amp:
+            evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
                 session, operation=PDISCONN
             )
 
@@ -243,7 +243,7 @@ class PortalSessionHandler(SessionHandler):
         # inform Server; wait until finished sending before we continue
         # removing all the sessions.
 
-        evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_AdminPortal2Server(
+        evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
             DUMMYSESSION, operation=PDISCONNALL
         ).addCallback(_callback, self)
 
@@ -439,10 +439,10 @@ class PortalSessionHandler(SessionHandler):
                 self.data_out(session, text=[[settings.COMMAND_RATE_WARNING], {}])
                 return
 
-            if not evennia.EVENNIA_PORTAL_SERVICE.amp_protocol:
+            if not evennia.EVENNIA_PORTAL_SERVICE.server_amp:
                 # this can happen if someone connects before AMP connection
                 # was established (usually on first start)
-                reactor.callLater(1.0, self.data_in, session, **kwargs)
+                clock.call_later(1.0, self.data_in, session, **kwargs)
                 return
 
             # scrub data
@@ -450,7 +450,7 @@ class PortalSessionHandler(SessionHandler):
 
             # relay data to Server
             session.cmd_last = now
-            evennia.EVENNIA_PORTAL_SERVICE.amp_protocol.send_MsgPortal2Server(session, **kwargs)
+            evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_MsgPortal2Server(session, **kwargs)
 
             # eventual local echo (text input only)
             if "text" in kwargs and session.protocol_flags.get("LOCALECHO", False):

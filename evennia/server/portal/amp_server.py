@@ -14,7 +14,8 @@ from twisted.internet import protocol
 
 import evennia
 from evennia.server.portal import amp
-from evennia.utils import logger
+from evennia.server.portal import ipc_handlers_portal
+from evennia.utils import clock, logger
 from evennia.utils.utils import class_from_module
 
 
@@ -121,43 +122,29 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
                 (portal_live, server_live, portal_PID, server_PID).
 
         """
+        portal = self.factory.portal
         server_connected = bool(
             self.factory.server_connection and self.factory.server_connection.transport.connected
         )
-        portal_info_dict = self.factory.portal.get_info_dict()
-        server_info_dict = self.factory.portal.server_info_dict
-        server_pid = self.factory.portal.server_process_id
+        portal_info_dict = portal.get_info_dict()
+        server_info_dict = portal.server_info_dict
+        server_pid = portal.server_process_id
         portal_pid = os.getpid()
-        return (True, server_connected, portal_pid, server_pid, portal_info_dict, server_info_dict)
+        portal_live = bool(
+            (portal.running or getattr(portal, "_launcher_ipc_ready", False))
+            and not getattr(portal, "shutdown_complete", False)
+        )
+        return (
+            portal_live,
+            server_connected,
+            portal_pid,
+            server_pid,
+            portal_info_dict,
+            server_info_dict,
+        )
 
     def data_to_server(self, command, sessid, **kwargs):
-        """
-        Send data across the wire to the Server.
-
-        Args:
-            command (AMP Command): A protocol send command.
-            sessid (int): A unique Session id.
-            kwargs (any): Data to send. This will be JSON-encoded.
-
-        Returns:
-            deferred (deferred or None): A deferred with an errback.
-
-        Notes:
-            Data is sent across the wire as a strict-JSON envelope
-            wrapping the tuple (sessid, kwargs).
-
-        """
-        # print("portal data_to_server: {}, {}, {}".format(command, sessid, kwargs))
-        if command in (amp.AdminPortal2Server,):
-            packed = amp.dumps_admin((sessid, kwargs))
-        else:
-            packed = amp.dumps_session((sessid, kwargs))
-        if self.factory.server_connection:
-            return self.factory.server_connection.callRemote(
-                command, packed_data=packed
-            ).addErrback(self.errback, command.key)
-        else:
-            return self.broadcast(command, sessid, packed_data=packed)
+        return ipc_handlers_portal.data_to_server(self, command, sessid, **kwargs)
 
     def start_server(self, server_twistd_cmd):
         """
@@ -198,10 +185,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
             self.factory.portal.server_twistd_cmd = server_twistd_cmd
             logfile.flush()
         if process and not _is_windows():
-            # Reap the child in a thread so the reactor is never blocked.
-            from twisted.internet import reactor
-
-            reactor.callInThread(process.wait)
+            clock.defer_to_thread(process.wait)
         return
 
     def wait_for_disconnect(self, callback, *args, **kwargs):
@@ -256,41 +240,23 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         Send a status stanza to the launcher.
 
         """
-        # print("send status to launcher")
-        # print("self.get_status(): {}".format(self.get_status()))
-        if self.factory.launcher_connection:
-            self.factory.launcher_connection.callRemote(
-                amp.MsgStatus, status=amp.dumps_status(self.get_status())
+        conn = self.factory.launcher_connection
+        if conn is None:
+            return
+        status = self.get_status()
+        if hasattr(conn, "push_status"):
+            conn.push_status(status)
+        elif hasattr(conn, "callRemote"):
+            conn.callRemote(
+                amp.MsgStatus, status=amp.dumps_status(status)
             ).addErrback(self.errback, amp.MsgStatus.key)
 
     def send_MsgPortal2Server(self, session, **kwargs):
-        """
-        Access method called by the Portal and executed on the Portal.
-
-        Args:
-            session (session): Session
-            kwargs (any, optional): Optional data.
-
-        Returns:
-            deferred (Deferred): Asynchronous return.
-
-        """
-        return self.data_to_server(amp.MsgPortal2Server, session.sessid, **kwargs)
+        return ipc_handlers_portal.send_msgportal2server(self, session, **kwargs)
 
     def send_AdminPortal2Server(self, session, operation="", **kwargs):
-        """
-        Send Admin instructions from the Portal to the Server.
-        Executed on the Portal.
-
-        Args:
-            session (Session): Session.
-            operation (char, optional): Identifier for the server operation, as defined by the
-                global variables in `evennia/server/amp.py`.
-            data (str or dict, optional): Data used in the administrative operation.
-
-        """
-        return self.data_to_server(
-            amp.AdminPortal2Server, session.sessid, operation=operation, **kwargs
+        return ipc_handlers_portal.send_adminportal2server(
+            self, session, operation=operation, **kwargs
         )
 
     # receive amp data
@@ -315,195 +281,22 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
     @amp.catch_traceback
     def portal_receive_launcher2portal(self, operation, arguments):
         """
-        Receives message arriving from evennia_launcher.
-        This method is executed on the Portal.
-
-        Args:
-            operation (str): The action to perform.
-            arguments (str): Possible argument to the instruction, or the empty string.
-
-        Returns:
-            result (dict): The result back to the launcher.
-
-        Notes:
-            This is the entrypoint for controlling the entire Evennia system from the evennia
-            launcher. It can obviously only accessed when the Portal is already up and running.
+        Legacy Twisted AMP entry (dev Windows twistd path only).
 
         """
-        # Since the launcher command uses amp.String() we need to convert from byte here.
+        from evennia.server.portal import launcher_handlers
+
         operation = str(operation, "utf-8")
         self.factory.launcher_connection = self
-        _, server_connected, _, _, _, _ = self.get_status()
-
-        # logger.log_msg("Evennia Launcher->Portal operation %s:%s received" % (ord(operation), arguments))
-        # logger.log_msg("operation == amp.SSTART: {}: {}".format(operation == amp.SSTART, amp.loads_launcher_args(arguments)))
-
-        if operation == amp.SSTART:  # portal start  #15
-            # first, check if server is already running
-            if not server_connected:
-                self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads_launcher_args(arguments))
-
-        elif operation == amp.SRELOAD:  # reload server #14
-            if server_connected:
-                # We let the launcher restart us once they get the signal
-                self.factory.server_connection.wait_for_disconnect(self.send_Status2Launcher)
-                self.stop_server(mode="reload")
-            else:
-                self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads_launcher_args(arguments))
-
-        elif operation == amp.SRESET:  # reload server #19
-            if server_connected:
-                self.factory.server_connection.wait_for_disconnect(self.send_Status2Launcher)
-                self.stop_server(mode="reset")
-            else:
-                self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads_launcher_args(arguments))
-
-        elif operation == amp.SSHUTD:  # server-only shutdown #17
-            if server_connected:
-                self.factory.server_connection.wait_for_disconnect(self.send_Status2Launcher)
-                self.stop_server(mode="shutdown")
-
-        elif operation == amp.PSHUTD:  # portal + server shutdown  #16
-            if server_connected:
-                self.factory.server_connection.wait_for_disconnect(self.factory.portal.shutdown)
-            else:
-                self.factory.portal.shutdown()
-
-        else:
-            logger.log_err("Operation {} not recognized".format(operation))
-            raise Exception("operation %(op)s not recognized." % {"op": operation})
-
+        launcher_handlers.receive_launcher_command(self, operation, arguments)
         return {}
 
     @amp.MsgServer2Portal.responder
     @amp.catch_traceback
     def portal_receive_server2portal(self, packed_data):
-        """
-        Receives message arriving to Portal from Server.
-        This method is executed on the Portal.
-
-        Args:
-            packed_data (bytes): JSON-encoded (sessid, kwargs) coming over the wire.
-
-        """
-        try:
-            # Server-generated output: trusted and may legitimately exceed the
-            # resource caps (large text, maps), so size limits are not enforced.
-            sessid, kwargs = amp.loads_session(packed_data, enforce_limits=False)
-            session = evennia.PORTAL_SESSION_HANDLER.get(sessid, None)
-            if session:
-                evennia.PORTAL_SESSION_HANDLER.data_out(session, **kwargs)
-        except Exception:
-            logger.log_trace("packed_data len {}".format(len(packed_data)))
-        return {}
+        return ipc_handlers_portal.receive_server2portal(packed_data)
 
     @amp.AdminServer2Portal.responder
     @amp.catch_traceback
     def portal_receive_adminserver2portal(self, packed_data):
-        """
-
-        Receives and handles admin operations sent to the Portal
-        This is executed on the Portal.
-
-        Args:
-            packed_data (bytes): Data received, a JSON-encoded tuple (sessid, kwargs).
-
-        """
-        self.factory.server_connection = self
-
-        sessid, kwargs = self.data_in(packed_data)
-
-        operation = kwargs.pop("operation")
-        portal_sessionhandler = evennia.PORTAL_SESSION_HANDLER
-
-        # logger.log_msg(f"Evennia Server->Portal admin data operation {ord(operation)}")
-
-        if operation == amp.SLOGIN:  # server_session_login
-            # a session has authenticated; sync it.
-            session = portal_sessionhandler.get(sessid)
-            if session:
-                portal_sessionhandler.server_logged_in(session, kwargs.get("sessiondata"))
-
-        elif operation == amp.SDISCONN:  # server_session_disconnect
-            # the server is ordering to disconnect the session
-            session = portal_sessionhandler.get(sessid)
-            if session:
-                portal_sessionhandler.server_disconnect(session, reason=kwargs.get("reason"))
-
-        elif operation == amp.SDISCONNALL:  # server_session_disconnect_all
-            # server orders all sessions to disconnect
-            portal_sessionhandler.server_disconnect_all(reason=kwargs.get("reason"))
-
-        elif operation == amp.SRELOAD:  # server reload
-            # set up callback to restart server once it has disconnected
-            self.factory.server_connection.wait_for_disconnect(
-                self.start_server, self.factory.portal.server_twistd_cmd
-            )
-            # tell server to reload
-            self.stop_server(mode="reload")
-
-        elif operation == amp.SRESET:  # server reset
-            # set up callback to restart server once it has disconnected
-            self.factory.server_connection.wait_for_disconnect(
-                self.start_server, self.factory.portal.server_twistd_cmd
-            )
-            # tell server to reset
-            self.stop_server(mode="reset")
-
-        elif operation == amp.SSHUTD:  # server-only shutdown
-            self.stop_server(mode="shutdown")
-
-        elif operation == amp.PSHUTD:  # full server+server shutdown
-            # set up callback to shut down portal once server has disconnected
-            self.factory.server_connection.wait_for_disconnect(self.factory.portal.shutdown)
-            # tell server to shut down
-            self.stop_server(mode="shutdown")
-
-        elif operation == amp.PSYNC:  # portal sync
-            # Server has (re-)connected and wants the session data from portal
-            self.factory.portal.server_info_dict = kwargs.get("info_dict", {})
-            self.factory.portal.server_process_id = kwargs.get("spid", None)
-            # this defaults to 'shutdown' or whatever value set in server_stop
-            server_restart_mode = self.factory.portal.server_restart_mode
-            # print("Server has connected. Sending session data to Server ... mode: {}".format(server_restart_mode))
-
-            sessdata = evennia.PORTAL_SESSION_HANDLER.get_all_sync_data()
-            self.send_AdminPortal2Server(
-                amp.DUMMYSESSION,
-                amp.PSYNC,
-                server_restart_mode=server_restart_mode,
-                sessiondata=sessdata,
-                portal_start_time=self.factory.portal.start_time,
-            )
-            evennia.PORTAL_SESSION_HANDLER.at_server_connection()
-            self.factory.portal.server_restart_mode = None
-
-            if self.factory.server_connection:
-                # this is an indication the server has successfully connected, so
-                # we trigger any callbacks (usually to tell the launcher server is up)
-                for callback, args, kwargs in self.factory.server_connect_callbacks:
-                    try:
-                        callback(*args, **kwargs)
-                    except Exception:
-                        logger.log_trace()
-                self.factory.server_connect_callbacks = []
-
-        elif operation == amp.SSYNC:  # server_session_sync
-            # server wants to save session data to the portal,
-            # maybe because it's about to shut down.
-            portal_sessionhandler.server_session_sync(
-                kwargs.get("sessiondata"), kwargs.get("clean", True)
-            )
-
-            # set a flag in case we are about to shut down soon
-            self.factory.server_restart_mode = "shutdown"
-
-        elif operation == amp.SCONN:  # server_force_connection (for irc/etc)
-            portal_sessionhandler.server_connect(**kwargs)
-
-        else:
-            raise Exception("operation %(op)s not recognized." % {"op": operation})
-        return {}
+        return ipc_handlers_portal.receive_adminserver2portal(self, packed_data)

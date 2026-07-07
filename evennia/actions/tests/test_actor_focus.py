@@ -28,8 +28,17 @@ from evennia.utils import create
 from evennia.utils.test_resources import EvenniaTest
 
 
+def _dispatch_d(engine, *args, **kwargs):
+    from twisted.internet.defer import ensureDeferred
+    return ensureDeferred(engine.dispatch(*args, **kwargs))
+
+
 def _sync(d):
     """Extract an already-fired Deferred's result (re-raising on failure)."""
+    import inspect
+    from twisted.internet.defer import ensureDeferred
+    if inspect.iscoroutine(d):
+        d = ensureDeferred(d)
     out = {}
     d.addCallbacks(lambda r: out.__setitem__("r", r), lambda f: out.__setitem__("f", f))
     if "f" in out:
@@ -185,7 +194,7 @@ class TestFocusRaceGuard(EvenniaTest):
 
     def test_pop_during_suspend_aborts_phase(self):
         b, actor, fired, d, ctx = self._setup()
-        dd = RuleEngine().dispatch(Poke(), actor, ctx)
+        dd = _dispatch_d(RuleEngine(), Poke(), actor, ctx)
         self.assertFalse(dd.called)  # suspended on the unfired Deferred
         self.assertEqual(fired, ["work"])
         # Another session (a second instance of the same row) pops char1.
@@ -197,14 +206,14 @@ class TestFocusRaceGuard(EvenniaTest):
 
     def test_untouched_focus_completes(self):
         _, actor, fired, d, ctx = self._setup()
-        dd = RuleEngine().dispatch(Poke(), actor, ctx)
+        dd = _dispatch_d(RuleEngine(), Poke(), actor, ctx)
         d.callback(PASS)
         self.assertEqual(fired, ["work", "after"])
         self.assertEqual(_sync(dd).outcome, "succeeded")
 
     def test_deeper_push_does_not_abort(self):
         b, actor, fired, d, ctx = self._setup()
-        dd = RuleEngine().dispatch(Poke(), actor, ctx)
+        dd = _dispatch_d(RuleEngine(), Poke(), actor, ctx)
         # A deeper push bumps generation but leaves char1 on the stack.
         ControlBinding.objects.get(pk=b.pk).push(self.obj1)
         d.callback(PASS)
@@ -214,7 +223,7 @@ class TestFocusRaceGuard(EvenniaTest):
     def test_unbound_actor_never_aborts(self):
         fired, d = [], Deferred()
         actor = Actor(session=self.session, account=self.account, character=self.char1)
-        dd = RuleEngine().dispatch(Poke(), actor, ActionContext(providers=[SlowWork(fired, d)]))
+        dd = _dispatch_d(RuleEngine(), Poke(), actor, ActionContext(providers=[SlowWork(fired, d)]))
         d.callback(PASS)
         self.assertEqual(fired, ["work", "after"])
         self.assertEqual(_sync(dd).outcome, "succeeded")

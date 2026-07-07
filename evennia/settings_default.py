@@ -78,6 +78,9 @@ SSH_INTERFACES = ["0.0.0.0"]
 # (Obs - further web configuration can be found below
 # in the section  'Config for Django web features')
 WEBSERVER_ENABLED = True
+# How Django is served: "wsgi" (Twisted-WSGI, default) or "asgi" (uvicorn in a
+# worker thread, unlocking async views/ORM). Both run in the Server process.
+WEB_SERVER = "asgi"
 # This is a security setting protecting against host poisoning
 # attacks.  It defaults to allowing all. In production, make
 # sure to change this to your actual host addresses/IPs.
@@ -137,6 +140,9 @@ WEBSOCKET_CLIENT_URL = None
 # See https://mudstandards.org/websocket/ for details on the standard
 # subprotocols.
 WEBSOCKET_SUBPROTOCOLS = [
+    # Azaban: our own shell protocol (structured RenderNode delivery). First so
+    # the Svelte shell negotiates it when offered; other clients fall through.
+    "azaban.v1",
     "json.mudstandards.org",
     "gmcp.mudstandards.org",
     "terminal.mudstandards.org",
@@ -153,6 +159,27 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
+# Portal<->Server session/admin IPC: redis Streams (plain XREAD/XADD).
+# Legacy AMP TCP between Portal and Server is removed; AMP_PORT is launcher-only.
+SERVER_PORTAL_BUS = "redis"
+REDIS_BUS_URL = "redis://127.0.0.1:6379/1"
+REDIS_BUS_PREFIX = "evennia:bus"
+SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
+
+# Evennia is synchronous-by-default: game code, hooks, scripts and boot make
+# blocking Django ORM calls on the single event-loop thread. Opt out of Django's
+# async-safety guard for the asyncio bootstrap (one thread, no true concurrency).
+os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
+
+# (T3) Run the Portal's telnet/websocket/ssh listeners + web reverse-proxy as
+# native asyncio servers (loop.create_server / h11+httpx proxy). When True,
+# Twisted TCPServer fallbacks for those listeners are not used. Off by default;
+# prod enables this.
+PORTAL_ASYNCIO_SERVERS = True
+
+# (T3 S8/S9) Start Portal/Server via ``python portal.py`` / ``python server.py``
+# on a native asyncio loop. The legacy ``twistd`` entrypoint is retired.
+EVENNIA_ASYNCIO_BOOTSTRAP = True
 
 
 # Path to the lib directory containing the bulk of the codebase's code.
@@ -536,6 +563,13 @@ LOCK_FUNC_MODULES = ("evennia.locks.lockfuncs", "server.conf.lockfuncs")
 # will be loaded in order, meaning functions in later modules may overload
 # previous ones if having the same name.
 INPUT_FUNC_MODULES = ["evennia.server.inputfuncs", "server.conf.inputfuncs"]
+# Modules that register OOB events into the protocol catalog (see
+# evennia.server.protocol). The engine's core events plus any game modules.
+PROTOCOL_EVENT_MODULES = ["evennia.server.protocol.core_events"]
+# If True, each outgoing session frame is validated against the typed outputfunc
+# catalog (evennia.server.protocol.outputfuncs) and mismatches are logged. The
+# frame is still sent either way; this is a dev/debug aid, off by default.
+VALIDATE_OUTPUT_FRAMES = False
 # Modules that contain prototypes for use with the spawner mechanism.
 PROTOTYPE_MODULES = ["world.prototypes"]
 # Modules containining Prototype functions able to be embedded in prototype
@@ -1109,6 +1143,16 @@ DISCORD_BOT_INTENTS = 105985
 DISCORD_BOT_TOKEN = None
 # The account typeclass which the Evennia-side Discord relay bot will use.
 DISCORD_BOT_CLASS = "evennia.accounts.bots.DiscordBot"
+# Unified ticket system: open a Discord thread per ticket and mirror the
+# conversation. Requires DISCORD_TICKET_PARENT_CHANNEL_ID (the parent channel
+# threads are created under) and the send_create_thread portal outputfunc.
+DISCORD_TICKET_THREADS = False
+DISCORD_TICKET_PARENT_CHANNEL_ID = None
+# Admin-only ticket kinds (e.g. report) use this parent when set.
+DISCORD_TICKET_ADMIN_PARENT_CHANNEL_ID = None
+# Orphan thread recovery: retry thread creation after this many minutes.
+TICKET_DISCORD_ORPHAN_MINS = 2
+TICKET_DISCORD_MAX_ATTEMPTS = 5
 
 ######################################################################
 # Django web features
@@ -1158,6 +1202,9 @@ SERVE_MEDIA = False
 # The master urlconf file that contains all of the sub-branches to the
 # applications. Change this to add your own URLs to the website.
 ROOT_URLCONF = "web.urls"
+# ASGI application, the async counterpart to the WSGI path. Used once the web
+# layer is served over ASGI (uvicorn/hypercorn) instead of Twisted-WSGI.
+ASGI_APPLICATION = "evennia.server.asgi.application"
 # Where users are redirected after logging in via contrib.auth.login.
 LOGIN_REDIRECT_URL = "/"
 # Where to redirect users when using the @login_required decorator.
@@ -1375,24 +1422,14 @@ BASE_SESSION_CLASS = "evennia.server.session.Session"
 # It is used for all telnet connections, and is also inherited by the SSL Protocol
 # (which is just TLS + Telnet).
 TELNET_PROTOCOL_CLASS = "evennia.server.portal.telnet.TelnetProtocol"
-SSL_PROTOCOL_CLASS = "evennia.server.portal.ssl.SSLProtocol"
+SSL_PROTOCOL_CLASS = "evennia.server.portal.telnet_ssl.SSLProtocol"
 
 # Websocket Client Protocol. This inherits from BASE_SESSION_CLASS. It is used
 # for all webclient connections.
 WEBSOCKET_PROTOCOL_CLASS = "evennia.server.portal.webclient.WebSocketClient"
 
-# Ajax Web Client classes. Evennia uses AJAX as a fallback for the webclient by
-# default. AJAX may in general be more useful for mobile clients as it's
-# resilient to IP address changes.
-
-# The Ajax Client Class is used to manage all AJAX sessions.
-AJAX_CLIENT_CLASS = "evennia.server.portal.webclient_ajax.AjaxWebClient"
-
-# Ajax Protocol Class is used for all AJAX client connections.
-AJAX_PROTOCOL_CLASS = "evennia.server.portal.webclient_ajax.AjaxWebClientSession"
-
-# Protocol for the SSH interface. This inherits from BASE_SESSION_CLASS.
-SSH_PROTOCOL_CLASS = "evennia.server.portal.ssh.SshProtocol"
+# Protocol for the SSH interface (asyncssh session class on the asyncio loop).
+SSH_PROTOCOL_CLASS = "evennia.server.portal.ssh_asyncio.AsyncioSSHSession"
 
 # Server-side session class used. This will inherit from BASE_SESSION_CLASS.
 # This one isn't as dangerous to replace.

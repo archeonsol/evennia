@@ -457,7 +457,7 @@ class TestSetHelp(unittest.TestCase):
     def test_edit_opens_editor_and_captures_through_engine(self):
         from evennia.actions.action import Action
         from evennia.actions.context import ActionContext
-        from evennia.actions.tests.fakes import ENGINE
+        from evennia.actions.tests.fakes import ENGINE, _sync
         from evennia.utils.eveditor import EvEditorState
 
         char, actor = self._setup()
@@ -470,7 +470,7 @@ class TestSetHelp(unittest.TestCase):
         line = Action()
         line._raw_string = "a help line"
         ctx = ActionContext(providers=[state], actor=actor, raw_string="a help line")
-        ENGINE.dispatch(line, actor, ctx, record_phases=False)
+        _sync(ENGINE.dispatch(line, actor, ctx, record_phases=False))
         self.assertIn("a help line", char.ndb._eveditor.get_buffer())
 
 

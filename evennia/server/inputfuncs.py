@@ -67,12 +67,6 @@ def _maybe_strip_incoming_mxp(txt):
 _ERROR_INPUT = "Inputfunc {name}({session}): Wrong/unrecognized input: {inp}"
 
 
-def _log_dispatch_failure(failure):
-    """Errback for the command-dispatch Deferred: a failure that reaches this
-    point escaped cmdhandler's own reporting and must still hit the log."""
-    log_err(f"Unhandled error in command dispatch:\n{failure.getTraceback()}")
-
-
 # All global functions are inputfuncs available to process inputs
 
 
@@ -115,11 +109,13 @@ def text(session, *args, **kwargs):
                 txt, categories=("inputline"), include_account=False
             )
     kwargs.pop("options", None)
-    deferred = cmdhandler(session, txt, callertype="session", session=session, **kwargs)
-    if deferred is not None:
-        # Backstop: cmdhandler reports its own errors, but a failed Deferred
-        # dropped here would otherwise vanish until Twisted's GC maybe-logs it.
-        deferred.addErrback(_log_dispatch_failure)
+    from evennia.utils import clock
+
+    # cmdhandler is `async def`; kick it off on the loop (unhandled errors
+    # are logged via clock.run_coroutine's task done-callback).
+    clock.run_coroutine(
+        cmdhandler(session, txt, callertype="session", session=session, **kwargs)
+    )
     session.update_session_counters()
 
 
@@ -707,6 +703,28 @@ def narrative_client(session, *args, **kwargs):
 
     # Sync to the portal (see editor_client) so the flag survives ``@reload``.
     session.update_flags(**{CLIENT_NARRATIVE_FLAG: bool(kwargs.get("supported", True))})
+
+
+def azaban_hello(session, *args, **kwargs):
+    """Azaban shell capability handshake (the `hello` envelope).
+
+    Stores the client's declared capabilities and derives the delivery flags from
+    them. ``caps.rendersNodes`` sets ``CLIENT_NARRATIVE`` so
+    :func:`evennia.narrative.rendernode.deliver_node` ships structured ``render``
+    payloads to this session; other caps (patches, assets, encoding) are stashed
+    for the features that consume them. Unknown caps are ignored.
+
+    Kwargs:
+        caps (dict): the client capability map from the hello envelope.
+    """
+    from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
+
+    caps = kwargs.get("caps") or {}
+    session.protocol_flags[CLIENT_NARRATIVE_FLAG] = bool(caps.get("rendersNodes"))
+    try:
+        session.protocol_flags["AZABAN_CAPS"] = dict(caps)
+    except Exception:
+        pass
 
 
 def editor_save(session, *args, **kwargs):

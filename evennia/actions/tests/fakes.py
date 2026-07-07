@@ -246,7 +246,15 @@ def make_actor(char, session=None, account=None):
 
 
 def _sync(deferred):
-    """Extract an already-fired Deferred's result, re-raising on failure."""
+    """Extract an already-fired Deferred/coroutine's result, re-raising on failure."""
+    import inspect
+
+    from twisted.internet.defer import ensureDeferred
+
+    if inspect.iscoroutine(deferred):
+        # engine.dispatch is `async def` now; run the coroutine to a Deferred
+        # (completes synchronously when no rule suspends).
+        deferred = ensureDeferred(deferred)
     out = {}
     deferred.addCallbacks(
         lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f)

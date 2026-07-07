@@ -1,29 +1,15 @@
 """
 Tests for evennia.utils.defer (AS1 threaded-I/O helpers).
 
-The reactor is not *run* inside Django's test runner, so two pieces of plumbing
-that production relies on are arranged by hand here:
-
-- The reactor thread pool is normally started via ``callWhenRunning``; with no
-  running reactor it would never start (and its non-daemon workers would, if
-  left started, block interpreter exit). Each test installs a fresh, started
-  ``ThreadPool`` as ``reactor.threadpool`` and stops it in ``tearDown``, so
-  ``deferToThread`` has real workers and the process still exits cleanly.
-- ``deferToThread`` delivers its callback through ``reactor.callFromThread``,
-  which only queues the call; we drain that queue with
-  ``reactor.runUntilCurrent`` on the main thread. The main (test) thread is the
-  stand-in for the reactor thread, so a callback that runs during a
-  ``runUntilCurrent`` drain has demonstrably run on the reactor thread, not the
-  worker thread.
+Uses a dedicated asyncio event loop per test. ``in_thread`` returns an
+``asyncio.Future`` from ``clock.defer_to_thread``; results are collected via
+``await`` inside ``loop.run_until_complete``.
 """
 
+import asyncio
 import threading
 import time
 from unittest.mock import patch
-
-from twisted.internet import reactor
-from twisted.internet.defer import Deferred
-from twisted.python.threadpool import ThreadPool
 
 from evennia.utils import defer
 from evennia.utils.test_resources import BaseEvenniaTestCase
@@ -31,174 +17,190 @@ from evennia.utils.test_resources import BaseEvenniaTestCase
 _DRAIN_TIMEOUT = 5.0
 
 
-class _RealPoolMixin:
-    """Install a fresh, started reactor thread pool for the duration of a test."""
+class _AsyncioLoopMixin:
+    """Install a fresh asyncio event loop for the duration of a test."""
 
     def setUp(self):
         super().setUp()
-        self._orig_pool = reactor.threadpool
-        self._pool = ThreadPool(minthreads=0, maxthreads=4, name="test_defer")
-        self._pool.start()
-        reactor.threadpool = self._pool
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
 
     def tearDown(self):
-        reactor.threadpool = self._orig_pool
-        self._pool.stop()
+        self._loop.close()
+        asyncio.set_event_loop(None)
         super().tearDown()
 
-    def _drain_until(self, done):
-        """Pump the reactor's thread-call queue on this thread until `done`."""
-        deadline = time.time() + _DRAIN_TIMEOUT
-        while not done.is_set():
-            reactor.runUntilCurrent()
-            if done.wait(0.01):
-                break
-            if time.time() > deadline:
-                self.fail("timed out waiting for reactor callback delivery")
 
+class TestInThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
+    """`in_thread` runs the worker off the loop thread; await resumes on it."""
 
-class TestInThread(_RealPoolMixin, BaseEvenniaTestCase):
-    """`in_thread` runs the worker off the reactor thread, callback on it."""
-
-    def test_worker_runs_off_reactor_thread_callback_runs_on_it(self):
+    def test_worker_runs_off_loop_thread_callback_runs_on_it(self):
         main_ident = threading.get_ident()
         box = {}
-        done = threading.Event()
 
         def worker(payload):
             box["worker_ident"] = threading.get_ident()
             return payload * 2
 
-        def on_result(result):
+        async def _run():
+            fut = defer.in_thread(worker, 21)
+            self.assertIsInstance(fut, asyncio.Future)
+            result = await fut
             box["callback_ident"] = threading.get_ident()
             box["result"] = result
-            done.set()
-            return result
 
-        d = defer.in_thread(worker, 21)
-        self.assertIsInstance(d, Deferred)
-        d.addCallback(on_result)
+        self._loop.run_until_complete(_run())
 
-        self._drain_until(done)
-
-        self.assertNotEqual(box["worker_ident"], main_ident)  # worker off reactor thread
-        self.assertEqual(box["callback_ident"], main_ident)  # callback on reactor thread
+        self.assertNotEqual(box["worker_ident"], main_ident)
+        self.assertEqual(box["callback_ident"], main_ident)
         self.assertEqual(box["result"], 42)
 
     def test_kwargs_are_forwarded_to_worker(self):
-        done = threading.Event()
         box = {}
 
         def worker(a, b=0):
             return a + b
 
-        defer.in_thread(worker, 5, b=7).addCallback(
-            lambda r: (box.__setitem__("result", r), done.set())
-        )
-        self._drain_until(done)
+        async def _run():
+            box["result"] = await defer.in_thread(worker, 5, b=7)
+
+        self._loop.run_until_complete(_run())
         self.assertEqual(box["result"], 12)
 
     def test_db_connections_cleaned_around_worker_on_worker_thread(self):
         main_ident = threading.get_ident()
         calls = []
-        done = threading.Event()
 
         def worker():
             return "x"
 
-        # close_old_connections must run before and after the worker, both in
-        # the worker thread, so a pooled thread never reuses a stale connection.
         with patch.object(
             defer, "close_old_connections", lambda: calls.append(threading.get_ident())
         ):
-            defer.in_thread(worker).addCallback(lambda r: done.set())
-            self._drain_until(done)
+
+            async def _run():
+                await defer.in_thread(worker)
+
+            self._loop.run_until_complete(_run())
 
         self.assertEqual(len(calls), 2)
         self.assertTrue(all(ident != main_ident for ident in calls))
 
 
-class TestThreaded(_RealPoolMixin, BaseEvenniaTestCase):
-    """`threaded` decorator turns a call into an `in_thread` Deferred."""
-
-    def test_decorated_call_returns_deferred_and_runs_in_thread(self):
+    def test_add_callbacks_runs_on_loop_thread(self):
         main_ident = threading.get_ident()
         box = {}
-        done = threading.Event()
+
+        def worker():
+            return [1, 2, 3]
+
+        def _apply(result):
+            box["callback_ident"] = threading.get_ident()
+            box["result"] = result
+
+        def _failed(failure):
+            box["failed"] = failure.getTraceback()
+
+        defer.in_thread(worker).addCallbacks(_apply, _failed)
+
+        deadline = time.time() + _DRAIN_TIMEOUT
+        while "result" not in box and time.time() < deadline:
+            self._loop.run_until_complete(asyncio.sleep(0.05))
+
+        self.assertEqual(box["callback_ident"], main_ident)
+        self.assertEqual(box["result"], [1, 2, 3])
+        self.assertNotIn("failed", box)
+
+    def test_add_callbacks_errback_gets_worker_failure(self):
+        box = {}
+
+        def worker():
+            raise ValueError("boom")
+
+        defer.in_thread(worker).addCallbacks(
+            lambda r: box.__setitem__("ok", r),
+            lambda f: box.__setitem__("err", f.getTraceback()),
+        )
+
+        deadline = time.time() + _DRAIN_TIMEOUT
+        while "err" not in box and time.time() < deadline:
+            self._loop.run_until_complete(asyncio.sleep(0.05))
+
+        self.assertIn("ValueError: boom", box["err"])
+        self.assertNotIn("ok", box)
+
+
+class TestThreaded(_AsyncioLoopMixin, BaseEvenniaTestCase):
+    """`threaded` decorator turns a call into an `in_thread` Future."""
+
+    def test_decorated_call_returns_future_and_runs_in_thread(self):
+        main_ident = threading.get_ident()
+        box = {}
 
         @defer.threaded
         def fetch(x):
             box["worker_ident"] = threading.get_ident()
             return x
 
-        d = fetch("ok")
-        self.assertIsInstance(d, Deferred)
-        d.addCallback(lambda r: (box.__setitem__("result", r), done.set()))
+        async def _run():
+            fut = fetch("ok")
+            self.assertIsInstance(fut, asyncio.Future)
+            box["result"] = await fut
 
-        self._drain_until(done)
+        self._loop.run_until_complete(_run())
 
         self.assertNotEqual(box["worker_ident"], main_ident)
         self.assertEqual(box["result"], "ok")
 
 
-class TestBackground(BaseEvenniaTestCase):
+class TestBackground(_AsyncioLoopMixin, BaseEvenniaTestCase):
     """
-    `background` is fire-and-forget; its error routing is reactor-thread
-    callback logic independent of real threading, so these patch `in_thread`
-    with a synchronous Deferred we drive by hand. This isolates the routing
-    contract: on_error gets called, the log fires by default, the failure
-    never propagates to the caller, and the return is None.
+    `background` is fire-and-forget; error routing runs on the event loop
+    thread after the worker raises.
     """
 
     def test_returns_none(self):
-        with patch.object(defer, "in_thread", return_value=Deferred()):
+        with patch.object(defer, "in_thread") as mock_in_thread:
+            mock_in_thread.return_value = self._loop.create_future()
             result = defer.background(lambda: None)
         self.assertIsNone(result)
 
     def test_exception_routed_to_on_error_not_logged(self):
-        d = Deferred()
         seen = []
+        done = threading.Event()
 
-        with patch.object(defer, "in_thread", return_value=d):
-            defer.background(lambda: None, on_error=seen.append)
+        def _fail():
+            raise ValueError("boom")
 
-        with patch.object(defer.logger, "log_err") as mock_err:
-            try:
-                raise ValueError("boom")
-            except ValueError:
-                d.errback()
+        def on_error(failure):
+            seen.append(failure)
+            done.set()
+
+        defer.background(_fail, on_error=on_error)
+
+        deadline = time.time() + _DRAIN_TIMEOUT
+        while not done.is_set() and time.time() < deadline:
+            self._loop.run_until_complete(asyncio.sleep(0.05))
 
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0].type, ValueError)
-        mock_err.assert_not_called()  # on_error given -> no default logging
 
     def test_exception_logged_by_default(self):
-        d = Deferred()
-
-        with patch.object(defer, "in_thread", return_value=d):
-            defer.background(lambda: None)
+        def _fail():
+            raise ValueError("boom")
 
         with patch.object(defer.logger, "log_err") as mock_err:
-            try:
-                raise ValueError("boom")
-            except ValueError:
-                d.errback()
+            defer.background(_fail)
 
-        mock_err.assert_called_once()
+            deadline = time.time() + _DRAIN_TIMEOUT
+            while mock_err.call_count == 0 and time.time() < deadline:
+                self._loop.run_until_complete(asyncio.sleep(0.05))
 
-    def test_failure_does_not_propagate(self):
-        # A handled errback must leave the Deferred with no lingering failure,
-        # so Twisted does not log an unhandled error at GC time.
-        d = Deferred()
-        with patch.object(defer, "in_thread", return_value=d):
-            defer.background(lambda: None)
+            mock_err.assert_called_once()
 
-        with patch.object(defer.logger, "log_err"):
-            try:
-                raise ValueError("boom")
-            except ValueError:
-                d.errback()
+    def test_failure_does_not_propagate_to_caller(self):
+        def _fail():
+            raise ValueError("boom")
 
-        collected = []
-        d.addBoth(collected.append)
-        self.assertEqual(collected, [None])  # errback returned None -> chain clean
+        result = defer.background(_fail)
+        self.assertIsNone(result)

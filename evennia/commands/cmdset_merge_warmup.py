@@ -21,13 +21,10 @@ first typed command jarring (it reads as a hung server).
 
 from __future__ import annotations
 
-from twisted.internet.defer import inlineCallbacks
-
-from evennia.utils import delay, logger
+from evennia.utils import clock, delay, logger
 
 
-@inlineCallbacks
-def warm_cmdset_merge_for_session(session, *, callertype: str = "session"):
+async def warm_cmdset_merge_for_session(session, *, callertype: str = "session"):
     """
     Prime the cmdset merge cache for a single session.
 
@@ -43,14 +40,19 @@ def warm_cmdset_merge_for_session(session, *, callertype: str = "session"):
     from evennia.commands.cmdhandler import (generate_cmdset_providers,
                                              get_and_merge_cmdsets)
 
-    (
-        _cmdset_providers,
-        cmdset_providers_list,
-        _cmdset_providers_errors_list,
-        merge_caller,
-        _error_to,
-    ) = generate_cmdset_providers(session, session=session)
-    yield get_and_merge_cmdsets(merge_caller, cmdset_providers_list, callertype, "", cmdid=None)
+    try:
+        (
+            _cmdset_providers,
+            cmdset_providers_list,
+            _cmdset_providers_errors_list,
+            merge_caller,
+            _error_to,
+        ) = generate_cmdset_providers(session, session=session)
+        await get_and_merge_cmdsets(
+            merge_caller, cmdset_providers_list, callertype, "", cmdid=None
+        )
+    except Exception as exc:
+        logger.log_trace(f"cmdset merge warmup: {exc}")
 
 
 def schedule_cmdset_merge_warmup_for_character(character) -> None:
@@ -76,9 +78,7 @@ def schedule_cmdset_merge_warmup_for_character(character) -> None:
             logger.log_trace("cmdset merge warmup: sessions.all() failed")
             return
         for sess in sessions_iter:
-            d = warm_cmdset_merge_for_session(sess)
-            if d is not None and hasattr(d, "addErrback"):
-                d.addErrback(lambda f: logger.log_trace(f"cmdset merge warmup: {f}"))
+            clock.run_coroutine(warm_cmdset_merge_for_session(sess))
 
     delay(0, _fire)
 
@@ -99,6 +99,4 @@ def warm_all_logged_in_puppet_sessions() -> None:
         get_puppet = getattr(session, "get_puppet", None)
         if not (get_puppet and get_puppet()):
             continue
-        d = warm_cmdset_merge_for_session(session)
-        if d is not None and hasattr(d, "addErrback"):
-            d.addErrback(lambda f: logger.log_trace(f"cmdset merge warmup: {f}"))
+        clock.run_coroutine(warm_cmdset_merge_for_session(session))

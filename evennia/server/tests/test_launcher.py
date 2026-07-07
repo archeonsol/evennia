@@ -6,6 +6,7 @@ Test the evennia launcher.
 import os
 
 from anything import Something
+from django.test.utils import override_settings
 from mock import MagicMock, create_autospec, patch
 from twisted.internet import reactor
 from twisted.internet.base import DelayedCall
@@ -66,35 +67,47 @@ class TestLauncher(TwistedTestCase):
         result = evennia_launcher._parse_status(response)
         self.assertEqual(result, ["teststring"])
 
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
     @patch("evennia.server.evennia_launcher.os.name", new="posix")
+    @patch("evennia.server.evennia_launcher.PORTAL_PY_FILE", "/p/portal.py")
+    @patch("evennia.server.evennia_launcher.SERVER_PY_FILE", "/p/server.py")
+    @patch("evennia.server.evennia_launcher.PORTAL_PIDFILE", "/game/portal.pid")
+    @patch("evennia.server.evennia_launcher.SERVER_PIDFILE", "/game/server.pid")
     def test_get_twisted_cmdline(self):
         pcmd, scmd = evennia_launcher._get_twistd_cmdline(False, False)
-        self.assertIn("portal.py", pcmd[1])
-        self.assertIn("--pidfile", pcmd[3])
-        self.assertIn("server.py", scmd[1])
-        self.assertIn("--pidfile", scmd[3])
+        self.assertTrue(any("portal.py" in arg for arg in pcmd))
+        self.assertTrue(any("server.py" in arg for arg in scmd))
+        self.assertTrue(any("--pidfile" in arg for arg in pcmd))
+        self.assertTrue(any("--pidfile" in arg for arg in scmd))
 
         pcmd, scmd = evennia_launcher._get_twistd_cmdline(True, True)
-        self.assertIn("portal.py", pcmd[1])
-        self.assertIn("--pidfile", pcmd[3])
-        self.assertIn("--profiler=cprofile", pcmd[5], pcmd)
-        self.assertIn("--profile=", pcmd[6])
-        self.assertIn("server.py", scmd[1])
-        self.assertIn("--pidfile", scmd[3])
-        self.assertIn("--pidfile", scmd[3])
-        self.assertIn("--profiler=cprofile", scmd[5], "actual: {}".format(scmd))
-        self.assertIn("--profile=", scmd[6])
+        self.assertTrue(any("portal.py" in arg for arg in pcmd))
+        self.assertTrue(any("--profiler=cprofile" in arg for arg in pcmd))
+        self.assertTrue(any(arg.startswith("--profile=") for arg in pcmd))
+        self.assertTrue(any("server.py" in arg for arg in scmd))
+        self.assertTrue(any("--profiler=cprofile" in arg for arg in scmd))
+        self.assertTrue(any(arg.startswith("--profile=") for arg in scmd))
 
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
     @patch("evennia.server.evennia_launcher.os.name", new="nt")
+    @patch("evennia.server.evennia_launcher.PORTAL_PY_FILE", "/p/portal.py")
+    @patch("evennia.server.evennia_launcher.SERVER_PY_FILE", "/p/server.py")
     def test_get_twisted_cmdline_nt(self):
         pcmd, scmd = evennia_launcher._get_twistd_cmdline(False, False)
-        self.assertTrue(len(pcmd) == 3, pcmd)
+        self.assertTrue(len(pcmd) == 2, pcmd)
         self.assertTrue(len(scmd) == 3, scmd)
 
-    @patch("evennia.server.evennia_launcher.reactor.stop")
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
+    @patch("twisted.internet.reactor.stop")
     def test_reactor_stop(self, mockstop):
         evennia_launcher._reactor_stop()
         mockstop.assert_called()
+
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=True)
+    def test_reactor_stop_ipc(self):
+        evennia_launcher.REACTOR_RUN = True
+        evennia_launcher._reactor_stop()
+        self.assertFalse(evennia_launcher.REACTOR_RUN)
 
     def _catch_wire_read(self, mocktransport):
         "Parse what was supposed to be sent over the wire"
@@ -155,6 +168,7 @@ class TestLauncher(TwistedTestCase):
         evennia_launcher.query_status(callback=testcall)
         mprint.assert_called_with([True, True, 2, 24, "info1", "info2"])
 
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
     @patch.object(evennia_launcher, "AMP_CONNECTION")
     @patch("evennia.server.evennia_launcher.print")
     def test_wait_for_status_reply(self, mprint, aconn):
@@ -172,8 +186,9 @@ class TestLauncher(TwistedTestCase):
         evennia_launcher.wait_for_status_reply(None)
         mprint.assert_called_with("No Evennia connection established.")
 
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
     @patch.object(evennia_launcher, "send_instruction", _msend_status_ok)
-    @patch("evennia.server.evennia_launcher.reactor.callLater")
+    @patch("twisted.internet.reactor.callLater")
     def test_wait_for_status(self, mcalllater):
         mcall = MagicMock()
         merr = MagicMock()
@@ -184,8 +199,9 @@ class TestLauncher(TwistedTestCase):
         mcall.assert_called_with(True, True)
         merr.assert_not_called()
 
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
     @patch.object(evennia_launcher, "send_instruction", _msend_status_err)
-    @patch("evennia.server.evennia_launcher.reactor.callLater")
+    @patch("twisted.internet.reactor.callLater")
     def test_wait_for_status_fail(self, mcalllater):
         mcall = MagicMock()
         merr = MagicMock()

@@ -28,7 +28,8 @@ stall duration; pair it with normal profiling to localize the site.
 import time
 
 from django.conf import settings
-from twisted.internet.task import LoopingCall
+
+from evennia.utils import clock
 
 from evennia.utils import logger
 
@@ -68,7 +69,7 @@ class ReactorStallWatchdog:
         self.interval = interval
         self._now = _now
         self._last = None
-        self._loop = LoopingCall(self._tick)
+        self._loop = clock.make_looping(self._tick)
 
     @property
     def enabled(self) -> bool:

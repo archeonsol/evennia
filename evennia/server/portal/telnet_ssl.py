@@ -9,6 +9,7 @@ ssl.cert in mygame/server/.
 """
 
 import os
+import ssl
 
 try:
     from OpenSSL import crypto
@@ -131,16 +132,17 @@ def verify_or_create_SSL_key_and_cert(keyfile, certfile):
 
 def getSSLContext():
     """
-    This is called by the portal when creating the SSL context
-    server-side.
-
-    Returns:
-        ssl_context (tuple): A key and certificate that is either
-            existing previously or created on the fly.
-
+    Legacy Twisted SSL context factory (deprecated; use ``get_asyncio_ssl_context``).
     """
-
     if verify_or_create_SSL_key_and_cert(_PRIVATE_KEY_FILE, _CERTIFICATE_FILE):
         return twisted_ssl.DefaultOpenSSLContextFactory(_PRIVATE_KEY_FILE, _CERTIFICATE_FILE)
-    else:
+    return None
+
+
+def get_asyncio_ssl_context():
+    """Return a stdlib ``ssl.SSLContext`` for asyncio telnet+SSL listeners."""
+    if not verify_or_create_SSL_key_and_cert(_PRIVATE_KEY_FILE, _CERTIFICATE_FILE):
         return None
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(_CERTIFICATE_FILE, _PRIVATE_KEY_FILE)
+    return ctx

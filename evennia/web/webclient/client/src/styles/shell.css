@@ -1,0 +1,235 @@
+/* Base shell styling. The palette lives in themes.css (per [data-theme]); this is
+   structure + the shared aesthetic primitives (corner-bracket frame, phosphor
+   glow, terminal scrollbars). Deliberately sharp + dense + monospace - no rounded
+   rects, no soft shadows, nothing that reads as SaaS. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-deep, #060403);
+  color: var(--fg, #cdbfa6);
+  font-family: var(--font-mono);
+  font-size: var(--shell-font-size, 15px);
+  /* Firefox terminal scrollbars */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) var(--bg-deep);
+}
+
+#evennia-shell {
+  height: 100dvh;
+}
+
+/* WebKit terminal scrollbars - squared, themed. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border: 2px solid var(--bg-deep);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+
+/* Corner-bracket frame - a targeting-reticle / cogitator motif drawn from the
+   theme accent. Applied to panels via .framed; drawn on ::before so it never
+   fights the element's own background. */
+.framed {
+  position: relative;
+}
+.framed::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background:
+    linear-gradient(var(--accent), var(--accent)) 0 0 / var(--bracket) 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 0 0 / 1px var(--bracket) no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 100% 0 / var(--bracket) 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 100% 0 / 1px var(--bracket) no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 0 100% / var(--bracket) 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 0 100% / 1px var(--bracket) no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 100% 100% / var(--bracket) 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 100% 100% / 1px var(--bracket) no-repeat;
+}
+
+/* Phosphor glow on marked accent text, only when the glow effect is enabled. */
+:global(html[data-glow]) .glow-text,
+html[data-glow] .glow-text {
+  text-shadow: 0 0 6px var(--glow);
+}
+
+/* Uppercase, wide-tracked machine label. */
+.label {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: var(--fg-dim);
+}
+
+/* Bracketed section header:  ┤ PRESENT ├ ─────  */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.section-head .br {
+  color: var(--accent);
+}
+.section-head .rule {
+  flex: 1;
+  height: 1px;
+  margin-left: 0.4ch;
+  background: linear-gradient(to right, var(--border-bright), transparent);
+}
+
+/* Accent sigil bullet for list rows. */
+.sigil {
+  color: var(--accent);
+  margin-right: 0.6ch;
+}
+
+/* A faint corner glyph for HUD ornament. */
+.tick {
+  color: var(--fg-faint);
+}
+
+/* Re-skin dockview to the grimdark aesthetic: sharp, mono, accent-driven. Layered
+   over the base dockview-theme-dark class; we override the generic --dv-* vars. */
+.dv-underspire {
+  font-family: var(--font-mono);
+  --dv-background-color: var(--bg);
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--bg-elev);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-activegroup-visiblepanel-tab-color: var(--accent-bright);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--bg-elev);
+  --dv-activegroup-hiddenpanel-tab-color: var(--fg-dim);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg-elev);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--fg-dim);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--bg-elev);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--fg-faint);
+  --dv-separator-border: var(--border-bright);
+  --dv-paneview-header-border-color: var(--border-bright);
+  --dv-tab-divider-color: var(--border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--accent);
+  --dv-paneview-active-outline-color: var(--accent);
+  --dv-border-radius: 0;
+  --dv-tab-border-radius: 0;
+  --dv-tab-font-size: 0.68rem;
+  --dv-floating-box-shadow: 0 0 0 1px var(--accent);
+  --dv-floating-group-border: 1px solid var(--accent);
+  --dv-floating-titlebar-background-color: var(--bg-elev);
+  --dv-drag-over-background-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-scrollbar-background-color: var(--bg-deep);
+  --dv-icon-hover-background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+/* Tabs - sharp, mono, uppercase; active tab gets a glowing accent underbar. */
+.dv-underspire .dv-tab {
+  padding: 0 13px;
+  border-right: 1px solid var(--border);
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 0.68rem;
+  position: relative;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.dv-underspire .dv-tab:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.dv-underspire .dv-tab.dv-active-tab {
+  color: var(--accent-bright);
+  background: var(--bg);
+}
+.dv-underspire .dv-tab.dv-active-tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 7px var(--glow);
+}
+.dv-underspire .dv-default-tab-content {
+  font-family: var(--font-mono);
+}
+.dv-underspire .dv-default-tab-action {
+  color: var(--fg-faint);
+}
+.dv-underspire .dv-default-tab-action:hover {
+  color: var(--alert);
+}
+
+/* Dragging tab - dimmed, accent-outlined ghost. */
+.dv-underspire .dv-tab.dv-tab--dragging,
+.dv-underspire .dv-tab-dragging,
+.dv-underspire .dv-tab-ghost-drag {
+  opacity: 0.6;
+  outline: 1px solid var(--accent);
+}
+
+/* Drop target - a targeting-reticle overlay (fill via --dv var + dashed edge). */
+.dv-underspire .dv-drop-target-dropzone {
+  outline: 1px dashed var(--accent);
+  outline-offset: -4px;
+}
+
+/* Sashes - invisible until hovered, then a glowing accent seam. */
+.dv-underspire .dv-sash {
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.dv-underspire .dv-sash:hover {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--glow);
+}
+
+/* Floating group - accent frame + machine-readout titlebar. */
+.dv-underspire .dv-floating-titlebar {
+  background: var(--bg-elev);
+  color: var(--accent-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.66rem;
+}
+.dv-underspire .dv-groupview {
+  background: var(--bg);
+}
+
+/* --- Server multimedia (image/audio/video/youtube in the log) --- */
+.media { display: inline-block; margin: 4px 0; max-width: 100%; vertical-align: bottom; }
+.media-img { max-width: min(480px, 100%); max-height: 360px; border: 1px solid var(--border-bright); border-radius: 3px; }
+.media-audio { width: min(420px, 100%); height: 34px; }
+.media-video { max-width: min(560px, 100%); max-height: 360px; border: 1px solid var(--border-bright); border-radius: 3px; }
+.media-yt { display: block; width: min(560px, 100%); aspect-ratio: 16 / 9; }
+.media-yt iframe { width: 100%; height: 100%; border: 1px solid var(--border-bright); border-radius: 3px; }
+
+/* --- Screenreader mode: drop decorative chrome, keep the log readable --- */
+:root[data-screenreader] .crt-overlay,
+:root[data-screenreader] .embers-layer { display: none !important; }

@@ -25,6 +25,537 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.142 — Orphan process reconciliation on stop
+
+### Launcher stop / orphan recovery
+
+- **`_force_kill_local_processes()`:** When graceful IPC shutdown fails or times out,
+  the launcher SIGTERM/SIGKILLs portal and server from pidfiles and waits for IPC
+  :4006 to go down. Prevents ``evennia stop`` / ``systemctl restart`` leaving live
+  orphans after ``No Evennia connection established``.
+- **`_local_pidfiles_alive()`:** Detects live portal/server processes from pidfiles
+  when IPC status query fails.
+- **`wait_for_status_reply(on_fail=...)`:** Optional fallback hook invoked on push
+  timeout or connection errors.
+- **`stop_evennia` / `reboot_evennia`:** Wire ``on_fail=_force_kill_local_processes``
+  on shutdown waits; IPC-unreachable stop path force-kills when pidfiles show live
+  processes.
+
+## 6.0.0+underspire.141 — Launcher stop/restart reliability
+
+### Launcher stop / start cycle
+
+- **`SHUTDOWN_WAIT_DEADLINE` (60s):** Portal/server shutdown waits no longer use the
+  legacy 10s ``retries * rate`` cap.
+- **Portal stop detection:** ``wait_until_state`` treats launcher IPC connection
+  refused as portal-down when waiting for ``portal_running=False``; fallback
+  confirms IPC is unreachable before declaring stop complete.
+- **`wait_for_status_reply`:** Push wait timeout and errors now call
+  ``_reactor_stop()`` so ``evennia stop`` does not hang indefinitely.
+- **Restart after stop:** ``_cleanup_stale_portal_process()`` kills a stale
+  portal pidfile process and blocks until IPC :4006 is free before spawning a
+  new portal; fixes immediate ``evennia start`` after ``evennia stop`` timing
+  out while leaving an orphan portal.
+- **Cold-start fallback:** If the portal wait times out but a status probe shows
+  the portal is live, proceed with the start callback.
+- **`AMP_CONNECTION` reset** at the start of ``start_evennia`` / ``stop_evennia``.
+
+### Tests
+
+- ``test_wait_until_state_portal_down_on_ipc_refused``
+- ``test_wait_for_portal_ipc_down``
+- ``test_query_ipc_status``
+
+---
+
+## 6.0.0+underspire.140 — Cold-start: fast PSTATUS probe, IPC status_push
+
+### Launcher cold boot
+
+- **`PSTATUS_PROBE_TIMEOUT` (5s):** Initial ``PSTATUS`` checks no longer block for the
+  full ``COLD_START_DEADLINE`` (120s) when the portal is not yet listening. Only
+  cold-start ``wait_for_status`` waits the full budget.
+- **`query_status` / `send_command_fire`:** Skip unsolicited ``status_push`` frames
+  that the portal may send on connect before the query ack — fixes spurious
+  ``unexpected launcher IPC response`` failures during status polling.
+- **IPC wait budget:** ``_wait_for_status_ipc`` passes ``retries=None`` so
+  ``wait_until_state`` uses ``COLD_START_DEADLINE`` instead of the legacy
+  30s ``retries * rate`` cap.
+
+### Server reload shutdown
+
+- **`maybe_await` portal sync:** ``all_sessions_portal_sync()`` is awaited via
+  ``clock.maybe_await`` on reload/reset so redis-bus ``IMMEDIATE_RESULT`` does not
+  crash the shutdown coroutine.
+
+### Tests
+
+- ``test_query_status_skips_status_push`` in ``test_launcher_ipc.py``.
+- ``test_shutdown_reload_with_immediate_result_portal_sync`` in
+  ``test_server_shutdown.py``.
+
+---
+
+## 6.0.0+underspire.139 — Cold-start: portal live when IPC binds
+
+### Portal status / launcher cold boot
+
+- **`_launcher_ipc_ready`:** Set on the portal service when launcher IPC binds
+  (``launcher_ipc._start_server``). ``AMPServerProtocol.get_status()`` reports
+  ``portal_live=True`` once IPC is listening, even before ``startService()`` /
+  ``register_plugins()`` finish — fixes the `.138` gap where the launcher could
+  connect to :4006 but ``wait_until_state`` never saw ``portal_running=True``.
+- **Test:** ``test_portal_live_when_ipc_ready_before_start_service`` in
+  ``test_amp_server_status.py``.
+
+### Ops (mootest)
+
+- **systemd:** ``Type=oneshot`` + ``RemainAfterExit=yes`` (launcher exits after
+  start; portal child stays up). Replaces ``Type=forking`` which never received
+  a fork notify and left the unit in ``activating`` for minutes.
+- **Deploy:** kill orphaned ``evennia reboot`` / ``evennia start`` processes
+  before ``systemctl restart``.
+
+---
+
+## 6.0.0+underspire.138 — Cold-start: bind launcher IPC first, require server up
+
+### Portal cold boot
+
+- **Launcher IPC binds synchronously** before ``run_forever()`` (``loop.run_until_complete``
+  in ``start_launcher_server``), matching legacy Twisted ``TCPServer`` early-bind
+  behaviour. ``register_amp()`` moved to the top of ``_privileged_start`` so :4006 is
+  live before telnet/web/plugins finish loading.
+
+### Launcher / ops
+
+- **`wait_until_state()``** — single connect+query retry loop with
+  ``COLD_START_DEADLINE`` (120s). ``_wait_for_status_ipc`` uses it instead of
+  separate connect-then-wait (which could exhaust the 60s budget before IPC bound).
+- **``evennia start`` exits 1** on launcher wait timeout (``LAUNCHER_FAILED``) so
+  systemd marks the unit failed instead of "active" with portal-only.
+- **`scripts/evennia_start.sh`** — systemd ``ExecStart`` wrapper waits up to 120s
+  for ``server.py`` after ``evennia start``.
+- **`prod_restart_evennia.sh`** — portal-up/server-down fallback uses
+  ``evennia sstart`` (not another full ``evennia start``).
+
+### Tests
+
+- ``test_start_launcher_server_binds_before_run_forever``,
+  ``test_wait_until_state_returns_on_connect`` in ``test_launcher_ipc.py``.
+
+---
+
+## 6.0.0+underspire.137 — Fix .135/.136 regressions (duplicate login, defer, cold start)
+
+### Service lifecycle (.135 regression)
+
+- **Fix:** ``service_registry.MultiService._on_start`` no longer calls
+  ``_privileged_start()`` — Twisted only ran privileged setup once via
+  ``privilegedStartService``; the duplicate call in ``.135`` registered two
+  Redis bus readers, delivering every ``PCONN`` twice and causing duplicate
+  login messages.
+- **Test:** ``test_privileged_start_runs_once`` in
+  ``evennia/server/tests/test_service_registry.py``.
+
+### Defer / bulk-tick (asyncio-only, no Twisted)
+
+- **``evennia.utils.defer``:** ``in_thread`` Futures get legacy
+  ``.addCallback`` / ``.addCallbacks`` chains via a pure-asyncio
+  :class:`WorkerFailure` shim (no ``twisted.python.failure``). ``background``
+  ``on_error`` receives ``WorkerFailure`` too.
+- **``evennia.utils.bulk_tick``:** Reactor-thread guard replaced with
+  ``clock.is_io_thread()`` (new helper on ``evennia.utils.clock``).
+- **Tests:** ``test_add_callbacks_*`` in ``evennia/utils/tests/test_defer.py``.
+
+### Redis bus / launcher
+
+- **``RedisPortalBus.broadcast``:** publishes via ``callRemote`` when no live
+  server shim is attached (fixes ``'RedisPortalBus' object has no attribute
+  'broadcast'`` when server is down).
+- **Redis transport:** ``start()`` is idempotent (skips if reader already alive).
+- **Launcher cold start:** ``connect_session()`` retries Portal IPC connect;
+  ``evennia_launcher._ensure_ipc_connection`` uses it (fixes systemd
+  ``Connection to Evennia timed out`` on cold boot).
+- **Tests:** ``connect_session`` retry/timeout tests in
+  ``evennia/server/tests/test_launcher_ipc.py``.
+
+---
+
+## 6.0.0+underspire.136 — Safe reload speedups
+
+### Launcher / shutdown latency
+
+- **A1:** Server shutdown uses ``clock.call_later(0, stop_loop)`` instead of a fixed 1s delay.
+- **A2:** ``maybe_collectstatic()`` fingerprints ``STATICFILES_DIRS`` and skips redundant
+  ``collectstatic`` on reload; ``evennia --collectstatic`` forces a run.
+- **A3:** Launcher IPC ``LauncherSession.wait_for_state()`` / ``wait_for_push()`` replace
+  polling loops; Portal pushes status on launcher connect, IPC bind, PSYNC, and shutdown.
+
+### Reload cold-boot trimming
+
+- **B1:** On reload, skip ``_hook_lint()`` in ``run_init_hooks`` and
+  ``create_default_channels()`` in ``at_post_portal_sync``.
+- **B2:** Remove automatic cmdset merge warmup from ``puppet_object`` and
+  ``at_post_portal_sync`` (action engine owns player input; warmup primed a cache the hot
+  path no longer reads).
+
+---
+
+## 6.0.0+underspire.135 — Retire Twisted fallbacks; asyncio service registry
+
+### Infrastructure (T3 phases 1–3)
+
+**Phase 1 — Delete legacy fallbacks**
+- Portal listeners are asyncio-only (`loop.create_server`); Twisted ``TCPServer``/``SSLServer``/
+  launcher AMP TCP branches removed from ``portal/service.py``.
+- ``evennia_launcher`` always uses asyncio bootstrap cmdline and launcher IPC (no ``twistd``/
+  Twisted AMP client path).
+- ``PORTAL_ASYNCIO_SERVERS`` and ``EVENNIA_ASYNCIO_BOOTSTRAP`` default ``True`` in
+  ``settings_default.py``; mootest enables on dev too.
+- Telnet+SSL uses ``get_asyncio_ssl_context()`` (stdlib ``ssl.SSLContext``).
+- ``clock.stop_loop`` no longer falls back to ``reactor.stop()``.
+
+**Phase 2 — Service registry**
+- New ``evennia/server/service_registry.py``: ``Service``, ``MultiService``,
+  ``ServiceCollection`` replace ``twisted.application.service``.
+- ``evennia/__init__.py`` builds ``TWISTED_APPLICATION`` as a ``ServiceCollection`` (name kept
+  for compat).
+- ``UvicornWebService`` and ``EvenniaGameIndexService`` migrated off Twisted ``Service``.
+
+**Phase 3 — Deferred → asyncio**
+- ``server/service.py`` shutdown hooks use ``clock.maybe_await`` + ``asyncio.gather``.
+- SIGINT handler uses ``clock.run_coroutine`` instead of ``ensureDeferred``.
+- ``ipc_handlers_server`` admin shutdown ops use ``clock.run_coroutine``.
+- ``utils/systems.py`` driver fires systems via async tasks instead of ``maybeDeferred``.
+- ``actions/engine.py`` interactive input uses ``asyncio.Future``; ``InputCaptureState`` updated.
+- ``redis_bus`` / ``sessionhandler`` return ``IMMEDIATE_RESULT`` instead of ``defer.succeed``.
+
+### Tests
+- ``evennia/server/tests/test_service_registry.py``.
+
+---
+
+## 6.0.0+underspire.134 — Fast stop/reload and server death watchdog
+
+### Hotfix
+
+- **`get_status()` lied about portal liveness** — always returned `portal_live=True`, so
+  `evennia stop`/`reload` under asyncio IPC polled for the full 120×0.5s (60s) timeout
+  instead of noticing `shutdown_complete`. Now reports `False` once shutdown begins.
+- **`wait_for_status()`** — stop/reload paths use 20 retries (~10s); cold start keeps 120.
+  Status callback also treats dead PIDs as stopped (belt-and-suspenders).
+- **Partial failure watchdog** — Portal checks every 15s; if `server_process_id` is dead
+  and no intentional reload/shutdown is in progress, auto-restarts the Server.
+- **`evennia.service`** — `TimeoutStopSec` 60→30 now that stop completes in seconds.
+
+- ``launcher_ipc._start_server()`` uses ``loop.create_server(protocol_factory)``
+  instead of ``asyncio.start_server()`` (Python 3.12 treats the first arg as a
+  ``(reader, writer)`` callback, so launcher commands never dispatched).
+- ``ServerSessionHandler._flush_outbuf()`` sends via ``portal_bus`` instead of
+  the ``amp`` module namespace.
+
+---
+
+## 6.0.0+underspire.132 — Fix launcher IPC server-start deadlock
+
+### Hotfix
+- ``wait_for_status_reply()`` under asyncio IPC now registers the status-push
+  waiter on a background thread (matching legacy AMP). The blocking ``read_push``
+  ran before ``SSTART`` was sent, so the server never launched.
+
+---
+
+## 6.0.0+underspire.131 — Reset launcher IPC session on connect errors
+
+### Hotfix
+- Clear ``AMP_CONNECTION`` when asyncio launcher IPC send/query fails so
+  ``wait_for_status`` retries open a fresh socket during cold portal boot.
+
+---
+
+## 6.0.0+underspire.130 — Longer launcher wait for asyncio cold boot
+
+### Hotfix
+- ``wait_for_status()`` defaults to 120 retries (60s) under asyncio bootstrap;
+  direct ``portal.py`` startup needs longer than legacy twistd before IPC listens.
+
+---
+
+## 6.0.0+underspire.129 — Call privilegedStartService in asyncio bootstrap
+
+### Hotfix
+- Twisted 24 ``Service.startService()`` only sets ``running=1``; listener
+  registration lives in ``privilegedStartService()`` (twistd called it before
+  ``startService``). ``asyncio_bootstrap.run_bootstrap()`` now mirrors twistd.
+
+---
+
+## 6.0.0+underspire.128 — Bootstrap starts Portal/Server service directly
+
+### Hotfix
+- ``asyncio_bootstrap.run_bootstrap()`` calls ``EVENNIA_PORTAL_SERVICE`` /
+  ``EVENNIA_SERVER_SERVICE.startService()`` instead of ``TWISTED_APPLICATION``,
+  which on current Twisted is a bare ``Componentized`` without ``startService``.
+- ``portal.py`` / ``server.py``: set ``DJANGO_SETTINGS_MODULE`` when run as
+  ``__main__``.
+
+---
+
+## 6.0.0+underspire.127 — Fix bootstrap game-dir sys.path
+
+### Hotfix
+- ``portal.py`` / ``server.py``: after popping the script directory from ``sys.path[0]``,
+  insert the game working directory (``os.getcwd()``) so ``server.conf.settings`` imports
+  when the launcher starts ``python portal.py`` / ``python server.py`` from the game dir.
+
+---
+
+## 6.0.0+underspire.126 — Fix asyncio bootstrap ssl shadowing crash
+
+### Hotfix
+- ``portal.py`` / ``server.py``: pop the script directory from ``sys.path[0]`` when run as
+  ``__main__``, so the legacy ``portal/ssl.py`` module no longer shadows the stdlib
+  ``ssl`` package (broke ``python portal.py`` bootstrap on Linux prod).
+- Deleted ``evennia/server/portal/ssl.py`` (superseded by ``telnet_ssl.py``).
+- ``SSL_PROTOCOL_CLASS`` now points at ``telnet_ssl.SSLProtocol``.
+
+---
+
+## 6.0.0+underspire.125 — T3 S10: launcher IPC, cleanups, headless mode
+
+### Launcher control plane (S10)
+- New ``evennia/server/launcher_ipc.py``: length-prefixed JSON frames on ``AMP_PORT`` replace Twisted AMP for launcher ↔ Portal when ``EVENNIA_ASYNCIO_BOOTSTRAP=True``.
+- ``evennia/server/portal/launcher_handlers.py``: transport-agnostic launcher command dispatch (SSTART, SRELOAD, SRESET, SSHUTD, PSHUTD).
+- Portal ``register_amp()`` starts the asyncio IPC server on the bound loop; legacy ``TCPServer`` AMP remains when bootstrap is off (Windows dev twistd).
+- ``evennia_launcher.send_instruction()`` uses blocking ``LauncherSession`` over IPC; Twisted AMP client kept as fallback when bootstrap is off.
+- ``amp_server.send_Status2Launcher()`` pushes via ``LauncherIPCConnection``; Twisted ``callRemote`` kept for legacy AMP connections.
+- Removed the hidden Twisted asyncio-reactor bridge from ``asyncio_bootstrap`` (no longer needed for launcher AMP).
+
+### Opportunistic cleanups
+- ``evennia.utils.clock.defer_later_compat()`` + ``_DeferLaterCompat``: Twisted ``deferLater`` shim for ``TaskHandler`` (``.called``, ``.cancel()``, pause/unpause).
+- ``taskhandler.py``: uses ``clock.defer_later_compat`` instead of ``deferLater(reactor, ...)``.
+- ``utils.run_in_main_thread()``: ``clock.call_from_thread`` + ``Future.result()`` instead of ``blockingCallFromThread(reactor, ...)``.
+
+### Headless engine mode
+- New ``evennia/standalone.py``: ``evennia.standalone()`` boots Portal or Server in-process (no launcher/twistd); ``evennia.shutdown_standalone()`` for graceful stop.
+- Exported via lazy registry: ``evennia.standalone``, ``evennia.shutdown_standalone``.
+
+### Tests
+- ``evennia/server/tests/test_launcher_ipc.py``, ``test_standalone.py``; bootstrap/launcher tests updated for S10.
+
+---
+
+## 6.0.0+underspire.124 — T3 S9: kill reactor on the hot path
+
+### Process loop ownership
+
+- ``asyncio_bootstrap`` now runs ``loop.run_forever()`` instead of ``reactor.run()``; the process loop is bound via ``clock.bind_loop``.
+- Hidden Twisted asyncio-reactor bridge remains **only** for launcher AMP ``TCPServer`` (:4006) until S10.
+- SIGINT/SIGTERM → ``clock.run_shutdown_hooks()`` + ``clock.stop_loop()``.
+
+### ``evennia.utils.clock`` extensions
+
+- ``bind_loop`` / ``get_bound_loop`` / ``stop_loop`` / ``register_shutdown_hook`` / ``run_shutdown_hooks`` replace direct ``reactor`` use on Portal/Server hot paths.
+- Twisted ``reactor`` fallback is confined to ``clock.stop_loop`` / ``_get_loop`` for Windows dev ``twistd``.
+
+### Hot-path reactor removal
+
+- ``portal/service.py``: ``clock.when_running``, ``clock.register_shutdown_hook``, ``clock.stop_loop`` (no ``reactor`` import).
+- ``server/service.py``: SIGINT via ``signal.signal`` under bootstrap; shutdown uses ``clock.stop_loop``.
+- ``asyncio_transport.get_asyncio_loop`` reads ``clock.get_bound_loop``.
+- ``amp_server.start_server``: ``clock.defer_to_thread`` for child reap.
+
+### Settings / launcher
+
+- Removed ``TWISTED_REACTOR`` setting and ``--reactor=asyncio`` twistd flag.
+- ``DJANGO_ALLOW_ASYNC_UNSAFE`` set unconditionally in ``settings_default`` (asyncio bootstrap is the prod path).
+
+### Tests
+
+- Updated ``test_asyncio_bootstrap`` for ``loop.run_forever``.
+- ``world/tests/test_clock.py``: ``bind_loop`` / ``stop_loop`` / shutdown hooks.
+
+---
+
+## 6.0.0+underspire.123 — T3 S8: asyncio process bootstrap
+
+### Replace ``twistd`` entrypoint (Portal/Server)
+
+- New ``evennia/server/asyncio_bootstrap.py``: creates an asyncio loop, installs the Twisted asyncio reactor bridge, starts the ``Application`` service tree, and runs until graceful shutdown.
+- ``portal.py`` / ``server.py`` expose ``__main__`` entry points (``python portal.py`` / ``python server.py``).
+- Launcher ``_get_twistd_cmdline`` uses bootstrap argv when ``EVENNIA_ASYNCIO_BOOTSTRAP=True``; legacy ``twistd`` path remains when the flag is off (Windows dev).
+- Portal interactive ``server_twistd_cmd`` backup uses bootstrap argv when the flag is on.
+
+### Settings
+
+- ``EVENNIA_ASYNCIO_BOOTSTRAP`` (default ``False``); prod enables in ``mootest/server/conf/settings.py``.
+
+### Tests
+
+- [`evennia/server/tests/test_asyncio_bootstrap.py`](evennia/evennia/server/tests/test_asyncio_bootstrap.py): cmdline builder, launcher routing, mocked bootstrap lifecycle.
+
+---
+
+## 6.0.0+underspire.122 — T3 S6: outbound connections on asyncio
+
+### Outbound WebSocket clients (Discord / Grapevine)
+
+- ``connect_ws`` routes to ``connect_ws_asyncio`` when ``PORTAL_ASYNCIO_SERVERS`` is on and the asyncio reactor provides a shared loop; Twisted ``connectTCP``/``connectSSL`` remain only for dev without the flag.
+- Missing asyncio reactor with the flag set logs an error and skips the outbound WS client (no silent Twisted fallback).
+- ``discord.py`` / ``grapevine.py`` call the unified ``connect_ws`` entry point.
+
+### Outbound IRC client
+
+- New ``connect_irc`` / ``connect_irc_asyncio`` in ``evennia/server/portal/irc.py``: IRC bots use ``loop.create_connection`` (+ verified TLS) with the same reconnect/backoff contract as the WS client driver.
+- ``IRCBotFactory.start`` delegates to ``connect_irc`` (Twisted ``TCPClient``/``connectSSL`` only when the flag is off).
+
+### Game Index client
+
+- ``EvenniaGameIndexService`` already used ``clock.looping`` + ``http.request`` (``defer_to_thread``); docstring updated to reflect that.
+
+### Tests
+
+- [`mootest/world/tests/test_ws_client_asyncio.py`](mootest/world/tests/test_ws_client_asyncio.py): fixed echo-server mixin import; ``connect_ws`` gating tests.
+- [`mootest/world/tests/test_irc_asyncio.py`](mootest/world/tests/test_irc_asyncio.py): asyncio IRC handshake + ``connect_irc`` gating.
+
+---
+
+## 6.0.0+underspire.121 — T3 S5: Portal asyncio-only listeners
+
+### Portal game listeners (telnet / shell WS / SSH / web proxy)
+
+- When ``PORTAL_ASYNCIO_SERVERS=True``, telnet, shell WebSocket, SSH, and the web reverse proxy run **only** on native asyncio servers; no Twisted ``TCPServer`` fallback in that mode.
+- Missing asyncio reactor with the flag set logs an error and skips listeners (no silent Twisted fallback).
+- Dev without the flag still uses Twisted telnet/WS/proxy listeners.
+
+### Retired modules
+
+- Deleted ``evennia/server/portal/webclient_ajax.py`` (AJAX ``/webclientdata`` long-poll; Azaban shell WS is the supported client).
+- Deleted ``evennia/server/portal/ssh.py`` (twisted.conch SSH); SSH is asyncssh-only via ``ssh_asyncio.py``.
+- Removed ``AJAX_CLIENT_CLASS`` / ``AJAX_PROTOCOL_CLASS`` settings; ``SSH_PROTOCOL_CLASS`` points at ``AsyncioSSHSession``.
+
+### Tests
+
+- [`mootest/world/tests/test_portal_asyncio.py`](mootest/world/tests/test_portal_asyncio.py): gating + error log when flag set without asyncio loop.
+- [`evennia/server/tests/test_redis_reload.py`](evennia/evennia/server/tests/test_redis_reload.py): mock ``run_init_hooks`` so PSYNC/reload survival tests exercise session sync without needing a live reactor loop.
+
+---
+
+## 6.0.0+underspire.120 — T3 S1-S3: asyncio scheduling facades
+
+### `evennia.utils.clock` on asyncio primitives
+
+- Replaced Twisted `reactor.callLater` / `LoopingCall` / `ensureDeferred` / `deferToThread` with native asyncio (`call_later`, `LoopHandle`, `create_task`, `run_in_executor`).
+- `run_coroutine` returns `asyncio.Task` on a running loop; test harnesses without a loop get a synchronous `_SyncCoroutineResult` driver.
+- `_main_loop` cache lets `call_from_thread` resolve the loop from worker threads.
+- Twisted `asyncioreactor` bridge (`reactor._asyncioEventloop`) remains until S9 kills the reactor.
+
+### `evennia.utils.defer` on thread-pool executor
+
+- `in_thread` / `background` / `threaded` now return `asyncio.Future` from `clock.defer_to_thread` (10-worker `ThreadPoolExecutor`).
+- `background` routes failures via `add_done_callback` instead of Twisted errbacks.
+
+### Call-site updates
+
+- Command dispatch (`inputfuncs`) and cmdset warmup: errbacks folded into coroutines / task done-callbacks.
+- Activity driver (`process.py`, `engine.py`): await any awaitable yield (not only Twisted `Deferred`).
+- `portal/discord.py` timer adapter routes through `clock.call_later`.
+- `game_index_client/service.py`: `clock.run_coroutine` in the maintenance loop.
+
+### Tests
+
+- [`mootest/world/tests/test_clock.py`](mootest/world/tests/test_clock.py), [`mootest/world/tests/test_deferred_migration.py`](mootest/world/tests/test_deferred_migration.py), [`evennia/utils/tests/test_defer.py`](evennia/utils/tests/test_defer.py) rewritten for asyncio.
+
+**Deferred:** `scripts/taskhandler.py` still uses Twisted `deferLater` + Deferred pause/cancel API.
+
+---
+
+## 6.0.0+underspire.119 — Tier 2: redis session bus + Portal asyncio WS hardening
+
+### Portal ↔ Server IPC (retire session AMP TCP)
+
+- **Session/admin traffic is redis-only.** `SERVER_PORTAL_BUS` defaults to `"redis"`; the Server no longer opens an AMP TCP client to the Portal. Misconfigured `"amp"` logs an error and still uses redis.
+- **Rollback:** revert this release and redeploy both Portal and Server; there is no runtime `"amp"` session fallback after this change.
+- New modules [`evennia/server/ipc_handlers_server.py`](evennia/server/ipc_handlers_server.py) and [`evennia/server/portal/ipc_handlers_portal.py`](evennia/server/portal/ipc_handlers_portal.py) hold transport-agnostic dispatch; [`evennia/server/redis_bus.py`](evennia/server/redis_bus.py) is plain `XADD`/`XREAD` (no consumer groups yet).
+- Server service exposes `portal_bus` (`amp_protocol` kept as a deprecated alias).
+- [`evennia/server/ipc_schema.py`](evennia/server/ipc_schema.py): `parse_admin` returns wire `str` op codes; `parse_session` threads `enforce_limits` per direction.
+- Tests: [`evennia/server/tests/test_redis_bus.py`](evennia/server/tests/test_redis_bus.py) (fakeredis), [`evennia/server/tests/test_redis_reload.py`](evennia/server/tests/test_redis_reload.py) (reload/PSYNC contract).
+- Prod settings: [`mootest/server/conf/settings.py`](mootest/server/conf/settings.py) commits `SERVER_PORTAL_BUS=redis` + `REDIS_BUS_URL`.
+
+### WebSocket / Tier 2.5
+
+- **Autobahn retirement closed:** dependency was already replaced by `wsproto`; changelog/doc updated.
+- Removed unused [`WSAsyncioServerProtocol`](evennia/server/portal/ws_protocol.py) decoy; prod path uses `AsyncioWebSocketProtocol` in [`webclient.py`](evennia/server/portal/webclient.py).
+- **AJAX `/webclientdata` retired** on the asyncio Portal proxy; Azaban shell WS (`client2`) is the supported web client.
+- Shell WS stays on the Portal for `@reload` survival (not folded into Server ASGI).
+
+## 6.0.0+underspire.118 — ticket thread buttons + forum sync
+
+### Portal / Discord
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): `send_thread_update`
+  (rename thread, refresh forum tags without archiving); `send_thread_message` accepts
+  `components`; `send_interaction_reply` accepts embeds, components, flags, response_type.
+
+## 6.0.0+underspire.117 — forum thread tags on archive
+
+### Portal / Discord
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): `send_thread_archive` accepts
+  optional `applied_tags` on PATCH so closed tickets can show a Resolved forum tag.
+
+---
+
+## 6.0.0+underspire.116 — Discord ticket thread embeds and forum tags
+
+### Portal / Discord
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): `send_create_thread` accepts
+  optional `applied_tags`, `message`, and `forum` kwargs for forum-channel parents; adds
+  `send_thread_message` for embed posts into bound threads.
+
+---
+
+## 6.0.0+underspire.115 — preserve webclient login across deploy reboot
+
+### Portal / webclient
+
+- [`evennia/server/portal/webclient.py`](evennia/server/portal/webclient.py): do not clear
+  `webclient_authenticated_uid` on portal-wide shutdown (`disconnect_all`) or
+  `GOING_AWAY` closes. Deploy reboot + client reconnect can auto-login from the
+  Django session cookie instead of forcing the login screen.
+
+---
+
+## 6.0.0+underspire.114 — align VERSION with deploy pin; fix Discord heartbeat cancel
+
+### Versioning
+
+- Bump `VERSION.txt`, `pyproject.toml`, and `uv.lock` to `6.0.0+underspire.114` so
+  the main-menu string matches the `EVENNIA_REF` deploy pin (was stuck at `.98`
+  while tags `.99`–`.113` shipped as deploy-only pins without a version bump).
+
+### Portal / Discord
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): guard
+  heartbeat `DelayedCall.cancel()` with `.active()` so reconnect/onClose no longer
+  raises `AlreadyCalled` (was spamming portal logs every ~60s and breaking
+  `websocket onClose`).
+
+### Deploy pins underspire.99–113 (changelog backfill)
+
+Shipped under tag-only pins between `.98` and this release; see git log
+`underspire.98..underspire.113` for full detail. Highlights:
+
+- R1 narrative render/deliver core, hybrid EvEditor
+- Portal: `send_create_thread`, `encode_res`, `send_thread_archive`, `send_dm`
+- Resumable webclient frames (portal-side replay on brief disconnect / reload)
+- ASGI foundation, asyncio reactor opt-in, Redis Streams server↔portal bus
+- Reload session-sync fixes (`portal_sessions_sync`, reload-diag probes)
+- Discord thread REST failure callback + gateway heartbeat timer adapter (`.113`)
+
+---
+
 ## 6.0.0+underspire.98 — get_tag obj-filter on typeclass managers
 
 Fixes a `FieldError` when `get_tag`/`get_alias`/`get_permission` is called with

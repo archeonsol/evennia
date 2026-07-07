@@ -11,6 +11,18 @@ by game/evennia.py).
 import os
 import sys
 
+# Running as ``python portal.py`` puts this package dir on sys.path[0], which
+# shadowed the stdlib ``ssl`` module (legacy ssl.py lived here). Pop it and
+# ensure the game directory is on sys.path — twistd arranged both automatically.
+if __name__ == "__main__":
+    _bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
+    if sys.path and os.path.abspath(sys.path[0]) == _bootstrap_dir:
+        sys.path.pop(0)
+    _game_dir = os.getcwd()
+    if _game_dir and _game_dir not in sys.path:
+        sys.path.insert(0, _game_dir)
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.conf.settings")
+
 import django
 from twisted.logger import globalLogPublisher
 
@@ -31,7 +43,7 @@ from evennia.utils import logger
 application = evennia.TWISTED_APPLICATION
 
 
-if "--nodaemon" not in sys.argv and "test" not in sys.argv:
+if __name__ != "__main__" and "--nodaemon" not in sys.argv and "test" not in sys.argv:
     # activate logging for interactive/testing mode
     logfile = logger.WeeklyLogFile(
         os.path.basename(settings.PORTAL_LOG_FILE),
@@ -41,3 +53,8 @@ if "--nodaemon" not in sys.argv and "test" not in sys.argv:
     )
     globalLogPublisher.addObserver(logger.GetPortalLogObserver()(logfile))
     logger.prune_rotated_logs(force=True)
+
+if __name__ == "__main__":
+    from evennia.server.asyncio_bootstrap import run_portal
+
+    run_portal()

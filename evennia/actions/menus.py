@@ -197,9 +197,13 @@ class InputCaptureState(StateProvider):
         if action.menu is not self:
             return PASS
         actor.exit_state(InputCaptureState)
-        d = self.deferred
-        if d is not None and not d.called:
-            d.callback(action.raw)
+        waiter = self.deferred
+        if waiter is not None:
+            if hasattr(waiter, "done"):
+                if not waiter.done():
+                    waiter.set_result(action.raw)
+            elif hasattr(waiter, "called") and not waiter.called:
+                waiter.callback(action.raw)
         return CLAIM
 
 

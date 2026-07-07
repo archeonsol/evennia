@@ -3028,9 +3028,6 @@ class CmdExamine(ObjManipCommand):
                 obj.cmdset.update()
                 # using callback to print results whenever function returns.
 
-                def _get_cmdset_callback(current_cmdset):
-                    self.msg(self.format_output(obj, current_cmdset).strip())
-
                 (
                     command_objects,
                     command_objects_list,
@@ -3039,9 +3036,17 @@ class CmdExamine(ObjManipCommand):
                     error_to,
                 ) = generate_cmdset_providers(obj, session=session)
 
-                get_and_merge_cmdsets(
-                    obj, command_objects_list, mergemode, self.raw_string, error_to
-                ).addCallback(_get_cmdset_callback)
+                # get_and_merge_cmdsets is now an ``async def``; await it in a
+                # small coroutine and print when the merge resolves.
+                async def _show_cmdset():
+                    current_cmdset = await get_and_merge_cmdsets(
+                        obj, command_objects_list, mergemode, self.raw_string, error_to
+                    )
+                    self.msg(self.format_output(obj, current_cmdset).strip())
+
+                from evennia.utils import clock
+
+                clock.run_coroutine(_show_cmdset())
 
             else:
                 # for objects without cmdsets we can proceed to examine immediately

@@ -43,6 +43,7 @@ from evennia.objects.objects import (
     DefaultRoom,
 )
 from evennia.scripts import taskhandler
+from evennia.utils import clock
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.portal import portal as portal_module
 from evennia.server.serversession import ServerSession
@@ -271,7 +272,7 @@ class EvenniaTestMixin:
         if hasattr(self, "sessions"):
             del evennia.SESSION_HANDLER[self.session.sessid]
 
-    @patch.object(taskhandler, "deferLater", _mock_deferlater)
+    @patch.object(clock, "defer_later_compat", _mock_deferlater)
     def setUp(self):
         """
         Sets up testing environment
