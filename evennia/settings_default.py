@@ -165,28 +165,22 @@ SERVER_PORTAL_BUS = "redis"
 REDIS_BUS_URL = "redis://127.0.0.1:6379/1"
 REDIS_BUS_PREFIX = "evennia:bus"
 SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
-# Twisted reactor for the Portal/Server twistd processes. "asyncio" runs Twisted
-# on an asyncio event loop, so engine code can use async/await and asyncio
-# libraries while all existing Twisted APIs (callLater, deferToThread, delay,
-# defer.background) keep working unchanged. Set to "" to use Twisted's default.
-TWISTED_REACTOR = "asyncio"
 
-# Evennia is synchronous-by-default: game code, hooks, scripts and boot
-# (run_initial_setup etc.) make BLOCKING Django ORM calls on the single reactor
-# thread. Under the asyncio reactor that thread IS the event loop, so Django's
-# async-safety guard would raise SynchronousOnlyOperation on every sync ORM call.
-# That blocking is intended here (one thread, no true concurrency; the async
-# stack lives in worker threads / native-async tasks), so opt out of the guard
-# when the asyncio reactor is active. Set at settings-import time, before any ORM
-# use, and inherited by the spawned Server/Portal processes.
-if TWISTED_REACTOR == "asyncio":
-    os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
+# Evennia is synchronous-by-default: game code, hooks, scripts and boot make
+# blocking Django ORM calls on the single event-loop thread. Opt out of Django's
+# async-safety guard for the asyncio bootstrap (one thread, no true concurrency).
+os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
-# (T3) Run the Portal's telnet/websocket listeners + web reverse-proxy as native
-# asyncio servers (loop.create_server / h11+httpx proxy) instead of Twisted
-# listeners. Only takes effect when TWISTED_REACTOR="asyncio" (a shared loop must
-# exist); a no-op otherwise. Off by default; prod-verify before enabling.
+# (T3) Run the Portal's telnet/websocket/ssh listeners + web reverse-proxy as
+# native asyncio servers (loop.create_server / h11+httpx proxy). When True,
+# Twisted TCPServer fallbacks for those listeners are not used. Off by default;
+# prod enables this.
 PORTAL_ASYNCIO_SERVERS = False
+
+# (T3 S8/S9) Start Portal/Server via ``python portal.py`` / ``python server.py``
+# on a native asyncio loop instead of ``twistd``. Off by default; prod enables
+# after soak alongside PORTAL_ASYNCIO_SERVERS.
+EVENNIA_ASYNCIO_BOOTSTRAP = False
 
 
 # Path to the lib directory containing the bulk of the codebase's code.
@@ -1435,18 +1429,8 @@ SSL_PROTOCOL_CLASS = "evennia.server.portal.ssl.SSLProtocol"
 # for all webclient connections.
 WEBSOCKET_PROTOCOL_CLASS = "evennia.server.portal.webclient.WebSocketClient"
 
-# Ajax Web Client classes. Evennia uses AJAX as a fallback for the webclient by
-# default. AJAX may in general be more useful for mobile clients as it's
-# resilient to IP address changes.
-
-# The Ajax Client Class is used to manage all AJAX sessions.
-AJAX_CLIENT_CLASS = "evennia.server.portal.webclient_ajax.AjaxWebClient"
-
-# Ajax Protocol Class is used for all AJAX client connections.
-AJAX_PROTOCOL_CLASS = "evennia.server.portal.webclient_ajax.AjaxWebClientSession"
-
-# Protocol for the SSH interface. This inherits from BASE_SESSION_CLASS.
-SSH_PROTOCOL_CLASS = "evennia.server.portal.ssh.SshProtocol"
+# Protocol for the SSH interface (asyncssh session class on the asyncio loop).
+SSH_PROTOCOL_CLASS = "evennia.server.portal.ssh_asyncio.AsyncioSSHSession"
 
 # Server-side session class used. This will inherit from BASE_SESSION_CLASS.
 # This one isn't as dangerous to replace.

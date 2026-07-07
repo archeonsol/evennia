@@ -15,7 +15,7 @@ from twisted.internet import protocol
 import evennia
 from evennia.server.portal import amp
 from evennia.server.portal import ipc_handlers_portal
-from evennia.utils import logger
+from evennia.utils import clock, logger
 from evennia.utils.utils import class_from_module
 
 
@@ -173,10 +173,7 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
             self.factory.portal.server_twistd_cmd = server_twistd_cmd
             logfile.flush()
         if process and not _is_windows():
-            # Reap the child in a thread so the reactor is never blocked.
-            from twisted.internet import reactor
-
-            reactor.callInThread(process.wait)
+            clock.defer_to_thread(process.wait)
         return
 
     def wait_for_disconnect(self, callback, *args, **kwargs):
@@ -231,11 +228,15 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         Send a status stanza to the launcher.
 
         """
-        # print("send status to launcher")
-        # print("self.get_status(): {}".format(self.get_status()))
-        if self.factory.launcher_connection:
-            self.factory.launcher_connection.callRemote(
-                amp.MsgStatus, status=amp.dumps_status(self.get_status())
+        conn = self.factory.launcher_connection
+        if conn is None:
+            return
+        status = self.get_status()
+        if hasattr(conn, "push_status"):
+            conn.push_status(status)
+        elif hasattr(conn, "callRemote"):
+            conn.callRemote(
+                amp.MsgStatus, status=amp.dumps_status(status)
             ).addErrback(self.errback, amp.MsgStatus.key)
 
     def send_MsgPortal2Server(self, session, **kwargs):
@@ -268,67 +269,14 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
     @amp.catch_traceback
     def portal_receive_launcher2portal(self, operation, arguments):
         """
-        Receives message arriving from evennia_launcher.
-        This method is executed on the Portal.
-
-        Args:
-            operation (str): The action to perform.
-            arguments (str): Possible argument to the instruction, or the empty string.
-
-        Returns:
-            result (dict): The result back to the launcher.
-
-        Notes:
-            This is the entrypoint for controlling the entire Evennia system from the evennia
-            launcher. It can obviously only accessed when the Portal is already up and running.
+        Legacy Twisted AMP entry (dev Windows twistd path only).
 
         """
-        # Since the launcher command uses amp.String() we need to convert from byte here.
+        from evennia.server.portal import launcher_handlers
+
         operation = str(operation, "utf-8")
         self.factory.launcher_connection = self
-        _, server_connected, _, _, _, _ = self.get_status()
-
-        # logger.log_msg("Evennia Launcher->Portal operation %s:%s received" % (ord(operation), arguments))
-        # logger.log_msg("operation == amp.SSTART: {}: {}".format(operation == amp.SSTART, amp.loads_launcher_args(arguments)))
-
-        if operation == amp.SSTART:  # portal start  #15
-            # first, check if server is already running
-            if not server_connected:
-                self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads_launcher_args(arguments))
-
-        elif operation == amp.SRELOAD:  # reload server #14
-            if server_connected:
-                # We let the launcher restart us once they get the signal
-                self.factory.server_connection.wait_for_disconnect(self.send_Status2Launcher)
-                self.stop_server(mode="reload")
-            else:
-                self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads_launcher_args(arguments))
-
-        elif operation == amp.SRESET:  # reload server #19
-            if server_connected:
-                self.factory.server_connection.wait_for_disconnect(self.send_Status2Launcher)
-                self.stop_server(mode="reset")
-            else:
-                self.wait_for_server_connect(self.send_Status2Launcher)
-                self.start_server(amp.loads_launcher_args(arguments))
-
-        elif operation == amp.SSHUTD:  # server-only shutdown #17
-            if server_connected:
-                self.factory.server_connection.wait_for_disconnect(self.send_Status2Launcher)
-                self.stop_server(mode="shutdown")
-
-        elif operation == amp.PSHUTD:  # portal + server shutdown  #16
-            if server_connected:
-                self.factory.server_connection.wait_for_disconnect(self.factory.portal.shutdown)
-            else:
-                self.factory.portal.shutdown()
-
-        else:
-            logger.log_err("Operation {} not recognized".format(operation))
-            raise Exception("operation %(op)s not recognized." % {"op": operation})
-
+        launcher_handlers.receive_launcher_command(self, operation, arguments)
         return {}
 
     @amp.MsgServer2Portal.responder

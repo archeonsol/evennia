@@ -14,7 +14,7 @@ from django.db import connection
 from django.db.utils import OperationalError
 from django.utils.translation import gettext as _
 from twisted.application.service import MultiService
-from twisted.internet import defer, reactor
+from twisted.internet import defer
 from twisted.internet.defer import Deferred
 
 import evennia
@@ -28,7 +28,7 @@ _SA = object.__setattr__
 class EvenniaServerService(MultiService):
     def _wrap_sigint_handler(self, *args):
         if getattr(self, "_shutdown_in_progress", False):
-            reactor.callLater(0, lambda: reactor.stop() if reactor.running else None)
+            clock.call_later(0, clock.stop_loop)
             return
 
         self._shutdown_in_progress = True
@@ -40,10 +40,10 @@ class EvenniaServerService(MultiService):
         else:
             d = defer.ensureDeferred(self.shutdown("reload", _reactor_stopping=True))
         self._shutdown_deferred = d
-        d.addCallback(lambda _: reactor.stop() if reactor.running else None)
+        d.addCallback(lambda _: clock.stop_loop())
         d.addBoth(lambda result: (setattr(self, "_shutdown_in_progress", False), result)[1])
         # Fallback: force-stop after 5 s in case the graceful shutdown hangs.
-        reactor.callLater(5, lambda: reactor.stop() if reactor.running else None)
+        clock.call_later(5, clock.stop_loop)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -79,7 +79,14 @@ class EvenniaServerService(MultiService):
         # this is necessary over using Twisted's signal handler.
         # (see https://github.com/evennia/evennia/issues/1128)
 
-        reactor.sigInt = self._wrap_sigint_handler
+        if getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False):
+            import signal
+
+            signal.signal(signal.SIGINT, self._wrap_sigint_handler)
+        else:
+            from twisted.internet import reactor
+
+            reactor.sigInt = self._wrap_sigint_handler
 
         self.start_stop_modules = [
             mod_import(mod)
@@ -662,7 +669,7 @@ class EvenniaServerService(MultiService):
         if not _reactor_stopping:
             # kill the server
             self.shutdown_complete = True
-            reactor.callLater(1, reactor.stop)
+            clock.call_later(1, clock.stop_loop)
 
         # we make sure the proper gametime is saved as late as possible
         evennia.ServerConfig.objects.conf("runtime", evennia.gametime.runtime())

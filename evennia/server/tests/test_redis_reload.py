@@ -38,6 +38,7 @@ class TestRedisReloadSurvival(TestCase):
 
         self.server = EvenniaServerService()
         self.server.run_initial_setup = MagicMock()
+        self.server.run_init_hooks = MagicMock()
         evennia.EVENNIA_SERVER_SERVICE = self.server
         evennia.SERVER_SESSION_HANDLER = ServerSessionHandler()
         evennia.SERVER_SESSION_HANDLER.portal_sessions_sync = MagicMock()
@@ -83,16 +84,74 @@ class TestRedisReloadSurvival(TestCase):
 
     def test_portal_ws_session_stays_connected_through_reload_admin(self):
         """SRELOAD admin op must not tear down Portal-side protocol transports."""
-        with patch.object(
-            amp_server.AMPServerProtocol, "stop_server", MagicMock()
-        ) as mock_stop:
-            self.server_bus.send_AdminServer2Portal(
-                amp.DUMMYSESSION, operation=amp.SRELOAD
-            )
-            _drain_bus()
-            mock_stop.assert_called_once_with(self.portal_bus, mode="reload")
+        with patch.object(self.portal_bus, "wait_for_disconnect", MagicMock()):
+            with patch.object(self.portal_bus, "stop_server", MagicMock()) as mock_stop:
+                self.server_bus.send_AdminServer2Portal(
+                    amp.DUMMYSESSION, operation=amp.SRELOAD
+                )
+                _drain_bus()
+                mock_stop.assert_called_once_with(mode="reload")
         self.assertTrue(self.portalsession.protocol.transport.connected)
         self.assertIn(1, evennia.PORTAL_SESSION_HANDLER)
+
+    def test_azaban_ws_survives_reload_and_delivers_post_reload_text(self):
+        """B3: asyncio WS session + azaban hello survives reload; output after PSYNC."""
+        from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
+        from evennia.server.inputfuncs import azaban_hello
+        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+        from evennia.server.portal.webclient import WebSocketClient
+        from evennia.server.portal.wire_formats.azaban import AzabanFormat
+
+        inner = MagicMock()
+        inner.connected = True
+        ws = WebSocketClient()
+        ws.sessid = 1
+        ws.protocol_flags = {}
+        ws.wire_format = AzabanFormat()
+        ws.transport = AsyncioTransportShim(inner)
+        ws.sessionhandler = evennia.PORTAL_SESSION_HANDLER
+        evennia.PORTAL_SESSION_HANDLER[1] = ws
+
+        azaban_hello(ws, caps={"rendersNodes": True})
+        self.assertTrue(ws.protocol_flags.get(CLIENT_NARRATIVE_FLAG))
+
+        outbound = []
+        ws.sendEncoded = MagicMock(side_effect=lambda data, **kw: outbound.append(data))
+
+        with patch.object(self.portal_bus, "wait_for_disconnect", MagicMock()):
+            with patch.object(self.portal_bus, "stop_server", MagicMock()):
+                self.server_bus.send_AdminServer2Portal(
+                    amp.DUMMYSESSION, operation=amp.SRELOAD
+                )
+                _drain_bus()
+
+        self.assertFalse(ws.transport.disconnecting)
+        self.assertIn(1, evennia.PORTAL_SESSION_HANDLER)
+
+        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.reset_mock()
+        self.portal_bus.send_AdminPortal2Server(
+            amp.DUMMYSESSION,
+            operation=amp.PSYNC,
+            server_restart_mode="reload",
+            sessiondata=[{"sessid": 1, "uid": 42}],
+            portal_start_time=time.time(),
+        )
+        _drain_bus(0.3)
+        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.assert_called_once()
+
+        outbound.clear()
+        evennia.PORTAL_SESSION_HANDLER.data_out(ws, text=[["after reload"], {}])
+        self.assertEqual(len(outbound), 1)
+        self.assertIn(b"after reload", outbound[0])
+
+    def test_server_start_psync_triggers_portal_handshake(self):
+        """Server ``start_bus`` PSYNC must reach Portal and fire ``at_server_connection``."""
+        evennia.PORTAL_SESSION_HANDLER.at_server_connection.reset_mock()
+        self.server_bus.stop_bus()
+        self.server_bus.start_bus()
+        _drain_bus()
+        evennia.PORTAL_SESSION_HANDLER.at_server_connection.assert_called()
+        self.assertIsNotNone(self.portal.server_process_id)
 
     def test_psync_after_server_restart_resyncs_sessions(self):
         """Portal PSYNC payload after Server reconnect reattaches sessions on Server."""

@@ -1683,7 +1683,12 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             sessions = self.sessions.get()
             session = sessions[0] if sessions else None
 
-        return _CMDHANDLER(self, raw_string, callertype="account", session=session, **kwargs)
+        from evennia.utils import clock
+
+        # cmdhandler is `async def` now; run the coroutine on the loop as a Deferred.
+        return clock.run_coroutine(
+            _CMDHANDLER(self, raw_string, callertype="account", session=session, **kwargs)
+        )
 
     # channel receive hooks
 

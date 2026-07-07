@@ -66,9 +66,9 @@ class _ReactorTimer:
     """Thin adapter: DiscordClient expects ``call_later`` on the factory timer."""
 
     def call_later(self, delay, func, *args, **kwargs):
-        from twisted.internet import reactor
+        from evennia.utils import clock
 
-        return reactor.callLater(delay, func, *args, **kwargs)
+        return clock.call_later(delay, func, *args, **kwargs)
 
 
 class DiscordWebsocketServerFactory(protocol.ReconnectingClientFactory):
@@ -205,14 +205,6 @@ class DiscordWebsocketServerFactory(protocol.ReconnectingClientFactory):
             self.get_gateway_url()
         elif not self.is_connecting:
             # everything is good, connect
-            from evennia.server.portal.asyncio_transport import (
-                asyncio_servers_enabled, get_asyncio_loop)
-
-            if asyncio_servers_enabled():
-                from evennia.server.portal.ws_protocol import connect_ws_asyncio
-
-                get_asyncio_loop().create_task(connect_ws_asyncio(self))
-                return
             connect_ws(self)
 
 

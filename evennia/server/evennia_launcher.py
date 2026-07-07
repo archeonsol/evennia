@@ -18,6 +18,8 @@ import re
 import shutil
 import signal
 import sys
+import threading
+import time
 from argparse import ArgumentParser
 from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
 
@@ -25,8 +27,6 @@ import django
 from django.core.management import execute_from_command_line
 from django.db.utils import ProgrammingError
 from packaging.version import Version
-from twisted.internet import endpoints, reactor
-from twisted.protocols import amp
 
 # Signal processing
 SIG = signal.SIGINT
@@ -36,7 +36,7 @@ CTRL_C_EVENT = 0  # Windows SIGINT-like signal
 EVENNIA_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import evennia  # noqa
-from evennia.server.amp_serde import pack_launcher_args, unpack_status
+from evennia.server.amp_serde import pack_launcher_args, pack_status, unpack_status
 
 EVENNIA_LIB = os.path.join(EVENNIA_ROOT, "evennia")
 EVENNIA_SERVER = os.path.join(EVENNIA_LIB, "server")
@@ -529,33 +529,38 @@ def _parse_status(response):
 
 def _get_twistd_cmdline(pprofiler, sprofiler):
     """
-    Compile the command line for starting a Twisted application using the 'twistd' executable.
+    Compile the command line for starting Portal/Server processes.
 
+    Uses the asyncio bootstrap (``python portal.py``) when
+    ``settings.EVENNIA_ASYNCIO_BOOTSTRAP`` is enabled; otherwise falls back to
+    ``twistd``.
     """
-    # Optional reactor override (settings.TWISTED_REACTOR, e.g. "asyncio").
-    # twistd installs the reactor before loading the app file, so it must go on
-    # the twistd command line. Skipped on Windows: Twisted's asyncio reactor
-    # can't drive Windows' ProactorEventLoop, so dev on Windows keeps the default
-    # reactor. On Linux (prod) the asyncio reactor uses the normal epoll loop.
-    reactor_opts = []
     try:
         from django.conf import settings as _settings
 
-        reactor_name = getattr(_settings, "TWISTED_REACTOR", "")
-        if reactor_name and os.name != "nt":
-            reactor_opts = [f"--reactor={reactor_name}"]
-    except Exception:
-        reactor_opts = []
+        if getattr(_settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False):
+            from evennia.server.asyncio_bootstrap import build_cmdline
 
+            return build_cmdline(
+                portal_py_file=PORTAL_PY_FILE,
+                server_py_file=SERVER_PY_FILE,
+                portal_pidfile=PORTAL_PIDFILE if os.name != "nt" else None,
+                server_pidfile=SERVER_PIDFILE if os.name != "nt" else None,
+                portal_profiler_log=PPROFILER_LOGFILE,
+                server_profiler_log=SPROFILER_LOGFILE,
+                pprofiler=pprofiler,
+                sprofiler=sprofiler,
+            )
+    except Exception:
+        pass
+
+    # Legacy twistd entrypoint (Windows dev and when EVENNIA_ASYNCIO_BOOTSTRAP is off).
     portal_cmd = [
-        TWISTED_BINARY,
-        *reactor_opts,
         f"--python={PORTAL_PY_FILE}",
         "--logger=evennia.utils.logger.GetPortalLogObserver",
     ]
     server_cmd = [
         TWISTED_BINARY,
-        *reactor_opts,
         f"--python={SERVER_PY_FILE}",
         "--logger=evennia.utils.logger.GetServerLogObserver",
     ]
@@ -578,8 +583,40 @@ def _get_twistd_cmdline(pprofiler, sprofiler):
 
 
 def _reactor_stop():
+    global AMP_CONNECTION, REACTOR_RUN
+    REACTOR_RUN = False
+    if _launcher_uses_ipc():
+        if AMP_CONNECTION is not None:
+            try:
+                AMP_CONNECTION.close()
+            except Exception:
+                pass
+            AMP_CONNECTION = None
+        return
     if not NO_REACTOR_STOP:
+        from twisted.internet import reactor
+
         reactor.stop()
+
+
+def _launcher_uses_ipc():
+    """True when Portal exposes the asyncio launcher IPC server (S10)."""
+    try:
+        from django.conf import settings
+
+        return getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False)
+    except Exception:
+        return False
+
+
+def _ensure_ipc_connection():
+    global AMP_CONNECTION
+    from evennia.server.launcher_ipc import LauncherSession
+
+    if AMP_CONNECTION is None or not isinstance(AMP_CONNECTION, LauncherSession):
+        AMP_CONNECTION = LauncherSession(AMP_HOST, AMP_PORT)
+        AMP_CONNECTION.connect()
+    return AMP_CONNECTION
 
 
 # ------------------------------------------------------------
@@ -589,75 +626,54 @@ def _reactor_stop():
 # ------------------------------------------------------------
 
 
-class MsgStatus(amp.Command):
-    """
-    Ping between AMP services
-
-    """
-
-    key = "MsgStatus"
-    arguments = [(b"status", amp.String())]
-    errors = {Exception: b"EXCEPTION"}
-    response = [(b"status", amp.String())]
-
-
-class MsgLauncher2Portal(amp.Command):
-    """
-    Message Launcher -> Portal
-
-    """
-
-    key = "MsgLauncher2Portal"
-    arguments = [(b"operation", amp.String()), (b"arguments", amp.String())]
-    errors = {Exception: b"EXCEPTION"}
-    response = []
+def _send_instruction_ipc(operation, arguments, callback=None, errback=None):
+    try:
+        session = _ensure_ipc_connection()
+        if operation == PSTATUS:
+            status = session.query_status()
+            if callback:
+                callback({"status": pack_status(status)})
+            return
+        session.send_command_fire(operation, arguments)
+        if callback:
+            callback({})
+    except Exception as fail:
+        if errback:
+            errback(fail)
 
 
-class AMPLauncherProtocol(amp.AMP):
-    """
-    Defines callbacks to the launcher
+def _send_instruction_amp(operation, arguments, callback=None, errback=None):
+    from twisted.internet import endpoints, reactor
+    from twisted.protocols import amp
 
-    """
+    class MsgStatus(amp.Command):
+        key = "MsgStatus"
+        arguments = [(b"status", amp.String())]
+        errors = {Exception: b"EXCEPTION"}
+        response = [(b"status", amp.String())]
 
-    def __init__(self):
-        self.on_status = []
+    class MsgLauncher2Portal(amp.Command):
+        key = "MsgLauncher2Portal"
+        arguments = [(b"operation", amp.String()), (b"arguments", amp.String())]
+        errors = {Exception: b"EXCEPTION"}
+        response = []
 
-    def wait_for_status(self, callback):
-        """
-        Register a waiter for a status return.
+    class AMPLauncherProtocol(amp.AMP):
+        def __init__(self):
+            self.on_status = []
 
-        """
-        self.on_status.append(callback)
+        def wait_for_status(self, cb):
+            self.on_status.append(cb)
 
-    @MsgStatus.responder
-    def receive_status_from_portal(self, status):
-        """
-        Get a status signal from portal - fire next queued
-        callback
-
-        """
-        try:
-            callback = self.on_status.pop()
-        except IndexError:
-            pass
-        else:
-            status = unpack_status(status)
-            callback(status)
-        return {"status": b""}
-
-
-def send_instruction(operation, arguments, callback=None, errback=None):
-    """
-    Send instruction and handle the response.
-
-    """
-    global AMP_CONNECTION, REACTOR_RUN
-
-    # print("launcher: Sending to portal: {} + {}".format(ord(operation), arguments))
-
-    if None in (AMP_HOST, AMP_PORT, AMP_INTERFACE):
-        print(ERROR_AMP_UNCONFIGURED)
-        sys.exit()
+        @MsgStatus.responder
+        def receive_status_from_portal(self, status):
+            try:
+                cb = self.on_status.pop()
+            except IndexError:
+                pass
+            else:
+                cb(unpack_status(status))
+            return {"status": b""}
 
     def _callback(result):
         if callback:
@@ -668,17 +684,11 @@ def send_instruction(operation, arguments, callback=None, errback=None):
             errback(fail)
 
     def _on_connect(prot):
-        """
-        This fires with the protocol when connection is established. We
-        immediately send off the instruction
-
-        """
         global AMP_CONNECTION
         AMP_CONNECTION = prot
         _send()
 
     def _on_connect_fail(fail):
-        "This is called if portal is not reachable."
         errback(fail)
 
     def _send():
@@ -686,23 +696,38 @@ def send_instruction(operation, arguments, callback=None, errback=None):
             return AMP_CONNECTION.callRemote(MsgStatus, status=b"").addCallbacks(
                 _callback, _errback
             )
-        else:
-            return AMP_CONNECTION.callRemote(
-                MsgLauncher2Portal,
-                operation=bytes(operation, "utf-8"),
-                arguments=pack_launcher_args(arguments),
-            ).addCallbacks(_callback, _errback)
+        return AMP_CONNECTION.callRemote(
+            MsgLauncher2Portal,
+            operation=bytes(operation, "utf-8"),
+            arguments=pack_launcher_args(arguments),
+        ).addCallbacks(_callback, _errback)
 
+    global REACTOR_RUN
     if AMP_CONNECTION:
-        # already connected - send right away
         return _send()
-    else:
-        # we must connect first, send once connected
-        point = endpoints.TCP4ClientEndpoint(reactor, AMP_HOST, AMP_PORT)
-        deferred = endpoints.connectProtocol(point, AMPLauncherProtocol())
-        deferred.addCallbacks(_on_connect, _on_connect_fail)
-        REACTOR_RUN = True
-        return deferred
+    point = endpoints.TCP4ClientEndpoint(reactor, AMP_HOST, AMP_PORT)
+    deferred = endpoints.connectProtocol(point, AMPLauncherProtocol())
+    deferred.addCallbacks(_on_connect, _on_connect_fail)
+    REACTOR_RUN = True
+    return deferred
+
+
+def send_instruction(operation, arguments, callback=None, errback=None):
+    """
+    Send instruction and handle the response.
+
+    """
+    global REACTOR_RUN
+
+    if None in (AMP_HOST, AMP_PORT, AMP_INTERFACE):
+        print(ERROR_AMP_UNCONFIGURED)
+        sys.exit()
+
+    if _launcher_uses_ipc():
+        _send_instruction_ipc(operation, arguments, callback, errback)
+        return
+
+    return _send_instruction_amp(operation, arguments, callback, errback)
 
 
 def query_status(callback=None):
@@ -739,6 +764,16 @@ def wait_for_status_reply(callback):
     """
     Wait for an explicit STATUS signal to be sent back from Evennia.
     """
+    if _launcher_uses_ipc():
+        try:
+            session = _ensure_ipc_connection()
+            status = session.read_push(timeout=120)
+            if status is not None:
+                callback(status)
+        except Exception:
+            print("No Evennia connection established.")
+        return
+
     if AMP_CONNECTION:
         AMP_CONNECTION.wait_for_status(callback)
     else:
@@ -764,12 +799,21 @@ def wait_for_status(
         retries (int): How many times to retry before timing out and calling `errback`.
     """
 
+    global REACTOR_RUN
+    REACTOR_RUN = True
+
+    def _schedule_retry():
+        threading.Timer(
+            rate,
+            wait_for_status,
+            args=(portal_running, server_running, callback, errback, rate, retries - 1),
+        ).start()
+
     def _callback(response):
         prun, srun, _, _, _, _ = _parse_status(response)
         if (portal_running is None or prun == portal_running) and (
             server_running is None or srun == server_running
         ):
-            # the correct state was achieved
             if callback:
                 callback(prun, srun)
             else:
@@ -782,23 +826,24 @@ def wait_for_status(
                     print("Connection to Evennia timed out. Try again.")
                     _reactor_stop()
             else:
-                reactor.callLater(
-                    rate,
-                    wait_for_status,
-                    portal_running,
-                    server_running,
-                    callback,
-                    errback,
-                    rate,
-                    retries - 1,
-                )
+                if _launcher_uses_ipc():
+                    _schedule_retry()
+                else:
+                    from twisted.internet import reactor
+
+                    reactor.callLater(
+                        rate,
+                        wait_for_status,
+                        portal_running,
+                        server_running,
+                        callback,
+                        errback,
+                        rate,
+                        retries - 1,
+                    )
 
     def _errback(fail):
-        """
-        Portal not running
-        """
         if not portal_running:
-            # this is what we want
             if callback:
                 callback(portal_running, server_running)
             else:
@@ -811,16 +856,21 @@ def wait_for_status(
                     print("Connection to Evennia timed out. Try again.")
                     _reactor_stop()
             else:
-                reactor.callLater(
-                    rate,
-                    wait_for_status,
-                    portal_running,
-                    server_running,
-                    callback,
-                    errback,
-                    rate,
-                    retries - 1,
-                )
+                if _launcher_uses_ipc():
+                    _schedule_retry()
+                else:
+                    from twisted.internet import reactor
+
+                    reactor.callLater(
+                        rate,
+                        wait_for_status,
+                        portal_running,
+                        server_running,
+                        callback,
+                        errback,
+                        rate,
+                        retries - 1,
+                    )
 
     return send_instruction(PSTATUS, None, _callback, _errback)
 
@@ -1249,10 +1299,12 @@ def tail_log_files(filename1, filename2, start_lines1=20, start_lines2=20, rate=
                 sys.stdout.flush()
 
         # set up the next poll
-        reactor.callLater(rate, _tail_file, filename, file_size, line_count, max_lines=100)
+        threading.Timer(
+            rate, _tail_file, args=(filename, file_size, line_count), kwargs={"max_lines": 100}
+        ).start()
 
-    reactor.callLater(0, _tail_file, filename1, 0, 0, max_lines=start_lines1)
-    reactor.callLater(0, _tail_file, filename2, 0, 0, max_lines=start_lines2)
+    _tail_file(filename1, 0, 0, max_lines=start_lines1)
+    _tail_file(filename2, 0, 0, max_lines=start_lines2)
 
     REACTOR_RUN = True
 
@@ -2448,7 +2500,16 @@ def main():
         print(ABOUT_INFO)
 
     if REACTOR_RUN:
-        reactor.run()
+        if _launcher_uses_ipc():
+            try:
+                while REACTOR_RUN:
+                    time.sleep(0.2)
+            except KeyboardInterrupt:
+                pass
+        else:
+            from twisted.internet import reactor
+
+            reactor.run()
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ from evennia.utils import logger
 # which is instantiated and attached to application in evennia._init()
 application = evennia.TWISTED_APPLICATION
 
-if "--nodaemon" not in sys.argv and "test" not in sys.argv:
+if __name__ != "__main__" and "--nodaemon" not in sys.argv and "test" not in sys.argv:
     # activate logging for interactive/testing mode
     logfile = logger.WeeklyLogFile(
         os.path.basename(settings.SERVER_LOG_FILE),
@@ -40,3 +40,8 @@ if "--nodaemon" not in sys.argv and "test" not in sys.argv:
     )
     globalLogPublisher.addObserver(logger.GetServerLogObserver()(logfile))
     logger.prune_rotated_logs(force=True)
+
+if __name__ == "__main__":
+    from evennia.server.asyncio_bootstrap import run_server
+
+    run_server()

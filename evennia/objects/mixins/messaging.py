@@ -54,7 +54,13 @@ class MessagingMixin:
         raw_string = self.nicks.nickreplace(
             raw_string, categories=("inputline", "channel"), include_account=True
         )
-        return _CMDHANDLER(self, raw_string, callertype="object", session=session, **kwargs)
+        # cmdhandler is now an ``async def``; bridge the coroutine back to a
+        # Deferred so the documented addCallback contract keeps working.
+        from evennia.utils import clock
+
+        return clock.run_coroutine(
+            _CMDHANDLER(self, raw_string, callertype="object", session=session, **kwargs)
+        )
 
     def msg(self, text=None, from_obj=None, session=None, options=None, **kwargs):
         """

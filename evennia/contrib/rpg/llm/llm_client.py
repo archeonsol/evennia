@@ -25,8 +25,6 @@ DEFAULT_LLM_REQUEST_BODY = {...}   # see below, this controls how to prompt the 
 import json
 
 from django.conf import settings
-from twisted.internet.defer import inlineCallbacks
-
 from evennia import logger
 from evennia.utils import http
 from evennia.utils.utils import make_iter
@@ -89,8 +87,7 @@ class LLMClient:
             self._handle_llm_error,
         )
 
-    @inlineCallbacks
-    def get_response(self, prompt):
+    async def get_response(self, prompt):
         """
         Get a response from the LLM server for the given npc.
 
@@ -105,7 +102,7 @@ class LLMClient:
                 the caller is expected to handle this gracefully.
 
         """
-        status_code, response = yield self._get_response_from_llm_server(prompt)
+        status_code, response = await self._get_response_from_llm_server(prompt)
         if status_code == 200:
             if settings.DEBUG:
                 logger.log_info(f"LLM response: {response}")

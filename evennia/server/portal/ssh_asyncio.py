@@ -1,15 +1,11 @@
-"""SSH access to the game on asyncssh (T3 replacement for the twisted.conch SSH).
+"""SSH access to the game on asyncssh (Portal asyncio listener).
 
-``ssh.py`` implements SSH with the full ``twisted.conch`` terminal stack (Manhole
-+ insults line editing + cred auth + PTY). asyncssh is a pure-asyncio SSH
-implementation that provides the transport, password auth, PTY and (crucially)
-readline-style line editing itself, so this port is a thin bridge: authenticate
-against ``AccountDB``, then pump edited input lines into the Evennia session and
-write session output back to the SSH channel.
+asyncssh provides transport, password auth, PTY and readline-style line editing;
+this module bridges authenticated lines into the Evennia session and writes
+session output back to the SSH channel.
 
-Runs on the native asyncio loop, so like the other Portal asyncio servers it is
-gated behind ``settings.PORTAL_ASYNCIO_SERVERS`` + the asyncio reactor. No
-twisted import here.
+Started via ``loop.create_server`` when ``PORTAL_ASYNCIO_SERVERS`` is on and the
+asyncio bootstrap has bound a loop. No twisted import here.
 """
 
 import os

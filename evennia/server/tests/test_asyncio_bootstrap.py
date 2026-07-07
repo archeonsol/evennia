@@ -1,0 +1,68 @@
+"""Tests for the asyncio Portal/Server bootstrap (T3 S8/S9)."""
+
+import sys
+from unittest.mock import MagicMock, patch
+
+from django.test import SimpleTestCase, TestCase, override_settings
+
+
+class BootstrapCmdlineTest(SimpleTestCase):
+    @patch("evennia.server.asyncio_bootstrap.os.name", "posix")
+    def test_build_cmdline_uses_python_entrypoints(self):
+        from evennia.server.asyncio_bootstrap import build_cmdline
+
+        portal_cmd, server_cmd = build_cmdline(
+            portal_py_file="/evennia/server/portal/portal.py",
+            server_py_file="/evennia/server/server.py",
+            portal_pidfile="/game/server/portal.pid",
+            server_pidfile="/game/server/server.pid",
+        )
+        self.assertEqual(portal_cmd[0], sys.executable)
+        self.assertEqual(portal_cmd[1], "/evennia/server/portal/portal.py")
+        self.assertIn("--pidfile", portal_cmd)
+        self.assertEqual(server_cmd[1], "/evennia/server/server.py")
+
+    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=True)
+    @patch("evennia.server.evennia_launcher.os.name", "posix")
+    @patch("evennia.server.evennia_launcher.PORTAL_PY_FILE", "/p/portal.py")
+    @patch("evennia.server.evennia_launcher.SERVER_PY_FILE", "/p/server.py")
+    @patch("evennia.server.evennia_launcher.PORTAL_PIDFILE", "/game/portal.pid")
+    @patch("evennia.server.evennia_launcher.SERVER_PIDFILE", "/game/server.pid")
+    @patch("evennia.server.evennia_launcher.PPROFILER_LOGFILE", "/game/portal.prof")
+    @patch("evennia.server.evennia_launcher.SPROFILER_LOGFILE", "/game/server.prof")
+    def test_launcher_uses_bootstrap_when_flag_set(self):
+        from evennia.server import evennia_launcher
+
+        pcmd, scmd = evennia_launcher._get_twistd_cmdline(False, False)
+        self.assertEqual(pcmd[1], "/p/portal.py")
+        self.assertEqual(scmd[1], "/p/server.py")
+        self.assertIn("--pidfile", pcmd)
+        self.assertIn("--pidfile", scmd)
+        self.assertNotIn("twistd", pcmd[0])
+
+
+class BootstrapRunTest(TestCase):
+    def test_run_bootstrap_starts_and_stops_application(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        loop.is_running = True
+        application = MagicMock()
+        application.running = True
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia.TWISTED_APPLICATION", application, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        application.startService.assert_called_once()
+        application.stopService.assert_called_once()
+        loop.run_forever.assert_called_once()

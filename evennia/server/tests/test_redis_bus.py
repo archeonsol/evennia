@@ -126,6 +126,19 @@ class TestRedisBus(TestCase):
         _drain_bus()
         evennia.SERVER_SESSION_HANDLER.portal_disconnect_all.assert_called()
 
+    def test_admin_ssync_on_portal(self):
+        evennia.PORTAL_SESSION_HANDLER.server_session_sync = MagicMock()
+        self.server_bus.send_AdminServer2Portal(
+            amp.DUMMYSESSION,
+            operation=amp.SSYNC,
+            sessiondata=[{"sessid": 1}],
+            clean=True,
+        )
+        _drain_bus()
+        evennia.PORTAL_SESSION_HANDLER.server_session_sync.assert_called_once_with(
+            [{"sessid": 1}], True
+        )
+
     def test_ipc_schema_session_wire(self):
         env = ipc_schema.SessionEnvelope(sessid=1, kwargs={"text": [["hi"], {}]})
         wire = env.to_wire()

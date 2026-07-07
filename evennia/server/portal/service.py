@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import connection
 from twisted.application import internet, service
 from twisted.application.service import MultiService
-from twisted.internet import protocol, reactor
+from twisted.internet import protocol
 
 import evennia
 from evennia.utils import clock, logger
@@ -16,13 +16,8 @@ from evennia.utils.utils import (class_from_module, get_evennia_version,
 
 
 def _asyncio_loop():
-    """Return the asyncio loop the Twisted reactor is driving, or None.
-
-    Only the Twisted *asyncio* reactor exposes a shared loop we can host native
-    asyncio Portal servers on; on the default reactor (e.g. Windows dev) there is
-    none, which keeps the native-asyncio servers gated off. See T3 notes.
-    """
-    return getattr(reactor, "_asyncioEventloop", None)
+    """Return the process-owned asyncio loop, or None before bootstrap runs."""
+    return clock.get_bound_loop()
 
 
 class EvenniaPortalService(MultiService):
@@ -40,8 +35,8 @@ class EvenniaPortalService(MultiService):
         self.start_time = 0
         self._maintenance_count = 0
         self.maintenance_task = None
-        # Native-asyncio Portal servers (T3), only started when
-        # settings.PORTAL_ASYNCIO_SERVERS is on AND the asyncio reactor is in use.
+        # Native-asyncio Portal servers (T3), started when PORTAL_ASYNCIO_SERVERS
+        # is on AND the asyncio reactor provides a shared loop.
         self._asyncio_servers = []
         self._asyncio_proxies = []
 
@@ -87,8 +82,8 @@ class EvenniaPortalService(MultiService):
         self.maintenance_task = clock.looping(60, self.portal_maintenance, now=True)  # every minute
         # set a callback if the server is killed abruptly,
         # by Ctrl-C, reboot etc.
-        reactor.addSystemEventTrigger(
-            "before", "shutdown", self.shutdown, _reactor_stopping=True, _stop_server=True
+        clock.register_shutdown_hook(
+            self.shutdown, _reactor_stopping=True, _stop_server=True
         )
 
         if settings.AMP_HOST and settings.AMP_PORT and settings.AMP_INTERFACE:
@@ -162,12 +157,7 @@ class EvenniaPortalService(MultiService):
                     )
 
     def register_ssh(self):
-        # Start SSH game connections. Will create a keypair in
-        # evennia/game if necessary.
-
-        from evennia.server.portal import ssh
-
-        _ssh_protocol = class_from_module(settings.SSH_PROTOCOL_CLASS)
+        # SSH via asyncssh on the shared asyncio loop (T3; conch path removed).
 
         interfaces = self.check_lockdown(settings.SSH_INTERFACES)
 
@@ -176,24 +166,14 @@ class EvenniaPortalService(MultiService):
             if interface not in ("0.0.0.0", "::") or len(interfaces) > 1:
                 ifacestr = "-%s" % interface
             for port in settings.SSH_PORTS:
-                pstring = "%s:%s" % (ifacestr, port)
                 if self._use_asyncio_servers():
                     self._start_asyncio_ssh(evennia.PORTAL_SESSION_HANDLER, interface, port)
                     self.info_dict["ssh"].append("ssh%s: %s (asyncio)" % (ifacestr, port))
-                    continue
-                factory = ssh.makeFactory(
-                    {
-                        "protocolFactory": _ssh_protocol,
-                        "protocolArgs": (),
-                        "sessions": evennia.PORTAL_SESSION_HANDLER,
-                    }
-                )
-                factory.noisy = False
-                ssh_service = internet.TCPServer(port, factory, interface=interface)
-                ssh_service.setName("EvenniaSSH%s" % pstring)
-                ssh_service.setServiceParent(self)
-
-                self.info_dict["ssh"].append("ssh%s: %s" % (ifacestr, port))
+                elif not self._asyncio_listeners_enabled():
+                    logger.log_warn(
+                        "SSH requires PORTAL_ASYNCIO_SERVERS=True and a running "
+                        "asyncio bootstrap loop; ssh%s:%s not started." % (ifacestr, port)
+                    )
 
     def register_webserver(self):
         from evennia.server.webserver import (EvenniaReverseProxyResource,
@@ -211,21 +191,12 @@ class EvenniaPortalService(MultiService):
             for proxyport, serverport in settings.WEBSERVER_PORTS:
                 web_root = EvenniaReverseProxyResource("127.0.0.1", serverport, "")
                 webclientstr = ""
-                if settings.WEBCLIENT_ENABLED:
-                    # create ajax client processes at /webclientdata
-                    ajax_class = class_from_module(settings.AJAX_CLIENT_CLASS)
-                    ajax_webclient = ajax_class()
-                    ajax_webclient.sessionhandler = evennia.PORTAL_SESSION_HANDLER
-                    web_root.putChild(b"webclientdata", ajax_webclient)
-                    webclientstr = "webclient (ajax only)"
-
+                if settings.WEBCLIENT_ENABLED and settings.WEBSOCKET_CLIENT_ENABLED:
                     if (
-                        settings.WEBSOCKET_CLIENT_ENABLED
-                        and settings.WEBSOCKET_CLIENT_PORT
+                        settings.WEBSOCKET_CLIENT_PORT
                         and settings.WEBSOCKET_CLIENT_INTERFACE
                     ) and not websocket_started:
-                        # start websocket client port for the webclient
-                        # we only support one websocket client
+                        # Shell WebSocket (azaban.v1); AJAX /webclientdata retired.
                         from evennia.server.portal import webclient  # noqa
                         from evennia.server.portal.ws_protocol import \
                             WSServerFactory
@@ -243,9 +214,6 @@ class EvenniaPortalService(MultiService):
                             w_ifacestr = "-%s" % w_interface
                         port = settings.WEBSOCKET_CLIENT_PORT
 
-                        # Sans-io wsproto on a plain Twisted factory (no autobahn).
-                        # permessage-deflate (RFC 7692) is offered by the protocol
-                        # itself, so there is nothing to configure here.
                         factory = WSServerFactory()
                         factory.protocol = _websocket_protocol
                         factory.sessionhandler = evennia.PORTAL_SESSION_HANDLER
@@ -258,7 +226,7 @@ class EvenniaPortalService(MultiService):
                                 lambda f=factory: AsyncioWebSocketProtocol(f), w_interface, port
                             )
                             webclientstr = "webclient-websocket%s: %s (asyncio)" % (w_ifacestr, port)
-                        else:
+                        elif not self._asyncio_listeners_enabled():
                             websocket_service = internet.TCPServer(
                                 port, factory, interface=w_interface
                             )
@@ -266,7 +234,8 @@ class EvenniaPortalService(MultiService):
                             websocket_service.setServiceParent(self)
                             webclientstr = "webclient-websocket%s: %s" % (w_ifacestr, port)
                         websocket_started = True
-                    self.info_dict["webclient"].append(webclientstr)
+                    if webclientstr:
+                        self.info_dict["webclient"].append(webclientstr)
 
                 try:
                     WEB_PLUGINS_MODULE = mod_import(settings.WEB_PLUGINS_MODULE)
@@ -290,13 +259,11 @@ class EvenniaPortalService(MultiService):
                             "mygame/server/conf."
                         )
                 if self._use_asyncio_servers():
-                    # native asyncio reverse proxy (h11 + httpx). Note: the ajax
-                    # /webclientdata local route is not served here yet.
                     self._start_asyncio_proxy(interface, proxyport, "127.0.0.1", serverport)
                     self.info_dict["webserver_proxy"].append(
                         "webserver-proxy%s: %s (asyncio)" % (ifacestr, proxyport)
                     )
-                else:
+                elif not self._asyncio_listeners_enabled():
                     web_root = Website(web_root, logPath=settings.HTTP_LOG_FILE)
                     web_root.is_portal = True
                     proxy_service = internet.TCPServer(proxyport, web_root, interface=interface)
@@ -331,29 +298,21 @@ class EvenniaPortalService(MultiService):
                         lambda f=factory: telnet.AsyncioTelnetProtocol(f), interface, port
                     )
                     self.info_dict["telnet"].append("telnet%s: %s (asyncio)" % (ifacestr, port))
-                    continue
-                telnet_service = internet.TCPServer(port, factory, interface=interface)
-                telnet_service.setName("EvenniaTelnet%s" % pstring)
-                telnet_service.setServiceParent(self)
-
-                self.info_dict["telnet"].append("telnet%s: %s" % (ifacestr, port))
+                elif not self._asyncio_listeners_enabled():
+                    telnet_service = internet.TCPServer(port, factory, interface=interface)
+                    telnet_service.setName("EvenniaTelnet%s" % pstring)
+                    telnet_service.setServiceParent(self)
+                    self.info_dict["telnet"].append("telnet%s: %s" % (ifacestr, port))
 
     def register_amp(self):
-        # The AMP server carries launcher control (start/stop/reload/status)
-        # ALWAYS, and Server session/admin traffic UNLESS a redis bus is used.
+        # Launcher control plane (start/stop/reload/status) over asyncio IPC (S10).
+        from evennia.server.launcher_ipc import start_launcher_server
         from evennia.server.portal import amp_server
 
-        self.info_dict["amp"] = "amp: %s" % settings.AMP_PORT
-
         factory = amp_server.AMPServerFactory(self)
-        # Kept so the redis bus can share it (single server_connection + callback
-        # list across the launcher-control path and the redis session path).
         self.amp_factory = factory
-        amp_service = internet.TCPServer(
-            settings.AMP_PORT, factory, interface=settings.AMP_INTERFACE
-        )
-        amp_service.setName("PortalAMPServer")
-        amp_service.setServiceParent(self)
+        self._launcher_amp_protocol = factory.protocol()
+        self._launcher_amp_protocol.factory = factory
 
         if getattr(settings, "SERVER_PORTAL_BUS", "redis") != "redis":
             logger.log_err(
@@ -362,14 +321,29 @@ class EvenniaPortalService(MultiService):
             )
         self.register_redis_bus()
 
+        if settings.AMP_HOST and settings.AMP_PORT and settings.AMP_INTERFACE:
+            if getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False) and _asyncio_loop() is not None:
+                start_launcher_server(
+                    self,
+                    factory,
+                    self._launcher_amp_protocol,
+                    settings.AMP_INTERFACE,
+                    settings.AMP_PORT,
+                )
+            else:
+                self.info_dict["amp"] = "amp: %s" % settings.AMP_PORT
+                amp_service = internet.TCPServer(
+                    settings.AMP_PORT, factory, interface=settings.AMP_INTERFACE
+                )
+                amp_service.setName("PortalAMPServer")
+                amp_service.setServiceParent(self)
+
     def register_redis_bus(self):
         """Redis-Streams link to the Server (settings.SERVER_PORTAL_BUS='redis').
 
         The AMP server above stays for the launcher; the Server's session/admin
         traffic flows over redis via server_bus instead.
         """
-        from twisted.internet import reactor
-
         from evennia.server.redis_bus import RedisPortalBus
 
         self.info_dict["amp"] += " + redis bus"
@@ -381,14 +355,27 @@ class EvenniaPortalService(MultiService):
 
     # -- native-asyncio Portal servers (T3, gated) ----------------------
 
-    def _use_asyncio_servers(self):
-        """Whether Portal listeners should run as native asyncio servers.
+    def _asyncio_listeners_enabled(self):
+        """Whether settings request native-asyncio Portal game listeners."""
+        return bool(getattr(settings, "PORTAL_ASYNCIO_SERVERS", False))
 
-        On only when ``settings.PORTAL_ASYNCIO_SERVERS`` is set AND the reactor is
-        the asyncio one (so a shared loop exists). Off by default -> the Twisted
-        listeners below are used unchanged.
+    def _use_asyncio_servers(self):
+        """Whether Portal listeners run as native asyncio servers.
+
+        On when ``PORTAL_ASYNCIO_SERVERS`` is set AND the reactor is the asyncio
+        one (shared loop). When the flag is set but no loop exists, logs an error
+        and returns False (no Twisted listener fallback in that case).
         """
-        return bool(getattr(settings, "PORTAL_ASYNCIO_SERVERS", False)) and _asyncio_loop() is not None
+        if not self._asyncio_listeners_enabled():
+            return False
+        if _asyncio_loop() is None:
+            logger.log_err(
+                "PORTAL_ASYNCIO_SERVERS=True requires an asyncio bootstrap loop "
+                "(no shared loop in this process). Portal game listeners "
+                "will not start."
+            )
+            return False
+        return True
 
     def _start_asyncio_server(self, protocol_factory, interface, port):
         """Start ``loop.create_server`` on the reactor's asyncio loop, tracked."""
@@ -409,7 +396,7 @@ class EvenniaPortalService(MultiService):
 
             loop.create_task(_create())
 
-        reactor.callWhenRunning(_go)
+        clock.when_running(_go)
 
     def _start_asyncio_proxy(self, interface, proxyport, upstream_host, upstream_port):
         """Start the asyncio reverse proxy on the reactor's asyncio loop."""
@@ -423,7 +410,7 @@ class EvenniaPortalService(MultiService):
             if loop is not None:
                 loop.create_task(proxy.start(interface, proxyport))
 
-        reactor.callWhenRunning(_go)
+        clock.when_running(_go)
 
     def _start_asyncio_ssh(self, sessionhandler, interface, port):
         """Start the asyncssh SSH server on the reactor's asyncio loop."""
@@ -445,7 +432,7 @@ class EvenniaPortalService(MultiService):
 
             loop.create_task(_create())
 
-        reactor.callWhenRunning(_go)
+        clock.when_running(_go)
 
     def _stop_asyncio_servers(self):
         loop = _asyncio_loop()
@@ -469,9 +456,29 @@ class EvenniaPortalService(MultiService):
         we need to guess it here (it's very likely to not change)
 
         Returns:
-            server_twistd_cmd (list): An instruction for starting the server, to pass to Popen.
+            server_start_cmd (list): An instruction for starting the server, to pass to Popen.
 
         """
+        from django.conf import settings
+
+        if getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False):
+            import sys
+
+            from evennia.server.asyncio_bootstrap import build_cmdline
+
+            gamedir = os.getcwd()
+            pidfile = (
+                os.path.join(gamedir, "server", "server.pid") if os.name != "nt" else None
+            )
+            _, server_cmd = build_cmdline(
+                portal_py_file=os.path.join(
+                    dirname(dirname(abspath(__file__))), "portal", "portal.py"
+                ),
+                server_py_file=os.path.join(dirname(dirname(abspath(__file__))), "server.py"),
+                server_pidfile=pidfile,
+            )
+            return server_cmd
+
         server_twistd_cmd = [
             "twistd",
             "--python={}".format(os.path.join(dirname(dirname(abspath(__file__))), "server.py")),
@@ -519,4 +526,4 @@ class EvenniaPortalService(MultiService):
             # shutting down the reactor will trigger another signal. We set
             # a flag to avoid loops.
             self.shutdown_complete = True
-            reactor.callLater(0, reactor.stop)
+            clock.call_later(0, clock.stop_loop)

@@ -119,14 +119,6 @@ class RestartingWebsocketServerFactory(protocol.ReconnectingClientFactory):
 
     def start(self):
         "Connect protocol to remote server"
-        from evennia.server.portal.asyncio_transport import (
-            asyncio_servers_enabled, get_asyncio_loop)
-
-        if asyncio_servers_enabled():
-            from evennia.server.portal.ws_protocol import connect_ws_asyncio
-
-            get_asyncio_loop().create_task(connect_ws_asyncio(self))
-            return
         connect_ws(self)
 
 

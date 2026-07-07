@@ -13,7 +13,7 @@ from evennia.utils import clock
 import evennia
 from evennia.server.portal.amp import PCONN, PCONNSYNC, PDISCONN, PDISCONNALL
 from evennia.server.sessionhandler import SessionHandler
-from evennia.utils.logger import log_info, log_trace
+from evennia.utils.logger import log_trace
 from evennia.utils.utils import class_from_module
 
 # module import
@@ -320,10 +320,6 @@ class PortalSessionHandler(SessionHandler):
         """
         session.load_sync_data(data)
         session.at_login()
-        log_info(
-            "[reload-diag] SLOGIN applied sessid=%s uid=%s logged_in=%s"
-            % (session.sessid, data.get("uid"), data.get("logged_in"))
-        )
 
     def server_session_sync(self, serversessions, clean=True):
         """

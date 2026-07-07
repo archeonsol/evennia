@@ -47,8 +47,8 @@ now, full stop — a body that tries to suspend (returns a generator or
    returns the ``Deferred``; the engine awaits it and coerces the resolved value.
 
 **Phase serialization across suspension (the CLAIM-ordering guarantee):** the
-``carry_out`` / ``report`` loops are ``inlineCallbacks`` generators that ``yield``
-on every rule. A suspended rule pauses the *whole* phase — the next rule does not
+``carry_out`` / ``report`` loops are ``async`` coroutines that ``await``
+on every rule. A suspended rule pauses the *whole* phase; the next rule does not
 start until the suspended one resolves and its result is inspected. Two rules
 never interleave, so ``CLAIM`` stays deterministic even across player input or a
 thread-pool round-trip.
@@ -60,7 +60,7 @@ effectively synchronous — the machinery cost is paid only when a rule defers.
 
 import inspect
 
-from twisted.internet.defer import Deferred, inlineCallbacks
+from twisted.internet.defer import Deferred
 
 from evennia.utils import clock
 
@@ -83,11 +83,11 @@ _NA = object()
 # Generator-driving primitives (Phase 1g)
 # ---------------------------------------------------------------------------
 def _is_deferred(raw) -> bool:
-    return isinstance(raw, Deferred)
+    return inspect.isawaitable(raw)
 
 
-def _sleep(seconds) -> Deferred:
-    """A Deferred that fires after ``seconds`` on the reactor (patchable in tests)."""
+def _sleep(seconds):
+    """An awaitable that fires after ``seconds`` on the loop (patchable in tests)."""
     return clock.defer_later(seconds)
 
 
@@ -122,8 +122,7 @@ def _get_input_deferred(actor, prompt) -> Deferred:
     return d
 
 
-@inlineCallbacks
-def _drive_generator(gen, actor):
+async def _drive_generator(gen, actor):
     """Drive a rule generator to completion, returning its ``return`` value.
 
     Each ``yield`` from the body is interpreted:
@@ -150,12 +149,12 @@ def _drive_generator(gen, actor):
         except StopIteration as stop:
             return getattr(stop, "value", None)
         to_send = None
-        if isinstance(value, Deferred):
-            to_send = yield value
+        if _is_deferred(value):
+            to_send = await value
         elif isinstance(value, MenuPrompt):
             while True:
                 caller.msg(format_menu_prompt(value))
-                raw = yield _get_input_deferred(actor, "")
+                raw = await _get_input_deferred(actor, "")
                 choice = parse_menu_choice(raw, value)
                 if choice == "__look__":
                     continue
@@ -165,9 +164,9 @@ def _drive_generator(gen, actor):
                 to_send = choice
                 break
         elif isinstance(value, str):
-            to_send = yield _get_input_deferred(actor, value)
+            to_send = await _get_input_deferred(actor, value)
         elif isinstance(value, (int, float)):
-            yield _sleep(value)
+            await _sleep(value)
         # else: unknown yield value — resume with None
 
 
@@ -176,8 +175,7 @@ class RuleEngine:
     all per-dispatch state lives in locals + the :class:`ActionTrace`."""
 
     # -- public API ---------------------------------------------------------
-    @inlineCallbacks
-    def dispatch(
+    async def dispatch(
         self,
         action,
         actor,
@@ -268,14 +266,14 @@ class RuleEngine:
             # In dry-run, ``_eval_rule_async`` records each rule (PASS/SKIP from
             # its ``requires`` gate) without firing the body, so the trace still
             # reflects all four phases for ``explain()``.
-            aborted = yield self._run_phase(action, actor, plan, trace, memo, "carry_out", dry_run)
+            aborted = await self._run_phase(action, actor, plan, trace, memo, "carry_out", dry_run)
             if aborted:
                 # The focus body this dispatch acted for was popped/collapsed by
                 # another session while a carry_out rule was suspended. Stop —
                 # don't narrate (report) work that no longer has a valid body.
                 trace.outcome = "aborted"
                 return trace
-            yield self._run_phase(action, actor, plan, trace, memo, "report", dry_run)
+            await self._run_phase(action, actor, plan, trace, memo, "report", dry_run)
 
             trace.outcome = self._final_outcome(trace)
             return trace
@@ -384,8 +382,7 @@ class RuleEngine:
         return PASS
 
     # -- suspendable phases (carry_out / report) ----------------------------
-    @inlineCallbacks
-    def _run_phase(self, action, actor, plan, trace, memo, phase, dry_run):
+    async def _run_phase(self, action, actor, plan, trace, memo, phase, dry_run):
         """Drive one suspendable phase. ``carry_out`` stops on ``CLAIM``; both
         phases serialize across suspension (the next rule waits for this one).
 
@@ -397,7 +394,7 @@ class RuleEngine:
         stop_on_claim = phase == "carry_out"
         guard = getattr(actor, "focus_still_valid", None)
         for provider, spec in plan[phase]:
-            result, suspended = yield self._eval_rule_async(
+            result, suspended = await self._eval_rule_async(
                 provider, spec, action, actor, memo, trace, phase, dry_run
             )
             if suspended and guard is not None and not guard():
@@ -408,8 +405,7 @@ class RuleEngine:
                 break
         return False
 
-    @inlineCallbacks
-    def _eval_rule_async(self, provider, spec, action, actor, memo, trace, phase, dry_run):
+    async def _eval_rule_async(self, provider, spec, action, actor, memo, trace, phase, dry_run):
         """Gate, fire, and (if it suspends) drive one ``carry_out``/``report``
         rule, coercing its eventual return to a :class:`RuleResult`.
 
@@ -436,11 +432,11 @@ class RuleEngine:
             raw = self._fire(provider, spec, action, actor)
             if inspect.isgenerator(raw):
                 suspended = True
-                final = yield _drive_generator(raw, actor)
+                final = await _drive_generator(raw, actor)
                 result = self._coerce_final(final)
             elif _is_deferred(raw):
                 suspended = True
-                final = yield raw
+                final = await raw
                 result = self._coerce_final(final)
             else:
                 result = self._coerce_final(raw)

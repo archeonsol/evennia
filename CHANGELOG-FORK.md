@@ -25,6 +25,155 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.125 — T3 S10: launcher IPC, cleanups, headless mode
+
+### Launcher control plane (S10)
+- New ``evennia/server/launcher_ipc.py``: length-prefixed JSON frames on ``AMP_PORT`` replace Twisted AMP for launcher ↔ Portal when ``EVENNIA_ASYNCIO_BOOTSTRAP=True``.
+- ``evennia/server/portal/launcher_handlers.py``: transport-agnostic launcher command dispatch (SSTART, SRELOAD, SRESET, SSHUTD, PSHUTD).
+- Portal ``register_amp()`` starts the asyncio IPC server on the bound loop; legacy ``TCPServer`` AMP remains when bootstrap is off (Windows dev twistd).
+- ``evennia_launcher.send_instruction()`` uses blocking ``LauncherSession`` over IPC; Twisted AMP client kept as fallback when bootstrap is off.
+- ``amp_server.send_Status2Launcher()`` pushes via ``LauncherIPCConnection``; Twisted ``callRemote`` kept for legacy AMP connections.
+- Removed the hidden Twisted asyncio-reactor bridge from ``asyncio_bootstrap`` (no longer needed for launcher AMP).
+
+### Opportunistic cleanups
+- ``evennia.utils.clock.defer_later_compat()`` + ``_DeferLaterCompat``: Twisted ``deferLater`` shim for ``TaskHandler`` (``.called``, ``.cancel()``, pause/unpause).
+- ``taskhandler.py``: uses ``clock.defer_later_compat`` instead of ``deferLater(reactor, ...)``.
+- ``utils.run_in_main_thread()``: ``clock.call_from_thread`` + ``Future.result()`` instead of ``blockingCallFromThread(reactor, ...)``.
+
+### Headless engine mode
+- New ``evennia/standalone.py``: ``evennia.standalone()`` boots Portal or Server in-process (no launcher/twistd); ``evennia.shutdown_standalone()`` for graceful stop.
+- Exported via lazy registry: ``evennia.standalone``, ``evennia.shutdown_standalone``.
+
+### Tests
+- ``evennia/server/tests/test_launcher_ipc.py``, ``test_standalone.py``; bootstrap/launcher tests updated for S10.
+
+---
+
+## 6.0.0+underspire.124 — T3 S9: kill reactor on the hot path
+
+### Process loop ownership
+
+- ``asyncio_bootstrap`` now runs ``loop.run_forever()`` instead of ``reactor.run()``; the process loop is bound via ``clock.bind_loop``.
+- Hidden Twisted asyncio-reactor bridge remains **only** for launcher AMP ``TCPServer`` (:4006) until S10.
+- SIGINT/SIGTERM → ``clock.run_shutdown_hooks()`` + ``clock.stop_loop()``.
+
+### ``evennia.utils.clock`` extensions
+
+- ``bind_loop`` / ``get_bound_loop`` / ``stop_loop`` / ``register_shutdown_hook`` / ``run_shutdown_hooks`` replace direct ``reactor`` use on Portal/Server hot paths.
+- Twisted ``reactor`` fallback is confined to ``clock.stop_loop`` / ``_get_loop`` for Windows dev ``twistd``.
+
+### Hot-path reactor removal
+
+- ``portal/service.py``: ``clock.when_running``, ``clock.register_shutdown_hook``, ``clock.stop_loop`` (no ``reactor`` import).
+- ``server/service.py``: SIGINT via ``signal.signal`` under bootstrap; shutdown uses ``clock.stop_loop``.
+- ``asyncio_transport.get_asyncio_loop`` reads ``clock.get_bound_loop``.
+- ``amp_server.start_server``: ``clock.defer_to_thread`` for child reap.
+
+### Settings / launcher
+
+- Removed ``TWISTED_REACTOR`` setting and ``--reactor=asyncio`` twistd flag.
+- ``DJANGO_ALLOW_ASYNC_UNSAFE`` set unconditionally in ``settings_default`` (asyncio bootstrap is the prod path).
+
+### Tests
+
+- Updated ``test_asyncio_bootstrap`` for ``loop.run_forever``.
+- ``world/tests/test_clock.py``: ``bind_loop`` / ``stop_loop`` / shutdown hooks.
+
+---
+
+## 6.0.0+underspire.123 — T3 S8: asyncio process bootstrap
+
+### Replace ``twistd`` entrypoint (Portal/Server)
+
+- New ``evennia/server/asyncio_bootstrap.py``: creates an asyncio loop, installs the Twisted asyncio reactor bridge, starts the ``Application`` service tree, and runs until graceful shutdown.
+- ``portal.py`` / ``server.py`` expose ``__main__`` entry points (``python portal.py`` / ``python server.py``).
+- Launcher ``_get_twistd_cmdline`` uses bootstrap argv when ``EVENNIA_ASYNCIO_BOOTSTRAP=True``; legacy ``twistd`` path remains when the flag is off (Windows dev).
+- Portal interactive ``server_twistd_cmd`` backup uses bootstrap argv when the flag is on.
+
+### Settings
+
+- ``EVENNIA_ASYNCIO_BOOTSTRAP`` (default ``False``); prod enables in ``mootest/server/conf/settings.py``.
+
+### Tests
+
+- [`evennia/server/tests/test_asyncio_bootstrap.py`](evennia/evennia/server/tests/test_asyncio_bootstrap.py): cmdline builder, launcher routing, mocked bootstrap lifecycle.
+
+---
+
+## 6.0.0+underspire.122 — T3 S6: outbound connections on asyncio
+
+### Outbound WebSocket clients (Discord / Grapevine)
+
+- ``connect_ws`` routes to ``connect_ws_asyncio`` when ``PORTAL_ASYNCIO_SERVERS`` is on and the asyncio reactor provides a shared loop; Twisted ``connectTCP``/``connectSSL`` remain only for dev without the flag.
+- Missing asyncio reactor with the flag set logs an error and skips the outbound WS client (no silent Twisted fallback).
+- ``discord.py`` / ``grapevine.py`` call the unified ``connect_ws`` entry point.
+
+### Outbound IRC client
+
+- New ``connect_irc`` / ``connect_irc_asyncio`` in ``evennia/server/portal/irc.py``: IRC bots use ``loop.create_connection`` (+ verified TLS) with the same reconnect/backoff contract as the WS client driver.
+- ``IRCBotFactory.start`` delegates to ``connect_irc`` (Twisted ``TCPClient``/``connectSSL`` only when the flag is off).
+
+### Game Index client
+
+- ``EvenniaGameIndexService`` already used ``clock.looping`` + ``http.request`` (``defer_to_thread``); docstring updated to reflect that.
+
+### Tests
+
+- [`mootest/world/tests/test_ws_client_asyncio.py`](mootest/world/tests/test_ws_client_asyncio.py): fixed echo-server mixin import; ``connect_ws`` gating tests.
+- [`mootest/world/tests/test_irc_asyncio.py`](mootest/world/tests/test_irc_asyncio.py): asyncio IRC handshake + ``connect_irc`` gating.
+
+---
+
+## 6.0.0+underspire.121 — T3 S5: Portal asyncio-only listeners
+
+### Portal game listeners (telnet / shell WS / SSH / web proxy)
+
+- When ``PORTAL_ASYNCIO_SERVERS=True``, telnet, shell WebSocket, SSH, and the web reverse proxy run **only** on native asyncio servers; no Twisted ``TCPServer`` fallback in that mode.
+- Missing asyncio reactor with the flag set logs an error and skips listeners (no silent Twisted fallback).
+- Dev without the flag still uses Twisted telnet/WS/proxy listeners.
+
+### Retired modules
+
+- Deleted ``evennia/server/portal/webclient_ajax.py`` (AJAX ``/webclientdata`` long-poll; Azaban shell WS is the supported client).
+- Deleted ``evennia/server/portal/ssh.py`` (twisted.conch SSH); SSH is asyncssh-only via ``ssh_asyncio.py``.
+- Removed ``AJAX_CLIENT_CLASS`` / ``AJAX_PROTOCOL_CLASS`` settings; ``SSH_PROTOCOL_CLASS`` points at ``AsyncioSSHSession``.
+
+### Tests
+
+- [`mootest/world/tests/test_portal_asyncio.py`](mootest/world/tests/test_portal_asyncio.py): gating + error log when flag set without asyncio loop.
+- [`evennia/server/tests/test_redis_reload.py`](evennia/evennia/server/tests/test_redis_reload.py): mock ``run_init_hooks`` so PSYNC/reload survival tests exercise session sync without needing a live reactor loop.
+
+---
+
+## 6.0.0+underspire.120 — T3 S1-S3: asyncio scheduling facades
+
+### `evennia.utils.clock` on asyncio primitives
+
+- Replaced Twisted `reactor.callLater` / `LoopingCall` / `ensureDeferred` / `deferToThread` with native asyncio (`call_later`, `LoopHandle`, `create_task`, `run_in_executor`).
+- `run_coroutine` returns `asyncio.Task` on a running loop; test harnesses without a loop get a synchronous `_SyncCoroutineResult` driver.
+- `_main_loop` cache lets `call_from_thread` resolve the loop from worker threads.
+- Twisted `asyncioreactor` bridge (`reactor._asyncioEventloop`) remains until S9 kills the reactor.
+
+### `evennia.utils.defer` on thread-pool executor
+
+- `in_thread` / `background` / `threaded` now return `asyncio.Future` from `clock.defer_to_thread` (10-worker `ThreadPoolExecutor`).
+- `background` routes failures via `add_done_callback` instead of Twisted errbacks.
+
+### Call-site updates
+
+- Command dispatch (`inputfuncs`) and cmdset warmup: errbacks folded into coroutines / task done-callbacks.
+- Activity driver (`process.py`, `engine.py`): await any awaitable yield (not only Twisted `Deferred`).
+- `portal/discord.py` timer adapter routes through `clock.call_later`.
+- `game_index_client/service.py`: `clock.run_coroutine` in the maintenance loop.
+
+### Tests
+
+- [`mootest/world/tests/test_clock.py`](mootest/world/tests/test_clock.py), [`mootest/world/tests/test_deferred_migration.py`](mootest/world/tests/test_deferred_migration.py), [`evennia/utils/tests/test_defer.py`](evennia/utils/tests/test_defer.py) rewritten for asyncio.
+
+**Deferred:** `scripts/taskhandler.py` still uses Twisted `deferLater` + Deferred pause/cancel API.
+
+---
+
 ## 6.0.0+underspire.119 — Tier 2: redis session bus + Portal asyncio WS hardening
 
 ### Portal ↔ Server IPC (retire session AMP TCP)

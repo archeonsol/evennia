@@ -17,10 +17,10 @@ _Peer = namedtuple("_Peer", "host port")
 
 
 def get_asyncio_loop():
-    """The asyncio loop the Twisted reactor drives, or None (default reactor)."""
-    from twisted.internet import reactor
+    """The process-owned asyncio loop, or None (before bootstrap / on Windows dev)."""
+    from evennia.utils import clock
 
-    return getattr(reactor, "_asyncioEventloop", None)
+    return clock.get_bound_loop()
 
 
 def asyncio_servers_enabled():

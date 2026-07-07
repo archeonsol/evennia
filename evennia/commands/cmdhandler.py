@@ -40,7 +40,6 @@ from traceback import format_exc
 from django.conf import settings
 from django.utils.translation import gettext as _
 from ftfy import fix_text as _ftfy_fix_text
-from twisted.internet.defer import ensureDeferred, inlineCallbacks
 
 from evennia.utils import clock
 
@@ -421,8 +420,7 @@ def generate_cmdset_providers(called_by, session=None):
     return cmdset_providers, cmdset_providers_list, cmdset_providers_errors_list, caller, error_to
 
 
-@inlineCallbacks
-def get_and_merge_cmdsets(
+async def get_and_merge_cmdsets(
     caller, cmdset_providers, callertype, raw_string, report_to=None, cmdid=None, session=None
 ):
     """
@@ -452,8 +450,7 @@ def get_and_merge_cmdsets(
     """
     try:
 
-        @inlineCallbacks
-        def _get_local_obj_cmdsets(obj):
+        async def _get_local_obj_cmdsets(obj):
             """
             Helper-method; Get Object-level cmdsets
 
@@ -475,7 +472,7 @@ def get_and_merge_cmdsets(
                     if local_objlist is None:
                         # Gather all cmdsets stored on objects in the room and
                         # also in the caller's inventory and the location itself
-                        local_objlist = yield (
+                        local_objlist = await clock.maybe_await(
                             location.contents_get(exclude=obj) + obj.contents_get() + [location]
                         )
                         local_objlist = [
@@ -499,7 +496,7 @@ def get_and_merge_cmdsets(
                             _GA(lobj, "at_cmdset_get")(caller=caller)
                         except Exception:
                             logger.log_trace()
-                    raw_obj_cmdsets = yield list(
+                    raw_obj_cmdsets = list(
                         chain.from_iterable(
                             lobj.cmdset.cmdset_stack
                             for lobj in local_objlist
@@ -531,15 +528,14 @@ def get_and_merge_cmdsets(
                 _msg_err(caller, _ERROR_CMDSETS)
                 raise ErrorReported(raw_string)
 
-        @inlineCallbacks
-        def _get_cmdsets(obj, current):
+        async def _get_cmdsets(obj, current):
             """
             Helper method; Get cmdset while making sure to trigger all
             hooks safely. Returns the stack and the valid options.
 
             """
             try:
-                yield obj.at_cmdset_get(caller=caller, current=current)
+                await clock.maybe_await(obj.at_cmdset_get(caller=caller, current=current))
             except Exception as exc:
                 _fire_cmdset_merge_error(caller, session, raw_string, exc)
                 _msg_err(caller, _ERROR_CMDSETS)
@@ -554,7 +550,7 @@ def get_and_merge_cmdsets(
         current_cmdset = CmdSet()
         object_cmdsets = list()
         for cmdobj in cmdset_providers:
-            current, cur_cmdsets = yield _get_cmdsets(cmdobj, current_cmdset)
+            current, cur_cmdsets = await _get_cmdsets(cmdobj, current_cmdset)
             if current:
                 current_cmdset = current_cmdset + current
             if cur_cmdsets:
@@ -562,7 +558,7 @@ def get_and_merge_cmdsets(
             match cmdobj.cmdset_provider_type:
                 case "object":
                     if not current.no_objs:
-                        local_obj_cmdsets = yield _get_local_obj_cmdsets(cmdobj)
+                        local_obj_cmdsets = await _get_local_obj_cmdsets(cmdobj)
                         if current.no_exits:
                             # filter out all exits
                             local_obj_cmdsets = [
@@ -571,12 +567,12 @@ def get_and_merge_cmdsets(
                         object_cmdsets += local_obj_cmdsets
 
         # weed out all non-found sets
-        cmdsets = yield [
+        cmdsets = [
             cmdset for cmdset in object_cmdsets if cmdset and cmdset.key != "_EMPTY_CMDSET"
         ]
         # report cmdset errors to user (these should already have been logged)
         if report_to:
-            yield [
+            [
                 report_to.msg(err_helper(cmdset.errmessage, cmdid=cmdid))
                 for cmdset in cmdsets
                 if cmdset.key == "_CMDSET_ERROR"
@@ -601,17 +597,17 @@ def get_and_merge_cmdsets(
                     prio = cmdset.priority
                     if prio in tempmergers:
                         # merge same-prio cmdset together separately
-                        tempmergers[prio] = yield tempmergers[prio] + cmdset
+                        tempmergers[prio] = tempmergers[prio] + cmdset
                     else:
                         tempmergers[prio] = cmdset
 
                 # sort cmdsets after reverse priority (highest prio are merged in last)
-                sorted_cmdsets = yield sorted(list(tempmergers.values()), key=lambda x: x.priority)
+                sorted_cmdsets = sorted(list(tempmergers.values()), key=lambda x: x.priority)
 
                 # Merge all command sets into one, beginning with the lowest-prio one
                 cmdset = sorted_cmdsets[0]
                 for merging_cmdset in sorted_cmdsets[1:]:
-                    cmdset = yield cmdset + merging_cmdset
+                    cmdset = cmdset + merging_cmdset
                 # store the original, ungrouped set for diagnosis
                 cmdset.merged_from = cmdsets
                 # Before caching, clear back-references that would pin game
@@ -651,8 +647,7 @@ def get_and_merge_cmdsets(
 # Main command-handler function
 
 
-@inlineCallbacks
-def cmdhandler(
+async def cmdhandler(
     called_by,
     raw_string,
     _testing=False,
@@ -728,8 +723,7 @@ def cmdhandler(
     ):
         raw_string = _ftfy_fix_text(raw_string)
 
-    @inlineCallbacks
-    def _run_command(cmd, cmdname, args, raw_cmdname, cmdset, session, account, cmdset_providers):
+    async def _run_command(cmd, cmdname, args, raw_cmdname, cmdset, session, account, cmdset_providers):
         """
         Helper function: This initializes and runs the Command
         instance once the parser has identified it as either a normal
@@ -827,16 +821,16 @@ def cmdhandler(
             )
 
             # pre-parse hook (was: at_pre_cmd before 6.0.0+underspire.2)
-            abort = yield cmd.at_pre_parse()
+            abort = await clock.maybe_await(cmd.at_pre_parse())
             if abort:
                 # abort sequence
                 return abort
 
             # Parse and execute
-            yield cmd.parse()
+            await clock.maybe_await(cmd.parse())
 
             # post-parse, pre-func hook (new in 6.0.0+underspire.2)
-            abort = yield cmd.at_pre_cmd()
+            abort = await clock.maybe_await(cmd.at_pre_cmd())
             if abort:
                 return abort
 
@@ -850,10 +844,10 @@ def cmdhandler(
             else:
                 if inspect.iscoroutine(ret):
                     # async def func(self) — wait for completion before post-hooks.
-                    yield ensureDeferred(ret)
+                    await ret
 
                 # post-command hook (sync and async paths both land here)
-                yield cmd.at_post_cmd()
+                await clock.maybe_await(cmd.at_post_cmd())
 
                 on_command_post.send_robust(
                     sender=type(cmd),
@@ -867,7 +861,7 @@ def cmdhandler(
                 if cmd.save_for_next:
                     # store a reference to this command, possibly
                     # accessible by the next command.
-                    caller.ndb.last_cmd = yield copy(cmd)
+                    caller.ndb.last_cmd = copy(cmd)
                 else:
                     caller.ndb.last_cmd = None
 
@@ -913,7 +907,7 @@ def cmdhandler(
 
     if cmdobj is None:
         try:
-            yield try_action_dispatch(
+            await try_action_dispatch(
                 called_by, raw_string, session=session, callertype=callertype, **kwargs
             )
         except Exception:
@@ -953,7 +947,7 @@ def cmdhandler(
 
             else:
                 # no explicit cmdobject given, figure it out
-                cmdset = yield get_and_merge_cmdsets(
+                cmdset = await get_and_merge_cmdsets(
                     caller,
                     cmdset_providers_list,
                     callertype,
@@ -970,14 +964,14 @@ def cmdhandler(
                 raw_string = raw_string.strip()
                 if not raw_string:
                     # Empty input. Test for system command instead.
-                    syscmd = yield cmdset.get(CMD_NOINPUT)
+                    syscmd = cmdset.get(CMD_NOINPUT)
                     sysarg = ""
                     raise ExecSystemCommand(syscmd, sysarg)
                 # Parse the input string and match to available cmdset.
                 # This also checks for permissions, so all commands in match
                 # are commands the caller is allowed to call.
                 try:
-                    matches = yield _COMMAND_PARSER(raw_string, cmdset, caller, session=session)
+                    matches = await clock.maybe_await(_COMMAND_PARSER(raw_string, cmdset, caller, session=session))
                 except TypeError:
                     logger.log_dep(
                         "Custom cmdparser does not accept 'session' kwarg. "
@@ -986,20 +980,20 @@ def cmdhandler(
                         "Session-aware lock functions like is_ooc() will not "
                         "work correctly until this is fixed."
                     )
-                    matches = yield _COMMAND_PARSER(raw_string, cmdset, caller)
+                    matches = await clock.maybe_await(_COMMAND_PARSER(raw_string, cmdset, caller))
 
                 # Deal with matches
 
                 if len(matches) > 1:
                     # We have a multiple-match
-                    syscmd = yield cmdset.get(CMD_MULTIMATCH)
+                    syscmd = cmdset.get(CMD_MULTIMATCH)
                     sysarg = _("There were multiple matches.")
                     if syscmd:
                         # use custom CMD_MULTIMATCH
                         syscmd.matches = matches
                     else:
                         # fall back to default error handling
-                        sysarg = yield _SEARCH_AT_RESULT(
+                        sysarg = _SEARCH_AT_RESULT(
                             [match[2] for match in matches], caller, query=matches[0][0]
                         )
                     raise ExecSystemCommand(syscmd, sysarg)
@@ -1012,7 +1006,7 @@ def cmdhandler(
 
                 if not matches:
                     # No commands match our entered command
-                    syscmd = yield cmdset.get(CMD_NOMATCH)
+                    syscmd = cmdset.get(CMD_NOMATCH)
                     if syscmd:
                         # use custom CMD_NOMATCH command
                         sysarg = raw_string
@@ -1042,7 +1036,7 @@ def cmdhandler(
                 cmd = copy(cmd)
 
             # A normal command.
-            yield _run_command(
+            await _run_command(
                 cmd, cmdname, args, raw_cmdname, cmdset, session, account, cmdset_providers
             )
 
@@ -1058,7 +1052,7 @@ def cmdhandler(
             sysarg = exc.sysarg
 
             if syscmd:
-                yield _run_command(
+                await _run_command(
                     syscmd,
                     syscmd.key,
                     sysarg,

@@ -105,6 +105,8 @@ _LAZY_EXPORTS = {
     "hooks": ".hooks:",
     "FuncParser": ".utils.funcparser:FuncParser",
     "OnDemandTask": ".scripts.ondemandhandler:OnDemandTask",
+    "standalone": ".standalone:standalone",
+    "shutdown_standalone": ".standalone:shutdown_standalone",
     # Handlers (singletons exposed as module attributes)
     "TASK_HANDLER": ".scripts.taskhandler:TASK_HANDLER",
     "MONITOR_HANDLER": ".scripts.monitorhandler:MONITOR_HANDLER",

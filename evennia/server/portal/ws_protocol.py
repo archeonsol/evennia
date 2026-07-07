@@ -505,7 +505,18 @@ async def connect_ws_asyncio(factory):
                 server_hostname=host if secure else None,
             )
             delay = getattr(factory, "initialDelay", 1)  # reset backoff on success
-            await proto.closed
+            closed_wait = _asyncio.ensure_future(proto.closed)
+            while not closed_wait.done():
+                if _stopping():
+                    try:
+                        proto.session.transport.loseConnection()
+                    except Exception:
+                        pass
+                try:
+                    await _asyncio.wait_for(_asyncio.shield(closed_wait), timeout=0.25)
+                    break
+                except _asyncio.TimeoutError:
+                    continue
         except Exception:
             logger.log_trace("asyncio ws client connection failed")
 
@@ -518,11 +529,29 @@ async def connect_ws_asyncio(factory):
 def connect_ws(factory, reactor=None):
     """Connect an outbound websocket client factory (replaces ``connectWS``).
 
-    Parses ``factory.ws_url`` (``ws://`` or ``wss://``), fills in
-    ``ws_host``/``ws_target`` for the protocol's upgrade request, and connects
-    the factory over TCP or TLS. Unlike autobahn's old ``ClientContextFactory``
-    path, TLS here verifies the server certificate (``optionsForClientTLS``).
+    When ``PORTAL_ASYNCIO_SERVERS`` is on and the asyncio reactor provides a
+    shared loop, starts ``connect_ws_asyncio`` on that loop (no Twisted
+    ``connectTCP``/``connectSSL``). Dev without the flag still uses Twisted.
     """
+    from django.conf import settings
+
+    from evennia.server.portal.asyncio_transport import (
+        asyncio_servers_enabled,
+        get_asyncio_loop,
+    )
+
+    if asyncio_servers_enabled():
+        get_asyncio_loop().create_task(connect_ws_asyncio(factory))
+        return None
+
+    if getattr(settings, "PORTAL_ASYNCIO_SERVERS", False):
+        logger.log_err(
+            "PORTAL_ASYNCIO_SERVERS=True requires an asyncio bootstrap loop "
+            "(no shared loop in this process). Outbound WS client "
+            "will not connect."
+        )
+        return None
+
     if reactor is None:
         from twisted.internet import reactor
 

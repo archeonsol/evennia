@@ -38,7 +38,6 @@ import time
 from collections import defaultdict
 
 from django.utils.translation import gettext as _
-from twisted.internet.defer import inlineCallbacks
 
 from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
 from evennia.utils.command_trace import get_trace_id
@@ -143,8 +142,7 @@ def _active_disambiguation(actor):
 # --------------------------------------------------------------------------- #
 
 
-@inlineCallbacks
-def try_action_dispatch(
+async def try_action_dispatch(
     called_by,
     raw_string,
     session=None,
@@ -181,7 +179,7 @@ def try_action_dispatch(
     #    replayed with a search override; see Actor.search).
     disambig = _active_disambiguation(actor)
     if disambig is not None and disambig.pending_raw is not None:
-        trace = yield _resolve_disambiguation(
+        trace = await _resolve_disambiguation(
             called_by, raw_string, session, actor, disambig, engine, parser, callertype, **kwargs
         )
         return trace
@@ -229,7 +227,7 @@ def try_action_dispatch(
         if stripped == CMD_LOGINSTART:
             action = LoginStartAction()
 
-    trace = yield _dispatch_with_signals(
+    trace = await _dispatch_with_signals(
         action, actor, raw_string, session, engine, callertype=callertype
     )
     fallback = _fail_closed_fallback(action, actor, trace, raw_string)
@@ -239,7 +237,7 @@ def try_action_dispatch(
         # defaults). The trace returned is still the typed verb's — that's
         # what truthfully describes this input; the feedback dispatch is an
         # implementation detail.
-        yield _dispatch_with_signals(
+        await _dispatch_with_signals(
             fallback, actor, raw_string, session, engine, callertype=callertype
         )
     return trace
@@ -295,8 +293,7 @@ def _fail_closed_fallback(action, actor, trace, raw_string):
     return None
 
 
-@inlineCallbacks
-def _resolve_disambiguation(
+async def _resolve_disambiguation(
     called_by, raw_string, session, actor, state, engine, parser, callertype=None, **kwargs
 ):
     """Resolve a pending disambiguation from the player's choice line."""
@@ -306,7 +303,7 @@ def _resolve_disambiguation(
         actor.msg("Invalid choice. Cancelled.")
         return None
     actor.set_search_override(state.ambiguous_name, choice)
-    trace = yield try_action_dispatch(
+    trace = await try_action_dispatch(
         called_by,
         state.pending_raw,
         session=session,
@@ -319,8 +316,7 @@ def _resolve_disambiguation(
     return trace
 
 
-@inlineCallbacks
-def _dispatch_with_signals(action, actor, raw_string, session, engine, callertype=None):
+async def _dispatch_with_signals(action, actor, raw_string, session, engine, callertype=None):
     """Run one engine dispatch wrapped in signals + middleware."""
     action._raw_string = raw_string
     caller = actor.effective
@@ -374,7 +370,7 @@ def _dispatch_with_signals(action, actor, raw_string, session, engine, callertyp
             logger.log_trace()
 
     try:
-        trace = yield engine.dispatch(action, actor, context, record_phases=False)
+        trace = await engine.dispatch(action, actor, context, record_phases=False)
     except Exception as exc:
         from traceback import format_exc
 

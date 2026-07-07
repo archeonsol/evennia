@@ -5,11 +5,10 @@ Module containing the task handler for Evennia deferred tasks, persistent or not
 from datetime import datetime, timedelta
 from pickle import PickleError
 
-from twisted.internet import reactor
 from twisted.internet.defer import CancelledError as DefCancelledError
-from twisted.internet.task import deferLater
 
 from evennia.server.models import ServerConfig
+from evennia.utils import clock
 from evennia.utils.dbserialize import dbserialize, dbunserialize
 from evennia.utils.logger import log_err
 
@@ -252,7 +251,7 @@ class TaskHandler:
     def __init__(self):
         self.tasks = {}
         self.to_save = {}
-        self.clock = reactor
+        self.clock = None
         # number of seconds before an uncalled canceled task is removed from TaskHandler
         self.stale_timeout = 60
         self._now = False  # used in unit testing to manually set now time
@@ -435,7 +434,7 @@ class TaskHandler:
             self.tasks[task_id] = (comp_time, callback, args, kwargs, persistent, None)
 
         # defer the task
-        d = deferLater(self.clock, timedelay, self.do_task, task_id)
+        d = clock.defer_later_compat(self.clock, timedelay, self.do_task, task_id)
         d.addErrback(handle_error)
 
         # some tasks may complete before the deferred can be added
@@ -628,7 +627,7 @@ class TaskHandler:
         for task_id, (date, callback, args, kwargs, _, _) in self.tasks.items():
             self.tasks[task_id] = date, callback, args, kwargs, True, None
             seconds = max(0, (date - now).total_seconds())
-            d = deferLater(self.clock, seconds, self.do_task, task_id)
+            d = clock.defer_later_compat(self.clock, seconds, self.do_task, task_id)
             d.addErrback(handle_error)
             # some tasks may complete before the deferred can be added
             if self.tasks.get(task_id, False):

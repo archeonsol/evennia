@@ -49,6 +49,10 @@ def _load_modules():
 
     from django.conf import settings
 
+    # engine-shipped baselines (events + outputfunc signatures)
+    import evennia.server.protocol.core_events  # noqa: F401
+    import evennia.server.protocol.core_outputfuncs  # noqa: F401
+
     for path in getattr(settings, "PROTOCOL_EVENT_MODULES", []) or []:
         try:
             import_module(path)

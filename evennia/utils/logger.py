@@ -28,6 +28,20 @@ from evennia.utils import clock
 
 log = twisted_logger.Logger()
 
+
+def _future_errback(future, errback):
+    """Attach a Twisted-style errback to an asyncio Future from defer_to_thread."""
+
+    def _done(fut):
+        exc = fut.exception()
+        if exc is not None:
+            from twisted.python.failure import Failure
+
+            errback(Failure(exc))
+
+    future.add_done_callback(_done)
+    return future
+
 _LOGDIR = None
 _LOG_ROTATE_SIZE = None
 _TIMEZONE = None
@@ -584,7 +598,7 @@ def log_file(msg, filename="game.log"):
     # save to server/logs/ directory
     filehandle = _open_log_file(filename)
     if filehandle:
-        clock.defer_to_thread(callback, filehandle, msg).addErrback(errback)
+        _future_errback(clock.defer_to_thread(callback, filehandle, msg), errback)
 
 
 def log_file_exists(filename="game.log"):
@@ -776,8 +790,9 @@ def tail_log_file(filename, offset, nlines, callback=None):
     filehandle = _open_log_file(filename)
     if filehandle:
         if callback:
-            return clock.defer_to_thread(seek_file, filehandle, offset, nlines, callback).addErrback(
-                errback
+            return _future_errback(
+                clock.defer_to_thread(seek_file, filehandle, offset, nlines, callback),
+                errback,
             )
         else:
             return seek_file(filehandle, offset, nlines, callback)

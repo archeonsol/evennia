@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 
 from evennia.utils import logger
 
-_WEBCLIENT_PROTOCOLS = frozenset({"websocket", "webclient_ajax"})
+_WEBCLIENT_PROTOCOLS = frozenset({"websocket"})
 
 
 # -- validation (co-located with the primitive) ---------------------------

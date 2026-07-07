@@ -33,12 +33,15 @@ three lifecycle verbs as ``state.py`` — start / cancel / query — so "is X
 walking?" becomes a typed query (``is_active(holder, "locomotion")``) instead of
 a scattered ``ndb`` flag.
 
-Stays on Twisted ``inlineCallbacks`` + ``deferLater`` (AS1 sync-by-default; no
-asyncio). Cancellation cancels the in-flight ``Deferred`` and runs ``on_cancel``;
-the driver guards a vanished actor/character and a crashing body.
+The driver is an ``async`` coroutine (kicked off via ``clock.run_coroutine``);
+it still awaits ``clock.defer_later`` sleeps and Deferred-returning bodies.
+Cancellation cancels the in-flight ``Deferred`` and runs ``on_cancel``; the
+driver guards a vanished actor/character and a crashing body.
 """
 
-from twisted.internet.defer import CancelledError, Deferred, inlineCallbacks
+import inspect
+
+from twisted.internet.defer import CancelledError, Deferred
 
 from evennia.utils import clock
 
@@ -170,8 +173,8 @@ def start_activity(holder, activity):
     Enforces exclusivity first: any already-active activity sharing this one's
     :attr:`~Activity.key` (or its :attr:`~Activity.exclusive_group`, when set) is
     cancelled with reason ``"superseded"``. Then the new activity is registered
-    and its generator driven (synchronously up to the first suspension, like
-    ``inlineCallbacks``).
+    and its coroutine driven (synchronously up to the first suspension, like
+    ``inlineCallbacks`` was).
 
     Returns:
         Activity: the started ``activity`` (for chaining / handle-keeping).
@@ -192,7 +195,7 @@ def start_activity(holder, activity):
     reg = _registry(holder, create=True)
     if activity not in reg:
         reg.append(activity)
-    _drive_activity(activity)
+    clock.run_coroutine(_drive_activity(activity))
     return activity
 
 
@@ -249,8 +252,7 @@ def is_active(holder, key_or_group) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-@inlineCallbacks
-def _drive_activity(activity):
+async def _drive_activity(activity):
     """Drive an :class:`Activity`'s generator to completion or cancellation.
 
     Fire-and-forget: ``start_activity`` calls this but does not await the
@@ -274,12 +276,12 @@ def _drive_activity(activity):
                 break
             to_send = None
             try:
-                if isinstance(value, Deferred):
+                if inspect.isawaitable(value) and not isinstance(value, (int, float)):
                     activity._pending = value
-                    to_send = yield value
+                    to_send = await value
                 elif isinstance(value, (int, float)):
                     activity._pending = clock.defer_later(max(0.0, float(value)))
-                    yield activity._pending
+                    await activity._pending
                 # else: unknown yield value — resume with None
             except CancelledError:
                 break

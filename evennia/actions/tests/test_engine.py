@@ -75,17 +75,32 @@ def _ctx(*providers):
 
 
 def _sync(d):
-    """Extract an already-fired Deferred's result, re-raising on failure."""
+    """Extract an already-fired Deferred/coroutine's result, re-raising on failure."""
+    import inspect
+
+    from twisted.internet.defer import ensureDeferred
+
+    if inspect.iscoroutine(d):
+        # dispatch/engine are now `async def`; run the coroutine to a Deferred.
+        d = ensureDeferred(d)
     out = {}
     d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
     if "fail" in out:
         out["fail"].raiseException()
     if "result" not in out:
-        raise AssertionError("dispatch Deferred did not fire synchronously")
+        raise AssertionError("dispatch did not complete synchronously")
     return out["result"]
 
 
 ENGINE = RuleEngine()
+
+
+def _dispatch(*args, **kwargs):
+    """``dispatch`` is ``async`` now; wrap the coroutine as a Deferred for tests
+    that drive a suspension manually (``.called`` + firing a rule's Deferred)."""
+    from twisted.internet.defer import ensureDeferred
+
+    return ensureDeferred(ENGINE.dispatch(*args, **kwargs))
 
 
 # --- provider classes -------------------------------------------------------
@@ -420,7 +435,7 @@ class TestOutcomeAndProviderOrder(unittest.TestCase):
         self.assertEqual(trace.outcome, "no_rules")
 
     def test_dispatch_returns_already_fired_deferred_when_no_suspension(self):
-        d = ENGINE.dispatch(Kick(), _actor(), _ctx(Worker([])))
+        d = _dispatch(Kick(), _actor(), _ctx(Worker([])))
         self.assertIsInstance(d, Deferred)
         self.assertTrue(d.called)
 
@@ -528,7 +543,7 @@ class TestDeferredRule(unittest.TestCase):
     def test_phase_serializes_until_deferred_fires(self):
         d = Deferred()
         fired = []
-        dispatch_d = ENGINE.dispatch(Kick(), _actor(), _ctx(Deferring(fired, d)))
+        dispatch_d = _dispatch(Kick(), _actor(), _ctx(Deferring(fired, d)))
         # carry_out suspended on the unfired Deferred — phase has not advanced
         self.assertFalse(dispatch_d.called)
         self.assertEqual(fired, ["work"])
@@ -541,7 +556,7 @@ class TestDeferredRule(unittest.TestCase):
     def test_deferred_claim_stops_phase(self):
         d = Deferred()
         fired = []
-        dispatch_d = ENGINE.dispatch(Kick(), _actor(), _ctx(Deferring(fired, d)))
+        dispatch_d = _dispatch(Kick(), _actor(), _ctx(Deferring(fired, d)))
         d.callback(CLAIM)
         self.assertEqual(fired, ["work"])  # after_work never fired
         _sync(dispatch_d)
@@ -549,7 +564,7 @@ class TestDeferredRule(unittest.TestCase):
     def test_report_serializes_and_never_short_circuits(self):
         d = Deferred()
         fired = []
-        dispatch_d = ENGINE.dispatch(Kick(), _actor(), _ctx(DeferringReport(fired, d)))
+        dispatch_d = _dispatch(Kick(), _actor(), _ctx(DeferringReport(fired, d)))
         self.assertFalse(dispatch_d.called)
         self.assertEqual(fired, ["slow_report"])  # next report rule waits
         d.callback(CLAIM)  # CLAIM is ignored in report
