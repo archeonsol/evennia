@@ -62,6 +62,15 @@ def should_retry(status_code):
         return False
 
 
+class _ReactorTimer:
+    """Thin adapter: DiscordClient expects ``call_later`` on the factory timer."""
+
+    def call_later(self, delay, func, *args, **kwargs):
+        from twisted.internet import reactor
+
+        return reactor.callLater(delay, func, *args, **kwargs)
+
+
 class DiscordWebsocketServerFactory(protocol.ReconnectingClientFactory):
     """
     A customized websocket client factory that navigates the Discord gateway process.
@@ -86,6 +95,7 @@ class DiscordWebsocketServerFactory(protocol.ReconnectingClientFactory):
         self.sessionhandler = sessionhandler
         self.port = None
         self.bot = None
+        self._batched_timer = _ReactorTimer()
 
     def get_gateway_url(self, *args, **kwargs):
         # get the websocket gateway URL from Discord
@@ -546,6 +556,9 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                 try:
                     payload = json.loads(response.content)
                 except Exception:
+                    logger.log_err(
+                        f"Discord thread create: invalid JSON for job={job_id}"
+                    )
                     return
                 thread_id = payload.get("id")
                 if thread_id:
@@ -560,8 +573,34 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                             },
                         ),
                     )
+                else:
+                    logger.log_err(
+                        f"Discord thread create: no thread id in response job={job_id}"
+                    )
             elif should_retry(response.code):
                 delay(300, self.send_create_thread, name, channel_id, job_id, **kwargs)
+            else:
+                err_body = ""
+                try:
+                    err_body = response.content.decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                logger.log_err(
+                    f"Discord thread create failed job={job_id} HTTP {response.code}: "
+                    f"{err_body}"
+                )
+                self.sessionhandler.data_in(
+                    self,
+                    bot_data_in=(
+                        "",
+                        {
+                            "type": "THREAD_CREATE_FAILED",
+                            "job_id": job_id,
+                            "code": response.code,
+                            "error": err_body,
+                        },
+                    ),
+                )
 
         http.request("POST", url, headers=headers, data=body).addCallback(cbResponse)
 

@@ -1151,6 +1151,11 @@ DISCORD_BOT_CLASS = "evennia.accounts.bots.DiscordBot"
 # threads are created under) and the send_create_thread portal outputfunc.
 DISCORD_TICKET_THREADS = False
 DISCORD_TICKET_PARENT_CHANNEL_ID = None
+# Admin-only ticket kinds (e.g. report) use this parent when set.
+DISCORD_TICKET_ADMIN_PARENT_CHANNEL_ID = None
+# Orphan thread recovery: retry thread creation after this many minutes.
+TICKET_DISCORD_ORPHAN_MINS = 2
+TICKET_DISCORD_MAX_ATTEMPTS = 5
 
 ######################################################################
 # Django web features
