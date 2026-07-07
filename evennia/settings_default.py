@@ -159,9 +159,9 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
-# Portal<->Server transport: "amp" (Twisted AMP over TCP, default) or "redis"
-# (redis Streams; decouples the two sides and enables multiple Server workers).
-SERVER_PORTAL_BUS = "amp"
+# Portal<->Server session/admin IPC: redis Streams (plain XREAD/XADD).
+# Legacy AMP TCP between Portal and Server is removed; AMP_PORT is launcher-only.
+SERVER_PORTAL_BUS = "redis"
 REDIS_BUS_URL = "redis://127.0.0.1:6379/1"
 REDIS_BUS_PREFIX = "evennia:bus"
 SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
@@ -573,6 +573,10 @@ INPUT_FUNC_MODULES = ["evennia.server.inputfuncs", "server.conf.inputfuncs"]
 # Modules that register OOB events into the protocol catalog (see
 # evennia.server.protocol). The engine's core events plus any game modules.
 PROTOCOL_EVENT_MODULES = ["evennia.server.protocol.core_events"]
+# If True, each outgoing session frame is validated against the typed outputfunc
+# catalog (evennia.server.protocol.outputfuncs) and mismatches are logged. The
+# frame is still sent either way; this is a dev/debug aid, off by default.
+VALIDATE_OUTPUT_FRAMES = False
 # Modules that contain prototypes for use with the spawner mechanism.
 PROTOTYPE_MODULES = ["world.prototypes"]
 # Modules containining Prototype functions able to be embedded in prototype

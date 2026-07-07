@@ -13,7 +13,6 @@ from django.conf import settings
 from django.db import connection
 from django.db.utils import OperationalError
 from django.utils.translation import gettext as _
-from twisted.application import internet
 from twisted.application.service import MultiService
 from twisted.internet import defer, reactor
 from twisted.internet.defer import Deferred
@@ -49,7 +48,8 @@ class EvenniaServerService(MultiService):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.maintenance_count = 0
-        self.amp_protocol = None  # set by amp factory
+        self.portal_bus = None  # RedisServerBus (Portal<->Server session IPC)
+        self.amp_protocol = None  # deprecated alias of portal_bus
         self.amp_service = None
         self.info_dict = {
             "servername": settings.SERVERNAME,
@@ -242,34 +242,27 @@ class EvenniaServerService(MultiService):
                 print(f"Could not load plugin module {plugin_module}")
 
     def register_amp(self):
-        # The AMP protocol handles the communication between
-        # the portal and the mud server. Only reason to ever deactivate
-        # it would be during testing and debugging.
-        if getattr(settings, "SERVER_PORTAL_BUS", "amp") == "redis":
-            self.register_redis_bus()
-            return
+        """Register the Portal<->Server redis bus (session/admin IPC).
 
-        ifacestr = ""
-        if settings.AMP_INTERFACE != "127.0.0.1":
-            ifacestr = "-%s" % settings.AMP_INTERFACE
-
-        self.info_dict["amp"] = "amp %s: %s" % (ifacestr, settings.AMP_PORT)
-
-        from evennia.server import amp_client
-
-        factory = amp_client.AMPClientFactory(self)
-        self.amp_service = internet.TCPClient(settings.AMP_HOST, settings.AMP_PORT, factory)
-        self.amp_service.setName("ServerAMPClient")
-        self.amp_service.setServiceParent(self)
+        The Portal AMP TCP listener (``register_amp`` on the Portal service) is
+        separate and carries launcher control only.
+        """
+        bus = getattr(settings, "SERVER_PORTAL_BUS", "redis")
+        if bus != "redis":
+            logger.log_err(
+                "SERVER_PORTAL_BUS=%r is no longer supported; use 'redis' and set REDIS_BUS_URL."
+                % bus
+            )
+        self.register_redis_bus()
 
     def register_redis_bus(self):
-        """Redis-Streams bus in place of AMP (settings.SERVER_PORTAL_BUS='redis')."""
+        """Redis Streams bus for Portal<->Server session/admin traffic."""
         from evennia.server.redis_bus import RedisServerBus
 
         self.info_dict["amp"] = "redis bus"
-        self.amp_protocol = RedisServerBus(self)
-        # Start once the reactor is running (redis threads + PSYNC handshake).
-        clock.when_running(self.amp_protocol.start_bus)
+        self.portal_bus = RedisServerBus(self)
+        self.amp_protocol = self.portal_bus  # deprecated alias
+        clock.when_running(self.portal_bus.start_bus)
 
     def register_webserver(self):
         # The Server serves Django over ASGI (uvicorn). The legacy Twisted-WSGI
@@ -610,7 +603,7 @@ class EvenniaServerService(MultiService):
                 await self._await_hooks(
                     evennia.AccountDB.get_all_cached_instances(), "at_server_shutdown"
                 )
-                if self.amp_protocol:
+                if self.portal_bus:
                     await evennia.SESSION_HANDLER.all_sessions_portal_sync()
             else:  # shutdown
                 accounts = list(evennia.AccountDB.get_all_cached_instances())

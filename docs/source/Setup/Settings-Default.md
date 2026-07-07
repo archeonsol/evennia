@@ -172,6 +172,13 @@ EVENNIA_ADMIN = True
 AMP_HOST = "localhost"
 AMP_PORT = 4006
 AMP_INTERFACE = "127.0.0.1"
+# Portal<->Server session/admin IPC: "redis" (redis Streams, plain XREAD/XADD) is
+# the default. AMP TCP between Portal and Server for sessions is removed; AMP_PORT
+# remains for launcher control only.
+SERVER_PORTAL_BUS = "redis"
+REDIS_BUS_URL = "redis://127.0.0.1:6379/1"
+REDIS_BUS_PREFIX = "evennia:bus"
+SERVER_WORKER_ID = "0"
 
 
 # Path to the lib directory containing the bulk of the codebase's code.

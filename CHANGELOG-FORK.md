@@ -25,6 +25,25 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.119 — Tier 2: redis session bus + Portal asyncio WS hardening
+
+### Portal ↔ Server IPC (retire session AMP TCP)
+
+- **Session/admin traffic is redis-only.** `SERVER_PORTAL_BUS` defaults to `"redis"`; the Server no longer opens an AMP TCP client to the Portal. Misconfigured `"amp"` logs an error and still uses redis.
+- **Rollback:** revert this release and redeploy both Portal and Server; there is no runtime `"amp"` session fallback after this change.
+- New modules [`evennia/server/ipc_handlers_server.py`](evennia/server/ipc_handlers_server.py) and [`evennia/server/portal/ipc_handlers_portal.py`](evennia/server/portal/ipc_handlers_portal.py) hold transport-agnostic dispatch; [`evennia/server/redis_bus.py`](evennia/server/redis_bus.py) is plain `XADD`/`XREAD` (no consumer groups yet).
+- Server service exposes `portal_bus` (`amp_protocol` kept as a deprecated alias).
+- [`evennia/server/ipc_schema.py`](evennia/server/ipc_schema.py): `parse_admin` returns wire `str` op codes; `parse_session` threads `enforce_limits` per direction.
+- Tests: [`evennia/server/tests/test_redis_bus.py`](evennia/server/tests/test_redis_bus.py) (fakeredis), [`evennia/server/tests/test_redis_reload.py`](evennia/server/tests/test_redis_reload.py) (reload/PSYNC contract).
+- Prod settings: [`mootest/server/conf/settings.py`](mootest/server/conf/settings.py) commits `SERVER_PORTAL_BUS=redis` + `REDIS_BUS_URL`.
+
+### WebSocket / Tier 2.5
+
+- **Autobahn retirement closed:** dependency was already replaced by `wsproto`; changelog/doc updated.
+- Removed unused [`WSAsyncioServerProtocol`](evennia/server/portal/ws_protocol.py) decoy; prod path uses `AsyncioWebSocketProtocol` in [`webclient.py`](evennia/server/portal/webclient.py).
+- **AJAX `/webclientdata` retired** on the asyncio Portal proxy; Azaban shell WS (`client2`) is the supported web client.
+- Shell WS stays on the Portal for `@reload` survival (not folded into Server ASGI).
+
 ## 6.0.0+underspire.118 — ticket thread buttons + forum sync
 
 ### Portal / Discord

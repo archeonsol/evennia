@@ -7,7 +7,7 @@ Evennia runs as two cooperating Twisted processes:
 - **Portal** (`server/portal/`) — faces the internet, handles all network protocols (telnet, SSH, SSL, websocket). Stays running during reloads.
 - **Server** (`server/`) — runs game logic, Django ORM, commands. Can be reloaded without disconnecting players.
 
-They communicate via an internal AMP (Asynchronous Messaging Protocol) connection.
+They communicate via redis Streams for session/admin IPC (`SERVER_PORTAL_BUS=redis`, plain XREAD/XADD). The launcher still uses AMP TCP on `AMP_PORT` for process control.
 
 ## Typeclass System
 

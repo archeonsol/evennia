@@ -10,7 +10,7 @@ from twisted.application.service import MultiService
 from twisted.internet import protocol, reactor
 
 import evennia
-from evennia.utils import clock
+from evennia.utils import clock, logger
 from evennia.utils.utils import (class_from_module, get_evennia_version,
                                  make_iter, mod_import)
 
@@ -66,12 +66,8 @@ class EvenniaPortalService(MultiService):
 
     @property
     def server_amp(self):
-        """Link used to send session/admin traffic to the Server.
-
-        Redis bus when enabled, else the AMP protocol (whose data_to_server
-        routes via factory.server_connection).
-        """
-        return self.server_bus or self.amp_protocol
+        """Session/admin link to the Server (redis bus)."""
+        return self.server_bus
 
     def portal_maintenance(self):
         """
@@ -359,8 +355,12 @@ class EvenniaPortalService(MultiService):
         amp_service.setName("PortalAMPServer")
         amp_service.setServiceParent(self)
 
-        if getattr(settings, "SERVER_PORTAL_BUS", "amp") == "redis":
-            self.register_redis_bus()
+        if getattr(settings, "SERVER_PORTAL_BUS", "redis") != "redis":
+            logger.log_err(
+                "SERVER_PORTAL_BUS=%r is no longer supported; use 'redis'."
+                % settings.SERVER_PORTAL_BUS
+            )
+        self.register_redis_bus()
 
     def register_redis_bus(self):
         """Redis-Streams link to the Server (settings.SERVER_PORTAL_BUS='redis').

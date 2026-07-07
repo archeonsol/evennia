@@ -400,14 +400,6 @@ class WSClientProtocolBase(_WSClientRole, _WSCore, _TwistedWSAdapter):
     """
 
 
-class WSAsyncioServerProtocol(_WSServerRole, _WSCore, _AsyncioWSAdapter):
-    """Server-side WebSocket on a native asyncio loop (T3 pilot).
-
-    Identical logic to ``WSProtocolBase`` with the Twisted transport swapped for
-    an asyncio one; used with ``loop.create_server``.
-    """
-
-
 class WSServerFactory(protocol.ServerFactory):
     """Plain Twisted factory for the websocket (replaces autobahn's).
 
