@@ -25,6 +25,15 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.117 — forum thread tags on archive
+
+### Portal / Discord
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): `send_thread_archive` accepts
+  optional `applied_tags` on PATCH so closed tickets can show a Resolved forum tag.
+
+---
+
 ## 6.0.0+underspire.116 — Discord ticket thread embeds and forum tags
 
 ### Portal / Discord

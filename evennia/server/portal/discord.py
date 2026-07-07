@@ -645,10 +645,14 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         Archive or unarchive a thread via REST PATCH.
 
         Use with session.msg(thread_archive=(thread_id, True/False)).
+        Optional kwargs: applied_tags (list of forum tag snowflakes).
         """
+        data = {"archived": bool(archived)}
+        if kwargs.get("applied_tags") is not None:
+            data["applied_tags"] = kwargs["applied_tags"]
         self._post_json(
             f"channels/{thread_id}",
-            {"archived": bool(archived)},
+            data,
             type="PATCH",
         )
 
