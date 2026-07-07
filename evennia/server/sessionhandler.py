@@ -28,7 +28,7 @@ from evennia.server.signals import (
     SIGNAL_ACCOUNT_POST_LOGIN,
     SIGNAL_ACCOUNT_POST_LOGOUT,
 )
-from evennia.utils.logger import log_trace
+from evennia.utils.logger import log_info, log_trace
 from evennia.utils.utils import (
     callables_from_module,
     class_from_module,
@@ -411,7 +411,7 @@ class ServerSessionHandler(SessionHandler):
                 # against a logged_in flag that got dropped in transit (would land
                 # the player back at the connect screen after a reload).
                 sess.logged_in = True
-            logger.log_info(
+            log_info(
                 "[reload-diag] rebuilt sessid=%s uid=%s logged_in=%s"
                 % (sessid, sess.uid, sess.logged_in)
             )
