@@ -60,7 +60,7 @@ effectively synchronous — the machinery cost is paid only when a rule defers.
 
 import inspect
 
-from twisted.internet.defer import Deferred
+import asyncio
 
 from evennia.utils import clock
 
@@ -101,25 +101,17 @@ def _caller_for(actor):
     )
 
 
-def _get_input_deferred(actor, prompt) -> Deferred:
-    """Ask the actor for one line; fires the Deferred when input arrives.
-
-    Uses :class:`~evennia.actions.menus.InputCaptureState` (engine-native capture)
-    instead of a legacy capture ``InputCmdSet``.
-    """
+def _get_input_future(actor, prompt):
+    """Ask the actor for one line; completes the Future when input arrives."""
     from .menus import InputCaptureState
 
-    d = Deferred()
+    loop = clock.get_bound_loop()
+    fut = loop.create_future()
     caller = _caller_for(actor)
     if prompt:
         caller.msg(prompt)
-    # Agnostic capture (no session scope): the prompt above is broadcast to every
-    # session (no session= on msg), so under MULTISESSION_MODE 1 the player may
-    # answer from any of their windows. Body isolation already separates distinct
-    # puppets (mode 2), so @interactive needs no session guard. Session-scoping is
-    # for captures whose output is session-targeted (get_input/ask_yes_no/EvMore).
-    actor.enter_state(InputCaptureState(d))
-    return d
+    actor.enter_state(InputCaptureState(fut))
+    return fut
 
 
 async def _drive_generator(gen, actor):
@@ -154,7 +146,7 @@ async def _drive_generator(gen, actor):
         elif isinstance(value, MenuPrompt):
             while True:
                 caller.msg(format_menu_prompt(value))
-                raw = await _get_input_deferred(actor, "")
+                raw = await _get_input_future(actor, "")
                 choice = parse_menu_choice(raw, value)
                 if choice == "__look__":
                     continue
@@ -164,7 +156,7 @@ async def _drive_generator(gen, actor):
                 to_send = choice
                 break
         elif isinstance(value, str):
-            to_send = await _get_input_deferred(actor, value)
+            to_send = await _get_input_future(actor, value)
         elif isinstance(value, (int, float)):
             await _sleep(value)
         # else: unknown yield value — resume with None

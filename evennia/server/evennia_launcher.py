@@ -527,86 +527,40 @@ def _parse_status(response):
     return unpack_status(response["status"])
 
 
-def _get_twistd_cmdline(pprofiler, sprofiler):
-    """
-    Compile the command line for starting Portal/Server processes.
+def _get_process_cmdline(pprofiler, sprofiler):
+    """Return ``(portal_argv, server_argv)`` for asyncio bootstrap launches."""
+    from evennia.server.asyncio_bootstrap import build_cmdline
 
-    Uses the asyncio bootstrap (``python portal.py``) when
-    ``settings.EVENNIA_ASYNCIO_BOOTSTRAP`` is enabled; otherwise falls back to
-    ``twistd``.
-    """
-    try:
-        from django.conf import settings as _settings
+    return build_cmdline(
+        portal_py_file=PORTAL_PY_FILE,
+        server_py_file=SERVER_PY_FILE,
+        portal_pidfile=PORTAL_PIDFILE if os.name != "nt" else None,
+        server_pidfile=SERVER_PIDFILE if os.name != "nt" else None,
+        portal_profiler_log=PPROFILER_LOGFILE,
+        server_profiler_log=SPROFILER_LOGFILE,
+        pprofiler=pprofiler,
+        sprofiler=sprofiler,
+    )
 
-        if getattr(_settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False):
-            from evennia.server.asyncio_bootstrap import build_cmdline
 
-            return build_cmdline(
-                portal_py_file=PORTAL_PY_FILE,
-                server_py_file=SERVER_PY_FILE,
-                portal_pidfile=PORTAL_PIDFILE if os.name != "nt" else None,
-                server_pidfile=SERVER_PIDFILE if os.name != "nt" else None,
-                portal_profiler_log=PPROFILER_LOGFILE,
-                server_profiler_log=SPROFILER_LOGFILE,
-                pprofiler=pprofiler,
-                sprofiler=sprofiler,
-            )
-    except Exception:
-        pass
-
-    # Legacy twistd entrypoint (Windows dev and when EVENNIA_ASYNCIO_BOOTSTRAP is off).
-    portal_cmd = [
-        f"--python={PORTAL_PY_FILE}",
-        "--logger=evennia.utils.logger.GetPortalLogObserver",
-    ]
-    server_cmd = [
-        TWISTED_BINARY,
-        f"--python={SERVER_PY_FILE}",
-        "--logger=evennia.utils.logger.GetServerLogObserver",
-    ]
-
-    if os.name != "nt":
-        # PID files only for UNIX
-        portal_cmd.append("--pidfile={}".format(PORTAL_PIDFILE))
-        server_cmd.append("--pidfile={}".format(SERVER_PIDFILE))
-
-    if pprofiler:
-        portal_cmd.extend(
-            ["--savestats", "--profiler=cprofile", "--profile={}".format(PPROFILER_LOGFILE)]
-        )
-    if sprofiler:
-        server_cmd.extend(
-            ["--savestats", "--profiler=cprofile", "--profile={}".format(SPROFILER_LOGFILE)]
-        )
-
-    return portal_cmd, server_cmd
+# Legacy name kept for callers/tests.
+_get_twistd_cmdline = _get_process_cmdline
 
 
 def _reactor_stop():
     global AMP_CONNECTION, REACTOR_RUN
     REACTOR_RUN = False
-    if _launcher_uses_ipc():
-        if AMP_CONNECTION is not None:
-            try:
-                AMP_CONNECTION.close()
-            except Exception:
-                pass
-            AMP_CONNECTION = None
-        return
-    if not NO_REACTOR_STOP:
-        from twisted.internet import reactor
-
-        reactor.stop()
+    if AMP_CONNECTION is not None:
+        try:
+            AMP_CONNECTION.close()
+        except Exception:
+            pass
+        AMP_CONNECTION = None
 
 
 def _launcher_uses_ipc():
-    """True when Portal exposes the asyncio launcher IPC server (S10)."""
-    try:
-        from django.conf import settings
-
-        return getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", False)
-    except Exception:
-        return False
+    """Launcher always uses asyncio IPC (twistd/AMP launcher path retired)."""
+    return True
 
 
 def _ensure_ipc_connection():
@@ -725,11 +679,7 @@ def send_instruction(operation, arguments, callback=None, errback=None):
         print(ERROR_AMP_UNCONFIGURED)
         sys.exit()
 
-    if _launcher_uses_ipc():
-        _send_instruction_ipc(operation, arguments, callback, errback)
-        return
-
-    return _send_instruction_amp(operation, arguments, callback, errback)
+    _send_instruction_ipc(operation, arguments, callback, errback)
 
 
 def query_status(callback=None):
@@ -809,14 +759,10 @@ def wait_for_status(
             and 20 for legacy AMP.
     """
     if retries is None:
-        if _launcher_uses_ipc():
-            # Cold start needs a long window; stop/reload only need ~10s.
-            if portal_running is False or server_running is False:
-                retries = 20
-            else:
-                retries = 120
-        else:
+        if portal_running is False or server_running is False:
             retries = 20
+        else:
+            retries = 120
 
     global REACTOR_RUN
     REACTOR_RUN = True
@@ -851,21 +797,7 @@ def wait_for_status(
                     print("Connection to Evennia timed out. Try again.")
                     _reactor_stop()
             else:
-                if _launcher_uses_ipc():
-                    _schedule_retry()
-                else:
-                    from twisted.internet import reactor
-
-                    reactor.callLater(
-                        rate,
-                        wait_for_status,
-                        portal_running,
-                        server_running,
-                        callback,
-                        errback,
-                        rate,
-                        retries - 1,
-                    )
+                _schedule_retry()
 
     def _errback(fail):
         if not portal_running:
@@ -881,21 +813,7 @@ def wait_for_status(
                     print("Connection to Evennia timed out. Try again.")
                     _reactor_stop()
             else:
-                if _launcher_uses_ipc():
-                    _schedule_retry()
-                else:
-                    from twisted.internet import reactor
-
-                    reactor.callLater(
-                        rate,
-                        wait_for_status,
-                        portal_running,
-                        server_running,
-                        callback,
-                        errback,
-                        rate,
-                        retries - 1,
-                    )
+                _schedule_retry()
 
     return send_instruction(PSTATUS, None, _callback, _errback)
 

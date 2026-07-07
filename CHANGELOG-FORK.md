@@ -25,6 +25,40 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.135 — Retire Twisted fallbacks; asyncio service registry
+
+### Infrastructure (T3 phases 1–3)
+
+**Phase 1 — Delete legacy fallbacks**
+- Portal listeners are asyncio-only (`loop.create_server`); Twisted ``TCPServer``/``SSLServer``/
+  launcher AMP TCP branches removed from ``portal/service.py``.
+- ``evennia_launcher`` always uses asyncio bootstrap cmdline and launcher IPC (no ``twistd``/
+  Twisted AMP client path).
+- ``PORTAL_ASYNCIO_SERVERS`` and ``EVENNIA_ASYNCIO_BOOTSTRAP`` default ``True`` in
+  ``settings_default.py``; mootest enables on dev too.
+- Telnet+SSL uses ``get_asyncio_ssl_context()`` (stdlib ``ssl.SSLContext``).
+- ``clock.stop_loop`` no longer falls back to ``reactor.stop()``.
+
+**Phase 2 — Service registry**
+- New ``evennia/server/service_registry.py``: ``Service``, ``MultiService``,
+  ``ServiceCollection`` replace ``twisted.application.service``.
+- ``evennia/__init__.py`` builds ``TWISTED_APPLICATION`` as a ``ServiceCollection`` (name kept
+  for compat).
+- ``UvicornWebService`` and ``EvenniaGameIndexService`` migrated off Twisted ``Service``.
+
+**Phase 3 — Deferred → asyncio**
+- ``server/service.py`` shutdown hooks use ``clock.maybe_await`` + ``asyncio.gather``.
+- SIGINT handler uses ``clock.run_coroutine`` instead of ``ensureDeferred``.
+- ``ipc_handlers_server`` admin shutdown ops use ``clock.run_coroutine``.
+- ``utils/systems.py`` driver fires systems via async tasks instead of ``maybeDeferred``.
+- ``actions/engine.py`` interactive input uses ``asyncio.Future``; ``InputCaptureState`` updated.
+- ``redis_bus`` / ``sessionhandler`` return ``IMMEDIATE_RESULT`` instead of ``defer.succeed``.
+
+### Tests
+- ``evennia/server/tests/test_service_registry.py``.
+
+---
+
 ## 6.0.0+underspire.134 — Fast stop/reload and server death watchdog
 
 ### Hotfix

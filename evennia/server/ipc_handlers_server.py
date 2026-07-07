@@ -2,7 +2,7 @@
 
 from evennia.server import ipc_schema
 from evennia.server.portal import amp
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 import evennia
 
@@ -42,20 +42,14 @@ def receive_adminportal2server(packed_data):
 
     elif operation == amp.SRELOAD:
         evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-        from twisted.internet import defer
-
-        defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"))
+        clock.run_coroutine(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"))
 
     elif operation == amp.SRESET:
         evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-        from twisted.internet import defer
-
-        defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"))
+        clock.run_coroutine(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"))
 
     elif operation == amp.SSHUTD:
-        from twisted.internet import defer
-
-        defer.ensureDeferred(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"))
+        clock.run_coroutine(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"))
 
     else:
         raise Exception("operation %(op)s not recognized." % {"op": operation})

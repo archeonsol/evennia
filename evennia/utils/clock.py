@@ -70,14 +70,6 @@ def stop_loop():
             return
     except RuntimeError:
         pass
-    # Legacy twistd dev fallback (Windows).
-    try:
-        from twisted.internet import reactor
-
-        if reactor.running:
-            reactor.stop()
-    except Exception:
-        pass
 
 
 def _get_loop() -> asyncio.AbstractEventLoop:

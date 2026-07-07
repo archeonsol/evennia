@@ -175,12 +175,11 @@ os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 # native asyncio servers (loop.create_server / h11+httpx proxy). When True,
 # Twisted TCPServer fallbacks for those listeners are not used. Off by default;
 # prod enables this.
-PORTAL_ASYNCIO_SERVERS = False
+PORTAL_ASYNCIO_SERVERS = True
 
 # (T3 S8/S9) Start Portal/Server via ``python portal.py`` / ``python server.py``
-# on a native asyncio loop instead of ``twistd``. Off by default; prod enables
-# after soak alongside PORTAL_ASYNCIO_SERVERS.
-EVENNIA_ASYNCIO_BOOTSTRAP = False
+# on a native asyncio loop. The legacy ``twistd`` entrypoint is retired.
+EVENNIA_ASYNCIO_BOOTSTRAP = True
 
 
 # Path to the lib directory containing the bulk of the codebase's code.

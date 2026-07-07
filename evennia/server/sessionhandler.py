@@ -17,7 +17,7 @@ from codecs import decode as codecs_decode
 
 from django.conf import settings
 from django.utils.translation import gettext as _
-from twisted.internet import defer
+from evennia.server.service_registry import IMMEDIATE_RESULT
 
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
@@ -44,7 +44,7 @@ def _send_admin_to_portal(session, **kwargs):
     if not bus:
         bus = getattr(evennia.EVENNIA_SERVER_SERVICE, "amp_protocol", None)
     if not bus:
-        return defer.succeed(None)
+        return IMMEDIATE_RESULT
     return bus.send_AdminServer2Portal(session, **kwargs)
 
 

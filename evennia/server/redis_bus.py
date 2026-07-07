@@ -19,7 +19,7 @@ import queue
 import threading
 
 from django.conf import settings
-from twisted.internet import defer
+from evennia.server.service_registry import IMMEDIATE_RESULT
 
 from evennia.server import ipc_handlers_server
 from evennia.server.portal import amp
@@ -135,7 +135,7 @@ class _RedisBusMixin:
         if isinstance(cmdkey, str):
             cmdkey = cmdkey.encode()
         self._transport.publish(self._send_stream, cmdkey, kwargs.get("packed_data"))
-        return defer.succeed(None)
+        return IMMEDIATE_RESULT
 
     def _on_frame(self, cmdkey, data):
         raise NotImplementedError

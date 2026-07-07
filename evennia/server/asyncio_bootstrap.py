@@ -1,11 +1,8 @@
 """Native asyncio process bootstrap for Portal/Server (T3 S8/S9).
 
-Replaces ``twistd`` as the Portal/Server entrypoint when
-``settings.EVENNIA_ASYNCIO_BOOTSTRAP`` is enabled. Creates and owns the process
-asyncio loop, starts the ``Application`` service tree, and runs
-``loop.run_forever()`` until graceful shutdown.
-
-Game hot paths use :mod:`evennia.utils.clock`, not ``reactor`` directly.
+Creates and owns the process asyncio loop, starts the service tree via
+:mod:`evennia.server.service_registry`, and runs ``loop.run_forever()`` until
+graceful shutdown.
 """
 
 from __future__ import annotations
@@ -146,8 +143,7 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
     if "test" not in sys.argv:
         _setup_process_logging(portal_mode, args.nodaemon)
 
-    # Twisted 24+: startService() only sets running=1; twistd called
-    # privilegedStartService() first (registers listeners, maintenance, etc.).
+    # privilegedStartService registers listeners; startService starts child services.
     service.privilegedStartService()
     service.startService()
 

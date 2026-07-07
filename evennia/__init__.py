@@ -233,9 +233,9 @@ def _init(portal_mode=False):
 
     PROCESS_ID = os.getpid()
 
-    from twisted.application.service import Application
+    from evennia.server.service_registry import ServiceCollection
 
-    TWISTED_APPLICATION = Application("Evennia")
+    TWISTED_APPLICATION = ServiceCollection("Evennia")
 
     if portal_mode:
         # Set up the PortalSessionHandler
