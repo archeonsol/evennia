@@ -146,6 +146,9 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
     if "test" not in sys.argv:
         _setup_process_logging(portal_mode, args.nodaemon)
 
+    # Twisted 24+: startService() only sets running=1; twistd called
+    # privilegedStartService() first (registers listeners, maintenance, etc.).
+    service.privilegedStartService()
     service.startService()
 
     try:

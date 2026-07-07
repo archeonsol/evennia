@@ -67,6 +67,7 @@ class BootstrapRunTest(TestCase):
         ):
             run_bootstrap(portal_mode=True, argv=[])
 
+        service.privilegedStartService.assert_called_once()
         service.startService.assert_called_once()
         service.stopService.assert_called_once()
         loop.run_forever.assert_called_once()

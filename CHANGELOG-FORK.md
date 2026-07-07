@@ -25,6 +25,15 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.129 — Call privilegedStartService in asyncio bootstrap
+
+### Hotfix
+- Twisted 24 ``Service.startService()`` only sets ``running=1``; listener
+  registration lives in ``privilegedStartService()`` (twistd called it before
+  ``startService``). ``asyncio_bootstrap.run_bootstrap()`` now mirrors twistd.
+
+---
+
 ## 6.0.0+underspire.128 — Bootstrap starts Portal/Server service directly
 
 ### Hotfix
