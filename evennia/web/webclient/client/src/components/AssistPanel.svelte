@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chat } from "../lib/chat.svelte";
+  import { renderBody, renderSender } from "../lib/markup";
 
   let reply = $state("");
   const thread = $derived(chat.assistThread);
@@ -88,8 +89,8 @@
       <div class="msgs">
         {#each thread.messages as m, i (i)}
           <div class="am">
-            <span class="s">{m.sender}</span>
-            <span class="t">{m.text}</span>
+            <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
+            <span class="t">{@html renderBody(m.html, m.text)}</span>
           </div>
         {/each}
         {#if !thread.messages.length}<p class="empty">No messages in this thread.</p>{/if}

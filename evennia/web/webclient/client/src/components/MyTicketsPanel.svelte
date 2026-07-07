@@ -2,6 +2,7 @@
   // A player's own tickets: list -> conversation -> reply. Driven by the
   // my_tickets / my_ticket RPCs; live staff replies arrive via ticket_msg.
   import { chat } from "../lib/chat.svelte";
+  import { renderBody, renderSender } from "../lib/markup";
 
   let reply = $state("");
   let showClosed = $state(false);
@@ -79,8 +80,8 @@
       <div class="msgs">
         {#each ticket.messages ?? [] as m, i (i)}
           <div class="m">
-            <span class="s">{m.sender}</span>
-            <span class="t">{@html m.html ?? m.text}</span>
+            <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
+            <span class="t">{@html renderBody(m.html, m.text)}</span>
           </div>
         {/each}
         {#if !(ticket.messages ?? []).length}<p class="empty">No messages yet. Add one below.</p>{/if}

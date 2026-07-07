@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chat } from "../lib/chat.svelte";
+  import { renderBody, renderSender } from "../lib/markup";
 
   let reply = $state("");
   let internal = $state(false);
@@ -162,8 +163,8 @@
       <div class="msgs">
         {#each ticket.messages ?? [] as m, i (i)}
           <div class="m" class:note={m.visibility === "internal"}>
-            <span class="s">{m.sender}</span>
-            <span class="t">{@html m.html ?? m.text}</span>
+            <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
+            <span class="t">{@html renderBody(m.html, m.text)}</span>
           </div>
         {/each}
         {#if !(ticket.messages ?? []).length}<p class="empty">No messages yet.</p>{/if}
