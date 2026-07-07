@@ -82,6 +82,10 @@ def receive_adminserver2portal(link, packed_data):
                 except Exception:
                     logger.log_trace()
             link.factory.server_connect_callbacks = []
+        try:
+            link.send_Status2Launcher()
+        except Exception:
+            logger.log_trace("PSYNC status push failed")
 
     elif operation == amp.SSYNC:
         portal_sessionhandler.server_session_sync(

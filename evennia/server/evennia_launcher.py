@@ -75,6 +75,7 @@ ENFORCED_SETTING = False
 
 REACTOR_RUN = False
 NO_REACTOR_STOP = False
+COLLECTSTATIC_FORCE = False
 
 # communication constants
 
@@ -723,7 +724,7 @@ def wait_for_status_reply(callback):
         def _reader():
             try:
                 session = _ensure_ipc_connection()
-                status = session.read_push(timeout=120)
+                status = session.wait_for_push(timeout=120.0)
                 if status is not None:
                     callback(status)
             except Exception:
@@ -736,6 +737,49 @@ def wait_for_status_reply(callback):
         AMP_CONNECTION.wait_for_status(callback)
     else:
         print("No Evennia connection established.")
+
+
+def _wait_for_status_ipc(
+    portal_running=True,
+    server_running=True,
+    callback=None,
+    errback=None,
+    rate=0.5,
+    retries=None,
+):
+    if retries is None:
+        if portal_running is False or server_running is False:
+            retries = 20
+        else:
+            retries = 120
+
+    def _reader():
+        try:
+            session = _ensure_ipc_connection()
+            status = session.wait_for_state(
+                portal_running=portal_running,
+                server_running=server_running,
+                timeout=retries * rate,
+                poll_interval=rate,
+            )
+        except Exception:
+            status = None
+        if status is None:
+            prun = portal_running if portal_running is not None else False
+            srun = server_running if server_running is not None else False
+            if errback:
+                errback(prun, srun)
+            else:
+                print("Connection to Evennia timed out. Try again.")
+                _reactor_stop()
+            return
+        prun, srun, *_ = status
+        if callback:
+            callback(prun, srun)
+        else:
+            _reactor_stop()
+
+    threading.Thread(target=_reader, daemon=True).start()
 
 
 def wait_for_status(
@@ -766,6 +810,16 @@ def wait_for_status(
 
     global REACTOR_RUN
     REACTOR_RUN = True
+
+    if _launcher_uses_ipc():
+        return _wait_for_status_ipc(
+            portal_running,
+            server_running,
+            callback,
+            errback,
+            rate=rate,
+            retries=retries,
+        )
 
     def _schedule_retry():
         threading.Timer(
@@ -830,6 +884,33 @@ def collectstatic():
     django.core.management.call_command("collectstatic", interactive=False, verbosity=0)
 
 
+def maybe_collectstatic(force=None):
+    """Run collectstatic only when static sources changed (or ``force``)."""
+    if force is None:
+        force = COLLECTSTATIC_FORCE
+    if not force:
+        from evennia.server.collectstatic_cache import (
+            compute_static_fingerprint,
+            read_cached_fingerprint,
+            write_cached_fingerprint,
+        )
+
+        fingerprint = compute_static_fingerprint()
+        if fingerprint == read_cached_fingerprint(GAMEDIR):
+            return False
+        collectstatic()
+        write_cached_fingerprint(GAMEDIR, fingerprint)
+        return True
+    collectstatic()
+    from evennia.server.collectstatic_cache import (
+        compute_static_fingerprint,
+        write_cached_fingerprint,
+    )
+
+    write_cached_fingerprint(GAMEDIR, compute_static_fingerprint())
+    return True
+
+
 def start_evennia(pprofiler=False, sprofiler=False):
     """
     This will start Evennia anew by launching the Evennia Portal (which in turn
@@ -890,7 +971,7 @@ def start_evennia(pprofiler=False, sprofiler=False):
             _reactor_stop()
         wait_for_status(True, None, _portal_started)
 
-    collectstatic()
+    maybe_collectstatic()
     send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
 
 
@@ -931,7 +1012,7 @@ def reload_evennia(sprofiler=False, reset=False):
         print("Evennia not running. Starting ...")
         start_evennia()
 
-    collectstatic()
+    maybe_collectstatic()
     send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
 
 
@@ -1004,7 +1085,7 @@ def reboot_evennia(pprofiler=False, sprofiler=False):
         print("Evennia not running. Starting ...")
         start_evennia()
 
-    collectstatic()
+    maybe_collectstatic()
     send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
 
 
@@ -1014,7 +1095,7 @@ def start_only_server():
     """
     portal_cmd, server_cmd = _get_twistd_cmdline(False, False)
     print("launcher: Sending to portal: SSTART + {}".format(server_cmd))
-    collectstatic()
+    maybe_collectstatic()
     send_instruction(SSTART, server_cmd)
 
 
@@ -1035,7 +1116,7 @@ def start_server_interactive():
         else:
             print("... Server stopped (leaving interactive mode).")
 
-    collectstatic()
+    maybe_collectstatic()
     stop_server_only(when_stopped=_iserver, interactive=True)
 
 
@@ -2203,6 +2284,13 @@ def main():
         help="test a server by connecting <N> dummy accounts to it",
     )
     parser.add_argument(
+        "--collectstatic",
+        action="store_true",
+        dest="collectstatic",
+        default=False,
+        help="force collectstatic even when static sources are unchanged",
+    )
+    parser.add_argument(
         "-v",
         "--version",
         action="store_true",
@@ -2218,6 +2306,9 @@ def main():
     )
 
     args, unknown_args = parser.parse_known_args()
+
+    global COLLECTSTATIC_FORCE
+    COLLECTSTATIC_FORCE = args.collectstatic
 
     # handle arguments
     option = args.operation

@@ -417,4 +417,10 @@ class EvenniaPortalService(MultiService):
             self.server_amp.stop_server(mode="shutdown")
         if not _reactor_stopping:
             self.shutdown_complete = True
+            protocol = getattr(self, "_launcher_amp_protocol", None)
+            if protocol is not None:
+                try:
+                    protocol.send_Status2Launcher()
+                except Exception:
+                    logger.log_trace("portal shutdown status push failed")
             clock.call_later(0, clock.stop_loop)

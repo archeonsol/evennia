@@ -25,6 +25,26 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.136 — Safe reload speedups
+
+### Launcher / shutdown latency
+
+- **A1:** Server shutdown uses ``clock.call_later(0, stop_loop)`` instead of a fixed 1s delay.
+- **A2:** ``maybe_collectstatic()`` fingerprints ``STATICFILES_DIRS`` and skips redundant
+  ``collectstatic`` on reload; ``evennia --collectstatic`` forces a run.
+- **A3:** Launcher IPC ``LauncherSession.wait_for_state()`` / ``wait_for_push()`` replace
+  polling loops; Portal pushes status on launcher connect, IPC bind, PSYNC, and shutdown.
+
+### Reload cold-boot trimming
+
+- **B1:** On reload, skip ``_hook_lint()`` in ``run_init_hooks`` and
+  ``create_default_channels()`` in ``at_post_portal_sync``.
+- **B2:** Remove automatic cmdset merge warmup from ``puppet_object`` and
+  ``at_post_portal_sync`` (action engine owns player input; warmup primed a cache the hot
+  path no longer reads).
+
+---
+
 ## 6.0.0+underspire.135 — Retire Twisted fallbacks; asyncio service registry
 
 ### Infrastructure (T3 phases 1–3)

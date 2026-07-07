@@ -23,6 +23,7 @@ import base64
 import json
 import socket
 import struct
+import time
 from typing import Any
 
 from evennia.utils import clock, logger
@@ -79,6 +80,13 @@ class _LauncherIPCProtocol(asyncio.Protocol):
         peer = transport.get_extra_info("peername")
         host = peer[0] if peer else "?"
         logger.log_info(f"Launcher IPC connected from {host}")
+        loop = clock.get_bound_loop()
+        self._link = LauncherIPCConnection(self.transport, loop)
+        self._factory.launcher_connection = self._link
+        try:
+            self._protocol.send_Status2Launcher()
+        except Exception:
+            logger.log_trace("launcher IPC: connect status push failed")
 
     def data_received(self, data):
         self._buffer.extend(data)
@@ -102,9 +110,10 @@ class _LauncherIPCProtocol(asyncio.Protocol):
             operation = frame.get("operation", "")
             args_b64 = frame.get("arguments") or ""
             args_wire = base64.b64decode(args_b64) if args_b64 else b""
-            loop = clock.get_bound_loop()
-            self._link = LauncherIPCConnection(self.transport, loop)
-            self._factory.launcher_connection = self._link
+            if self._link is None:
+                loop = clock.get_bound_loop()
+                self._link = LauncherIPCConnection(self.transport, loop)
+                self._factory.launcher_connection = self._link
             self._write({"type": "ack"})
             launcher_handlers.receive_launcher_command(
                 self._protocol, operation, args_wire
@@ -190,6 +199,56 @@ class LauncherSession:
             return push["status"]
         return None
 
+    def wait_for_push(self, timeout: float = 120.0) -> list | None:
+        """Block until a ``status_push`` frame arrives or timeout."""
+        return self.read_push(timeout=timeout)
+
+    def _state_matches(
+        self,
+        status: list,
+        portal_running,
+        server_running,
+    ) -> bool:
+        from evennia.server.redis_bus import _pid_alive
+
+        prun, srun, ppid, spid, _, _ = status
+        if portal_running is False and ppid and not _pid_alive(ppid):
+            prun = False
+        if server_running is False and spid and not _pid_alive(spid):
+            srun = False
+        if portal_running is not None and prun != portal_running:
+            return False
+        if server_running is not None and srun != server_running:
+            return False
+        return True
+
+    def wait_for_state(
+        self,
+        portal_running=True,
+        server_running=True,
+        timeout: float = 60.0,
+        poll_interval: float = 0.5,
+    ) -> list | None:
+        """Block until status matches desired portal/server run-state."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                status = self.query_status()
+            except (TimeoutError, OSError, ConnectionError):
+                time.sleep(min(poll_interval, deadline - time.monotonic()))
+                continue
+            if self._state_matches(status, portal_running, server_running):
+                return status
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            push = self.read_push(timeout=min(remaining, poll_interval))
+            if push is not None and self._state_matches(
+                push, portal_running, server_running
+            ):
+                return push
+        return None
+
 
 _servers: list = []
 
@@ -205,6 +264,12 @@ async def _start_server(portal, amp_factory, amp_protocol, interface: str, port:
     _servers.append(server)
     portal.info_dict["amp"] = f"launcher-ipc: {port}"
     logger.log_info(f"Launcher IPC listening on {interface}:{port}")
+    protocol = getattr(portal, "_launcher_amp_protocol", None)
+    if protocol is not None:
+        try:
+            protocol.send_Status2Launcher()
+        except Exception:
+            logger.log_trace("launcher IPC: ready status push failed")
 
 
 def start_launcher_server(portal, amp_factory, amp_protocol, interface: str, port: int):

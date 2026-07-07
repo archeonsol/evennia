@@ -449,10 +449,10 @@ class EvenniaServerService(MultiService):
         # strict enforcement lives in the test suite
         # (test_engine_lint_is_clean) so an engine documentation issue
         # cannot block a game from booting.
-        from evennia.hooks.lint import warn_at_startup as _hook_lint
-        from evennia.typeclasses.models import TypedObject
+        if mode != "reload":
+            from evennia.hooks.lint import warn_at_startup as _hook_lint
 
-        _hook_lint()
+            _hook_lint()
 
         # start server time and maintenance task. Stop-and-replace so a
         # repeat init (tests) never leaves an orphaned task ticking.
@@ -650,7 +650,7 @@ class EvenniaServerService(MultiService):
         if not _reactor_stopping:
             # kill the server
             self.shutdown_complete = True
-            clock.call_later(1, clock.stop_loop)
+            clock.call_later(0, clock.stop_loop)
 
         # we make sure the proper gametime is saved as late as possible
         evennia.ServerConfig.objects.conf("runtime", evennia.gametime.runtime())
@@ -733,23 +733,11 @@ class EvenniaServerService(MultiService):
 
         ON_DEMAND_HANDLER.load()
 
-        # create/update channels
-        self.create_default_channels()
+        if mode != "reload":
+            self.create_default_channels()
 
         # delete the temporary setting
         evennia.ServerConfig.objects.conf("server_restart_mode", delete=True)
-
-        # Prime the cmdset merge cache for every already-puppeted session so
-        # the first typed command after reload does not pay the cold merge.
-        if mode == "reload":
-            from evennia.commands.cmdset_merge_warmup import warm_all_logged_in_puppet_sessions
-
-            try:
-                warm_all_logged_in_puppet_sessions()
-            except Exception:
-                from evennia.utils import logger
-
-                logger.log_trace("cmdset merge warmup on reload failed")
 
     def at_server_reload_stop(self):
         """
