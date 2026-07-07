@@ -35,6 +35,8 @@ class EvenniaPortalService(MultiService):
         self.start_time = 0
         self._maintenance_count = 0
         self.maintenance_task = None
+        self._server_watchdog_task = None
+        self._last_server_autorestart = 0.0
         # Native-asyncio Portal servers (T3), started when PORTAL_ASYNCIO_SERVERS
         # is on AND the asyncio reactor provides a shared loop.
         self._asyncio_servers = []
@@ -77,9 +79,36 @@ class EvenniaPortalService(MultiService):
             # (see https://github.com/evennia/evennia/issues/1376)
             connection.close()
 
+    def _maybe_restart_dead_server(self):
+        """Restart the Server if it died while the Portal is still up."""
+        from evennia.server.redis_bus import _pid_alive
+
+        if getattr(self, "shutdown_complete", False):
+            return
+        if self.server_restart_mode:
+            return
+        spid = self.server_process_id
+        if not spid or _pid_alive(spid):
+            return
+        if not self.server_twistd_cmd:
+            return
+        now = time.monotonic()
+        if now - self._last_server_autorestart < 30:
+            return
+        protocol = getattr(self, "_launcher_amp_protocol", None)
+        if not protocol:
+            return
+        self._last_server_autorestart = now
+        logger.log_warn("Server process %s died; Portal auto-restarting it." % spid)
+        self.server_process_id = None
+        protocol.start_server(self.server_twistd_cmd)
+
     def privilegedStartService(self):
         self.start_time = time.time()
         self.maintenance_task = clock.looping(60, self.portal_maintenance, now=True)  # every minute
+        self._server_watchdog_task = clock.looping(
+            15, self._maybe_restart_dead_server, now=False
+        )
         # set a callback if the server is killed abruptly,
         # by Ctrl-C, reboot etc.
         clock.register_shutdown_hook(

@@ -25,9 +25,19 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.133 — Fix launcher IPC protocol factory and server outbuf bus
+## 6.0.0+underspire.134 — Fast stop/reload and server death watchdog
 
 ### Hotfix
+
+- **`get_status()` lied about portal liveness** — always returned `portal_live=True`, so
+  `evennia stop`/`reload` under asyncio IPC polled for the full 120×0.5s (60s) timeout
+  instead of noticing `shutdown_complete`. Now reports `False` once shutdown begins.
+- **`wait_for_status()`** — stop/reload paths use 20 retries (~10s); cold start keeps 120.
+  Status callback also treats dead PIDs as stopped (belt-and-suspenders).
+- **Partial failure watchdog** — Portal checks every 15s; if `server_process_id` is dead
+  and no intentional reload/shutdown is in progress, auto-restarts the Server.
+- **`evennia.service`** — `TimeoutStopSec` 60→30 now that stop completes in seconds.
+
 - ``launcher_ipc._start_server()`` uses ``loop.create_server(protocol_factory)``
   instead of ``asyncio.start_server()`` (Python 3.12 treats the first arg as a
   ``(reader, writer)`` callback, so launcher commands never dispatched).

@@ -122,14 +122,25 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
                 (portal_live, server_live, portal_PID, server_PID).
 
         """
+        portal = self.factory.portal
         server_connected = bool(
             self.factory.server_connection and self.factory.server_connection.transport.connected
         )
-        portal_info_dict = self.factory.portal.get_info_dict()
-        server_info_dict = self.factory.portal.server_info_dict
-        server_pid = self.factory.portal.server_process_id
+        portal_info_dict = portal.get_info_dict()
+        server_info_dict = portal.server_info_dict
+        server_pid = portal.server_process_id
         portal_pid = os.getpid()
-        return (True, server_connected, portal_pid, server_pid, portal_info_dict, server_info_dict)
+        portal_live = bool(
+            portal.running and not getattr(portal, "shutdown_complete", False)
+        )
+        return (
+            portal_live,
+            server_connected,
+            portal_pid,
+            server_pid,
+            portal_info_dict,
+            server_info_dict,
+        )
 
     def data_to_server(self, command, sessid, **kwargs):
         return ipc_handlers_portal.data_to_server(self, command, sessid, **kwargs)

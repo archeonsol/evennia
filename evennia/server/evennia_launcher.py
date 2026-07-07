@@ -809,7 +809,14 @@ def wait_for_status(
             and 20 for legacy AMP.
     """
     if retries is None:
-        retries = 120 if _launcher_uses_ipc() else 20
+        if _launcher_uses_ipc():
+            # Cold start needs a long window; stop/reload only need ~10s.
+            if portal_running is False or server_running is False:
+                retries = 20
+            else:
+                retries = 120
+        else:
+            retries = 20
 
     global REACTOR_RUN
     REACTOR_RUN = True
@@ -822,7 +829,13 @@ def wait_for_status(
         ).start()
 
     def _callback(response):
-        prun, srun, _, _, _, _ = _parse_status(response)
+        from evennia.server.redis_bus import _pid_alive
+
+        prun, srun, ppid, spid, _, _ = _parse_status(response)
+        if portal_running is False and ppid and not _pid_alive(ppid):
+            prun = False
+        if server_running is False and spid and not _pid_alive(spid):
+            srun = False
         if (portal_running is None or prun == portal_running) and (
             server_running is None or srun == server_running
         ):
