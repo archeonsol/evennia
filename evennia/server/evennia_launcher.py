@@ -638,6 +638,8 @@ def _send_instruction_ipc(operation, arguments, callback=None, errback=None):
         if callback:
             callback({})
     except Exception as fail:
+        global AMP_CONNECTION
+        AMP_CONNECTION = None
         if errback:
             errback(fail)
 

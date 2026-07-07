@@ -25,6 +25,14 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.131 — Reset launcher IPC session on connect errors
+
+### Hotfix
+- Clear ``AMP_CONNECTION`` when asyncio launcher IPC send/query fails so
+  ``wait_for_status`` retries open a fresh socket during cold portal boot.
+
+---
+
 ## 6.0.0+underspire.130 — Longer launcher wait for asyncio cold boot
 
 ### Hotfix
