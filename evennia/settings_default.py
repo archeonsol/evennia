@@ -171,6 +171,17 @@ SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
 # defer.background) keep working unchanged. Set to "" to use Twisted's default.
 TWISTED_REACTOR = "asyncio"
 
+# Evennia is synchronous-by-default: game code, hooks, scripts and boot
+# (run_initial_setup etc.) make BLOCKING Django ORM calls on the single reactor
+# thread. Under the asyncio reactor that thread IS the event loop, so Django's
+# async-safety guard would raise SynchronousOnlyOperation on every sync ORM call.
+# That blocking is intended here (one thread, no true concurrency; the async
+# stack lives in worker threads / native-async tasks), so opt out of the guard
+# when the asyncio reactor is active. Set at settings-import time, before any ORM
+# use, and inherited by the spawned Server/Portal processes.
+if TWISTED_REACTOR == "asyncio":
+    os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
+
 # (T3) Run the Portal's telnet/websocket listeners + web reverse-proxy as native
 # asyncio servers (loop.create_server / h11+httpx proxy) instead of Twisted
 # listeners. Only takes effect when TWISTED_REACTOR="asyncio" (a shared loop must
