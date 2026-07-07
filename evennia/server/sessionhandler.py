@@ -866,11 +866,11 @@ class ServerSessionHandler(SessionHandler):
             if joined:
                 frame = {"text": (joined, text_options) if text_options else joined}
                 frame = self.clean_senddata(session, frame)
-                amp.send_MsgServer2Portal(session, **frame)
+                bus.send_MsgServer2Portal(session, **frame)
 
         for frame in standalone_frames:
             frame = self.clean_senddata(session, frame)
-            amp.send_MsgServer2Portal(session, **frame)
+            bus.send_MsgServer2Portal(session, **frame)
 
     def get_inputfuncs(self):
         """

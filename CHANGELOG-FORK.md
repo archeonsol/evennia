@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.133 — Fix launcher IPC protocol factory and server outbuf bus
+
+### Hotfix
+- ``launcher_ipc._start_server()`` uses ``loop.create_server(protocol_factory)``
+  instead of ``asyncio.start_server()`` (Python 3.12 treats the first arg as a
+  ``(reader, writer)`` callback, so launcher commands never dispatched).
+- ``ServerSessionHandler._flush_outbuf()`` sends via ``portal_bus`` instead of
+  the ``amp`` module namespace.
+
+---
+
 ## 6.0.0+underspire.132 — Fix launcher IPC server-start deadlock
 
 ### Hotfix

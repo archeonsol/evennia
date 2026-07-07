@@ -196,11 +196,12 @@ _servers: list = []
 
 async def _start_server(portal, amp_factory, amp_protocol, interface: str, port: int):
     global _servers
+    loop = clock.get_bound_loop()
 
-    def _factory():
+    def protocol_factory():
         return _LauncherIPCProtocol(portal, amp_factory, amp_protocol)
 
-    server = await asyncio.start_server(_factory, interface, port)
+    server = await loop.create_server(protocol_factory, interface, port)
     _servers.append(server)
     portal.info_dict["amp"] = f"launcher-ipc: {port}"
     logger.log_info(f"Launcher IPC listening on {interface}:{port}")
