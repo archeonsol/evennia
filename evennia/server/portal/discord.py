@@ -274,7 +274,12 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         if data["op"] == OP_HELLO:
             self.interval = data["d"]["heartbeat_interval"] / 1000  # convert millisec to seconds
             if self.nextHeartbeatCall:
-                self.nextHeartbeatCall.cancel()
+                try:
+                    if self.nextHeartbeatCall.active():
+                        self.nextHeartbeatCall.cancel()
+                except Exception:
+                    pass
+                self.nextHeartbeatCall = None
             self.nextHeartbeatCall = self.factory._batched_timer.call_later(
                 self.interval * random(),
                 self.doHeartbeat,
@@ -325,7 +330,11 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         """
         self.sessionhandler.disconnect(self)
         if self.nextHeartbeatCall:
-            self.nextHeartbeatCall.cancel()
+            try:
+                if self.nextHeartbeatCall.active():
+                    self.nextHeartbeatCall.cancel()
+            except Exception:
+                pass
             self.nextHeartbeatCall = None
         if wasClean:
             logger.log_info(f"Discord connection closed ({code}) reason: {reason}")
@@ -454,7 +463,12 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         """
         if not self.pending_heartbeat or kwargs.get("force"):
             if self.nextHeartbeatCall:
-                self.nextHeartbeatCall.cancel()
+                try:
+                    if self.nextHeartbeatCall.active():
+                        self.nextHeartbeatCall.cancel()
+                except Exception:
+                    pass
+                self.nextHeartbeatCall = None
             # send the heartbeat
             data = {"op": 1, "d": self.last_sequence}
             self._send_json(data)

@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.114 — align VERSION with deploy pin; fix Discord heartbeat cancel
+
+### Versioning
+
+- Bump `VERSION.txt`, `pyproject.toml`, and `uv.lock` to `6.0.0+underspire.114` so
+  the main-menu string matches the `EVENNIA_REF` deploy pin (was stuck at `.98`
+  while tags `.99`–`.113` shipped as deploy-only pins without a version bump).
+
+### Portal / Discord
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): guard
+  heartbeat `DelayedCall.cancel()` with `.active()` so reconnect/onClose no longer
+  raises `AlreadyCalled` (was spamming portal logs every ~60s and breaking
+  `websocket onClose`).
+
+### Deploy pins underspire.99–113 (changelog backfill)
+
+Shipped under tag-only pins between `.98` and this release; see git log
+`underspire.98..underspire.113` for full detail. Highlights:
+
+- R1 narrative render/deliver core, hybrid EvEditor
+- Portal: `send_create_thread`, `encode_res`, `send_thread_archive`, `send_dm`
+- Resumable webclient frames (portal-side replay on brief disconnect / reload)
+- ASGI foundation, asyncio reactor opt-in, Redis Streams server↔portal bus
+- Reload session-sync fixes (`portal_sessions_sync`, reload-diag probes)
+- Discord thread REST failure callback + gateway heartbeat timer adapter (`.113`)
+
+---
+
 ## 6.0.0+underspire.98 — get_tag obj-filter on typeclass managers
 
 Fixes a `FieldError` when `get_tag`/`get_alias`/`get_permission` is called with
