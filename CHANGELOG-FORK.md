@@ -25,6 +25,16 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.116 — Discord ticket thread embeds and forum tags
+
+### Portal / Discord
+
+- [`evennia/server/portal/discord.py`](evennia/server/portal/discord.py): `send_create_thread` accepts
+  optional `applied_tags`, `message`, and `forum` kwargs for forum-channel parents; adds
+  `send_thread_message` for embed posts into bound threads.
+
+---
+
 ## 6.0.0+underspire.115 — preserve webclient login across deploy reboot
 
 ### Portal / webclient

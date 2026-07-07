@@ -553,10 +553,18 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         Use with session.msg(create_thread=(name, channel_id, job_id)). On
         success the portal feeds a THREAD_CREATED event to the server carrying
         ``job_id`` and the new ``thread_id`` so game code can bind them.
+
+        Optional kwargs (forum parent or rich opener):
+          applied_tags (list[str]) — forum tag snowflakes
+          message (dict) — initial thread/post body (embeds/content)
+          forum (bool) — omit type 11 (required for forum channel parents)
         """
         url = f"{DISCORD_API_BASE_URL}/channels/{channel_id}/threads"
-        # type 11 = GUILD_PUBLIC_THREAD; 1440 min = 1 day auto-archive.
-        data = {"name": str(name)[:100], "type": 11, "auto_archive_duration": 1440}
+        forum = kwargs.pop("forum", False)
+        data = {"name": str(name)[:100], "auto_archive_duration": 1440}
+        if not forum and "message" not in kwargs:
+            # type 11 = GUILD_PUBLIC_THREAD in a text channel.
+            data["type"] = 11
         data.update(kwargs)
         body = json.dumps(data).encode("utf-8")
         headers = {
@@ -617,6 +625,20 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                 )
 
         http.request("POST", url, headers=headers, data=body).addCallback(cbResponse)
+
+    def send_thread_message(self, thread_id, **kwargs):
+        """
+        Post a message (plain content and/or embeds) into a thread.
+
+        Use with session.msg(thread_message=(thread_id,), embeds=[...]).
+        """
+        data = {}
+        if kwargs.get("content"):
+            data["content"] = str(kwargs["content"])[:2000]
+        if kwargs.get("embeds"):
+            data["embeds"] = kwargs["embeds"]
+        if data:
+            self._post_json(f"channels/{thread_id}/messages", data)
 
     def send_thread_archive(self, thread_id, archived, **kwargs):
         """
