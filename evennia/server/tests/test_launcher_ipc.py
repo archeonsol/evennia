@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from evennia.server.launcher_ipc import LauncherSession
+from evennia.server.launcher_ipc import LauncherSession, connect_session
 
 
 class LauncherSessionWaitTest(SimpleTestCase):
@@ -26,3 +26,17 @@ class LauncherSessionWaitTest(SimpleTestCase):
     def test_wait_for_push_returns_status_push(self, mock_push):
         session = LauncherSession("127.0.0.1", 4006)
         self.assertEqual(session.wait_for_push(timeout=1.0), mock_push.return_value)
+
+    @patch.object(LauncherSession, "connect")
+    def test_connect_session_retries_until_success(self, mock_connect):
+        mock_connect.side_effect = [ConnectionError("refused"), ConnectionError("refused"), None]
+        with patch("evennia.server.launcher_ipc.time.sleep"):
+            session = connect_session("127.0.0.1", 4006, connect_timeout=5.0)
+        self.assertIsInstance(session, LauncherSession)
+        self.assertEqual(mock_connect.call_count, 3)
+
+    @patch.object(LauncherSession, "connect", side_effect=ConnectionError("refused"))
+    def test_connect_session_raises_after_timeout(self, _mock_connect):
+        with patch("evennia.server.launcher_ipc.time.sleep"):
+            with self.assertRaises(ConnectionError):
+                connect_session("127.0.0.1", 4006, connect_timeout=0.1, retry_interval=0.01)

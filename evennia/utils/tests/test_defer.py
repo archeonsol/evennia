@@ -87,6 +87,49 @@ class TestInThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertTrue(all(ident != main_ident for ident in calls))
 
 
+    def test_add_callbacks_runs_on_loop_thread(self):
+        main_ident = threading.get_ident()
+        box = {}
+
+        def worker():
+            return [1, 2, 3]
+
+        def _apply(result):
+            box["callback_ident"] = threading.get_ident()
+            box["result"] = result
+
+        def _failed(failure):
+            box["failed"] = failure.getTraceback()
+
+        defer.in_thread(worker).addCallbacks(_apply, _failed)
+
+        deadline = time.time() + _DRAIN_TIMEOUT
+        while "result" not in box and time.time() < deadline:
+            self._loop.run_until_complete(asyncio.sleep(0.05))
+
+        self.assertEqual(box["callback_ident"], main_ident)
+        self.assertEqual(box["result"], [1, 2, 3])
+        self.assertNotIn("failed", box)
+
+    def test_add_callbacks_errback_gets_worker_failure(self):
+        box = {}
+
+        def worker():
+            raise ValueError("boom")
+
+        defer.in_thread(worker).addCallbacks(
+            lambda r: box.__setitem__("ok", r),
+            lambda f: box.__setitem__("err", f.getTraceback()),
+        )
+
+        deadline = time.time() + _DRAIN_TIMEOUT
+        while "err" not in box and time.time() < deadline:
+            self._loop.run_until_complete(asyncio.sleep(0.05))
+
+        self.assertIn("ValueError: boom", box["err"])
+        self.assertNotIn("ok", box)
+
+
 class TestThreaded(_AsyncioLoopMixin, BaseEvenniaTestCase):
     """`threaded` decorator turns a call into an `in_thread` Future."""
 

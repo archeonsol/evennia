@@ -56,11 +56,27 @@ offload those without breaking the caller's contract. For those: do not block.
 Precompute, cache, or restructure so the I/O happens in a deferrable context.
 """
 
+from __future__ import annotations
+
+import traceback
 from functools import wraps
 
 from django.db import close_old_connections
 
 from evennia.utils import clock, logger
+
+
+class WorkerFailure:
+    """Errback payload for legacy ``.addCallbacks`` chains (no Twisted)."""
+
+    def __init__(self, exc: BaseException):
+        self.value = exc
+        self.type = type(exc)
+
+    def getTraceback(self) -> str:
+        return "".join(
+            traceback.format_exception(type(self.value), self.value, self.value.__traceback__)
+        )
 
 
 def _run_with_db_hygiene(fn, args, kwargs):
@@ -80,6 +96,57 @@ def _run_with_db_hygiene(fn, args, kwargs):
         close_old_connections()
 
 
+def _wire_future_compat(future):
+    """Attach legacy callback-chain methods to an ``asyncio.Future``."""
+    if getattr(future, "_evennia_future_compat", False):
+        return future
+
+    def addCallback(callback, *args, **kwargs):
+        def _done(fut):
+            if fut.cancelled():
+                return
+            exc = fut.exception()
+            if exc is not None:
+                return
+            callback(fut.result(), *args, **kwargs)
+
+        future.add_done_callback(_done)
+        return future
+
+    def addErrback(errback, *args, **kwargs):
+        def _done(fut):
+            if fut.cancelled():
+                return
+            exc = fut.exception()
+            if exc is not None:
+                errback(WorkerFailure(exc), *args, **kwargs)
+
+        future.add_done_callback(_done)
+        return future
+
+    def addCallbacks(callback, errback, callbackArgs=(), callbackKeywords=None, errbackArgs=(), errbackKeywords=None):
+        callbackKeywords = callbackKeywords or {}
+        errbackKeywords = errbackKeywords or {}
+
+        def _done(fut):
+            if fut.cancelled():
+                return
+            exc = fut.exception()
+            if exc is not None:
+                errback(WorkerFailure(exc), *errbackArgs, **errbackKeywords)
+            else:
+                callback(fut.result(), *callbackArgs, **callbackKeywords)
+
+        future.add_done_callback(_done)
+        return future
+
+    future.addCallback = addCallback
+    future.addErrback = addErrback
+    future.addCallbacks = addCallbacks
+    future._evennia_future_compat = True
+    return future
+
+
 def in_thread(fn, *args, **kwargs):
     """
     Run a blocking, game-state-free callable in the thread pool.
@@ -97,11 +164,12 @@ def in_thread(fn, *args, **kwargs):
 
     Returns:
         asyncio.Future: Whose result is delivered on the event loop thread.
-            ``await`` it or attach ``.add_done_callback`` to handle the result
-            and touch game objects safely.
+            ``await`` it or attach ``.add_done_callback`` / legacy
+            ``.addCallback`` / ``.addCallbacks`` to handle the result and
+            touch game objects safely.
 
     """
-    return clock.defer_to_thread(_run_with_db_hygiene, fn, args, kwargs)
+    return _wire_future_compat(clock.defer_to_thread(_run_with_db_hygiene, fn, args, kwargs))
 
 
 def _attach_done_errback(future, on_error=None):
@@ -112,12 +180,7 @@ def _attach_done_errback(future, on_error=None):
         if exc is None:
             return
         if on_error is not None:
-            try:
-                from twisted.python.failure import Failure
-
-                on_error(Failure(exc))
-            except Exception:
-                on_error(exc)
+            on_error(WorkerFailure(exc))
         else:
             logger.log_err(f"defer.background task failed:\n{exc}")
 
@@ -141,8 +204,8 @@ def background(fn, *args, on_error=None, **kwargs) -> None:
         fn (callable): The callable to run in a worker thread.
         *args: Positional arguments passed to `fn`.
         on_error (callable, optional): Called as `on_error(failure)` on the
-            event loop thread if `fn` raises, where `failure` is a Twisted
-            `Failure`. If not given, the failure is logged.
+            event loop thread if `fn` raises, where `failure` is a
+            :class:`WorkerFailure`. If not given, the failure is logged.
         **kwargs: Keyword arguments passed to `fn`.
 
     Returns:

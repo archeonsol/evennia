@@ -1,22 +1,22 @@
 """
-Bulk-tick engine: reactor-safe coordinator for vectorised attribute ticks.
+Bulk-tick engine: event-loop-thread-safe coordinator for vectorised attribute ticks.
 
 Three-phase pattern for every tick that mutates scalar attributes on many objects:
 
-    Phase 1  [reactor thread]   BulkTickContext.gather_objectdb()
+    Phase 1  [event loop thread]   BulkTickContext.gather_objectdb()
         Snapshots raw values straight from in-process L1 dicts — zero SQL,
-        zero deserialization.  Must run on the reactor because the idmapper
+        zero deserialization.  Must run on the event loop because the idmapper
         and L1 dicts are not concurrency-safe.
 
-        Phase 1b: SQL bulk-read for uncached objects (blocking I/O on reactor,
-        acceptable at <10 000 objects; move to Phase 2 worker if reactor
-        time exceeds 5ms at scale).
+        Phase 1b: SQL bulk-read for uncached objects (blocking I/O on the event
+        loop thread, acceptable at <10 000 objects; move to Phase 2 worker if
+        event-loop time exceeds 5ms at scale).
 
     Phase 2  [worker thread]    caller-supplied computation (e.g. Polars)
         Pure CPU work on plain Python dicts.  No game-object access; safe to
-        run off the reactor via evennia.utils.defer.in_thread.
+        run off the event loop via evennia.utils.defer.in_thread.
 
-    Phase 3  [reactor thread]   BulkTickContext.apply()
+    Phase 3  [event loop thread]   BulkTickContext.apply()
         Writes per-row results back to L1 dicts and marks backends dirty.
         The normal write-behind flush (maintenance tick) persists to Postgres.
         For uncached objects, writes directly to db_attrs via ORM (safe because
@@ -45,21 +45,16 @@ from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
 _NULL_CAT = "~"  # db_attrs key for the default (category=None) section
 
 
-def _assert_reactor_thread(where: str) -> None:
-    """Fail fast if not on the Twisted I/O thread (idmapper/L1 are not thread-safe).
+def _assert_io_thread(where: str) -> None:
+    """Fail fast if not on the process event-loop thread (idmapper/L1 are not thread-safe)."""
+    from evennia.utils import clock
 
-    Uses ``twisted.python.threadable.isInIOThread`` — the portable API.  Some
-    Twisted builds expose ``reactor.isInIOThread`` only on newer releases; prod
-    EPollReactor lacks that method and raised AttributeError every heartbeat tick.
-    """
-    from twisted.python import threadable
-
-    assert threadable.isInIOThread(), f"{where} must run on the reactor thread"
+    assert clock.is_io_thread(), f"{where} must run on the event loop thread"
 
 
 class BulkTickContext:
     """
-    Reactor-side coordinator for a single bulk-tick cycle.
+    Event-loop-side coordinator for a single bulk-tick cycle.
 
     Usage::
 
@@ -70,7 +65,7 @@ class BulkTickContext:
         # Phase 2 — in worker (compute on ctx.rows, e.g. via Polars)
         result = compute_fn(ctx.rows)
 
-        # Phase 3 — on reactor (callback from defer.in_thread)
+        # Phase 3 — on event loop (callback from defer.in_thread)
         ctx.apply(result)
 
     The caller supplies a ``snapshot_fn(obj_id, l1_dict) -> dict`` that
@@ -106,10 +101,10 @@ class BulkTickContext:
         Uncached objects: db_attrs read from Postgres via ORM (Phase 1b —
         blocking I/O on the reactor; acceptable at <10 000 objects).
 
-        Must run on the reactor thread.
+        Must run on the event loop thread.
         Returns self for chaining.
         """
-        _assert_reactor_thread("gather_objectdb")
+        _assert_io_thread("gather_objectdb")
 
         from evennia.objects.models import ObjectDB
 
@@ -171,10 +166,10 @@ class BulkTickContext:
         Cached objects: patched in-process; write-behind persists to Postgres.
         Uncached objects: written directly to db_attrs via ORM.
 
-        Must run on the reactor thread.
+        Must run on the event loop thread.
         Returns the number of objects whose L1 / DB was actually mutated.
         """
-        _assert_reactor_thread("apply")
+        _assert_io_thread("apply")
 
         patched = 0
         sql_batch: dict[int, dict[str, Any]] = {}

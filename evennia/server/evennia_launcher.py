@@ -566,11 +566,11 @@ def _launcher_uses_ipc():
 
 def _ensure_ipc_connection():
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import LauncherSession
+    from evennia.server.launcher_ipc import LauncherSession, connect_session
 
-    if AMP_CONNECTION is None or not isinstance(AMP_CONNECTION, LauncherSession):
-        AMP_CONNECTION = LauncherSession(AMP_HOST, AMP_PORT)
-        AMP_CONNECTION.connect()
+    if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
+        return AMP_CONNECTION
+    AMP_CONNECTION = connect_session(AMP_HOST, AMP_PORT)
     return AMP_CONNECTION
 
 

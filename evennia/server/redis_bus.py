@@ -57,6 +57,8 @@ class _RedisTransport:
         self._stop = threading.Event()
 
     def start(self):
+        if self._reader is not None and self._reader.is_alive():
+            return
         import redis
 
         self._client = redis.Redis.from_url(self._url)
@@ -151,6 +153,10 @@ class _RedisBusMixin:
 
     def errback(self, err, info):
         logger.log_trace("redis bus errback (%s): %s" % (info, err))
+
+    def broadcast(self, command, sessid, **kwargs):
+        """Publish when no live server AMP shim is attached (redis-only path)."""
+        return self.callRemote(command, **kwargs)
 
 
 class _ServerShimFactory:

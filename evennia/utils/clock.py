@@ -39,6 +39,23 @@ def loop_running() -> bool:
     return loop is not None and loop.is_running()
 
 
+def is_io_thread() -> bool:
+    """True when the current thread is running the bound process event loop."""
+    loop = get_bound_loop()
+    if loop is None:
+        return False
+    try:
+        return asyncio.get_running_loop() is loop
+    except RuntimeError:
+        pass
+    thread_id = getattr(loop, "_thread_id", None)
+    if thread_id is None:
+        return False
+    import threading
+
+    return threading.get_ident() == thread_id
+
+
 def register_shutdown_hook(fn, *args, **kwargs):
     """Register a callable to run during graceful process shutdown."""
     _shutdown_hooks.append((fn, args, kwargs))

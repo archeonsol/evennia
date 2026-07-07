@@ -16,7 +16,20 @@ class _ChildService(Service):
         self.stopped = True
 
 
+class _PrivilegedRoot(MultiService):
+    privileged_count = 0
+
+    def _privileged_start(self):
+        self.privileged_count += 1
+
+
 class ServiceRegistryTest(SimpleTestCase):
+    def test_privileged_start_runs_once(self):
+        root = _PrivilegedRoot()
+        root.privilegedStartService()
+        root.startService()
+        self.assertEqual(root.privileged_count, 1)
+
     def test_child_start_stop_order(self):
         root = MultiService()
         child_a = _ChildService()

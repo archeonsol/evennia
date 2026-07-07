@@ -128,6 +128,33 @@ class _LauncherIPCProtocol(asyncio.Protocol):
             logger.log_trace("launcher IPC: write failed")
 
 
+def connect_session(
+    host: str,
+    port: int,
+    *,
+    timeout: float = 30.0,
+    connect_timeout: float = 60.0,
+    retry_interval: float = 0.5,
+) -> LauncherSession:
+    """Connect to Portal launcher IPC, retrying until timeout (cold-start safe)."""
+    session = LauncherSession(host, port, timeout=timeout)
+    deadline = time.monotonic() + connect_timeout
+    last_err: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            session.connect()
+            return session
+        except (OSError, ConnectionError, TimeoutError) as err:
+            last_err = err
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(retry_interval, remaining))
+    raise ConnectionError(
+        f"launcher IPC connect to {host}:{port} timed out after {connect_timeout}s"
+    ) from last_err
+
+
 class LauncherSession:
     """Blocking launcher client for one control session (replaces AMP launcher)."""
 

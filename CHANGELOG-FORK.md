@@ -25,6 +25,42 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.137 — Fix .135/.136 regressions (duplicate login, defer, cold start)
+
+### Service lifecycle (.135 regression)
+
+- **Fix:** ``service_registry.MultiService._on_start`` no longer calls
+  ``_privileged_start()`` — Twisted only ran privileged setup once via
+  ``privilegedStartService``; the duplicate call in ``.135`` registered two
+  Redis bus readers, delivering every ``PCONN`` twice and causing duplicate
+  login messages.
+- **Test:** ``test_privileged_start_runs_once`` in
+  ``evennia/server/tests/test_service_registry.py``.
+
+### Defer / bulk-tick (asyncio-only, no Twisted)
+
+- **``evennia.utils.defer``:** ``in_thread`` Futures get legacy
+  ``.addCallback`` / ``.addCallbacks`` chains via a pure-asyncio
+  :class:`WorkerFailure` shim (no ``twisted.python.failure``). ``background``
+  ``on_error`` receives ``WorkerFailure`` too.
+- **``evennia.utils.bulk_tick``:** Reactor-thread guard replaced with
+  ``clock.is_io_thread()`` (new helper on ``evennia.utils.clock``).
+- **Tests:** ``test_add_callbacks_*`` in ``evennia/utils/tests/test_defer.py``.
+
+### Redis bus / launcher
+
+- **``RedisPortalBus.broadcast``:** publishes via ``callRemote`` when no live
+  server shim is attached (fixes ``'RedisPortalBus' object has no attribute
+  'broadcast'`` when server is down).
+- **Redis transport:** ``start()`` is idempotent (skips if reader already alive).
+- **Launcher cold start:** ``connect_session()`` retries Portal IPC connect;
+  ``evennia_launcher._ensure_ipc_connection`` uses it (fixes systemd
+  ``Connection to Evennia timed out`` on cold boot).
+- **Tests:** ``connect_session`` retry/timeout tests in
+  ``evennia/server/tests/test_launcher_ipc.py``.
+
+---
+
 ## 6.0.0+underspire.136 — Safe reload speedups
 
 ### Launcher / shutdown latency

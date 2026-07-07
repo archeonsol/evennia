@@ -66,7 +66,8 @@ class MultiService(Service):
         pass
 
     def _on_start(self):
-        self._privileged_start()
+        # Twisted ``MultiService.startService`` only starts children; privileged
+        # setup runs once via ``privilegedStartService`` (see asyncio_bootstrap).
         for service in self._services:
             service.startService()
 
