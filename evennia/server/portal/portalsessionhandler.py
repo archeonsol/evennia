@@ -320,6 +320,10 @@ class PortalSessionHandler(SessionHandler):
         """
         session.load_sync_data(data)
         session.at_login()
+        logger.log_info(
+            "[reload-diag] SLOGIN applied sessid=%s uid=%s logged_in=%s"
+            % (session.sessid, data.get("uid"), data.get("logged_in"))
+        )
 
     def server_session_sync(self, serversessions, clean=True):
         """

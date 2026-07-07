@@ -471,6 +471,13 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
             # print("Server has connected. Sending session data to Server ... mode: {}".format(server_restart_mode))
 
             sessdata = evennia.PORTAL_SESSION_HANDLER.get_all_sync_data()
+            logger.log_info(
+                "[reload-diag] PSYNC sending mode=%s sessions=%s"
+                % (
+                    server_restart_mode,
+                    {sid: (d.get("logged_in"), d.get("uid")) for sid, d in sessdata.items()},
+                )
+            )
             self.send_AdminPortal2Server(
                 amp.DUMMYSESSION,
                 amp.PSYNC,

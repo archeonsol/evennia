@@ -407,6 +407,14 @@ class ServerSessionHandler(SessionHandler):
             sess.load_sync_data(sessdict)
             if sess.uid:
                 sess.account = _AccountDB.objects.get_account_from_uid(sess.uid)
+                # invariant: a synced session carrying a uid is authenticated. Guard
+                # against a logged_in flag that got dropped in transit (would land
+                # the player back at the connect screen after a reload).
+                sess.logged_in = True
+            logger.log_info(
+                "[reload-diag] rebuilt sessid=%s uid=%s logged_in=%s"
+                % (sessid, sess.uid, sess.logged_in)
+            )
             self[sessid] = sess
             sess.at_sync()
 

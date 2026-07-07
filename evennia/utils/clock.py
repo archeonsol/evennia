@@ -40,6 +40,20 @@ def when_running(fn, *args, **kwargs):
     return reactor.callWhenRunning(fn, *args, **kwargs)
 
 
+def run_coroutine(coro):
+    """Schedule an ``async`` coroutine to run on the reactor/loop.
+
+    The bridge for the Deferred->async migration: an ``async def`` returns a
+    coroutine that nobody runs on its own, so callers that kick one off (outside
+    an ``await``) route it through here. Today it is wrapped as a Twisted
+    ``Deferred`` (so ``.addErrback``/``.addCallback`` still work during the
+    transition); at pure-asyncio this becomes ``loop.create_task``.
+    """
+    from twisted.internet.defer import ensureDeferred
+
+    return ensureDeferred(coro)
+
+
 def make_looping(fn, *args, **kwargs):
     """Build a repeating-call handle WITHOUT starting it.
 
