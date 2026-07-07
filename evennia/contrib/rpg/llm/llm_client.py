@@ -25,14 +25,10 @@ DEFAULT_LLM_REQUEST_BODY = {...}   # see below, this controls how to prompt the 
 import json
 
 from django.conf import settings
-from twisted.internet import defer, protocol, reactor
 from twisted.internet.defer import inlineCallbacks
-from twisted.web.client import Agent, HTTPConnectionPool, _HTTP11ClientFactory
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IBodyProducer
-from zope.interface import implementer
 
 from evennia import logger
+from evennia.utils import http
 from evennia.utils.utils import make_iter
 
 DEFAULT_LLM_HOST = "http://127.0.0.1:5000"
@@ -46,52 +42,6 @@ DEFAULT_LLM_REQUEST_BODY = {
 }
 
 
-@implementer(IBodyProducer)
-class StringProducer:
-    """
-    Used for feeding a request body to the HTTP client.
-    """
-
-    def __init__(self, body):
-        self.body = bytes(body, "utf-8")
-        self.length = len(body)
-
-    def startProducing(self, consumer):
-        consumer.write(self.body)
-        return defer.succeed(None)
-
-    def pauseProducing(self):
-        pass
-
-    def stopProducing(self):
-        pass
-
-
-class SimpleResponseReceiver(protocol.Protocol):
-    """
-    Used for pulling the response body out of an HTTP response.
-    """
-
-    def __init__(self, status_code, d):
-        self.status_code = status_code
-        self.buf = b""
-        self.d = d
-
-    def dataReceived(self, data):
-        self.buf += data
-
-    def connectionLost(self, reason=protocol.connectionDone):
-        self.d.callback((self.status_code, self.buf))
-
-
-class QuietHTTP11ClientFactory(_HTTP11ClientFactory):
-    """
-    Silences the obnoxious factory start/stop messages in the default client.
-    """
-
-    noisy = False
-
-
 class LLMClient:
     """
     A client for communicating with an LLM server.
@@ -99,9 +49,6 @@ class LLMClient:
     """
 
     def __init__(self, on_bad_request=None):
-        self._conn_pool = HTTPConnectionPool(reactor)
-        self._conn_pool._factory = QuietHTTP11ClientFactory
-
         self.prompt_keyname = getattr(settings, "LLM_PROMPT_KEYNAME", DEFAULT_LLM_PROMPT_KEYNAME)
         self.hostname = getattr(settings, "LLM_HOST", DEFAULT_LLM_HOST)
         self.pathname = getattr(settings, "LLM_PATH", DEFAULT_LLM_PATH)
@@ -109,8 +56,6 @@ class LLMClient:
         self.request_body = getattr(settings, "LLM_REQUEST_BODY", DEFAULT_LLM_REQUEST_BODY)
 
         self.api_type = getattr(settings, "LLM_API_TYPE", DEFAULT_LLM_API_TYPE)
-
-        self.agent = Agent(reactor, pool=self._conn_pool)
 
     def _format_request_body(self, prompt):
         """Structure the request body for the LLM server"""
@@ -121,12 +66,6 @@ class LLMClient:
         request_body[self.prompt_keyname] = prompt
 
         return request_body
-
-    def _handle_llm_response_body(self, response):
-        """Get the response body from the response"""
-        d = defer.Deferred()
-        response.deliverBody(SimpleResponseReceiver(response.code, d))
-        return d
 
     def _handle_llm_error(self, failure):
         """Correctly handle server connection errors"""
@@ -140,15 +79,15 @@ class LLMClient:
         if settings.DEBUG:
             logger.log_info(f"LLM request body: {request_body}")
 
-        d = self.agent.request(
-            b"POST",
-            bytes(self.hostname + self.pathname, "utf-8"),
-            headers=Headers(self.headers),
-            bodyProducer=StringProducer(json.dumps(request_body)),
+        return http.request(
+            "POST",
+            self.hostname + self.pathname,
+            headers=self.headers,
+            data=json.dumps(request_body),
+        ).addCallbacks(
+            lambda response: (response.code, response.content),
+            self._handle_llm_error,
         )
-
-        d.addCallbacks(self._handle_llm_response_body, self._handle_llm_error)
-        return d
 
     @inlineCallbacks
     def get_response(self, prompt):

@@ -29,10 +29,10 @@ import queue
 import threading
 
 from django.conf import settings
-from twisted.internet import defer, reactor
+from twisted.internet import defer
 
 from evennia.server.portal import amp
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 # Frame field names in the redis stream entries.
 _CMD = b"c"
@@ -127,7 +127,7 @@ class _RedisTransport:
                     cmdkey = fields.get(_CMD, b"")
                     data = fields.get(_DATA, b"")
                     try:
-                        reactor.callFromThread(self._on_frame, cmdkey, data)
+                        clock.call_from_thread(self._on_frame, cmdkey, data)
                     except Exception:
                         logger.log_trace("redis bus: dispatch failed")
 
@@ -173,6 +173,51 @@ class _ServerShimFactory:
 class _PortalShimFactory:
     def __init__(self, portal):
         self.portal = portal
+        self.server_connection = None
+        self.server_connect_callbacks = []
+        self.launcher_connection = None
+        self.broadcasts = []
+        self.disconnect_callbacks = {}
+
+
+def _pid_alive(pid):
+    """Is the process with this pid still running? (redis-native liveness)."""
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)  # POSIX: raises if the process is gone
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just not ours
+    except (OSError, ValueError, TypeError):
+        # Windows fallback (dev doesn't use redis mode, but be safe).
+        try:
+            import ctypes
+
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, 0, int(pid))
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            return True
+
+
+class _PidTransport:
+    """Stands in for a Twisted transport: 'connected' == the Server pid is alive.
+
+    Lets the AMP lifecycle code (get_status, wait_for_disconnect) treat the redis
+    bus as if it were the AMP server connection.
+    """
+
+    def __init__(self, portal):
+        self._portal = portal
+
+    @property
+    def connected(self):
+        return _pid_alive(getattr(self._portal, "server_process_id", None))
 
 
 class RedisServerBus(_RedisBusMixin, amp.AMPMultiConnectionProtocol):
@@ -220,13 +265,20 @@ class RedisServerBus(_RedisBusMixin, amp.AMPMultiConnectionProtocol):
 class RedisPortalBus(_RedisBusMixin, amp.AMPMultiConnectionProtocol):
     """Portal-side bus. Reuses AMPServerProtocol's send/receive logic."""
 
-    def __init__(self, portal):
+    def __init__(self, portal, factory=None):
         amp.AMPMultiConnectionProtocol.__init__(self)
         w = _worker_id()
         prefix = _stream_prefix()
         self._send_stream = f"{prefix}:p2s:{w}"
         self._read_stream = f"{prefix}:s2p"
-        self._init_bus(_PortalShimFactory(portal))
+        self._portal = portal
+        # Share the AMP server's factory when given, so the launcher-control code
+        # (get_status, wait_for_server_connect, server_connect_callbacks) and this
+        # bus agree on a single server_connection / callback list.
+        self._init_bus(factory if factory is not None else _PortalShimFactory(portal))
+        # Make the AMP lifecycle code treat us as the server connection: a
+        # pid-backed transport stands in for the TCP link that redis doesn't have.
+        self.transport = _PidTransport(portal)
 
     def _on_frame(self, cmdkey, data):
         from evennia.server.portal.amp_server import AMPServerProtocol
@@ -258,3 +310,29 @@ class RedisPortalBus(_RedisBusMixin, amp.AMPMultiConnectionProtocol):
         from evennia.server.portal.amp_server import AMPServerProtocol
 
         return AMPServerProtocol.stop_server(self, mode=mode)
+
+    def start_server(self, server_twistd_cmd):
+        # (Re)spawn the Server process. Reused verbatim from AMP: it Popens the
+        # twistd command and records server_process_id on the portal.
+        from evennia.server.portal.amp_server import AMPServerProtocol
+
+        return AMPServerProtocol.start_server(self, server_twistd_cmd)
+
+    def wait_for_disconnect(self, callback, *args, **kwargs):
+        """Fire ``callback`` once the Server process has exited.
+
+        AMP fires this off the TCP connection dropping; over redis there is no
+        such socket, so we poll the Server pid (which the Portal recorded at
+        PSYNC / when it spawned the process) until it is gone.
+        """
+
+        def _poll():
+            if not self.transport.connected:
+                try:
+                    callback(*args, **kwargs)
+                except Exception:
+                    logger.log_trace("redis bus: wait_for_disconnect callback failed")
+            else:
+                clock.call_later(0.2, _poll)
+
+        clock.call_later(0.2, _poll)

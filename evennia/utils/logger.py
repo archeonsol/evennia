@@ -21,9 +21,10 @@ from traceback import format_exc
 
 from django.conf import settings
 from twisted import logger as twisted_logger
-from twisted.internet.threads import deferToThread
 from twisted.python import logfile
 from twisted.python import util as twisted_util
+
+from evennia.utils import clock
 
 log = twisted_logger.Logger()
 
@@ -583,7 +584,7 @@ def log_file(msg, filename="game.log"):
     # save to server/logs/ directory
     filehandle = _open_log_file(filename)
     if filehandle:
-        deferToThread(callback, filehandle, msg).addErrback(errback)
+        clock.defer_to_thread(callback, filehandle, msg).addErrback(errback)
 
 
 def log_file_exists(filename="game.log"):
@@ -775,7 +776,7 @@ def tail_log_file(filename, offset, nlines, callback=None):
     filehandle = _open_log_file(filename)
     if filehandle:
         if callback:
-            return deferToThread(seek_file, filehandle, offset, nlines, callback).addErrback(
+            return clock.defer_to_thread(seek_file, filehandle, offset, nlines, callback).addErrback(
                 errback
             )
         else:

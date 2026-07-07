@@ -17,37 +17,9 @@ import urllib.parse
 from urllib.parse import quote as urlquote
 
 from django.conf import settings
-from django.core.wsgi import get_wsgi_application
-from twisted.application import internet
-from twisted.internet import defer, reactor
-from twisted.python import threadpool
 from twisted.web import http, resource, server, static
 from twisted.web.proxy import ReverseProxyResource
 from twisted.web.server import NOT_DONE_YET
-from twisted.web.wsgi import WSGIResource
-
-from evennia.utils import logger
-
-
-class LockableThreadPool(threadpool.ThreadPool):
-    """
-    Threadpool that can be locked from accepting new requests.
-    """
-
-    def __init__(self, *args, **kwargs):
-        self._accept_new = True
-        threadpool.ThreadPool.__init__(self, *args, **kwargs)
-
-    def lock(self):
-        self._accept_new = False
-
-    def callInThread(self, func, *args, **kwargs):
-        """
-        called in the main reactor thread. Makes sure the pool
-        is not locked before continuing.
-        """
-        if self._accept_new:
-            threadpool.ThreadPool.callInThread(self, func, *args, **kwargs)
 
 
 #
@@ -143,80 +115,6 @@ class EvenniaReverseProxyResource(ReverseProxyResource):
 
 
 #
-# Website server resource
-#
-
-
-class DjangoWebRoot(resource.Resource):
-    """
-    This creates a web root (/) that Django
-    understands by tweaking the way
-    child instances are recognized.
-    """
-
-    def __init__(self, pool):
-        """
-        Setup the django+twisted resource.
-
-        Args:
-            pool (ThreadPool): The twisted threadpool.
-
-        """
-        self.pool = pool
-        self._echo_log = True
-        self._pending_requests = {}
-        super().__init__()
-        self.wsgi_resource = WSGIResource(reactor, pool, get_wsgi_application())
-
-    def empty_threadpool(self):
-        """
-        Converts our _pending_requests list of deferreds into a DeferredList
-
-        Returns:
-            deflist (DeferredList): Contains all deferreds of pending requests.
-
-        """
-        self.pool.lock()
-        if self._pending_requests and self._echo_log:
-            self._echo_log = False  # just to avoid multiple echoes
-            msg = "Webserver waiting for %i requests ... "
-            logger.log_info(msg % len(self._pending_requests))
-        return defer.DeferredList(self._pending_requests, consumeErrors=True)
-
-    def _decrement_requests(self, *args, **kwargs):
-        self._pending_requests.pop(kwargs.get("deferred", None), None)
-
-    def getChild(self, path, request):
-        """
-        To make things work we nudge the url tree to make this the
-        root.
-
-        Args:
-            path (str): Url path.
-            request (Request object): Incoming request.
-
-        Notes:
-            We make sure to save the request queue so
-            that we can safely kill the threadpool
-            on a server reload.
-
-        """
-        path0 = request.prepath.pop(0)
-        request.postpath.insert(0, path0)
-
-        request.notifyFinish().addErrback(
-            lambda f: 0
-            # lambda f: logger.log_trace("%s\nCaught errback in webserver.py:" % f)
-        )
-
-        deferred = request.notifyFinish()
-        self._pending_requests[deferred] = deferred
-        deferred.addBoth(self._decrement_requests, deferred=deferred)
-
-        return self.wsgi_resource
-
-
-#
 # Site with deactivateable logging
 #
 
@@ -238,59 +136,6 @@ class Website(server.Site):
         """Conditional logging"""
         if settings.DEBUG:
             server.Site.log(self, request)
-
-
-#
-# Threaded Webserver
-#
-
-
-class WSGIWebServer(internet.TCPServer):
-    """
-    This is a WSGI webserver. It makes sure to start
-    the threadpool after the service itself started,
-    so as to register correctly with the twisted daemon.
-
-    call with WSGIWebServer(threadpool, port, wsgi_resource)
-
-    """
-
-    def __init__(self, pool, *args, **kwargs):
-        """
-        This just stores the threadpool.
-
-        Args:
-            pool (ThreadPool): The twisted threadpool.
-            args, kwargs (any): Passed on to the TCPServer.
-
-        """
-        self.pool = pool
-        super().__init__(*args, **kwargs)
-
-    def startService(self):
-        """
-        Start the pool after the service starts.
-
-        """
-        try:
-            super().startService()
-            self.pool.start()
-        except Exception:
-            logger.log_trace("Webserver did not start correctly. Disabling.")
-            self.stopService()
-
-    def stopService(self):
-        """
-        Safely stop the pool after the service stops.
-
-        """
-        try:
-            super().stopService()
-        except Exception:
-            logger.log_trace("Webserver stopService error.")
-        finally:
-            if self.pool.started:
-                self.pool.stop()
 
 
 class PrivateStaticRoot(static.File):

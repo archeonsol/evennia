@@ -40,9 +40,9 @@ from traceback import format_exc
 from django.conf import settings
 from django.utils.translation import gettext as _
 from ftfy import fix_text as _ftfy_fix_text
-from twisted.internet import reactor
 from twisted.internet.defer import ensureDeferred, inlineCallbacks
-from twisted.internet.task import deferLater
+
+from evennia.utils import clock
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
@@ -289,7 +289,7 @@ def _process_input(caller, prompt, result, cmd, generator):
 
     """
     # We call it using a Twisted deferLater to make sure the input is properly closed.
-    deferLater(reactor, 0, _progressive_cmd_run, cmd, generator, response=result)
+    clock.defer_later(0, _progressive_cmd_run, cmd, generator, response=result)
     return False
 
 

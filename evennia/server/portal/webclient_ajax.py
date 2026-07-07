@@ -25,8 +25,9 @@ import time
 
 from django.conf import settings
 from django.utils.functional import Promise
-from twisted.internet.task import LoopingCall
 from twisted.web import resource, server
+
+from evennia.utils import clock
 
 from evennia.server import session
 from evennia.utils import utils
@@ -376,8 +377,7 @@ class AjaxWebClient(resource.Resource):
         self.last_alive[sess.csessid] = (time.time(), False)
         if not self.keep_alive:
             # the keepalive is not running; start it.
-            self.keep_alive = LoopingCall(self._keepalive)
-            self.keep_alive.start(_KEEPALIVE, now=False)
+            self.keep_alive = clock.looping(_KEEPALIVE, self._keepalive, now=False)
 
         browserstr = f":{browserstr}" if browserstr else ""
         sess.protocol_flags["CLIENTNAME"] = f"Evennia Webclient (ajax{browserstr})"

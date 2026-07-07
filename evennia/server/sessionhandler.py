@@ -805,9 +805,9 @@ class ServerSessionHandler(SessionHandler):
         uid = session.sessid
         if uid not in self._outbuf:
             self._outbuf[uid] = []
-            from twisted.internet import reactor as _reactor
+            from evennia.utils import clock
 
-            _reactor.callLater(0, self._flush_outbuf, uid)
+            clock.call_later(0, self._flush_outbuf, uid)
         self._outbuf[uid].append(kwargs)
 
     def _flush_outbuf(self, uid):

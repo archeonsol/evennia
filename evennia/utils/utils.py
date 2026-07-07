@@ -42,7 +42,6 @@ from django.utils.translation import gettext as _
 from simpleeval import simple_eval
 from twisted.internet import reactor, threads
 from twisted.internet.defer import returnValue  # noqa - used as import target
-from twisted.internet.task import deferLater
 
 import evennia
 from evennia.utils import logger
@@ -2592,7 +2591,9 @@ def interactive(func):
     from evennia.actions.menus import get_input
 
     def _process_input(caller, prompt, result, generator):
-        deferLater(reactor, 0, _iterate, generator, caller, response=result)
+        from evennia.utils import clock
+
+        clock.defer_later(0, _iterate, generator, caller, response=result)
         return False
 
     def _iterate(generator, caller=None, response=None):

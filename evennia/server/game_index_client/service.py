@@ -4,10 +4,9 @@ Service for integrating the Evennia Game Index client into Evennia.
 """
 
 from twisted.application.service import Service
-from twisted.internet import defer, reactor
-from twisted.internet.task import LoopingCall
+from twisted.internet import defer
 
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 from .client import EvenniaGameIndexClient
 
@@ -30,7 +29,7 @@ class EvenniaGameIndexService(Service):
 
     def __init__(self):
         self.client = EvenniaGameIndexClient(on_bad_request=self._die_on_bad_request)
-        self.loop = LoopingCall(lambda: defer.ensureDeferred(self.client.send_game_details()))
+        self.loop = clock.make_looping(lambda: defer.ensureDeferred(self.client.send_game_details()))
 
     def startService(self):
         super().startService()
@@ -38,7 +37,7 @@ class EvenniaGameIndexService(Service):
         # Start the loop, but only after a short delay. This allows the
         # portal and the server time to sync up as far as total player counts.
         # Prevents always reporting a count of 0.
-        reactor.callLater(_FIRST_UPDATE_DELAY, self.loop.start, _CLIENT_UPDATE_RATE)
+        clock.call_later(_FIRST_UPDATE_DELAY, self.loop.start, _CLIENT_UPDATE_RATE)
 
     def stopService(self):
         if self.running == 0:

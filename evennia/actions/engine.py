@@ -60,9 +60,9 @@ effectively synchronous — the machinery cost is paid only when a rule defers.
 
 import inspect
 
-from twisted.internet import reactor
 from twisted.internet.defer import Deferred, inlineCallbacks
-from twisted.internet.task import deferLater
+
+from evennia.utils import clock
 
 from .context import ActionContext
 from .exceptions import ActionError
@@ -88,7 +88,7 @@ def _is_deferred(raw) -> bool:
 
 def _sleep(seconds) -> Deferred:
     """A Deferred that fires after ``seconds`` on the reactor (patchable in tests)."""
-    return deferLater(reactor, seconds, lambda: None)
+    return clock.defer_later(seconds)
 
 
 def _caller_for(actor):

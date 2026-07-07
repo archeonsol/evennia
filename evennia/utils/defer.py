@@ -61,10 +61,9 @@ Precompute, cache, or restructure so the I/O happens in a deferrable context.
 from functools import wraps
 
 from django.db import close_old_connections
-from twisted.internet import threads
 from twisted.internet.defer import Deferred
 
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 
 def _run_with_db_hygiene(fn, args, kwargs):
@@ -105,7 +104,7 @@ def in_thread(fn, *args, **kwargs) -> Deferred:
             objects safely.
 
     """
-    return threads.deferToThread(_run_with_db_hygiene, fn, args, kwargs)
+    return clock.defer_to_thread(_run_with_db_hygiene, fn, args, kwargs)
 
 
 def background(fn, *args, on_error=None, **kwargs) -> None:

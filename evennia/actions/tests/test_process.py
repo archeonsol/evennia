@@ -2,7 +2,7 @@
 
 An :class:`Activity` is driven by ``_drive_activity`` (an ``inlineCallbacks``
 generator) on the reactor. To keep these tests synchronous we control the two
-suspension points: numeric ``yield``\\s go through ``process.deferLater``, which
+suspension points: numeric ``yield``\\s go through ``process.clock.defer_later``, which
 we patch to ``succeed(None)`` so a timed step resolves inline; ``Deferred``
 ``yield``\\s use bare ``Deferred``\\s we fire (or cancel) by hand to assert
 suspension, resume-with-value (per-step re-validation), and cancellation.
@@ -89,7 +89,7 @@ class Crasher(Activity):
 class TestActivityLifecycle(unittest.TestCase):
     def test_runs_to_completion_and_unregisters(self):
         holder, log = _holder(), []
-        with mock.patch.object(process, "deferLater", return_value=succeed(None)):
+        with mock.patch.object(process.clock, "defer_later", return_value=succeed(None)):
             process.start_activity(holder, Counter(log, steps=2))
         self.assertEqual(log, ["step0", "step1", "ran", "complete"])
         self.assertEqual(process.get_activities(holder), [])

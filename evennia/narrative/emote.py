@@ -49,6 +49,7 @@ __all__ = [
     "parse_quoted_speech",
     "PRONOUN_MAP",
     "first_to_second",
+    "leading_third_to_second",
     "first_to_third",
     "split_emote_segments",
     "build_emote_segment_plans",
@@ -181,6 +182,40 @@ def first_to_second(text: str) -> str:
     for pattern, replacement in FIRST_TO_SECOND_MAP:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return _restore_quotes(text, quote_map)
+
+
+_THIRD_TO_SECOND_LEADING = (
+    ("is ", "are "),
+    ("was ", "were "),
+    ("has ", "have "),
+    ("does ", "do "),
+)
+_THIRD_TO_SECOND_BARE = (
+    ("is", "are"),
+    ("was", "were"),
+    ("has", "have"),
+    ("does", "do"),
+)
+
+
+def leading_third_to_second(text: str) -> str:
+    """
+    Map a leading third-person auxiliary to second person for the emitter echo.
+
+    After ``.-verb`` shorthand strips the marker, segments like ``is a raccoon``
+    stay third person for the room but must read ``are a raccoon`` in the You-line.
+    """
+    if not text:
+        return text
+    lower = text.lower()
+    for third, second in _THIRD_TO_SECOND_LEADING:
+        if lower.startswith(third):
+            rep = second[0].upper() + second[1:] if text[:1].isupper() else second
+            return rep + text[len(third) :]
+    for third, second in _THIRD_TO_SECOND_BARE:
+        if lower == third:
+            return second.capitalize() if text[:1].isupper() else second
+    return text
 
 
 def _conjugate(word: str) -> str:
@@ -511,6 +546,7 @@ def build_caller_echo(
         seg = seg.lstrip().lstrip(",").lstrip() if seg.strip().startswith(",") else seg
         seg = re.sub(r"^\.\s*(\w+)", r"\1", seg)
         seg = re.sub(r" \.\s*(\w+)", r" \1", seg)
+        seg = leading_third_to_second(seg)
         converted = first_to_second(seg)
         if i == 0:
             converted = converted[0].upper() + converted[1:] if converted else converted

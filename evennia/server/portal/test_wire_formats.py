@@ -547,12 +547,18 @@ class TestWireFormatRegistry(TestCase):
         self.assertIn("gmcp.mudstandards.org", WIRE_FORMATS)
         self.assertIn("terminal.mudstandards.org", WIRE_FORMATS)
 
-    def test_registry_order_prefers_json(self):
-        """json.mudstandards.org should be first (highest priority)."""
+    def test_registry_order_prefers_azaban(self):
+        """azaban.v1 (our shell protocol) is first; json is the standard default.
+
+        Negotiation matches the client's offered list, so this ordering only
+        sets default priority — standard clients offering json/gmcp/terminal are
+        unaffected; only the Svelte shell (which offers azaban.v1) gets Azaban.
+        """
         from evennia.server.portal.wire_formats import WIRE_FORMATS
 
         keys = list(WIRE_FORMATS.keys())
-        self.assertEqual(keys[0], "json.mudstandards.org")
+        self.assertEqual(keys[0], "azaban.v1")
+        self.assertIn("json.mudstandards.org", keys)
 
     def test_registry_instances_are_correct_types(self):
         from evennia.server.portal.wire_formats import (WIRE_FORMATS,

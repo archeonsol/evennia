@@ -142,7 +142,8 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from twisted.internet.defer import maybeDeferred
-from twisted.internet.task import LoopingCall
+
+from evennia.utils import clock
 
 from evennia.utils import logger
 
@@ -734,7 +735,7 @@ class SystemDriver:
 
     def __init__(self, now=time.time):
         self._now = now
-        self._loop = LoopingCall(self.tick)
+        self._loop = clock.make_looping(self.tick)
 
     def start(self):
         """Start ticking at `TICK_INTERVAL`. No-op if already running."""

@@ -28,7 +28,7 @@ import re
 import weakref
 
 # General Telnet
-from twisted.conch.telnet import IAC, SB, SE
+from evennia.server.portal.telnet_parser import IAC, SB, SE
 
 from .gmcp_utils import decode_gmcp as _decode_gmcp
 from .gmcp_utils import encode_gmcp as _encode_gmcp_str

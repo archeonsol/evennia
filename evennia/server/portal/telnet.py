@@ -9,14 +9,18 @@ sessions etc.
 
 import re
 
+import asyncio
+
 from django.conf import settings
-from twisted.conch.telnet import (ECHO, GA, IAC, LINEMODE, LINEMODE_EDIT,
-                                  LINEMODE_TRAPSIG, MODE, NOP, NULL, WILL,
-                                  WONT, StatefulTelnetProtocol, Telnet)
 from twisted.internet import protocol
-from twisted.internet.task import LoopingCall
 
 from evennia.server.portal import mssp, naws, suppress_ga, telnet_oob, ttype
+from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+from evennia.server.portal.telnet_parser import (ECHO, GA, IAC, LINEMODE,
+                                                 LINEMODE_EDIT, LINEMODE_TRAPSIG,
+                                                 MODE, NOP, NULL, WILL, WONT,
+                                                 Telnet)
+from evennia.utils import clock
 from evennia.server.portal.mccp import MCCP, Mccp, mccp_compress
 from evennia.server.portal.mxp import Mxp, mxp_parse
 from evennia.server.portal.naws import NAWS
@@ -62,7 +66,7 @@ class TelnetServerFactory(protocol.ServerFactory):
         return "Telnet"
 
 
-class TelnetProtocol(Telnet, StatefulTelnetProtocol, _BASE_SESSION_CLASS):
+class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
     """
     Each player connecting over telnet (ie using most traditional mud
     clients) gets a telnet protocol instance assigned to them.  All
@@ -178,8 +182,7 @@ class TelnetProtocol(Telnet, StatefulTelnetProtocol, _BASE_SESSION_CLASS):
         if self.nop_keep_alive and self.nop_keep_alive.running:
             self.nop_keep_alive.stop()
         else:
-            self.nop_keep_alive = LoopingCall(self._send_nop_keepalive)
-            self.nop_keep_alive.start(30, now=False)
+            self.nop_keep_alive = clock.looping(30, self._send_nop_keepalive, now=False)
 
     def handshake_done(self, timeout=False):
         """
@@ -523,3 +526,42 @@ class TelnetProtocol(Telnet, StatefulTelnetProtocol, _BASE_SESSION_CLASS):
         """
         if not cmdname == "options":
             self.oob.data_out(cmdname, *args, **kwargs)
+
+
+# -- native asyncio transport (T3) --------------------------------------
+#
+# TelnetProtocol above is a Twisted Protocol (real reactor transport). The
+# vendored telnet parser is transport-agnostic, so the exact same protocol can
+# also run on a native asyncio loop: AsyncioTransportShim presents the asyncio
+# transport with the small Twisted-transport surface TelnetProtocol reads, and
+# an asyncio.Protocol forwards the loop's callbacks into it. Byte behaviour is
+# identical; only the event loop differs.
+
+
+class AsyncioTelnetProtocol(asyncio.Protocol):
+    """Run a ``TelnetProtocol`` (vendored parser + game session) on asyncio.
+
+    Composes a ``TelnetProtocol`` and bridges the asyncio loop's transport
+    callbacks to it, via ``AsyncioTransportShim``. Use with
+    ``loop.create_server(lambda: AsyncioTelnetProtocol(factory), ...)`` where
+    ``factory`` carries ``.sessionhandler`` (as ``TelnetServerFactory`` does).
+    """
+
+    def __init__(self, factory):
+        self._factory = factory
+        self.telnet = None
+
+    def connection_made(self, transport):
+        proto_class = getattr(self._factory, "protocol", None) or TelnetProtocol
+        proto = proto_class()
+        proto.factory = self._factory
+        proto.transport = AsyncioTransportShim(transport)
+        self.telnet = proto
+        proto.connectionMade()
+
+    def data_received(self, data):
+        self.telnet.dataReceived(data)
+
+    def connection_lost(self, exc):
+        if self.telnet is not None:
+            self.telnet.connectionLost(str(exc) if exc else "")

@@ -80,7 +80,7 @@ SSH_INTERFACES = ["0.0.0.0"]
 WEBSERVER_ENABLED = True
 # How Django is served: "wsgi" (Twisted-WSGI, default) or "asgi" (uvicorn in a
 # worker thread, unlocking async views/ORM). Both run in the Server process.
-WEB_SERVER = "wsgi"
+WEB_SERVER = "asgi"
 # This is a security setting protecting against host poisoning
 # attacks.  It defaults to allowing all. In production, make
 # sure to change this to your actual host addresses/IPs.
@@ -170,6 +170,12 @@ SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
 # libraries while all existing Twisted APIs (callLater, deferToThread, delay,
 # defer.background) keep working unchanged. Set to "" to use Twisted's default.
 TWISTED_REACTOR = "asyncio"
+
+# (T3) Run the Portal's telnet/websocket listeners + web reverse-proxy as native
+# asyncio servers (loop.create_server / h11+httpx proxy) instead of Twisted
+# listeners. Only takes effect when TWISTED_REACTOR="asyncio" (a shared loop must
+# exist); a no-op otherwise. Off by default; prod-verify before enabling.
+PORTAL_ASYNCIO_SERVERS = False
 
 
 # Path to the lib directory containing the bulk of the codebase's code.

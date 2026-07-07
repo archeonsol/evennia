@@ -38,9 +38,9 @@ asyncio). Cancellation cancels the in-flight ``Deferred`` and runs ``on_cancel``
 the driver guards a vanished actor/character and a crashing body.
 """
 
-from twisted.internet import reactor
 from twisted.internet.defer import CancelledError, Deferred, inlineCallbacks
-from twisted.internet.task import deferLater
+
+from evennia.utils import clock
 
 __all__ = [
     "Activity",
@@ -278,7 +278,7 @@ def _drive_activity(activity):
                     activity._pending = value
                     to_send = yield value
                 elif isinstance(value, (int, float)):
-                    activity._pending = deferLater(reactor, max(0.0, float(value)), lambda: None)
+                    activity._pending = clock.defer_later(max(0.0, float(value)))
                     yield activity._pending
                 # else: unknown yield value — resume with None
             except CancelledError:

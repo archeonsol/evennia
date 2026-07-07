@@ -7,13 +7,13 @@ It uses the plugin system and should be plugged via settings as detailed in the 
 
 import json
 
-from autobahn.twisted import WebSocketServerFactory
 from twisted.application import internet
 
 from evennia import settings
 from evennia.contrib.base_systems.godotwebsocket.text2bbcode import \
     parse_to_bbcode
 from evennia.server.portal import webclient
+from evennia.server.portal.ws_protocol import WSServerFactory
 from evennia.settings_default import LOCKDOWN_MODE
 
 
@@ -64,13 +64,7 @@ class GodotWebSocketClient(webclient.WebSocketClient):
 
 
 def start_plugin_services(portal):
-    class GodotWebsocket(WebSocketServerFactory):
-        "Only here for better naming in logs"
-
-        pass
-
-    factory = GodotWebsocket()
-    factory.noisy = False
+    factory = WSServerFactory()
     factory.protocol = GodotWebSocketClient
     from evennia.server.portal.portalsessionhandler import PORTAL_SESSIONS
 

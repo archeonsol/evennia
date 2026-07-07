@@ -7,10 +7,9 @@ to the channel whenever the feed updates.
 """
 
 from django.conf import settings
-from twisted.internet import task, threads
 
 from evennia.server.session import Session
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 RSS_ENABLED = settings.RSS_ENABLED
 # RETAG = re.compile(r'<[^>]*?>')
@@ -115,7 +114,7 @@ class RSSReader(Session):
 
         """
         return (
-            threads.deferToThread(self.get_new)
+            clock.defer_to_thread(self.get_new)
             .addCallback(self._callback, init)
             .addErrback(self._errback)
         )
@@ -161,6 +160,6 @@ class RSSBotFactory(object):
 
         # start repeater task
         self.bot.update(init=True)
-        self.task = task.LoopingCall(self.bot.update)
+        self.task = clock.make_looping(self.bot.update)
         if self.rate:
             self.task.start(self.rate, now=False).addErrback(errback)

@@ -2,7 +2,8 @@
 Webclient based on websockets with MUD Standards subprotocol support.
 
 This implements a webclient with WebSockets (http://en.wikipedia.org/wiki/WebSocket)
-by use of the autobahn-python package's implementation (https://github.com/crossbario/autobahn-python).
+on top of the sans-io ``wsproto`` state machine driven from a Twisted protocol
+(see ``evennia/server/portal/ws_protocol.py``; this replaced autobahn-python).
 It is used together with evennia/web/media/javascript/evennia_websocket_webclient.js.
 
 Subprotocol Negotiation (RFC 6455 Sec-WebSocket-Protocol):
@@ -32,14 +33,20 @@ from the command line and interprets it as an Evennia Command: `["text", ["look"
 
 """
 
+import asyncio
 import json
 import time
 from collections import deque
 
-from autobahn.exception import Disconnected
-from autobahn.twisted.websocket import WebSocketServerProtocol
 from django.conf import settings
 
+from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+from evennia.server.portal.ws_protocol import (
+    CLOSE_NORMAL,
+    GOING_AWAY,
+    Disconnected,
+    WSProtocolBase,
+)
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -60,13 +67,7 @@ def _prune_resume_stash():
     for tok in [t for t, s in _RESUME_STASH.items() if s["deadline"] < now]:
         _RESUME_STASH.pop(tok, None)
 
-# Status Code 1000: Normal Closure
-#   called when the connection was closed through JavaScript
-CLOSE_NORMAL = WebSocketServerProtocol.CLOSE_STATUS_CODE_NORMAL
-
-# Status Code 1001: Going Away
-#   called when the browser is navigating away from the page
-GOING_AWAY = WebSocketServerProtocol.CLOSE_STATUS_CODE_GOING_AWAY
+# CLOSE_NORMAL (1000) / GOING_AWAY (1001) are imported from ws_protocol.
 
 _BASE_SESSION_CLASS = class_from_module(settings.BASE_SESSION_CLASS)
 
@@ -143,7 +144,7 @@ def _get_supported_subprotocols():
     return protos
 
 
-class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
+class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
     """
     Implements the server-side of the Websocket connection.
 
@@ -262,8 +263,8 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
         This is called when the WebSocket connection is fully established.
 
         """
-        client_address = self.transport.client
-        client_address = client_address[0] if client_address else None
+        peer = self.transport.getPeer()
+        client_address = getattr(peer, "host", None)
 
         if client_address in settings.UPSTREAM_IPS and "x-forwarded-for" in self.http_headers:
             addresses = [x.strip() for x in self.http_headers["x-forwarded-for"].split(",")]
@@ -349,12 +350,8 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             self.logged_in = False
 
         self.sessionhandler.disconnect(self)
-        # autobahn-python:
-        # 1000 for a normal close, 1001 if the browser window is closed,
-        # 3000-4999 for app. specific,
-        # in case anyone wants to expose this functionality later.
-        #
-        # sendClose() under autobahn/websocket/interfaces.py
+        # RFC 6455 close codes: 1000 normal, 1001 browser window closed,
+        # 3000-4999 application-specific (in case anyone wants to expose that).
         self.sendClose(CLOSE_NORMAL, reason)
 
     def _handle_resume(self, resume):
@@ -658,3 +655,34 @@ class WebSocketClient(WebSocketServerProtocol, _BASE_SESSION_CLASS):
             # Fallback: legacy behavior
             if not cmdname == "options":
                 self.sendLine(json.dumps([cmdname, args, kwargs]))
+
+
+class AsyncioWebSocketProtocol(asyncio.Protocol):
+    """Run a ``WebSocketClient`` (full webclient session) on a native asyncio loop.
+
+    Composition mirror of ``AsyncioTelnetProtocol``: owns a ``WebSocketClient``,
+    hands it an ``AsyncioTransportShim``, and forwards the loop's transport
+    callbacks. The wsproto core is transport-agnostic and the session layer only
+    touches the (shimmed) transport, so the webclient runs unchanged. Use with
+    ``loop.create_server(lambda: AsyncioWebSocketProtocol(factory), ...)`` where
+    ``factory`` carries ``.sessionhandler`` (as ``WSServerFactory`` does).
+    """
+
+    def __init__(self, factory):
+        self._factory = factory
+        self.ws = None
+
+    def connection_made(self, transport):
+        proto_class = getattr(self._factory, "protocol", None) or WebSocketClient
+        proto = proto_class()
+        proto.factory = self._factory
+        proto.transport = AsyncioTransportShim(transport)
+        self.ws = proto
+        # server role: onConnect/onOpen fire once the client's upgrade arrives
+
+    def data_received(self, data):
+        self.ws.dataReceived(data)
+
+    def connection_lost(self, exc):
+        if self.ws is not None:
+            self.ws.connectionLost(str(exc) if exc else None)

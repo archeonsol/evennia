@@ -17,9 +17,9 @@ from twisted.application import internet
 from twisted.application.service import MultiService
 from twisted.internet import defer, reactor
 from twisted.internet.defer import Deferred
-from twisted.internet.task import LoopingCall
 
 import evennia
+from evennia.utils import clock
 from evennia.utils import logger
 from evennia.utils.utils import get_evennia_version, make_iter, mod_import
 
@@ -269,60 +269,12 @@ class EvenniaServerService(MultiService):
         self.info_dict["amp"] = "redis bus"
         self.amp_protocol = RedisServerBus(self)
         # Start once the reactor is running (redis threads + PSYNC handshake).
-        reactor.callWhenRunning(self.amp_protocol.start_bus)
+        clock.when_running(self.amp_protocol.start_bus)
 
     def register_webserver(self):
-        # Start a django-compatible webserver: ASGI (uvicorn) or Twisted-WSGI.
-        if getattr(settings, "WEB_SERVER", "wsgi") == "asgi":
-            self.register_asgi_webserver()
-            return
-
-        from evennia.server.webserver import (
-            DjangoWebRoot,
-            LockableThreadPool,
-            PrivateStaticRoot,
-            Website,
-            WSGIWebServer,
-        )
-
-        # start a thread pool and define the root url (/) as a wsgi resource
-        # recognized by Django
-        threads = LockableThreadPool(
-            minthreads=max(1, settings.WEBSERVER_THREADPOOL_LIMITS[0]),
-            maxthreads=max(1, settings.WEBSERVER_THREADPOOL_LIMITS[1]),
-        )
-
-        web_root = DjangoWebRoot(threads)
-        # point our media resources to url /media
-        web_root.putChild(b"media", PrivateStaticRoot(settings.MEDIA_ROOT))
-        # point our static resources to url /static
-        web_root.putChild(b"static", PrivateStaticRoot(settings.STATIC_ROOT))
-        self.web_root = web_root
-
-        try:
-            WEB_PLUGINS_MODULE = mod_import(settings.WEB_PLUGINS_MODULE)
-        except ImportError:
-            WEB_PLUGINS_MODULE = None
-            self.info_dict["errors"] = (
-                "WARNING: settings.WEB_PLUGINS_MODULE not found - "
-                "copy 'evennia/game_template/server/conf/web_plugins.py to mygame/server/conf."
-            )
-
-        if WEB_PLUGINS_MODULE:
-            # custom overloads
-            web_root = WEB_PLUGINS_MODULE.at_webserver_root_creation(web_root)
-
-        web_site = Website(web_root, logPath=settings.HTTP_LOG_FILE)
-        web_site.is_portal = False
-
-        self.info_dict["webserver"] = ""
-        for proxyport, serverport in settings.WEBSERVER_PORTS:
-            # create the webserver (we only need the port for this)
-            webserver = WSGIWebServer(threads, serverport, web_site, interface="127.0.0.1")
-            webserver.setName("EvenniaWebServer%s" % serverport)
-            webserver.setServiceParent(self)
-
-            self.info_dict["webserver"] += "webserver: %s" % serverport
+        # The Server serves Django over ASGI (uvicorn). The legacy Twisted-WSGI
+        # path was retired in the T3 modernization; WEB_SERVER is always "asgi".
+        self.register_asgi_webserver()
 
     def register_asgi_webserver(self):
         """Serve Django over ASGI (uvicorn in a worker thread). See asgi_webserver."""
@@ -522,8 +474,7 @@ class EvenniaServerService(MultiService):
         # repeat init (tests) never leaves an orphaned task ticking.
         if self.maintenance_task is not None and self.maintenance_task.running:
             self.maintenance_task.stop()
-        self.maintenance_task = LoopingCall(self.server_maintenance)
-        self.maintenance_task.start(60, now=True)  # call every minute
+        self.maintenance_task = clock.looping(60, self.server_maintenance, now=True)  # every minute
 
         # load declared system modules and start the system-scheduler driver
         # (engine systems first, then settings.SYSTEM_MODULES; a broken

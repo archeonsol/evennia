@@ -14,10 +14,10 @@ from collections import defaultdict
 from random import choice
 
 from django.conf import settings
-from twisted.internet import reactor, task
 from twisted.internet.defer import CancelledError, inlineCallbacks
 
 from evennia import AttributeProperty, Command, DefaultCharacter
+from evennia.utils import clock
 from evennia.utils.utils import make_iter
 
 from .llm_client import LLMClient
@@ -157,8 +157,8 @@ class LLMNPC(DefaultCharacter):
             """Suppress task-cancel errors only"""
             failure.trap(CancelledError)
 
-        thinking_defer = task.deferLater(
-            reactor, self.thinking_timeout, _echo_thinking_message
+        thinking_defer = clock.defer_later(
+            self.thinking_timeout, _echo_thinking_message
         ).addErrback(_handle_cancel_error)
 
         # remember latest input in memory, so it's included in the prompt
