@@ -29,27 +29,18 @@ import asyncio
 from urllib.parse import urlparse
 
 from twisted.internet import protocol
-
 from wsproto import ConnectionType, WSConnection
-from wsproto.events import (
-    AcceptConnection,
-    BytesMessage,
-    CloseConnection,
-    Message,
-    Ping,
-    Pong,
-    RejectConnection,
-    Request,
-    TextMessage,
-)
+from wsproto.events import (AcceptConnection, BytesMessage, CloseConnection,
+                            Message, Ping, Pong, RejectConnection, Request,
+                            TextMessage)
 from wsproto.extensions import PerMessageDeflate
 from wsproto.utilities import RemoteProtocolError
 
 from evennia.utils import logger
 
 # RFC 6455 close codes (were sourced from autobahn's WebSocketServerProtocol).
-CLOSE_NORMAL = 1000   # normal closure (JS close())
-GOING_AWAY = 1001     # browser navigating away / tab closed
+CLOSE_NORMAL = 1000  # normal closure (JS close())
+GOING_AWAY = 1001  # browser navigating away / tab closed
 
 
 class Disconnected(Exception):
@@ -89,10 +80,10 @@ class _WSCore:
 
     def __init__(self, conn_type, *args, **kwargs):
         self._ws = WSConnection(conn_type)
-        self._ws_open = False          # handshake completed
-        self._ws_closed = False        # close frame sent/received
+        self._ws_open = False  # handshake completed
+        self._ws_closed = False  # close frame sent/received
         self._closed_notified = False  # onClose fired exactly once
-        self._msg_parts = []           # fragments of the message being received
+        self._msg_parts = []  # fragments of the message being received
         self._msg_is_binary = False
         # Continue cooperative init into the session mixin.
         super().__init__(*args, **kwargs)
@@ -201,7 +192,9 @@ class _WSCore:
             return
         self._ws_closed = True
         try:
-            self._safe_write(self._ws.send(CloseConnection(code=code or CLOSE_NORMAL, reason=reason)))
+            self._safe_write(
+                self._ws.send(CloseConnection(code=code or CLOSE_NORMAL, reason=reason))
+            )
         except Exception:
             pass
         self._lose_connection()
@@ -439,7 +432,8 @@ class _AsyncioWSClientProtocol(asyncio.Protocol):
     """
 
     def __init__(self, factory, loop):
-        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+        from evennia.server.portal.asyncio_transport import \
+            AsyncioTransportShim
 
         self._shim_cls = AsyncioTransportShim
         self.session = factory.buildProtocol(None)
@@ -510,15 +504,20 @@ async def connect_ws_asyncio(factory):
                 if _stopping():
                     try:
                         proto.session.transport.loseConnection()
-                    except Exception:
+                    except (AttributeError, OSError):
                         pass
                 try:
                     await _asyncio.wait_for(_asyncio.shield(closed_wait), timeout=0.25)
                     break
                 except _asyncio.TimeoutError:
                     continue
+        except (OSError, _asyncio.TimeoutError):
+            # Transient connection failure (DNS, refused, reset, timeout): retry.
+            logger.log_trace("asyncio ws client connection failed; will retry")
         except Exception:
-            logger.log_trace("asyncio ws client connection failed")
+            # Non-transient (misconfig, programming error): stop, do not spin.
+            logger.log_trace("asyncio ws client hit a non-transient error; stopping reconnect")
+            break
 
         if _stopping():
             break
@@ -536,9 +535,7 @@ def connect_ws(factory, reactor=None):
     from django.conf import settings
 
     from evennia.server.portal.asyncio_transport import (
-        asyncio_servers_enabled,
-        get_asyncio_loop,
-    )
+        asyncio_servers_enabled, get_asyncio_loop)
 
     if asyncio_servers_enabled():
         get_asyncio_loop().create_task(connect_ws_asyncio(factory))

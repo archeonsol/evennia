@@ -539,3 +539,106 @@ class TestWebclientGoingAwayAuth(TestCase):
         client.onClose(False, code=GOING_AWAY)
 
         self.assertEqual(csession["webclient_authenticated_uid"], 42)
+
+
+class TestAsyncioReconnectHardening(TestCase):
+    """Reconnect loops must not retry forever on non-transient errors."""
+
+    def _factory(self):
+        f = MagicMock()
+        f.stopping = False
+        f.bot = None
+        f.ssl = False
+        f.initialDelay = 0.01
+        f.factor = 1.0
+        f.maxDelay = 0.01
+        return f
+
+    def test_irc_reconnect_breaks_on_non_transient_error(self):
+        import asyncio
+
+        from evennia.server.portal import irc
+
+        factory = self._factory()
+        loop = asyncio.new_event_loop()
+        calls = []
+
+        async def boom(*a, **k):
+            calls.append(1)
+            raise AttributeError("programming error, not a network blip")
+
+        try:
+            asyncio.set_event_loop(loop)
+            with mock.patch.object(loop, "create_connection", side_effect=boom):
+                loop.run_until_complete(
+                    asyncio.wait_for(irc.connect_irc_asyncio(factory), timeout=1)
+                )
+            # non-transient → exactly one attempt, then break (no infinite retry)
+            self.assertEqual(len(calls), 1)
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    def test_ws_reconnect_breaks_on_non_transient_error(self):
+        import asyncio
+
+        from evennia.server.portal import ws_protocol
+
+        factory = self._factory()
+        factory.ws_url = "ws://localhost:1/"
+        loop = asyncio.new_event_loop()
+        calls = []
+
+        async def boom(*a, **k):
+            calls.append(1)
+            raise AttributeError("programming error, not a network blip")
+
+        try:
+            asyncio.set_event_loop(loop)
+            with mock.patch.object(loop, "create_connection", side_effect=boom):
+                loop.run_until_complete(
+                    asyncio.wait_for(ws_protocol.connect_ws_asyncio(factory), timeout=1)
+                )
+            self.assertEqual(len(calls), 1)
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    def test_irc_data_received_wraps_and_closes_on_error(self):
+        from evennia.server.portal import irc
+
+        proto = object.__new__(irc._AsyncioIRCClientProtocol)
+        proto.session = MagicMock()
+        proto.session.dataReceived.side_effect = ValueError("hostile line")
+
+        # must not propagate to the asyncio loop; must close the connection
+        proto.data_received(b"garbage")
+        proto.session.transport.loseConnection.assert_called_once()
+
+
+class TestIrcSslFallback(TestCase):
+    """The Twisted IRC SSL fallback must verify the server certificate."""
+
+    def test_twisted_ssl_fallback_uses_verifying_context(self):
+        from django.test import override_settings
+
+        from evennia.server.portal import irc
+
+        factory = MagicMock()
+        factory.ssl = True
+        factory.port = 6697
+        factory.network = "irc.example.org"
+
+        with (
+            mock.patch(
+                "evennia.server.portal.asyncio_transport.asyncio_servers_enabled",
+                return_value=False,
+            ),
+            mock.patch.object(irc, "reactor") as mock_reactor,
+            mock.patch("twisted.internet.ssl.optionsForClientTLS") as mock_opts,
+            override_settings(PORTAL_ASYNCIO_SERVERS=False),
+        ):
+            irc.connect_irc(factory)
+
+        mock_opts.assert_called_once_with("irc.example.org")
+        mock_reactor.connectSSL.assert_called_once()

@@ -353,7 +353,8 @@ class _AsyncioIRCClientProtocol(asyncio.Protocol):
     """Drive an ``IRCBot`` session over a native asyncio transport."""
 
     def __init__(self, factory, loop):
-        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+        from evennia.server.portal.asyncio_transport import \
+            AsyncioTransportShim
 
         self._shim_cls = AsyncioTransportShim
         self.session = factory.buildProtocol(None)
@@ -364,7 +365,16 @@ class _AsyncioIRCClientProtocol(asyncio.Protocol):
         self.session.connectionMade()
 
     def data_received(self, data):
-        self.session.dataReceived(data)
+        try:
+            self.session.dataReceived(data)
+        except Exception:
+            # A hostile/malformed line must not escape into the asyncio loop's
+            # exception handler; log it and drop this connection deliberately.
+            logger.log_trace("asyncio IRC data_received failed; closing connection")
+            try:
+                self.session.transport.loseConnection()
+            except (AttributeError, OSError):
+                pass
 
     def connection_lost(self, exc):
         try:
@@ -405,15 +415,20 @@ async def connect_irc_asyncio(factory):
                 if _stopping():
                     try:
                         proto.session.transport.loseConnection()
-                    except Exception:
+                    except (AttributeError, OSError):
                         pass
                 try:
                     await asyncio.wait_for(asyncio.shield(closed_wait), timeout=0.25)
                     break
                 except asyncio.TimeoutError:
                     continue
+        except (OSError, asyncio.TimeoutError):
+            # Transient connection failure (DNS, refused, reset, timeout): retry.
+            logger.log_trace("asyncio IRC client connection failed; will retry")
         except Exception:
-            logger.log_trace("asyncio IRC client connection failed")
+            # Non-transient (misconfig, programming error): stop, do not spin.
+            logger.log_trace("asyncio IRC client hit a non-transient error; stopping reconnect")
+            break
 
         if _stopping():
             break
@@ -426,9 +441,7 @@ def connect_irc(factory):
     from django.conf import settings
 
     from evennia.server.portal.asyncio_transport import (
-        asyncio_servers_enabled,
-        get_asyncio_loop,
-    )
+        asyncio_servers_enabled, get_asyncio_loop)
 
     if asyncio_servers_enabled():
         get_asyncio_loop().create_task(connect_irc_asyncio(factory))
@@ -449,8 +462,13 @@ def connect_irc(factory):
         try:
             from twisted.internet import ssl
 
+            # optionsForClientTLS verifies the server cert + hostname (matching the
+            # asyncio path's create_default_context); ClientContextFactory did not.
             service = reactor.connectSSL(
-                factory.network, int(factory.port), factory, ssl.ClientContextFactory()
+                factory.network,
+                int(factory.port),
+                factory,
+                ssl.optionsForClientTLS(factory.network),
             )
         except ImportError:
             logger.log_err("To use SSL, the PyOpenSSL module must be installed.")
