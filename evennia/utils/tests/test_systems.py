@@ -7,13 +7,14 @@ need no running reactor. Calendar persistence goes through ServerConfig and
 needs the test database; everything else is in-memory.
 """
 
+import asyncio
 import sys
 import types
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 from django.test import override_settings
-from twisted.internet.defer import Deferred, succeed
+from twisted.internet.defer import succeed
 
 from evennia.utils import systems
 from evennia.utils.systems import (SystemDriver, SystemRegistrationError,
@@ -361,8 +362,34 @@ class TestErrorIsolation(_SchedulerTestMixin, BaseEvenniaTestCase):
 
 
 class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
+    """Overlap guard: a fire suspends on an ``asyncio.Future`` gate (its body or
+    the entity-id query) and stays ``in_flight`` across ticks until the test
+    resolves it. ``run_coroutine`` makes a real task on ``self._loop``; ``_tick``
+    steps the loop so a resolve/failure unwinds the fire.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
+    def tearDown(self):
+        self._loop.close()
+        asyncio.set_event_loop(None)
+        super().tearDown()
+
+    def _gate(self):
+        return self._loop.create_future()
+
+    async def _tick(self, n=3):
+        for _ in range(n):
+            await asyncio.sleep(0)
+
+    def _run(self, coro):
+        return self._loop.run_until_complete(coro)
+
     def test_due_while_in_flight_skips_and_warns(self):
-        pending = Deferred()
+        pending = self._gate()
         runs = []
 
         def _slow(ctx):
@@ -370,102 +397,147 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
             return pending
 
         register(name="slow", cadence=every_tick(), scope=global_scope(), run=_slow)
-        self.driver.tick()
-        self.assertEqual(len(runs), 1)
 
-        with patch.object(systems, "logger") as mock_logger:
+        async def scenario():
+            self.driver.tick()
+            await self._tick()  # fire suspends on the pending body
+            self.assertEqual(len(runs), 1)
+
+            with patch.object(systems, "logger") as mock_logger:
+                self.clock.advance(1.0)
+                self.driver.tick()  # still in flight -> skip
+                await self._tick()
+            self.assertEqual(len(runs), 1)
+            self.assertTrue(mock_logger.log_warn.called)
+
+            pending.set_result(None)  # body completes
+            await self._tick()
             self.clock.advance(1.0)
-            self.driver.tick()  # still in flight -> skip
-        self.assertEqual(len(runs), 1)
-        self.assertTrue(mock_logger.log_warn.called)
+            self.driver.tick()
+            await self._tick()
+            self.assertEqual(len(runs), 2)
 
-        pending.callback(None)  # body completes
-        self.clock.advance(1.0)
-        self.driver.tick()
-        self.assertEqual(len(runs), 2)
+        self._run(scenario())
 
     def test_async_failure_clears_in_flight_and_logs(self):
-        pending = Deferred()
+        pending = self._gate()
         register(name="slow", cadence=every_tick(), scope=global_scope(), run=lambda ctx: pending)
-        self.driver.tick()
-        with patch.object(systems, "logger") as mock_logger:
-            pending.errback(RuntimeError("async kaboom"))
-        self.assertTrue(mock_logger.log_trace.called)
-        self.assertFalse(get_system("slow").in_flight)
+
+        async def scenario():
+            self.driver.tick()
+            await self._tick()  # fire suspends on the pending body
+            with patch.object(systems, "logger") as mock_logger:
+                pending.set_exception(RuntimeError("async kaboom"))
+                await self._tick()  # failure unwinds the fire
+            self.assertTrue(mock_logger.log_trace.called)
+            self.assertFalse(get_system("slow").in_flight)
+
+        self._run(scenario())
 
     def test_skip_escalates_to_error_after_threshold(self):
-        pending = Deferred()
+        pending = self._gate()
         register(name="slow", cadence=every_tick(), scope=global_scope(), run=lambda ctx: pending)
-        self.driver.tick()  # fire; body never completes
-        with patch.object(systems, "logger") as mock_logger:
-            for _ in range(systems._SKIP_ESCALATION_THRESHOLD):
-                self.clock.advance(1.0)
-                self.driver.tick()
-        # the first skips warn; the threshold-th skip escalates to error
-        self.assertEqual(mock_logger.log_warn.call_count, systems._SKIP_ESCALATION_THRESHOLD - 1)
-        self.assertEqual(mock_logger.log_err.call_count, 1)
-        self.assertIn("consecutive skips", str(mock_logger.log_err.call_args))
+
+        async def scenario():
+            self.driver.tick()  # fire; body never completes
+            await self._tick()
+            with patch.object(systems, "logger") as mock_logger:
+                for _ in range(systems._SKIP_ESCALATION_THRESHOLD):
+                    self.clock.advance(1.0)
+                    self.driver.tick()
+            # the first skips warn; the threshold-th skip escalates to error
+            self.assertEqual(
+                mock_logger.log_warn.call_count, systems._SKIP_ESCALATION_THRESHOLD - 1
+            )
+            self.assertEqual(mock_logger.log_err.call_count, 1)
+            self.assertIn("consecutive skips", str(mock_logger.log_err.call_args))
+
+            pending.set_result(None)  # let the wedged fire finish before loop close
+            await self._tick()
+
+        self._run(scenario())
 
     def test_all_entities_in_flight_spans_pending_id_query(self):
-        pending_ids = Deferred()
+        pending_ids = self._gate()
         register(
             name="sweep",
             cadence=every(1),
             scope=all_entities(component="foo.Bar"),
             run=self._recording_run,
         )
-        with patch.object(systems, "_entity_ids_deferred", return_value=pending_ids):
-            self.clock.set(0.0)
-            self.driver.tick()  # prime
-            self.clock.set(1.0)
-            self.driver.tick()  # fire: id query pending, body not yet run
-            self.assertTrue(get_system("sweep").in_flight)
-            self.assertEqual(len(self.fires), 0)
-            with patch.object(systems, "logger") as mock_logger:
-                self.clock.set(2.0)
-                self.driver.tick()  # due again while id query pending -> skip
-            self.assertTrue(mock_logger.log_warn.called)
-            self.assertEqual(len(self.fires), 0)
-            pending_ids.callback([1, 2])  # query completes -> body runs
-        self.assertEqual(len(self.fires), 1)
-        self.assertEqual(self.fires[0].entity_ids, [1, 2])
-        self.assertFalse(get_system("sweep").in_flight)
+
+        async def scenario():
+            with patch.object(systems, "_entity_ids_deferred", return_value=pending_ids):
+                self.clock.set(0.0)
+                self.driver.tick()  # prime
+                await self._tick()
+                self.clock.set(1.0)
+                self.driver.tick()  # fire: id query pending, body not yet run
+                await self._tick()
+                self.assertTrue(get_system("sweep").in_flight)
+                self.assertEqual(len(self.fires), 0)
+                with patch.object(systems, "logger") as mock_logger:
+                    self.clock.set(2.0)
+                    self.driver.tick()  # due again while id query pending -> skip
+                    await self._tick()
+                self.assertTrue(mock_logger.log_warn.called)
+                self.assertEqual(len(self.fires), 0)
+                pending_ids.set_result([1, 2])  # query completes -> body runs
+                await self._tick()
+            self.assertEqual(len(self.fires), 1)
+            self.assertEqual(self.fires[0].entity_ids, [1, 2])
+            self.assertFalse(get_system("sweep").in_flight)
+
+        self._run(scenario())
 
     def test_all_entities_id_query_failure_clears_in_flight(self):
-        pending_ids = Deferred()
+        pending_ids = self._gate()
         register(
             name="sweep",
             cadence=every(1),
             scope=all_entities(component="foo.Bar"),
             run=self._recording_run,
         )
-        with patch.object(systems, "_entity_ids_deferred", return_value=pending_ids):
-            self.clock.set(0.0)
-            self.driver.tick()  # prime
-            self.clock.set(1.0)
-            self.driver.tick()  # fire
-            with patch.object(systems, "logger") as mock_logger:
-                pending_ids.errback(RuntimeError("query died"))
-        self.assertTrue(mock_logger.log_err.called)
-        self.assertEqual(len(self.fires), 0)
-        self.assertFalse(get_system("sweep").in_flight)
+
+        async def scenario():
+            with patch.object(systems, "_entity_ids_deferred", return_value=pending_ids):
+                self.clock.set(0.0)
+                self.driver.tick()  # prime
+                await self._tick()
+                self.clock.set(1.0)
+                self.driver.tick()  # fire
+                await self._tick()
+                with patch.object(systems, "logger") as mock_logger:
+                    pending_ids.set_exception(RuntimeError("query died"))
+                    await self._tick()  # failure unwinds the fire
+            self.assertTrue(mock_logger.log_trace.called)
+            self.assertEqual(len(self.fires), 0)
+            self.assertFalse(get_system("sweep").in_flight)
+
+        self._run(scenario())
 
     def test_sync_raise_in_entity_selection_clears_in_flight(self):
         register(name="p", cadence=every_tick(), scope=online_puppets(), run=self._recording_run)
-        with (
-            patch.object(
-                systems, "_select_online_puppets", side_effect=RuntimeError("selector died")
-            ),
-            patch.object(systems, "logger") as mock_logger,
-        ):
-            self.driver.tick()
-        self.assertTrue(mock_logger.log_err.called)
-        self.assertFalse(get_system("p").in_flight)
-        # the system recovers once the selector works again
-        with patch.object(systems, "_select_online_puppets", return_value=[]):
-            self.clock.advance(1.0)
-            self.driver.tick()
-        self.assertEqual(len(self.fires), 1)
+
+        async def scenario():
+            with (
+                patch.object(
+                    systems, "_select_online_puppets", side_effect=RuntimeError("selector died")
+                ),
+                patch.object(systems, "logger") as mock_logger,
+            ):
+                self.driver.tick()
+                await self._tick()  # selector raises inside the fire, unwinds it
+            self.assertTrue(mock_logger.log_trace.called)
+            self.assertFalse(get_system("p").in_flight)
+            # the system recovers once the selector works again
+            with patch.object(systems, "_select_online_puppets", return_value=[]):
+                self.clock.advance(1.0)
+                self.driver.tick()
+                await self._tick()
+            self.assertEqual(len(self.fires), 1)
+
+        self._run(scenario())
 
 
 class TestRegistry(_SchedulerTestMixin, BaseEvenniaTestCase):
