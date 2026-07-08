@@ -98,7 +98,18 @@ class _RedisTransport:
         for t in (self._writer, self._reader):
             if t is not None:
                 t.join(timeout=3)
-        self._writer = self._reader = None
+        # Only drop handles for threads that actually exited. A thread wedged in
+        # a blocking redis call ignores _stop and outlives the join; keeping its
+        # handle lets a later start() see it via is_alive() and skip spawning a
+        # duplicate rather than orphaning a live reader/writer.
+        if self._writer is not None and self._writer.is_alive():
+            logger.log_warn("redis bus: writer thread did not stop within 3s; leaving it running")
+        else:
+            self._writer = None
+        if self._reader is not None and self._reader.is_alive():
+            logger.log_warn("redis bus: reader thread did not stop within 3s; leaving it running")
+        else:
+            self._reader = None
         try:
             if self._client is not None:
                 self._client.close()

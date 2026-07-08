@@ -223,6 +223,28 @@ class TestRedisTransportBootFailFast(SimpleTestCase):
 
 
 @override_settings(**_BUS_SETTINGS)
+class TestRedisTransportStop(SimpleTestCase):
+    """stop() drops only threads that actually exited; a wedged thread is kept
+    (and logged) so a later start() sees it via is_alive() and never duplicates."""
+
+    def test_stop_keeps_wedged_thread_handle_and_warns(self):
+        transport = _RedisTransport("evennia:testbus:s2p", lambda *a: None)
+        exited = MagicMock()
+        exited.is_alive.return_value = False
+        wedged = MagicMock()
+        wedged.is_alive.return_value = True
+        transport._writer = exited
+        transport._reader = wedged
+        with patch.object(redis_bus.logger, "log_warn") as mock_log_warn:
+            transport.stop()
+        # exited thread handle cleared; wedged one retained so start()'s
+        # is_alive() guard prevents spawning a duplicate reader
+        self.assertIsNone(transport._writer)
+        self.assertIs(transport._reader, wedged)
+        self.assertTrue(mock_log_warn.called)
+
+
+@override_settings(**_BUS_SETTINGS)
 class TestRedisTransportQueueBound(SimpleTestCase):
     """Publish queue is bounded: overflow drops the newest frame, logs once per stall."""
 
