@@ -42,6 +42,7 @@ def _future_errback(future, errback):
     future.add_done_callback(_done)
     return future
 
+
 _LOGDIR = None
 _LOG_ROTATE_SIZE = None
 _TIMEZONE = None
@@ -597,8 +598,19 @@ def log_file(msg, filename="game.log"):
 
     # save to server/logs/ directory
     filehandle = _open_log_file(filename)
-    if filehandle:
+    if not filehandle:
+        return
+    if clock.loop_running():
+        # normal path: offload the blocking write off the reactor thread
         _future_errback(clock.defer_to_thread(callback, filehandle, msg), errback)
+    else:
+        # no running loop (early boot, synchronous test setUp): deferring would
+        # raise "no running event loop" or queue on a loop that never runs and
+        # drop the line. Write inline instead.
+        try:
+            callback(filehandle, msg)
+        except Exception:
+            log_trace()
 
 
 def log_file_exists(filename="game.log"):

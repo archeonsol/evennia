@@ -1,8 +1,42 @@
 import unittest
+from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
+from evennia.utils import logger
 from evennia.utils.logger import mask_sensitive_input
+
+
+class TestLogFileNoLoop(unittest.TestCase):
+    """
+    log_file must write synchronously when no event loop is running (early
+    boot, synchronous test setUp). Deferring to a thread there either raises
+    "no running event loop" or queues on a loop that never runs, silently
+    dropping the line.
+    """
+
+    @patch("evennia.utils.logger._future_errback")
+    @patch("evennia.utils.logger._open_log_file")
+    @patch("evennia.utils.logger.clock")
+    def test_no_loop_writes_synchronously(self, mock_clock, mock_open, mock_fe):
+        mock_clock.loop_running.return_value = False
+        handle = MagicMock()
+        mock_open.return_value = handle
+        logger.log_file("hello", filename="test.log")
+        mock_clock.defer_to_thread.assert_not_called()
+        handle.write.assert_called_once()
+        handle.flush.assert_called_once()
+
+    @patch("evennia.utils.logger._future_errback")
+    @patch("evennia.utils.logger._open_log_file")
+    @patch("evennia.utils.logger.clock")
+    def test_running_loop_defers_to_thread(self, mock_clock, mock_open, mock_fe):
+        mock_clock.loop_running.return_value = True
+        handle = MagicMock()
+        mock_open.return_value = handle
+        logger.log_file("hello", filename="test.log")
+        mock_clock.defer_to_thread.assert_called_once()
+        handle.write.assert_not_called()
 
 
 class TestMaskSensitiveInput(unittest.TestCase):
