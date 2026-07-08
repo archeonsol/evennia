@@ -127,3 +127,47 @@ class TestDeferLaterCompatErrbacks(_AsyncioLoopMixin, BaseEvenniaTestCase):
             d._run_errbacks(ValueError("orig"))
         self.assertIs(ctx.exception, sentinel)  # not UnboundLocalError
         self.assertEqual(len(calls), 1)  # not double-invoked
+
+
+class TestDefaultExecutorLifecycle(BaseEvenniaTestCase):
+    """The shared worker pool is built once and shut down on graceful exit."""
+
+    def setUp(self):
+        super().setUp()
+        self._saved_executor = clock._default_executor
+        self._saved_loop = clock._main_loop
+        self._saved_hooks = clock._shutdown_hooks[:]
+        clock._default_executor = None
+        clock._shutdown_hooks.clear()
+
+    def tearDown(self):
+        clock.shutdown_default_executor()
+        clock._default_executor = self._saved_executor
+        clock._main_loop = self._saved_loop
+        clock._shutdown_hooks[:] = self._saved_hooks
+        super().tearDown()
+
+    def test_bind_loop_constructs_executor_eagerly(self):
+        loop = asyncio.new_event_loop()
+        try:
+            self.assertIsNone(clock._default_executor)
+            clock.bind_loop(loop)
+            # eager build in the single-threaded bootstrap → no lazy construct race
+            self.assertIsNotNone(clock._default_executor)
+        finally:
+            loop.close()
+
+    def test_run_shutdown_hooks_shuts_down_executor(self):
+        loop = asyncio.new_event_loop()
+        try:
+            clock.bind_loop(loop)
+            executor = clock._default_executor
+            self.assertIsNotNone(executor)
+
+            clock.run_shutdown_hooks()
+
+            self.assertIsNone(clock._default_executor)
+            with self.assertRaises(RuntimeError):
+                executor.submit(lambda: None)  # pool is shut down, not leaked
+        finally:
+            loop.close()

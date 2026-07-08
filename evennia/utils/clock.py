@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 # Twisted default reactor threadpool uses maxthreads=10.
@@ -18,6 +19,7 @@ _DEFAULT_EXECUTOR_WORKERS = 10
 _pending_when_running: list[tuple] = []
 _shutdown_hooks: list[tuple] = []
 _default_executor: ThreadPoolExecutor | None = None
+_executor_lock = threading.Lock()
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 
@@ -25,6 +27,10 @@ def bind_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Register the process-owned loop (asyncio bootstrap, T3 S9)."""
     global _main_loop
     _main_loop = loop
+    # Build the worker pool here, in the single-threaded bootstrap context, so
+    # concurrent defer_to_thread callers never race to construct duplicate pools.
+    # (The pool spawns no threads until work is actually submitted.)
+    _ensure_default_executor()
 
 
 def get_bound_loop() -> asyncio.AbstractEventLoop | None:
@@ -72,6 +78,10 @@ def run_shutdown_hooks():
             from evennia.utils.logger import log_trace
 
             log_trace("shutdown hook failed")
+    # Tear the worker pool down last, after user hooks: a hook may still hand
+    # blocking work to defer_to_thread, and its non-daemon threads would
+    # otherwise outlive loop teardown and pile up across in-process reloads.
+    shutdown_default_executor()
 
 
 def stop_loop():
@@ -127,14 +137,29 @@ def _flush_when_running(loop: asyncio.AbstractEventLoop) -> None:
         loop.call_soon(fn, *args, **kwargs)
 
 
-def _get_default_executor() -> ThreadPoolExecutor:
+def _ensure_default_executor() -> ThreadPoolExecutor:
+    """Return the shared worker pool, building it once under a lock."""
     global _default_executor
-    if _default_executor is None:
-        _default_executor = ThreadPoolExecutor(
-            max_workers=_DEFAULT_EXECUTOR_WORKERS,
-            thread_name_prefix="evennia-io",
-        )
-    return _default_executor
+    with _executor_lock:
+        if _default_executor is None:
+            _default_executor = ThreadPoolExecutor(
+                max_workers=_DEFAULT_EXECUTOR_WORKERS,
+                thread_name_prefix="evennia-io",
+            )
+        return _default_executor
+
+
+def _get_default_executor() -> ThreadPoolExecutor:
+    return _ensure_default_executor()
+
+
+def shutdown_default_executor(wait: bool = False) -> None:
+    """Shut down the shared worker pool (called during graceful shutdown)."""
+    global _default_executor
+    with _executor_lock:
+        executor, _default_executor = _default_executor, None
+    if executor is not None:
+        executor.shutdown(wait=wait)
 
 
 def _format_exc_traceback(exc: BaseException) -> str:
