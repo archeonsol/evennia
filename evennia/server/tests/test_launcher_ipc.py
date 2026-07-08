@@ -1,10 +1,73 @@
 """Tests for LauncherSession event-driven status waits."""
 
+import struct
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from evennia.server.launcher_ipc import LauncherSession, connect_session, wait_until_state
+from evennia.server.launcher_ipc import (_MAX_FRAME_SIZE,
+                                         LauncherIPCFrameError,
+                                         LauncherSession, _decode_frames,
+                                         _encode_frame, connect_session,
+                                         wait_until_state)
+
+
+class DecodeFramesTest(SimpleTestCase):
+    def test_round_trip_single_frame(self):
+        payload = {"type": "status", "status": [True, False, 1, None, {}, {}]}
+        frames, remainder = _decode_frames(bytearray(_encode_frame(payload)))
+        self.assertEqual(frames, [payload])
+        self.assertEqual(remainder, bytearray())
+
+    def test_partial_header_returns_no_frames(self):
+        encoded = _encode_frame({"type": "status"})
+        for n in (1, 2, 3):
+            buffer = bytearray(encoded[:n])
+            frames, remainder = _decode_frames(buffer)
+            self.assertEqual(frames, [])
+            self.assertEqual(remainder, bytearray(encoded[:n]))
+
+    def test_partial_body_completes_on_rest(self):
+        encoded = _encode_frame({"type": "status"})
+        split = len(encoded) - 2
+        buffer = bytearray(encoded[:split])
+        frames, buffer = _decode_frames(buffer)
+        self.assertEqual(frames, [])
+        self.assertEqual(buffer, bytearray(encoded[:split]))
+        buffer.extend(encoded[split:])
+        frames, buffer = _decode_frames(buffer)
+        self.assertEqual(frames, [{"type": "status"}])
+        self.assertEqual(buffer, bytearray())
+
+    def test_two_frames_in_one_buffer(self):
+        first = {"type": "status"}
+        second = {"type": "ack"}
+        buffer = bytearray(_encode_frame(first) + _encode_frame(second))
+        frames, remainder = _decode_frames(buffer)
+        self.assertEqual(frames, [first, second])
+        self.assertEqual(remainder, bytearray())
+
+    def test_byte_by_byte_feed_yields_one_frame(self):
+        encoded = _encode_frame({"type": "ack"})
+        buffer = bytearray()
+        collected = []
+        for byte in encoded:
+            buffer.append(byte)
+            frames, buffer = _decode_frames(buffer)
+            collected.extend(frames)
+        self.assertEqual(collected, [{"type": "ack"}])
+        self.assertEqual(buffer, bytearray())
+
+    def test_oversized_length_raises_immediately(self):
+        buffer = bytearray(struct.pack("!I", _MAX_FRAME_SIZE + 1))
+        with self.assertRaises(LauncherIPCFrameError):
+            _decode_frames(buffer)
+
+    def test_malformed_json_body_raises(self):
+        body = b"not json"
+        buffer = bytearray(struct.pack("!I", len(body)) + body)
+        with self.assertRaises(LauncherIPCFrameError):
+            _decode_frames(buffer)
 
 
 class LauncherSessionWaitTest(SimpleTestCase):
@@ -108,9 +171,7 @@ class LauncherSessionWaitTest(SimpleTestCase):
         protocol.send_Status2Launcher = MagicMock()
 
         try:
-            launcher_ipc.start_launcher_server(
-                portal, factory, protocol, "127.0.0.1", 0
-            )
+            launcher_ipc.start_launcher_server(portal, factory, protocol, "127.0.0.1", 0)
             self.assertTrue(launcher_ipc._servers)
         finally:
             for server in launcher_ipc._servers:

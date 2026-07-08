@@ -28,6 +28,19 @@ from typing import Any
 
 from evennia.utils import clock, logger
 
+# Generous ceiling on a single frame body. Real status/command frames are tiny;
+# a larger declared size is a corrupt or hostile peer, so we refuse to buffer it.
+_MAX_FRAME_SIZE = 8 * 1024 * 1024
+
+
+class LauncherIPCFrameError(Exception):
+    """Unrecoverable launcher IPC frame-layer violation.
+
+    Raised for an oversize declared frame length or a body that cannot be
+    decoded as JSON. Both mean the byte stream is corrupt past the point of
+    recovery, so the caller should drop the connection rather than resync.
+    """
+
 
 def _encode_frame(payload: dict) -> bytes:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -35,14 +48,35 @@ def _encode_frame(payload: dict) -> bytes:
 
 
 def _decode_frames(buffer: bytearray) -> tuple[list[dict], bytearray]:
+    """Decode as many whole frames as *buffer* holds, returning the remainder.
+
+    Args:
+        buffer (bytearray): Accumulated inbound bytes, consumed in place.
+
+    Returns:
+        tuple: ``(frames, remainder)`` where *frames* is a list of decoded
+        payload dicts and *remainder* is the trailing bytes of an incomplete
+        frame (may be empty).
+
+    Raises:
+        LauncherIPCFrameError: A declared frame length exceeds
+            :data:`_MAX_FRAME_SIZE`, or a complete body is not valid JSON.
+    """
     frames = []
     while len(buffer) >= 4:
         (size,) = struct.unpack("!I", buffer[:4])
+        if size > _MAX_FRAME_SIZE:
+            raise LauncherIPCFrameError(
+                f"launcher IPC frame size {size} exceeds cap {_MAX_FRAME_SIZE}"
+            )
         if len(buffer) < 4 + size:
             break
         chunk = bytes(buffer[4 : 4 + size])
         del buffer[: 4 + size]
-        frames.append(json.loads(chunk.decode("utf-8")))
+        try:
+            frames.append(json.loads(chunk.decode("utf-8")))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise LauncherIPCFrameError("launcher IPC frame body is not valid JSON") from exc
     return frames, buffer
 
 
@@ -90,7 +124,12 @@ class _LauncherIPCProtocol(asyncio.Protocol):
 
     def data_received(self, data):
         self._buffer.extend(data)
-        frames, self._buffer = _decode_frames(self._buffer)
+        try:
+            frames, self._buffer = _decode_frames(self._buffer)
+        except LauncherIPCFrameError:
+            logger.log_trace("launcher IPC: corrupt frame stream, closing connection")
+            self.transport.close()
+            return
         for frame in frames:
             self._dispatch(frame)
 
@@ -109,15 +148,19 @@ class _LauncherIPCProtocol(asyncio.Protocol):
         if ftype == "command":
             operation = frame.get("operation", "")
             args_b64 = frame.get("arguments") or ""
-            args_wire = base64.b64decode(args_b64) if args_b64 else b""
+            try:
+                args_wire = base64.b64decode(args_b64) if args_b64 else b""
+            except (ValueError, TypeError):
+                # Drop just this frame; a bad-base64 argument is not a reason to
+                # tear down an otherwise healthy control channel.
+                logger.log_trace("launcher IPC: bad base64 command arguments, dropping frame")
+                return
             if self._link is None:
                 loop = clock.get_bound_loop()
                 self._link = LauncherIPCConnection(self.transport, loop)
                 self._factory.launcher_connection = self._link
             self._write({"type": "ack"})
-            launcher_handlers.receive_launcher_command(
-                self._protocol, operation, args_wire
-            )
+            launcher_handlers.receive_launcher_command(self._protocol, operation, args_wire)
             return
         logger.log_err(f"launcher IPC: unknown frame type {ftype!r}")
 
@@ -187,7 +230,11 @@ class LauncherSession:
     def _read_frame(self) -> dict:
         assert self._sock is not None
         while True:
-            frames, self._buffer = _decode_frames(self._buffer)
+            try:
+                frames, self._buffer = _decode_frames(self._buffer)
+            except LauncherIPCFrameError as exc:
+                logger.log_trace("launcher IPC: corrupt frame stream on read")
+                raise ConnectionError("launcher IPC frame error") from exc
             if frames:
                 return frames[0]
             chunk = self._sock.recv(4096)
@@ -286,9 +333,7 @@ class LauncherSession:
             if remaining <= 0:
                 break
             push = self.read_push(timeout=min(remaining, poll_interval))
-            if push is not None and self._state_matches(
-                push, portal_running, server_running
-            ):
+            if push is not None and self._state_matches(push, portal_running, server_running):
                 return push
         return None
 
@@ -411,6 +456,7 @@ def start_launcher_server(portal, amp_factory, amp_protocol, interface: str, por
         return
 
     if loop.is_running():
+
         async def _go():
             try:
                 await _start_server(portal, amp_factory, amp_protocol, interface, port)
