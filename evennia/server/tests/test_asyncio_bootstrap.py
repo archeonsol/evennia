@@ -72,6 +72,37 @@ class BootstrapRunTest(TestCase):
         service.stopService.assert_called_once()
         loop.run_forever.assert_called_once()
 
+    def test_lifecycle_runs_in_order(self):
+        # The count-based asserts above pass even if the calls were reordered.
+        # A running loop must start after privileged/start and stop only after
+        # run_forever returns; record the real order and pin it.
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        order = []
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        loop.run_forever.side_effect = lambda: order.append("run_forever")
+        service = MagicMock()
+        service.running = True
+        service.privilegedStartService.side_effect = lambda: order.append("privileged")
+        service.startService.side_effect = lambda: order.append("start")
+        service.stopService.side_effect = lambda: order.append("stop")
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertEqual(order, ["privileged", "start", "run_forever", "stop"])
+
     def test_stopservice_failure_is_logged_and_siblings_still_run(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
 

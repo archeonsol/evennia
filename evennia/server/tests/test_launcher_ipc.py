@@ -102,6 +102,22 @@ class LauncherSessionWaitTest(SimpleTestCase):
         session = LauncherSession("127.0.0.1", 4006)
         self.assertEqual(session.wait_for_push(timeout=1.0), mock_push.return_value)
 
+    @patch.object(LauncherSession, "read_push", return_value=[True, True, 1, 2, {}, {}])
+    @patch.object(LauncherSession, "query_status", return_value=[False, False, 1, 2, {}, {}])
+    def test_wait_for_state_returns_on_push_match(self, _mock_query, mock_push):
+        # query never matches; the state arrives on the push branch of the loop.
+        session = LauncherSession("127.0.0.1", 4006)
+        result = session.wait_for_state(timeout=1.0, poll_interval=0.01)
+        self.assertEqual(result, mock_push.return_value)
+
+    @patch.object(LauncherSession, "read_push", return_value=[False, False, 1, 2, {}, {}])
+    @patch.object(LauncherSession, "query_status", return_value=[False, False, 1, 2, {}, {}])
+    def test_wait_for_state_times_out_returns_none(self, _mock_query, _mock_push):
+        # neither query nor push ever matches → the deadline exit returns None.
+        session = LauncherSession("127.0.0.1", 4006)
+        result = session.wait_for_state(timeout=0.05, poll_interval=0.02)
+        self.assertIsNone(result)
+
     @patch.object(LauncherSession, "connect")
     def test_connect_session_retries_until_success(self, mock_connect):
         mock_connect.side_effect = [ConnectionError("refused"), ConnectionError("refused"), None]

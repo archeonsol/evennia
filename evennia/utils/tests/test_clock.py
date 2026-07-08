@@ -8,6 +8,7 @@ no running loop.
 """
 
 import asyncio
+import threading
 from unittest.mock import patch
 
 from evennia.utils import clock
@@ -259,3 +260,143 @@ class TestSyncCoroutineResultDrain(BaseEvenniaTestCase):
         res = clock.run_coroutine(parent())  # no running loop → _SyncCoroutineResult
         self.assertEqual(res.result(), "done")
         self.assertTrue(cancelled.get("hit"))  # drained on teardown, not destroyed-pending
+
+
+class TestCallFromThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
+    """`call_from_thread` hands work from a worker thread onto the loop thread.
+
+    Everywhere else this primitive is exercised through a sync stub (redis bus
+    tests) or a `call_soon_threadsafe` mock; here a real `threading.Thread`
+    proves the callable actually runs on the loop thread, not the caller's.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # bind_loop is the sole writer of the module-global loop/thread identity;
+        # snapshot and restore it so this test does not bleed into others.
+        self._saved = (clock._main_loop, clock._loop_thread_id)
+        clock.bind_loop(self._loop)  # records this (loop-owning) thread's ident
+
+    def tearDown(self):
+        clock.shutdown_default_executor()  # bind_loop built the pool eagerly
+        clock._main_loop, clock._loop_thread_id = self._saved
+        super().tearDown()
+
+    def test_callable_runs_on_loop_thread_not_worker(self):
+        ran = {}
+
+        def target():
+            ran["thread"] = threading.get_ident()
+
+        async def drive():
+            loop_ident = threading.get_ident()  # the coro runs on the loop thread
+            worker_ident = {}
+
+            def worker():
+                worker_ident["id"] = threading.get_ident()
+                clock.call_from_thread(target)
+
+            t = threading.Thread(target=worker)
+            t.start()
+            t.join()
+            for _ in range(5):  # let the loop process the thread-safe callback
+                await asyncio.sleep(0)
+            return loop_ident, worker_ident["id"]
+
+        loop_ident, worker_ident = self._loop.run_until_complete(drive())
+        self.assertNotEqual(loop_ident, worker_ident)  # genuinely two threads
+        self.assertEqual(ran.get("thread"), loop_ident)  # ran on loop, not worker
+
+    def test_args_and_kwargs_are_forwarded(self):
+        # kwargs takes the functools.partial branch; args-only takes the other.
+        got = {}
+
+        def target(a, b=None):
+            got["a"], got["b"] = a, b
+
+        async def drive():
+            def worker():
+                clock.call_from_thread(target, "pos", b="kw")
+
+            t = threading.Thread(target=worker)
+            t.start()
+            t.join()
+            for _ in range(5):
+                await asyncio.sleep(0)
+
+        self._loop.run_until_complete(drive())
+        self.assertEqual((got.get("a"), got.get("b")), ("pos", "kw"))
+
+
+class TestRunCoroutineDirect(_AsyncioLoopMixin, BaseEvenniaTestCase):
+    """`run_coroutine` on a running loop returns a Task that carries the result."""
+
+    def test_running_loop_returns_task_with_result(self):
+        async def compute():
+            await asyncio.sleep(0)
+            return 42
+
+        async def drive():
+            task = clock.run_coroutine(compute())
+            self.assertIsInstance(task, asyncio.Task)
+            return await task
+
+        self.assertEqual(self._loop.run_until_complete(drive()), 42)
+
+
+class TestLoopHandleDirect(_AsyncioLoopMixin, BaseEvenniaTestCase):
+    """`LoopHandle` fires repeatedly until stopped, then fires no more."""
+
+    def test_repeats_then_stop_halts_further_fires(self):
+        calls = []
+
+        async def drive():
+            handle = clock.looping(0.001, calls.append, "x", now=True)
+            while len(calls) < 3:  # wait for several real fires
+                await asyncio.sleep(0.001)
+            handle.stop()
+            n_at_stop = len(calls)
+            self.assertFalse(handle.running)  # stop() clears the flag at once
+            await asyncio.sleep(0.02)  # window in which a stray fire would show
+            return n_at_stop
+
+        n_at_stop = self._loop.run_until_complete(drive())
+        self.assertGreaterEqual(n_at_stop, 3)
+        self.assertEqual(len(calls), n_at_stop)  # nothing fired after stop()
+        self.assertTrue(all(c == "x" for c in calls))  # args forwarded each fire
+
+
+class TestDeferLaterCompatPauseCancel(_AsyncioLoopMixin, BaseEvenniaTestCase):
+    """`_DeferLaterCompat` pause/cancel semantics (errbacks covered elsewhere)."""
+
+    def _make(self, fn):
+        d = clock._DeferLaterCompat(0, fn)
+        self.addCleanup(d.cancel)
+        return d
+
+    def test_pause_defers_fire_until_unpause(self):
+        ran = []
+        d = self._make(lambda: ran.append(1))
+        d.pause()
+        d._fire()  # the scheduled fire arrives while paused
+        self.assertFalse(d.called)
+        self.assertEqual(ran, [])
+        d.unpause()  # deferred fire runs now
+        self.assertTrue(d.called)
+        self.assertEqual(ran, [1])
+
+    def test_cancel_before_fire_prevents_invocation(self):
+        ran = []
+        d = self._make(lambda: ran.append(1))
+        d.cancel()
+        d._fire()  # cancelled → no-op
+        self.assertFalse(d.called)
+        self.assertEqual(ran, [])
+
+    def test_cancel_after_fire_is_noop(self):
+        ran = []
+        d = self._make(lambda: ran.append(1))
+        d._fire()  # fires now
+        self.assertTrue(d.called)
+        d.cancel()  # guarded by `if self.called`; must not re-run or raise
+        self.assertEqual(ran, [1])
