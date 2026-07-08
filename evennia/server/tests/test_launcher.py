@@ -315,10 +315,24 @@ class TestForceKillIdentity(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
+        evennia_launcher.LAUNCHER_FAILED = False
 
     def _write(self, path, pid):
         with open(path, "w") as fh:
             fh.write(str(pid))
+
+    @patch("evennia.server.evennia_launcher.wait_for_portal_ipc_down", create=True)
+    @patch("evennia.server.evennia_launcher.psutil.wait_procs", return_value=([], []))
+    def test_force_kill_marks_launcher_failed(self, _mock_wait, _mock_ipc):
+        # a force-kill fallback means the graceful stop did not work -> exit non-zero
+        evennia_launcher.LAUNCHER_FAILED = False
+        with (
+            patch.object(evennia_launcher, "SERVER_PIDFILE", None),
+            patch.object(evennia_launcher, "PORTAL_PIDFILE", None),
+            patch.object(evennia_launcher, "AMP_HOST", None),
+        ):
+            evennia_launcher._force_kill_local_processes()
+        self.assertTrue(evennia_launcher.LAUNCHER_FAILED)
 
     @patch("evennia.server.evennia_launcher.psutil.Process")
     def test_our_process_matches_by_cmdline(self, mock_proc):

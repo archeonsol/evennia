@@ -21,8 +21,7 @@ import sys
 import threading
 import time
 from argparse import ArgumentParser
-from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
-                        check_output)
+from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
 
 import django
 import psutil
@@ -620,6 +619,11 @@ def _force_kill_local_processes():
     """SIGTERM then SIGKILL portal and server from pidfiles when IPC shutdown failed."""
     from evennia.server.launcher_ipc import wait_for_portal_ipc_down
 
+    # reaching the force-kill fallback means the graceful IPC stop did not work;
+    # exit non-zero so orchestration sees the stop was not clean
+    global LAUNCHER_FAILED
+    LAUNCHER_FAILED = True
+
     targets = []  # (proc, pidfile) for processes confirmed to be ours
     for pidfile, py_file in _local_pid_targets():
         proc = _our_process(pidfile, py_file)
@@ -675,8 +679,7 @@ def _cleanup_stale_portal_process():
 
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
-                                             LauncherSession, connect_session)
+    from evennia.server.launcher_ipc import COLD_START_DEADLINE, LauncherSession, connect_session
 
     with _AMP_CONNECTION_LOCK:
         if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
@@ -803,12 +806,14 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
-    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
-                                             SHUTDOWN_WAIT_DEADLINE,
-                                             LauncherSession,
-                                             portal_ipc_reachable,
-                                             query_ipc_status,
-                                             wait_until_state)
+    from evennia.server.launcher_ipc import (
+        COLD_START_DEADLINE,
+        SHUTDOWN_WAIT_DEADLINE,
+        LauncherSession,
+        portal_ipc_reachable,
+        query_ipc_status,
+        wait_until_state,
+    )
 
     if retries is None:
         if portal_running is False or server_running is False:
@@ -919,8 +924,10 @@ def maybe_collectstatic(force=None):
         force = COLLECTSTATIC_FORCE
     if not force:
         from evennia.server.collectstatic_cache import (
-            compute_static_fingerprint, read_cached_fingerprint,
-            write_cached_fingerprint)
+            compute_static_fingerprint,
+            read_cached_fingerprint,
+            write_cached_fingerprint,
+        )
 
         fingerprint = compute_static_fingerprint()
         if fingerprint == read_cached_fingerprint(GAMEDIR):
@@ -929,8 +936,10 @@ def maybe_collectstatic(force=None):
         write_cached_fingerprint(GAMEDIR, fingerprint)
         return True
     collectstatic()
-    from evennia.server.collectstatic_cache import (compute_static_fingerprint,
-                                                    write_cached_fingerprint)
+    from evennia.server.collectstatic_cache import (
+        compute_static_fingerprint,
+        write_cached_fingerprint,
+    )
 
     write_cached_fingerprint(GAMEDIR, compute_static_fingerprint())
     return True
