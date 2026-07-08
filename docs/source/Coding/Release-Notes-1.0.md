@@ -36,15 +36,15 @@ This summarizes the changes. See the [Changelog](./Changelog.md) for the full li
 
 The `contrib` folder structure was changed from 0.9.5. All contribs are now in sub-folders and organized into categories. All import paths must be updated. See [Contribs overview](../Contribs/Contribs-Overview.md).
 
-- New [Traits contrib](../Contribs/Contrib-Traits.md), converted and expanded from Ainneve project. (whitenoise, Griatch)
+- New Traits contrib, converted and expanded from Ainneve project. (whitenoise, Griatch)
 - New [Crafting contrib](../Contribs/Contrib-Crafting.md), adding a full crafting subsystem (Griatch)
 - New [XYZGrid contrib](../Contribs/Contrib-XYZGrid.md), adding x,y,z grid coordinates with in-game map and pathfinding. Controlled outside of the game via custom evennia launcher command (Griatch)
-- New [Command cooldown contrib](../Contribs/Contrib-Cooldowns.md) contrib for making it easier to manage commands using
+- New Command cooldown contrib for making it easier to manage commands using
   dynamic cooldowns between uses (owllex)
 - New [Godot Protocol contrib](../Contribs/Contrib-Godotwebsocket.md) for connecting to Evennia from a client written in the open-source game engine [Godot](https://godotengine.org/) (ChrisLR).
-- New [name_generator contrib](../Contribs/Contrib-Name-Generator.md) for building random real-world based or fantasy-names based on phonetic rules (InspectorCaracal)
-- New [Buffs contrib](../Contribs/Contrib-Buffs.md) for managing temporary and permanent RPG status buffs effects (tegiminis)
--  The existing [RPSystem contrib](../Contribs/Contrib-RPSystem.md) was refactored and saw a speed boost (InspectorCaracal, other contributors) 
+- New name_generator contrib for building random real-world based or fantasy-names based on phonetic rules (InspectorCaracal)
+- New Buffs contrib for managing temporary and permanent RPG status buffs effects (tegiminis)
+-  The existing RPSystem contrib was refactored and saw a speed boost (InspectorCaracal, other contributors) 
 
 ## Translations 
 

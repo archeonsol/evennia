@@ -180,10 +180,3 @@ text = "$You() $conj(pick) up the $obj(gun), whistling to $pron(yourself)"
 room.msg_contents(text, from_obj=caller, mapping={"gun": gun_object})
 ```
 Depending on your game, Tom may now see himself picking up `A rusty old gun`, whereas an onlooker with a high gun smith skill may instead see him picking up `A rare-make Smith & Wesson model 686 in poor condition" ...`
-
-## Recog systems and roleplaying
-
-The `$funcparser` inline functions are very powerful for the game developer, but they may
-be a bit too much to write for the regular player.
-
-The [rpsystem contrib](evennia.contrib.rpg.rpsystem) implements a full dynamic emote/pose and recognition system with short-descriptions and disguises. It uses director stance with a custom markup language, like `/me` `/gun` and `/tall man` to refer to players and objects in the location. It can be worth checking out for inspiration.

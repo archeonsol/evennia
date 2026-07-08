@@ -74,6 +74,13 @@ worked examples; mirror their depth and section structure.
    - `git rm` any orphaned `docs/source/Contribs/Contrib-*.md` left behind
      for removed contribs — the generator writes live pages but never
      prunes stale ones.
+   - For every contrib page you removed, grep the narrative docs for inbound
+     links to it and fix them — pruning the page does not touch the prose
+     that pointed at it, so each removal otherwise leaves dead links. Both
+     link styles: `../Contribs/Contrib-<Name>.md` and the autodoc form
+     `(evennia.contrib.<path>)`. Keep historical release notes/changelogs as
+     history (de-link the text, don't rewrite the entry); drop or reword
+     active howto/concept recommendations that point at a now-absent contrib.
 6. Run the relevant test suite from the test game dir (see
    [Testing](testing.md)) before merging. Don't tag a release that
    doesn't pass.

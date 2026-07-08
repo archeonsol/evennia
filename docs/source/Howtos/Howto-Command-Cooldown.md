@@ -13,9 +13,6 @@ a while.
 
 Such effects are called *command cooldowns*.
 
-```{sidebar}
-The [Cooldown contrib](../Contribs/Contrib-Cooldowns.md) is a ready-made solution for command cooldowns. It is based on this howto and implements a [handler](Tutorial-Peristent-Handler) on the object to conveniently manage and store the cooldowns.
-```
 This howto exemplifies a very resource-efficient way to do cooldowns. A more
 'active' way is to use asynchronous delays as in the [Command-Duration howto](./Howto-Command-Duration.md#blocking-commands) suggests.  The two howto's might be useful to combine if you want to echo some message to the user after the cooldown ends.
 

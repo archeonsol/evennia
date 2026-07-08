@@ -516,7 +516,7 @@ same as Markdown.
 
 The source code docstrings will be parsed as Markdown. When writing a module docstring, you can use Markdown formatting, including header levels down to 4th level (`#### SubSubSubHeader`). 
 
-After the module documentation it's a good idea to end with four dashes `----`. This will create a visible line between the documentation and the class/function docs to follow. See for example [the Traits docs](evennia.contrib.rpg.traits).
+After the module documentation it's a good idea to end with four dashes `----`. This will create a visible line between the documentation and the class/function docs to follow. See for example the rendered contrib module docs.
 
 All non-private classes, methods and functions must have a Google-style docstring, as per the [Evennia coding style guidelines][github:evennia/CODING_STYLE.md]. This will then be correctly formatted into pretty api docs. 
 
