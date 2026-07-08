@@ -58,20 +58,26 @@ class TestMonitoredInputfunc(BaseEvenniaTest):
 
 
 class TestTextDispatchErrback(unittest.TestCase):
-    """``text`` must consume a failed cmdhandler Deferred by logging it, not
-    leave it for Twisted's garbage collector to maybe-report."""
+    """``text`` must consume a failed cmdhandler coroutine by logging it, not
+    leave the task exception unhandled.
 
-    def test_failed_dispatch_deferred_is_logged(self):
-        from unittest import mock
+    ``cmdhandler`` is now ``async``; ``text`` kicks it off via
+    ``clock.run_coroutine``, whose done-callback logs unhandled exceptions
+    through ``evennia.utils.logger.log_err``. With no running loop (this test
+    harness) the coroutine is driven synchronously and the same backstop fires.
+    """
 
-        from twisted.internet import defer
+    def test_failed_dispatch_coroutine_is_logged(self):
+        from evennia.utils import logger
+
+        async def failing(*args, **kwargs):
+            raise RuntimeError("dispatch kaboom")
 
         session = mock.MagicMock()
         session.account = None
-        failing = defer.fail(RuntimeError("dispatch kaboom"))
         with (
-            mock.patch.object(inputfuncs, "cmdhandler", return_value=failing),
-            mock.patch.object(inputfuncs, "log_err") as log_mock,
+            mock.patch.object(inputfuncs, "cmdhandler", side_effect=failing),
+            mock.patch.object(logger, "log_err") as log_mock,
         ):
             inputfuncs.text(session, "look")
         log_mock.assert_called()

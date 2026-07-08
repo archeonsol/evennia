@@ -6,21 +6,15 @@ from twisted.internet import defer
 
 from evennia.server.game_index_client import client as game_index_client
 from evennia.server.game_index_client.client import EvenniaGameIndexClient
+from evennia.utils.http import Response
 
 
-class _DummyResponse:
-    code = 200
-
-
-class _RecordingAgent:
+class _RecordingRequest:
     latest_data = None
 
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def request(self, method, url, headers=None, bodyProducer=None):
-        _RecordingAgent.latest_data = bodyProducer.body.decode("utf-8")
-        return defer.succeed(_DummyResponse())
+    def __call__(self, method, url, headers=None, data=None, timeout=30):
+        _RecordingRequest.latest_data = data
+        return defer.succeed(Response(200, b"OK"))
 
 
 @override_settings(
@@ -41,7 +35,7 @@ class TestGameIndexClient(TestCase):
         "evennia.server.game_index_client.client.evennia.SESSION_HANDLER.account_count",
         return_value=0,
     )
-    @patch.object(game_index_client, "Agent", _RecordingAgent)
+    @patch.object(game_index_client.http, "request", new_callable=_RecordingRequest)
     def test_backslash_n_in_long_description_becomes_newline(self, *_):
         client = EvenniaGameIndexClient()
         d = client._form_and_send_request()
@@ -49,6 +43,6 @@ class TestGameIndexClient(TestCase):
         result = []
         d.addCallback(result.append)
 
-        payload = urllib.parse.parse_qs(_RecordingAgent.latest_data)
+        payload = urllib.parse.parse_qs(_RecordingRequest.latest_data)
         self.assertEqual(payload["long_description"][0], "Line 1\nLine 2")
         self.assertEqual(result, [(200, "OK")])

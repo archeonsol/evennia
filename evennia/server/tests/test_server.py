@@ -12,7 +12,6 @@ import evennia
 from evennia.server import service
 
 
-@patch.object(service, "LoopingCall", new=MagicMock())
 class TestServer(TestCase):
     """
     Test server module.
@@ -32,7 +31,6 @@ class TestServer(TestCase):
             patch.object(evennia, "ServerConfig", new=MagicMock()) as mockconf,
             patch.multiple(
                 "evennia.server.service",
-                LoopingCall=DEFAULT,
                 connection=DEFAULT,
             ) as mocks,
         ):
@@ -53,7 +51,6 @@ class TestServer(TestCase):
         with (
             patch.multiple(
                 "evennia.server.service",
-                LoopingCall=DEFAULT,
                 connection=DEFAULT,
             ) as mocks,
             patch.object(evennia, "ServerConfig", new=MagicMock()) as mockconf,
@@ -71,7 +68,6 @@ class TestServer(TestCase):
         with (
             patch.multiple(
                 "evennia.server.service",
-                LoopingCall=DEFAULT,
                 connection=DEFAULT,
             ) as mocks,
             patch.object(evennia, "ServerConfig", new=MagicMock()) as mockconf,
@@ -89,7 +85,6 @@ class TestServer(TestCase):
         with (
             patch.multiple(
                 "evennia.server.service",
-                LoopingCall=DEFAULT,
                 connection=DEFAULT,
                 time=DEFAULT,
             ) as mocks,
@@ -225,9 +220,9 @@ class TestInitHooks(TestCase):
             obj.at_post_load = MagicMock()
 
     def tearDown(self):
-        # run_init_hooks starts real LoopingCalls (maintenance task, stall
+        # run_init_hooks starts real repeating loops (maintenance task, stall
         # watchdog, system-scheduler driver); stop them so they don't leak
-        # pending DelayedCalls into the reactor and trip trial's dirty-reactor
+        # pending timers into the event loop and trip trial's dirty-reactor
         # check when server tests share a process with trial-based tests.
         if self.server.maintenance_task is not None and self.server.maintenance_task.running:
             self.server.maintenance_task.stop()

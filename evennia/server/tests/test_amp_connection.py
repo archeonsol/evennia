@@ -12,7 +12,7 @@ from twisted.internet.base import DelayedCall
 from twisted.trial.unittest import TestCase as TwistedTestCase
 
 import evennia
-from evennia.server import amp_client, server, serversession, service, session
+from evennia.server import amp_client, server, serversession, session
 from evennia.server.portal import amp, amp_server, portal
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
@@ -78,7 +78,6 @@ class _TestAMP(TwistedTestCase):
         return all_sent
 
 
-@patch.object(service, "LoopingCall", MagicMock())
 @patch("evennia.server.portal.amp.amp.BinaryBoxProtocol.transport")
 class TestAMPClientSend(_TestAMP):
     """Test amp client sending data"""

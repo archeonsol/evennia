@@ -53,6 +53,6 @@ class AMPServerGetStatusTest(SimpleTestCase):
         portal.server_info_dict = {}
         portal.server_process_id = 99
 
-        live, _, pid, _, _, _ = self._protocol(portal).get_status()
+        live, _, _, spid, _, _ = self._protocol(portal).get_status()
         self.assertTrue(live)
-        self.assertEqual(pid, 99)
+        self.assertEqual(spid, 99)
