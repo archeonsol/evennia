@@ -97,7 +97,15 @@ def _run_with_db_hygiene(fn, args, kwargs):
 
 
 def _wire_future_compat(future):
-    """Attach legacy callback-chain methods to an ``asyncio.Future``."""
+    """Attach legacy ``addCallback``/``addErrback``/``addCallbacks`` shims to a Future.
+
+    These are single-level compatibility shims, NOT Twisted Deferreds. Each method
+    registers its callback on the same settled Future and returns that same Future,
+    so they do not chain: ``f.addCallback(a).addCallback(b)`` hands ``b`` the
+    original worker result (not ``a``'s return value), and an exception raised
+    inside a callback is not routed to a later-attached errback. Attach at most one
+    callback and one errback per future; for real chaining, ``await`` instead.
+    """
     if getattr(future, "_evennia_future_compat", False):
         return future
 
@@ -124,7 +132,14 @@ def _wire_future_compat(future):
         future.add_done_callback(_done)
         return future
 
-    def addCallbacks(callback, errback, callbackArgs=(), callbackKeywords=None, errbackArgs=(), errbackKeywords=None):
+    def addCallbacks(
+        callback,
+        errback,
+        callbackArgs=(),
+        callbackKeywords=None,
+        errbackArgs=(),
+        errbackKeywords=None,
+    ):
         callbackKeywords = callbackKeywords or {}
         errbackKeywords = errbackKeywords or {}
 
