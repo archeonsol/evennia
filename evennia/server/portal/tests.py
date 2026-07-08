@@ -13,7 +13,6 @@ import string
 import sys
 
 import mock
-from evennia.server.portal.ws_protocol import WSServerFactory
 from mock import MagicMock, Mock
 from twisted.conch.telnet import DO, DONT, IAC, NAWS, SB, SE, WILL
 from twisted.internet.base import DelayedCall
@@ -24,6 +23,7 @@ import evennia
 from evennia.server.portal import irc, portalsessionhandler
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
+from evennia.server.portal.ws_protocol import WSServerFactory
 from evennia.utils.test_resources import BaseEvenniaTest
 
 from .amp import (AMP_MAXLEN, AMPMultiConnectionProtocol, MsgPortal2Server,
@@ -411,3 +411,34 @@ class TestWebSocket(BaseEvenniaTest):
         args, kwargs = call_args
         is_binary = kwargs.get("is_binary", args[1] if len(args) > 1 else False)
         self.assertFalse(is_binary)
+
+
+class TestServerWatchdog(TestCase):
+    """Portal dead-server watchdog (``_maybe_restart_dead_server``)."""
+
+    def _armed_portal(self):
+        """A Portal in the armed state: a Server was up and its restart mode cleared."""
+        portal = EvenniaPortalService()
+        portal.server_restart_mode = None
+        portal.server_process_id = 4242
+        portal.server_twistd_cmd = ["python", "server.py"]
+        portal._launcher_amp_protocol = MagicMock()
+        portal._last_server_autorestart = 0.0
+        return portal
+
+    @mock.patch("evennia.server.portal.service.logger")
+    @mock.patch("evennia.server.portal.service.time")
+    @mock.patch("evennia.server.redis_bus._pid_alive", return_value=False)
+    def test_failed_restart_does_not_permanently_disarm(self, _alive, mock_time, _logger):
+        portal = self._armed_portal()
+
+        # first tick sees the Server dead and fires a restart
+        mock_time.monotonic.return_value = 1000.0
+        portal._maybe_restart_dead_server()
+        self.assertEqual(portal._launcher_amp_protocol.start_server.call_count, 1)
+
+        # the relaunched Server never comes up (no PSYNC → no new pid reported).
+        # once past the 30s throttle a later tick must try again, not stay disarmed.
+        mock_time.monotonic.return_value = 1031.0
+        portal._maybe_restart_dead_server()
+        self.assertEqual(portal._launcher_amp_protocol.start_server.call_count, 2)

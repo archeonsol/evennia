@@ -82,9 +82,13 @@ class EvenniaPortalService(MultiService):
         protocol = getattr(self, "_launcher_amp_protocol", None)
         if not protocol:
             return
+        # Stamp the throttle before launching: it is the sole re-fire guard.
+        # Do NOT clear server_process_id here. start_server swallows a failed
+        # Popen, so a relaunch that never comes back would leave the pid None
+        # and the `if not spid` guard above would disarm the watchdog forever.
+        # Keeping the (dead) pid lets a later tick, past the throttle, retry.
         self._last_server_autorestart = now
         logger.log_warn("Server process %s died; Portal auto-restarting it." % spid)
-        self.server_process_id = None
         protocol.start_server(self.server_twistd_cmd)
 
     def _privileged_start(self):
@@ -189,11 +193,11 @@ class EvenniaPortalService(MultiService):
                 webclientstr = ""
                 if settings.WEBCLIENT_ENABLED and settings.WEBSOCKET_CLIENT_ENABLED:
                     if (
-                        settings.WEBSOCKET_CLIENT_PORT
-                        and settings.WEBSOCKET_CLIENT_INTERFACE
+                        settings.WEBSOCKET_CLIENT_PORT and settings.WEBSOCKET_CLIENT_INTERFACE
                     ) and not websocket_started:
                         from evennia.server.portal import webclient  # noqa
-                        from evennia.server.portal.ws_protocol import WSServerFactory
+                        from evennia.server.portal.ws_protocol import \
+                            WSServerFactory
 
                         w_interface = (
                             "127.0.0.1"
@@ -213,7 +217,8 @@ class EvenniaPortalService(MultiService):
                         factory.sessionhandler = evennia.PORTAL_SESSION_HANDLER
 
                         if self._require_asyncio_loop("webclient-websocket%s" % w_ifacestr, port):
-                            from evennia.server.portal.webclient import AsyncioWebSocketProtocol
+                            from evennia.server.portal.webclient import \
+                                AsyncioWebSocketProtocol
 
                             self._start_asyncio_server(
                                 lambda f=factory: AsyncioWebSocketProtocol(f), w_interface, port
@@ -332,9 +337,7 @@ class EvenniaPortalService(MultiService):
 
             async def _create():
                 try:
-                    server = await loop.create_server(
-                        protocol_factory, interface, port, ssl=ssl
-                    )
+                    server = await loop.create_server(protocol_factory, interface, port, ssl=ssl)
                     self._asyncio_servers.append(server)
                 except Exception:
                     logger.log_trace("asyncio Portal server failed to start")
@@ -399,9 +402,7 @@ class EvenniaPortalService(MultiService):
         gamedir = os.getcwd()
         pidfile = os.path.join(gamedir, "server", "server.pid") if os.name != "nt" else None
         _, server_cmd = build_cmdline(
-            portal_py_file=os.path.join(
-                dirname(dirname(abspath(__file__))), "portal", "portal.py"
-            ),
+            portal_py_file=os.path.join(dirname(dirname(abspath(__file__))), "portal", "portal.py"),
             server_py_file=os.path.join(dirname(dirname(abspath(__file__))), "server.py"),
             server_pidfile=pidfile,
         )
