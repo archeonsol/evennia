@@ -21,8 +21,7 @@ import sys
 import threading
 import time
 from argparse import ArgumentParser
-from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
-                        check_output)
+from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
 
 import django
 from django.core.management import execute_from_command_line
@@ -37,8 +36,7 @@ CTRL_C_EVENT = 0  # Windows SIGINT-like signal
 EVENNIA_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import evennia  # noqa
-from evennia.server.amp_serde import (pack_launcher_args, pack_status,
-                                      unpack_status)
+from evennia.server.amp_serde import pack_status, unpack_status
 
 EVENNIA_LIB = os.path.join(EVENNIA_ROOT, "evennia")
 EVENNIA_SERVER = os.path.join(EVENNIA_LIB, "server")
@@ -573,11 +571,6 @@ def _fail_launcher():
     _reactor_stop()
 
 
-def _launcher_uses_ipc():
-    """Launcher always uses asyncio IPC (twistd/AMP launcher path retired)."""
-    return True
-
-
 def _local_pidfiles_alive():
     """Return True if portal or server pidfiles point at live processes."""
     for pidfile in (SERVER_PIDFILE, PORTAL_PIDFILE):
@@ -641,8 +634,7 @@ def _cleanup_stale_portal_process():
 
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
-                                             LauncherSession, connect_session)
+    from evennia.server.launcher_ipc import COLD_START_DEADLINE, LauncherSession, connect_session
 
     with _AMP_CONNECTION_LOCK:
         if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
@@ -689,76 +681,6 @@ def _send_instruction_ipc(operation, arguments, callback=None, errback=None):
             import traceback
 
             traceback.print_exc()
-
-
-def _send_instruction_amp(operation, arguments, callback=None, errback=None):
-    from twisted.internet import endpoints, reactor
-    from twisted.protocols import amp
-
-    class MsgStatus(amp.Command):
-        key = "MsgStatus"
-        arguments = [(b"status", amp.String())]
-        errors = {Exception: b"EXCEPTION"}
-        response = [(b"status", amp.String())]
-
-    class MsgLauncher2Portal(amp.Command):
-        key = "MsgLauncher2Portal"
-        arguments = [(b"operation", amp.String()), (b"arguments", amp.String())]
-        errors = {Exception: b"EXCEPTION"}
-        response = []
-
-    class AMPLauncherProtocol(amp.AMP):
-        def __init__(self):
-            self.on_status = []
-
-        def wait_for_status(self, cb):
-            self.on_status.append(cb)
-
-        @MsgStatus.responder
-        def receive_status_from_portal(self, status):
-            try:
-                cb = self.on_status.pop()
-            except IndexError:
-                pass
-            else:
-                cb(unpack_status(status))
-            return {"status": b""}
-
-    def _callback(result):
-        if callback:
-            callback(result)
-
-    def _errback(fail):
-        if errback:
-            errback(fail)
-
-    def _on_connect(prot):
-        global AMP_CONNECTION
-        AMP_CONNECTION = prot
-        _send()
-
-    def _on_connect_fail(fail):
-        errback(fail)
-
-    def _send():
-        if operation == PSTATUS:
-            return AMP_CONNECTION.callRemote(MsgStatus, status=b"").addCallbacks(
-                _callback, _errback
-            )
-        return AMP_CONNECTION.callRemote(
-            MsgLauncher2Portal,
-            operation=bytes(operation, "utf-8"),
-            arguments=pack_launcher_args(arguments),
-        ).addCallbacks(_callback, _errback)
-
-    global REACTOR_RUN
-    if AMP_CONNECTION:
-        return _send()
-    point = endpoints.TCP4ClientEndpoint(reactor, AMP_HOST, AMP_PORT)
-    deferred = endpoints.connectProtocol(point, AMPLauncherProtocol())
-    deferred.addCallbacks(_on_connect, _on_connect_fail)
-    REACTOR_RUN = True
-    return deferred
 
 
 def send_instruction(operation, arguments, callback=None, errback=None):
@@ -809,35 +731,26 @@ def wait_for_status_reply(callback, on_fail=None):
     """
     Wait for an explicit STATUS signal to be sent back from Evennia.
     """
-    if _launcher_uses_ipc():
-        global REACTOR_RUN
-        REACTOR_RUN = True
+    global REACTOR_RUN
+    REACTOR_RUN = True
 
-        def _reader():
-            try:
-                session = _ensure_ipc_connection()
-                status = session.wait_for_push(timeout=120.0)
-                if status is not None:
-                    callback(status)
-                else:
-                    if on_fail:
-                        on_fail()
-                    _reactor_stop()
-            except Exception:
-                print("No Evennia connection established.")
+    def _reader():
+        try:
+            session = _ensure_ipc_connection()
+            status = session.wait_for_push(timeout=120.0)
+            if status is not None:
+                callback(status)
+            else:
                 if on_fail:
                     on_fail()
                 _reactor_stop()
+        except Exception:
+            print("No Evennia connection established.")
+            if on_fail:
+                on_fail()
+            _reactor_stop()
 
-        threading.Thread(target=_reader, daemon=True).start()
-        return
-
-    if AMP_CONNECTION:
-        AMP_CONNECTION.wait_for_status(callback)
-    else:
-        print("No Evennia connection established.")
-        if on_fail:
-            on_fail()
+    threading.Thread(target=_reader, name="_launcher_status_reader", daemon=True).start()
 
 
 def _wait_for_status_ipc(
@@ -848,12 +761,14 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
-    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
-                                             SHUTDOWN_WAIT_DEADLINE,
-                                             LauncherSession,
-                                             portal_ipc_reachable,
-                                             query_ipc_status,
-                                             wait_until_state)
+    from evennia.server.launcher_ipc import (
+        COLD_START_DEADLINE,
+        SHUTDOWN_WAIT_DEADLINE,
+        LauncherSession,
+        portal_ipc_reachable,
+        query_ipc_status,
+        wait_until_state,
+    )
 
     if retries is None:
         if portal_running is False or server_running is False:
@@ -936,65 +851,14 @@ def wait_for_status(
     global REACTOR_RUN
     REACTOR_RUN = True
 
-    if _launcher_uses_ipc():
-        return _wait_for_status_ipc(
-            portal_running,
-            server_running,
-            callback,
-            errback,
-            rate=rate,
-            retries=None,
-        )
-
-    def _schedule_retry():
-        threading.Timer(
-            rate,
-            wait_for_status,
-            args=(portal_running, server_running, callback, errback, rate, retries - 1),
-        ).start()
-
-    def _callback(response):
-        from evennia.server.redis_bus import _pid_alive
-
-        prun, srun, ppid, spid, _, _ = _parse_status(response)
-        if portal_running is False and ppid and not _pid_alive(ppid):
-            prun = False
-        if server_running is False and spid and not _pid_alive(spid):
-            srun = False
-        if (portal_running is None or prun == portal_running) and (
-            server_running is None or srun == server_running
-        ):
-            if callback:
-                callback(prun, srun)
-            else:
-                _reactor_stop()
-        else:
-            if retries <= 0:
-                if errback:
-                    errback(prun, srun)
-                else:
-                    print("Connection to Evennia timed out. Try again.")
-                    _reactor_stop()
-            else:
-                _schedule_retry()
-
-    def _errback(fail):
-        if not portal_running:
-            if callback:
-                callback(portal_running, server_running)
-            else:
-                _reactor_stop()
-        else:
-            if retries <= 0:
-                if errback:
-                    errback(portal_running, server_running)
-                else:
-                    print("Connection to Evennia timed out. Try again.")
-                    _reactor_stop()
-            else:
-                _schedule_retry()
-
-    return send_instruction(PSTATUS, None, _callback, _errback)
+    return _wait_for_status_ipc(
+        portal_running,
+        server_running,
+        callback,
+        errback,
+        rate=rate,
+        retries=None,
+    )
 
 
 # ------------------------------------------------------------
@@ -1015,8 +879,10 @@ def maybe_collectstatic(force=None):
         force = COLLECTSTATIC_FORCE
     if not force:
         from evennia.server.collectstatic_cache import (
-            compute_static_fingerprint, read_cached_fingerprint,
-            write_cached_fingerprint)
+            compute_static_fingerprint,
+            read_cached_fingerprint,
+            write_cached_fingerprint,
+        )
 
         fingerprint = compute_static_fingerprint()
         if fingerprint == read_cached_fingerprint(GAMEDIR):
@@ -1025,8 +891,10 @@ def maybe_collectstatic(force=None):
         write_cached_fingerprint(GAMEDIR, fingerprint)
         return True
     collectstatic()
-    from evennia.server.collectstatic_cache import (compute_static_fingerprint,
-                                                    write_cached_fingerprint)
+    from evennia.server.collectstatic_cache import (
+        compute_static_fingerprint,
+        write_cached_fingerprint,
+    )
 
     write_cached_fingerprint(GAMEDIR, compute_static_fingerprint())
     return True
@@ -2666,16 +2534,11 @@ def main():
         print(ABOUT_INFO)
 
     if REACTOR_RUN:
-        if _launcher_uses_ipc():
-            try:
-                while REACTOR_RUN:
-                    time.sleep(0.2)
-            except KeyboardInterrupt:
-                pass
-        else:
-            from twisted.internet import reactor
-
-            reactor.run()
+        try:
+            while REACTOR_RUN:
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            pass
 
     if LAUNCHER_FAILED:
         sys.exit(1)

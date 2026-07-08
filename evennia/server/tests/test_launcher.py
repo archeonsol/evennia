@@ -11,7 +11,6 @@ import unittest
 from anything import Something
 from django.test.utils import override_settings
 from mock import MagicMock, create_autospec, patch
-from twisted.internet import reactor
 from twisted.internet.base import DelayedCall
 from twisted.trial.unittest import TestCase as TwistedTestCase
 
@@ -24,6 +23,12 @@ DelayedCall.debug = True
 
 @patch.object(evennia_launcher, "Popen", new=MagicMock())
 class TestLauncher(TwistedTestCase):
+    def tearDown(self):
+        # some tests toggle launcher globals; reset so they never leak between tests
+        evennia_launcher.AMP_CONNECTION = None
+        evennia_launcher.REACTOR_RUN = False
+        super().tearDown()
+
     def test_is_windows(self):
         self.assertEqual(evennia_launcher._is_windows(), os.name == "nt")
 
@@ -97,17 +102,11 @@ class TestLauncher(TwistedTestCase):
     @patch("evennia.server.evennia_launcher.SERVER_PY_FILE", "/p/server.py")
     def test_get_twisted_cmdline_nt(self):
         pcmd, scmd = evennia_launcher._get_twistd_cmdline(False, False)
+        # on Windows no --pidfile is appended, so both are just [python, py_file]
         self.assertTrue(len(pcmd) == 2, pcmd)
-        self.assertTrue(len(scmd) == 3, scmd)
+        self.assertTrue(len(scmd) == 2, scmd)
 
-    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
-    @patch("twisted.internet.reactor.stop")
-    def test_reactor_stop(self, mockstop):
-        evennia_launcher._reactor_stop()
-        mockstop.assert_called()
-
-    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=True)
-    def test_reactor_stop_ipc(self):
+    def test_reactor_stop(self):
         evennia_launcher.REACTOR_RUN = True
         evennia_launcher._reactor_stop()
         self.assertFalse(evennia_launcher.REACTOR_RUN)
@@ -171,50 +170,86 @@ class TestLauncher(TwistedTestCase):
         evennia_launcher.query_status(callback=testcall)
         mprint.assert_called_with([True, True, 2, 24, "info1", "info2"])
 
-    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
-    @patch.object(evennia_launcher, "AMP_CONNECTION")
-    @patch("evennia.server.evennia_launcher.print")
-    def test_wait_for_status_reply(self, mprint, aconn):
-        aconn.wait_for_status = MagicMock()
+    def _run_status_reply(self, push_value, mcall, on_fail):
+        """
+        Drive wait_for_status_reply against a stub IPC session and join its
+        reader thread deterministically (no socket, no leaked thread).
+        """
+        from evennia.server import launcher_ipc
 
-        def test():
-            pass
+        session = create_autospec(launcher_ipc.LauncherSession, instance=True)
+        session.wait_for_push.return_value = push_value
 
-        evennia_launcher.wait_for_status_reply(test)
-        aconn.wait_for_status.assert_called_with(test)
+        created = []
+        real_thread = threading.Thread
 
-    @patch.object(evennia_launcher, "AMP_CONNECTION", None)
-    @patch("evennia.server.evennia_launcher.print")
-    def test_wait_for_status_reply_fail(self, mprint):
-        evennia_launcher.wait_for_status_reply(None)
-        mprint.assert_called_with("No Evennia connection established.")
+        def _capture_thread(*args, **kwargs):
+            thread = real_thread(*args, **kwargs)
+            created.append(thread)
+            return thread
 
-    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
-    @patch.object(evennia_launcher, "send_instruction", _msend_status_ok)
-    @patch("twisted.internet.reactor.callLater")
-    def test_wait_for_status(self, mcalllater):
+        with (
+            patch.object(evennia_launcher, "_ensure_ipc_connection", return_value=session),
+            patch.object(evennia_launcher, "_reactor_stop") as mstop,
+            patch.object(evennia_launcher.threading, "Thread", side_effect=_capture_thread),
+        ):
+            evennia_launcher.wait_for_status_reply(mcall, on_fail=on_fail)
+            self.assertEqual(len(created), 1)
+            created[0].join(timeout=5)
+            self.assertFalse(created[0].is_alive())
+
+        return mstop
+
+    def test_wait_for_status_reply(self):
+        status = (True, True, 2, 24, "info1", "info2")
         mcall = MagicMock()
-        merr = MagicMock()
-        evennia_launcher.wait_for_status(
-            portal_running=True, server_running=True, callback=mcall, errback=merr
-        )
+        on_fail = MagicMock()
 
-        mcall.assert_called_with(True, True)
-        merr.assert_not_called()
+        mstop = self._run_status_reply(status, mcall, on_fail)
 
-    @override_settings(EVENNIA_ASYNCIO_BOOTSTRAP=False)
-    @patch.object(evennia_launcher, "send_instruction", _msend_status_err)
-    @patch("twisted.internet.reactor.callLater")
-    def test_wait_for_status_fail(self, mcalllater):
+        mcall.assert_called_once_with(status)
+        on_fail.assert_not_called()
+        mstop.assert_not_called()
+
+    def test_wait_for_status_reply_fail(self):
         mcall = MagicMock()
-        merr = MagicMock()
-        evennia_launcher.wait_for_status(
-            portal_running=True, server_running=True, callback=mcall, errback=merr
-        )
+        on_fail = MagicMock()
+
+        mstop = self._run_status_reply(None, mcall, on_fail)
 
         mcall.assert_not_called()
+        on_fail.assert_called_once_with()
+        mstop.assert_called_once_with()
+
+    def test_wait_for_status(self):
+        mcall = MagicMock()
+        merr = MagicMock()
+
+        def _stub(portal_running, server_running, callback, errback, rate=0.5, retries=None):
+            callback(portal_running, server_running)
+
+        with patch.object(evennia_launcher, "_wait_for_status_ipc", side_effect=_stub):
+            evennia_launcher.wait_for_status(
+                portal_running=True, server_running=True, callback=mcall, errback=merr
+            )
+
+        mcall.assert_called_once_with(True, True)
         merr.assert_not_called()
-        mcalllater.assert_called()
+
+    def test_wait_for_status_fail(self):
+        mcall = MagicMock()
+        merr = MagicMock()
+
+        def _stub(portal_running, server_running, callback, errback, rate=0.5, retries=None):
+            errback(portal_running, server_running)
+
+        with patch.object(evennia_launcher, "_wait_for_status_ipc", side_effect=_stub):
+            evennia_launcher.wait_for_status(
+                portal_running=True, server_running=True, callback=mcall, errback=merr
+            )
+
+        mcall.assert_not_called()
+        merr.assert_called_once_with(True, True)
 
 
 class TestLauncherIPCConnection(unittest.TestCase):
