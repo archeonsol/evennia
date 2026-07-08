@@ -26,7 +26,15 @@ _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
 
 def _sync(d):
-    """Extract an already-fired Deferred's result, re-raising on failure."""
+    """Extract an already-fired Deferred/coroutine's result, re-raising on failure."""
+    import inspect
+
+    from twisted.internet.defer import ensureDeferred
+
+    if inspect.iscoroutine(d):
+        # dispatch/engine are now `async def`; drive the (synchronous) coroutine
+        # to an already-fired Deferred.
+        d = ensureDeferred(d)
     out = {}
     d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
     if "fail" in out:

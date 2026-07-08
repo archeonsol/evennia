@@ -11,8 +11,7 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import (BaseEvenniaCommandTest,
-                                          BaseEvenniaTest, TestCase)
+from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest, TestCase
 
 # Testing-command sets
 
@@ -1072,9 +1071,9 @@ class TestGetAndMergeCmdSets(TwistedTestCase, BaseEvenniaTest):
             error_to,
         ) = cmdhandler.generate_cmdset_providers(self.session)
 
-        deferred = ensureDeferred(cmdhandler.get_and_merge_cmdsets(
-            self.session, [self.session], "session", "", error_to
-        ))
+        deferred = ensureDeferred(
+            cmdhandler.get_and_merge_cmdsets(self.session, [self.session], "session", "", error_to)
+        )
 
         def _callback(cmdset):
             self.assertEqual(cmdset.key, "A")
@@ -1096,9 +1095,11 @@ class TestGetAndMergeCmdSets(TwistedTestCase, BaseEvenniaTest):
             error_to,
         ) = cmdhandler.generate_cmdset_providers(self.account)
 
-        deferred = ensureDeferred(cmdhandler.get_and_merge_cmdsets(
-            self.account, command_objects_list, "account", "", error_to
-        ))
+        deferred = ensureDeferred(
+            cmdhandler.get_and_merge_cmdsets(
+                self.account, command_objects_list, "account", "", error_to
+            )
+        )
         # get_and_merge_cmdsets converts  to lower-case internally.
 
         def _callback(cmdset):
@@ -1121,9 +1122,11 @@ class TestGetAndMergeCmdSets(TwistedTestCase, BaseEvenniaTest):
             error_to,
         ) = cmdhandler.generate_cmdset_providers(self.obj1)
 
-        deferred = ensureDeferred(cmdhandler.get_and_merge_cmdsets(
-            self.obj1, command_objects_list, "object", "", error_to
-        ))
+        deferred = ensureDeferred(
+            cmdhandler.get_and_merge_cmdsets(
+                self.obj1, command_objects_list, "object", "", error_to
+            )
+        )
         # get_and_merge_cmdsets converts  to lower-case internally.
 
         def _callback(cmdset):
@@ -1146,9 +1149,11 @@ class TestGetAndMergeCmdSets(TwistedTestCase, BaseEvenniaTest):
             caller,
             error_to,
         ) = cmdhandler.generate_cmdset_providers(self.obj1)
-        deferred = ensureDeferred(cmdhandler.get_and_merge_cmdsets(
-            self.obj1, command_objects_list, "object", "", error_to
-        ))
+        deferred = ensureDeferred(
+            cmdhandler.get_and_merge_cmdsets(
+                self.obj1, command_objects_list, "object", "", error_to
+            )
+        )
 
         def _callback(cmdset):
             self.assertTrue(cmdset.no_exits)
@@ -1173,9 +1178,11 @@ class TestGetAndMergeCmdSets(TwistedTestCase, BaseEvenniaTest):
             error_to,
         ) = cmdhandler.generate_cmdset_providers(self.obj1, session=None)
 
-        deferred = ensureDeferred(cmdhandler.get_and_merge_cmdsets(
-            self.obj1, command_objects_list, "object", "", error_to
-        ))
+        deferred = ensureDeferred(
+            cmdhandler.get_and_merge_cmdsets(
+                self.obj1, command_objects_list, "object", "", error_to
+            )
+        )
 
         def _callback(cmdset):
             self.assertEqual(len(cmdset.commands), 9)
@@ -1509,9 +1516,11 @@ class TestIssue2627(TwistedTestCase, BaseEvenniaTest):
 
     @patch.object(cmdhandler.logger, "log_err")
     def test_cmdhandler_masks_sensitive_input_in_error_log(self, mock_log_err):
-        d = ensureDeferred(cmdhandler.cmdhandler(
-            self.session, " johnny password123", cmdobj=_CmdCrash(), cmdobj_key="connect"
-        ))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(
+                self.session, " johnny password123", cmdobj=_CmdCrash(), cmdobj_key="connect"
+            )
+        )
 
         def _callback(_):
             logged = [call.args[0] for call in mock_log_err.call_args_list if call.args]
@@ -1667,8 +1676,7 @@ class TestCmdAccessCache(BaseEvenniaTest):
 
     @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
     def test_invalidate_bumps_generation(self):
-        from evennia.commands.cmd_access_cache import (
-            cached_cmd_access, invalidate_cmd_access_cache)
+        from evennia.commands.cmd_access_cache import cached_cmd_access, invalidate_cmd_access_cache
 
         cmd = _CmdA("test")
         with patch.object(cmd, "access", return_value=True) as mock_access:
@@ -1849,7 +1857,9 @@ class TestAtPreCmdRename(BaseEvenniaTest):
             def at_post_cmd(self):
                 events.append("at_post_cmd")
 
-        d = ensureDeferred(cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdOrder(), cmdobj_key="order"))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdOrder(), cmdobj_key="order")
+        )
 
         def _check(_):
             # at_pre_cmd is engine-only (no-op) during the deprecation
@@ -1877,7 +1887,9 @@ class TestAtPreCmdRename(BaseEvenniaTest):
             def func(self):
                 events.append("func")
 
-        d = ensureDeferred(cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPre(), cmdobj_key="abortpre"))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPre(), cmdobj_key="abortpre")
+        )
 
         def _check(_):
             self.assertEqual(events, ["at_pre_parse"])
@@ -1909,9 +1921,11 @@ class TestAtPreCmdRename(BaseEvenniaTest):
             def at_post_cmd(self):
                 events.append("at_post_cmd")
 
-        d = ensureDeferred(cmdhandler.cmdhandler(
-            self.session, "", cmdobj=_CmdPostParseHook(), cmdobj_key="postparsehook"
-        ))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(
+                self.session, "", cmdobj=_CmdPostParseHook(), cmdobj_key="postparsehook"
+            )
+        )
 
         def _check(_):
             self.assertEqual(
@@ -1945,7 +1959,9 @@ class TestAtPreCmdRename(BaseEvenniaTest):
             def at_post_cmd(self):
                 events.append("at_post_cmd")
 
-        d = ensureDeferred(cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPost(), cmdobj_key="abortpost"))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPost(), cmdobj_key="abortpost")
+        )
 
         def _check(_):
             # parse ran (post-parse hook only fires after) but func and
@@ -1988,7 +2004,9 @@ class TestFtfyNormalization(BaseEvenniaTest):
     @override_settings(INPUT_FTFY_NORMALIZE=True)
     def test_mojibake_normalized_on_raw_string(self):
         cmd, captured = self._capture_cmd()
-        d = ensureDeferred(cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key"))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key")
+        )
 
         def _check(_):
             self.assertEqual(captured["raw_string"], "key" + self.FIXED_ARG)
@@ -1999,7 +2017,9 @@ class TestFtfyNormalization(BaseEvenniaTest):
     @override_settings(INPUT_FTFY_NORMALIZE=False)
     def test_setting_off_passes_through(self):
         cmd, captured = self._capture_cmd()
-        d = ensureDeferred(cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key"))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key")
+        )
 
         def _check(_):
             self.assertEqual(captured["raw_string"], "key" + self.MOJIBAKE_ARG)
@@ -2079,7 +2099,9 @@ class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
         _on_command_pre.connect(_bad, weak=False, dispatch_uid="bad-pre")
         self.addCleanup(_on_command_pre.disconnect, _bad, dispatch_uid="bad-pre")
 
-        d = ensureDeferred(cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok"))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
+        )
 
         def _check(_):
             kinds = [ev[0] for ev in self.recorder.events]
@@ -2120,13 +2142,15 @@ class TestSignalSessionResolution(TwistedTestCase, BaseEvenniaTest):
                 return self._providers
 
         synthetic = _SyntheticSession(self.session.get_cmdset_providers())
-        d = ensureDeferred(cmdhandler.cmdhandler(
-            self.session,
-            "",
-            cmdobj=_CmdSignalsOk(),
-            cmdobj_key="ok",
-            session=synthetic,
-        ))
+        d = ensureDeferred(
+            cmdhandler.cmdhandler(
+                self.session,
+                "",
+                cmdobj=_CmdSignalsOk(),
+                cmdobj_key="ok",
+                session=synthetic,
+            )
+        )
 
         def _check(_):
             post_kwargs = self.recorder.events[1][2]
@@ -2140,8 +2164,7 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import (begin_command_trace,
-                                                 end_command_trace)
+        from evennia.utils.command_trace import begin_command_trace, end_command_trace
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2185,8 +2208,13 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
-    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
+    bump_cmdset_generation,
+    clear_location_cmdset_cache,
+    cmdset_generation,
+    get_cached_location_cmdsets,
+    make_cache_key,
+    set_cached_location_cmdsets,
+)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2862,7 +2890,11 @@ class TestPosePassthroughIntegration(TwistedTestCase):
 
     def _route(self, raw):
         out = {}
-        d = _rp_try_dispatch(self.char, raw, actor=self.actor, engine=_rp_engine, parser=_rp_parser)
+        # try_action_dispatch is `async def` now; drive the (synchronous)
+        # coroutine to an already-fired Deferred.
+        d = ensureDeferred(
+            _rp_try_dispatch(self.char, raw, actor=self.actor, engine=_rp_engine, parser=_rp_parser)
+        )
         d.addCallbacks(lambda r: out.__setitem__("ok", r), lambda f: out.__setitem__("fail", f))
         if "fail" in out:
             out["fail"].raiseException()
