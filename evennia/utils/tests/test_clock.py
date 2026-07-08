@@ -171,3 +171,54 @@ class TestDefaultExecutorLifecycle(BaseEvenniaTestCase):
                 executor.submit(lambda: None)  # pool is shut down, not leaked
         finally:
             loop.close()
+
+
+class TestClockLoopBinding(BaseEvenniaTestCase):
+    """bind_loop is the sole authority for the bound loop + its owning thread."""
+
+    def setUp(self):
+        super().setUp()
+        self._saved_loop = clock._main_loop
+        self._saved_tid = clock._loop_thread_id
+
+    def tearDown(self):
+        clock._main_loop = self._saved_loop
+        clock._loop_thread_id = self._saved_tid
+        super().tearDown()
+
+    def test_get_loop_does_not_rebind_main_loop(self):
+        bound = asyncio.new_event_loop()
+        other = asyncio.new_event_loop()
+        try:
+            clock.bind_loop(bound)
+
+            async def _inside():
+                return clock._get_loop()
+
+            got = other.run_until_complete(_inside())
+            self.assertIs(got, other)  # returns the actually-running loop
+            self.assertIs(clock._main_loop, bound)  # but must not rebind the global
+        finally:
+            bound.close()
+            other.close()
+
+    def test_is_io_thread_uses_recorded_thread_ident(self):
+        import threading
+
+        loop = asyncio.new_event_loop()
+        try:
+            clock.bind_loop(loop)
+            # binding thread, no running loop → identified via recorded ident
+            self.assertTrue(clock.is_io_thread())
+
+            result = {}
+
+            def worker():
+                result["io"] = clock.is_io_thread()
+
+            t = threading.Thread(target=worker)
+            t.start()
+            t.join()
+            self.assertFalse(result["io"])
+        finally:
+            loop.close()

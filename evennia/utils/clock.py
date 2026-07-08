@@ -17,16 +17,25 @@ from concurrent.futures import ThreadPoolExecutor
 _DEFAULT_EXECUTOR_WORKERS = 10
 
 _pending_when_running: list[tuple] = []
+_pending_lock = threading.Lock()
 _shutdown_hooks: list[tuple] = []
 _default_executor: ThreadPoolExecutor | None = None
 _executor_lock = threading.Lock()
 _main_loop: asyncio.AbstractEventLoop | None = None
+_loop_thread_id: int | None = None
 
 
 def bind_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Register the process-owned loop (asyncio bootstrap, T3 S9)."""
-    global _main_loop
+    """Register the process-owned loop (asyncio bootstrap, T3 S9).
+
+    This is the sole writer of ``_main_loop``: the running loop is discovered via
+    ``asyncio.get_running_loop()`` on the hot path, never rebound here-behind-the-back.
+    """
+    global _main_loop, _loop_thread_id
     _main_loop = loop
+    # Record the owning thread so is_io_thread never reads the CPython-private
+    # ``loop._thread_id``. bind_loop runs on the thread that then runs the loop.
+    _loop_thread_id = threading.get_ident()
     # Build the worker pool here, in the single-threaded bootstrap context, so
     # concurrent defer_to_thread callers never race to construct duplicate pools.
     # (The pool spawns no threads until work is actually submitted.)
@@ -54,12 +63,9 @@ def is_io_thread() -> bool:
         return asyncio.get_running_loop() is loop
     except RuntimeError:
         pass
-    thread_id = getattr(loop, "_thread_id", None)
-    if thread_id is None:
+    if _loop_thread_id is None:
         return False
-    import threading
-
-    return threading.get_ident() == thread_id
+    return threading.get_ident() == _loop_thread_id
 
 
 def register_shutdown_hook(fn, *args, **kwargs):
@@ -101,11 +107,9 @@ def stop_loop():
 
 def _get_loop() -> asyncio.AbstractEventLoop:
     """Return the running asyncio loop, or the bound bootstrap loop."""
-    global _main_loop
     try:
-        loop = asyncio.get_running_loop()
-        _main_loop = loop
-        return loop
+        # Discover the running loop; do not rebind _main_loop (bind_loop owns it).
+        return asyncio.get_running_loop()
     except RuntimeError:
         pass
     if _main_loop is not None and not _main_loop.is_closed():
@@ -129,10 +133,11 @@ def _get_loop() -> asyncio.AbstractEventLoop:
 
 
 def _flush_when_running(loop: asyncio.AbstractEventLoop) -> None:
-    if not _pending_when_running:
-        return
-    pending = _pending_when_running[:]
-    _pending_when_running.clear()
+    with _pending_lock:
+        if not _pending_when_running:
+            return
+        pending = _pending_when_running[:]
+        _pending_when_running.clear()
     for fn, args, kwargs in pending:
         loop.call_soon(fn, *args, **kwargs)
 
@@ -310,7 +315,8 @@ def call_from_thread(fn, *args, **kwargs):
     if kwargs:
         fn = functools.partial(fn, *args, **kwargs)
         return loop.call_soon_threadsafe(fn)
-    return loop.call_soon_threadsafe(fn, *args, **kwargs)
+    # kwargs is empty in this branch; call_soon_threadsafe takes no **kwargs.
+    return loop.call_soon_threadsafe(fn, *args)
 
 
 def when_running(fn, *args, **kwargs):
@@ -318,7 +324,8 @@ def when_running(fn, *args, **kwargs):
     try:
         loop = _get_loop()
     except RuntimeError:
-        _pending_when_running.append((fn, args, kwargs))
+        with _pending_lock:
+            _pending_when_running.append((fn, args, kwargs))
         return None
     _flush_when_running(loop)
     return loop.call_soon(fn, *args, **kwargs)
