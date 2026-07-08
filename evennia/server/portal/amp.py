@@ -396,21 +396,6 @@ class AMPMultiConnectionProtocol(amp.AMP):
         Args:
             string (str): the data coming in.
 
-        Notes:
-
-            To test, add the following code to the beginning of
-            `evennia.server.amp_client.AMPServerClientProtocol.data_to_portal`, then
-            run multiple commands until the error trigger:
-            ::
-
-                import random
-                from twisted.protocols.amp import AmpBox
-                always_fail = False
-                if always_fail or random.random() < 0.05:
-                    breaker = AmpBox()
-                    breaker['_answer'.encode()]='13541'.encode()
-                    self.transport.write(breaker.serialize())
-
         """
         try:
             pto = "proto_" + self.state

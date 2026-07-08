@@ -1,21 +1,17 @@
 """Portal-side Portal<->Server IPC handlers (transport-agnostic)."""
 
+import evennia
 from evennia.server import ipc_schema
 from evennia.server.portal import amp
 from evennia.utils import logger
 
-import evennia
-
 
 def receive_server2portal(packed_data):
     """Server -> Portal session data plane (trusted output)."""
-    try:
-        sessid, kwargs = ipc_schema.parse_session(packed_data, enforce_limits=False)
-        session = evennia.PORTAL_SESSION_HANDLER.get(sessid, None)
-        if session:
-            evennia.PORTAL_SESSION_HANDLER.data_out(session, **kwargs)
-    except Exception:
-        logger.log_trace("packed_data len {}".format(len(packed_data)))
+    sessid, kwargs = ipc_schema.parse_session(packed_data, enforce_limits=False)
+    session = evennia.PORTAL_SESSION_HANDLER.get(sessid, None)
+    if session:
+        evennia.PORTAL_SESSION_HANDLER.data_out(session, **kwargs)
     return {}
 
 
@@ -102,14 +98,11 @@ def receive_adminserver2portal(link, packed_data):
 
 
 def data_to_server(link, command, sessid, **kwargs):
-    """Pack and publish/send a frame to the Server."""
+    """Pack and publish a frame to the Server over the redis bus."""
     if command in (amp.AdminPortal2Server,):
         packed = amp.dumps_admin((sessid, kwargs))
     else:
         packed = amp.dumps_session((sessid, kwargs))
-    if getattr(link.factory, "server_connection", None):
-        conn = link.factory.server_connection
-        return conn.callRemote(command, packed_data=packed).addErrback(link.errback, command.key)
     return link.broadcast(command, sessid, packed_data=packed)
 
 
@@ -118,4 +111,6 @@ def send_msgportal2server(link, session, **kwargs):
 
 
 def send_adminportal2server(link, session, operation="", **kwargs):
-    return data_to_server(link, amp.AdminPortal2Server, session.sessid, operation=operation, **kwargs)
+    return data_to_server(
+        link, amp.AdminPortal2Server, session.sessid, operation=operation, **kwargs
+    )

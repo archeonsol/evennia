@@ -247,9 +247,9 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         if hasattr(conn, "push_status"):
             conn.push_status(status)
         elif hasattr(conn, "callRemote"):
-            conn.callRemote(
-                amp.MsgStatus, status=amp.dumps_status(status)
-            ).addErrback(self.errback, amp.MsgStatus.key)
+            conn.callRemote(amp.MsgStatus, status=amp.dumps_status(status)).addErrback(
+                self.errback, amp.MsgStatus.key
+            )
 
     def send_MsgPortal2Server(self, session, **kwargs):
         return ipc_handlers_portal.send_msgportal2server(self, session, **kwargs)
@@ -290,13 +290,3 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
         self.factory.launcher_connection = self
         launcher_handlers.receive_launcher_command(self, operation, arguments)
         return {}
-
-    @amp.MsgServer2Portal.responder
-    @amp.catch_traceback
-    def portal_receive_server2portal(self, packed_data):
-        return ipc_handlers_portal.receive_server2portal(packed_data)
-
-    @amp.AdminServer2Portal.responder
-    @amp.catch_traceback
-    def portal_receive_adminserver2portal(self, packed_data):
-        return ipc_handlers_portal.receive_adminserver2portal(self, packed_data)

@@ -222,6 +222,30 @@ class TestRedisTransportBootFailFast(SimpleTestCase):
         self.assertIsNone(transport._writer)
 
 
+class TestReceiveServer2PortalSurfacesErrors(SimpleTestCase):
+    """The trusted Server->Portal out path must not swallow genuine errors:
+    redis dispatches each frame independently, so a data_out bug should surface
+    rather than hide in a trace line (a holdover from AMP per-frame isolation)."""
+
+    def test_data_out_error_propagates(self):
+        from evennia.server.portal import ipc_handlers_portal
+
+        handler = MagicMock()
+        handler.get.return_value = object()
+        handler.data_out.side_effect = RuntimeError("data_out bug")
+        with (
+            patch.object(ipc_handlers_portal, "evennia") as mock_ev,
+            patch.object(
+                ipc_handlers_portal.ipc_schema,
+                "parse_session",
+                return_value=(1, {"text": "hi"}),
+            ),
+        ):
+            mock_ev.PORTAL_SESSION_HANDLER = handler
+            with self.assertRaises(RuntimeError):
+                ipc_handlers_portal.receive_server2portal(b"frame")
+
+
 class TestUnsupportedBusFailsHard(SimpleTestCase):
     """redis is the only supported Portal<->Server bus: any other setting aborts
     boot rather than silently forcing redis."""
