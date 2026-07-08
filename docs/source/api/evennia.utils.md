@@ -4,8 +4,8 @@ evennia.utils
 
 .. automodule:: evennia.utils
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
 
 
 
@@ -14,22 +14,29 @@ evennia.utils
 
    evennia.utils.ansi
    evennia.utils.batchprocessors
+   evennia.utils.bulk_tick
+   evennia.utils.clock
+   evennia.utils.command_trace
    evennia.utils.containers
    evennia.utils.create
    evennia.utils.dbserialize
+   evennia.utils.defer
    evennia.utils.eveditor
    evennia.utils.evform
-   evennia.utils.evmenu
    evennia.utils.evmore
    evennia.utils.evtable
    evennia.utils.funcparser
    evennia.utils.gametime
    evennia.utils.hex_colors
+   evennia.utils.http
    evennia.utils.logger
+   evennia.utils.multimatch
    evennia.utils.optionclasses
    evennia.utils.optionhandler
    evennia.utils.picklefield
+   evennia.utils.reactor_watchdog
    evennia.utils.search
+   evennia.utils.systems
    evennia.utils.test_resources
    evennia.utils.text2html
    evennia.utils.utils
@@ -39,6 +46,7 @@ evennia.utils
 .. toctree::
    :maxdepth: 6
 
+   evennia.utils.editor
    evennia.utils.idmapper
    evennia.utils.verb_conjugation
 

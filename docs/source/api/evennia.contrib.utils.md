@@ -4,8 +4,8 @@ evennia.contrib.utils
 
 .. automodule:: evennia.contrib.utils
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
 
 
 .. toctree::
@@ -14,7 +14,6 @@ evennia.contrib.utils
    evennia.contrib.utils.auditing
    evennia.contrib.utils.debugpy
    evennia.contrib.utils.git_integration
-   evennia.contrib.utils.name_generator
    evennia.contrib.utils.random_string_generator
 
 ```

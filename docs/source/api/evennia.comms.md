@@ -4,14 +4,15 @@ evennia.comms
 
 .. automodule:: evennia.comms
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
 
 
 
 .. toctree::
    :maxdepth: 6
 
+   evennia.comms.channel_subscriber_cache
    evennia.comms.comms
    evennia.comms.managers
    evennia.comms.models

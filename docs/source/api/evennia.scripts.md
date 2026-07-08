@@ -4,8 +4,8 @@ evennia.scripts
 
 .. automodule:: evennia.scripts
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
 
 
 
@@ -19,6 +19,5 @@ evennia.scripts
    evennia.scripts.scripthandler
    evennia.scripts.scripts
    evennia.scripts.taskhandler
-   evennia.scripts.tickerhandler
 
 ```

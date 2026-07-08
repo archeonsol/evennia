@@ -7,7 +7,7 @@ in the [Community Contribs & Snippets][forum] forum.
 _Contribs_ are optional code snippets and systems contributed by
 the Evennia community. They vary in size and complexity and
 may be more specific about game types and styles than 'core' Evennia.
-This page is auto-generated and summarizes all **30** contribs currently included
+This page is auto-generated and summarizes all **29** contribs currently included
 with the Evennia distribution.
 
 All contrib categories are imported from `evennia.contrib`, such as
@@ -34,7 +34,7 @@ If you want to add a contrib, see [the contrib guidelines](Contribs-Guidelines)!
 | [dice](#dice) | [email_login](#email_login) | [gendersub](#gendersub) | [git_integration](#git_integration) | [godotwebsocket](#godotwebsocket) |
 | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) |
 | [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) | [random_string_generator](#random_string_generator) | [red_button](#red_button) | [simpledoor](#simpledoor) |
-| [slow_exit](#slow_exit) | [storage](#storage) | [unixcommand](#unixcommand) | [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
+| [storage](#storage) | [unixcommand](#unixcommand) | [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
 
 
 
@@ -296,7 +296,6 @@ Contribs-Guidelines.md
 Contrib-Ingame-Map-Display.md
 Contrib-Mapbuilder.md
 Contrib-Simpledoor.md
-Contrib-Slow-Exit.md
 Contrib-Wilderness.md
 Contrib-XYZGrid.md
 ```
@@ -334,19 +333,6 @@ closed from both sides. Can easily be expanded to make it lockable,
 destroyable etc. 
 
 [Read the documentation](./Contrib-Simpledoor.md) - [Browse the Code](api:evennia.contrib.grid.simpledoor)
-
-
-
-### `slow_exit`
-
-_Contribution by Griatch 2014_
-
-An example of an Exit-type that delays its traversal. This simulates
-slow movement, common in many games. The contrib also
-contains two commands, `setspeed` and `stop` for changing the movement speed
-and abort an ongoing traversal, respectively.
-
-[Read the documentation](./Contrib-Slow-Exit.md) - [Browse the Code](api:evennia.contrib.grid.slow_exit)
 
 
 
