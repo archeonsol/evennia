@@ -52,7 +52,7 @@ references to rooms previously created is passed to the build commands.
 You then call the command in-game using the path to the MAP and MAP_LEGEND vars
 The path you provide is relative to the evennia or mygame folder.
 
-See also the [separate tutorial in the docs](./Contrib-Mapbuilder-Tutorial.md).
+See also the [separate tutorial in the docs](Contrib-Mapbuilder-Tutorial).
 
 ## Installation
 

@@ -103,7 +103,8 @@ func _handle_data(data):
 	# The first element can be used to see if its text
 	if data_array[0] == 'text':
 		# The second element contains the messages
-		for msg in data_array[1]: 			write_to_rtb(msg)
+		for msg in data_array[1]:
+			write_to_rtb(msg)
 
 func write_to_rtb(msg):
 	output_label.append_text(msg)
@@ -176,7 +177,8 @@ func _handle_data(data):
 	# The first element can be used to see if its text
 	if data_array[0] == 'text':
 		# The second element contains the messages
-		for msg in data_array[1]: 			write_to_rtb(msg)
+		for msg in data_array[1]:
+			write_to_rtb(msg)
 
 func write_to_rtb(msg):
 	output_label.append_text(msg)

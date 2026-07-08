@@ -7,7 +7,7 @@ in the [Community Contribs & Snippets][forum] forum.
 _Contribs_ are optional code snippets and systems contributed by
 the Evennia community. They vary in size and complexity and
 may be more specific about game types and styles than 'core' Evennia.
-This page is auto-generated and summarizes all **43** contribs currently included
+This page is auto-generated and summarizes all **30** contribs currently included
 with the Evennia distribution.
 
 All contrib categories are imported from `evennia.contrib`, such as
@@ -18,26 +18,23 @@ Each contrib contains installation instructions for how to integrate it
 with your other code. If you want to tweak the code of a contrib, just
 copy its entire folder to your game directory and modify/use it from there.
 
-If you want to add a contrib, see [the contrib guidelines](./Contribs-Guidelines.md)!
+If you want to add a contrib, see [the contrib guidelines](Contribs-Guidelines)!
 
 [forum]: https://github.com/evennia/evennia/discussions/categories/community-contribs-snippets
 
 ## Index
-| | | | | | |
-|---|---|---|---|---|---|
+| | | | | | | |
+|---|---|---|---|---|---|---|
 | [base_systems](#base_systems) | [game_systems](#game_systems) | [grid](#grid) | [rpg](#rpg) | [tutorials](#tutorials) | [utils](#utils) |
 
 | | | | | |
 |---|---|---|---|---|
-| [achievements](#achievements) | [auditing](#auditing) | [awsstorage](#awsstorage) | [barter](#barter) | [batchprocessor](#batchprocessor) |
-| [bodyfunctions](#bodyfunctions) | [buffs](#buffs) | [building_menu](#building_menu) | [clothing](#clothing) | [color_markups](#color_markups) |
-| [components](#components) | [containers](#containers) | [cooldowns](#cooldowns) | [crafting](#crafting) | [custom_gametime](#custom_gametime) |
-| [debugpy](#debugpy) | [dice](#dice) | [email_login](#email_login) | [extended_room](#extended_room) | [gendersub](#gendersub) |
-| [git_integration](#git_integration) | [godotwebsocket](#godotwebsocket) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [llm](#llm) |
-| [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) | [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) |
-| [name_generator](#name_generator) | [puzzles](#puzzles) | [random_string_generator](#random_string_generator) | [red_button](#red_button) | [rpsystem](#rpsystem) |
-| [simpledoor](#simpledoor) | [slow_exit](#slow_exit) | [storage](#storage) | [traits](#traits) | [turnbattle](#turnbattle) |
-| [unixcommand](#unixcommand) | [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
+| [achievements](#achievements) | [auditing](#auditing) | [awsstorage](#awsstorage) | [batchprocessor](#batchprocessor) | [building_menu](#building_menu) |
+| [clothing](#clothing) | [color_markups](#color_markups) | [containers](#containers) | [crafting](#crafting) | [debugpy](#debugpy) |
+| [dice](#dice) | [email_login](#email_login) | [gendersub](#gendersub) | [git_integration](#git_integration) | [godotwebsocket](#godotwebsocket) |
+| [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) |
+| [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) | [random_string_generator](#random_string_generator) | [red_button](#red_button) | [simpledoor](#simpledoor) |
+| [slow_exit](#slow_exit) | [storage](#storage) | [unixcommand](#unixcommand) | [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
 
 
 
@@ -58,8 +55,6 @@ Contribs-Guidelines.md
 Contrib-AWSStorage.md
 Contrib-Building-Menu.md
 Contrib-Color-Markups.md
-Contrib-Components.md
-Contrib-Custom-Gametime.md
 Contrib-Email-Login.md
 Contrib-Godotwebsocket.md
 Contrib-Mux-Comms-Cmds.md
@@ -75,7 +70,7 @@ This plugin migrates the Web-based portion of Evennia, namely images,
 javascript, and other items located inside staticfiles into Amazon AWS (S3)
 cloud hosting. Great for those serving media with the game.
 
-[Read the documentation](./Contrib-AWSStorage.md) - [Browse the Code](evennia.contrib.base_systems.awsstorage)
+[Read the documentation](./Contrib-AWSStorage.md) - [Browse the Code](api:evennia.contrib.base_systems.awsstorage)
 
 
 
@@ -90,7 +85,7 @@ builders quick-editing of a given object, like a room. If you follow the
 steps to add the contrib, you will have access to an `edit` command
 that will edit any default object, offering to change its key and description.
 
-[Read the documentation](./Contrib-Building-Menu.md) - [Browse the Code](evennia.contrib.base_systems.building_menu)
+[Read the documentation](./Contrib-Building-Menu.md) - [Browse the Code](api:evennia.contrib.base_systems.building_menu)
 
 
 
@@ -102,30 +97,7 @@ Additional color markup styles for Evennia (extending or replacing the default
 `|r`, `|234`). Adds support for MUSH-style (`%cr`, `%c123`) and/or legacy-Evennia
 (`{r`, `{123`).
 
-[Read the documentation](./Contrib-Color-Markups.md) - [Browse the Code](evennia.contrib.base_systems.color_markups)
-
-
-
-### `components`
-
-_Contrib by ChrisLR, 2021_
-
-Expand typeclasses using a components/composition approach.
-
-[Read the documentation](./Contrib-Components.md) - [Browse the Code](evennia.contrib.base_systems.components)
-
-
-
-### `custom_gametime`
-
-_Contrib by vlgeoff, 2017 - based on Griatch's core original_
-
-This reimplements the `evennia.utils.gametime` module but with a _custom_
-calendar (unusual number of days per week/month/year etc) for your game world.
-Like the original, it allows for scheduling events to happen at given
-in-game times, but now taking this custom calendar into account.
-
-[Read the documentation](./Contrib-Custom-Gametime.md) - [Browse the Code](evennia.contrib.base_systems.custom_gametime)
+[Read the documentation](./Contrib-Color-Markups.md) - [Browse the Code](api:evennia.contrib.base_systems.color_markups)
 
 
 
@@ -137,7 +109,7 @@ This is a variant of the login system that asks for an email-address
 instead of a username to login. Note that it does not verify the email,
 it just uses it as the identifier rather than a username.
 
-[Read the documentation](./Contrib-Email-Login.md) - [Browse the Code](evennia.contrib.base_systems.email_login)
+[Read the documentation](./Contrib-Email-Login.md) - [Browse the Code](api:evennia.contrib.base_systems.email_login)
 
 
 
@@ -149,8 +121,7 @@ This contrib allows you to connect a Godot Client directly to your mud,
 and display regular text with color in Godot's RichTextLabel using BBCode.
 You can use Godot to provide advanced functionality with proper Evennia support.
 
-[Read the documentation](./Contrib-Godotwebsocket.md) - [Browse the Code](evennia.contrib.base_systems.godotwebsocket)
-
+[Read the documentation](./Contrib-Godotwebsocket.md) - [Browse the Code](api:evennia.contrib.base_systems.godotwebsocket)
 
 
 
@@ -164,7 +135,7 @@ This contrib (extracted from Evennia 0.9.5) breaks out the functionality into
 separate Commands more familiar to MU* users. This is just for show though, the 
 main `channel` command is still called under the hood.
 
-[Read the documentation](./Contrib-Mux-Comms-Cmds.md) - [Browse the Code](evennia.contrib.base_systems.mux_comms_cmds)
+[Read the documentation](./Contrib-Mux-Comms-Cmds.md) - [Browse the Code](api:evennia.contrib.base_systems.mux_comms_cmds)
 
 
 
@@ -179,7 +150,7 @@ but can be really useful for builders when they need to have a single command do
 many things with many options. It uses the `ArgumentParser` from Python's standard
 library under the hood.
 
-[Read the documentation](./Contrib-Unixcommand.md) - [Browse the Code](evennia.contrib.base_systems.unixcommand)
+[Read the documentation](./Contrib-Unixcommand.md) - [Browse the Code](api:evennia.contrib.base_systems.unixcommand)
 
 
 
@@ -202,17 +173,13 @@ Contribs-Guidelines.md
 :maxdepth: 1
 
 Contrib-Achievements.md
-Contrib-Barter.md
 Contrib-Clothing.md
 Contrib-Containers.md
-Contrib-Cooldowns.md
 Contrib-Crafting.md
 Contrib-Gendersub.md
 Contrib-Mail.md
 Contrib-Multidescer.md
-Contrib-Puzzles.md
 Contrib-Storage.md
-Contrib-Turnbattle.md
 ```
 
 
@@ -222,23 +189,7 @@ _A simple, but reasonably comprehensive, system for tracking achievements. Achie
 
 The contrib provides several functions for tracking and accessing achievements, as well as a basic in-game command for viewing achievement status.
 
-[Read the documentation](./Contrib-Achievements.md) - [Browse the Code](evennia.contrib.game_systems.achievements)
-
-
-
-### `barter`
-
-_Contribution by Griatch, 2012_
-
-This implements a full barter system - a way for players to safely
-trade items between each other in code rather than simple `give/get`
-commands. This increases both safety (at no time will one player have 
-both goods and payment in-hand) and speed, since agreed goods will 
-be moved automatically). By just replacing one side with coin objects,
-(or a mix of coins and goods), this also works fine for regular money 
-transactions.
-
-[Read the documentation](./Contrib-Barter.md) - [Browse the Code](evennia.contrib.game_systems.barter)
+[Read the documentation](./Contrib-Achievements.md) - [Browse the Code](api:evennia.contrib.game_systems.achievements)
 
 
 
@@ -249,7 +200,7 @@ _Contribution by Tim Ashley Jenkins, 2017_
 Provides a typeclass and commands for wearable clothing. These 
 look of these clothes are appended to the character's description when worn.
 
-[Read the documentation](./Contrib-Clothing.md) - [Browse the Code](evennia.contrib.game_systems.clothing)
+[Read the documentation](./Contrib-Clothing.md) - [Browse the Code](api:evennia.contrib.game_systems.clothing)
 
 
 
@@ -259,21 +210,7 @@ _Adds the ability to put objects into other container objects by providing a con
 
 ## Installation
 
-[Read the documentation](./Contrib-Containers.md) - [Browse the Code](evennia.contrib.game_systems.containers)
-
-
-
-### `cooldowns`
-
-_Contribution by owllex, 2021_
-
-Cooldowns are used to model rate-limited actions, like how often a
-character can perform a given action; until a certain time has passed their
-command can not be used again. This contrib provides a simple cooldown
-handler that can be attached to any typeclass. A cooldown is a lightweight persistent
-asynchronous timer that you can query to see if a certain time has yet passed.
-
-[Read the documentation](./Contrib-Cooldowns.md) - [Browse the Code](evennia.contrib.game_systems.cooldowns)
+[Read the documentation](./Contrib-Containers.md) - [Browse the Code](api:evennia.contrib.game_systems.containers)
 
 
 
@@ -286,7 +223,7 @@ where you combine items (tagged as ingredients) create something new. The recipe
 require certain (non-consumed) tools. An example would be to use the 'bread recipe' to
 combine 'flour', 'water' and 'yeast' with an 'oven' to bake a 'loaf of bread'.
 
-[Read the documentation](./Contrib-Crafting.md) - [Browse the Code](evennia.contrib.game_systems.crafting)
+[Read the documentation](./Contrib-Crafting.md) - [Browse the Code](api:evennia.contrib.game_systems.crafting)
 
 
 
@@ -299,7 +236,7 @@ insert custom markers in their text to indicate gender-aware
 messaging. It relies on a modified msg() and is meant as an
 inspiration and starting point to how to do stuff like this.
 
-[Read the documentation](./Contrib-Gendersub.md) - [Browse the Code](evennia.contrib.game_systems.gendersub)
+[Read the documentation](./Contrib-Gendersub.md) - [Browse the Code](api:evennia.contrib.game_systems.gendersub)
 
 
 
@@ -312,7 +249,7 @@ Core. It has two Commands for either sending mails between Accounts (out of game
 or between Characters (in-game). The two types of mails can be used together or
 on their own.
 
-[Read the documentation](./Contrib-Mail.md) - [Browse the Code](evennia.contrib.game_systems.mail)
+[Read the documentation](./Contrib-Mail.md) - [Browse the Code](api:evennia.contrib.game_systems.mail)
 
 
 
@@ -326,21 +263,7 @@ then swap out at will. It is a way for quickly managing your look (such as when
 changing clothes) in more free-form roleplaying systems. This will also
 work well together with the `rpsystem` contrib.
 
-[Read the documentation](./Contrib-Multidescer.md) - [Browse the Code](evennia.contrib.game_systems.multidescer)
-
-
-
-### `puzzles`
-
-_Contribution by Henddher 2018_
-
-Intended for adventure-game style combination puzzles, such as combining fruits
-and a blender to create a smoothie. Provides a typeclass and commands for objects 
-that can be combined (i.e. used together). Unlike the `crafting` contrib, each 
-puzzle is built from unique objects rather than using tags and a builder can create 
-the puzzle entirely from in-game.
-
-[Read the documentation](./Contrib-Puzzles.md) - [Browse the Code](evennia.contrib.game_systems.puzzles)
+[Read the documentation](./Contrib-Multidescer.md) - [Browse the Code](api:evennia.contrib.game_systems.multidescer)
 
 
 
@@ -350,23 +273,7 @@ _Contribution by helpme (2024)_
 
 This module allows certain rooms to be marked as storage locations.
 
-[Read the documentation](./Contrib-Storage.md) - [Browse the Code](evennia.contrib.game_systems.storage)
-
-
-
-### `turnbattle`
-
-_Contribution by Tim Ashley Jenkins, 2017_
-
-This is a framework for a simple turn-based combat system, similar
-to those used in D&D-style tabletop role playing games. It allows
-any character to start a fight in a room, at which point initiative
-is rolled and a turn order is established. Each participant in combat
-has a limited time to decide their action for that turn (30 seconds by
-default), and combat progresses through the turn order, looping through
-the participants until the fight ends.
-
-[Read the documentation](./Contrib-Turnbattle.md) - [Browse the Code](evennia.contrib.game_systems.turnbattle)
+[Read the documentation](./Contrib-Storage.md) - [Browse the Code](api:evennia.contrib.game_systems.storage)
 
 
 
@@ -386,7 +293,6 @@ Contribs-Guidelines.md
 ```{toctree}
 :maxdepth: 1
 
-Contrib-Extended-Room.md
 Contrib-Ingame-Map-Display.md
 Contrib-Mapbuilder.md
 Contrib-Simpledoor.md
@@ -394,23 +300,6 @@ Contrib-Slow-Exit.md
 Contrib-Wilderness.md
 Contrib-XYZGrid.md
 ```
-
-
-### `extended_room`
-
-_Contribution - Griatch 2012, vincent-lg 2019, Griatch 2023_
-
-This extends the normal `Room` typeclass to allow its description to change with
-time-of-day and/or season as well as any other state (like flooded or dark).
-Embedding `$state(burning, This place is on fire!)` in the description will
-allow for changing the description based on room state. The room also supports
-`details` for the player to look at in the room (without having to create a new
-in-game object for each), as well as support for random echoes. The room
-comes with a set of alternate commands for `look` and `@desc`, as well as new
-commands `detail`, `roomstate` and `time`.
-
-[Read the documentation](./Contrib-Extended-Room.md) - [Browse the Code](evennia.contrib.grid.extended_room)
-
 
 
 ### `ingame_map_display`
@@ -422,7 +311,7 @@ You can easily alter it to add special characters, room colors etc. The map show
 dynamically generated on use, and supports all compass directions and up/down. Other
 directions are ignored.
 
-[Read the documentation](./Contrib-Ingame-Map-Display.md) - [Browse the Code](evennia.contrib.grid.ingame_map_display)
+[Read the documentation](./Contrib-Ingame-Map-Display.md) - [Browse the Code](api:evennia.contrib.grid.ingame_map_display)
 
 
 
@@ -432,7 +321,7 @@ _Contribution by Cloud_Keeper 2016_
 
 Build a game map from the drawing of a 2D ASCII map.
 
-[Read the documentation](./Contrib-Mapbuilder.md) - [Browse the Code](evennia.contrib.grid.mapbuilder)
+[Read the documentation](./Contrib-Mapbuilder.md) - [Browse the Code](api:evennia.contrib.grid.mapbuilder)
 
 
 
@@ -444,7 +333,7 @@ A simple two-way exit that represents a door that can be opened and
 closed from both sides. Can easily be expanded to make it lockable, 
 destroyable etc. 
 
-[Read the documentation](./Contrib-Simpledoor.md) - [Browse the Code](evennia.contrib.grid.simpledoor)
+[Read the documentation](./Contrib-Simpledoor.md) - [Browse the Code](api:evennia.contrib.grid.simpledoor)
 
 
 
@@ -457,7 +346,7 @@ slow movement, common in many games. The contrib also
 contains two commands, `setspeed` and `stop` for changing the movement speed
 and abort an ongoing traversal, respectively.
 
-[Read the documentation](./Contrib-Slow-Exit.md) - [Browse the Code](evennia.contrib.grid.slow_exit)
+[Read the documentation](./Contrib-Slow-Exit.md) - [Browse the Code](api:evennia.contrib.grid.slow_exit)
 
 
 
@@ -470,7 +359,7 @@ of rooms - as you move, you instead end up back in the same room but its descrip
 changes. This means you can make huge areas with little database use as
 long as the rooms are relatively similar (e.g. only the names/descs changing).
 
-[Read the documentation](./Contrib-Wilderness.md) - [Browse the Code](evennia.contrib.grid.wilderness)
+[Read the documentation](./Contrib-Wilderness.md) - [Browse the Code](api:evennia.contrib.grid.wilderness)
 
 
 
@@ -485,7 +374,7 @@ Supports very fast shortest-route pathfinding on each map. Also includes a
 fast view function for seeing only a limited number of steps away from your
 current location (useful for displaying the grid as an in-game, updating map).
 
-[Read the documentation](./Contrib-XYZGrid.md) - [Browse the Code](evennia.contrib.grid.xyzgrid)
+[Read the documentation](./Contrib-XYZGrid.md) - [Browse the Code](api:evennia.contrib.grid.xyzgrid)
 
 
 
@@ -505,24 +394,9 @@ Contribs-Guidelines.md
 ```{toctree}
 :maxdepth: 1
 
-Contrib-Buffs.md
 Contrib-Dice.md
 Contrib-Health-Bar.md
-Contrib-Llm.md
-Contrib-RPSystem.md
-Contrib-Traits.md
 ```
-
-
-### `buffs`
-
-_Contribution by Tegiminis 2022_
-
-A buff is a timed object, attached to a game entity. It is capable of modifying values, triggering code, or both. 
-It is a common design pattern in RPGs, particularly action games.
-
-[Read the documentation](./Contrib-Buffs.md) - [Browse the Code](evennia.contrib.rpg.buffs)
-
 
 
 ### `dice`
@@ -534,7 +408,7 @@ A dice roller for any number and side of dice. Adds in-game dice rolling
 and functions for rolling dice in code. Command also supports hidden or secret
 rolls for use by a human game master.
 
-[Read the documentation](./Contrib-Dice.md) - [Browse the Code](evennia.contrib.rpg.dice)
+[Read the documentation](./Contrib-Dice.md) - [Browse the Code](api:evennia.contrib.rpg.dice)
 
 
 
@@ -547,43 +421,7 @@ bars or meters as a colorful bar instead of just a number. A "health bar"
 is merely the most obvious use for this, but the bar is highly customizable
 and can be used for any sort of appropriate data besides player health.
 
-[Read the documentation](./Contrib-Health-Bar.md) - [Browse the Code](evennia.contrib.rpg.health_bar)
-
-
-
-### `llm`
-
-_Contribution by Griatch 2023_
-
-This adds an LLMClient that allows Evennia to send prompts to a  LLM server (Large Language Model, along the lines of ChatGPT). Example uses a local OSS LLM install. Included is an NPC you can chat with using a new `talk` command. The NPC will respond using the AI responses from the LLM server. All calls are asynchronous, so if the LLM is slow, Evennia is not affected.
-
-[Read the documentation](./Contrib-Llm.md) - [Browse the Code](evennia.contrib.rpg.llm)
-
-
-
-### `rpsystem`
-
-_Contribution by Griatch, 2015_
-
-A full roleplaying emote system. Short-descriptions and recognition (only know people by their looks until you assign a name to them). Room poses. Masks/disguises (hide your description). Speak directly in emote, with optional language obscuration (words get garbled if you don't know the language, you can also have different languages with different 'sounding' garbling). Whispers can be partly overheard from a distance. A very powerful in-emote reference system, for referencing and differentiate targets (including objects).
-
-[Read the documentation](./Contrib-RPSystem.md) - [Browse the Code](evennia.contrib.rpg.rpsystem)
-
-
-
-### `traits`
-
-_Contribution by Griatch 2020, based on code by Whitenoise and Ainneve contribs, 2014_
-
-A `Trait` represents a modifiable property on (usually) a Character. They can
-be used to represent everything from attributes (str, agi etc) to skills
-(hunting 10, swords 14 etc) and dynamically changing things like HP, XP etc.
-Traits differ from normal Attributes in that they track their changes and limit
-themselves to particular value-ranges. One can add/subtract from them easily and
-they can even change dynamically at a particular rate (like you being poisoned or
-healed).
-
-[Read the documentation](./Contrib-Traits.md) - [Browse the Code](evennia.contrib.rpg.traits)
+[Read the documentation](./Contrib-Health-Bar.md) - [Browse the Code](api:evennia.contrib.rpg.health_bar)
 
 
 
@@ -594,7 +432,8 @@ healed).
 
 _Helper resources specifically meant to teach a development concept or
 to exemplify an Evennia system. Any extra resources tied to documentation
-tutorials are found here._
+tutorials are found here. Also the home of the Tutorial-World and Evadventure
+demo codes._
 
 
 ```{toctree}
@@ -605,7 +444,6 @@ Contribs-Guidelines.md
 :maxdepth: 1
 
 Contrib-Batchprocessor.md
-Contrib-Bodyfunctions.md
 Contrib-Mirror.md
 Contrib-Red-Button.md
 ```
@@ -619,18 +457,7 @@ Simple examples for the batch-processor. The batch processor is used for generat
 in-game content from one or more static files. Files can be stored with version 
 control and then 'applied' to the game to create content.
 
-[Read the documentation](./Contrib-Batchprocessor.md) - [Browse the Code](evennia.contrib.tutorials.batchprocessor)
-
-
-
-### `bodyfunctions`
-
-_Contribution by Griatch, 2012_
-
-Example script for testing. This adds a simple timer that has your
-character make small verbal observations at irregular intervals.
-
-[Read the documentation](./Contrib-Bodyfunctions.md) - [Browse the Code](evennia.contrib.tutorials.bodyfunctions)
+[Read the documentation](./Contrib-Batchprocessor.md) - [Browse the Code](api:evennia.contrib.tutorials.batchprocessor)
 
 
 
@@ -640,7 +467,7 @@ _Contribution by Griatch, 2017_
 
 A simple mirror object to experiment with. It will respond to being looked at.
 
-[Read the documentation](./Contrib-Mirror.md) - [Browse the Code](evennia.contrib.tutorials.mirror)
+[Read the documentation](./Contrib-Mirror.md) - [Browse the Code](api:evennia.contrib.tutorials.mirror)
 
 
 
@@ -651,7 +478,9 @@ _Contribution by Griatch, 2011_
 A red button that you can press to have an effect. This is a more advanced example 
 object with its own functionality and state tracking.
 
-[Read the documentation](./Contrib-Red-Button.md) - [Browse the Code](evennia.contrib.tutorials.red_button)
+[Read the documentation](./Contrib-Red-Button.md) - [Browse the Code](api:evennia.contrib.tutorials.red_button)
+
+
 
 
 
@@ -671,7 +500,6 @@ Contribs-Guidelines.md
 Contrib-Auditing.md
 Contrib-Debugpy.md
 Contrib-Git-Integration.md
-Contrib-Name-Generator.md
 Contrib-Random-String-Generator.md
 ```
 
@@ -684,7 +512,7 @@ Utility that taps and intercepts all data sent to/from clients and the
 server and passes it to a callback of your choosing. This is intended for 
 quality assurance, post-incident investigations and debugging.
 
-[Read the documentation](./Contrib-Auditing.md) - [Browse the Code](evennia.contrib.utils.auditing)
+[Read the documentation](./Contrib-Auditing.md) - [Browse the Code](api:evennia.contrib.utils.auditing)
 
 
 
@@ -695,7 +523,7 @@ _Contribution by electroglyph, 2025_
 This registers an in-game command `debugpy` which starts the debugpy debugger and listens on port 5678.
 For now this is only available for Visual Studio Code (VS Code).
 
-[Read the documentation](./Contrib-Debugpy.md) - [Browse the Code](evennia.contrib.utils.debugpy)
+[Read the documentation](./Contrib-Debugpy.md) - [Browse the Code](api:evennia.contrib.utils.debugpy)
 
 
 
@@ -705,20 +533,7 @@ _Contribution by helpme (2022)_
 
 A module to integrate a stripped-down version of git within the game, allowing developers to view their git status, change branches, and pull updated code of both their local mygame repo and Evennia core. After a successful pull or checkout, the git command will reload the game: Manual restarts may be required to to apply certain changes that would impact persistent scripts etc.
 
-[Read the documentation](./Contrib-Git-Integration.md) - [Browse the Code](evennia.contrib.utils.git_integration)
-
-
-
-### `name_generator`
-
-_Contribution by InspectorCaracal (2022)_
-
-A module for generating random names, both real-world and fantasy. Real-world
-names can be generated either as first (personal) names, family (last) names, or
-full names (first, optional middles, and last). The name data is from [Behind the Name](https://www.behindthename.com/)
-and used under the [CC BY-SA 4.0 license](https://creativecommons.org/licenses/by-sa/4.0/).
-
-[Read the documentation](./Contrib-Name-Generator.md) - [Browse the Code](evennia.contrib.utils.name_generator)
+[Read the documentation](./Contrib-Git-Integration.md) - [Browse the Code](api:evennia.contrib.utils.git_integration)
 
 
 
@@ -731,7 +546,9 @@ with specific criteria.  You could, for instance, use it to generate
 phone numbers, license plate numbers, validation codes, in-game security 
 passwords and so on. The strings generated will be stored and won't be repeated.
 
-[Read the documentation](./Contrib-Random-String-Generator.md) - [Browse the Code](evennia.contrib.utils.random_string_generator)
+[Read the documentation](./Contrib-Random-String-Generator.md) - [Browse the Code](api:evennia.contrib.utils.random_string_generator)
+
+
 
 
 

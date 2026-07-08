@@ -60,7 +60,7 @@ Exits: northeast and east
    the server. This makes the `map`, `goto/path` and the modified `teleport` and
    `open` commands available in-game.
 
-[add]: ../Components/Command-Sets
+[add]: docs/source/Command-Sets.md#defining-command-sets
 
 3. Edit `mygame/server/conf/settings.py` and add
 
@@ -79,7 +79,7 @@ Exits: northeast and east
    also make use of in-game (db-) created prototypes, add
    `XYZGRID_USE_DB_PROTOTYPES = True` to settings.
 
-[prototypes]: ../Components/Prototypes
+[prototypes]: ../Components/Prototypes.md
 
 ## Overview
 

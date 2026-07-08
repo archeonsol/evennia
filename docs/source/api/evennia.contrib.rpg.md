@@ -14,7 +14,6 @@ evennia.contrib.rpg
    evennia.contrib.rpg.buffs
    evennia.contrib.rpg.dice
    evennia.contrib.rpg.health_bar
-   evennia.contrib.rpg.llm
    evennia.contrib.rpg.rpsystem
    evennia.contrib.rpg.traits
 
