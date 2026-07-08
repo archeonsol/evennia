@@ -751,9 +751,9 @@ dependencies = [
     { name = "legacy-cgi", marker = "python_full_version >= '3.13'" },
     { name = "lunr" },
     { name = "mock" },
-    { name = "model-mommy" },
     { name = "parameterized" },
     { name = "psutil" },
+    { name = "pydantic" },
     { name = "pyopenssl" },
     { name = "pytz" },
     { name = "pyyaml" },
@@ -791,7 +791,6 @@ game = [
     { name = "djangorestframework" },
     { name = "networkx" },
     { name = "prometheus-client" },
-    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "requests" },
     { name = "structlog" },
@@ -831,14 +830,13 @@ requires-dist = [
     { name = "legacy-cgi", marker = "python_full_version >= '3.13'" },
     { name = "lunr", specifier = "==0.7.0.post1" },
     { name = "mock", specifier = ">=4.0.3" },
-    { name = "model-mommy", specifier = ">=2.0" },
     { name = "networkx", marker = "extra == 'game'", specifier = ">=3.6" },
     { name = "parameterized", specifier = "==0.9.0" },
     { name = "prometheus-client", marker = "extra == 'game'", specifier = ">=0.20" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'extra'", specifier = ">=3.1.12" },
     { name = "pyasn1", marker = "extra == 'extra'", specifier = ">=0.4.8" },
-    { name = "pydantic", marker = "extra == 'game'", specifier = ">=2.12" },
+    { name = "pydantic", specifier = ">=2.12" },
     { name = "pyopenssl", specifier = ">=25" },
     { name = "pyopenssl", marker = "extra == 'extra'", specifier = ">=19.1" },
     { name = "pytz", specifier = ">=2022.6" },
@@ -1528,18 +1526,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/07/8c/14c2ae915e5f9dca5a22edd68b35be94400719ccfa068a03e0fb63d0f6f6/mock-5.2.0.tar.gz", hash = "sha256:4e460e818629b4b173f32d08bf30d3af8123afbb8e04bb5707a1fd4799e503f0", size = 92796, upload-time = "2025-03-03T12:31:42.911Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/d9/617e6af809bf3a1d468e0d58c3997b1dc219a9a9202e650d30c2fc85d481/mock-5.2.0-py3-none-any.whl", hash = "sha256:7ba87f72ca0e915175596069dbbcc7c75af7b5e9b9bc107ad6349ede0819982f", size = 31617, upload-time = "2025-03-03T12:31:41.518Z" },
-]
-
-[[package]]
-name = "model-mommy"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/71/ae2850e1a466020e10f218ef5a917bed1812b50f9f0fd794330cb0475e70/model_mommy-2.0.0.tar.gz", hash = "sha256:3d332afce941c57f1990f45b083ba13252ba74fcd1ae43fd047e5af7a70fb312", size = 30412, upload-time = "2019-10-21T22:04:00.723Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/69/1d588507ba30f51e5347696a42bd37d4bf5d46cfc12ad335ed9d77ccfac3/model_mommy-2.0.0-py2.py3-none-any.whl", hash = "sha256:40d6e740aad7509e696a324b94cf2b0a104da93c3d4a7924cea1be3d0eb95b4f", size = 16513, upload-time = "2019-10-21T22:03:57.103Z" },
 ]
 
 [[package]]
