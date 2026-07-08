@@ -1,11 +1,11 @@
 from django.contrib.auth.models import AnonymousUser
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, SimpleTestCase
 from mock import MagicMock, patch
 
 from . import general_context
 
 
-class TestGeneralContext(TestCase):
+class TestGeneralContext(SimpleTestCase):
     maxDiff = None
 
     @patch.object(general_context, "GAME_NAME", "test_name")

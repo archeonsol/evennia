@@ -3,7 +3,7 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, override_settings
 
 
 class BootstrapCmdlineTest(SimpleTestCase):
@@ -41,7 +41,7 @@ class BootstrapCmdlineTest(SimpleTestCase):
         self.assertNotIn("twistd", pcmd[0])
 
 
-class BootstrapRunTest(TestCase):
+class BootstrapRunTest(SimpleTestCase):
     def test_run_bootstrap_starts_and_stops_application(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
 

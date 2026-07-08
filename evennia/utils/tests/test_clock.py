@@ -11,8 +11,9 @@ import asyncio
 import threading
 from unittest.mock import patch
 
+from django.test import SimpleTestCase
+
 from evennia.utils import clock
-from evennia.utils.test_resources import BaseEvenniaTestCase
 
 
 class _AsyncioLoopMixin:
@@ -33,7 +34,7 @@ def _distinctively_named_boom():
     raise ValueError("kaboom")
 
 
-class TestRunCoroutineBackstop(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestRunCoroutineBackstop(_AsyncioLoopMixin, SimpleTestCase):
     """`run_coroutine`'s done-callback logs the full traceback, not str(exc)."""
 
     def test_running_loop_path_logs_traceback(self):
@@ -75,7 +76,7 @@ class TestRunCoroutineBackstop(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertIn("Traceback", msg)
 
 
-class TestLoopHandleBackstop(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestLoopHandleBackstop(_AsyncioLoopMixin, SimpleTestCase):
     """A repeating loop whose body raises must not stop silently."""
 
     def test_body_error_without_on_error_is_logged(self):
@@ -95,7 +96,7 @@ class TestLoopHandleBackstop(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertTrue(captured, "loop body error was swallowed silently")
 
 
-class TestDeferLaterCompatErrbacks(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestDeferLaterCompatErrbacks(_AsyncioLoopMixin, SimpleTestCase):
     """`_DeferLaterCompat._run_errbacks` must not UnboundLocalError, double-call, or swallow."""
 
     def _make(self):
@@ -130,7 +131,7 @@ class TestDeferLaterCompatErrbacks(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertEqual(len(calls), 1)  # not double-invoked
 
 
-class TestDefaultExecutorLifecycle(BaseEvenniaTestCase):
+class TestDefaultExecutorLifecycle(SimpleTestCase):
     """The shared worker pool is built once and shut down on graceful exit."""
 
     def setUp(self):
@@ -174,7 +175,7 @@ class TestDefaultExecutorLifecycle(BaseEvenniaTestCase):
             loop.close()
 
 
-class TestClockLoopBinding(BaseEvenniaTestCase):
+class TestClockLoopBinding(SimpleTestCase):
     """bind_loop is the sole authority for the bound loop + its owning thread."""
 
     def setUp(self):
@@ -225,7 +226,7 @@ class TestClockLoopBinding(BaseEvenniaTestCase):
             loop.close()
 
 
-class TestFixedRateSchedule(BaseEvenniaTestCase):
+class TestFixedRateSchedule(SimpleTestCase):
     """LoopHandle cadence is fixed-rate (anchored), not fixed-delay."""
 
     def test_fast_body_keeps_interval(self):
@@ -240,7 +241,7 @@ class TestFixedRateSchedule(BaseEvenniaTestCase):
         self.assertEqual(clock._next_fire_time(0.0, 5.0, 17.0), 20.0)
 
 
-class TestSyncCoroutineResultDrain(BaseEvenniaTestCase):
+class TestSyncCoroutineResultDrain(SimpleTestCase):
     """The no-running-loop path must not orphan child tasks on loop close."""
 
     def test_child_tasks_are_cancelled_not_orphaned(self):
@@ -262,7 +263,7 @@ class TestSyncCoroutineResultDrain(BaseEvenniaTestCase):
         self.assertTrue(cancelled.get("hit"))  # drained on teardown, not destroyed-pending
 
 
-class TestCallFromThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestCallFromThread(_AsyncioLoopMixin, SimpleTestCase):
     """`call_from_thread` hands work from a worker thread onto the loop thread.
 
     Everywhere else this primitive is exercised through a sync stub (redis bus
@@ -328,7 +329,7 @@ class TestCallFromThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertEqual((got.get("a"), got.get("b")), ("pos", "kw"))
 
 
-class TestRunCoroutineDirect(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestRunCoroutineDirect(_AsyncioLoopMixin, SimpleTestCase):
     """`run_coroutine` on a running loop returns a Task that carries the result."""
 
     def test_running_loop_returns_task_with_result(self):
@@ -344,7 +345,7 @@ class TestRunCoroutineDirect(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertEqual(self._loop.run_until_complete(drive()), 42)
 
 
-class TestLoopHandleDirect(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestLoopHandleDirect(_AsyncioLoopMixin, SimpleTestCase):
     """`LoopHandle` fires repeatedly until stopped, then fires no more."""
 
     def test_repeats_then_stop_halts_further_fires(self):
@@ -366,7 +367,7 @@ class TestLoopHandleDirect(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertTrue(all(c == "x" for c in calls))  # args forwarded each fire
 
 
-class TestDeferLaterCompatPauseCancel(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestDeferLaterCompatPauseCancel(_AsyncioLoopMixin, SimpleTestCase):
     """`_DeferLaterCompat` pause/cancel semantics (errbacks covered elsewhere)."""
 
     def _make(self, fn):

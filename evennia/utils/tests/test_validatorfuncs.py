@@ -4,12 +4,12 @@ import datetime
 
 import mock
 import pytz
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from evennia.utils import validatorfuncs
 
 
-class TestValidatorFuncs(TestCase):
+class TestValidatorFuncs(SimpleTestCase):
     def test_text_ok(self):
         for val in [None, -123, "abc", 1.234, {1: True, 2: False}, ["a", 1]]:
             self.assertEqual(str(val), validatorfuncs.text(val))

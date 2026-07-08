@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from evennia.utils.ansi import ANSIParser
 from evennia.utils.ansi import ANSIString as AN
@@ -6,7 +6,7 @@ from evennia.utils.ansi import ANSIString as AN
 parser = ANSIParser().parse_ansi
 
 
-class TestANSIStringHex(TestCase):
+class TestANSIStringHex(SimpleTestCase):
     """
     Tests the conversion of html hex colors
     to xterm-style colors
@@ -88,7 +88,7 @@ class TestANSIStringHex(TestCase):
         self.assertEqual(ansi_256, self.output4, "Output xterm256")
 
 
-class TestANSIParser(TestCase):
+class TestANSIParser(SimpleTestCase):
     """
     Tests the ansi fallback of the hex color conversion and
     truecolor conversion

@@ -3,12 +3,12 @@
 import unittest
 
 import mock
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from evennia.utils import ansi, text2html
 
 
-class TestText2Html(TestCase):
+class TestText2Html(SimpleTestCase):
     def test_format_styles(self):
         parser = text2html.HTML_PARSER
         self.assertEqual("foo", parser.format_styles("foo"))

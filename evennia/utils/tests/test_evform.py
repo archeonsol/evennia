@@ -5,12 +5,12 @@ Unit tests for the EvForm text form generator
 
 from unittest import skip
 
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from evennia.utils import ansi, evform, evtable
 
 
-class TestEvForm(TestCase):
+class TestEvForm(SimpleTestCase):
     maxDiff = None
 
     def _parse_form(self):
@@ -230,7 +230,7 @@ _EXPECTED = """
 """
 
 
-class TestEvFormParallelTables(TestCase):
+class TestEvFormParallelTables(SimpleTestCase):
     """
     Test of issue #2308
     https://github.com/evennia/evennia/issues/2308
@@ -266,7 +266,7 @@ class TestEvFormParallelTables(TestCase):
         self.assertEqual(ansi.strip_ansi(str(form).strip()), _EXPECTED.strip())
 
 
-class TestEvFormErrors(TestCase):
+class TestEvFormErrors(SimpleTestCase):
     """
     Tests of EvForm errors found for v1.0-dev
 

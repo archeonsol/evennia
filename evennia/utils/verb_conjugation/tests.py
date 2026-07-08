@@ -3,13 +3,13 @@ Unit tests for verb conjugation.
 
 """
 
-from django.test import TestCase
+from django.test import SimpleTestCase
 from parameterized import parameterized
 
 from . import conjugate, pronouns
 
 
-class TestVerbConjugate(TestCase):
+class TestVerbConjugate(SimpleTestCase):
     """
     Test the conjugation.
 
@@ -269,7 +269,7 @@ class TestVerbConjugate(TestCase):
         self.assertEqual(expected, conjugate.verb_actor_stance_components(verb))
 
 
-class TestPronounMapping(TestCase):
+class TestPronounMapping(SimpleTestCase):
     """
     Test pronoun viewpoint mapping
     """

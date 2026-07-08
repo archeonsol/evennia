@@ -1,5 +1,5 @@
 from anything import Something
-from django.test import TestCase
+from django.test import SimpleTestCase
 from mock import Mock
 
 from .dummyrunner_settings import (
@@ -20,7 +20,7 @@ from .dummyrunner_settings import (
 )
 
 
-class TestDummyrunnerSettings(TestCase):
+class TestDummyrunnerSettings(SimpleTestCase):
     def setUp(self):
         self.client = Mock()
         self.client.cid = 1

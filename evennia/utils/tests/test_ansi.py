@@ -6,14 +6,21 @@ Test of the ANSI parsing and ANSIStrings.
 
 """
 
-from django.test import TestCase
+from django.test import SimpleTestCase
 
-from evennia.utils.ansi import (ANSI_BLUE, ANSI_CYAN, ANSI_GREEN, ANSI_HILITE,
-                                ANSI_NORMAL, ANSI_RED, ANSI_YELLOW)
+from evennia.utils.ansi import (
+    ANSI_BLUE,
+    ANSI_CYAN,
+    ANSI_GREEN,
+    ANSI_HILITE,
+    ANSI_NORMAL,
+    ANSI_RED,
+    ANSI_YELLOW,
+)
 from evennia.utils.ansi import ANSIString as AN
 
 
-class TestANSIString(TestCase):
+class TestANSIString(SimpleTestCase):
     """
     Verifies that ANSIString's string-API works as intended.
     """

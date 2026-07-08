@@ -11,8 +11,9 @@ import threading
 import time
 from unittest.mock import patch
 
+from django.test import SimpleTestCase
+
 from evennia.utils import defer
-from evennia.utils.test_resources import BaseEvenniaTestCase
 
 _DRAIN_TIMEOUT = 5.0
 
@@ -31,7 +32,7 @@ class _AsyncioLoopMixin:
         super().tearDown()
 
 
-class TestInThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestInThread(_AsyncioLoopMixin, SimpleTestCase):
     """`in_thread` runs the worker off the loop thread; await resumes on it."""
 
     def test_worker_runs_off_loop_thread_callback_runs_on_it(self):
@@ -86,7 +87,6 @@ class TestInThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertEqual(len(calls), 2)
         self.assertTrue(all(ident != main_ident for ident in calls))
 
-
     def test_add_callbacks_runs_on_loop_thread(self):
         main_ident = threading.get_ident()
         box = {}
@@ -130,7 +130,7 @@ class TestInThread(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertNotIn("ok", box)
 
 
-class TestThreaded(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestThreaded(_AsyncioLoopMixin, SimpleTestCase):
     """`threaded` decorator turns a call into an `in_thread` Future."""
 
     def test_decorated_call_returns_future_and_runs_in_thread(self):
@@ -153,7 +153,7 @@ class TestThreaded(_AsyncioLoopMixin, BaseEvenniaTestCase):
         self.assertEqual(box["result"], "ok")
 
 
-class TestBackground(_AsyncioLoopMixin, BaseEvenniaTestCase):
+class TestBackground(_AsyncioLoopMixin, SimpleTestCase):
     """
     `background` is fire-and-forget; error routing runs on the event loop
     thread after the worker raises.

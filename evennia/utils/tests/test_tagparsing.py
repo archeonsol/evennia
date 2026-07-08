@@ -5,14 +5,14 @@ Unit tests for all sorts of inline text-tag parsing, like ANSI, html conversion,
 
 import re
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, override_settings
 
 from evennia.utils import funcparser
 from evennia.utils.ansi import ANSIString
 from evennia.utils.text2html import TextToHTMLparser
 
 
-class ANSIStringTestCase(TestCase):
+class ANSIStringTestCase(SimpleTestCase):
     def checker(self, ansi, raw, clean):
         """
         Verifies the raw and clean strings of an ANSIString match expected
@@ -244,7 +244,7 @@ class ANSIStringTestCase(TestCase):
         self.assertEqual(string.raw(), split_string.raw())
 
 
-class TestTextToHTMLparser(TestCase):
+class TestTextToHTMLparser(SimpleTestCase):
     def setUp(self):
         self.parser = TextToHTMLparser()
 

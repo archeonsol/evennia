@@ -2,12 +2,12 @@
 Tests for evennia.utils.multimatch
 """
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, override_settings
 
 from evennia.utils import multimatch
 
 
-class TestParseMultimatchInput(TestCase):
+class TestParseMultimatchInput(SimpleTestCase):
     def test_first_prefix(self):
         sel, rem = multimatch.parse_multimatch_input("first sword")
         self.assertEqual(sel, 0)
@@ -32,7 +32,7 @@ class TestParseMultimatchInput(TestCase):
         self.assertEqual(rem, "sword")
 
 
-class TestResolveMultimatchIndex(TestCase):
+class TestResolveMultimatchIndex(SimpleTestCase):
     def test_other_only_two(self):
         self.assertEqual(multimatch.resolve_multimatch_index("other", 2), 1)
         self.assertIsNone(multimatch.resolve_multimatch_index("other", 3))
@@ -41,7 +41,7 @@ class TestResolveMultimatchIndex(TestCase):
         self.assertEqual(multimatch.resolve_multimatch_index("last", 5), 4)
 
 
-class TestMultimatchLabel(TestCase):
+class TestMultimatchLabel(SimpleTestCase):
     def test_two_match_other(self):
         self.assertEqual(multimatch.multimatch_label(1, 2), "other")
 
@@ -49,7 +49,7 @@ class TestMultimatchLabel(TestCase):
         self.assertEqual(multimatch.multimatch_label(2, 3), "last")
 
 
-class TestParseLocationScope(TestCase):
+class TestParseLocationScope(SimpleTestCase):
     def test_my_scope(self):
         scope, rem = multimatch.parse_location_scope("my sword")
         self.assertEqual(scope, "inventory")
@@ -61,7 +61,7 @@ class TestParseLocationScope(TestCase):
         self.assertEqual(rem, "mystery box")
 
 
-class TestParseSearchQualifiers(TestCase):
+class TestParseSearchQualifiers(SimpleTestCase):
     def test_scope_then_ordinal(self):
         q = multimatch.parse_search_qualifiers("my first sword")
         self.assertEqual(q["scope"], "inventory")
@@ -70,7 +70,7 @@ class TestParseSearchQualifiers(TestCase):
         self.assertTrue(q["had_qualifier"])
 
 
-class TestTryAutopick(TestCase):
+class TestTryAutopick(SimpleTestCase):
     class Caller:
         def __init__(self, loc):
             self.location = loc

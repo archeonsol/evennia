@@ -3,11 +3,12 @@ Tests for EvTable component.
 
 """
 
+from django.test import SimpleTestCase
+
 from evennia.utils import ansi, evtable
-from evennia.utils.test_resources import EvenniaTestCase
 
 
-class TestEvTable(EvenniaTestCase):
+class TestEvTable(SimpleTestCase):
     def _validate(self, expected, result):
         """easier debug"""
         expected = ansi.strip_ansi(expected).strip()

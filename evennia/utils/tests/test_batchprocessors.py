@@ -4,12 +4,12 @@ import codecs
 import textwrap
 
 import mock
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from evennia.utils import batchprocessors, utils
 
 
-class TestBatchprocessorErrors(TestCase):
+class TestBatchprocessorErrors(SimpleTestCase):
     @mock.patch.object(utils, "pypath_to_realpath", return_value=[])
     def test_read_batchfile_raises_IOError(self, _):
         with self.assertRaises(IOError):
@@ -23,7 +23,7 @@ class TestBatchprocessorErrors(TestCase):
             batchprocessors.read_batchfile("foopath")
 
 
-class TestBatchCommandProcessor(TestCase):
+class TestBatchCommandProcessor(SimpleTestCase):
     @mock.patch.object(batchprocessors, "read_batchfile")
     def test_parses_2_commands(self, mocked_read):
         mocked_read.return_value = textwrap.dedent(r"""
@@ -86,7 +86,7 @@ class TestBatchCommandProcessor(TestCase):
         )
 
 
-class TestReadBatchFile(TestCase):
+class TestReadBatchFile(SimpleTestCase):
     """Test read_batchfile line ending normalization."""
 
     @mock.patch.object(utils, "pypath_to_realpath", return_value=["testpath"])
@@ -115,7 +115,7 @@ class TestReadBatchFile(TestCase):
         self.assertEqual(result, "@create sky\n#INSERT another.ev\n")
 
 
-class TestBatchCodeProcessor(TestCase):
+class TestBatchCodeProcessor(SimpleTestCase):
     @mock.patch.object(batchprocessors, "read_batchfile")
     def test_parses_one_codeblock(self, mocked_read):
         mocked_read.return_value = textwrap.dedent(r"""

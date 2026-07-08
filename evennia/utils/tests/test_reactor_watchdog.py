@@ -10,11 +10,10 @@ checked separately.
 
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 
 from evennia.utils import reactor_watchdog
 from evennia.utils.reactor_watchdog import ReactorStallWatchdog
-from evennia.utils.test_resources import BaseEvenniaTestCase
 
 
 class _Clock:
@@ -30,7 +29,7 @@ class _Clock:
         self.t += seconds
 
 
-class TestStallDetection(BaseEvenniaTestCase):
+class TestStallDetection(SimpleTestCase):
     def _make(self, clock, threshold_ms=200, interval=0.05):
         return ReactorStallWatchdog(threshold_ms=threshold_ms, interval=interval, _now=clock)
 
@@ -65,7 +64,7 @@ class TestStallDetection(BaseEvenniaTestCase):
         mock_warn.assert_not_called()
 
 
-class TestLifecycle(BaseEvenniaTestCase):
+class TestLifecycle(SimpleTestCase):
     def test_disabled_when_threshold_zero(self):
         wd = ReactorStallWatchdog(threshold_ms=0)
         self.assertFalse(wd.enabled)

@@ -1,7 +1,7 @@
 import urllib.parse
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, override_settings
 from twisted.internet import defer
 
 from evennia.server.game_index_client import client as game_index_client
@@ -26,7 +26,7 @@ class _RecordingRequest:
         "listing_contact": "admin@example.com",
     }
 )
-class TestGameIndexClient(TestCase):
+class TestGameIndexClient(SimpleTestCase):
     @patch(
         "evennia.server.game_index_client.client.AccountDB.objects.num_total_accounts",
         return_value=0,
