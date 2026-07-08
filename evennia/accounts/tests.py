@@ -443,11 +443,17 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
         from mock import MagicMock as MM
 
         from evennia.server.serversession import ServerSession
+        from evennia.utils import clock
+        from evennia.utils.test_resources import _mock_deferlater
 
         other = ServerSession()
         other.init_session("telnet", ("localhost", "testmode"), evennia.SESSION_HANDLER)
         other.sessid = 2
-        evennia.SESSION_HANDLER.portal_connect(other.get_sync_data())
+        # portal_connect schedules the login-start command via delay(); in a sync
+        # test body there is no running loop, so route it through the harness's
+        # synchronous deferLater shim (matching EvenniaTestMixin.setUp).
+        with patch.object(clock, "defer_later_compat", _mock_deferlater):
+            evennia.SESSION_HANDLER.portal_connect(other.get_sync_data())
         other = evennia.SESSION_HANDLER.session_from_sessid(2)
         evennia.SESSION_HANDLER.login(other, self.account, testmode=True)
         try:

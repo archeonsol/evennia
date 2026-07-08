@@ -10,11 +10,13 @@ from . import email_login
 
 class TestEmailLogin(BaseEvenniaCommandTest):
     def test_connect(self):
+        # Only `create` prompts for confirmation (its func yields); `connect`
+        # has no yes/no prompt, so an inputs=["Y"] there is a leftover that gets
+        # executed as a spurious command.
         self.call(
             email_login.CmdUnconnectedConnect(),
             "mytest@test.com test",
             "The email 'mytest@test.com' does not match any accounts.",
-            inputs=["Y"],
         )
         self.call(
             email_login.CmdUnconnectedCreate(),
@@ -27,7 +29,6 @@ class TestEmailLogin(BaseEvenniaCommandTest):
             "mytest@test.com test11111",
             "",
             caller=self.account.sessions.get()[0],
-            inputs=["Y"],
         )
 
     def test_quit(self):
