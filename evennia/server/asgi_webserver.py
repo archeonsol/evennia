@@ -47,6 +47,8 @@ class UvicornWebService(Service):
             loop.run_until_complete(self._server.serve())
         except Exception:
             logger.log_trace("uvicorn serve loop exited")
+        finally:
+            loop.close()
 
     async def empty_threadpool(self):
         """No-op compatibility hook for graceful shutdown."""
@@ -57,3 +59,7 @@ class UvicornWebService(Service):
             self._server.should_exit = True
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=5)
+        # Drop the handles so a stop is idempotent and a later restart rebuilds
+        # cleanly rather than inspecting a dead server/thread.
+        self._server = None
+        self._thread = None

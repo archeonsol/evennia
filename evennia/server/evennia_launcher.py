@@ -869,7 +869,7 @@ def _wait_for_status_ipc(
 
 
 def wait_for_status(
-    portal_running=True, server_running=True, callback=None, errback=None, rate=0.5, retries=None
+    portal_running=True, server_running=True, callback=None, errback=None, rate=0.5
 ):
     """
     Repeat the status ping until the desired state combination is achieved.
@@ -883,16 +883,13 @@ def wait_for_status(
             condition is fulfilled.
         errback (callable): Will be called with portal_state, server_state if the
             request is timed out.
-        rate (float): How often to retry.
-        retries (int): How many times to retry before timing out and calling `errback``.
-            Defaults to 240 (120s at rate=0.5) for cold start, 20 for shutdown waits.
-    """
-    if retries is None:
-        if portal_running is False or server_running is False:
-            retries = 20
-        else:
-            retries = 120
+        rate (float): How often to poll for the desired state.
 
+    Notes:
+        The wait deadline is owned by ``_wait_for_status_ipc``, which selects the
+        tuned ``COLD_START_DEADLINE`` / ``SHUTDOWN_WAIT_DEADLINE`` constants (from
+        :mod:`evennia.server.launcher_ipc`) by the desired run-state.
+    """
     global REACTOR_RUN
     REACTOR_RUN = True
 
@@ -902,7 +899,6 @@ def wait_for_status(
         callback,
         errback,
         rate=rate,
-        retries=None,
     )
 
 

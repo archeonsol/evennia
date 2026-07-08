@@ -14,6 +14,12 @@ Response types (Portal → launcher):
   ``{"type": "status", "status": <6-tuple list>}``  — immediate status query
   ``{"type": "ack"}``  — command accepted; a ``status_push`` may follow
   ``{"type": "status_push", "status": <6-tuple list>}``  — async status update
+
+Trust boundary: the control plane is UNAUTHENTICATED. A ``command`` frame can
+start/stop the Server, so any process that can open ``AMP_HOST:AMP_PORT`` gains
+that control. Security rests entirely on binding a loopback interface: keep
+``AMP_HOST`` at ``127.0.0.1`` (the default). Do not expose this port on a routable
+interface without adding an auth layer first.
 """
 
 from __future__ import annotations
@@ -287,6 +293,9 @@ class LauncherSession:
             return None
         if push.get("type") == "status_push":
             return push["status"]
+        # A non-status_push frame here (e.g. the ``ack`` that precedes a push) is
+        # intentionally skipped, not an error: the full frame was already consumed
+        # so framing stays aligned, and the caller re-reads for the next push.
         return None
 
     def wait_for_push(self, timeout: float = 120.0) -> list | None:
