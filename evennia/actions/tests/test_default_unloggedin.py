@@ -239,7 +239,7 @@ class TestCreate(unittest.TestCase):
             d.callback(answer)
             return d
 
-        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+        with mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_input):
             return _patched_dispatch(session, actor, action)
 
     def test_create_confirmed(self):

@@ -409,7 +409,7 @@ class TestSetHelp(unittest.TestCase):
             d.callback(next(answers))
             return d
 
-        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+        with mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_input):
             with mock.patch("evennia.utils.create.create_help_entry") as mk:
                 self._sethelp(char, actor, "combat = how to fight", helper=helper)
         self.assertTrue(any("Warning" in m for m in char.messages))
@@ -430,7 +430,7 @@ class TestSetHelp(unittest.TestCase):
             d.callback(next(answers))
             return d
 
-        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+        with mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_input):
             with mock.patch("evennia.utils.create.create_help_entry", return_value=object()) as mk:
                 self._sethelp(char, actor, "combat = how to fight", helper=helper)
         self.assertTrue(any("Warning" in m for m in char.messages))
@@ -450,7 +450,7 @@ class TestSetHelp(unittest.TestCase):
             d.callback(next(answers))
             return d
 
-        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+        with mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_input):
             self._sethelp(char, actor, "look = my topic", helper=helper)
         self.assertTrue(any("key/alias of verb 'look'" in m for m in char.messages))
 

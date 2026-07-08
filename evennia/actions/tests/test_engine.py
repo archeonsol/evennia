@@ -450,7 +450,7 @@ class TestInteractiveRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_deferred)
+        return mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_deferred)
 
     def test_interactive_resumes_with_input_and_claim_stops_phase(self):
         fired = []
@@ -499,7 +499,7 @@ class TestMenuPromptRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_deferred)
+        return mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_deferred)
 
     def test_menu_prompt_resumes_with_numeric_choice(self):
         fired = []

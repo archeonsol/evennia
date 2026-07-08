@@ -253,7 +253,7 @@ class TestPy(unittest.TestCase):
             d.callback(next(answers))
             return d
 
-        with mock.patch.object(engine_mod, "_get_input_deferred", side_effect=fake_input):
+        with mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_input):
             self._py(char, actor, "")
         out = _texts(char)
         self.assertTrue(any("Evennia Interactive Python mode" in m for m in out))

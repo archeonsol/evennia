@@ -119,7 +119,7 @@ async def _drive_generator(gen, actor):
 
     Each ``yield`` from the body is interpreted:
 
-    * ``str`` → a prompt; suspend on :func:`_get_input_deferred`, resume with the
+    * ``str`` → a prompt; suspend on :func:`_get_input_future`, resume with the
       player's line (sent back into the generator).
     * :class:`~evennia.actions.menus.MenuPrompt` → render numbered options, capture
       input, resume with the chosen key (``None`` on quit).
