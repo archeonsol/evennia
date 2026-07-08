@@ -64,14 +64,24 @@ worked examples; mirror their depth and section structure.
    new version exactly. `uv lock` regenerates `uv.lock`.
 4. Run `make cleanrot` if any `.agents/` or `AGENTS.md` files were
    touched on the branch.
-5. Run the relevant test suite from the test game dir (see
+5. If the branch added, removed, or renamed any public module or contrib,
+   regenerate the doc trees so they stay aligned (skipping this is how the
+   large `underspire.NN` doc drift accumulated: 99 undocumented new modules
+   and 12 stale contribs in one jump). Both generators walk the filesystem,
+   so no import or gamedir is needed:
+   - api tree: `cd docs && EVDIR=$(realpath ../evennia) uv run --with sphinx make _autodoc-index`
+   - contrib index + narrative pages: `uv run python docs/pylib/contrib_readmes2docs.py`
+   - `git rm` any orphaned `docs/source/Contribs/Contrib-*.md` left behind
+     for removed contribs — the generator writes live pages but never
+     prunes stale ones.
+6. Run the relevant test suite from the test game dir (see
    [Testing](testing.md)) before merging. Don't tag a release that
    doesn't pass.
-6. Merge with `git merge --no-ff` into `underspire` so the feature
+7. Merge with `git merge --no-ff` into `underspire` so the feature
    branch's structure is preserved in history (each phase reads as a
    coherent merge in `git log --first-parent underspire`).
-7. Tag on the merge commit: `git tag -a underspire.<n> -m "<title>"`.
-8. The push (branch + tag) is done from the user's shell, not by an
+8. Tag on the merge commit: `git tag -a underspire.<n> -m "<title>"`.
+9. The push (branch + tag) is done from the user's shell, not by an
    agent. Auth typically fails in agent environments.
 
 ## Backfilling skipped versions
