@@ -41,12 +41,8 @@ from collections import deque
 from django.conf import settings
 
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
-from evennia.server.portal.ws_protocol import (
-    CLOSE_NORMAL,
-    GOING_AWAY,
-    Disconnected,
-    WSProtocolBase,
-)
+from evennia.server.portal.ws_protocol import (CLOSE_NORMAL, GOING_AWAY,
+                                               Disconnected, WSProtocolBase)
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -57,15 +53,16 @@ _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 # grace window; when the client reconnects and presents the token + its last seen
 # seq in `hello`, we replay the frames it missed, so a brief blip doesn't drop
 # lines. State events are idempotent, so the parallel fresh-login pushes are safe.
-RESUME_BUFFER_MAX = 400        # frames kept per connection
-RESUME_GRACE_SECONDS = 90      # how long a stash survives a disconnect
-_RESUME_STASH = {}             # token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float}
+RESUME_BUFFER_MAX = 400  # frames kept per connection
+RESUME_GRACE_SECONDS = 90  # how long a stash survives a disconnect
+_RESUME_STASH = {}  # token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float}
 
 
 def _prune_resume_stash():
     now = time.time()
     for tok in [t for t, s in _RESUME_STASH.items() if s["deadline"] < now]:
         _RESUME_STASH.pop(tok, None)
+
 
 # CLOSE_NORMAL (1000) / GOING_AWAY (1001) are imported from ws_protocol.
 
@@ -403,12 +400,11 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
 
         """
         self._stash_for_resume()
-        if code == CLOSE_NORMAL:
+        if code in (CLOSE_NORMAL, GOING_AWAY):
+            # GOING_AWAY (1001) is an ordinary browser tab-close/navigation, so it
+            # must clear the auto-login stamp like a normal close. A portal reboot
+            # keeps the stamp via the _disconnect_all guard inside disconnect().
             self.disconnect(reason)
-        elif code == GOING_AWAY:
-            # Unclean from the portal's POV: keep browser auto-login for reconnect.
-            self.logged_in = False
-            self.sessionhandler.disconnect(self)
         else:
             self.websocket_close_code = code
 

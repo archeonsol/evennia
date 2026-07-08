@@ -496,3 +496,46 @@ class TestDiscordThreadRetry(TestCase):
         mock_delay.assert_called_once()
         _args, kwargs = mock_delay.call_args
         self.assertTrue(kwargs.get("forum"), "retry must preserve the forum flag")
+
+
+class TestWebclientGoingAwayAuth(TestCase):
+    """GOING_AWAY (tab close) must clear the auto-login stamp, except on reboot."""
+
+    class _CSession(dict):
+        def save(self):
+            self.saved = True
+
+    def _client(self, disconnect_all=False):
+        from evennia.server.portal.webclient import WebSocketClient
+
+        client = object.__new__(WebSocketClient)
+        client.nonce = 7
+        client.resume_token = None
+        client.out_buffer = []
+        client.sessionhandler = MagicMock()
+        client.sessionhandler._disconnect_all = disconnect_all
+        client.sendClose = MagicMock()
+        return client
+
+    def test_tab_close_clears_auto_login_stamp(self):
+        from evennia.server.portal.webclient import GOING_AWAY
+
+        client = self._client(disconnect_all=False)
+        csession = self._CSession(webclient_authenticated_uid=42, webclient_authenticated_nonce=7)
+        client.get_client_session = lambda: csession
+
+        client.onClose(False, code=GOING_AWAY)
+
+        self.assertIsNone(csession["webclient_authenticated_uid"])
+        self.assertEqual(csession["webclient_authenticated_nonce"], 0)
+
+    def test_reboot_preserves_auto_login_stamp(self):
+        from evennia.server.portal.webclient import GOING_AWAY
+
+        client = self._client(disconnect_all=True)
+        csession = self._CSession(webclient_authenticated_uid=42, webclient_authenticated_nonce=7)
+        client.get_client_session = lambda: csession
+
+        client.onClose(False, code=GOING_AWAY)
+
+        self.assertEqual(csession["webclient_authenticated_uid"], 42)
