@@ -7,7 +7,6 @@ System commands
 import code
 import datetime
 import os
-import subprocess
 import sys
 import time
 import traceback
@@ -850,25 +849,15 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
             if not _RESOURCE:
                 import resource as _RESOURCE
 
-            env = os.environ.copy()
-            env["LC_NUMERIC"] = "C"  # use default locale instead of system locale
+            import psutil
+
             loadavg = os.getloadavg()[0]
 
-            # Helper function to run the ps command with a modified environment
-            def run_ps_command(command):
-                result = subprocess.run(
-                    command, shell=True, env=env, stdout=subprocess.PIPE, text=True
-                )
-                return result.stdout.strip()
-
-            # Resident memory
-            rmem = float(run_ps_command(f"ps -p {pid} -o rss | tail -1")) / 1000.0
-
-            # Virtual memory
-            vmem = float(run_ps_command(f"ps -p {pid} -o vsz | tail -1")) / 1000.0
-
-            # Percentage of resident memory to total
-            pmem = float(run_ps_command(f"ps -p {pid} -o %mem | tail -1"))
+            proc = psutil.Process(pid)
+            meminfo = proc.memory_info()
+            rmem = meminfo.rss / (1000.0 * 1000)  # resident set size, MB
+            vmem = meminfo.vms / (1000.0 * 1000)  # virtual memory size, MB
+            pmem = proc.memory_percent()  # resident memory as % of physical RAM
 
             rusage = _RESOURCE.getrusage(_RESOURCE.RUSAGE_SELF)
 
