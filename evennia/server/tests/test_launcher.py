@@ -4,10 +4,13 @@ Test the evennia launcher.
 """
 
 import os
+import shutil
+import tempfile
 import threading
 import time
 import unittest
 
+import psutil
 from anything import Something
 from django.test.utils import override_settings
 from mock import MagicMock, create_autospec, patch
@@ -300,3 +303,98 @@ class TestLauncherIPCConnection(unittest.TestCase):
         # connection is cleared for the next attempt
         self.assertTrue(mock_print_exc.called)
         self.assertIsNone(evennia_launcher.AMP_CONNECTION)
+
+
+class TestForceKillIdentity(unittest.TestCase):
+    """Force-kill must confirm a pid is still ours before signalling it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.server_pid = os.path.join(self.tmp, "server.pid")
+        self.portal_pid = os.path.join(self.tmp, "portal.pid")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, path, pid):
+        with open(path, "w") as fh:
+            fh.write(str(pid))
+
+    @patch("evennia.server.evennia_launcher.psutil.Process")
+    def test_our_process_matches_by_cmdline(self, mock_proc):
+        self._write(self.server_pid, 4242)
+        mock_proc.return_value.cmdline.return_value = ["/py", "/lib/server.py", "--pidfile", "x"]
+        proc = evennia_launcher._our_process(self.server_pid, "/lib/server.py")
+        self.assertIs(proc, mock_proc.return_value)
+        mock_proc.assert_called_once_with(4242)
+
+    @patch("evennia.server.evennia_launcher.psutil.Process")
+    def test_our_process_rejects_recycled_pid(self, mock_proc):
+        self._write(self.server_pid, 4242)
+        mock_proc.return_value.cmdline.return_value = ["/usr/bin/vim", "notes.txt"]
+        self.assertIsNone(evennia_launcher._our_process(self.server_pid, "/lib/server.py"))
+
+    @patch("evennia.server.evennia_launcher.psutil.Process")
+    def test_our_process_missing(self, mock_proc):
+        self._write(self.server_pid, 4242)
+        mock_proc.side_effect = psutil.NoSuchProcess(4242)
+        self.assertIsNone(evennia_launcher._our_process(self.server_pid, "/lib/server.py"))
+
+    @patch("evennia.server.evennia_launcher.wait_for_portal_ipc_down", create=True)
+    @patch("evennia.server.evennia_launcher.psutil.Process")
+    def test_force_kill_skips_recycled_via_cmdline(self, mock_proc, _mock_ipc):
+        # pid 4242 was recycled to an unrelated process; it must not be signalled
+        self._write(self.server_pid, 4242)
+        inst = mock_proc.return_value
+        inst.cmdline.return_value = ["/usr/bin/vim", "notes.txt"]
+        with (
+            patch.object(evennia_launcher, "SERVER_PIDFILE", self.server_pid),
+            patch.object(evennia_launcher, "PORTAL_PIDFILE", None),
+            patch.object(evennia_launcher, "SERVER_PY_FILE", "/lib/server.py"),
+            patch.object(evennia_launcher, "AMP_HOST", None),
+        ):
+            evennia_launcher._force_kill_local_processes()
+        inst.terminate.assert_not_called()
+        inst.kill.assert_not_called()
+        self.assertFalse(os.path.isfile(self.server_pid))  # stale pidfile cleaned
+
+    @patch("evennia.server.evennia_launcher.wait_for_portal_ipc_down", create=True)
+    def test_force_kill_terminates_our_process(self, _mock_ipc):
+        self._write(self.server_pid, 100)
+        proc = MagicMock()
+        proc.is_running.return_value = False  # dies on SIGTERM
+
+        def _our(pidfile, py_file):
+            return proc if pidfile == self.server_pid else None
+
+        with (
+            patch.object(evennia_launcher, "SERVER_PIDFILE", self.server_pid),
+            patch.object(evennia_launcher, "PORTAL_PIDFILE", None),
+            patch.object(evennia_launcher, "AMP_HOST", None),
+            patch("evennia.server.evennia_launcher._our_process", side_effect=_our),
+            patch("evennia.server.evennia_launcher.psutil.wait_procs", return_value=([proc], [])),
+        ):
+            evennia_launcher._force_kill_local_processes()
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()  # died on SIGTERM, no SIGKILL needed
+        self.assertFalse(os.path.isfile(self.server_pid))  # removed after death
+
+    @patch("evennia.server.evennia_launcher.wait_for_portal_ipc_down", create=True)
+    def test_force_kill_sigkills_survivor(self, _mock_ipc):
+        self._write(self.server_pid, 100)
+        proc = MagicMock()
+        proc.is_running.return_value = False  # gone after SIGKILL
+
+        def _our(pidfile, py_file):
+            return proc if pidfile == self.server_pid else None
+
+        with (
+            patch.object(evennia_launcher, "SERVER_PIDFILE", self.server_pid),
+            patch.object(evennia_launcher, "PORTAL_PIDFILE", None),
+            patch.object(evennia_launcher, "AMP_HOST", None),
+            patch("evennia.server.evennia_launcher._our_process", side_effect=_our),
+            patch("evennia.server.evennia_launcher.psutil.wait_procs", return_value=([], [proc])),
+        ):
+            evennia_launcher._force_kill_local_processes()
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()  # survived SIGTERM, escalated to SIGKILL

@@ -21,9 +21,11 @@ import sys
 import threading
 import time
 from argparse import ArgumentParser
-from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
+from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
+                        check_output)
 
 import django
+import psutil
 from django.core.management import execute_from_command_line
 from django.db.utils import ProgrammingError
 from packaging.version import Version
@@ -571,70 +573,110 @@ def _fail_launcher():
     _reactor_stop()
 
 
+# pidfile -> the py-file its process runs, used to confirm a pid still belongs
+# to our portal/server (not an unrelated process that recycled the same pid)
+def _local_pid_targets():
+    return ((SERVER_PIDFILE, SERVER_PY_FILE), (PORTAL_PIDFILE, PORTAL_PY_FILE))
+
+
+def _our_process(pidfile, expected_py_file):
+    """Return the live :class:`psutil.Process` for ``pidfile`` if it is ours.
+
+    A pidfile left by a hard-crashed process can point at a pid the OS later
+    recycled to something unrelated; signalling it blindly would kill an
+    innocent process. Confirm the live process is actually our portal/server by
+    matching its command line against ``expected_py_file`` before returning it.
+
+    Args:
+        pidfile (str): Path to the pidfile holding the process id.
+        expected_py_file (str): The portal/server entry-point path the process
+            should be running.
+
+    Returns:
+        psutil.Process or None: The process if it is live and ours, else None.
+    """
+    if not pidfile or not os.path.isfile(pidfile):
+        return None
+    try:
+        with open(pidfile) as pidfh:
+            pid = int(pidfh.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+    try:
+        proc = psutil.Process(pid)
+        if expected_py_file and any(expected_py_file in arg for arg in proc.cmdline()):
+            return proc
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        pass
+    return None
+
+
 def _local_pidfiles_alive():
-    """Return True if portal or server pidfiles point at live processes."""
-    for pidfile in (SERVER_PIDFILE, PORTAL_PIDFILE):
-        if not pidfile or not os.path.isfile(pidfile):
-            continue
-        try:
-            with open(pidfile) as pidfh:
-                pid = int(pidfh.read().strip())
-            os.kill(pid, 0)
-            return True
-        except (OSError, ValueError):
-            continue
-    return False
+    """Return True if a portal or server pidfile points at a live process of ours."""
+    return any(_our_process(pidfile, py_file) for pidfile, py_file in _local_pid_targets())
 
 
 def _force_kill_local_processes():
-    """SIGTERM/SIGKILL portal and server from pidfiles when IPC shutdown failed."""
+    """SIGTERM then SIGKILL portal and server from pidfiles when IPC shutdown failed."""
     from evennia.server.launcher_ipc import wait_for_portal_ipc_down
 
-    for pidfile in (SERVER_PIDFILE, PORTAL_PIDFILE):
-        if not pidfile or not os.path.isfile(pidfile):
+    targets = []  # (proc, pidfile) for processes confirmed to be ours
+    for pidfile, py_file in _local_pid_targets():
+        proc = _our_process(pidfile, py_file)
+        if proc is None:
+            # missing, stale, or recycled pid: never signal it, just drop the file
+            _try_remove(pidfile)
             continue
         try:
-            with open(pidfile) as pidfh:
-                pid = int(pidfh.read().strip())
-            os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, ValueError, OSError):
-            pass
-        else:
-            time.sleep(1)
-            try:
-                os.kill(pid, 0)
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+            proc.terminate()
+        except psutil.NoSuchProcess:
+            _try_remove(pidfile)
+            continue
+        targets.append((proc, pidfile))
+
+    procs = [proc for proc, _ in targets]
+    _, alive = psutil.wait_procs(procs, timeout=3)
+    for proc in alive:
         try:
-            os.remove(pidfile)
-        except OSError:
+            proc.kill()
+        except psutil.NoSuchProcess:
             pass
+    psutil.wait_procs(alive, timeout=3)
+
+    # remove a pidfile only once its process is confirmed gone
+    for proc, pidfile in targets:
+        if not proc.is_running():
+            _try_remove(pidfile)
 
     if AMP_HOST is not None and AMP_PORT is not None:
         wait_for_portal_ipc_down(AMP_HOST, AMP_PORT)
 
 
+def _try_remove(path):
+    if path and os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def _cleanup_stale_portal_process():
     """Ensure a previous Portal/IPC listener is gone before spawning a new one."""
-    import signal
-
     from evennia.server.launcher_ipc import wait_for_portal_ipc_down
 
-    if os.path.isfile(PORTAL_PIDFILE):
+    proc = _our_process(PORTAL_PIDFILE, PORTAL_PY_FILE)
+    if proc is not None:
         try:
-            with open(PORTAL_PIDFILE) as pidfile:
-                pid = int(pidfile.read().strip())
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, ValueError, OSError):
+            proc.terminate()
+        except psutil.NoSuchProcess:
             pass
     wait_for_portal_ipc_down(AMP_HOST, AMP_PORT)
 
 
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import COLD_START_DEADLINE, LauncherSession, connect_session
+    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
+                                             LauncherSession, connect_session)
 
     with _AMP_CONNECTION_LOCK:
         if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
@@ -761,14 +803,12 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
-    from evennia.server.launcher_ipc import (
-        COLD_START_DEADLINE,
-        SHUTDOWN_WAIT_DEADLINE,
-        LauncherSession,
-        portal_ipc_reachable,
-        query_ipc_status,
-        wait_until_state,
-    )
+    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
+                                             SHUTDOWN_WAIT_DEADLINE,
+                                             LauncherSession,
+                                             portal_ipc_reachable,
+                                             query_ipc_status,
+                                             wait_until_state)
 
     if retries is None:
         if portal_running is False or server_running is False:
@@ -879,10 +919,8 @@ def maybe_collectstatic(force=None):
         force = COLLECTSTATIC_FORCE
     if not force:
         from evennia.server.collectstatic_cache import (
-            compute_static_fingerprint,
-            read_cached_fingerprint,
-            write_cached_fingerprint,
-        )
+            compute_static_fingerprint, read_cached_fingerprint,
+            write_cached_fingerprint)
 
         fingerprint = compute_static_fingerprint()
         if fingerprint == read_cached_fingerprint(GAMEDIR):
@@ -891,10 +929,8 @@ def maybe_collectstatic(force=None):
         write_cached_fingerprint(GAMEDIR, fingerprint)
         return True
     collectstatic()
-    from evennia.server.collectstatic_cache import (
-        compute_static_fingerprint,
-        write_cached_fingerprint,
-    )
+    from evennia.server.collectstatic_cache import (compute_static_fingerprint,
+                                                    write_cached_fingerprint)
 
     write_cached_fingerprint(GAMEDIR, compute_static_fingerprint())
     return True
