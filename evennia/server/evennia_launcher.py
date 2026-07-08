@@ -679,7 +679,11 @@ def _cleanup_stale_portal_process():
 
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import COLD_START_DEADLINE, LauncherSession, connect_session
+    from evennia.server.launcher_ipc import (
+        COLD_START_DEADLINE,
+        LauncherSession,
+        connect_session,
+    )
 
     with _AMP_CONNECTION_LOCK:
         if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
@@ -772,32 +776,6 @@ def query_status(callback=None):
     send_instruction(PSTATUS, None, _callback, _errback)
 
 
-def wait_for_status_reply(callback, on_fail=None):
-    """
-    Wait for an explicit STATUS signal to be sent back from Evennia.
-    """
-    global REACTOR_RUN
-    REACTOR_RUN = True
-
-    def _reader():
-        try:
-            session = _ensure_ipc_connection()
-            status = session.wait_for_push(timeout=120.0)
-            if status is not None:
-                callback(status)
-            else:
-                if on_fail:
-                    on_fail()
-                _reactor_stop()
-        except Exception:
-            print("No Evennia connection established.")
-            if on_fail:
-                on_fail()
-            _reactor_stop()
-
-    threading.Thread(target=_reader, name="_launcher_status_reader", daemon=True).start()
-
-
 def _wait_for_status_ipc(
     portal_running=True,
     server_running=True,
@@ -840,7 +818,7 @@ def _wait_for_status_ipc(
             srun = server_running if server_running is not None else False
             if portal_running is False and not portal_ipc_reachable(AMP_HOST, AMP_PORT):
                 if callback:
-                    callback(False, srun)
+                    callback((False, srun, None, None, None, None))
                 else:
                     _reactor_stop()
                 return
@@ -849,7 +827,7 @@ def _wait_for_status_ipc(
                 probe_session = LauncherSession(AMP_HOST, AMP_PORT)
                 if probe and probe_session._state_matches(probe, portal_running, server_running):
                     if callback:
-                        callback(*probe[:2])
+                        callback(probe)
                     else:
                         _reactor_stop()
                     return
@@ -859,9 +837,8 @@ def _wait_for_status_ipc(
                 print("Connection to Evennia timed out. Try again.")
                 _fail_launcher()
             return
-        prun, srun, *_ = status
         if callback:
-            callback(prun, srun)
+            callback(status)
         else:
             _reactor_stop()
 
@@ -969,8 +946,8 @@ def start_evennia(pprofiler=False, sprofiler=False):
                 "(under cProfile)" if sprofiler else ""
             )
         )
-        wait_for_status_reply(_server_started)
         send_instruction(SSTART, server_cmd)
+        wait_for_status(True, True, _server_started)
 
     def _portal_running(response):
         prun, srun, ppid, spid, _, _ = _parse_status(response)
@@ -980,8 +957,8 @@ def start_evennia(pprofiler=False, sprofiler=False):
             _reactor_stop()
         else:
             print("Server starting {}...".format("(under cProfile)" if sprofiler else ""))
-            wait_for_status_reply(_server_started)
             send_instruction(SSTART, server_cmd)
+            wait_for_status(True, True, _server_started)
 
     def _portal_not_running(fail):
         _cleanup_stale_portal_process()
@@ -1028,19 +1005,19 @@ def reload_evennia(sprofiler=False, reset=False):
         _reactor_stop()
 
     def _server_stopped(status):
-        wait_for_status_reply(_server_reloaded)
         send_instruction(SSTART, server_cmd)
+        wait_for_status(True, True, _server_reloaded)
 
     def _portal_running(response):
         _, srun, _, _, _, _ = _parse_status(response)
         if srun:
             print("Server {}...".format("resetting" if reset else "reloading"))
-            wait_for_status_reply(_server_stopped)
             send_instruction(SRESET if reset else SRELOAD, {})
+            wait_for_status(True, False, _server_stopped)
         else:
             print("Server down. Re-starting ...")
-            wait_for_status_reply(_server_restarted)
             send_instruction(SSTART, server_cmd)
+            wait_for_status(True, True, _server_restarted)
 
     def _portal_not_running(fail):
         print("Evennia not running. Starting ...")
@@ -1072,7 +1049,7 @@ def stop_evennia():
         if srun:
             print("Server stopping ...")
             send_instruction(SSHUTD, {})
-            wait_for_status_reply(_server_stopped, on_fail=_force_kill_local_processes)
+            wait_for_status(True, False, _server_stopped, lambda *_: _force_kill_local_processes())
         else:
             print("Server already stopped.\nStopping Portal ...")
             send_instruction(PSHUTD, {})
@@ -1115,7 +1092,7 @@ def reboot_evennia(pprofiler=False, sprofiler=False):
         if srun:
             print("Server stopping ...")
             send_instruction(SSHUTD, {})
-            wait_for_status_reply(_server_stopped, on_fail=_force_kill_local_processes)
+            wait_for_status(True, False, _server_stopped, lambda *_: _force_kill_local_processes())
         else:
             print("Server already stopped.\nStopping Portal ...")
             send_instruction(PSHUTD, {})
@@ -1224,11 +1201,11 @@ def stop_server_only(when_stopped=None, interactive=False):
         _, srun, _, _, _, _ = _parse_status(response)
         if srun:
             print("Server stopping ...")
-            wait_for_status_reply(_server_stopped)
             if interactive:
                 send_instruction(SRELOAD, {})
             else:
                 send_instruction(SSHUTD, {})
+            wait_for_status(True, False, _server_stopped)
         else:
             if when_stopped:
                 when_stopped()

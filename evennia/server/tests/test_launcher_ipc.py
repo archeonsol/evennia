@@ -5,11 +5,15 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from evennia.server.launcher_ipc import (_MAX_FRAME_SIZE,
-                                         LauncherIPCFrameError,
-                                         LauncherSession, _decode_frames,
-                                         _encode_frame, connect_session,
-                                         wait_until_state)
+from evennia.server.launcher_ipc import (
+    _MAX_FRAME_SIZE,
+    LauncherIPCFrameError,
+    LauncherSession,
+    _decode_frames,
+    _encode_frame,
+    connect_session,
+    wait_until_state,
+)
 
 
 class DecodeFramesTest(SimpleTestCase):
@@ -96,11 +100,6 @@ class LauncherSessionWaitTest(SimpleTestCase):
         session = LauncherSession("127.0.0.1", 4006)
         result = session.wait_for_state(timeout=1.0, poll_interval=0.01)
         self.assertEqual(result, mock_query.return_value)
-
-    @patch.object(LauncherSession, "read_push", return_value=[True, False, 1, None, {}, {}])
-    def test_wait_for_push_returns_status_push(self, mock_push):
-        session = LauncherSession("127.0.0.1", 4006)
-        self.assertEqual(session.wait_for_push(timeout=1.0), mock_push.return_value)
 
     @patch.object(LauncherSession, "read_push", return_value=[True, True, 1, 2, {}, {}])
     @patch.object(LauncherSession, "query_status", return_value=[False, False, 1, 2, {}, {}])

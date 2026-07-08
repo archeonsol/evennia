@@ -173,70 +173,19 @@ class TestLauncher(TwistedTestCase):
         evennia_launcher.query_status(callback=testcall)
         mprint.assert_called_with([True, True, 2, 24, "info1", "info2"])
 
-    def _run_status_reply(self, push_value, mcall, on_fail):
-        """
-        Drive wait_for_status_reply against a stub IPC session and join its
-        reader thread deterministically (no socket, no leaked thread).
-        """
-        from evennia.server import launcher_ipc
-
-        session = create_autospec(launcher_ipc.LauncherSession, instance=True)
-        session.wait_for_push.return_value = push_value
-
-        created = []
-        real_thread = threading.Thread
-
-        def _capture_thread(*args, **kwargs):
-            thread = real_thread(*args, **kwargs)
-            created.append(thread)
-            return thread
-
-        with (
-            patch.object(evennia_launcher, "_ensure_ipc_connection", return_value=session),
-            patch.object(evennia_launcher, "_reactor_stop") as mstop,
-            patch.object(evennia_launcher.threading, "Thread", side_effect=_capture_thread),
-        ):
-            evennia_launcher.wait_for_status_reply(mcall, on_fail=on_fail)
-            self.assertEqual(len(created), 1)
-            created[0].join(timeout=5)
-            self.assertFalse(created[0].is_alive())
-
-        return mstop
-
-    def test_wait_for_status_reply(self):
-        status = (True, True, 2, 24, "info1", "info2")
-        mcall = MagicMock()
-        on_fail = MagicMock()
-
-        mstop = self._run_status_reply(status, mcall, on_fail)
-
-        mcall.assert_called_once_with(status)
-        on_fail.assert_not_called()
-        mstop.assert_not_called()
-
-    def test_wait_for_status_reply_fail(self):
-        mcall = MagicMock()
-        on_fail = MagicMock()
-
-        mstop = self._run_status_reply(None, mcall, on_fail)
-
-        mcall.assert_not_called()
-        on_fail.assert_called_once_with()
-        mstop.assert_called_once_with()
-
     def test_wait_for_status(self):
         mcall = MagicMock()
         merr = MagicMock()
 
         def _stub(portal_running, server_running, callback, errback, rate=0.5, retries=None):
-            callback(portal_running, server_running)
+            callback((portal_running, server_running, 2, 24, "pinfo", "sinfo"))
 
         with patch.object(evennia_launcher, "_wait_for_status_ipc", side_effect=_stub):
             evennia_launcher.wait_for_status(
                 portal_running=True, server_running=True, callback=mcall, errback=merr
             )
 
-        mcall.assert_called_once_with(True, True)
+        mcall.assert_called_once_with((True, True, 2, 24, "pinfo", "sinfo"))
         merr.assert_not_called()
 
     def test_wait_for_status_fail(self):
@@ -253,6 +202,85 @@ class TestLauncher(TwistedTestCase):
 
         mcall.assert_not_called()
         merr.assert_called_once_with(True, True)
+
+    def test_wait_for_status_ipc_passes_full_status_tuple(self):
+        """
+        The success callback receives the full status tuple (including the info
+        dicts), not just (portal_running, server_running). This is what lets the
+        start/reload sites poll for completion yet still print the server info
+        panel the old push-reply path carried.
+        """
+        status = (True, True, 2, 24, "pinfo", "sinfo")
+        mcall = MagicMock()
+        created = []
+        real_thread = threading.Thread
+
+        def _capture(*args, **kwargs):
+            thread = real_thread(*args, **kwargs)
+            created.append(thread)
+            return thread
+
+        with (
+            patch("evennia.server.launcher_ipc.wait_until_state", return_value=status),
+            patch.object(evennia_launcher.threading, "Thread", side_effect=_capture),
+        ):
+            evennia_launcher._wait_for_status_ipc(True, True, callback=mcall)
+            self.assertEqual(len(created), 1)
+            created[0].join(timeout=5)
+
+        mcall.assert_called_once_with(status)
+
+    def test_start_evennia_sends_then_polls_for_server_up(self):
+        """
+        With the portal up and server down, start_evennia sends SSTART and only
+        then polls for the server to come up. Send-before-poll on one connection,
+        never a concurrent status reader on the shared socket.
+        """
+        calls = []
+
+        def fake_send(op, args, callback=None, errback=None):
+            calls.append(("send", op))
+            if op == evennia_launcher.PSTATUS:
+                callback({"status": pack_status((True, False, 11, 0, "pinfo", "sinfo"))})
+
+        def fake_wait(portal_running, server_running, callback=None, errback=None, rate=0.5):
+            calls.append(("wait", portal_running, server_running))
+
+        with (
+            patch.object(evennia_launcher, "send_instruction", side_effect=fake_send),
+            patch.object(evennia_launcher, "wait_for_status", side_effect=fake_wait),
+            patch.object(evennia_launcher, "maybe_collectstatic"),
+            patch.object(evennia_launcher, "_get_twistd_cmdline", return_value=(["p"], ["s"])),
+        ):
+            evennia_launcher.start_evennia()
+
+        self.assertLess(
+            calls.index(("send", evennia_launcher.SSTART)),
+            calls.index(("wait", True, True)),
+        )
+
+    def test_stop_evennia_sends_shutdown_then_polls_for_server_down(self):
+        """With both up, stop_evennia sends SSHUTD then polls for the server to go down."""
+        calls = []
+
+        def fake_send(op, args, callback=None, errback=None):
+            calls.append(("send", op))
+            if op == evennia_launcher.PSTATUS:
+                callback({"status": pack_status((True, True, 11, 22, "pinfo", "sinfo"))})
+
+        def fake_wait(portal_running, server_running, callback=None, errback=None, rate=0.5):
+            calls.append(("wait", portal_running, server_running))
+
+        with (
+            patch.object(evennia_launcher, "send_instruction", side_effect=fake_send),
+            patch.object(evennia_launcher, "wait_for_status", side_effect=fake_wait),
+        ):
+            evennia_launcher.stop_evennia()
+
+        self.assertLess(
+            calls.index(("send", evennia_launcher.SSHUTD)),
+            calls.index(("wait", True, False)),
+        )
 
 
 class TestLauncherIPCConnection(unittest.TestCase):

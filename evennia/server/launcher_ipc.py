@@ -298,10 +298,6 @@ class LauncherSession:
         # so framing stays aligned, and the caller re-reads for the next push.
         return None
 
-    def wait_for_push(self, timeout: float = 120.0) -> list | None:
-        """Block until a ``status_push`` frame arrives or timeout."""
-        return self.read_push(timeout=timeout)
-
     def _state_matches(
         self,
         status: list,
