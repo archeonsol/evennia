@@ -21,7 +21,8 @@ import sys
 import threading
 import time
 from argparse import ArgumentParser
-from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
+from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
+                        check_output)
 
 import django
 from django.core.management import execute_from_command_line
@@ -36,7 +37,8 @@ CTRL_C_EVENT = 0  # Windows SIGINT-like signal
 EVENNIA_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import evennia  # noqa
-from evennia.server.amp_serde import pack_launcher_args, pack_status, unpack_status
+from evennia.server.amp_serde import (pack_launcher_args, pack_status,
+                                      unpack_status)
 
 EVENNIA_LIB = os.path.join(EVENNIA_ROOT, "evennia")
 EVENNIA_SERVER = os.path.join(EVENNIA_LIB, "server")
@@ -84,6 +86,11 @@ AMP_PORT = None
 AMP_HOST = None
 AMP_INTERFACE = None
 AMP_CONNECTION = None
+# Serializes creation, use, and teardown of the single shared launcher IPC
+# connection: daemon status-reader threads and the main thread otherwise race on
+# AMP_CONNECTION (check-then-act connect) and on its socket. Reentrant because
+# _send_instruction_ipc holds it across _ensure_ipc_connection.
+_AMP_CONNECTION_LOCK = threading.RLock()
 
 SRELOAD = chr(14)  # server reloading (have portal start a new server)
 SSTART = chr(15)  # server start
@@ -634,18 +641,16 @@ def _cleanup_stale_portal_process():
 
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import (
-        COLD_START_DEADLINE,
-        LauncherSession,
-        connect_session,
-    )
+    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
+                                             LauncherSession, connect_session)
 
-    if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
+    with _AMP_CONNECTION_LOCK:
+        if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
+            return AMP_CONNECTION
+        if connect_timeout is None:
+            connect_timeout = COLD_START_DEADLINE
+        AMP_CONNECTION = connect_session(AMP_HOST, AMP_PORT, connect_timeout=connect_timeout)
         return AMP_CONNECTION
-    if connect_timeout is None:
-        connect_timeout = COLD_START_DEADLINE
-    AMP_CONNECTION = connect_session(AMP_HOST, AMP_PORT, connect_timeout=connect_timeout)
-    return AMP_CONNECTION
 
 
 # ------------------------------------------------------------
@@ -656,24 +661,34 @@ def _ensure_ipc_connection(*, connect_timeout=None):
 
 
 def _send_instruction_ipc(operation, arguments, callback=None, errback=None):
+    global AMP_CONNECTION
     try:
-        if operation == PSTATUS:
-            from evennia.server.launcher_ipc import PSTATUS_PROBE_TIMEOUT
+        # hold the lock across ensure + the send/recv so the shared socket is
+        # not used by a concurrent sender or reset mid-exchange
+        with _AMP_CONNECTION_LOCK:
+            if operation == PSTATUS:
+                from evennia.server.launcher_ipc import PSTATUS_PROBE_TIMEOUT
 
-            session = _ensure_ipc_connection(connect_timeout=PSTATUS_PROBE_TIMEOUT)
-            status = session.query_status()
-            if callback:
-                callback({"status": pack_status(status)})
-            return
-        session = _ensure_ipc_connection()
-        session.send_command_fire(operation, arguments)
+                session = _ensure_ipc_connection(connect_timeout=PSTATUS_PROBE_TIMEOUT)
+                status = session.query_status()
+                if callback:
+                    callback({"status": pack_status(status)})
+                return
+            session = _ensure_ipc_connection()
+            session.send_command_fire(operation, arguments)
         if callback:
             callback({})
     except Exception as fail:
-        global AMP_CONNECTION
-        AMP_CONNECTION = None
+        with _AMP_CONNECTION_LOCK:
+            AMP_CONNECTION = None
         if errback:
             errback(fail)
+        else:
+            # do not swallow: a send failure that silently drops the connection
+            # is otherwise invisible on the launcher console
+            import traceback
+
+            traceback.print_exc()
 
 
 def _send_instruction_amp(operation, arguments, callback=None, errback=None):
@@ -833,14 +848,12 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
-    from evennia.server.launcher_ipc import (
-        COLD_START_DEADLINE,
-        SHUTDOWN_WAIT_DEADLINE,
-        LauncherSession,
-        portal_ipc_reachable,
-        query_ipc_status,
-        wait_until_state,
-    )
+    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
+                                             SHUTDOWN_WAIT_DEADLINE,
+                                             LauncherSession,
+                                             portal_ipc_reachable,
+                                             query_ipc_status,
+                                             wait_until_state)
 
     if retries is None:
         if portal_running is False or server_running is False:
@@ -874,9 +887,7 @@ def _wait_for_status_ipc(
             if portal_running is True:
                 probe = query_ipc_status(AMP_HOST, AMP_PORT)
                 probe_session = LauncherSession(AMP_HOST, AMP_PORT)
-                if probe and probe_session._state_matches(
-                    probe, portal_running, server_running
-                ):
+                if probe and probe_session._state_matches(probe, portal_running, server_running):
                     if callback:
                         callback(*probe[:2])
                     else:
@@ -1004,10 +1015,8 @@ def maybe_collectstatic(force=None):
         force = COLLECTSTATIC_FORCE
     if not force:
         from evennia.server.collectstatic_cache import (
-            compute_static_fingerprint,
-            read_cached_fingerprint,
-            write_cached_fingerprint,
-        )
+            compute_static_fingerprint, read_cached_fingerprint,
+            write_cached_fingerprint)
 
         fingerprint = compute_static_fingerprint()
         if fingerprint == read_cached_fingerprint(GAMEDIR):
@@ -1016,10 +1025,8 @@ def maybe_collectstatic(force=None):
         write_cached_fingerprint(GAMEDIR, fingerprint)
         return True
     collectstatic()
-    from evennia.server.collectstatic_cache import (
-        compute_static_fingerprint,
-        write_cached_fingerprint,
-    )
+    from evennia.server.collectstatic_cache import (compute_static_fingerprint,
+                                                    write_cached_fingerprint)
 
     write_cached_fingerprint(GAMEDIR, compute_static_fingerprint())
     return True

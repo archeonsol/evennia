@@ -4,6 +4,9 @@ Test the evennia launcher.
 """
 
 import os
+import threading
+import time
+import unittest
 
 from anything import Something
 from django.test.utils import override_settings
@@ -212,3 +215,53 @@ class TestLauncher(TwistedTestCase):
         mcall.assert_not_called()
         merr.assert_not_called()
         mcalllater.assert_called()
+
+
+class TestLauncherIPCConnection(unittest.TestCase):
+    """The shared launcher IPC connection must be created and mutated safely."""
+
+    def setUp(self):
+        self._saved = evennia_launcher.AMP_CONNECTION
+        evennia_launcher.AMP_CONNECTION = None
+
+    def tearDown(self):
+        evennia_launcher.AMP_CONNECTION = self._saved
+
+    def test_ensure_ipc_connection_is_thread_safe(self):
+        from evennia.server import launcher_ipc
+
+        calls = []
+
+        def _slow_connect(*args, **kwargs):
+            # count the connect and hold long enough that a racing thread would
+            # also pass the None check before this one assigns AMP_CONNECTION
+            calls.append(1)
+            time.sleep(0.1)
+            return create_autospec(launcher_ipc.LauncherSession, instance=True)
+
+        with patch.object(launcher_ipc, "connect_session", side_effect=_slow_connect):
+            threads = [
+                threading.Thread(target=evennia_launcher._ensure_ipc_connection) for _ in range(2)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        # both threads shared one connection instead of each opening its own
+        self.assertEqual(len(calls), 1)
+
+    def test_send_instruction_ipc_surfaces_failure_without_errback(self):
+        from evennia.server import launcher_ipc
+
+        session = create_autospec(launcher_ipc.LauncherSession, instance=True)
+        session.send_command_fire.side_effect = RuntimeError("boom")
+        evennia_launcher.AMP_CONNECTION = session
+
+        with patch("traceback.print_exc") as mock_print_exc:
+            evennia_launcher._send_instruction_ipc(evennia_launcher.SRELOAD, {})
+
+        # the failure is surfaced (not silently swallowed) and the stale
+        # connection is cleared for the next attempt
+        self.assertTrue(mock_print_exc.called)
+        self.assertIsNone(evennia_launcher.AMP_CONNECTION)
