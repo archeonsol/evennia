@@ -68,7 +68,7 @@ connection.on("render", (env) => {
   // Be tolerant of the payload shape: a list of nodes, or a single node.
   const nodes = Array.isArray(env.nodes) ? env.nodes : env.nodes ? [env.nodes] : [];
   for (const node of nodes) {
-    if (node) session.append(renderNodeHtml(node), node.msgType ?? "text");
+    if (node) session.append(renderNodeHtml(node), node.msg_type ?? "text");
   }
 });
 

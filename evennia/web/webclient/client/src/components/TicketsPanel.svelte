@@ -282,7 +282,7 @@
     border-top: 1px solid var(--accent); flex: 0 0 auto;
   }
   .int { color: var(--fg-dim); font-size: 0.62rem; text-transform: uppercase; display: flex; align-items: center; gap: 3px; }
-  .reply input[type="text"], .reply input:not([type]) {
+  .reply input:not([type]) {
     flex: 1; background: transparent; border: none; outline: none;
     color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);
   }

@@ -45,7 +45,7 @@
       refreshPresets();
     }
   }
-  function delPreset(name: string, e: MouseEvent) {
+  function delPreset(name: string, e: MouseEvent | KeyboardEvent) {
     e.stopPropagation();
     dock.deleteLayout(name);
     refreshPresets();
@@ -85,7 +85,17 @@
           {#each presets as name}
             <button class="mi preset" role="menuitem" onclick={() => loadPreset(name)}>
               ▸ {name}
-              <span class="del" role="button" tabindex="0" onclick={(e) => delPreset(name, e)}>×</span>
+              <span
+                class="del"
+                role="button"
+                tabindex="0"
+                onclick={(e) => delPreset(name, e)}
+                onkeydown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    delPreset(name, e);
+                  }
+                }}>×</span>
             </button>
           {/each}
           <button class="mi" role="menuitem" onclick={savePreset}>Save layout…</button>

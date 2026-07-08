@@ -16,7 +16,7 @@ interface NodePayload {
   html?: string;
   body?: string;
   refs?: CharRef[];
-  msgType?: string;
+  msg_type?: string;
 }
 
 function escapeRe(s: string): string {

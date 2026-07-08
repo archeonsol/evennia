@@ -31,11 +31,10 @@ const CLIENT_CAPS = {
 
 function loadClientToken(): string {
   try {
-    let t = localStorage.getItem("underspire.client.token");
-    if (!t) {
-      t = (crypto as any).randomUUID?.() ?? String(Date.now()) + Math.random().toString(36).slice(2);
-      localStorage.setItem("underspire.client.token", t);
-    }
+    const existing = localStorage.getItem("underspire.client.token");
+    if (existing) return existing;
+    const t = (crypto as any).randomUUID?.() ?? String(Date.now()) + Math.random().toString(36).slice(2);
+    localStorage.setItem("underspire.client.token", t);
     return t;
   } catch {
     return String(Date.now());

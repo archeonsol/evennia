@@ -46,7 +46,9 @@
             allowfullscreen
           ></iframe>
         {:else if media.nowPlaying.type === "video"}
-          <video bind:this={videoEl} src={media.nowPlaying.url} controls></video>
+          <video bind:this={videoEl} src={media.nowPlaying.url} controls>
+            <track kind="captions" />
+          </video>
         {:else}
           <audio bind:this={audioEl} src={media.nowPlaying.url} controls></audio>
         {/if}
