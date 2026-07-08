@@ -18,10 +18,10 @@ from django.conf import settings
 
 import evennia
 from evennia.accounts.models import AccountDB
+from evennia.actions.menus import ask_yes_no
 from evennia.scripts.taskhandler import TaskHandlerTask
 from evennia.utils import gametime, logger, search, utils
 from evennia.utils.eveditor import EvEditor
-from evennia.actions.menus import ask_yes_no
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import class_from_module, iter_to_str
 
@@ -824,36 +824,24 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
         pid = os.getpid()
 
         if os_windows:
-            # Windows requires the psutil module to even get paltry
-            # statistics like this (it's pretty much worthless,
-            # unfortunately, since it's not specific to the process) /rant
-            try:
-                import psutil
+            # Windows lacks os.getloadavg/resource; psutil (a core dependency) is
+            # the only source of these (machine-wide, not per-process) stats there.
+            import psutil
 
-                has_psutil = True
-            except ImportError:
-                has_psutil = False
+            loadavg = psutil.cpu_percent()
+            _mem = psutil.virtual_memory()
+            rmem = _mem.used / (1000.0 * 1000)
+            pmem = _mem.percent
 
-            if has_psutil:
-                loadavg = psutil.cpu_percent()
-                _mem = psutil.virtual_memory()
-                rmem = _mem.used / (1000.0 * 1000)
-                pmem = _mem.percent
-
-                if "mem" in self.switches:
-                    string = "Total computer memory usage: |w%g|n MB (%g%%)"
-                    self.msg(string % (rmem, pmem))
-                    return
-                # Display table
-                loadtable = self.styled_table("property", "statistic", align="l")
-                loadtable.add_row("Total CPU load", "%g %%" % loadavg)
-                loadtable.add_row("Total computer memory usage", "%g MB (%g%%)" % (rmem, pmem))
-                loadtable.add_row("Process ID", "%g" % pid),
-            else:
-                loadtable = (
-                    "Not available on Windows without 'psutil' library "
-                    "(install with |wpip install psutil|n)."
-                )
+            if "mem" in self.switches:
+                string = "Total computer memory usage: |w%g|n MB (%g%%)"
+                self.msg(string % (rmem, pmem))
+                return
+            # Display table
+            loadtable = self.styled_table("property", "statistic", align="l")
+            loadtable.add_row("Total CPU load", "%g %%" % loadavg)
+            loadtable.add_row("Total computer memory usage", "%g MB (%g%%)" % (rmem, pmem))
+            loadtable.add_row("Process ID", "%g" % pid),
 
         else:
             # Linux / BSD (OSX) - proper pid-based statistics
@@ -1005,9 +993,9 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         By default, tasks that are canceled and never called are cleaned up after one minute.
 
     Examples:
-        - `tasks/cancel move_callback` - Cancels all movement delays from the slow_exit contrib.
-            In this example slow exits creates it's tasks with
-            `utils.delay(move_delay, move_callback)`
+        - `tasks/cancel move_callback` - Cancels all pending tasks whose callback is
+            `move_callback`, e.g. movement delays created with
+            `utils.delay(move_delay, move_callback)`.
         - `tasks/cancel 2` - Cancel task id 2.
 
     """

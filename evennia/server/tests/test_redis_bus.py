@@ -4,6 +4,9 @@ Integration tests for the redis Streams Portal<->Server bus (plain XADD/XREAD).
 Uses fakeredis so CI does not need a live redis daemon.
 """
 
+import os
+import subprocess
+import sys
 import time
 from unittest.mock import MagicMock, patch
 
@@ -15,8 +18,12 @@ from evennia.server import ipc_schema, redis_bus, session
 from evennia.server.portal import amp, amp_server
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
-from evennia.server.redis_bus import (RedisPortalBus, RedisServerBus,
-                                      _PidTransport, _RedisTransport)
+from evennia.server.redis_bus import (
+    RedisPortalBus,
+    RedisServerBus,
+    _PidTransport,
+    _RedisTransport,
+)
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
 
@@ -305,3 +312,21 @@ class TestRedisTransportQueueBound(SimpleTestCase):
         self.assertEqual(transport._q.qsize(), 5)
         # one log for the whole stall episode, not one per dropped frame
         self.assertEqual(mock_log_err.call_count, 1)
+
+
+class PidAliveTest(SimpleTestCase):
+    """`_pid_alive` reports liveness for real pids without a running loop or DB."""
+
+    def test_own_pid_is_alive(self):
+        self.assertTrue(redis_bus._pid_alive(os.getpid()))
+
+    def test_falsy_pid_is_not_alive(self):
+        # guards the None/0/"" cases the callers pass when no process is known
+        self.assertFalse(redis_bus._pid_alive(None))
+        self.assertFalse(redis_bus._pid_alive(0))
+        self.assertFalse(redis_bus._pid_alive(""))
+
+    def test_reaped_pid_is_not_alive(self):
+        proc = subprocess.Popen([sys.executable, "-c", ""])
+        proc.wait()  # child exits and is reaped, so its pid is truly gone
+        self.assertFalse(redis_bus._pid_alive(proc.pid))

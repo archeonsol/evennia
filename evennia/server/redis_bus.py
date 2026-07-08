@@ -18,6 +18,7 @@ import os
 import queue
 import threading
 
+import psutil
 from django.conf import settings
 
 from evennia.server import ipc_handlers_server
@@ -221,23 +222,9 @@ def _pid_alive(pid):
     if not pid:
         return False
     try:
-        os.kill(int(pid), 0)
-        return True
-    except ProcessLookupError:
+        return psutil.pid_exists(int(pid))
+    except (ValueError, TypeError):
         return False
-    except PermissionError:
-        return True
-    except (OSError, ValueError, TypeError):
-        try:
-            import ctypes
-
-            handle = ctypes.windll.kernel32.OpenProcess(0x1000, 0, int(pid))
-            if handle:
-                ctypes.windll.kernel32.CloseHandle(handle)
-                return True
-            return False
-        except Exception:
-            return True
 
 
 class _PidTransport:
