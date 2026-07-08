@@ -178,8 +178,9 @@ def start_activity(holder, activity):
     Enforces exclusivity first: any already-active activity sharing this one's
     :attr:`~Activity.key` (or its :attr:`~Activity.exclusive_group`, when set) is
     cancelled with reason ``"superseded"``. Then the new activity is registered
-    and its coroutine driven (synchronously up to the first suspension, like
-    ``inlineCallbacks`` was).
+    and its body is driven synchronously up to the first real suspension (like
+    ``inlineCallbacks`` was), so first-step side effects land before this returns;
+    only the awaits/sleeps beyond that run on the loop.
 
     Returns:
         Activity: the started ``activity`` (for chaining / handle-keeping).
@@ -200,7 +201,17 @@ def start_activity(holder, activity):
     reg = _registry(holder, create=True)
     if activity not in reg:
         reg.append(activity)
-    clock.run_coroutine(_drive_activity(activity))
+
+    # Run the synchronous prefix inline (up to the first real suspension), so any
+    # first-step side effect (dispatch/msg before the first await) happens before
+    # we return, matching the old inlineCallbacks contract. The prefix touches no
+    # loop primitive, so deferring it would only reorder observable output.
+    gen = activity.run()
+    kind, value = _step_activity(activity, gen, None)
+    if kind in ("done", "cancelled", "error"):
+        _finish_activity(activity, gen, completed=(kind == "done"))
+    else:
+        clock.run_coroutine(_drive_activity(activity, gen, kind, value))
     return activity
 
 
@@ -257,37 +268,78 @@ def is_active(holder, key_or_group) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-async def _drive_activity(activity):
-    """Drive an :class:`Activity`'s generator to completion or cancellation.
+def _step_activity(activity, gen, to_send):
+    """Advance the generator to the next real suspension or its terminus.
 
-    Fire-and-forget: ``start_activity`` calls this but does not await the
-    returned Deferred — the activity runs on the reactor in the background. Each
-    ``yield`` is interpreted per the module grammar; a cancelled activity unwinds
-    at the next suspension (or via a cancelled in-flight Deferred). The body's
-    own exceptions are logged, never propagated, and the activity is always
-    unregistered and its terminal hook (``on_complete``/``on_cancel``) fired.
+    Runs the synchronous part of the body (``gen.send`` plus any inline
+    "unknown yield value → resume with None" steps) without ever awaiting, and
+    returns ``(kind, value)``:
+
+    - ``("done", None)`` — the body returned (``StopIteration``).
+    - ``("cancelled", None)`` — the activity was cancelled before a step.
+    - ``("await", awaitable)`` — the body yielded an awaitable to await.
+    - ``("sleep", seconds)`` — the body yielded a numeric delay to sleep on.
+    - ``("error", None)`` — the body raised (already logged).
+
+    The caller owns loop suspension, so the synchronous prefix can run inline in
+    :func:`start_activity` and the async remainder in :func:`_drive_activity`
+    off one classifier (no divergence between the two paths).
     """
-    gen = activity.run()
-    to_send = None
+    while True:
+        if activity._cancelled:
+            return ("cancelled", None)
+        try:
+            value = gen.send(to_send)
+        except StopIteration:
+            return ("done", None)
+        except Exception:  # noqa: BLE001 - a crashing body must not kill the loop
+            from evennia.utils import logger
+
+            logger.log_trace(f"activity {activity.key!r} crashed")
+            return ("error", None)
+        to_send = None
+        if inspect.isawaitable(value) and not isinstance(value, (int, float)):
+            return ("await", value)
+        if isinstance(value, (int, float)):
+            return ("sleep", value)
+        # unknown yield value — resume with None, no loop suspension
+
+
+def _finish_activity(activity, gen, completed):
+    """Close the generator, unregister, and fire the terminal hook once."""
+    try:
+        gen.close()
+    except Exception:  # noqa: BLE001
+        pass
+    _unregister(activity)
+    if activity._cancelled:
+        _safe(activity.on_cancel, activity._cancel_reason)
+    elif completed:
+        _safe(activity.on_complete)
+
+
+async def _drive_activity(activity, gen, kind, value):
+    """Await an activity's suspensions and drive it to completion/cancellation.
+
+    Entered only after :func:`start_activity` has run the synchronous prefix up
+    to the first real suspension (``kind``/``value``). Fire-and-forget: it runs
+    on the loop in the background, awaiting that suspension and each later one,
+    running the synchronous steps between them inline via :func:`_step_activity`.
+    A cancelled activity unwinds at the next suspension (or via its cancelled
+    in-flight awaitable); body exceptions are logged, never propagated, and the
+    terminal hook (``on_complete``/``on_cancel``) always fires once.
+    """
     completed = False
     try:
         while True:
-            if activity._cancelled:
-                break
             try:
-                value = gen.send(to_send)
-            except StopIteration:
-                completed = True
-                break
-            to_send = None
-            try:
-                if inspect.isawaitable(value) and not isinstance(value, (int, float)):
+                if kind == "await":
                     activity._pending = value
                     to_send = await value
-                elif isinstance(value, (int, float)):
+                else:  # "sleep"
                     activity._pending = clock.defer_later(max(0.0, float(value)))
                     await activity._pending
-                # else: unknown yield value — resume with None
+                    to_send = None
             except (CancelledError, asyncio.CancelledError):
                 # asyncio.CancelledError (a BaseException) arrives when a
                 # clock.defer_later Task is cancelled; twisted CancelledError
@@ -295,17 +347,16 @@ async def _drive_activity(activity):
                 break
             finally:
                 activity._pending = None
-    except Exception:  # noqa: BLE001 - a crashing body must not kill the reactor
+
+            kind, value = _step_activity(activity, gen, to_send)
+            if kind == "done":
+                completed = True
+                break
+            if kind in ("cancelled", "error"):
+                break
+    except Exception:  # noqa: BLE001 - an awaited body raising must not kill the loop
         from evennia.utils import logger
 
         logger.log_trace(f"activity {activity.key!r} crashed")
     finally:
-        try:
-            gen.close()
-        except Exception:  # noqa: BLE001
-            pass
-        _unregister(activity)
-        if activity._cancelled:
-            _safe(activity.on_cancel, activity._cancel_reason)
-        elif completed:
-            _safe(activity.on_complete)
+        _finish_activity(activity, gen, completed)

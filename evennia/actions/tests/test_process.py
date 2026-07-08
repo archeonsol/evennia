@@ -1,19 +1,18 @@
 """Tests for the Activity primitive + scheduler (CM1 movement engine additions).
 
-An :class:`Activity` is driven by ``_drive_activity`` (an ``inlineCallbacks``
-generator) on the reactor. To keep these tests synchronous we control the two
-suspension points: numeric ``yield``\\s go through ``process.clock.defer_later``, which
-we patch to ``succeed(None)`` so a timed step resolves inline; ``Deferred``
-``yield``\\s use bare ``Deferred``\\s we fire (or cancel) by hand to assert
-suspension, resume-with-value (per-step re-validation), and cancellation.
+An :class:`Activity` is driven by ``_drive_activity`` on the event loop. The two
+suspension points are exercised natively: numeric ``yield``\\s go through
+``process.clock.defer_later`` (patched to ``asyncio.sleep(0)`` so a timed step
+resolves inline); awaitable ``yield``\\s use an ``asyncio.Future`` gate the test
+resolves or cancels by hand to assert suspension, resume-with-value (per-step
+re-validation), and cancellation. Suspend/resume tests run the driver as a task
+on a live loop, ticking it forward with ``asyncio.sleep(0)``.
 """
 
 import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest import mock
-
-from twisted.internet.defer import Deferred, succeed
 
 from evennia.actions import process
 from evennia.actions.process import Activity
@@ -50,20 +49,20 @@ class Counter(Activity):
 
 
 class Waiter(Activity):
-    """Suspends on an externally-controlled Deferred, then continues."""
+    """Suspends on an externally-controlled ``asyncio.Future``, then continues."""
 
     key = "waiter"
     exclusive_group = "exclusive"
 
-    def __init__(self, log, name, deferred):
+    def __init__(self, log, name, gate):
         super().__init__()
         self.log = log
         self.name = name
-        self.deferred = deferred
+        self.gate = gate
 
     def run(self):
         self.log.append(f"start:{self.name}")
-        result = yield self.deferred
+        result = yield self.gate
         self.log.append(f"resume:{self.name}:{result}")
 
     def on_complete(self):
@@ -90,32 +89,13 @@ class Crasher(Activity):
 class TestActivityLifecycle(unittest.TestCase):
     def test_runs_to_completion_and_unregisters(self):
         holder, log = _holder(), []
-        with mock.patch.object(process.clock, "defer_later", return_value=succeed(None)):
+        with mock.patch.object(
+            process.clock, "defer_later", side_effect=lambda *a, **k: asyncio.sleep(0)
+        ):
             process.start_activity(holder, Counter(log, steps=2))
         self.assertEqual(log, ["step0", "step1", "ran", "complete"])
         self.assertEqual(process.get_activities(holder), [])
         self.assertFalse(process.is_active(holder, "counter"))
-
-    def test_registered_and_queryable_while_suspended(self):
-        holder, log = _holder(), []
-        act = Waiter(log, "a", Deferred())
-        process.start_activity(holder, act)
-        self.assertEqual(log, ["start:a"])
-        self.assertTrue(process.is_active(holder, "waiter"))
-        self.assertTrue(process.is_active(holder, "exclusive"))  # by group
-        self.assertIs(process.active_activity(holder, "waiter"), act)
-        self.assertTrue(act.running)
-
-    def test_deferred_yield_resumes_with_value(self):
-        # The per-step re-validation contract: yield a Deferred (engine.dispatch),
-        # resume with its resolved value.
-        holder, log = _holder(), []
-        d = Deferred()
-        process.start_activity(holder, Waiter(log, "a", d))
-        self.assertEqual(log, ["start:a"])
-        d.callback("TRACE")
-        self.assertEqual(log, ["start:a", "resume:a:TRACE", "complete:a"])
-        self.assertEqual(process.get_activities(holder), [])
 
     def test_crashing_body_is_contained(self):
         holder, log = _holder(), []
@@ -125,59 +105,157 @@ class TestActivityLifecycle(unittest.TestCase):
         self.assertEqual(process.get_activities(holder), [])
 
 
+class _LoopActivityTest(unittest.TestCase):
+    """Base for tests that need a live loop to drive suspensions.
+
+    The body's ``yield`` gate is an ``asyncio.Future`` the test resolves or
+    cancels while the driver runs as a task on ``self._loop``; ``_tick`` steps
+    the loop forward so a resolve/cancel unwinds the driver.
+    """
+
+    def setUp(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
+    def tearDown(self):
+        self._loop.close()
+        asyncio.set_event_loop(None)
+
+    def _gate(self):
+        return self._loop.create_future()
+
+    async def _tick(self, n=3):
+        for _ in range(n):
+            await asyncio.sleep(0)
+
+    def _run(self, coro):
+        return self._loop.run_until_complete(coro)
+
+
+class TestActivitySuspend(_LoopActivityTest):
+    def test_registered_and_queryable_while_suspended(self):
+        holder, log = _holder(), []
+
+        async def scenario():
+            act = Waiter(log, "a", self._gate())
+            process.start_activity(holder, act)
+            await self._tick()
+            self.assertEqual(log, ["start:a"])
+            self.assertTrue(process.is_active(holder, "waiter"))
+            self.assertTrue(process.is_active(holder, "exclusive"))  # by group
+            self.assertIs(process.active_activity(holder, "waiter"), act)
+            self.assertTrue(act.running)
+            act.cancel()  # cleanup: let the driver finish before the loop closes
+            await self._tick()
+
+        self._run(scenario())
+
+    def test_gate_yield_resumes_with_value(self):
+        # The per-step re-validation contract: yield an awaitable (engine.dispatch),
+        # resume with its resolved value.
+        holder, log = _holder(), []
+
+        async def scenario():
+            gate = self._gate()
+            process.start_activity(holder, Waiter(log, "a", gate))
+            await self._tick()
+            self.assertEqual(log, ["start:a"])
+            gate.set_result("TRACE")
+            await self._tick()
+            self.assertEqual(log, ["start:a", "resume:a:TRACE", "complete:a"])
+            self.assertEqual(process.get_activities(holder), [])
+
+        self._run(scenario())
+
+
 # --- cancellation -----------------------------------------------------------
-class TestActivityCancel(unittest.TestCase):
+class TestActivityCancel(_LoopActivityTest):
     def test_cancel_while_suspended_runs_on_cancel(self):
         holder, log = _holder(), []
-        d = Deferred()
-        process.start_activity(holder, Waiter(log, "a", d))
-        process.cancel_activity(holder, "waiter", reason="stop")
-        self.assertEqual(log, ["start:a", "cancel:a:stop"])
-        self.assertFalse(process.is_active(holder, "waiter"))
+
+        async def scenario():
+            process.start_activity(holder, Waiter(log, "a", self._gate()))
+            await self._tick()
+            process.cancel_activity(holder, "waiter", reason="stop")
+            await self._tick()
+            self.assertEqual(log, ["start:a", "cancel:a:stop"])
+            self.assertFalse(process.is_active(holder, "waiter"))
+
+        self._run(scenario())
 
     def test_cancel_by_group(self):
         holder, log = _holder(), []
-        process.start_activity(holder, Waiter(log, "a", Deferred()))
-        cancelled = process.cancel_activity(holder, "exclusive", reason="grp")
-        self.assertEqual(len(cancelled), 1)
-        self.assertEqual(log, ["start:a", "cancel:a:grp"])
+
+        async def scenario():
+            process.start_activity(holder, Waiter(log, "a", self._gate()))
+            await self._tick()
+            cancelled = process.cancel_activity(holder, "exclusive", reason="grp")
+            await self._tick()
+            self.assertEqual(len(cancelled), 1)
+            self.assertEqual(log, ["start:a", "cancel:a:grp"])
+
+        self._run(scenario())
 
     def test_cancel_by_instance(self):
         holder, log = _holder(), []
-        act = Waiter(log, "a", Deferred())
-        process.start_activity(holder, act)
-        process.cancel_activity(holder, act, reason="inst")
-        self.assertEqual(log, ["start:a", "cancel:a:inst"])
+
+        async def scenario():
+            act = Waiter(log, "a", self._gate())
+            process.start_activity(holder, act)
+            await self._tick()
+            process.cancel_activity(holder, act, reason="inst")
+            await self._tick()
+            self.assertEqual(log, ["start:a", "cancel:a:inst"])
+
+        self._run(scenario())
 
     def test_cancel_is_idempotent(self):
         holder, log = _holder(), []
-        act = Waiter(log, "a", Deferred())
-        process.start_activity(holder, act)
-        process.cancel_activity(holder, "waiter", reason="first")
-        process.cancel_activity(holder, "waiter", reason="second")  # no-op
-        self.assertEqual(log, ["start:a", "cancel:a:first"])
+
+        async def scenario():
+            act = Waiter(log, "a", self._gate())
+            process.start_activity(holder, act)
+            await self._tick()
+            process.cancel_activity(holder, "waiter", reason="first")
+            process.cancel_activity(holder, "waiter", reason="second")  # no-op
+            await self._tick()
+            self.assertEqual(log, ["start:a", "cancel:a:first"])
+
+        self._run(scenario())
 
     def test_cancelled_body_does_not_resume(self):
         holder, log = _holder(), []
-        d = Deferred()
-        act = Waiter(log, "a", d)
-        process.start_activity(holder, act)
-        act.cancel(reason="x")
-        # firing the Deferred now must not push the body past its suspension
-        self.assertNotIn("resume:a:None", log)
+
+        async def scenario():
+            act = Waiter(log, "a", self._gate())
+            process.start_activity(holder, act)
+            await self._tick()
+            act.cancel(reason="x")  # also cancels the in-flight gate
+            await self._tick()
+            self.assertNotIn("resume:a:None", log)
+
+        self._run(scenario())
 
 
 # --- exclusivity ------------------------------------------------------------
-class TestActivityExclusivity(unittest.TestCase):
+class TestActivityExclusivity(_LoopActivityTest):
     def test_same_group_supersedes(self):
         holder, log = _holder(), []
-        a1 = Waiter(log, "a1", Deferred())
-        a2 = Waiter(log, "a2", Deferred())
-        process.start_activity(holder, a1)
-        process.start_activity(holder, a2)  # same exclusive_group → cancels a1
-        self.assertIn("cancel:a1:superseded", log)
-        self.assertIs(process.active_activity(holder, "waiter"), a2)
-        self.assertEqual(len(process.get_activities(holder)), 1)
+
+        async def scenario():
+            a1 = Waiter(log, "a1", self._gate())
+            a2 = Waiter(log, "a2", self._gate())
+            process.start_activity(holder, a1)
+            await self._tick()
+            process.start_activity(holder, a2)  # same exclusive_group → cancels a1
+            await self._tick()
+            self.assertIn("cancel:a1:superseded", log)
+            self.assertIs(process.active_activity(holder, "waiter"), a2)
+            self.assertEqual(len(process.get_activities(holder)), 1)
+            a2.cancel()  # cleanup
+            await self._tick()
+
+        self._run(scenario())
 
     def test_distinct_keys_and_groups_coexist(self):
         holder, log = _holder(), []
@@ -186,9 +264,63 @@ class TestActivityExclusivity(unittest.TestCase):
             key = "other"
             exclusive_group = None
 
-        process.start_activity(holder, Waiter(log, "w", Deferred()))
-        process.start_activity(holder, Other(log, "o", Deferred()))
-        self.assertEqual(len(process.get_activities(holder)), 2)
+        async def scenario():
+            process.start_activity(holder, Waiter(log, "w", self._gate()))
+            process.start_activity(holder, Other(log, "o", self._gate()))
+            await self._tick()
+            self.assertEqual(len(process.get_activities(holder)), 2)
+            for act in list(process.get_activities(holder)):
+                act.cancel()  # cleanup
+            await self._tick()
+
+        self._run(scenario())
+
+
+# --- synchronous prefix (inlineCallbacks-parity) ----------------------------
+class TestActivitySyncPrefix(_LoopActivityTest):
+    """The body's synchronous prefix runs inline before start_activity returns."""
+
+    def test_prefix_without_suspension_runs_before_start_returns(self):
+        holder, events = _holder(), []
+
+        class NoSuspend(Activity):
+            key = "nosuspend"
+
+            def run(self):
+                events.append("body")
+                return
+                yield  # pragma: no cover - generator marker
+
+        async def scenario():
+            process.start_activity(holder, NoSuspend())
+            # the body must already have run, before we yield to the loop
+            return list(events)
+
+        self.assertEqual(self._run(scenario()), ["body"])
+
+    def test_prefix_before_first_suspension_runs_inline(self):
+        holder, events = _holder(), []
+
+        async def scenario():
+            gate = self._gate()
+
+            class MsgThenWait(Activity):
+                key = "msgwait"
+
+                def run(self):
+                    events.append("before")
+                    yield gate  # first real suspension
+                    events.append("after")
+
+            process.start_activity(holder, MsgThenWait())
+            inline = list(events)  # observed after start_activity, before awaiting
+            gate.set_result(None)
+            await self._tick()
+            return inline, list(events)
+
+        inline, final = self._run(scenario())
+        self.assertEqual(inline, ["before"])  # prefix ran inline, not next tick
+        self.assertEqual(final, ["before", "after"])  # remainder ran on the loop
 
 
 # --- cancellation on the real asyncio path ---------------------------------
