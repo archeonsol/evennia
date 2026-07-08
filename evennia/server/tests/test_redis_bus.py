@@ -200,6 +200,29 @@ class TestRedisBusSerdeLimits(SimpleTestCase):
 
 
 @override_settings(**_BUS_SETTINGS)
+class TestRedisTransportBootFailFast(SimpleTestCase):
+    """Boot ping failure fails fast: log fatal, stop the loop, no reader thread."""
+
+    def test_boot_ping_failure_stops_loop(self):
+        import redis as redis_mod
+
+        fake = MagicMock()
+        fake.ping.side_effect = redis_mod.exceptions.ConnectionError("refused")
+        with (
+            patch("redis.Redis.from_url", return_value=fake),
+            patch.object(redis_bus.logger, "log_err") as mock_log_err,
+            patch.object(redis_bus.clock, "stop_loop") as mock_stop,
+        ):
+            transport = _RedisTransport("evennia:testbus:s2p", lambda *a: None)
+            transport.start()
+        mock_log_err.assert_called_once()
+        mock_stop.assert_called_once()
+        # writer/reader threads must not start on a dead connection
+        self.assertIsNone(transport._reader)
+        self.assertIsNone(transport._writer)
+
+
+@override_settings(**_BUS_SETTINGS)
 class TestRedisTransportQueueBound(SimpleTestCase):
     """Publish queue is bounded: overflow drops the newest frame, logs once per stall."""
 

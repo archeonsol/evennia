@@ -69,7 +69,19 @@ class _RedisTransport:
         import redis
 
         self._client = redis.Redis.from_url(self._url)
-        self._client.ping()
+        try:
+            self._client.ping()
+        except redis.exceptions.RedisError as err:
+            # The redis bus is the sole Portal<->Server transport; a Server that
+            # cannot reach it on boot has no way to serve. Fail fast: log clearly
+            # and stop the loop so the process exits and the launcher watchdog
+            # retries at process level (throttled) rather than half-initializing.
+            logger.log_err(
+                "redis bus: cannot reach redis at %s on boot (%s); stopping the "
+                "process for launcher retry." % (self._url, err)
+            )
+            clock.stop_loop()
+            return
         self._stop.clear()
         self._writer = threading.Thread(
             target=self._writer_loop, name="redis-bus-writer", daemon=True
