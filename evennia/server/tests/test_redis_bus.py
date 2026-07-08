@@ -46,6 +46,17 @@ class TestRedisBus(TestCase):
         self.redis_patcher = patch("redis.Redis.from_url", return_value=self.fake_redis)
         self.redis_patcher.start()
 
+        # This test overwrites process-global evennia services/handlers. Restore
+        # them so later tests don't inherit this test's instances/mocks.
+        _globals = (
+            "EVENNIA_SERVER_SERVICE",
+            "SERVER_SESSION_HANDLER",
+            "EVENNIA_PORTAL_SERVICE",
+            "PORTAL_SESSION_HANDLER",
+        )
+        _saved = {name: getattr(evennia, name, None) for name in _globals}
+        self.addCleanup(lambda: [setattr(evennia, n, v) for n, v in _saved.items()])
+
         self.server = EvenniaServerService()
         self.server.run_initial_setup = MagicMock()
         evennia.EVENNIA_SERVER_SERVICE = self.server

@@ -196,6 +196,16 @@ class TestInitHooks(TestCase):
 
         self.server = evennia.EVENNIA_SERVER_SERVICE
 
+        # run_init_hooks schedules real asyncio work (maintenance task, system
+        # driver) and defers the at_post_load batch, all of which resolve a loop
+        # via clock._get_loop. Provide one but do not run it: the scheduled tasks
+        # never fire (no side effects), while the synchronous reset/shutdown
+        # at_post_load burst still runs inline, which is what this test asserts.
+        import asyncio
+
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
         self.obj1 = create.object(key="HookTestObj1")
         self.obj2 = create.object(key="HookTestObj2")
         self.acct1 = create.account("HookAcct1", "hooktest1@test.com", "testpasswd")
@@ -234,9 +244,30 @@ class TestInitHooks(TestCase):
         for obj in self.objects:
             obj.delete()
 
+        import asyncio
+
+        asyncio.set_event_loop(None)
+        self._loop.close()
+
     @override_settings(TEST_ENVIRONMENT=True)
     def test_run_init_hooks(self):
+        # This test verifies run_init_hooks invokes at_post_load on the entities
+        # the collector yields and fires the per-mode server hooks. Pin the
+        # collector to this test's objects: the real idmapper cache is process-
+        # global and, under a full-suite run, may evict these instances or hold
+        # hundreds of others, so relying on them staying cached is flaky (and is
+        # the job of the at_init_scheduler collection tests, not this one).
+        # clock.call_later is run inline so the reload path's deferred burst
+        # fires without a running loop.
+        def _sync_call_later(delay, fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
         with (
+            patch(
+                "evennia.server.at_init_scheduler._collect_cached_entities",
+                return_value=self.objects,
+            ),
+            patch("evennia.utils.clock.call_later", side_effect=_sync_call_later),
             patch.object(self.server, "at_server_reload_start", new=MagicMock()) as reload,
             patch.object(self.server, "at_server_cold_start", new=MagicMock()) as cold,
         ):

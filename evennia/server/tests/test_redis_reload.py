@@ -19,11 +19,8 @@ from evennia.server.portal.service import EvenniaPortalService
 from evennia.server.redis_bus import RedisPortalBus, RedisServerBus
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
-from evennia.server.tests.test_redis_bus import (
-    _BUS_SETTINGS,
-    _drain_bus,
-    _sync_call_from_thread,
-)
+from evennia.server.tests.test_redis_bus import (_BUS_SETTINGS, _drain_bus,
+                                                 _sync_call_from_thread)
 
 
 @override_settings(**_BUS_SETTINGS)
@@ -31,10 +28,20 @@ from evennia.server.tests.test_redis_bus import (
 class TestRedisReloadSurvival(TestCase):
     def setUp(self):
         self.fake_redis = fakeredis.FakeRedis(decode_responses=False)
-        self.redis_patcher = patch(
-            "redis.Redis.from_url", return_value=self.fake_redis
-        )
+        self.redis_patcher = patch("redis.Redis.from_url", return_value=self.fake_redis)
         self.redis_patcher.start()
+
+        # This test overwrites process-global evennia services/handlers. Restore
+        # them so later tests (e.g. test_server.TestInitHooks reads
+        # evennia.EVENNIA_SERVER_SERVICE) don't inherit this test's mocks.
+        _globals = (
+            "EVENNIA_SERVER_SERVICE",
+            "SERVER_SESSION_HANDLER",
+            "EVENNIA_PORTAL_SERVICE",
+            "PORTAL_SESSION_HANDLER",
+        )
+        _saved = {name: getattr(evennia, name, None) for name in _globals}
+        self.addCleanup(lambda: [setattr(evennia, n, v) for n, v in _saved.items()])
 
         self.server = EvenniaServerService()
         self.server.run_initial_setup = MagicMock()
@@ -86,9 +93,7 @@ class TestRedisReloadSurvival(TestCase):
         """SRELOAD admin op must not tear down Portal-side protocol transports."""
         with patch.object(self.portal_bus, "wait_for_disconnect", MagicMock()):
             with patch.object(self.portal_bus, "stop_server", MagicMock()) as mock_stop:
-                self.server_bus.send_AdminServer2Portal(
-                    amp.DUMMYSESSION, operation=amp.SRELOAD
-                )
+                self.server_bus.send_AdminServer2Portal(amp.DUMMYSESSION, operation=amp.SRELOAD)
                 _drain_bus()
                 mock_stop.assert_called_once_with(mode="reload")
         self.assertTrue(self.portalsession.protocol.transport.connected)
@@ -98,7 +103,8 @@ class TestRedisReloadSurvival(TestCase):
         """B3: asyncio WS session + azaban hello survives reload; output after PSYNC."""
         from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
         from evennia.server.inputfuncs import azaban_hello
-        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
+        from evennia.server.portal.asyncio_transport import \
+            AsyncioTransportShim
         from evennia.server.portal.webclient import WebSocketClient
         from evennia.server.portal.wire_formats.azaban import AzabanFormat
 
@@ -120,9 +126,7 @@ class TestRedisReloadSurvival(TestCase):
 
         with patch.object(self.portal_bus, "wait_for_disconnect", MagicMock()):
             with patch.object(self.portal_bus, "stop_server", MagicMock()):
-                self.server_bus.send_AdminServer2Portal(
-                    amp.DUMMYSESSION, operation=amp.SRELOAD
-                )
+                self.server_bus.send_AdminServer2Portal(amp.DUMMYSESSION, operation=amp.SRELOAD)
                 _drain_bus()
 
         self.assertFalse(ws.transport.disconnecting)

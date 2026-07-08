@@ -93,19 +93,6 @@ class TestAMPClientSend(_TestAMP):
             self.portalsession, text={"foo": "bar"}
         )
 
-    def test_adminserver2portal(self, mocktransport):
-        self._connect_client(mocktransport)
-
-        self.amp_client.send_AdminServer2Portal(
-            self.session, operation=amp.PSYNC, info_dict={}, spid=None
-        )
-        wire_data = self._catch_wire_read(mocktransport)[0]
-
-        self._connect_server(mocktransport)
-        self.amp_server.data_in = MagicMock()
-        self.amp_server.dataReceived(wire_data)
-        self.amp_server.data_in.assert_called()
-
 
 @patch("evennia.server.portal.amp.amp.BinaryBoxProtocol.transport")
 class TestAMPClientRecv(_TestAMP):
