@@ -16,19 +16,10 @@ from django.test import override_settings
 from twisted.internet.defer import Deferred, succeed
 
 from evennia.utils import systems
-from evennia.utils.systems import (
-    SystemDriver,
-    SystemRegistrationError,
-    all_entities,
-    all_systems,
-    calendar,
-    every,
-    every_tick,
-    get_system,
-    global_scope,
-    online_puppets,
-    register,
-)
+from evennia.utils.systems import (SystemDriver, SystemRegistrationError,
+                                   all_entities, all_systems, calendar, every,
+                                   every_tick, get_system, global_scope,
+                                   online_puppets, register)
 from evennia.utils.test_resources import BaseEvenniaTestCase
 
 
@@ -347,16 +338,26 @@ class TestErrorIsolation(_SchedulerTestMixin, BaseEvenniaTestCase):
         register(name="bad", cadence=every_tick(), scope=global_scope(), run=_boom)
         register(name="good", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
 
-        with patch.object(systems, "logger") as mock_logger:
+        # capture the live traceback log_trace would format, to prove the log
+        # call happens inside the except block (not a bare str(exc))
+        import traceback
+
+        captured = {}
+
+        def _fake_trace(msg=None, **kwargs):
+            captured["tb"] = traceback.format_exc()
+            captured["msg"] = msg
+
+        with patch.object(systems.logger, "log_trace", _fake_trace):
             self.driver.tick()
             self.clock.advance(1.0)
             self.driver.tick()
 
         # the peer fired both ticks despite the failing sibling
         self.assertEqual(len(self.fires), 2)
-        logged = " ".join(str(c) for c in mock_logger.log_err.call_args_list)
-        self.assertIn("bad", logged)
-        self.assertIn("kaboom", logged)
+        self.assertIn("bad", captured.get("msg", ""))
+        self.assertIn("kaboom", captured.get("tb", ""))
+        self.assertIn("_boom", captured.get("tb", ""))  # frame proves stack captured
 
 
 class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
@@ -389,7 +390,7 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.driver.tick()
         with patch.object(systems, "logger") as mock_logger:
             pending.errback(RuntimeError("async kaboom"))
-        self.assertTrue(mock_logger.log_err.called)
+        self.assertTrue(mock_logger.log_trace.called)
         self.assertFalse(get_system("slow").in_flight)
 
     def test_skip_escalates_to_error_after_threshold(self):

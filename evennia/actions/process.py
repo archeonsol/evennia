@@ -39,6 +39,7 @@ Cancellation cancels the in-flight ``Deferred`` and runs ``on_cancel``; the
 driver guards a vanished actor/character and a crashing body.
 """
 
+import asyncio
 import inspect
 
 from twisted.internet.defer import CancelledError, Deferred
@@ -116,7 +117,11 @@ class Activity:
         self._cancelled = True
         self._cancel_reason = reason
         pending = self._pending
-        if pending is not None and not pending.called:
+        # ``pending`` may be an asyncio Task/Future (clock.defer_later) or a
+        # Twisted Deferred; ``.cancel()`` on an already-finished one is a safe
+        # no-op on both, so no ``.called``/``.done()`` pre-check is needed (and
+        # a Task has no ``.called``).
+        if pending is not None:
             try:
                 pending.cancel()
             except Exception:  # noqa: BLE001 - cancellation must never raise
@@ -283,7 +288,10 @@ async def _drive_activity(activity):
                     activity._pending = clock.defer_later(max(0.0, float(value)))
                     await activity._pending
                 # else: unknown yield value — resume with None
-            except CancelledError:
+            except (CancelledError, asyncio.CancelledError):
+                # asyncio.CancelledError (a BaseException) arrives when a
+                # clock.defer_later Task is cancelled; twisted CancelledError
+                # when a Deferred is. Both mean an orderly cancel, not a crash.
                 break
             finally:
                 activity._pending = None

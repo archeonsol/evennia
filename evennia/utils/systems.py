@@ -142,9 +142,7 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 
-from evennia.utils import clock
-
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 #: Driver tick rate in seconds. Part of the `every_tick` contract ("once per
 #: driver tick; the driver ticks at 1 Hz") — a constant, not a setting,
@@ -841,10 +839,10 @@ class SystemDriver:
         async def _run_fire():
             try:
                 await self._invoke_async(system, now, dt)
-            except Exception as exc:
-                logger.log_err(
+            except Exception:
+                logger.log_trace(
                     f"System '{system.name}' errored on fire (run skipped, driver "
-                    f"and other systems unaffected):\n{exc}"
+                    f"and other systems unaffected)."
                 )
             finally:
                 system.in_flight = False

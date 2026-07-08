@@ -137,6 +137,19 @@ def _get_default_executor() -> ThreadPoolExecutor:
     return _default_executor
 
 
+def _format_exc_traceback(exc: BaseException) -> str:
+    """Format a captured exception with its full traceback.
+
+    ``logger.log_trace`` reads the live ``sys.exc_info()`` and so only works
+    inside an ``except`` block. Scheduling backstops receive the exception as an
+    object (from ``task.exception()`` or a stored value) with no live context,
+    so the traceback must be formatted from ``exc.__traceback__`` directly.
+    """
+    import traceback
+
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+
 def _log_task_exception(task: asyncio.Task) -> None:
     if task.cancelled():
         return
@@ -144,7 +157,7 @@ def _log_task_exception(task: asyncio.Task) -> None:
     if exc is not None:
         from evennia.utils.logger import log_err
 
-        log_err(f"Unhandled error in scheduled coroutine:\n{exc}")
+        log_err(f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}")
 
 
 class LoopHandle:
@@ -197,13 +210,20 @@ class LoopHandle:
             result = self._fn(*self._args, **self._kwargs)
             await maybe_await(result)
         except Exception:
+            from evennia.utils.logger import log_trace
+
             if self._on_error is not None:
                 try:
                     from twisted.python.failure import Failure
 
                     self._on_error(Failure())
                 except Exception:
-                    self._on_error(None)
+                    try:
+                        self._on_error(None)
+                    except Exception:
+                        log_trace("LoopHandle on_error callback failed")
+            else:
+                log_trace("Unhandled error in repeating loop; loop stopped")
             self.running = False
             if self._task is not None and not self._task.done():
                 self._task.cancel()
@@ -242,7 +262,7 @@ class _SyncCoroutineResult:
 def _log_task_exception_from_exception(exc: BaseException) -> None:
     from evennia.utils.logger import log_err
 
-    log_err(f"Unhandled error in scheduled coroutine:\n{exc}")
+    log_err(f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}")
 
 
 def call_later(seconds, fn, *args, **kwargs):
@@ -385,16 +405,16 @@ class _DeferLaterCompat:
             self._run_errbacks(exc)
 
     def _run_errbacks(self, exc):
-        for errfn, args, kwargs in self._errbacks:
-            try:
-                from twisted.python.failure import Failure
+        # Each errback is invoked once with a Twisted Failure (the deferLater
+        # contract). A deliberately-raised errback (e.g. taskhandler.handle_error
+        # re-raising a non-cancel failure) is allowed to propagate to the loop's
+        # exception handler, which surfaces it with a traceback, rather than
+        # being swallowed or masked by a retry with a different argument shape.
+        from twisted.python.failure import Failure
 
-                result = errfn(Failure(exc), *args, **kwargs)
-            except Exception:
-                try:
-                    errfn(exc, *args, **kwargs)
-                except Exception:
-                    pass
+        failure = Failure(exc)
+        for errfn, args, kwargs in self._errbacks:
+            result = errfn(failure, *args, **kwargs)
             if hasattr(result, "raiseException"):
                 result.raiseException()
 

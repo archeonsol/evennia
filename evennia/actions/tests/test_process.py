@@ -8,6 +8,7 @@ we patch to ``succeed(None)`` so a timed step resolves inline; ``Deferred``
 suspension, resume-with-value (per-step re-validation), and cancellation.
 """
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -188,6 +189,59 @@ class TestActivityExclusivity(unittest.TestCase):
         process.start_activity(holder, Waiter(log, "w", Deferred()))
         process.start_activity(holder, Other(log, "o", Deferred()))
         self.assertEqual(len(process.get_activities(holder)), 2)
+
+
+# --- cancellation on the real asyncio path ---------------------------------
+class Sleeper(Activity):
+    """Suspends on a real ``clock.defer_later`` sleep (an ``asyncio.Task``)."""
+
+    key = "sleeper"
+
+    def __init__(self, log):
+        super().__init__()
+        self.log = log
+
+    def run(self):
+        self.log.append("start")
+        yield 10  # real defer_later sleep -> asyncio.Task in self._pending
+        self.log.append("resumed")  # must NOT run after a mid-suspend cancel
+
+    def on_cancel(self, reason=None):
+        self.log.append(f"cancel:{reason}")
+
+
+class TestActivityCancelAsyncio(unittest.TestCase):
+    """Cancellation must work when ``_pending`` is a real asyncio object.
+
+    The legacy cancel tests drive raw Twisted ``Deferred``s (``.called`` +
+    twisted ``CancelledError``); production suspension points hold an
+    ``asyncio.Task`` from ``clock.defer_later``, which has neither.
+    """
+
+    def setUp(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
+    def tearDown(self):
+        self._loop.close()
+        asyncio.set_event_loop(None)
+
+    def test_cancel_during_real_defer_later_sleep(self):
+        holder, log = _holder(), []
+
+        async def scenario():
+            process.start_activity(holder, Sleeper(log))
+            await asyncio.sleep(0)  # let the driver reach the defer_later await
+            act = process.active_activity(holder, "sleeper")
+            self.assertIsNotNone(act)
+            act.cancel(reason="stop")
+            await asyncio.sleep(0)  # let the cancellation unwind the driver
+
+        self._loop.run_until_complete(scenario())
+        self.assertIn("start", log)
+        self.assertIn("cancel:stop", log)  # on_cancel fired
+        self.assertNotIn("resumed", log)  # body did not resume
+        self.assertFalse(process.is_active(holder, "sleeper"))
 
 
 if __name__ == "__main__":
