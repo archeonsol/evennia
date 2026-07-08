@@ -51,10 +51,9 @@ class BootstrapRunTest(TestCase):
         service = MagicMock()
         service.running = True
 
-        mock_evennia = MagicMock()
-        mock_evennia._LOADED = True
-        mock_evennia.EVENNIA_PORTAL_SERVICE = service
-
+        # run_bootstrap does a local ``import evennia``, which shadows any patch
+        # of the bootstrap module's ``evennia`` attribute; patch the real module
+        # attributes the local import resolves to.
         with (
             patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
@@ -63,7 +62,8 @@ class BootstrapRunTest(TestCase):
             patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
             patch("evennia.server.asyncio_bootstrap._write_pidfile"),
             patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
-            patch("evennia.server.asyncio_bootstrap.evennia", mock_evennia, create=True),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
         ):
             run_bootstrap(portal_mode=True, argv=[])
 
@@ -71,3 +71,35 @@ class BootstrapRunTest(TestCase):
         service.startService.assert_called_once()
         service.stopService.assert_called_once()
         loop.run_forever.assert_called_once()
+
+    def test_stopservice_failure_is_logged_and_siblings_still_run(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        service = MagicMock()
+        service.running = True
+        service.stopService.side_effect = RuntimeError("boom")
+
+        # run_bootstrap does a local ``import evennia`` (line ~133), which
+        # shadows any patch of the bootstrap module's ``evennia`` attribute, so
+        # patch the real module attributes the local import resolves to.
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile") as mock_remove,
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+            patch("evennia.utils.logger.log_trace") as mock_trace,
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        # a failing stopService must be logged, not silently swallowed
+        self.assertTrue(mock_trace.called)
+        # and sibling teardown (pidfile removal, loop close) must still run
+        mock_remove.assert_called_once()
+        loop.close.assert_called_once()

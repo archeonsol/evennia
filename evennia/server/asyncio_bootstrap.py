@@ -150,17 +150,21 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
     try:
         loop.run_forever()
     finally:
+        from evennia.utils import logger
+
         try:
             if service.running:
                 service.stopService()
         except Exception:
-            pass
+            # log rather than swallow, but keep going: sibling teardown
+            # (pidfile removal, loop close) must still run
+            logger.log_trace("error during service.stopService() on shutdown")
         _remove_pidfile(args.pidfile)
         try:
             if not loop.is_closed():
                 loop.close()
         except Exception:
-            pass
+            logger.log_trace("error closing the event loop on shutdown")
 
 
 def run_portal(argv=None):
