@@ -223,6 +223,17 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
     def __init__(self):
         super().__init__()
 
+    def _cancel_heartbeat(self):
+        """Cancel any pending heartbeat timer.
+
+        ``call_later`` returns an :class:`asyncio.TimerHandle`, whose
+        ``cancel()`` is idempotent and safe on an already-fired handle, so no
+        pending-state guard is needed.
+        """
+        if self.nextHeartbeatCall:
+            self.nextHeartbeatCall.cancel()
+            self.nextHeartbeatCall = None
+
     def at_login(self):
         pass
 
@@ -265,13 +276,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         # check for discord gateway API op codes first
         if data["op"] == OP_HELLO:
             self.interval = data["d"]["heartbeat_interval"] / 1000  # convert millisec to seconds
-            if self.nextHeartbeatCall:
-                try:
-                    if self.nextHeartbeatCall.active():
-                        self.nextHeartbeatCall.cancel()
-                except Exception:
-                    pass
-                self.nextHeartbeatCall = None
+            self._cancel_heartbeat()
             self.nextHeartbeatCall = self.factory._batched_timer.call_later(
                 self.interval * random(),
                 self.doHeartbeat,
@@ -321,13 +326,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
 
         """
         self.sessionhandler.disconnect(self)
-        if self.nextHeartbeatCall:
-            try:
-                if self.nextHeartbeatCall.active():
-                    self.nextHeartbeatCall.cancel()
-            except Exception:
-                pass
-            self.nextHeartbeatCall = None
+        self._cancel_heartbeat()
         if wasClean:
             logger.log_info(f"Discord connection closed ({code}) reason: {reason}")
         else:
@@ -454,13 +453,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
 
         """
         if not self.pending_heartbeat or kwargs.get("force"):
-            if self.nextHeartbeatCall:
-                try:
-                    if self.nextHeartbeatCall.active():
-                        self.nextHeartbeatCall.cancel()
-                except Exception:
-                    pass
-                self.nextHeartbeatCall = None
+            self._cancel_heartbeat()
             # send the heartbeat
             data = {"op": 1, "d": self.last_sequence}
             self._send_json(data)
@@ -575,9 +568,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                 try:
                     payload = json.loads(response.content)
                 except Exception:
-                    logger.log_err(
-                        f"Discord thread create: invalid JSON for job={job_id}"
-                    )
+                    logger.log_err(f"Discord thread create: invalid JSON for job={job_id}")
                     return
                 thread_id = payload.get("id")
                 if thread_id:
@@ -593,11 +584,11 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                         ),
                     )
                 else:
-                    logger.log_err(
-                        f"Discord thread create: no thread id in response job={job_id}"
-                    )
+                    logger.log_err(f"Discord thread create: no thread id in response job={job_id}")
             elif should_retry(response.code):
-                delay(300, self.send_create_thread, name, channel_id, job_id, **kwargs)
+                # forum was popped from kwargs above; restore it so the retry
+                # still targets a forum parent (else it re-adds the type-11 flag).
+                delay(300, self.send_create_thread, name, channel_id, job_id, forum=forum, **kwargs)
             else:
                 err_body = ""
                 try:

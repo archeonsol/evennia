@@ -442,3 +442,57 @@ class TestServerWatchdog(TestCase):
         mock_time.monotonic.return_value = 1031.0
         portal._maybe_restart_dead_server()
         self.assertEqual(portal._launcher_amp_protocol.start_server.call_count, 2)
+
+
+class TestDiscordHeartbeatCancel(TestCase):
+    """Discord heartbeat timer cancel (``_cancel_heartbeat``)."""
+
+    def test_cancel_heartbeat_cancels_asyncio_timerhandle(self):
+        import asyncio
+
+        from evennia.server.portal.discord import DiscordClient
+
+        loop = asyncio.new_event_loop()
+        try:
+            fired = []
+            handle = loop.call_later(1000, lambda: fired.append(True))
+            client = object.__new__(DiscordClient)
+            client.nextHeartbeatCall = handle
+
+            client._cancel_heartbeat()
+
+            # the underlying asyncio timer must actually be cancelled, not just
+            # the local ref dropped, or a stale heartbeat keeps firing
+            self.assertTrue(handle.cancelled())
+            self.assertIsNone(client.nextHeartbeatCall)
+        finally:
+            loop.close()
+
+
+class TestDiscordThreadRetry(TestCase):
+    """Forum-thread create retry must not lose the popped ``forum`` kwarg."""
+
+    def test_retry_preserves_forum_kwarg(self):
+        from evennia.server.portal import discord
+
+        client = object.__new__(discord.DiscordClient)
+        client.sessionhandler = MagicMock()
+        captured = {}
+
+        class _Req:
+            def addCallback(self, cb):
+                captured["cb"] = cb
+                return self
+
+        with (
+            mock.patch.object(discord.http, "request", return_value=_Req()),
+            mock.patch.object(discord, "delay") as mock_delay,
+        ):
+            client.send_create_thread("MyThread", "123", "job7", forum=True, applied_tags=["9"])
+            resp = MagicMock()
+            resp.code = 503  # retryable
+            captured["cb"](resp)
+
+        mock_delay.assert_called_once()
+        _args, kwargs = mock_delay.call_args
+        self.assertTrue(kwargs.get("forum"), "retry must preserve the forum flag")
