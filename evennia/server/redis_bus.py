@@ -19,16 +19,22 @@ import queue
 import threading
 
 from django.conf import settings
-from evennia.server.service_registry import IMMEDIATE_RESULT
 
 from evennia.server import ipc_handlers_server
-from evennia.server.portal import amp
-from evennia.server.portal import ipc_handlers_portal
+from evennia.server.portal import amp, ipc_handlers_portal
+from evennia.server.service_registry import IMMEDIATE_RESULT
 from evennia.utils import clock, logger
 
 # Frame field names in the redis stream entries.
 _CMD = b"c"
 _DATA = b"d"
+
+# Cap the outbound publish queue so a stalled/unreachable redis (writer thread
+# blocked in xadd) cannot grow it without bound and OOM the process. On
+# overflow the newest frame is dropped (best-effort delivery is the bus
+# contract); one log per stall episode keeps a real outage visible without
+# flooding.
+_MAX_QUEUE = 10000
 
 
 def _bus_url():
@@ -51,7 +57,8 @@ class _RedisTransport:
         self._read_stream = read_stream
         self._on_frame = on_frame
         self._client = None
-        self._q = queue.Queue()
+        self._q = queue.Queue(maxsize=_MAX_QUEUE)
+        self._queue_full_logged = False
         self._writer = None
         self._reader = None
         self._stop = threading.Event()
@@ -64,8 +71,12 @@ class _RedisTransport:
         self._client = redis.Redis.from_url(self._url)
         self._client.ping()
         self._stop.clear()
-        self._writer = threading.Thread(target=self._writer_loop, name="redis-bus-writer", daemon=True)
-        self._reader = threading.Thread(target=self._reader_loop, name="redis-bus-reader", daemon=True)
+        self._writer = threading.Thread(
+            target=self._writer_loop, name="redis-bus-writer", daemon=True
+        )
+        self._reader = threading.Thread(
+            target=self._reader_loop, name="redis-bus-reader", daemon=True
+        )
         self._writer.start()
         self._reader.start()
 
@@ -83,7 +94,16 @@ class _RedisTransport:
             pass
 
     def publish(self, stream, cmdkey, data):
-        self._q.put((stream, cmdkey, data))
+        try:
+            self._q.put_nowait((stream, cmdkey, data))
+            self._queue_full_logged = False
+        except queue.Full:
+            if not self._queue_full_logged:
+                self._queue_full_logged = True
+                logger.log_err(
+                    "redis bus: publish queue full (%d); dropping frames until it drains"
+                    % _MAX_QUEUE
+                )
 
     def _writer_loop(self):
         while not self._stop.is_set():

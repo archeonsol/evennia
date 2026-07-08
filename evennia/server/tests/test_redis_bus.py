@@ -11,12 +11,12 @@ import fakeredis
 from django.test import SimpleTestCase, TestCase, override_settings
 
 import evennia
-from evennia.server import session
-from evennia.server import ipc_schema
+from evennia.server import ipc_schema, redis_bus, session
 from evennia.server.portal import amp, amp_server
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
-from evennia.server.redis_bus import RedisPortalBus, RedisServerBus, _PidTransport
+from evennia.server.redis_bus import (RedisPortalBus, RedisServerBus,
+                                      _PidTransport, _RedisTransport)
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
 
@@ -43,9 +43,7 @@ def _drain_bus(seconds=0.15):
 class TestRedisBus(TestCase):
     def setUp(self):
         self.fake_redis = fakeredis.FakeRedis(decode_responses=False)
-        self.redis_patcher = patch(
-            "redis.Redis.from_url", return_value=self.fake_redis
-        )
+        self.redis_patcher = patch("redis.Redis.from_url", return_value=self.fake_redis)
         self.redis_patcher.start()
 
         self.server = EvenniaServerService()
@@ -79,8 +77,14 @@ class TestRedisBus(TestCase):
         self.portal.server_bus = self.portal_bus
         self.amp_factory.server_connection = self.portal_bus
 
-        self.server_bus.start_bus()
+        # Match production lifecycle: the Portal is subscribed to s2p before the
+        # Server boots and announces itself via PSYNC. Starting the server bus
+        # first would publish PSYNC before the portal reader exists and the
+        # ``$`` cursor would skip it. Let the portal reader reach its first
+        # blocking xread before the server publishes.
         self.portal_bus.start_bus()
+        time.sleep(0.05)
+        self.server_bus.start_bus()
 
     def tearDown(self):
         try:
@@ -103,9 +107,7 @@ class TestRedisBus(TestCase):
     def test_msgportal2server_roundtrip(self):
         self.portal_bus.send_MsgPortal2Server(self.portalsession, text={"foo": "bar"})
         _drain_bus()
-        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(
-            self.session, text={"foo": "bar"}
-        )
+        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(self.session, text={"foo": "bar"})
 
     def test_msgserver2portal_roundtrip(self):
         self.server_bus.send_MsgServer2Portal(self.session, text={"hello": "world"})
@@ -120,9 +122,7 @@ class TestRedisBus(TestCase):
         evennia.PORTAL_SESSION_HANDLER.at_server_connection.assert_called()
 
     def test_admin_pdisconnall(self):
-        self.portal_bus.send_AdminPortal2Server(
-            amp.DUMMYSESSION, operation=amp.PDISCONNALL
-        )
+        self.portal_bus.send_AdminPortal2Server(amp.DUMMYSESSION, operation=amp.PDISCONNALL)
         _drain_bus()
         evennia.SERVER_SESSION_HANDLER.portal_disconnect_all.assert_called()
 
@@ -143,9 +143,7 @@ class TestRedisBus(TestCase):
         env = ipc_schema.SessionEnvelope(sessid=1, kwargs={"text": [["hi"], {}]})
         wire = env.to_wire()
         self.server_bus._on_frame(b"MsgPortal2Server", wire)
-        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(
-            self.session, text=[["hi"], {}]
-        )
+        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(self.session, text=[["hi"], {}])
 
     def test_pid_transport_disconnect(self):
         transport = _PidTransport(self.portal)
@@ -188,3 +186,20 @@ class TestRedisBusSerdeLimits(SimpleTestCase):
         self.assertEqual(operation, amp.PSYNC)
         self.assertEqual(sessid, 0)
         self.assertEqual(kwargs.get("spid"), 1)
+
+
+@override_settings(**_BUS_SETTINGS)
+class TestRedisTransportQueueBound(SimpleTestCase):
+    """Publish queue is bounded: overflow drops the newest frame, logs once per stall."""
+
+    @patch.object(redis_bus, "_MAX_QUEUE", 5)
+    @patch.object(redis_bus.logger, "log_err")
+    def test_publish_queue_bounded_drops_newest_logs_once(self, mock_log_err):
+        # writer thread never started, so nothing drains the queue
+        transport = _RedisTransport("evennia:testbus:s2p", lambda *a: None)
+        for i in range(20):
+            transport.publish("stream", b"MsgPortal2Server", str(i).encode())
+        # capped at _MAX_QUEUE; the first 5 frames are kept, the newer 15 dropped
+        self.assertEqual(transport._q.qsize(), 5)
+        # one log for the whole stall episode, not one per dropped frame
+        self.assertEqual(mock_log_err.call_count, 1)

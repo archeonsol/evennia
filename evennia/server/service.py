@@ -17,8 +17,7 @@ from django.utils.translation import gettext as _
 
 import evennia
 from evennia.server.service_registry import MultiService
-from evennia.utils import clock
-from evennia.utils import logger
+from evennia.utils import clock, logger
 from evennia.utils.utils import get_evennia_version, make_iter, mod_import
 
 _SA = object.__setattr__
@@ -93,7 +92,8 @@ class EvenniaServerService(MultiService):
         the server needs to do. It is called every minute.
         """
         if not self._flush_cache:
-            from evennia.utils.idmapper.models import conditional_flush as _FLUSH_CACHE
+            from evennia.utils.idmapper.models import \
+                conditional_flush as _FLUSH_CACHE
 
             self._flush_cache = _FLUSH_CACHE
 
@@ -203,7 +203,8 @@ class EvenniaServerService(MultiService):
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
-            from evennia.server.game_index_client.service import EvenniaGameIndexService
+            from evennia.server.game_index_client.service import \
+                EvenniaGameIndexService
 
             egi_service = EvenniaGameIndexService()
             egi_service.setServiceParent(self)
@@ -276,15 +277,21 @@ class EvenniaServerService(MultiService):
         Optimize some SQLite stuff at startup since we
         can't save it to the database.
         """
-        if (
+        if not (
             hasattr(settings, "DATABASES")
             and settings.DATABASES.get("default", {}).get("ENGINE", None)
             == "django.db.backends.sqlite3"
         ):
-            # sqlite3 database pragmas (directives)
-            cursor = connection.cursor()
-            for pragma in settings.SQLITE3_PRAGMAS:
-                cursor.execute(pragma)
+            return
+        # These pragmas (synchronous/journal_mode) are connection-level tuning
+        # that sqlite refuses to change inside a transaction. At server boot the
+        # connection is idle so they apply; under a wrapping transaction (e.g. a
+        # Django TestCase) the change is both illegal and irrelevant — skip it.
+        if connection.in_atomic_block:
+            return
+        cursor = connection.cursor()
+        for pragma in settings.SQLITE3_PRAGMAS:
+            cursor.execute(pragma)
 
     def update_defaults(self):
         """
