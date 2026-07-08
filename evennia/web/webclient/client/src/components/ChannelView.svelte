@@ -1,6 +1,7 @@
 <script lang="ts">
   import { chat } from "../lib/chat.svelte";
   import { dock } from "../lib/dock.svelte";
+  import { renderBody, renderSender } from "../lib/markup";
 
   let { channelKey = "" }: { channelKey?: string } = $props();
 
@@ -105,7 +106,7 @@
     {#if pin}
       <div class="pin">
         <span class="pin-tag">pinned</span>
-        <span class="pin-text">{pin.text}</span>
+        <span class="pin-text">{@html renderBody(undefined, pin.text)}</span>
         {#if chat.staff}<button class="pin-x" onclick={() => chat.unpin(key)} aria-label="unpin">×</button>{/if}
       </div>
     {/if}
@@ -118,9 +119,9 @@
         <div class="msg" class:disc={m.platform === "discord"} class:grouped>
           {#if !grouped}
             <span class="mts">{fmt(m.ts)}</span>
-            <span class="sender">{m.sender}</span>
+            <span class="sender">{@html renderSender(m.senderHtml, m.sender)}</span>
           {/if}
-          <span class="text">{@html m.html ?? m.text}</span>
+          <span class="text">{@html renderBody(m.html, m.text)}</span>
           {#if Object.keys(m.reactions).length}
             <span class="reacts">
               {#each Object.entries(m.reactions) as [emoji, count]}
