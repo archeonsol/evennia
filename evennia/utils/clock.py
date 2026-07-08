@@ -190,6 +190,20 @@ def _log_task_exception(task: asyncio.Task) -> None:
         log_err(f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}")
 
 
+def _next_fire_time(target: float, interval: float, now: float) -> float:
+    """Next fixed-rate fire time strictly after ``target``, never in the past.
+
+    Anchors to ``target + interval``; if the body overran and that slot is
+    already past ``now``, skips whole intervals to the next future slot so the
+    loop resumes its cadence instead of firing a bunched catch-up burst.
+    """
+    target += interval
+    if target <= now:
+        missed = int((now - target) // interval) + 1
+        target += missed * interval
+    return target
+
+
 class LoopHandle:
     """Asyncio-backed repeating call with a LoopingCall-compatible surface."""
 
@@ -222,10 +236,17 @@ class LoopHandle:
 
     async def _loop(self, fire_immediately: bool):
         try:
+            loop = asyncio.get_running_loop()
             if fire_immediately:
                 await self._run_once()
+            # Fixed-RATE cadence like Twisted LoopingCall: anchor each wake to a
+            # monotonic schedule so a slow body does not drift the period. If the
+            # body overruns one or more intervals, skip to the next future slot
+            # rather than firing a catch-up burst.
+            target = loop.time()
             while self.running:
-                await asyncio.sleep(self._interval)
+                target = _next_fire_time(target, self._interval, loop.time())
+                await asyncio.sleep(target - loop.time())
                 if not self.running:
                     break
                 await self._run_once()
@@ -263,16 +284,16 @@ class _SyncCoroutineResult:
     """Test-harness result when ``run_coroutine`` is called with no running loop."""
 
     def __init__(self, coro):
-        loop = asyncio.new_event_loop()
+        # asyncio.run drives the coroutine on a fresh loop and, crucially, cancels
+        # and drains any child tasks the coroutine left pending before closing the
+        # loop, so we don't orphan them ("Task was destroyed but it is pending").
         try:
-            self._result = loop.run_until_complete(coro)
+            self._result = asyncio.run(coro)
             self._exception = None
         except Exception as exc:
             self._result = None
             self._exception = exc
             _log_task_exception_from_exception(exc)
-        finally:
-            loop.close()
 
     def add_done_callback(self, callback):
         callback(self)

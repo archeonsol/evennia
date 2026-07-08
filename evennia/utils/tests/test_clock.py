@@ -222,3 +222,40 @@ class TestClockLoopBinding(BaseEvenniaTestCase):
             self.assertFalse(result["io"])
         finally:
             loop.close()
+
+
+class TestFixedRateSchedule(BaseEvenniaTestCase):
+    """LoopHandle cadence is fixed-rate (anchored), not fixed-delay."""
+
+    def test_fast_body_keeps_interval(self):
+        # body finished at now=1, interval=5, prev target=0 → next slot at 5
+        self.assertEqual(clock._next_fire_time(0.0, 5.0, 1.0), 5.0)
+
+    def test_overrun_one_interval_skips_to_next_future_slot(self):
+        # body ran past the 5 slot to now=7 → next future slot 10, no bunching
+        self.assertEqual(clock._next_fire_time(0.0, 5.0, 7.0), 10.0)
+
+    def test_overrun_many_intervals_skips_all_missed(self):
+        self.assertEqual(clock._next_fire_time(0.0, 5.0, 17.0), 20.0)
+
+
+class TestSyncCoroutineResultDrain(BaseEvenniaTestCase):
+    """The no-running-loop path must not orphan child tasks on loop close."""
+
+    def test_child_tasks_are_cancelled_not_orphaned(self):
+        cancelled = {}
+
+        async def child():
+            try:
+                await asyncio.sleep(100)
+            except asyncio.CancelledError:
+                cancelled["hit"] = True
+                raise
+
+        async def parent():
+            asyncio.ensure_future(child())  # fire-and-forget child
+            return "done"
+
+        res = clock.run_coroutine(parent())  # no running loop → _SyncCoroutineResult
+        self.assertEqual(res.result(), "done")
+        self.assertTrue(cancelled.get("hit"))  # drained on teardown, not destroyed-pending
