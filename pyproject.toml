@@ -85,6 +85,8 @@ dependencies = [
   "tzdata >= 2022.6",
   "inflection == 0.5.1",
   "ftfy == 6.3.1",  # Unicode/encoding fix for player input
+  "django-redis >= 7.0.0",
+  "redis >= 8.0.1",
   # for unit tests and code formatting
   "mock >= 4.0.3",
   "model_mommy >= 2.0",
@@ -131,8 +133,6 @@ extra = [
 
 # Typical UNDERSPIRE game-server dependencies (install after -e evennia)
 game = [
-  "django-redis",
-  "redis",
   "argon2-cffi",
   "djangorestframework >= 3.16, < 3.17",
   "django-cors-headers >= 4.3, < 5",

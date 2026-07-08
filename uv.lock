@@ -692,15 +692,16 @@ wheels = [
 
 [[package]]
 name = "django-redis"
-version = "6.0.0"
+version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "redis" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/08/53/dbcfa1e528e0d6c39947092625b2c89274b5d88f14d357cee53c4d6dbbd4/django_redis-6.0.0.tar.gz", hash = "sha256:2d9cb12a20424a4c4dde082c6122f486628bae2d9c2bee4c0126a4de7fda00dd", size = 56904, upload-time = "2025-06-17T18:15:46.376Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/78/203a0cdc0f1c083a5407d01f77b58099a120bb8a5a04562f56a9bb341314/django_redis-7.0.0.tar.gz", hash = "sha256:e48491c862f4350b0747ceb1016700686fb93c4f4e0fb9c490fe6c6658ffd933", size = 64601, upload-time = "2026-06-02T14:17:48.819Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/79/055dfcc508cfe9f439d9f453741188d633efa9eab90fc78a67b0ab50b137/django_redis-6.0.0-py3-none-any.whl", hash = "sha256:20bf0063a8abee567eb5f77f375143c32810c8700c0674ced34737f8de4e36c0", size = 33687, upload-time = "2025-06-17T18:15:34.165Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/9f/09cdb9a1eebe8533b02a7694ca787acfc1e4d93b5b6175ff99366d4e6d64/django_redis-7.0.0-py3-none-any.whl", hash = "sha256:4b23aa6e0cd0937bb1242e9a463809e6004de3ca2150f34e986306bb6220d688", size = 38932, upload-time = "2026-06-02T14:17:47.281Z" },
 ]
 
 [[package]]
@@ -738,6 +739,7 @@ dependencies = [
     { name = "black" },
     { name = "django" },
     { name = "django-filter" },
+    { name = "django-redis" },
     { name = "django-sekizai" },
     { name = "djangorestframework" },
     { name = "fakeredis" },
@@ -755,6 +757,7 @@ dependencies = [
     { name = "pyopenssl" },
     { name = "pytz" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "simpleeval" },
     { name = "twisted" },
     { name = "tzdata" },
@@ -785,13 +788,11 @@ game = [
     { name = "django-cors-headers" },
     { name = "django-htmx" },
     { name = "django-prometheus" },
-    { name = "django-redis" },
     { name = "djangorestframework" },
     { name = "networkx" },
     { name = "prometheus-client" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "redis" },
     { name = "requests" },
     { name = "structlog" },
     { name = "transitions" },
@@ -814,7 +815,7 @@ requires-dist = [
     { name = "django-filter", specifier = "==25.2" },
     { name = "django-htmx", marker = "extra == 'game'" },
     { name = "django-prometheus", marker = "extra == 'game'" },
-    { name = "django-redis", marker = "extra == 'game'" },
+    { name = "django-redis", specifier = ">=7.0.0" },
     { name = "django-sekizai", specifier = "==2.0.0" },
     { name = "djangorestframework", specifier = ">=3.16,<3.17" },
     { name = "djangorestframework", marker = "extra == 'game'", specifier = ">=3.16,<3.17" },
@@ -843,7 +844,7 @@ requires-dist = [
     { name = "pytz", specifier = ">=2022.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'game'", specifier = ">=6.0" },
-    { name = "redis", marker = "extra == 'game'" },
+    { name = "redis", specifier = ">=8.0.1" },
     { name = "requests", marker = "extra == 'game'", specifier = ">=2.31" },
     { name = "scipy", marker = "extra == 'extra'", specifier = "==1.17.0" },
     { name = "service-identity", marker = "extra == 'extra'", specifier = ">=18.1.0" },
@@ -2222,11 +2223,11 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "7.4.0"
+version = "8.0.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7b/7f/3759b1d0d72b7c92f0d70ffd9dc962b7b7b5ee74e135f9d7d8ab06b8a318/redis-7.4.0.tar.gz", hash = "sha256:64a6ea7bf567ad43c964d2c30d82853f8df927c5c9017766c55a1d1ed95d18ad", size = 4943913, upload-time = "2026-03-24T09:14:37.53Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/c3/928b290c2c0ca99ab96eea5b4ff8f30be8112b075301a7d3ba214a3c8c12/redis-8.0.1.tar.gz", hash = "sha256:afc5a7a2f5a084f5b1880dec548dd45be17db7e43c82a30d84f952aefb05cfb0", size = 5114170, upload-time = "2026-06-23T14:52:37.728Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/3a/95deec7db1eb53979973ebd156f3369a72732208d1391cd2e5d127062a32/redis-7.4.0-py3-none-any.whl", hash = "sha256:a9c74a5c893a5ef8455a5adb793a31bb70feb821c86eccb62eebef5a19c429ec", size = 409772, upload-time = "2026-03-24T09:14:35.968Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/0a/c2345ebf1ebe70840ce3f6c6ee612f8fa749cfbd1b03069c53bf0c62aaad/redis-8.0.1-py3-none-any.whl", hash = "sha256:47daa35a058c23468d6437f17a8c76882cb316b838ef763036af99b96cedd743", size = 502406, upload-time = "2026-06-23T14:52:36.137Z" },
 ]
 
 [[package]]
