@@ -11,6 +11,7 @@ import traceback
 import django
 import django.db
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 from django.db.utils import OperationalError
 from django.utils.translation import gettext as _
@@ -241,9 +242,9 @@ class EvenniaServerService(MultiService):
         """
         bus = getattr(settings, "SERVER_PORTAL_BUS", "redis")
         if bus != "redis":
-            logger.log_err(
-                "SERVER_PORTAL_BUS=%r is no longer supported; use 'redis' and set REDIS_BUS_URL."
-                % bus
+            raise ImproperlyConfigured(
+                "SERVER_PORTAL_BUS=%r is not supported; redis is the only "
+                "Portal<->Server bus. Set SERVER_PORTAL_BUS='redis' and REDIS_BUS_URL." % bus
             )
         self.register_redis_bus()
 

@@ -3,6 +3,7 @@ import time
 from os.path import abspath, dirname
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 
 import evennia
@@ -282,16 +283,18 @@ class EvenniaPortalService(MultiService):
         from evennia.server.launcher_ipc import start_launcher_server
         from evennia.server.portal import amp_server
 
+        bus = getattr(settings, "SERVER_PORTAL_BUS", "redis")
+        if bus != "redis":
+            raise ImproperlyConfigured(
+                "SERVER_PORTAL_BUS=%r is not supported; redis is the only "
+                "Portal<->Server bus. Set SERVER_PORTAL_BUS='redis'." % bus
+            )
+
         factory = amp_server.AMPServerFactory(self)
         self.amp_factory = factory
         self._launcher_amp_protocol = factory.protocol()
         self._launcher_amp_protocol.factory = factory
 
-        if getattr(settings, "SERVER_PORTAL_BUS", "redis") != "redis":
-            logger.log_err(
-                "SERVER_PORTAL_BUS=%r is no longer supported; use 'redis'."
-                % settings.SERVER_PORTAL_BUS
-            )
         self.register_redis_bus()
 
         if settings.AMP_HOST and settings.AMP_PORT and settings.AMP_INTERFACE:

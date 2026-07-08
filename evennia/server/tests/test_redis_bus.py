@@ -222,6 +222,28 @@ class TestRedisTransportBootFailFast(SimpleTestCase):
         self.assertIsNone(transport._writer)
 
 
+class TestUnsupportedBusFailsHard(SimpleTestCase):
+    """redis is the only supported Portal<->Server bus: any other setting aborts
+    boot rather than silently forcing redis."""
+
+    # EvenniaServerService.__init__ runs sqlite3_prep(), which opens a cursor.
+    databases = {"default"}
+
+    @override_settings(SERVER_PORTAL_BUS="amp")
+    def test_server_register_amp_raises_on_non_redis(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        with self.assertRaises(ImproperlyConfigured):
+            EvenniaServerService().register_amp()
+
+    @override_settings(SERVER_PORTAL_BUS="amp")
+    def test_portal_register_amp_raises_on_non_redis(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        with self.assertRaises(ImproperlyConfigured):
+            EvenniaPortalService().register_amp()
+
+
 @override_settings(**_BUS_SETTINGS)
 class TestRedisTransportStop(SimpleTestCase):
     """stop() drops only threads that actually exited; a wedged thread is kept
