@@ -177,6 +177,7 @@ class LauncherSessionWaitTest(SimpleTestCase):
         from evennia.server import launcher_ipc
         from evennia.utils import clock
 
+        saved_loop, saved_tid = clock._main_loop, clock._loop_thread_id
         loop = asyncio.new_event_loop()
         clock.bind_loop(loop)
         portal = MagicMock()
@@ -194,4 +195,7 @@ class LauncherSessionWaitTest(SimpleTestCase):
             launcher_ipc._servers = []
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.close()
-            clock.bind_loop(asyncio.new_event_loop())
+            # Restore the prior bound-loop identity; binding a fresh unrun loop
+            # here would leave later tests (e.g. utils.tests.test_defer) resolving
+            # defer_to_thread onto a loop that never runs their callbacks.
+            clock._main_loop, clock._loop_thread_id = saved_loop, saved_tid
