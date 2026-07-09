@@ -168,7 +168,7 @@ class MediaStore {
     this.ytStart = pending.start;
     this.ytLoop = pending.loop;
     ytBgm.setRoomLoop(pending.loop);
-    ytBgm.playSequence(pending.id, pending.start, pending.loop);
+    ytBgm.syncSameTrack(pending.id, pending.start, pending.loop);
   }
 
   private drainYoutubeQueue(): void {

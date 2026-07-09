@@ -25,116 +25,38 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.154 — BGM connect sync, crossfade, HUD chip
+## 6.0.0+underspire.155 — Azaban room BGM (full parity)
+
+Single release consolidating the `.150`–`.154` fix arc (those tags are removed;
+pin `EVENNIA_REF: underspire.155`).
 
 ### Webclient
 
-- **`media.svelte.ts`:** Room-to-room crossfade (queue `play_yt` until leave fade finishes);
-  quiet same-track re-sync (seek only, no log/dock); YouTube BGM no longer auto-opens Media
-  dock (video/audio still do); HUD helpers for now-playing chip.
-- **`youtube-bgm.svelte.ts`:** Periodic drift correction while room BGM plays; YouTube IFrame
-  API load timeout + user-visible warning on failure.
-- **`main.ts`:** Dev OOB trace via `localStorage.setItem("underspire.trace.oob", "1")`.
-- **`StatusBar.svelte`:** Clickable now-playing chip opens Media panel.
+- **Media OOB routing (`main.ts`, `media.svelte.ts`):** Full legacy parity for
+  `play_yt`, `stop_music`, `stop_music_now`, HTML5 audio, and coalesced rapid OOB
+  pairs. Room BGM uses `play_yt` only (no dual-`youtube` races). Log line is
+  `♪ media: <url>`; YouTube BGM does not auto-open the Media dock.
+- **`youtube-bgm.svelte.ts`:** Hidden `YT.Player` with 2.8s fade in/out, manual
+  loop on `ENDED`, same-track `seekTo` re-sync, fractional offset drift correction,
+  periodic drift loop, IFrame API load timeout + user warning. Fade-in fallback
+  kicks (legacy immediate fade) so playback is not stuck silent until user touches
+  the volume slider; `syncSameTrack()` avoids re-fading on reconnect.
+- **`StatusBar.svelte`:** Hover-reveal slim volume control (legacy `#volume-slider`
+  parity) and clickable now-playing chip.
+- **`client2.html`:** YouTube IFrame API script; Error 153 embed fixes (`origin`,
+  referrer policy). Rebuilt shell; cache bust `?v=155`.
+- **Dev:** `localStorage.setItem("underspire.trace.oob", "1")` logs BGM OOB events.
 
 ### Game (mootest)
 
-- **`client_media.push_room_bgm_if_any`:** Shared helper for room BGM on enter/connect.
-- **`server/conf/inputfuncs.azaban_hello`:** Re-push room BGM on shell connect/reconnect.
-- **`wilderness_map.ColonyWildernessRoom`:** BGM stop/enter hooks (wilderness parity).
-- **`dj_flow.broadcast_play_yt`:** Fractional offset sync (matches `client_media`).
-- **Help text:** `@music` vs `@setmusic` in action docstrings and usage messages.
+- **`client_media.py`:** `play_yt`-only push; fractional offset; `push_room_bgm_if_any`
+  for enter/connect/reconnect.
+- **`server/conf/inputfuncs.azaban_hello`:** Re-push room BGM after shell hello.
+- **`rooms/base.py` / `wilderness_map.py`:** BGM on arrive, fade stop on leave
+  (including wilderness rooms).
+- **`dj_flow.py`:** Fractional broadcast offset; `@music` vs `@setmusic` help text.
 
 ---
-
-## 6.0.0+underspire.153 — YouTube BGM fade + sync robustness
-
-### Webclient
-
-- **`youtube-bgm.svelte.ts`:** Defer fade-in until `PLAYING`/`BUFFERING` (volume API
-  is unreliable before playback starts); `mute()`/`unMute()` so `setVolume` ramps
-  are audible; same-track re-enter uses `seekTo` instead of reload; post-play
-  drift correction via `getCurrentTime()`; load YouTube IFrame API from
-  `client2.html` like legacy `base.html`.
-- **`main.ts` / `media.svelte.ts`:** Fractional `play_yt` offset (sub-second sync).
-
-### Game (mootest)
-
-- **`client_media.py` / `rooms/base.py`:** Sub-second BGM offset (`round(time.time
-  - start, 2)`) sent in `play_yt`.
-
-## 6.0.0+underspire.152 — Room BGM leave fade and re-enter resume
-
-### Webclient
-
-- **`youtube-bgm.svelte.ts`:** `isPlaying()` via `getPlayerState()`; fade-out uses
-  slider volume fallback when `getVolume()` reports 0 (hidden iframe timing).
-- **`media.svelte.ts`:** Remove metadata dedup that skipped `playSequence` after
-  leave/re-enter; `stopGeneration` guard prevents stale fade callbacks from
-  clearing new playback; `stop()` fades when YT player is active even if UI
-  state desynced; `play_yt` cancels in-flight leave fade.
-- **`main.ts`:** Ignore `youtube` OOB for playback — room BGM uses `play_yt` only
-  (matches legacy client; avoids dual-OOB races).
-
-### Game (mootest, deploy separately)
-
-- **`client_media.py`:** `push_youtube()` sends `play_yt` only (drops redundant
-  `youtube=` OOB).
-
-## 6.0.0+underspire.151 — Azaban music parity (YT IFrame API, fades, HUD volume)
-
-### Webclient
-
-- **`youtube-bgm.svelte.ts`:** Port legacy `custom-client.js` YouTube BGM manager to the
-  Azaban shell — `YT.Player` on persistent `#yt-player`, 2.8s fade-in on `play_yt`,
-  2.8s fade-out on `stop_music`, instant stop on `stop_music_now`, manual loop on
-  `ENDED` when room BGM loop is set. Replaces broken embed-iframe `postMessage`
-  volume control.
-- **`media.svelte.ts`:** HTML5 BGM via internal `Audio()` with fade in/out; coalesce
-  rapid `youtube` + `play_yt` OOB pairs (last wins per tick); parse `&t=` from watch
-  URLs; default volume 40% with legacy `mud_terminal_settings.musicVolume` import;
-  skip slider writes during active fades.
-- **`main.ts`:** Separate handlers for `stop_music` vs `stop_music_now`; honor
-  `fade_out` / `fade_in` / `fade` kwargs on `STOP_AUDIO`, `PLAY_AUDIO`, and
-  `SET_AUDIO_VOLUME`.
-- **`StatusBar.svelte`:** Always-visible HUD music volume slider (legacy `#volume-slider`
-  parity).
-- **`MediaPanel.svelte`:** Volume slider always shown; audio/YouTube show link only
-  (playback is hidden BGM player).
-- Rebuilt `shell.js` / `shell.css`; template cache bust `?v=151`.
-
-## 6.0.0+underspire.150 — Azaban webclient music and YouTube embed fixes
-
-Backfills git-only tags `underspire.146`–`underspire.149`, which shipped without
-bumping `pyproject.toml` / `VERSION.txt` (see `8093cdc53` … `7a36d7e2a`).
-
-### Webclient
-
-- **Azaban shell media OOB (`evennia/web/webclient/client/src/main.ts`):** Handle
-  legacy `play_yt`, `stop_music`, `stop_music_now`, `yt_set_loop`, `play_music`,
-  `PLAY_AUDIO`, `STOP_AUDIO`, and `SET_AUDIO_VOLUME`, plus protocol events
-  `youtube` / `audio` / `video` / `image`. Room DJ and `@music` now reach the
-  Svelte client instead of being dropped silently.
-- **`src/lib/` tracked in git (`.gitignore`):** Anchor `/lib` and `/lib64` at the
-  repo root so `webclient/client/src/lib/` is no longer excluded; fresh clones
-  can rebuild the shell.
-- **`YoutubeBgm` hidden player (`App.svelte`):** Always-mounted 1×1 iframe for
-  background YouTube audio (legacy `#yt-player` parity); Media panel is status +
-  volume only.
-- **YouTube Error 153 (`media.ts`, `client2.html`):** Use `www.youtube.com`
-  embeds with `origin` / `widget_referrer`, iframe
-  `referrerpolicy="strict-origin-when-cross-origin"`, and a document meta
-  referrer tag. Downstream games must also avoid `Referrer-Policy: same-origin`
-  (see mootest `security_headers.py`).
-- **Media log UX (`media.svelte.ts`):** Log line is `♪ media: <url>` only; shell
-  assets cache-busted via `?v=150`.
-- **WebSocket reconnect (`evennia.svelte.ts`):** Exponential backoff and close-code
-  logging on reconnect storms.
-
-### Migration
-
-- Deploy must pin `EVENNIA_REF: underspire.150` (PEP 440 version now matches the
-  git tag). Game repo should ship matching CSP / `client_media.py` helpers.
 
 ## 6.0.0+underspire.145 — Green engine test suite; drop dead contribs; ruff tooling
 

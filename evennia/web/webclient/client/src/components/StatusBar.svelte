@@ -15,6 +15,7 @@
   };
 
   let viewsOpen = $state(false);
+  let volOpen = $state(false);
   // Panels the player can reopen (Tickets only for staff).
   const viewIds = $derived(
     Object.keys(VIEWS).filter((id) => id !== "tickets" || chat.staff),
@@ -81,11 +82,33 @@
   </div>
 
   <div class="zone right">
-    <div class="vol" title="Music volume">
-      <span class="vglyph" aria-hidden="true">{media.volume === 0 ? "🔇" : "🔊"}</span>
+    <div
+      class="vol"
+      class:open={volOpen}
+      class:muted={media.volume === 0}
+      role="group"
+      aria-label="Music volume"
+      title="Music volume"
+      onmouseenter={() => (volOpen = true)}
+      onmouseleave={() => (volOpen = false)}
+      onfocusin={() => (volOpen = true)}
+      onfocusout={(e) => {
+        if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+          volOpen = false;
+        }
+      }}
+    >
+      <svg class="vol-icon" viewBox="0 0 24 24" aria-hidden="true">
+        {#if media.volume === 0}
+          <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+        {:else}
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+        {/if}
+      </svg>
       <label class="sr-only" for="hud-vol">Music volume</label>
       <input
         id="hud-vol"
+        class="vol-slider"
         type="range"
         min="0"
         max="100"
@@ -185,9 +208,75 @@
   }
   .now-playing:hover { color: var(--accent-bright); border-color: var(--accent); }
   .brand { color: var(--accent-bright); letter-spacing: 0.32em; font-weight: 500; }
-  .vol { display: flex; align-items: center; gap: 4px; }
-  .vol input { width: 4.5rem; accent-color: var(--accent); }
-  .vglyph { font-size: 0.75rem; line-height: 1; }
+
+  .vol {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 1.25rem;
+    cursor: default;
+  }
+  .vol-icon {
+    flex-shrink: 0;
+    width: 0.85rem;
+    height: 0.85rem;
+    fill: var(--fg-faint);
+    transition: fill 0.15s ease;
+  }
+  .vol:hover .vol-icon,
+  .vol.open .vol-icon,
+  .vol:focus-within .vol-icon {
+    fill: var(--accent);
+  }
+  .vol.muted .vol-icon { fill: var(--fg-faint); opacity: 0.65; }
+
+  .vol-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0;
+    height: 2px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 1px;
+    background: var(--border);
+    outline: none;
+    opacity: 0;
+    pointer-events: none;
+    transition: width 0.18s ease, opacity 0.15s ease, margin 0.18s ease;
+    touch-action: none;
+  }
+  .vol.open .vol-slider,
+  .vol:focus-within .vol-slider {
+    width: 4.5rem;
+    margin-left: 0.45rem;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 0 1px var(--bg-elev);
+  }
+  .vol-slider::-moz-range-thumb {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+  }
+  .vol-slider::-moz-range-track {
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+  }
+
   .sr-only {
     position: absolute;
     width: 1px;

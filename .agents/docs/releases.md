@@ -16,6 +16,12 @@ If a change ships without a version bump, the next release that does bump
 must backfill a changelog entry covering the skipped commits (so the
 changelog stays a complete record of what shipped at each version).
 
+**Fix arcs:** When iterating on one feature (e.g. BGM parity), land fixes on
+`underspire` without tagging every commit. Cut **one tag** when the arc is
+done; merge intermediate changelog entries into that release. Delete superseded
+tags if they never reached production or were replaced (see `underspire.155`,
+which replaced `.150`–`.154`).
+
 ## Files to update on every release
 
 All four must move together. The merge commit and tag are the source
