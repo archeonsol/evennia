@@ -57,7 +57,7 @@ class TestEvForm(SimpleTestCase):
         form = evform.EvForm(formdict, literals=literals)
         form.map(cells=cellsdict)
         form = ansi.strip_ansi(str(form))
-        # this is necessary since editors/black tend to strip lines spaces
+        # this is necessary since editors/formatters tend to strip lines spaces
         # from the end of lines for the comparison strings.
         form = "\n".join(line.rstrip() for line in form.split("\n"))
         return form
@@ -281,7 +281,7 @@ class TestEvFormErrors(SimpleTestCase):
             "tablechar": "c",
         }
         form = evform.EvForm(formdict, **kwargs)
-        # this is necessary since editors/black tend to strip lines spaces
+        # this is necessary since editors/formatters tend to strip lines spaces
         # from the end of lines for the comparison strings.
         form = ansi.strip_ansi(str(form))
         form = "\n".join(line.rstrip() for line in form.split("\n"))

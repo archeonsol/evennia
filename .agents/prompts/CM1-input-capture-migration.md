@@ -322,9 +322,9 @@ finish line but needs its own care (do **not** fold it into a subsystem PR):
 ## Repo conventions
 
 See [AGENTS.md](../../AGENTS.md). TDD (engine-routed failing test first). Run
-tests with Django's runner from `.test_game_dir/`. Format only touched files
-(`uv run black <file>` then `uv run isort --profile black <file>`, line-length
-100). Release-worthy: bump `VERSION.txt` + `pyproject.toml` + `uv.lock` + add a
+tests with Django's runner from `.test_game_dir/`. Format with `make format`
+(`ruff format` + import sort, line length 100); do not hand-format.
+Release-worthy: bump `VERSION.txt` + `pyproject.toml` + `uv.lock` + add a
 `CHANGELOG-FORK.md` entry when the user asks to commit.
 
 ## Ask before

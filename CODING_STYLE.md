@@ -253,12 +253,20 @@ the Command body should contain something to the effect of
 
 ## Tools for auto-linting
 
-### black
+### ruff
 
-Automatic pep8 compliant formatting and linting can be performed using the
-`black` formatter:
+Automatic formatting, pep8-compliant style, and import sorting are handled by
+[`ruff`](https://docs.astral.sh/ruff/) (pinned in `pyproject.toml`), which
+replaces the former `black` + `isort` pair. The easy way is:
 
-    black --line-length 100
+    make format
+
+To invoke `ruff` directly (line length is set to 100 in `pyproject.toml`):
+
+    ruff format .
+    ruff check --select I --fix .
+
+Use `make lint` to check formatting and import order without modifying files.
 
 ### PyCharm
 
