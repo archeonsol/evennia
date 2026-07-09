@@ -173,7 +173,7 @@ class TestCraftingRecipe(BaseEvenniaTestCase):
             self.crafter, self.tool1, self.tool2, self.cons1, self.cons2, self.cons3
         )
 
-        msg = "{missing},{tools},{consumables},{inputs},{outputs}" "{i0},{i1},{o0}"
+        msg = "{missing},{tools},{consumables},{inputs},{outputs}{i0},{i1},{o0}"
         kwargs = {
             "missing": "foo",
             "tools": ["bar", "bar2", "bar3"],

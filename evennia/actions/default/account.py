@@ -30,9 +30,8 @@ from evennia.accounts.accounts import DefaultAccount
 from ..action import action
 from ..muxargs import ArgAction
 from ..permission import Scope, get_capability_enum
-from ..predicate import NEVER
+from ..predicate import NEVER, HasCapability
 from ..predicate import Admin as AdminCap
-from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
 from .general import NickRules

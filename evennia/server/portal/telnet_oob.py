@@ -177,30 +177,22 @@ class TelnetOOB:
             if len(args) == 1:
                 msdp_args += str(args[0])
             else:
-                msdp_args += (
-                    "{msdp_array_open}"
-                    "{msdp_args}"
-                    "{msdp_array_close}".format(
-                        msdp_array_open=MSDP_ARRAY_OPEN.decode(),
-                        msdp_array_close=MSDP_ARRAY_CLOSE.decode(),
-                        msdp_args="".join("%s%s" % (MSDP_VAL.decode(), val) for val in args),
-                    )
+                msdp_args += "{msdp_array_open}{msdp_args}{msdp_array_close}".format(
+                    msdp_array_open=MSDP_ARRAY_OPEN.decode(),
+                    msdp_array_close=MSDP_ARRAY_CLOSE.decode(),
+                    msdp_args="".join("%s%s" % (MSDP_VAL.decode(), val) for val in args),
                 )
 
         msdp_kwargs = ""
         if kwargs:
             msdp_kwargs = msdp_cmdname
-            msdp_kwargs += (
-                "{msdp_table_open}"
-                "{msdp_kwargs}"
-                "{msdp_table_close}".format(
-                    msdp_table_open=MSDP_TABLE_OPEN.decode(),
-                    msdp_table_close=MSDP_TABLE_CLOSE.decode(),
-                    msdp_kwargs="".join(
-                        "%s%s%s%s" % (MSDP_VAR.decode(), key, MSDP_VAL.decode(), val)
-                        for key, val in kwargs.items()
-                    ),
-                )
+            msdp_kwargs += "{msdp_table_open}{msdp_kwargs}{msdp_table_close}".format(
+                msdp_table_open=MSDP_TABLE_OPEN.decode(),
+                msdp_table_close=MSDP_TABLE_CLOSE.decode(),
+                msdp_kwargs="".join(
+                    "%s%s%s%s" % (MSDP_VAR.decode(), key, MSDP_VAL.decode(), val)
+                    for key, val in kwargs.items()
+                ),
             )
 
         msdp_string = msdp_args + msdp_kwargs

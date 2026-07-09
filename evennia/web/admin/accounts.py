@@ -7,8 +7,7 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.options import IS_POPUP_VAR
 from django.contrib.admin.utils import unquote
-from django.contrib.admin.widgets import (FilteredSelectMultiple,
-                                          ForeignKeyRawIdWidget)
+from django.contrib.admin.widgets import FilteredSelectMultiple, ForeignKeyRawIdWidget
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
@@ -52,7 +51,7 @@ class AccountChangeForm(UserChangeForm):
             "invalid": "This value may contain only letters, spaces, numbers "
             "and @/./+/-/_ characters."
         },
-        help_text="30 characters or fewer. Letters, spaces, digits and " "@/./+/-/_ only.",
+        help_text="30 characters or fewer. Letters, spaces, digits and @/./+/-/_ only.",
     )
 
     db_typeclass_path = forms.ChoiceField(
@@ -97,7 +96,7 @@ class AccountChangeForm(UserChangeForm):
         if username.upper() == self.instance.username.upper():
             return username
         elif AccountDB.objects.filter(username__iexact=username):
-            raise forms.ValidationError("An account with that name " "already exists.")
+            raise forms.ValidationError("An account with that name already exists.")
         return self.cleaned_data["username"]
 
     def __init__(self, *args, **kwargs):
@@ -134,7 +133,7 @@ class AccountCreationForm(UserCreationForm):
             "invalid": "This value may contain only letters, spaces, numbers "
             "and @/./+/-/_ characters."
         },
-        help_text="30 characters or fewer. Letters, spaces, digits and " "@/./+/-/_ only.",
+        help_text="30 characters or fewer. Letters, spaces, digits and @/./+/-/_ only.",
     )
 
     def clean_username(self):
@@ -143,7 +142,7 @@ class AccountCreationForm(UserCreationForm):
         """
         username = self.cleaned_data["username"]
         if AccountDB.objects.filter(username__iexact=username):
-            raise forms.ValidationError("An account with that name already " "exists.")
+            raise forms.ValidationError("An account with that name already exists.")
         return username
 
 

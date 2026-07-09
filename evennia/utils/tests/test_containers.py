@@ -19,7 +19,6 @@ class UnittestInvalidScript:
 
 
 class TestGlobalScriptContainer(unittest.TestCase):
-
     def test_init_with_no_scripts(self):
         gsc = containers.GlobalScriptContainer()
 

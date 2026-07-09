@@ -56,8 +56,7 @@ from django.conf import settings
 from evennia.commands.command import Command
 from evennia.utils import logger
 from evennia.utils.evmore import EvMore
-from evennia.utils.utils import (all_from_module, is_iter, make_iter,
-                                 string_partial_matching)
+from evennia.utils.utils import all_from_module, is_iter, make_iter, string_partial_matching
 
 # this is either a string of the attribute name, or a tuple of strings of the attribute name and category
 _ACHIEVEMENT_ATTR = make_iter(getattr(settings, "ACHIEVEMENT_CONTRIB_ATTRIBUTE", "achievements"))

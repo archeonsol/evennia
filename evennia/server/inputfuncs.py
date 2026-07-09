@@ -113,9 +113,7 @@ def text(session, *args, **kwargs):
 
     # cmdhandler is `async def`; kick it off on the loop (unhandled errors
     # are logged via clock.run_coroutine's task done-callback).
-    clock.run_coroutine(
-        cmdhandler(session, txt, callertype="session", session=session, **kwargs)
-    )
+    clock.run_coroutine(cmdhandler(session, txt, callertype="session", session=session, **kwargs))
     session.update_session_counters()
 
 

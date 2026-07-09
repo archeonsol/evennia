@@ -840,7 +840,7 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
             loadtable = self.styled_table("property", "statistic", align="l")
             loadtable.add_row("Total CPU load", "%g %%" % loadavg)
             loadtable.add_row("Total computer memory usage", "%g MB (%g%%)" % (rmem, pmem))
-            loadtable.add_row("Process ID", "%g" % pid),
+            (loadtable.add_row("Process ID", "%g" % pid),)
 
         else:
             # Linux / BSD (OSX) - proper pid-based statistics
@@ -868,7 +868,7 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
 
             loadtable = self.styled_table("property", "statistic", align="l")
             loadtable.add_row("Server load (1 min)", "%g" % loadavg)
-            loadtable.add_row("Process ID", "%g" % pid),
+            (loadtable.add_row("Process ID", "%g" % pid),)
             loadtable.add_row("Memory usage", "%g MB (%g%%)" % (rmem, pmem))
             loadtable.add_row("Virtual address space", "")
             loadtable.add_row("|x(resident+swap+caching)|n", "%g MB" % vmem)

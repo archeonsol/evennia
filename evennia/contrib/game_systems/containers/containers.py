@@ -34,8 +34,8 @@ or implement the same locks/hooks in your own typeclasses.
 from django.conf import settings
 
 from evennia import CmdSet, DefaultObject
-from evennia.typeclasses.attributes import AttributeProperty
 from evennia.commands.default.general import CmdDrop, CmdGet, CmdLook
+from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils import class_from_module
 from evennia.utils.utils import is_veto
 

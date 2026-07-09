@@ -10,11 +10,42 @@ COMPRESSIBLE_EXTENSIONS = {".md", ".txt", ".markdown", ".rst", ".typ", ".typst",
 
 # Extensions that are code/config and should be skipped
 SKIP_EXTENSIONS = {
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml",
-    ".toml", ".env", ".lock", ".css", ".scss", ".html", ".xml",
-    ".sql", ".sh", ".bash", ".zsh", ".go", ".rs", ".java", ".c",
-    ".cpp", ".h", ".hpp", ".rb", ".php", ".swift", ".kt", ".lua",
-    ".dockerfile", ".makefile", ".csv", ".ini", ".cfg",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".env",
+    ".lock",
+    ".css",
+    ".scss",
+    ".html",
+    ".xml",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".go",
+    ".rs",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".rb",
+    ".php",
+    ".swift",
+    ".kt",
+    ".lua",
+    ".dockerfile",
+    ".makefile",
+    ".csv",
+    ".ini",
+    ".cfg",
 }
 
 # Well-known build/config files that carry no (or a misleading) extension —
@@ -22,8 +53,16 @@ SKIP_EXTENSIONS = {
 # `CMakeLists.txt` would ride the compressible `.txt` rule. Checked by
 # basename before any extension rule.
 KNOWN_CODE_FILENAMES = {
-    "dockerfile", "makefile", "gnumakefile", "jenkinsfile", "vagrantfile",
-    "rakefile", "gemfile", "justfile", "procfile", "brewfile",
+    "dockerfile",
+    "makefile",
+    "gnumakefile",
+    "jenkinsfile",
+    "vagrantfile",
+    "rakefile",
+    "gemfile",
+    "justfile",
+    "procfile",
+    "brewfile",
     "cmakelists.txt",
 }
 
@@ -85,7 +124,11 @@ def detect_file_type(filepath: Path) -> str:
     if ext in COMPRESSIBLE_EXTENSIONS:
         return "natural_language"
     if ext in SKIP_EXTENSIONS:
-        return "code" if ext not in {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env"} else "config"
+        return (
+            "code"
+            if ext not in {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env"}
+            else "config"
+        )
 
     # Extensionless files (like CLAUDE.md, TODO) — check content
     if not ext:

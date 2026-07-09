@@ -16,5 +16,10 @@ register_event("video", carrier="args", fields={"_": "str"}, doc="args[0] = vide
 register_event("youtube", carrier="args", fields={"_": "str"}, doc="args[0] = YouTube URL.")
 
 # -- server-driven UI primitive (evennia.server.ui) -----------------------
-register_event("ui_component", carrier="args", fields={"_": "dict"}, doc="A UI component spec (see evennia.server.ui).")
+register_event(
+    "ui_component",
+    carrier="args",
+    fields={"_": "dict"},
+    doc="A UI component spec (see evennia.server.ui).",
+)
 register_event("ui_remove", carrier="args", fields={"id": "str"})

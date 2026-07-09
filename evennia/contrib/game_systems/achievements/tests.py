@@ -1,7 +1,6 @@
 from mock import patch
 
-from evennia.utils.test_resources import (BaseEvenniaCommandTest,
-                                          BaseEvenniaTest)
+from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest
 
 from . import achievements
 

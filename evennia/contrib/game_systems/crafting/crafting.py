@@ -126,8 +126,7 @@ from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
 from evennia.prototypes.spawner import spawn
 from evennia.utils.create import create_object
-from evennia.utils.utils import (callables_from_module, inherits_from,
-                                 iter_to_str, make_iter)
+from evennia.utils.utils import callables_from_module, inherits_from, iter_to_str, make_iter
 
 _RECIPE_CLASSES = {}
 
@@ -600,9 +599,9 @@ class CraftingRecipe(CraftingRecipeBase):
         else:
             self.tool_names = self.tool_tags
 
-        assert isinstance(
-            self.output_prototypes, (list, tuple)
-        ), "Crafting {self.__class__}.output_prototypes must be a list or tuple."
+        assert isinstance(self.output_prototypes, (list, tuple)), (
+            "Crafting {self.__class__}.output_prototypes must be a list or tuple."
+        )
 
         if self.output_names:
             assert len(self.output_names) == len(self.output_prototypes), (

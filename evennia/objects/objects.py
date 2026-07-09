@@ -19,8 +19,10 @@ continues to work without modification.
 
 from evennia.objects.character import DefaultCharacter  # noqa: F401
 from evennia.objects.exit import DefaultExit, ExitCommand  # noqa: F401
-from evennia.objects.object import (DefaultObject,  # noqa: F401
-                                    ObjectSessionHandler)
+from evennia.objects.object import (
+    DefaultObject,  # noqa: F401
+    ObjectSessionHandler,
+)
 from evennia.objects.room import DefaultRoom  # noqa: F401
 
 __all__ = [

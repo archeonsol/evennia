@@ -640,8 +640,7 @@ class SubscriptionHandler:
                     self.obj.db_object_subscriptions.remove(subscriber)
         self._recache()
         try:
-            from evennia.comms.channel_subscriber_cache import \
-                remove_subscriber
+            from evennia.comms.channel_subscriber_cache import remove_subscriber
         except Exception:
             remove_subscriber = None
         if remove_subscriber is not None:
@@ -786,8 +785,7 @@ def _drop_channel_subscriber_cache_on_delete(sender, instance, **kwargs):
         instance, "object_subscription_set"
     ):
         return
-    from evennia.comms.channel_subscriber_cache import \
-        remove_subscriber_from_all_channels
+    from evennia.comms.channel_subscriber_cache import remove_subscriber_from_all_channels
 
     remove_subscriber_from_all_channels(instance)
 

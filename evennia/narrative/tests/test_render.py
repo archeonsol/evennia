@@ -7,11 +7,20 @@ stored/replayable content.
 
 import unittest
 
-from evennia.narrative.render import (CharRef, KeyResolver, PipelineResolver,
-                                      PronounRef, Section, SectionedView,
-                                      SpeechSpan, TextSpan, ViewerContext,
-                                      render_spans, span_from_dict,
-                                      span_to_dict)
+from evennia.narrative.render import (
+    CharRef,
+    KeyResolver,
+    PipelineResolver,
+    PronounRef,
+    Section,
+    SectionedView,
+    SpeechSpan,
+    TextSpan,
+    ViewerContext,
+    render_spans,
+    span_from_dict,
+    span_to_dict,
+)
 
 
 class _Obj:

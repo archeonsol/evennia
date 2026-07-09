@@ -314,8 +314,7 @@ class XYZRoom(DefaultRoom):
     def xyzgrid(self):
         global GET_XYZGRID
         if not GET_XYZGRID:
-            from evennia.contrib.grid.xyzgrid.xyzgrid import \
-                get_xyzgrid as GET_XYZGRID
+            from evennia.contrib.grid.xyzgrid.xyzgrid import get_xyzgrid as GET_XYZGRID
         return GET_XYZGRID()
 
     @property
@@ -539,8 +538,7 @@ class XYZExit(DefaultExit):
     def xyzgrid(self):
         global GET_XYZGRID
         if not GET_XYZGRID:
-            from evennia.contrib.grid.xyzgrid.xyzgrid import \
-                get_xyzgrid as GET_XYZGRID
+            from evennia.contrib.grid.xyzgrid.xyzgrid import get_xyzgrid as GET_XYZGRID
         return GET_XYZGRID()
 
     @property

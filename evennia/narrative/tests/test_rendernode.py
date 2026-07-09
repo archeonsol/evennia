@@ -7,8 +7,7 @@ announced support.
 
 import unittest
 
-from evennia.narrative.rendernode import (CLIENT_NARRATIVE_FLAG, RenderNode,
-                                          deliver_node)
+from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG, RenderNode, deliver_node
 
 
 class _Sessions:

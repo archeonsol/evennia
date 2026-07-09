@@ -66,14 +66,14 @@ class TestValidatorFuncs(SimpleTestCase):
 
     def test_future_ok(self):
         year = int(datetime.datetime.utcnow().strftime("%Y"))
-        for f in [f"Jan 2 12:00 {year+1}", f"Dec 31 00:00 {year+1}"]:
+        for f in [f"Jan 2 12:00 {year + 1}", f"Dec 31 00:00 {year + 1}"]:
             self.assertTrue(
                 isinstance(validatorfuncs.future(f, from_tz=pytz.UTC), datetime.datetime)
             )
 
     def test_future_raises_ValueError(self):
         year = int(datetime.datetime.utcnow().strftime("%Y"))
-        for f in [f"Jan 2 12:00 {year-1}", f"Dec 31 00:00 {year-1}"]:
+        for f in [f"Jan 2 12:00 {year - 1}", f"Dec 31 00:00 {year - 1}"]:
             with self.assertRaises(ValueError):
                 validatorfuncs.future(f, from_tz=pytz.UTC)
 

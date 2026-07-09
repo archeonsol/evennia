@@ -80,9 +80,7 @@ class TestHelpCatalog(TestCase):
         )
         self.assertTrue(denied)
         self.assertIsNotNone(topic)
-        self.assertFalse(
-            action_help_accessible(_StaffAction, actor, staff_reference=True)
-        )
+        self.assertFalse(action_help_accessible(_StaffAction, actor, staff_reference=True))
 
     def test_player_cannot_lookup_action_topics(self):
         actor = self._actor(["Player"], ["Player"])

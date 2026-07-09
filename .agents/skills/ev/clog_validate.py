@@ -81,8 +81,7 @@ def _validate_section(section_name, section_text):
     for ref_name, count in link_def_counts.items():
         if count > 1:
             errors.append(
-                f"[{section_name}] Duplicate link ref [{ref_name}] "
-                f"(defined {count} times)"
+                f"[{section_name}] Duplicate link ref [{ref_name}] (defined {count} times)"
             )
 
     # Check for missing link refs (entry references something not defined)
@@ -112,12 +111,11 @@ def _validate_section(section_name, section_text):
         url_match = URL_RE.search(url)
         if not url_match:
             errors.append(
-                f"[{section_name}] Link ref [{ref_name}] has "
-                f"unrecognised URL format: {url}"
+                f"[{section_name}] Link ref [{ref_name}] has unrecognised URL format: {url}"
             )
             continue
 
-        url_type = url_match.group(1)   # "pull" or "issues"
+        url_type = url_match.group(1)  # "pull" or "issues"
         url_num = url_match.group(2)
 
         # Check type: pull -> pull, issue -> issues

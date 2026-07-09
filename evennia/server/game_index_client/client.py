@@ -107,9 +107,9 @@ class EvenniaGameIndexClient:
 
         data = urllib.parse.urlencode(values)
 
-        return http.request(
-            "POST", self.report_url, headers=headers, data=data
-        ).addCallback(self.handle_egd_response)
+        return http.request("POST", self.report_url, headers=headers, data=data).addCallback(
+            self.handle_egd_response
+        )
 
     def handle_egd_response(self, response):
         if 200 <= response.code < 300:

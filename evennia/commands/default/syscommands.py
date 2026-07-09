@@ -22,8 +22,7 @@ from django.conf import settings
 
 # The command keys the engine is calling
 # (the actual names all start with __)
-from evennia.commands.cmdhandler import (CMD_MULTIMATCH, CMD_NOINPUT,
-                                         CMD_NOMATCH)
+from evennia.commands.cmdhandler import CMD_MULTIMATCH, CMD_NOINPUT, CMD_NOMATCH
 from evennia.comms.models import ChannelDB
 from evennia.utils import create, utils
 from evennia.utils.utils import at_search_result

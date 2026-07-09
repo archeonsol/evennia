@@ -178,7 +178,7 @@ class TestEvEditor(BaseEvenniaCommandTest):
         )
         self._drive(
             ": 3:1",  # try to list invalid range (reversed)
-            msg="Line Editor []\n03line 3\n" "[l:01 w:002 c:0006](:h for help)",
+            msg="Line Editor []\n03line 3\n[l:01 w:002 c:0006](:h for help)",
         )
 
     def test_eveditor_view_cmd(self):
@@ -246,7 +246,8 @@ class TestEvEditor(BaseEvenniaCommandTest):
         self._drive(":i 2 New Second line", msg="Inserted 1 new line(s) at line 2.")  # insert
         self._drive(":r 2 New Replaced Second line", msg="Replaced 1 line(s) at line 2.")  # replace
         self._drive(
-            ":I 2 Inserted-", msg="Inserted text at beginning of line 2."  # insert beginning line
+            ":I 2 Inserted-",
+            msg="Inserted text at beginning of line 2.",  # insert beginning line
         )
         self._drive(":A 2 -End", msg="Appended text to end of line 2.")  # append end line
 

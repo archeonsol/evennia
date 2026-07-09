@@ -37,8 +37,7 @@ async def warm_cmdset_merge_for_session(session, *, callertype: str = "session")
             Defaults to `"session"`, matching the normal command dispatch path.
 
     """
-    from evennia.commands.cmdhandler import (generate_cmdset_providers,
-                                             get_and_merge_cmdsets)
+    from evennia.commands.cmdhandler import generate_cmdset_providers, get_and_merge_cmdsets
 
     try:
         (
@@ -48,9 +47,7 @@ async def warm_cmdset_merge_for_session(session, *, callertype: str = "session")
             merge_caller,
             _error_to,
         ) = generate_cmdset_providers(session, session=session)
-        await get_and_merge_cmdsets(
-            merge_caller, cmdset_providers_list, callertype, "", cmdid=None
-        )
+        await get_and_merge_cmdsets(merge_caller, cmdset_providers_list, callertype, "", cmdid=None)
     except Exception as exc:
         logger.log_trace(f"cmdset merge warmup: {exc}")
 

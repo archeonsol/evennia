@@ -72,7 +72,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
             caller.msg(text)
         else:
             caller.msg(
-                "No help topics are available. " "Try |whelp <topic>|n or |whelpsearch <query>|n."
+                "No help topics are available. Try |whelp <topic>|n or |whelpsearch <query>|n."
             )
 
     helper.msg_help = msg_help

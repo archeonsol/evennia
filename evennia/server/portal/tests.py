@@ -26,8 +26,7 @@ from evennia.server.portal.service import EvenniaPortalService
 from evennia.server.portal.ws_protocol import WSServerFactory
 from evennia.utils.test_resources import BaseEvenniaTest
 
-from .amp import (AMP_MAXLEN, AMPMultiConnectionProtocol, MsgPortal2Server,
-                  MsgServer2Portal)
+from .amp import AMP_MAXLEN, AMPMultiConnectionProtocol, MsgPortal2Server, MsgServer2Portal
 from .amp_server import AMPServerFactory
 from .mccp import MCCP
 from .mssp import MSSP

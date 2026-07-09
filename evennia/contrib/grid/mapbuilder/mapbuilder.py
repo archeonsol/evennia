@@ -445,7 +445,7 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
         # Check if arguments passed.
         if not self.args or (len(args) != 2):
-            caller.msg("Usage: @mapbuilder <path.to.module.VARNAME> " "<path.to.module.MAP_LEGEND>")
+            caller.msg("Usage: @mapbuilder <path.to.module.VARNAME> <path.to.module.MAP_LEGEND>")
             return
 
         # Set up base variables.

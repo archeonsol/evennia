@@ -20,14 +20,12 @@ from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend, force_flush
 from evennia.typeclasses.jsonb_util import _SENTINEL, from_jsonb, to_jsonb
 from evennia.utils.test_resources import BaseEvenniaTest
 
-
 # ---------------------------------------------------------------------------
 # Serialization round-trips
 # ---------------------------------------------------------------------------
 
 
 class TestToJsonb(BaseEvenniaTest):
-
     def _roundtrip(self, value):
         encoded = to_jsonb(value)
         return from_jsonb(encoded)
@@ -75,11 +73,12 @@ class TestToJsonb(BaseEvenniaTest):
 
     def test_arbitrary_object_roundtrip(self):
         import datetime
+
         d = datetime.date(2026, 1, 1)
         self.assertEqual(self._roundtrip(d), d)
 
     def test_large_int_stored_directly(self):
-        big = 10 ** 25
+        big = 10**25
         encoded = to_jsonb(big)
         # Python's json module handles arbitrary-precision ints exactly; no sentinel needed.
         self.assertEqual(encoded, big)
@@ -97,6 +96,7 @@ class TestJsonbBackendCRUD(BaseEvenniaTest):
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
+
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         self.backend = self.handler.backend
 
@@ -206,10 +206,10 @@ class TestJsonbBackendCRUD(BaseEvenniaTest):
 
 
 class TestJsonbWriteBack(BaseEvenniaTest):
-
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
+
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         self.backend = self.handler.backend
 
@@ -251,6 +251,7 @@ class TestJsonbPersistence(BaseEvenniaTest):
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
+
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         self.backend = self.handler.backend
 
@@ -258,6 +259,7 @@ class TestJsonbPersistence(BaseEvenniaTest):
         """Flush, then construct a fresh backend reading from db_attrs."""
         self.backend.flush_dirty()
         from evennia.typeclasses.attributes import AttributeHandler
+
         fresh = AttributeHandler(self.obj1, JsonbAttributeBackend)
         return fresh
 
@@ -300,7 +302,6 @@ class TestJsonbPersistence(BaseEvenniaTest):
 
 
 class TestForceFlushNoop(BaseEvenniaTest):
-
     def test_force_flush_noop_on_jsonb_backend(self):
         self.obj1.attributes.add("x", 1)
         force_flush(self.obj1)  # must not raise
@@ -312,10 +313,10 @@ class TestForceFlushNoop(BaseEvenniaTest):
 
 
 class TestFlushRetry(BaseEvenniaTest):
-
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
+
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         self.backend = self.handler.backend
 
@@ -348,7 +349,6 @@ class TestFlushRetry(BaseEvenniaTest):
 
 
 class TestAttrtypeQueryAll(BaseEvenniaTest):
-
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -385,10 +385,10 @@ class TestAttrtypeQueryAll(BaseEvenniaTest):
 
 
 class TestPendingCount(BaseEvenniaTest):
-
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
+
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         self.backend = self.handler.backend
 
@@ -411,10 +411,10 @@ class TestPendingCount(BaseEvenniaTest):
 
 
 class TestPkCounter(BaseEvenniaTest):
-
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
+
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         self.backend = self.handler.backend
 

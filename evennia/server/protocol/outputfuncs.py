@@ -25,7 +25,9 @@ _TYPES = {"str", "int", "float", "bool", "list", "dict", "any"}
 _PY = {"str": str, "int": int, "float": float, "bool": bool, "list": list, "dict": dict, "any": Any}
 
 
-def register_outputfunc(name: str, args: list | None = None, kwargs: dict | None = None, doc: str = ""):
+def register_outputfunc(
+    name: str, args: list | None = None, kwargs: dict | None = None, doc: str = ""
+):
     """Register (or replace) an outputfunc signature in the catalog.
 
     ``args`` is a list of positional type names; ``kwargs`` maps optional keyword

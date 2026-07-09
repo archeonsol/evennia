@@ -357,7 +357,7 @@ def _option_initpath(*suboptions):
     xymaps = grid.all_maps()
     nmaps = len(xymaps)
     for inum, xymap in enumerate(xymaps):
-        print(f"(Re)building pathfinding matrix for xymap Z={xymap.Z} ({inum+1}/{nmaps}) ...")
+        print(f"(Re)building pathfinding matrix for xymap Z={xymap.Z} ({inum + 1}/{nmaps}) ...")
         xymap.calculate_path_matrix(force=True)
 
     cachepath = pathjoin(settings.GAME_DIR, "server", ".cache")

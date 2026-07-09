@@ -93,8 +93,7 @@ class EvenniaServerService(MultiService):
         the server needs to do. It is called every minute.
         """
         if not self._flush_cache:
-            from evennia.utils.idmapper.models import \
-                conditional_flush as _FLUSH_CACHE
+            from evennia.utils.idmapper.models import conditional_flush as _FLUSH_CACHE
 
             self._flush_cache = _FLUSH_CACHE
 
@@ -204,8 +203,7 @@ class EvenniaServerService(MultiService):
             ENABLED.append("grapevine")
 
         if settings.GAME_INDEX_ENABLED:
-            from evennia.server.game_index_client.service import \
-                EvenniaGameIndexService
+            from evennia.server.game_index_client.service import EvenniaGameIndexService
 
             egi_service = EvenniaGameIndexService()
             egi_service.setServiceParent(self)

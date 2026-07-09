@@ -58,9 +58,8 @@ suspends, that Deferred is already fired (``.called is True``) and dispatch is
 effectively synchronous — the machinery cost is paid only when a rule defers.
 """
 
-import inspect
-
 import asyncio
+import inspect
 
 from evennia.utils import clock
 

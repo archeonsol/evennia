@@ -52,6 +52,7 @@ class TestMismatchedURLs:
 
     def test_clean(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
         f.write_text(VALID_SECTION)
         errors = validate_changelog(f)
@@ -60,8 +61,10 @@ class TestMismatchedURLs:
 
     def test_pull_url_number_mismatch(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -69,7 +72,8 @@ class TestMismatchedURLs:
             - [Fix][pull100]: Fix a bug (alice)
 
             [pull100]: https://github.com/evennia/evennia/pull/999
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         mismatched = [e for e in errors if "mismatch" in e.lower()]
         assert len(mismatched) == 1
@@ -77,8 +81,10 @@ class TestMismatchedURLs:
 
     def test_issue_url_number_mismatch(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -86,7 +92,8 @@ class TestMismatchedURLs:
             - [Fix][issue3813]: Fix something (bob)
 
             [issue3813]: https://github.com/evennia/evennia/issues/3513
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         mismatched = [e for e in errors if "mismatch" in e.lower()]
         assert len(mismatched) == 1
@@ -94,8 +101,10 @@ class TestMismatchedURLs:
 
     def test_pull_ref_pointing_to_issues_url(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -103,7 +112,8 @@ class TestMismatchedURLs:
             - [Fix][pull100]: Fix (alice)
 
             [pull100]: https://github.com/evennia/evennia/issues/100
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         mismatched = [e for e in errors if "mismatch" in e.lower()]
         assert len(mismatched) == 1
@@ -119,6 +129,7 @@ class TestMissingLinkRefs:
 
     def test_clean(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
         f.write_text(VALID_SECTION)
         errors = validate_changelog(f)
@@ -127,14 +138,17 @@ class TestMissingLinkRefs:
 
     def test_entry_without_link_ref(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
 
             - [Fix][pull100]: Fix a bug (alice)
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         missing = [e for e in errors if "missing" in e.lower() and "link" in e.lower()]
         assert len(missing) == 1
@@ -143,15 +157,18 @@ class TestMissingLinkRefs:
     def test_entries_without_refs_are_fine(self, tmp_path):
         """Entries like '- Fix: blah (Author)' have no ref and need no link."""
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
 
             - Fix: Something without a ref (Griatch)
             - Feat: Another thing (Griatch)
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         missing = [e for e in errors if "missing" in e.lower() and "link" in e.lower()]
         assert missing == []
@@ -167,6 +184,7 @@ class TestOrphanLinkRefs:
 
     def test_clean(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
         f.write_text(VALID_SECTION)
         errors = validate_changelog(f)
@@ -175,8 +193,10 @@ class TestOrphanLinkRefs:
 
     def test_orphan_detected(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -185,7 +205,8 @@ class TestOrphanLinkRefs:
 
             [pull100]: https://github.com/evennia/evennia/pull/100
             [pull999]: https://github.com/evennia/evennia/pull/999
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         orphans = [e for e in errors if "orphan" in e.lower()]
         assert len(orphans) == 1
@@ -202,6 +223,7 @@ class TestDuplicateLinkRefs:
 
     def test_clean(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
         f.write_text(VALID_SECTION)
         errors = validate_changelog(f)
@@ -210,8 +232,10 @@ class TestDuplicateLinkRefs:
 
     def test_duplicate_detected(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -220,7 +244,8 @@ class TestDuplicateLinkRefs:
 
             [pull100]: https://github.com/evennia/evennia/pull/100
             [pull100]: https://github.com/evennia/evennia/pull/100
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         dupes = [e for e in errors if "duplicate" in e.lower()]
         assert len(dupes) == 1
@@ -237,8 +262,10 @@ class TestMultipleSections:
 
     def test_same_ref_in_different_sections_is_fine(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -252,14 +279,17 @@ class TestMultipleSections:
             - [Fix][pull100]: Fix v1 (alice)
 
             [pull100]: https://github.com/evennia/evennia/pull/100
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         assert errors == []
 
     def test_errors_report_section_name(self, tmp_path):
         from clog_validate import validate_changelog
+
         f = tmp_path / "CHANGELOG.md"
-        f.write_text(textwrap.dedent("""\
+        f.write_text(
+            textwrap.dedent("""\
             # Changelog
 
             ## Main branch
@@ -269,7 +299,8 @@ class TestMultipleSections:
             ## Evennia 1.0.0
 
             - [Fix][pull50]: Old fix (carol)
-        """))
+        """)
+        )
         errors = validate_changelog(f)
         missing = [e for e in errors if "missing" in e.lower() and "link" in e.lower()]
         assert len(missing) == 1
@@ -286,6 +317,7 @@ class TestRealChangelog:
 
     def test_no_errors(self):
         from clog_validate import validate_changelog
+
         changelog = Path(__file__).resolve().parents[4] / "CHANGELOG.md"
         if not changelog.exists():
             pytest.skip("CHANGELOG.md not found at expected path")

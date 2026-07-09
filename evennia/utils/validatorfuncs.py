@@ -169,7 +169,7 @@ def signed_integer(entry, option_key="Signed Integer", **kwargs):
         num = int(entry)
     except ValueError:
         raise ValueError(
-            _("Could not convert '{entry}' to a whole " "number for {option_key}!").format(
+            _("Could not convert '{entry}' to a whole number for {option_key}!").format(
                 entry=entry, option_key=option_key
             )
         )
@@ -191,7 +191,7 @@ def unsigned_integer(entry, option_key="Unsigned Integer", **kwargs):
     num = signed_integer(entry, option_key)
     if not num >= 0:
         raise ValueError(
-            _("{option_key} must be a whole number greater than " "or equal to 0!").format(
+            _("{option_key} must be a whole number greater than or equal to 0!").format(
                 option_key=option_key
             )
         )

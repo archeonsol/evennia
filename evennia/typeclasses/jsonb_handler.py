@@ -48,9 +48,9 @@ import weakref
 from django.conf import settings
 
 from evennia.typeclasses.attributes import (
+    _DIRTY_BACKENDS,
     IAttributeBackend,
     InMemoryAttribute,
-    _DIRTY_BACKENDS,
 )
 from evennia.typeclasses.jsonb_util import from_jsonb, to_jsonb
 
@@ -93,6 +93,7 @@ class JsonbAttribute(InMemoryAttribute):
             backend._on_attr_value_changed(self.db_key, self.db_category, new_value)
         elif self._backend_ref is not None:
             from evennia.utils import logger
+
             logger.log_err(
                 f"JsonbAttribute: backend evicted while attr {self.db_key!r} still "
                 "referenced — in-place mutation lost. Do not hold strong refs to "
@@ -115,6 +116,7 @@ class JsonbAttribute(InMemoryAttribute):
             backend._on_lock_changed(self.db_key, self.db_category, value)
         elif self._backend_ref is not None:
             from evennia.utils import logger
+
             logger.log_err(
                 f"JsonbAttribute: backend evicted while attr {self.db_key!r} still "
                 "referenced — lock mutation lost."
@@ -236,7 +238,7 @@ class JsonbAttributeBackend(IAttributeBackend):
                 # Attrtype backend: only yield sections for this attrtype.
                 if not cat_key.startswith(attrtype_prefix):
                     continue
-                cat_part = cat_key[len(attrtype_prefix):]
+                cat_part = cat_key[len(attrtype_prefix) :]
                 category = None if cat_part == _NULL_CATEGORY else cat_part
             else:
                 # Regular backend: skip internal meta and attrtype sections.
@@ -268,10 +270,7 @@ class JsonbAttributeBackend(IAttributeBackend):
         data = section.get(_DATA, {})
         locks = section.get(_LOCKS, {})
         strvs = section.get(_STRV, {})
-        return [
-            self._make_attr(k, category, data[k], locks.get(k, ""), strvs.get(k))
-            for k in data
-        ]
+        return [self._make_attr(k, category, data[k], locks.get(k, ""), strvs.get(k)) for k in data]
 
     # ------------------------------------------------------------------
     # Cache layer — override to skip the M2M connector indirection
@@ -412,6 +411,7 @@ class JsonbAttributeBackend(IAttributeBackend):
             _DIRTY_BACKENDS.discard(self)
         except Exception:
             from evennia.utils import logger
+
             self._flush_failures += 1
             _DIRTY_BACKENDS.add(self)
             logger.log_trace(

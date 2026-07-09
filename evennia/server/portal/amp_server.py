@@ -13,8 +13,7 @@ from django.conf import settings
 from twisted.internet import protocol
 
 import evennia
-from evennia.server.portal import amp
-from evennia.server.portal import ipc_handlers_portal
+from evennia.server.portal import amp, ipc_handlers_portal
 from evennia.utils import clock, logger
 from evennia.utils.utils import class_from_module
 

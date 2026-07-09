@@ -353,8 +353,8 @@ class Telnet:
         d = state.him.onResult
         state.him.onResult = None
         d.callback(True)
-        assert self.enableRemote(option), "enableRemote must return True in this context (for option {!r})".format(
-            option
+        assert self.enableRemote(option), (
+            "enableRemote must return True in this context (for option {!r})".format(option)
         )
 
     def will_yes_false(self, state, option):
@@ -363,7 +363,9 @@ class Telnet:
 
     def will_yes_true(self, state, option):
         # Bogus state, here for completeness. Never entered.
-        assert False, "will_yes_true can never be entered, but was called with {!r}, {!r}".format(state, option)
+        assert False, "will_yes_true can never be entered, but was called with {!r}, {!r}".format(
+            state, option
+        )
 
     willMap = {
         ("no", False): will_no_false,
@@ -436,7 +438,9 @@ class Telnet:
 
     def do_yes_true(self, state, option):
         # Bogus state, here for completeness. Never entered.
-        assert False, "do_yes_true can never be entered, but was called with {!r}, {!r}".format(state, option)
+        assert False, "do_yes_true can never be entered, but was called with {!r}, {!r}".format(
+            state, option
+        )
 
     doMap = {
         ("no", False): do_no_false,
@@ -489,11 +493,7 @@ class Telnet:
         return False
 
     def disableLocal(self, option):
-        raise NotImplementedError(
-            "You must override this method (for option %r)" % (option,)
-        )
+        raise NotImplementedError("You must override this method (for option %r)" % (option,))
 
     def disableRemote(self, option):
-        raise NotImplementedError(
-            "You must override this method (for option %r)" % (option,)
-        )
+        raise NotImplementedError("You must override this method (for option %r)" % (option,))

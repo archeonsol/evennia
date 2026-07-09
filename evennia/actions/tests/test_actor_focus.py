@@ -30,13 +30,16 @@ from evennia.utils.test_resources import EvenniaTest
 
 def _dispatch_d(engine, *args, **kwargs):
     from twisted.internet.defer import ensureDeferred
+
     return ensureDeferred(engine.dispatch(*args, **kwargs))
 
 
 def _sync(d):
     """Extract an already-fired Deferred's result (re-raising on failure)."""
     import inspect
+
     from twisted.internet.defer import ensureDeferred
+
     if inspect.iscoroutine(d):
         d = ensureDeferred(d)
     out = {}

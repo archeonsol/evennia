@@ -9,8 +9,7 @@ from django.db import connection
 import evennia
 from evennia.server.service_registry import MultiService
 from evennia.utils import clock, logger
-from evennia.utils.utils import (class_from_module, get_evennia_version,
-                                 make_iter, mod_import)
+from evennia.utils.utils import class_from_module, get_evennia_version, make_iter, mod_import
 
 
 def _asyncio_loop():
@@ -197,8 +196,7 @@ class EvenniaPortalService(MultiService):
                         settings.WEBSOCKET_CLIENT_PORT and settings.WEBSOCKET_CLIENT_INTERFACE
                     ) and not websocket_started:
                         from evennia.server.portal import webclient  # noqa
-                        from evennia.server.portal.ws_protocol import \
-                            WSServerFactory
+                        from evennia.server.portal.ws_protocol import WSServerFactory
 
                         w_interface = (
                             "127.0.0.1"
@@ -218,8 +216,7 @@ class EvenniaPortalService(MultiService):
                         factory.sessionhandler = evennia.PORTAL_SESSION_HANDLER
 
                         if self._require_asyncio_loop("webclient-websocket%s" % w_ifacestr, port):
-                            from evennia.server.portal.webclient import \
-                                AsyncioWebSocketProtocol
+                            from evennia.server.portal.webclient import AsyncioWebSocketProtocol
 
                             self._start_asyncio_server(
                                 lambda f=factory: AsyncioWebSocketProtocol(f), w_interface, port

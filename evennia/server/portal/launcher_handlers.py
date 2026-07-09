@@ -20,9 +20,7 @@ def receive_launcher_command(protocol, operation: str, arguments_wire: bytes):
 
     elif operation == amp.SRELOAD:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(
-                protocol.send_Status2Launcher
-            )
+            protocol.factory.server_connection.wait_for_disconnect(protocol.send_Status2Launcher)
             protocol.stop_server(mode="reload")
         else:
             protocol.wait_for_server_connect(protocol.send_Status2Launcher)
@@ -30,9 +28,7 @@ def receive_launcher_command(protocol, operation: str, arguments_wire: bytes):
 
     elif operation == amp.SRESET:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(
-                protocol.send_Status2Launcher
-            )
+            protocol.factory.server_connection.wait_for_disconnect(protocol.send_Status2Launcher)
             protocol.stop_server(mode="reset")
         else:
             protocol.wait_for_server_connect(protocol.send_Status2Launcher)
@@ -40,16 +36,12 @@ def receive_launcher_command(protocol, operation: str, arguments_wire: bytes):
 
     elif operation == amp.SSHUTD:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(
-                protocol.send_Status2Launcher
-            )
+            protocol.factory.server_connection.wait_for_disconnect(protocol.send_Status2Launcher)
             protocol.stop_server(mode="shutdown")
 
     elif operation == amp.PSHUTD:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(
-                protocol.factory.portal.shutdown
-            )
+            protocol.factory.server_connection.wait_for_disconnect(protocol.factory.portal.shutdown)
         else:
             protocol.factory.portal.shutdown()
 

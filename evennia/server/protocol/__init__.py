@@ -91,7 +91,9 @@ def model_for(event: str):
         key = fname[:-1] if optional else fname
         t = _PY[ftype]
         py_fields[key] = (Optional[t], None) if optional else (t, ...)
-    model = create_model(f"{_pascal(event)}Payload", __config__=ConfigDict(extra="allow"), **py_fields)
+    model = create_model(
+        f"{_pascal(event)}Payload", __config__=ConfigDict(extra="allow"), **py_fields
+    )
     _MODELS[event] = model
     return model
 

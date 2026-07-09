@@ -17,11 +17,11 @@ from codecs import decode as codecs_decode
 
 from django.conf import settings
 from django.utils.translation import gettext as _
-from evennia.server.service_registry import IMMEDIATE_RESULT
 
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.server.portal import amp
+from evennia.server.service_registry import IMMEDIATE_RESULT
 from evennia.server.signals import (
     SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
     SIGNAL_ACCOUNT_POST_LAST_LOGOUT,

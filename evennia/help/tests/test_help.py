@@ -145,7 +145,6 @@ class TestFileHelp(TestCase):
 
 
 class HelpUtils(TestCase):
-
     def setUp(self):
         self.candidate_entries = [
             filehelp.FileHelpEntry(

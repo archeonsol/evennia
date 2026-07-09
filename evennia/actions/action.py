@@ -176,8 +176,7 @@ class Action:
                     if _has_default(f):
                         continue
                     raise ParseError(
-                        f"Missing required {f.name} "
-                        f"(one of: {', '.join(map(str, literal_opts))})."
+                        f"Missing required {f.name} (one of: {', '.join(map(str, literal_opts))})."
                     )
                 values[f.name] = chosen
                 continue

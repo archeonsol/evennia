@@ -141,9 +141,7 @@ class AzabanFormat(WireFormat):
                 }
             )
         # Generic typed OOB event.
-        return _frame(
-            {"t": "oob", "event": cmdname, "args": list(args), "kwargs": kwargs}
-        )
+        return _frame({"t": "oob", "event": cmdname, "args": list(args), "kwargs": kwargs})
 
     # -- incoming (client -> server) ---------------------------------------
 

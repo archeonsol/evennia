@@ -93,9 +93,7 @@ class TestAzabanFormat(unittest.TestCase):
         self.assertEqual(out, {"autocomplete": [["lo"], {"seq": 3, "ns": "cg"}]})
 
     def test_decode_hello(self):
-        out = self.fmt.decode_incoming(
-            b'{"t":"hello","caps":{"rendersNodes":true}}', False
-        )
+        out = self.fmt.decode_incoming(b'{"t":"hello","caps":{"rendersNodes":true}}', False)
         self.assertEqual(out, {"azaban_hello": [[], {"caps": {"rendersNodes": True}}]})
 
     def test_decode_close(self):

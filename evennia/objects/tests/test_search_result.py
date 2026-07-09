@@ -5,8 +5,7 @@ These tests don't touch the DB; the result types are pure dataclasses.
 
 import unittest
 
-from evennia.objects.search_result import (Ambiguous, Found, NotFound,
-                                           SearchResult)
+from evennia.objects.search_result import Ambiguous, Found, NotFound, SearchResult
 
 
 class TestSearchResult(unittest.TestCase):

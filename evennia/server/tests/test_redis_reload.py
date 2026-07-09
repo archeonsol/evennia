@@ -19,8 +19,7 @@ from evennia.server.portal.service import EvenniaPortalService
 from evennia.server.redis_bus import RedisPortalBus, RedisServerBus
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
-from evennia.server.tests.test_redis_bus import (_BUS_SETTINGS, _drain_bus,
-                                                 _sync_call_from_thread)
+from evennia.server.tests.test_redis_bus import _BUS_SETTINGS, _drain_bus, _sync_call_from_thread
 
 
 @override_settings(**_BUS_SETTINGS)
@@ -103,8 +102,7 @@ class TestRedisReloadSurvival(TestCase):
         """B3: asyncio WS session + azaban hello survives reload; output after PSYNC."""
         from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
         from evennia.server.inputfuncs import azaban_hello
-        from evennia.server.portal.asyncio_transport import \
-            AsyncioTransportShim
+        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
         from evennia.server.portal.webclient import WebSocketClient
         from evennia.server.portal.wire_formats.azaban import AzabanFormat
 

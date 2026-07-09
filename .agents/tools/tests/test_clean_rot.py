@@ -14,10 +14,15 @@ import pytest
 # Make the tools package importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from clean_rot import (_extract_paragraphs, check_broken_links,
-                       check_duplication, check_index_density,
-                       check_line_budget, check_orphan_docs,
-                       check_stale_references)
+from clean_rot import (
+    _extract_paragraphs,
+    check_broken_links,
+    check_duplication,
+    check_index_density,
+    check_line_budget,
+    check_orphan_docs,
+    check_stale_references,
+)
 
 
 @pytest.fixture
@@ -280,7 +285,8 @@ class TestStaleReferences:
 
 class TestIndexDensity:
     def test_mostly_structural(self, repo):
-        repo["agents_md"].write_text(textwrap.dedent("""\
+        repo["agents_md"].write_text(
+            textwrap.dedent("""\
             # AGENTS.md
 
             ## Section
@@ -291,7 +297,8 @@ class TestIndexDensity:
             ```bash
             make test
             ```
-        """))
+        """)
+        )
         assert check_index_density(**repo) == 0
 
     def test_too_much_prose(self, repo):
@@ -308,7 +315,8 @@ class TestIndexDensity:
         assert check_index_density(**repo) == 0
 
     def test_code_block_contents_are_structural(self, repo):
-        repo["agents_md"].write_text(textwrap.dedent("""\
+        repo["agents_md"].write_text(
+            textwrap.dedent("""\
             # AGENTS.md
 
             ```bash
@@ -318,5 +326,6 @@ class TestIndexDensity:
             ```
 
             One prose line here.
-        """))
+        """)
+        )
         assert check_index_density(**repo) == 0

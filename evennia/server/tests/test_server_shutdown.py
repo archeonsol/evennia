@@ -34,9 +34,7 @@ class ServerShutdownDelayTest(SimpleTestCase):
             mock_evennia.ScriptDB.get_all_cached_instances.return_value = []
             mock_evennia.ServerConfig.objects.conf = MagicMock()
             mock_evennia.gametime.runtime.return_value = 0
-            mock_evennia.SESSION_HANDLER.all_sessions_portal_sync.return_value = (
-                IMMEDIATE_RESULT
-            )
+            mock_evennia.SESSION_HANDLER.all_sessions_portal_sync.return_value = IMMEDIATE_RESULT
 
             asyncio.run(service.shutdown(mode="reload"))
 
@@ -76,9 +74,7 @@ class AtPostPortalSyncReloadTest(SimpleTestCase):
     @patch("evennia.scripts.ondemandhandler.ON_DEMAND_HANDLER")
     @patch("evennia.scripts.taskhandler.TASK_HANDLER")
     @patch("evennia.scripts.monitorhandler.MONITOR_HANDLER")
-    def test_reload_skips_default_channels_and_warmup(
-        self, monitor, task, ondemand
-    ):
+    def test_reload_skips_default_channels_and_warmup(self, monitor, task, ondemand):
         service = self._service()
         service.create_default_channels = MagicMock()
 
@@ -96,9 +92,7 @@ class AtPostPortalSyncReloadTest(SimpleTestCase):
     @patch("evennia.scripts.ondemandhandler.ON_DEMAND_HANDLER")
     @patch("evennia.scripts.taskhandler.TASK_HANDLER")
     @patch("evennia.scripts.monitorhandler.MONITOR_HANDLER")
-    def test_cold_start_still_creates_default_channels(
-        self, monitor, task, ondemand
-    ):
+    def test_cold_start_still_creates_default_channels(self, monitor, task, ondemand):
         service = self._service()
         service.create_default_channels = MagicMock()
 

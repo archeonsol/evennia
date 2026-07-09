@@ -651,8 +651,7 @@ class TestDelay(BaseEvenniaTest):
         self.timedelay = 5
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import \
-                TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
         _TASK_HANDLER.clock = task.Clock()
         self.char1.ndb.dummy_var = False
 

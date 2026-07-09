@@ -7,24 +7,32 @@ sessions etc.
 
 """
 
-import re
-
 import asyncio
+import re
 
 from django.conf import settings
 from twisted.internet import protocol
 
 from evennia.server.portal import mssp, naws, suppress_ga, telnet_oob, ttype
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
-from evennia.server.portal.telnet_parser import (ECHO, GA, IAC, LINEMODE,
-                                                 LINEMODE_EDIT, LINEMODE_TRAPSIG,
-                                                 MODE, NOP, NULL, WILL, WONT,
-                                                 Telnet)
-from evennia.utils import clock
 from evennia.server.portal.mccp import MCCP, Mccp, mccp_compress
 from evennia.server.portal.mxp import Mxp, mxp_parse
 from evennia.server.portal.naws import NAWS
-from evennia.utils import ansi
+from evennia.server.portal.telnet_parser import (
+    ECHO,
+    GA,
+    IAC,
+    LINEMODE,
+    LINEMODE_EDIT,
+    LINEMODE_TRAPSIG,
+    MODE,
+    NOP,
+    NULL,
+    WILL,
+    WONT,
+    Telnet,
+)
+from evennia.utils import ansi, clock
 from evennia.utils.utils import class_from_module, to_bytes
 
 _RE_N = re.compile(r"\|n$")

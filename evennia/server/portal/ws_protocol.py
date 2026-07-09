@@ -30,9 +30,17 @@ from urllib.parse import urlparse
 
 from twisted.internet import protocol
 from wsproto import ConnectionType, WSConnection
-from wsproto.events import (AcceptConnection, BytesMessage, CloseConnection,
-                            Message, Ping, Pong, RejectConnection, Request,
-                            TextMessage)
+from wsproto.events import (
+    AcceptConnection,
+    BytesMessage,
+    CloseConnection,
+    Message,
+    Ping,
+    Pong,
+    RejectConnection,
+    Request,
+    TextMessage,
+)
 from wsproto.extensions import PerMessageDeflate
 from wsproto.utilities import RemoteProtocolError
 
@@ -432,8 +440,7 @@ class _AsyncioWSClientProtocol(asyncio.Protocol):
     """
 
     def __init__(self, factory, loop):
-        from evennia.server.portal.asyncio_transport import \
-            AsyncioTransportShim
+        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
 
         self._shim_cls = AsyncioTransportShim
         self.session = factory.buildProtocol(None)
@@ -534,8 +541,7 @@ def connect_ws(factory, reactor=None):
     """
     from django.conf import settings
 
-    from evennia.server.portal.asyncio_transport import (
-        asyncio_servers_enabled, get_asyncio_loop)
+    from evennia.server.portal.asyncio_transport import asyncio_servers_enabled, get_asyncio_loop
 
     if asyncio_servers_enabled():
         get_asyncio_loop().create_task(connect_ws_asyncio(factory))

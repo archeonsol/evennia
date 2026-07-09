@@ -256,10 +256,14 @@ def menu_setattr(menu, choice, obj, string):
     """
     attr = getattr(choice, "attr", None) if choice else None
     if choice is None or string is None or attr is None or menu is None:
-        log_err(dedent("""
+        log_err(
+            dedent(
+                """
                 The `menu_setattr` function was called to set the attribute {} of object {} to {},
                 but the choice {} of menu {} or another information is missing.
-            """.format(attr, obj, repr(string), choice, menu)).strip("\n")).strip()
+            """.format(attr, obj, repr(string), choice, menu)
+            ).strip("\n")
+        ).strip()
         return
 
     for part in attr.split(".")[:-1]:

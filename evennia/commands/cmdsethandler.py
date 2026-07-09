@@ -612,10 +612,8 @@ class CmdSetHandler(object):
         instead of swallowing silently.
         """
         try:
-            from evennia.commands.cmd_access_cache import \
-                invalidate_for_cmdset_owner
-            from evennia.commands.location_cmdset_cache import \
-                bump_cmdset_generation
+            from evennia.commands.cmd_access_cache import invalidate_for_cmdset_owner
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
 
             bump_cmdset_generation(self.obj)
             invalidate_for_cmdset_owner(self.obj)

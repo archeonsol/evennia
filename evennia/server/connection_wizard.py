@@ -498,9 +498,8 @@ def node_view_and_apply_settings(wizard):
     if not game_index_listing and settings.GAME_INDEX_ENABLED:
         game_index_listing = settings.GAME_INDEX_LISTING
     if game_index_listing:
-        game_index_save_text = (
-            "GAME_INDEX_ENABLED = True\n"
-            "GAME_INDEX_LISTING = \\\n" + pp.pformat(game_index_listing)
+        game_index_save_text = "GAME_INDEX_ENABLED = True\nGAME_INDEX_LISTING = \\\n" + pp.pformat(
+            game_index_listing
         )
         saves = True
     else:

@@ -705,8 +705,7 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         senders = make_iter(senders) if senders else []
         receivers = None
         try:
-            from evennia.comms.channel_subscriber_cache import \
-                get_cached_subscribers
+            from evennia.comms.channel_subscriber_cache import get_cached_subscribers
 
             receivers = get_cached_subscribers(self, online_only=bool(self.send_to_online_only))
         except Exception:

@@ -21,9 +21,15 @@ from evennia.utils.create import create_script
 from evennia.utils.evmore import EvMore
 from evennia.utils.evtable import EvTable
 from evennia.utils.funcparser import FuncParser
-from evennia.utils.utils import (all_from_module, class_from_module,
-                                 dbid_to_obj, is_iter, justify, make_iter,
-                                 variable_from_module)
+from evennia.utils.utils import (
+    all_from_module,
+    class_from_module,
+    dbid_to_obj,
+    is_iter,
+    justify,
+    make_iter,
+    variable_from_module,
+)
 
 _MODULE_PROTOTYPE_MODULES = {}
 _MODULE_PROTOTYPES = {}
@@ -651,9 +657,7 @@ def search_prototype(
                 not_found.append(db_id)
 
         if not_found:
-            not_found_scripts = DefaultScript.objects.filter(
-                pk__in=not_found
-            ).order_by("db_key")
+            not_found_scripts = DefaultScript.objects.filter(pk__in=not_found).order_by("db_key")
             for script in not_found_scripts:
                 prot = script.attributes.get("prototype")
                 if prot is not None:

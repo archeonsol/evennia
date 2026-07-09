@@ -67,8 +67,7 @@ class ScriptHandler(object):
             script = scriptclass
             if script.db_obj and script.db_obj != self.obj:
                 logger.log_err(
-                    f"Script instance {script} already belongs to "
-                    f"another object: {script.db_obj}."
+                    f"Script instance {script} already belongs to another object: {script.db_obj}."
                 )
                 return None
             script.db_obj = self.obj

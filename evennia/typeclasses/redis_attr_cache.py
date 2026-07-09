@@ -16,7 +16,6 @@ it will raise ``ImproperlyConfigured`` at instantiation.
 
 from django.core.exceptions import ImproperlyConfigured
 
-
 # ---------------------------------------------------------------------------
 # No-op stubs — call sites are try/except-wrapped or gated by the disabled
 # ATTRIBUTE_REDIS_CACHE_ENABLED setting.  These prevent ImportError while

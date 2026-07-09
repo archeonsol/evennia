@@ -10,7 +10,6 @@ class StandaloneTest(SimpleTestCase):
     @patch("django.setup")
     def test_standalone_binds_loop_and_starts_service(self, mock_setup, mock_init):
         import evennia
-
         from evennia.standalone import standalone
 
         loop = MagicMock()

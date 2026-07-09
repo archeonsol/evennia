@@ -51,11 +51,17 @@ import random
 from django.conf import settings
 
 from evennia.utils import logger, search
-from evennia.utils.utils import (callables_from_module, crop, int2str, justify,
-                                 make_iter, pad, safe_convert_to_types,
-                                 variable_from_module)
-from evennia.utils.verb_conjugation.conjugate import \
-    verb_actor_stance_components
+from evennia.utils.utils import (
+    callables_from_module,
+    crop,
+    int2str,
+    justify,
+    make_iter,
+    pad,
+    safe_convert_to_types,
+    variable_from_module,
+)
+from evennia.utils.verb_conjugation.conjugate import verb_actor_stance_components
 from evennia.utils.verb_conjugation.pronouns import pronoun_to_viewpoints
 
 # setup

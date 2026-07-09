@@ -165,7 +165,7 @@ class MonitorHandler(object):
                 raise TypeError("callback is not a function.")
             dbserialize((obj, fieldname, callback, idstring, persistent, kwargs))
         except Exception:
-            err = "Invalid monitor definition: \n" " (%s, %s, %s, %s, %s, %s)" % (
+            err = "Invalid monitor definition: \n (%s, %s, %s, %s, %s, %s)" % (
                 obj,
                 fieldname,
                 callback,

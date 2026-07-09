@@ -1,10 +1,9 @@
 """Server-side Portal<->Server IPC handlers (transport-agnostic)."""
 
+import evennia
 from evennia.server import ipc_schema
 from evennia.server.portal import amp
 from evennia.utils import clock, logger
-
-import evennia
 
 
 def receive_msgportal2server(packed_data):
@@ -71,4 +70,6 @@ def send_msgserver2portal(link, session, **kwargs):
 
 
 def send_adminserver2portal(link, session, operation="", **kwargs):
-    return data_to_portal(link, amp.AdminServer2Portal, session.sessid, operation=operation, **kwargs)
+    return data_to_portal(
+        link, amp.AdminServer2Portal, session.sessid, operation=operation, **kwargs
+    )

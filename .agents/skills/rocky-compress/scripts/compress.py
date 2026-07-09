@@ -14,15 +14,11 @@ import sys
 from pathlib import Path
 from typing import List
 
-OUTER_FENCE_REGEX = re.compile(
-    r"\A\s*(`{3,}|~{3,})[^\n]*\n(.*)\n\1\s*\Z", re.DOTALL
-)
+OUTER_FENCE_REGEX = re.compile(r"\A\s*(`{3,}|~{3,})[^\n]*\n(.*)\n\1\s*\Z", re.DOTALL)
 
 # YAML frontmatter: starts at file start with --- on its own line, ends with --- on its own line.
 # Captures the entire block (including delimiters and trailing newline) and the body after.
-FRONTMATTER_REGEX = re.compile(
-    r"\A(---\r?\n.*?\r?\n---\r?\n)(.*)", re.DOTALL
-)
+FRONTMATTER_REGEX = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n)(.*)", re.DOTALL)
 
 
 def split_frontmatter(text: str):
@@ -38,6 +34,7 @@ def split_frontmatter(text: str):
     if m:
         return m.group(1), m.group(2)
     return "", text
+
 
 # Filenames and paths that almost certainly hold secrets or PII. Compressing
 # them ships raw bytes to the Anthropic API — a third-party data boundary that
@@ -61,8 +58,14 @@ SENSITIVE_BASENAME_REGEX = re.compile(
 SENSITIVE_PATH_COMPONENTS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker"})
 
 SENSITIVE_NAME_TOKENS = (
-    "secret", "credential", "password", "passwd",
-    "apikey", "accesskey", "token", "privatekey",
+    "secret",
+    "credential",
+    "password",
+    "passwd",
+    "apikey",
+    "accesskey",
+    "token",
+    "privatekey",
 )
 
 
@@ -109,6 +112,7 @@ def strip_llm_wrapper(text: str) -> str:
     if m:
         return m.group(2)
     return text
+
 
 from .detect import should_compress
 from .validate import validate
@@ -262,7 +266,9 @@ def compress_file(filepath: Path) -> bool:
     if backup_path.exists():
         print(f"⚠️ Backup file already exists: {backup_path}")
         print("The original backup may contain important content.")
-        print("Aborting to prevent data loss. Please remove or rename the backup file if you want to proceed.")
+        print(
+            "Aborting to prevent data loss. Please remove or rename the backup file if you want to proceed."
+        )
         return False
 
     # Split YAML frontmatter off before compression. Claude tends to strip or
@@ -304,7 +310,9 @@ def compress_file(filepath: Path) -> bool:
     backup_readback = backup_path.read_text(errors="ignore")
     if backup_readback != original_text:
         print(f"❌ Backup write verification failed: {backup_path}")
-        print("   In-memory original differs from on-disk backup. Aborting before touching the input file.")
+        print(
+            "   In-memory original differs from on-disk backup. Aborting before touching the input file."
+        )
         try:
             backup_path.unlink()
         except OSError:
@@ -334,9 +342,7 @@ def compress_file(filepath: Path) -> bool:
             return False
 
         print("Fixing with Claude...")
-        compressed = call_claude(
-            build_fix_prompt(original_text, compressed, result.errors)
-        )
+        compressed = call_claude(build_fix_prompt(original_text, compressed, result.errors))
         filepath.write_text(compressed)
 
     return True

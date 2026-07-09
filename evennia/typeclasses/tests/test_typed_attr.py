@@ -15,19 +15,18 @@ Covers:
 from unittest.mock import MagicMock, patch
 
 from evennia.typeclasses.typed_attr import (
+    _SCHEMA_VERSION_CATEGORY,
+    _SCHEMA_VERSION_KEY,
+    _UNSET,
     AttrField,
     AttributeBag,
     DropAttr,
     RenameAttr,
     TransformAttr,
     TypedAttr,
-    _SCHEMA_VERSION_CATEGORY,
-    _SCHEMA_VERSION_KEY,
-    _UNSET,
     apply_schema_migrations,
 )
 from evennia.utils.test_resources import BaseEvenniaTest
-
 
 # ---------------------------------------------------------------------------
 # Helpers

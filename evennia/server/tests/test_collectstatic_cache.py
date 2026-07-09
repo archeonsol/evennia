@@ -7,10 +7,12 @@ from unittest import mock
 
 from django.test import SimpleTestCase, override_settings
 
-from evennia.server.collectstatic_cache import (compute_static_fingerprint,
-                                                read_cached_fingerprint,
-                                                static_sources_changed,
-                                                write_cached_fingerprint)
+from evennia.server.collectstatic_cache import (
+    compute_static_fingerprint,
+    read_cached_fingerprint,
+    static_sources_changed,
+    write_cached_fingerprint,
+)
 
 
 class CollectstaticCacheTest(SimpleTestCase):

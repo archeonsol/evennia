@@ -14,8 +14,7 @@ import json
 from django.conf import settings
 from twisted.internet import protocol
 
-from evennia.server.portal.ws_protocol import (WSClientProtocolBase,
-                                               connect_ws)
+from evennia.server.portal.ws_protocol import WSClientProtocolBase, connect_ws
 from evennia.server.session import Session
 from evennia.utils import get_evennia_version
 from evennia.utils.logger import log_err, log_info

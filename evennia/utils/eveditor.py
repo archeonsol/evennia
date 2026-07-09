@@ -50,12 +50,10 @@ from evennia.actions.action import Action
 from evennia.actions.menus import MenuInputAction, session_mismatch
 from evennia.actions.result import CLAIM, PASS, REDIRECT
 from evennia.actions.rule import rule
-from evennia.actions.state import (StateProvider, capture_holder, enter_state,
-                                   exit_state)
+from evennia.actions.state import StateProvider, capture_holder, enter_state, exit_state
 from evennia.utils import dedent, fill, is_iter, justify, logger, to_str, utils
 from evennia.utils.ansi import raw
-from evennia.utils.editor.core import (REDO_NONE, REDO_OK, UNDO_NONE, UNDO_OK,
-                                       EditCore)
+from evennia.utils.editor.core import REDO_NONE, REDO_OK, UNDO_NONE, UNDO_OK, EditCore
 
 _RE_GROUP = re.compile(r"\".*?\"|\'.*?\'|\S*")
 
@@ -212,12 +210,14 @@ _HELP_LEGEND = _("""
     <txt> - longer string, usually not needing quotes.
 """)
 
-_HELP_CODE = _("""
+_HELP_CODE = _(
+    """
  :!    - Execute code buffer without saving
  :<    - Decrease the level of automatic indentation for the next lines
  :>    - Increase the level of automatic indentation for the next lines
  :=    - Switch automatic indentation on/off
-""".lstrip("\n"))
+""".lstrip("\n")
+)
 
 _ERROR_LOADFUNC = _("""
 {error}

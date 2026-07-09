@@ -51,7 +51,7 @@ class AuditingTest(BaseEvenniaTest):
             "say the password is plugh",
             # Unfortunately given the syntax, there is no way to discern the
             # latter of these as sensitive
-            "@create pretty sunset" "@create johnny password123",
+            "@create pretty sunset@create johnny password123",
             '{"text": "Command \'do stuff\' is not available. Type "help" for help."}',
         )
 

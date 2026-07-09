@@ -105,8 +105,7 @@ try:
     from scipy.sparse.csgraph import dijkstra
 except ImportError as err:
     raise ImportError(
-        f"{err}\nThe XYZgrid contrib requires "
-        "the SciPy package. Install with `pip install scipy'."
+        f"{err}\nThe XYZgrid contrib requires the SciPy package. Install with `pip install scipy'."
     )
 from django.conf import settings
 
@@ -323,14 +322,13 @@ class XYMap:
 
         if not mapdata:
             raise MapError(
-                "No valid XYMAP_DATA or XYMAP_DATA_LIST could be found from "
-                f"{map_module_or_dict}."
+                f"No valid XYMAP_DATA or XYMAP_DATA_LIST could be found from {map_module_or_dict}."
             )
 
         # validate
         if any(key for key in mapdata if key not in MAP_DATA_KEYS):
             raise MapError(
-                f"Mapdata has keys {list(mapdata)}, but only " f"keys {MAP_DATA_KEYS} are allowed."
+                f"Mapdata has keys {list(mapdata)}, but only keys {MAP_DATA_KEYS} are allowed."
             )
 
         for key in mapdata.get("legend", DEFAULT_LEGEND):
@@ -459,7 +457,7 @@ class XYMap:
                 mapnode_or_link_class = self.legend.get(char)
                 if not mapnode_or_link_class:
                     raise MapParserError(
-                        f"Symbol '{char}' on XY=({ix / 2:g},{iy / 2:g}) " "is not found in LEGEND."
+                        f"Symbol '{char}' on XY=({ix / 2:g},{iy / 2:g}) is not found in LEGEND."
                     )
                 if hasattr(mapnode_or_link_class, "node_index"):
                     # A mapnode. Mapnodes can only be placed on even grid positions, where
@@ -672,8 +670,7 @@ class XYMap:
         """
         global _XYZROOMCLASS
         if not _XYZROOMCLASS:
-            from evennia.contrib.grid.xyzgrid.xyzroom import \
-                XYZRoom as _XYZROOMCLASS
+            from evennia.contrib.grid.xyzgrid.xyzroom import XYZRoom as _XYZROOMCLASS
         x, y = xy
         wildcard = "*"
         spawned = []
@@ -946,8 +943,7 @@ class XYMap:
 
         else:
             raise MapError(
-                f"Map.get_visual_range 'mode' was '{mode}' "
-                "- it must be either 'scan' or 'nodes'."
+                f"Map.get_visual_range 'mode' was '{mode}' - it must be either 'scan' or 'nodes'."
             )
         if character:
             gridmap[iyc][ixc] = character  # correct indexing; it's a list of lines

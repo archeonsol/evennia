@@ -254,9 +254,7 @@ class SectionedView:
         out = []
         for group in groups:
             texts = [
-                self.sections[k].text
-                for k in group
-                if k in self.sections and self.sections[k].text
+                self.sections[k].text for k in group if k in self.sections and self.sections[k].text
             ]
             joined = within.join(texts)
             if joined:

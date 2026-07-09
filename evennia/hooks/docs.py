@@ -72,7 +72,7 @@ def render_return_contracts() -> str:
         rows = _by_returns(value)
         if not rows:
             continue
-        sections.append(f"### {label} (`returns=\"{value}\"`)")
+        sections.append(f'### {label} (`returns="{value}"`)')
         sections.append("")
         sections.append(f"| Hook | Class | Actor | {header_effect} |")
         sections.append("|---|---|---|---|")
@@ -104,8 +104,10 @@ def render_misshapen() -> str:
             msg = f.message.replace("|", "\\|")
             sections.append(f"| `{f.location}` | {msg} |")
     else:
-        sections.append("_None: every `at_pre_*` / `at_post_*` / `at_failed_*` "
-                        "name matches its declared phase._")
+        sections.append(
+            "_None: every `at_pre_*` / `at_post_*` / `at_failed_*` "
+            "name matches its declared phase._"
+        )
     sections.append("")
     sections.append("### Self-flagged in spec notes")
     sections.append("")

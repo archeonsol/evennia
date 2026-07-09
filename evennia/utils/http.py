@@ -25,9 +25,9 @@ class Response:
     """Minimal HTTP response (Agent-compatible ``.code``)."""
 
     def __init__(self, status_code, content, headers=None):
-        self.code = status_code            # twisted.web Agent response attribute
+        self.code = status_code  # twisted.web Agent response attribute
         self.status_code = status_code
-        self.content = content             # bytes
+        self.content = content  # bytes
         self.headers = headers or {}
 
     def json(self):

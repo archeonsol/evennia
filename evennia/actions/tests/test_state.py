@@ -34,7 +34,9 @@ ENGINE = RuleEngine()
 def _sync(d):
     """Extract an already-fired Deferred/coroutine's result, re-raising on failure."""
     import inspect
+
     from twisted.internet.defer import ensureDeferred
+
     if inspect.iscoroutine(d):
         d = ensureDeferred(d)
     out = {}

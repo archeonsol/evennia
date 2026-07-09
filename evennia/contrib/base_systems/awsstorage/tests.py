@@ -622,8 +622,7 @@ class S3Boto3StorageTests(S3Boto3TestCase):
 
     def test_location_leading_slash(self):
         msg = (
-            "S3Boto3Storage.location cannot begin with a leading slash. "
-            "Found '/'. Use '' instead."
+            "S3Boto3Storage.location cannot begin with a leading slash. Found '/'. Use '' instead."
         )
         with self.assertRaises(ImproperlyConfigured, msg=msg):
             s3boto3.S3Boto3Storage(location="/")

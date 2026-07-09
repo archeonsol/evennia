@@ -104,26 +104,25 @@ SIGNALS_CUSTOM: dict[str, Signal] = defaultdict(Signal)
 
 # Django default signals (https://docs.djangoproject.com/en/4.1/topics/signals/)
 
-from django.core.signals import request_finished  # "             ends.
-from django.core.signals import \
-    request_started  # Sent when HTTP request begins.
-from django.db.backends.signals import \
-    connection_created  # Sent when making initial connection to database
-from django.db.models.signals import \
-    m2m_changed  # Sent when a ManyToManyField changes.
-from django.db.models.signals import post_delete  # after         "
-from django.db.models.signals import post_init  # end
-from django.db.models.signals import post_migrate  # after     "
-from django.db.models.signals import post_save  # after            "
-from django.db.models.signals import \
-    pre_delete  # Sent before an object is deleted.
-from django.db.models.signals import \
-    pre_migrate  # Sent before migration starts
-from django.db.models.signals import \
-    pre_save  # Sent before a typeclass' .save is called.
-from django.db.models.signals import \
-    pre_init  # Sent at start of typeclass __init__ (before at_post_load)
-from django.test.signals import \
-    setting_changed  # Sent when setting changes from override
-from django.test.signals import \
-    template_rendered  # Sent when test system renders template
+from django.core.signals import (
+    request_finished,  # "             ends.
+    request_started,  # Sent when HTTP request begins.
+)
+from django.db.backends.signals import (
+    connection_created,
+)  # Sent when making initial connection to database
+from django.db.models.signals import (
+    m2m_changed,  # Sent when a ManyToManyField changes.
+    post_delete,  # after         "
+    post_init,  # end
+    post_migrate,  # after     "
+    post_save,  # after            "
+    pre_delete,  # Sent before an object is deleted.
+    pre_init,
+    pre_migrate,  # Sent before migration starts
+    pre_save,  # Sent before a typeclass' .save is called.
+)  # Sent at start of typeclass __init__ (before at_post_load)
+from django.test.signals import (
+    setting_changed,  # Sent when setting changes from override
+    template_rendered,  # Sent when test system renders template
+)

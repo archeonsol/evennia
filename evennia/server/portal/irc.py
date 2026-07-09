@@ -353,8 +353,7 @@ class _AsyncioIRCClientProtocol(asyncio.Protocol):
     """Drive an ``IRCBot`` session over a native asyncio transport."""
 
     def __init__(self, factory, loop):
-        from evennia.server.portal.asyncio_transport import \
-            AsyncioTransportShim
+        from evennia.server.portal.asyncio_transport import AsyncioTransportShim
 
         self._shim_cls = AsyncioTransportShim
         self.session = factory.buildProtocol(None)
@@ -440,8 +439,7 @@ def connect_irc(factory):
     """Connect an outbound IRC client factory (Twisted or asyncio per T3 gate)."""
     from django.conf import settings
 
-    from evennia.server.portal.asyncio_transport import (
-        asyncio_servers_enabled, get_asyncio_loop)
+    from evennia.server.portal.asyncio_transport import asyncio_servers_enabled, get_asyncio_loop
 
     if asyncio_servers_enabled():
         get_asyncio_loop().create_task(connect_irc_asyncio(factory))

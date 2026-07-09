@@ -10,10 +10,19 @@ from django.db.models import Q
 from django.db.models.fields import exceptions
 
 from evennia.server import signals
-from evennia.typeclasses.managers import (TypeclassManager, TypedObjectManager,
-                                          _flush_attr_writes, _jsonb_match_pks)
-from evennia.utils.utils import (class_from_module, dbid_to_obj, is_iter,
-                                 make_iter, string_partial_matching)
+from evennia.typeclasses.managers import (
+    TypeclassManager,
+    TypedObjectManager,
+    _flush_attr_writes,
+    _jsonb_match_pks,
+)
+from evennia.utils.utils import (
+    class_from_module,
+    dbid_to_obj,
+    is_iter,
+    make_iter,
+    string_partial_matching,
+)
 
 __all__ = ("ObjectManager", "ObjectDBManager")
 _GA = object.__getattribute__
@@ -22,7 +31,10 @@ _GA = object.__getattribute__
 _ATTR = None
 
 from evennia.utils.multimatch import (  # noqa: E402
-    _get_multimatch_input_handler, _multimatch_regex, resolve_multimatch_index)
+    _get_multimatch_input_handler,
+    _multimatch_regex,
+    resolve_multimatch_index,
+)
 
 _ATTR_SEARCH_FORCE_MSG = (
     "{method}() runs an attribute search, which forces a process-wide "

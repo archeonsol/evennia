@@ -12,11 +12,11 @@ from django.db.models import Q
 
 from evennia.accounts import bots
 from evennia.accounts.models import AccountDB
+from evennia.actions.menus import ask_yes_no
 from evennia.comms.comms import DefaultChannel
 from evennia.comms.models import Msg
 from evennia.locks.lockhandler import LockException
 from evennia.utils import create, logger, search, utils
-from evennia.actions.menus import ask_yes_no
 from evennia.utils.logger import tail_log_file
 from evennia.utils.utils import class_from_module, strip_unsafe_input
 
@@ -2049,7 +2049,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 for i, (evchan, dcchan) in enumerate(channel_list):
                     dc_info = dc_chan_names.get(dcchan, {"name": dcchan, "guild": "unknown"})
                     table.add_row(
-                        i, evchan, f"#{dc_info.get('name','?')}@{dc_info.get('guild','?')}"
+                        i, evchan, f"#{dc_info.get('name', '?')}@{dc_info.get('guild', '?')}"
                     )
                 self.msg(table)
             else:
@@ -2069,7 +2069,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                     dc_info = dc_chan_names.get(dc_chan, {"name": "unknown", "guild": "unknown"})
                     self.msg(
                         f"Removed link between {ev_chan} and"
-                        f" #{dc_info.get('name','?')}@{dc_info.get('guild','?')}"
+                        f" #{dc_info.get('name', '?')}@{dc_info.get('guild', '?')}"
                     )
                     return
             else:

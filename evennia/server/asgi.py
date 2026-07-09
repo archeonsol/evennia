@@ -22,4 +22,3 @@ if getattr(settings, "DEBUG", False):
     from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
 
     application = ASGIStaticFilesHandler(application)
-

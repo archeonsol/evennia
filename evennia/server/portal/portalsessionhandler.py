@@ -8,11 +8,11 @@ from collections import deque, namedtuple
 
 from django.conf import settings
 from django.utils.translation import gettext as _
-from evennia.utils import clock
 
 import evennia
 from evennia.server.portal.amp import PCONN, PCONNSYNC, PDISCONN, PDISCONNALL
 from evennia.server.sessionhandler import SessionHandler
+from evennia.utils import clock
 from evennia.utils.logger import log_trace
 from evennia.utils.utils import class_from_module
 

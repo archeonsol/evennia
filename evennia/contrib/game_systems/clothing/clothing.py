@@ -79,9 +79,15 @@ from django.conf import settings
 
 from evennia import DefaultCharacter, DefaultObject, default_cmds
 from evennia.commands.command import Command
-from evennia.utils import (at_search_result, crop, evtable,
-                           group_objects_by_key_and_desc, inherits_from,
-                           int2str, iter_to_str)
+from evennia.utils import (
+    at_search_result,
+    crop,
+    evtable,
+    group_objects_by_key_and_desc,
+    inherits_from,
+    int2str,
+    iter_to_str,
+)
 from evennia.utils.ansi import raw as raw_ansi
 
 # Options start here.
@@ -443,8 +449,7 @@ class CmdWear(Command):
             return
         if not self.rhs:
             # check if the whole string is an object
-            from evennia.objects.search_result import (Ambiguous, Found,
-                                                       NotFound)
+            from evennia.objects.search_result import Ambiguous, Found, NotFound
 
             initial = self.caller.search_for(self.lhs, candidates=self.caller.contents)
             if isinstance(initial, NotFound):

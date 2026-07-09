@@ -183,8 +183,7 @@ class PyRules:
 
         console = EvenniaPythonConsole(caller)
         banner = (
-            "|gEvennia Interactive Python mode{echomode}\n"
-            "Python {version} on {platform}".format(
+            "|gEvennia Interactive Python mode{echomode}\nPython {version} on {platform}".format(
                 echomode=" (no echoing of prompts)" if noecho else "",
                 version=sys.version,
                 platform=sys.platform,

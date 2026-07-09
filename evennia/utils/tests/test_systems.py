@@ -17,10 +17,19 @@ from django.test import override_settings
 from twisted.internet.defer import succeed
 
 from evennia.utils import systems
-from evennia.utils.systems import (SystemDriver, SystemRegistrationError,
-                                   all_entities, all_systems, calendar, every,
-                                   every_tick, get_system, global_scope,
-                                   online_puppets, register)
+from evennia.utils.systems import (
+    SystemDriver,
+    SystemRegistrationError,
+    all_entities,
+    all_systems,
+    calendar,
+    every,
+    every_tick,
+    get_system,
+    global_scope,
+    online_puppets,
+    register,
+)
 from evennia.utils.test_resources import BaseEvenniaTestCase
 
 

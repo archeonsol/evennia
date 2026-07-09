@@ -13,8 +13,7 @@ from django.db.models.functions import Cast
 
 from evennia.typeclasses.tags import Tag
 from evennia.utils import idmapper
-from evennia.utils.utils import (class_from_module, make_iter,
-                                 variable_from_module)
+from evennia.utils.utils import class_from_module, make_iter, variable_from_module
 
 __all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__

@@ -43,12 +43,11 @@ from evennia.objects.objects import (
     DefaultRoom,
 )
 from evennia.scripts import taskhandler
-from evennia.utils import clock
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.portal import portal as portal_module
 from evennia.server.serversession import ServerSession
 from evennia.typeclasses.attributes import discard_dirty_backends
-from evennia.utils import ansi, create
+from evennia.utils import ansi, clock, create
 from evennia.utils.idmapper.models import flush_cache
 from evennia.utils.utils import all_from_module, class_from_module, inherits_from, to_str
 

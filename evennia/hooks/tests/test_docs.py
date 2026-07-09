@@ -1,9 +1,13 @@
 """Tests for the doc generator."""
 
 from evennia.hooks import hook
-from evennia.hooks.docs import (_rewrite_doc, regenerate_doc_files,
-                                render_misshapen, render_return_contracts,
-                                render_section)
+from evennia.hooks.docs import (
+    _rewrite_doc,
+    regenerate_doc_files,
+    render_misshapen,
+    render_return_contracts,
+    render_section,
+)
 from evennia.hooks.registry import _REGISTRY, _reset_registry_for_tests
 from evennia.utils.test_resources import EvenniaTestCase
 
@@ -137,11 +141,7 @@ class RewriteDocTest(EvenniaTestCase):
         self.assertTrue(out.endswith("outro\n"))
 
     def test_unknown_section_left_alone(self):
-        doc = (
-            "<!-- hooks-gen:start no-such-section -->\n"
-            "keep me\n"
-            "<!-- hooks-gen:end -->\n"
-        )
+        doc = "<!-- hooks-gen:start no-such-section -->\nkeep me\n<!-- hooks-gen:end -->\n"
         self.assertEqual(_rewrite_doc(doc), doc)
 
     def test_render_section_unknown_raises(self):

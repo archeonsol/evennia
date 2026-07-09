@@ -5,12 +5,14 @@ from django.utils.translation import gettext as _
 
 import evennia
 from evennia.hooks import hook
-from evennia.objects.search_result import (Ambiguous, Found, NotFound,
-                                           SearchResult)
+from evennia.objects.search_result import Ambiguous, Found, NotFound, SearchResult
 from evennia.utils import search as _search_utils
-from evennia.utils.multimatch import (narrow_candidates,
-                                      parse_search_qualifiers,
-                                      resolve_multimatch_index, try_autopick)
+from evennia.utils.multimatch import (
+    narrow_candidates,
+    parse_search_qualifiers,
+    resolve_multimatch_index,
+    try_autopick,
+)
 from evennia.utils.utils import dbref, make_iter, variable_from_module
 
 _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))

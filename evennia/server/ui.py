@@ -29,6 +29,7 @@ _WEBCLIENT_PROTOCOLS = frozenset({"websocket"})
 
 # -- validation (co-located with the primitive) ---------------------------
 
+
 class _UIButton(BaseModel):
     model_config = ConfigDict(extra="forbid")
     label: str
@@ -76,6 +77,7 @@ def validate_ui(comp: dict) -> tuple[bool, Optional[str]]:
 
 # -- delivery -------------------------------------------------------------
 
+
 def _sessions_of(target):
     if target is None:
         return []
@@ -117,27 +119,74 @@ def remove(target, comp_id):
 
 # -- convenience builders -------------------------------------------------
 
+
 def card(target, comp_id, title, body="", buttons=None, dismissible=True):
-    push(target, {"id": comp_id, "type": "card", "title": title, "body": body,
-                  "buttons": buttons or [], "dismissible": dismissible})
+    push(
+        target,
+        {
+            "id": comp_id,
+            "type": "card",
+            "title": title,
+            "body": body,
+            "buttons": buttons or [],
+            "dismissible": dismissible,
+        },
+    )
 
 
 def menu(target, comp_id, title, options, dismissible=True):
-    push(target, {"id": comp_id, "type": "menu", "title": title,
-                  "options": options, "dismissible": dismissible})
+    push(
+        target,
+        {
+            "id": comp_id,
+            "type": "menu",
+            "title": title,
+            "options": options,
+            "dismissible": dismissible,
+        },
+    )
 
 
 def form(target, comp_id, title, fields, cmd, submit_label="Submit", dismissible=True):
-    push(target, {"id": comp_id, "type": "form", "title": title, "fields": fields,
-                  "cmd": cmd, "submit_label": submit_label, "dismissible": dismissible})
+    push(
+        target,
+        {
+            "id": comp_id,
+            "type": "form",
+            "title": title,
+            "fields": fields,
+            "cmd": cmd,
+            "submit_label": submit_label,
+            "dismissible": dismissible,
+        },
+    )
 
 
 def gauge(target, comp_id, label, value, maximum, color="#c9a44c", dock=True):
-    push(target, {"id": comp_id, "type": "gauge", "title": label,
-                  "value": value, "max": maximum, "color": color, "dock": dock,
-                  "dismissible": False})
+    push(
+        target,
+        {
+            "id": comp_id,
+            "type": "gauge",
+            "title": label,
+            "value": value,
+            "max": maximum,
+            "color": color,
+            "dock": dock,
+            "dismissible": False,
+        },
+    )
 
 
 def table(target, comp_id, title, columns, rows, dismissible=True):
-    push(target, {"id": comp_id, "type": "table", "title": title,
-                  "columns": columns, "rows": rows, "dismissible": dismissible})
+    push(
+        target,
+        {
+            "id": comp_id,
+            "type": "table",
+            "title": title,
+            "columns": columns,
+            "rows": rows,
+            "dismissible": dismissible,
+        },
+    )

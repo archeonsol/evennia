@@ -41,8 +41,7 @@ from collections import deque
 from django.conf import settings
 
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
-from evennia.server.portal.ws_protocol import (CLOSE_NORMAL, GOING_AWAY,
-                                               Disconnected, WSProtocolBase)
+from evennia.server.portal.ws_protocol import CLOSE_NORMAL, GOING_AWAY, Disconnected, WSProtocolBase
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -304,7 +303,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if self.wire_format is None:
             from evennia.utils import logger
 
-            logger.log_err("WebSocketClient: No wire formats available. " "Closing connection.")
+            logger.log_err("WebSocketClient: No wire formats available. Closing connection.")
             self.sendClose(CLOSE_NORMAL, "No wire formats available")
             return
 

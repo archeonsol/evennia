@@ -7,9 +7,8 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
-from .views import accounts, channels, characters, errors
+from .views import accounts, channels, characters, errors, index
 from .views import help as helpviews
-from .views import index
 
 urlpatterns = [
     # website front page

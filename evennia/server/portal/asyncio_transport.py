@@ -25,7 +25,9 @@ def get_asyncio_loop():
 
 def asyncio_servers_enabled():
     """Whether native-asyncio Portal servers/clients should be used (T3 gate)."""
-    return bool(getattr(settings, "PORTAL_ASYNCIO_SERVERS", False)) and get_asyncio_loop() is not None
+    return (
+        bool(getattr(settings, "PORTAL_ASYNCIO_SERVERS", False)) and get_asyncio_loop() is not None
+    )
 
 
 class AsyncioTransportShim:

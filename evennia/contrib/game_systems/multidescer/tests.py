@@ -36,6 +36,6 @@ class TestMultidescer(BaseEvenniaCommandTest):
         self.call(
             multidescer.CmdMultiDesc(),
             "/set test1 + test2 + + test3",
-            "test1 Desc 2 Desc 3\n\n" "The above was set as the current description.",
+            "test1 Desc 2 Desc 3\n\nThe above was set as the current description.",
         )
         self.assertEqual(self.char1.db.desc, "test1 Desc 2 Desc 3")

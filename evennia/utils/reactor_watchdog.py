@@ -29,9 +29,7 @@ import time
 
 from django.conf import settings
 
-from evennia.utils import clock
-
-from evennia.utils import logger
+from evennia.utils import clock, logger
 
 #: Default poll interval as a fraction of the threshold, floored, so the
 #: measured stall stays close to the true block duration without polling

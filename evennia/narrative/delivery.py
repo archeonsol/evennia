@@ -9,10 +9,17 @@ from __future__ import annotations
 
 import re
 
-from .emote import (EmotePlan, EmoteResult, build_caller_echo,
-                    build_camera_text, build_emote_for_viewer,
-                    build_emote_segment_plans, format_emote_message,
-                    replace_first_pronoun_with_name, split_emote_segments)
+from .emote import (
+    EmotePlan,
+    EmoteResult,
+    build_caller_echo,
+    build_camera_text,
+    build_emote_for_viewer,
+    build_emote_segment_plans,
+    format_emote_message,
+    replace_first_pronoun_with_name,
+    split_emote_segments,
+)
 from .protocols import KeyNameResolver, NameResolver
 from .rendernode import RenderNode, deliver_node
 

@@ -7,7 +7,6 @@ Griatch 2017, released under the BSD license.
 
 """
 
-
 import fnmatch
 import os
 import re
@@ -134,7 +133,6 @@ def rename_in_tree(path, in_list, out_list, excl_list, fileend_list, is_interact
     repl_mapping = list(zip(in_list, out_list))
 
     for root, dirs, files in os.walk(path):
-
         print("\ndir: %s\n" % root)
 
         if any(fnmatch.fnmatch(root, excl) for excl in excl_list):
@@ -142,7 +140,6 @@ def rename_in_tree(path, in_list, out_list, excl_list, fileend_list, is_interact
             continue
 
         for file in files:
-
             full_path = os.path.join(root, file)
             if any(fnmatch.fnmatch(full_path, excl) for excl in excl_list):
                 print("%s skipped (excluded)." % full_path)
@@ -239,7 +236,6 @@ def rename_in_file(path, in_list, out_list, is_interactive):
                 return
 
             while True:
-
                 for iline, renamed_line in sorted(list(renamed.items()), key=lambda tup: tup[0]):
                     print("%3i orig: %s" % (iline + 1, org_lines[iline]))
                     print("    new : %s" % (_yellow(renamed_line)))

@@ -16,8 +16,7 @@ from random import random
 from django.conf import settings
 from twisted.internet import protocol
 
-from evennia.server.portal.ws_protocol import (WSClientProtocolBase,
-                                               connect_ws, encode_ws_headers)
+from evennia.server.portal.ws_protocol import WSClientProtocolBase, connect_ws, encode_ws_headers
 from evennia.server.session import Session
 from evennia.utils import class_from_module, get_evennia_version, http, logger
 from evennia.utils.utils import delay
@@ -596,8 +595,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                 except Exception:
                     pass
                 logger.log_err(
-                    f"Discord thread create failed job={job_id} HTTP {response.code}: "
-                    f"{err_body}"
+                    f"Discord thread create failed job={job_id} HTTP {response.code}: {err_body}"
                 )
                 self.sessionhandler.data_in(
                     self,

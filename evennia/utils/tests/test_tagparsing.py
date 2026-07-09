@@ -311,7 +311,7 @@ class TestTextToHTMLparser(SimpleTestCase):
     def test_url_chars_exclam(self):
         self.assertEqual(
             self.parser.convert_urls(
-                "https://groups.google.com/forum/" "?fromgroups#!categories/evennia/ainneve"
+                "https://groups.google.com/forum/?fromgroups#!categories/evennia/ainneve"
             ),
             '<a href="https://groups.google.com/forum/?fromgroups#!categories/evennia/ainneve"'
             ' target="_blank">https://groups.google.com/forum/?fromgroups#!categories/evennia/ainneve</a>',

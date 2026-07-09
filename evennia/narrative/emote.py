@@ -106,8 +106,7 @@ _BE_PRESENT = {"he": "is", "she": "is", "they": "are"}
 _BE_PAST = {"he": "was", "she": "was", "they": "were"}
 
 FIRST_TO_SECOND_MAP = [
-    (pattern, replacement)
-    for pattern, replacement in (_lang.get("first_to_second_map") or [])
+    (pattern, replacement) for pattern, replacement in (_lang.get("first_to_second_map") or [])
 ]
 
 IRREGULAR_VERBS = _lang.get("irregular_verbs") or {}
@@ -447,7 +446,7 @@ def build_emote_for_viewer(
         idx = len(pronoun_occurrences) - 1 - i
         ph = f"__PRON_{idx}__"
         placeholders.append((ph, referent, form_type, original, suffix))
-        tail = (" " + suffix if suffix else "")
+        tail = " " + suffix if suffix else ""
         text = text[:start] + ph + tail + text[end:]
 
     for matched_name, char in sorted(targets, key=lambda t: -len(t[0])):

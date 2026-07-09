@@ -41,13 +41,15 @@ from django.conf import settings
 from django.utils.translation import gettext as _
 from ftfy import fix_text as _ftfy_fix_text
 
-from evennia.utils import clock
-
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import InterruptCommand
-from evennia.commands.signals import (on_cmdset_merge_error, on_command_error,
-                                      on_command_post, on_command_pre)
-from evennia.utils import logger, utils
+from evennia.commands.signals import (
+    on_cmdset_merge_error,
+    on_command_error,
+    on_command_post,
+    on_command_pre,
+)
+from evennia.utils import clock, logger, utils
 from evennia.utils.command_trace import get_trace_id
 
 __all__ = ("cmdhandler", "InterruptCommand")
@@ -464,8 +466,10 @@ async def get_and_merge_cmdsets(
                     location = None
                 if location:
                     from evennia.commands.location_cmdset_cache import (
-                        get_cached_location_cmdsets, make_cache_key,
-                        set_cached_location_cmdsets)
+                        get_cached_location_cmdsets,
+                        make_cache_key,
+                        set_cached_location_cmdsets,
+                    )
 
                     loc_cache_key = make_cache_key(caller, location)
                     local_objlist = get_cached_location_cmdsets(loc_cache_key)
@@ -567,9 +571,7 @@ async def get_and_merge_cmdsets(
                         object_cmdsets += local_obj_cmdsets
 
         # weed out all non-found sets
-        cmdsets = [
-            cmdset for cmdset in object_cmdsets if cmdset and cmdset.key != "_EMPTY_CMDSET"
-        ]
+        cmdsets = [cmdset for cmdset in object_cmdsets if cmdset and cmdset.key != "_EMPTY_CMDSET"]
         # report cmdset errors to user (these should already have been logged)
         if report_to:
             [
@@ -723,7 +725,9 @@ async def cmdhandler(
     ):
         raw_string = _ftfy_fix_text(raw_string)
 
-    async def _run_command(cmd, cmdname, args, raw_cmdname, cmdset, session, account, cmdset_providers):
+    async def _run_command(
+        cmd, cmdname, args, raw_cmdname, cmdset, session, account, cmdset_providers
+    ):
         """
         Helper function: This initializes and runs the Command
         instance once the parser has identified it as either a normal
@@ -971,7 +975,9 @@ async def cmdhandler(
                 # This also checks for permissions, so all commands in match
                 # are commands the caller is allowed to call.
                 try:
-                    matches = await clock.maybe_await(_COMMAND_PARSER(raw_string, cmdset, caller, session=session))
+                    matches = await clock.maybe_await(
+                        _COMMAND_PARSER(raw_string, cmdset, caller, session=session)
+                    )
                 except TypeError:
                     logger.log_dep(
                         "Custom cmdparser does not accept 'session' kwarg. "
@@ -1017,8 +1023,7 @@ async def cmdhandler(
                         )
                         suggestions = []
                         if getattr(settings, "COMMAND_FUZZY_SUGGESTIONS_ENABLED", True):
-                            from evennia.commands.cmdparser_trie import \
-                                fuzzy_command_suggestions
+                            from evennia.commands.cmdparser_trie import fuzzy_command_suggestions
 
                             suggestions = fuzzy_command_suggestions(raw_string, cmdset)
                         if suggestions:

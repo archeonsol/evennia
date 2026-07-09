@@ -1,12 +1,15 @@
 from mock import MagicMock, patch
 
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.typeclasses.attributes import AttributeProperty
-from evennia.typeclasses.tags import (AliasProperty, PermissionProperty,
-                                      TagCategoryProperty, TagProperty)
+from evennia.typeclasses.tags import (
+    AliasProperty,
+    PermissionProperty,
+    TagCategoryProperty,
+    TagProperty,
+)
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase

@@ -25,9 +25,17 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command, InterruptCommand
-from evennia.commands.default import account, admin, building, comms, general
+from evennia.commands.default import (
+    account,
+    admin,
+    building,
+    comms,
+    general,
+    syscommands,
+    system,
+    unloggedin,
+)
 from evennia.commands.default import help as help_module
-from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.objects.models import ObjectDB
 from evennia.objects.objects import (
@@ -1347,11 +1355,13 @@ class TestBuilding(BaseEvenniaCommandTest):
             building.CmdDestroy(), settings.DEFAULT_HOME, "You are trying to delete"
         )  # DEFAULT_HOME should not be deleted
         self.char2.location = self.room2
-        self.call(
-            building.CmdDestroy(),
-            self.room2.dbref,
-            "Char2 arrives to Room from Room2.|Room2 was destroyed.",
-        ),
+        (
+            self.call(
+                building.CmdDestroy(),
+                self.room2.dbref,
+                "Char2 arrives to Room from Room2.|Room2 was destroyed.",
+            ),
+        )
         building.CmdDestroy.confirm = confirm
 
     def test_destroy_sequence(self):
