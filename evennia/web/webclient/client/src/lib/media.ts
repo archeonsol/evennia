@@ -30,6 +30,12 @@ export function youtubeId(raw: string): string | null {
   return null;
 }
 
+/** Extract start offset (seconds) from a YouTube watch URL (`&t=` / `?t=`). */
+export function parseYoutubeStart(raw: string): number | null {
+  const m = (raw || "").match(/[?&]t=(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 export function youtubeEmbedUrl(
   id: string,
   opts: { start?: number; loop?: boolean; autoplay?: boolean } = {},

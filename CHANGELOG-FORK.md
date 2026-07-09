@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.151 — Azaban music parity (YT IFrame API, fades, HUD volume)
+
+### Webclient
+
+- **`youtube-bgm.svelte.ts`:** Port legacy `custom-client.js` YouTube BGM manager to the
+  Azaban shell — `YT.Player` on persistent `#yt-player`, 2.8s fade-in on `play_yt`,
+  2.8s fade-out on `stop_music`, instant stop on `stop_music_now`, manual loop on
+  `ENDED` when room BGM loop is set. Replaces broken embed-iframe `postMessage`
+  volume control.
+- **`media.svelte.ts`:** HTML5 BGM via internal `Audio()` with fade in/out; coalesce
+  rapid `youtube` + `play_yt` OOB pairs (last wins per tick); parse `&t=` from watch
+  URLs; default volume 40% with legacy `mud_terminal_settings.musicVolume` import;
+  skip slider writes during active fades.
+- **`main.ts`:** Separate handlers for `stop_music` vs `stop_music_now`; honor
+  `fade_out` / `fade_in` / `fade` kwargs on `STOP_AUDIO`, `PLAY_AUDIO`, and
+  `SET_AUDIO_VOLUME`.
+- **`StatusBar.svelte`:** Always-visible HUD music volume slider (legacy `#volume-slider`
+  parity).
+- **`MediaPanel.svelte`:** Volume slider always shown; audio/YouTube show link only
+  (playback is hidden BGM player).
+- Rebuilt `shell.js` / `shell.css`; template cache bust `?v=151`.
+
 ## 6.0.0+underspire.150 — Azaban webclient music and YouTube embed fixes
 
 Backfills git-only tags `underspire.146`–`underspire.149`, which shipped without

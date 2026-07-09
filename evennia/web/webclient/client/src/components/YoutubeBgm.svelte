@@ -1,48 +1,17 @@
 <script lang="ts">
-  // Hidden YouTube player for room BGM / @music. Always mounted so playback
-  // does not depend on the Media dock panel being open (legacy client parity).
-  import { media } from "../lib/media.svelte";
-  import { youtubeId, youtubeEmbedUrl } from "../lib/media";
+  // Hidden YouTube player for room BGM / @music. Always mounted (#yt-player parity
+  // with legacy custom-client.js) so playback and fades do not depend on the Media dock.
+  import { onMount } from "svelte";
+  import { ytBgm } from "../lib/youtube-bgm.svelte";
 
-  let ytEl = $state<HTMLIFrameElement | null>(null);
-
-  const yt = $derived(
-    media.nowPlaying?.type === "youtube" ? youtubeId(media.nowPlaying.url) : null,
-  );
-  const src = $derived(
-    yt
-      ? youtubeEmbedUrl(yt, {
-          start: media.ytStart,
-          loop: media.ytLoop,
-          autoplay: true,
-        })
-      : "",
-  );
-
-  $effect(() => {
-    if (!ytEl || !yt) return;
-    try {
-      ytEl.contentWindow?.postMessage(
-        JSON.stringify({ event: "command", func: "setVolume", args: [media.volume] }),
-        "*",
-      );
-    } catch {
-      /* ignore */
-    }
+  onMount(() => {
+    void ytBgm.init("yt-player");
   });
 </script>
 
-{#if yt && src}
-  <div class="yt-bgm" aria-hidden="true">
-    <iframe
-      bind:this={ytEl}
-      {src}
-      title="Background music"
-      referrerpolicy="strict-origin-when-cross-origin"
-      allow="autoplay; encrypted-media"
-    ></iframe>
-  </div>
-{/if}
+<div class="yt-bgm" aria-hidden="true">
+  <div id="yt-player"></div>
+</div>
 
 <style>
   .yt-bgm {
@@ -54,9 +23,8 @@
     pointer-events: none;
     z-index: -1;
   }
-  iframe {
+  #yt-player {
     width: 1px;
     height: 1px;
-    border: 0;
   }
 </style>

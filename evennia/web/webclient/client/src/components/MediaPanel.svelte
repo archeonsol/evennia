@@ -2,14 +2,12 @@
   import { media } from "../lib/media.svelte";
   import { youtubeId } from "../lib/media";
 
-  let audioEl = $state<HTMLAudioElement | null>(null);
   let videoEl = $state<HTMLVideoElement | null>(null);
 
   const yt = $derived(media.nowPlaying ? youtubeId(media.nowPlaying.url) : null);
 
   function tryPlay(el: HTMLMediaElement | null): void {
     if (!el) return;
-    el.loop = media.audioLoop;
     el.play().catch(() => {
       const resume = () => {
         el.play().catch(() => {});
@@ -21,15 +19,13 @@
     });
   }
 
-  // Push the store volume into whichever player is live (YouTube volume is handled by YoutubeBgm).
   $effect(() => {
     const v = media.volume / 100;
-    if (audioEl) audioEl.volume = v;
-    if (videoEl) videoEl.volume = v;
+    if (videoEl && !media.isFadeActive) videoEl.volume = v;
   });
 
   $effect(() => {
-    if (media.nowPlaying?.type === "audio") tryPlay(audioEl);
+    if (media.nowPlaying?.type === "video") tryPlay(videoEl);
   });
 </script>
 
@@ -42,7 +38,7 @@
 
     {#if media.nowPlaying}
       <div class="player">
-        {#if yt}
+        {#if yt || media.nowPlaying.type === "audio"}
           <p class="yt-note">
             <a href={media.nowPlaying.url} target="_blank" rel="noopener">{media.nowPlaying.url}</a>
           </p>
@@ -50,22 +46,20 @@
           <video bind:this={videoEl} src={media.nowPlaying.url} controls>
             <track kind="captions" />
           </video>
-        {:else}
-          <audio bind:this={audioEl} src={media.nowPlaying.url} controls loop={media.audioLoop}></audio>
         {/if}
-      </div>
-      <div class="vol">
-        <span class="vglyph" aria-hidden="true">{media.volume === 0 ? "🔇" : "🔊"}</span>
-        <input
-          type="range" min="0" max="100" step="1" value={media.volume}
-          oninput={(e) => media.setVolume(+e.currentTarget.value)}
-          aria-label="volume"
-        />
-        <span class="vval">{media.volume}</span>
       </div>
     {:else}
       <p class="empty">Nothing playing. The game can push audio or a YouTube link here.</p>
     {/if}
+    <div class="vol">
+      <span class="vglyph" aria-hidden="true">{media.volume === 0 ? "🔇" : "🔊"}</span>
+      <input
+        type="range" min="0" max="100" step="1" value={media.volume}
+        oninput={(e) => media.setVolume(+e.currentTarget.value)}
+        aria-label="volume"
+      />
+      <span class="vval">{media.volume}</span>
+    </div>
   </div>
 
   <div class="gallery">
@@ -94,11 +88,9 @@
   .x:hover { color: var(--accent-bright); }
   .np { flex: 0 0 auto; border-bottom: 1px solid var(--accent); }
   .player { padding: 8px 10px 0; }
-  .player iframe { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border-bright); }
-  .player audio, .player video { width: 100%; }
+  .player video { width: 100%; max-height: 240px; border: 1px solid var(--border-bright); }
   .yt-note { margin: 0; padding: 8px 10px; font-size: 0.78rem; color: var(--fg-dim); }
   .yt-note a { color: var(--accent-bright); word-break: break-all; }
-  .player video { max-height: 240px; border: 1px solid var(--border-bright); }
   .vol { display: flex; align-items: center; gap: 8px; padding: 6px 10px 9px; }
   .vol input { flex: 1; accent-color: var(--accent); }
   .vglyph { font-size: 0.9rem; }

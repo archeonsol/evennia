@@ -18,6 +18,7 @@ import { toasts } from "./lib/toasts.svelte";
 import { notify } from "./lib/notify.svelte";
 import { renderNodeHtml } from "./lib/render";
 import { media } from "./lib/media.svelte";
+import { parseYoutubeStart } from "./lib/media";
 import { ui } from "./lib/ui.svelte";
 
 // Legacy global API so in-game MXP links (`<a onclick="Evennia.msg(...)">`) and
@@ -106,7 +107,9 @@ connection.on("oob", (env) => {
     const kw = env.kwargs ?? {};
     if (!url) return;
     if (event === "youtube") {
-      media.playYoutube(String(url), Number(kw.start ?? 0), !!(kw.loop ?? kw.looping));
+      const raw = String(url);
+      const start = Number(kw.start ?? parseYoutubeStart(raw) ?? 0);
+      media.playYoutube(raw, start, !!(kw.loop ?? kw.looping));
     } else {
       media.add(event, String(url), { loop: !!(kw.loop ?? kw.looping) });
     }
@@ -116,24 +119,37 @@ connection.on("oob", (env) => {
     if (rawId != null) {
       media.playYoutube(String(rawId), Number(args[1] ?? 0), !!(args[2] === 1 || args[2] === true));
     }
-  } else if (event === "stop_music" || event === "stop_music_now" || event === "STOP_AUDIO") {
-    media.stop();
+  } else if (event === "stop_music") {
+    const kw = env.kwargs ?? {};
+    const fadeMs = kw.fade_out != null ? Number(kw.fade_out) * 1000 : undefined;
+    media.stop(fadeMs);
+  } else if (event === "stop_music_now") {
+    media.stopNow();
+  } else if (event === "STOP_AUDIO") {
+    const kw = env.kwargs ?? {};
+    const fadeMs = kw.fade_out != null ? Number(kw.fade_out) * 1000 : undefined;
+    media.stop(fadeMs);
   } else if (event === "yt_set_loop") {
     const args = Array.isArray(env.args) ? env.args : [];
     media.setYtLoop(!!(args[0] === 1 || args[0] === true));
   } else if (event === "play_music") {
     const url = Array.isArray(env.args) ? env.args[0] : env.args;
-    if (url) media.add("audio", String(url), { loop: true });
+    if (url) media.playMusic(String(url));
   } else if (event === "PLAY_AUDIO") {
     const kw = env.kwargs ?? {};
     const url = kw.url ?? (Array.isArray(env.args) ? env.args[0] : env.args);
     if (url) {
-      media.add("audio", String(url), { loop: !!kw.loop });
-      if (kw.volume != null) media.setVolume(Math.round(Number(kw.volume) * 100));
+      media.playAudio(String(url), {
+        loop: !!kw.loop,
+        volume: kw.volume != null ? Number(kw.volume) : undefined,
+        fadeIn: kw.fade_in != null ? Number(kw.fade_in) : undefined,
+      });
     }
   } else if (event === "SET_AUDIO_VOLUME") {
     const kw = env.kwargs ?? {};
-    if (kw.volume != null) media.setVolume(Math.round(Number(kw.volume) * 100));
+    if (kw.volume != null) {
+      media.setAudioVolume(Number(kw.volume), kw.fade != null ? Number(kw.fade) : 1);
+    }
   } else if (event.startsWith("community_")) {
     toasts.fromCommunity(event, env.kwargs ?? {});
   }

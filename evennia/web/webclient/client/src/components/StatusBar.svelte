@@ -3,6 +3,7 @@
   import { scene } from "../lib/scene.svelte";
   import { dock, VIEWS } from "../lib/dock.svelte";
   import { chat } from "../lib/chat.svelte";
+  import { media } from "../lib/media.svelte";
 
   let { onsettings }: { onsettings: () => void } = $props();
 
@@ -70,6 +71,20 @@
   </div>
 
   <div class="zone right">
+    <div class="vol" title="Music volume">
+      <span class="vglyph" aria-hidden="true">{media.volume === 0 ? "🔇" : "🔊"}</span>
+      <label class="sr-only" for="hud-vol">Music volume</label>
+      <input
+        id="hud-vol"
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={media.volume}
+        oninput={(e) => media.setVolume(+e.currentTarget.value)}
+        aria-label="Music volume"
+      />
+    </div>
     <span class="brand glow-text">UNDERSPIRE</span>
     <div class="menu">
       <button class="cfg" onclick={() => (viewsOpen = !viewsOpen)} aria-haspopup="true" aria-expanded={viewsOpen}>[ VIEWS ]</button>
@@ -145,6 +160,20 @@
     white-space: nowrap;
   }
   .brand { color: var(--accent-bright); letter-spacing: 0.32em; font-weight: 500; }
+  .vol { display: flex; align-items: center; gap: 4px; }
+  .vol input { width: 4.5rem; accent-color: var(--accent); }
+  .vglyph { font-size: 0.75rem; line-height: 1; }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .cfg {
     background: none;
     border: none;
