@@ -1,9 +1,8 @@
 # Releases & Versioning
 
 Fork releases use PEP 440 local version identifiers:
-`6.0.0+underspire.<n>`, where `<n>` increments on each tagged release.
-The `+local` suffix means `pip` installs cleanly and never collides with
-an upstream `6.0.0` release.
+`6.0.0+underspire.<n>`, where `<n>` increments on each tagged release. The
+`+local` suffix means `pip` installs cleanly and never collides with upstream.
 
 ## When to cut a release
 
@@ -34,9 +33,8 @@ of truth — out-of-sync files between them mean a release is broken.
 | [`uv.lock`](../../uv.lock) | Run `uv lock` to regenerate — don't hand-edit |
 | [`CHANGELOG-FORK.md`](../../CHANGELOG-FORK.md) | New entry at top under `---` separator |
 
-At runtime, the version string with the current git rev appended is
-exposed as the package's `__version__` attribute (see
-[`evennia/__init__.py`](../../evennia/__init__.py)).
+At runtime, this string plus the current git rev is exposed as the package's
+`__version__` (see [`evennia/__init__.py`](../../evennia/__init__.py)).
 
 ## Changelog entry format
 
@@ -80,13 +78,11 @@ worked examples; mirror their depth and section structure.
    - `git rm` any orphaned `docs/source/Contribs/Contrib-*.md` left behind
      for removed contribs — the generator writes live pages but never
      prunes stale ones.
-   - For every contrib page you removed, grep the narrative docs for inbound
-     links to it and fix them — pruning the page does not touch the prose
-     that pointed at it, so each removal otherwise leaves dead links. Both
-     link styles: `../Contribs/Contrib-<Name>.md` and the autodoc form
-     `(evennia.contrib.<path>)`. Keep historical release notes/changelogs as
-     history (de-link the text, don't rewrite the entry); drop or reword
-     active howto/concept recommendations that point at a now-absent contrib.
+   - For every removed contrib page, grep the narrative docs for inbound links
+     and fix them (pruning the page leaves the prose that pointed at it). Both
+     styles: `../Contribs/Contrib-<Name>.md` and autodoc `(evennia.contrib.<path>)`.
+     Keep historical changelogs as history (de-link, don't rewrite); drop or
+     reword active howto/concept recommendations pointing at a now-absent contrib.
 6. Run the relevant test suite from the test game dir (see
    [Testing](testing.md)) before merging. Don't tag a release that
    doesn't pass.
