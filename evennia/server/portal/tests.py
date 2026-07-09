@@ -197,6 +197,24 @@ class TestIRC(TestCase):
 class TestTelnet(TwistedTestCase):
     def setUp(self):
         super().setUp()
+        # connectionMade schedules the telnet handshake via delay(); without a
+        # bound loop _DeferLaterCompat.call_later has nowhere to schedule and
+        # raises. Bind a fresh, non-running loop (mirroring the old always-present
+        # reactor): the handshake is scheduled but never fires, and each test
+        # cancels it. Restore the prior global loop identity on teardown.
+        import asyncio
+
+        from evennia.utils import clock
+
+        self._saved_loop = (clock._main_loop, clock._loop_thread_id)
+        self._loop = asyncio.new_event_loop()
+        clock.bind_loop(self._loop)
+
+        def _restore():
+            self._loop.close()
+            clock._main_loop, clock._loop_thread_id = self._saved_loop
+
+        self.addCleanup(_restore)
         self.portal = EvenniaPortalService()
         evennia.EVENNIA_PORTAL_SERVICE = self.portal
         self.amp_server_factory = AMPServerFactory(self.portal)
