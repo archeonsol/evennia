@@ -38,6 +38,7 @@
       bind:this={ytEl}
       {src}
       title="Background music"
+      referrerpolicy="strict-origin-when-cross-origin"
       allow="autoplay; encrypted-media"
     ></iframe>
   </div>
