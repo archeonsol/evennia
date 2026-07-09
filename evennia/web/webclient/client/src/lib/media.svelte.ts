@@ -2,8 +2,9 @@
 // become the "now playing" so music doesn't scroll away in the log. Fed from the
 // same server events as the inline log media.
 
-import { mediaHtml } from "./media";
+import { mediaHtml, youtubeId } from "./media";
 import { session } from "./session.svelte";
+import { dock } from "./dock.svelte";
 
 export interface MediaItem {
   type: string;
@@ -17,6 +18,9 @@ class MediaStore {
   images = $state<MediaItem[]>([]);
   nowPlaying = $state<MediaItem | null>(null);
   volume = $state<number>(80); // 0..100
+  ytStart = $state(0);
+  ytLoop = $state(false);
+  audioLoop = $state(false);
 
   constructor() {
     try {
@@ -36,7 +40,20 @@ class MediaStore {
     }
   }
 
-  add(type: string, url: string): void {
+  private noteNowPlaying(label: string): void {
+    const safe = label.replace(/"/g, "&quot;");
+    session.append(
+      `<span class="media-note">♪ media: ${safe} — see the Media panel</span>`,
+      "media",
+    );
+    dock.openView("media");
+  }
+
+  add(type: string, url: string, opts: { loop?: boolean; start?: number } = {}): void {
+    if (type === "youtube") {
+      this.playYoutube(url, opts.start ?? 0, opts.loop ?? false);
+      return;
+    }
     const html = mediaHtml(type, url);
     if (!html) return;
     const item = { type, url, html };
@@ -44,19 +61,41 @@ class MediaStore {
       this.images = [...this.images, item].slice(-60);
       session.append(html, "media"); // images still show inline
     } else {
-      // Audio / video / YouTube: park it in the panel (persistent player) and
-      // leave a compact marker in the log instead of a scrolling player.
+      this.audioLoop = !!opts.loop;
+      this.ytStart = 0;
+      this.ytLoop = false;
       this.nowPlaying = item;
-      const safe = url.replace(/"/g, "&quot;");
-      session.append(
-        `<span class="media-note">♪ media: <a href="${safe}" target="_blank" rel="noopener">${safe}</a> - see the Media panel</span>`,
-        "media",
+      this.noteNowPlaying(
+        `<a href="${url.replace(/"/g, "&quot;")}" target="_blank" rel="noopener">${url.replace(/"/g, "&quot;")}</a>`,
       );
     }
   }
 
+  /** Legacy room-DJ / @music path: bare id or URL, optional sync offset + loop. */
+  playYoutube(raw: string, startSeconds = 0, loop = false): void {
+    const id = youtubeId(raw);
+    if (!id) return;
+    this.ytStart = Math.max(0, Math.floor(startSeconds));
+    this.ytLoop = loop;
+    this.audioLoop = false;
+    const url = `https://www.youtube.com/watch?v=${id}`;
+    const html = mediaHtml("youtube", url);
+    if (!html) return;
+    this.nowPlaying = { type: "youtube", url, html };
+    this.noteNowPlaying(
+      `<a href="${url}" target="_blank" rel="noopener">YouTube ${id}</a>`,
+    );
+  }
+
+  setYtLoop(enabled: boolean): void {
+    this.ytLoop = enabled;
+  }
+
   stop(): void {
     this.nowPlaying = null;
+    this.ytStart = 0;
+    this.ytLoop = false;
+    this.audioLoop = false;
   }
   clearImages(): void {
     this.images = [];

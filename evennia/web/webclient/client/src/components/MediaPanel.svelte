@@ -1,12 +1,35 @@
 <script lang="ts">
   import { media } from "../lib/media.svelte";
-  import { youtubeId } from "../lib/media";
+  import { youtubeId, youtubeEmbedUrl } from "../lib/media";
 
   let audioEl = $state<HTMLAudioElement | null>(null);
   let videoEl = $state<HTMLVideoElement | null>(null);
   let ytEl = $state<HTMLIFrameElement | null>(null);
 
   const yt = $derived(media.nowPlaying ? youtubeId(media.nowPlaying.url) : null);
+  const ytSrc = $derived(
+    yt
+      ? youtubeEmbedUrl(yt, {
+          start: media.ytStart,
+          loop: media.ytLoop,
+          autoplay: true,
+        })
+      : "",
+  );
+
+  function tryPlay(el: HTMLMediaElement | null): void {
+    if (!el) return;
+    el.loop = media.audioLoop;
+    el.play().catch(() => {
+      const resume = () => {
+        el.play().catch(() => {});
+        document.removeEventListener("click", resume);
+        document.removeEventListener("keydown", resume);
+      };
+      document.addEventListener("click", resume, { once: true });
+      document.addEventListener("keydown", resume, { once: true });
+    });
+  }
 
   // Push the store volume into whichever player is live.
   $effect(() => {
@@ -25,6 +48,10 @@
       }
     }
   });
+
+  $effect(() => {
+    if (media.nowPlaying?.type === "audio") tryPlay(audioEl);
+  });
 </script>
 
 <div class="media-panel">
@@ -39,7 +66,7 @@
         {#if yt}
           <iframe
             bind:this={ytEl}
-            src={`https://www.youtube-nocookie.com/embed/${yt}?enablejsapi=1`}
+            src={ytSrc}
             title="YouTube player"
             frameborder="0"
             allow="autoplay; encrypted-media; picture-in-picture"
@@ -50,7 +77,7 @@
             <track kind="captions" />
           </video>
         {:else}
-          <audio bind:this={audioEl} src={media.nowPlaying.url} controls></audio>
+          <audio bind:this={audioEl} src={media.nowPlaying.url} controls loop={media.audioLoop}></audio>
         {/if}
       </div>
       <div class="vol">

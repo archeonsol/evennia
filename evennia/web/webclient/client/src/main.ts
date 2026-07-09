@@ -102,10 +102,38 @@ connection.on("oob", (env) => {
   } else if (event === "player_mention") {
     chat.onMention(env.kwargs ?? {});
   } else if (event === "image" || event === "audio" || event === "video" || event === "youtube") {
-    // Server multimedia: target.msg(image="url") etc. Args = [url] (optionally a
-    // {type} kwargs dict, ignored here). Render an inline media line in the log.
     const url = Array.isArray(env.args) ? env.args[0] : env.args;
-    if (url) media.add(event, String(url));
+    const kw = env.kwargs ?? {};
+    if (!url) return;
+    if (event === "youtube") {
+      media.playYoutube(String(url), Number(kw.start ?? 0), !!(kw.loop ?? kw.looping));
+    } else {
+      media.add(event, String(url), { loop: !!(kw.loop ?? kw.looping) });
+    }
+  } else if (event === "play_yt") {
+    const args = Array.isArray(env.args) ? env.args : [];
+    const rawId = args[0];
+    if (rawId != null) {
+      media.playYoutube(String(rawId), Number(args[1] ?? 0), !!(args[2] === 1 || args[2] === true));
+    }
+  } else if (event === "stop_music" || event === "stop_music_now" || event === "STOP_AUDIO") {
+    media.stop();
+  } else if (event === "yt_set_loop") {
+    const args = Array.isArray(env.args) ? env.args : [];
+    media.setYtLoop(!!(args[0] === 1 || args[0] === true));
+  } else if (event === "play_music") {
+    const url = Array.isArray(env.args) ? env.args[0] : env.args;
+    if (url) media.add("audio", String(url), { loop: true });
+  } else if (event === "PLAY_AUDIO") {
+    const kw = env.kwargs ?? {};
+    const url = kw.url ?? (Array.isArray(env.args) ? env.args[0] : env.args);
+    if (url) {
+      media.add("audio", String(url), { loop: !!kw.loop });
+      if (kw.volume != null) media.setVolume(Math.round(Number(kw.volume) * 100));
+    }
+  } else if (event === "SET_AUDIO_VOLUME") {
+    const kw = env.kwargs ?? {};
+    if (kw.volume != null) media.setVolume(Math.round(Number(kw.volume) * 100));
   } else if (event.startsWith("community_")) {
     toasts.fromCommunity(event, env.kwargs ?? {});
   }

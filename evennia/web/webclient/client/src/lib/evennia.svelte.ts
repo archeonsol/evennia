@@ -17,7 +17,8 @@ declare global {
 }
 
 const SUBPROTOCOL = "azaban.v1";
-const RECONNECT_MS = 2000;
+const RECONNECT_BASE_MS = 2000;
+const RECONNECT_MAX_MS = 30000;
 
 // Capabilities this shell announces to the server. As `render` / `patch` /
 // `asset` land, flip these on to opt into structured delivery for this session.
@@ -60,6 +61,7 @@ class AzabanConnection {
   private seq = 0;
   private everOpen = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
   private manualClose = false;
   // Resumable sessions: a stable token + the last server seq we've seen, sent in
   // `hello` so the portal can replay frames missed across a brief disconnect.
@@ -156,6 +158,7 @@ class AzabanConnection {
     this.loggedOut = false;
     this.logoutReason = "";
     this.manualClose = false;
+    this.reconnectAttempt = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -193,6 +196,7 @@ class AzabanConnection {
 
     ws.onopen = () => {
       this.everOpen = true;
+      this.reconnectAttempt = 0;
       this.state = "open";
       // Announce our capabilities (replaces the CLIENT_NARRATIVE flag).
       this.sendEnvelope({
@@ -202,8 +206,11 @@ class AzabanConnection {
         resume: { token: this.clientToken, last_seq: this.lastSeq },
       });
     };
-    ws.onclose = () => {
+    ws.onclose = (ev: CloseEvent) => {
       this.state = "closed";
+      if (!this.manualClose && this.everOpen) {
+        console.warn("azaban: websocket closed", ev.code, ev.reason || "(no reason)");
+      }
       // Fail any in-flight RPCs so callers don't hang across a disconnect.
       for (const [seq, p] of this.pending) {
         this.pending.delete(seq);
@@ -252,10 +259,15 @@ class AzabanConnection {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer || this.manualClose) return;
+    const delay = Math.min(
+      RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
+      RECONNECT_MAX_MS,
+    );
+    this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.state !== "open") this.open();
-    }, RECONNECT_MS);
+    }, delay);
   }
 }
 
