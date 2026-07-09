@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.156 — BGM re-enter: restore immediate play_yt
+
+### Webclient
+
+- **`media.svelte.ts`:** Remove crossfade queue on `play_yt` during leave fade (legacy
+  cancels fade and starts at the server offset immediately). Tighten quiet sync to
+  audible playback only (hello/reconnect resync, not mid-leave).
+- **`youtube-bgm.svelte.ts`:** Add `isAudible()` helper for sync gating.
+
+---
+
 ## 6.0.0+underspire.155 — Azaban room BGM (full parity)
 
 Single release consolidating the `.150`–`.154` fix arc (those tags are removed;

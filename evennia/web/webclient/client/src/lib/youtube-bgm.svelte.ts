@@ -108,6 +108,17 @@ class YoutubeBgmController {
     }
   }
 
+  /** Audible playback (not fading in/out, volume up). */
+  isAudible(): boolean {
+    if (this.fadeActive || this.pendingFadeInMs > 0 || !this.isPlaying()) return false;
+    try {
+      if (this.player?.isMuted?.()) return false;
+      return (this.player?.getVolume?.() ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
   init(hostId = "yt-player"): Promise<void> {
     this.hostId = hostId;
     if (!this.readyPromise) {
@@ -198,9 +209,7 @@ class YoutubeBgmController {
       return;
     }
     try {
-      const vol = this.player.getVolume?.() ?? 0;
-      const audible = !this.fadeActive && this.pendingFadeInMs <= 0 && vol > 0;
-      if (audible) {
+      if (this.isAudible()) {
         this.syncOffset = offset;
         this.syncWallAt = Date.now() / 1000;
         this.player.seekTo(offset, true);

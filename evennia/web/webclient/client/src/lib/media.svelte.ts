@@ -27,8 +27,6 @@ class MediaStore {
   private html5Track: HTMLAudioElement | null = null;
   private html5FadeTimer: ReturnType<typeof setInterval> | null = null;
   private ytPlayPending: { id: string; start: number; loop: boolean } | null = null;
-  private queuedYoutubePlay: { id: string; start: number; loop: boolean } | null = null;
-  private crossfadeOutActive = false;
   private stopGeneration = 0;
   ytApiWarned = false;
 
@@ -135,32 +133,21 @@ class MediaStore {
     if (!pending) return;
 
     const currentId = this.currentYoutubeId() ?? ytBgm.getActiveVideoId();
-    if (currentId === pending.id && (ytBgm.isPlaying() || this.nowPlaying?.type === "youtube")) {
+    // Hello/reconnect offset resync only — not while leaving or fading.
+    if (
+      currentId === pending.id &&
+      ytBgm.isAudible() &&
+      !ytBgm.isFadeActive()
+    ) {
       this.applyQuietYoutubeSync(pending);
       return;
     }
 
-    if (ytBgm.isFadeActive()) {
-      this.queuedYoutubePlay = pending;
-      return;
-    }
-
-    const playingOther =
-      ytBgm.isPlaying() && currentId != null && currentId !== pending.id;
-    if (playingOther) {
-      this.queuedYoutubePlay = pending;
-      if (!this.crossfadeOutActive) {
-        this.crossfadeOutActive = true;
-        ytBgm.fadeOut(YT_FADE_MS, () => {
-          this.crossfadeOutActive = false;
-          this.clearPlayback();
-          this.drainYoutubeQueue();
-        });
-      }
-      return;
-    }
-
-    this.startYoutubePlay(pending);
+    // Legacy: play_yt cancels any in-flight fade and starts at the server offset.
+    const quiet =
+      currentId === pending.id &&
+      (ytBgm.isFadeActive() || this.nowPlaying?.type === "youtube");
+    this.startYoutubePlay(pending, { quiet });
   }
 
   /** Same track, new offset — seek only; no log line or dock. */
@@ -171,13 +158,10 @@ class MediaStore {
     ytBgm.syncSameTrack(pending.id, pending.start, pending.loop);
   }
 
-  private drainYoutubeQueue(): void {
-    const next = this.queuedYoutubePlay;
-    this.queuedYoutubePlay = null;
-    if (next) this.startYoutubePlay(next);
-  }
-
-  private startYoutubePlay(pending: { id: string; start: number; loop: boolean }): void {
+  private startYoutubePlay(
+    pending: { id: string; start: number; loop: boolean },
+    opts: { quiet?: boolean } = {},
+  ): void {
     this.stopGeneration += 1;
     ytBgm.cancelFade();
 
@@ -189,7 +173,7 @@ class MediaStore {
     const html = mediaHtml("youtube", url);
     if (!html) return;
     this.nowPlaying = { type: "youtube", url, html };
-    this.noteNowPlaying(url);
+    if (!opts.quiet) this.noteNowPlaying(url);
     ytBgm.setRoomLoop(pending.loop);
     ytBgm.playSequence(pending.id, pending.start, pending.loop);
   }
@@ -268,10 +252,7 @@ class MediaStore {
     const done = (): void => {
       if (gen !== this.stopGeneration) return;
       pending -= 1;
-      if (pending <= 0) {
-        this.clearPlayback();
-        this.drainYoutubeQueue();
-      }
+      if (pending <= 0) this.clearPlayback();
     };
 
     const fadeYoutube =
@@ -290,8 +271,6 @@ class MediaStore {
   /** `@musicstop` / `stop_music_now` — immediate cut. */
   stopNow(): void {
     this.stopGeneration += 1;
-    this.queuedYoutubePlay = null;
-    this.crossfadeOutActive = false;
     this.stopYoutubeNow();
     this.stopHtml5Now();
     this.clearPlayback();
