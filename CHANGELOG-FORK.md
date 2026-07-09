@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.154 — BGM connect sync, crossfade, HUD chip
+
+### Webclient
+
+- **`media.svelte.ts`:** Room-to-room crossfade (queue `play_yt` until leave fade finishes);
+  quiet same-track re-sync (seek only, no log/dock); YouTube BGM no longer auto-opens Media
+  dock (video/audio still do); HUD helpers for now-playing chip.
+- **`youtube-bgm.svelte.ts`:** Periodic drift correction while room BGM plays; YouTube IFrame
+  API load timeout + user-visible warning on failure.
+- **`main.ts`:** Dev OOB trace via `localStorage.setItem("underspire.trace.oob", "1")`.
+- **`StatusBar.svelte`:** Clickable now-playing chip opens Media panel.
+
+### Game (mootest)
+
+- **`client_media.push_room_bgm_if_any`:** Shared helper for room BGM on enter/connect.
+- **`server/conf/inputfuncs.azaban_hello`:** Re-push room BGM on shell connect/reconnect.
+- **`wilderness_map.ColonyWildernessRoom`:** BGM stop/enter hooks (wilderness parity).
+- **`dj_flow.broadcast_play_yt`:** Fractional offset sync (matches `client_media`).
+- **Help text:** `@music` vs `@setmusic` in action docstrings and usage messages.
+
+---
+
 ## 6.0.0+underspire.153 — YouTube BGM fade + sync robustness
 
 ### Webclient

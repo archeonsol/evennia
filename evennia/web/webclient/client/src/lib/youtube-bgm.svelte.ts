@@ -68,7 +68,24 @@ class YoutubeBgmController {
   private pendingFadeInMs = 0;
   /** Target sync offset for the active playGen (seconds, may be fractional). */
   private syncOffset = 0;
+  /** Wall-clock second when the current syncOffset was applied. */
+  private syncWallAt = 0;
   private activeVideoId: string | null = null;
+  private driftTimer: ReturnType<typeof setInterval> | null = null;
+  private apiErrorHandler: ((msg: string) => void) | null = null;
+  apiLoadFailed = false;
+
+  private static readonly DRIFT_CHECK_MS = 30_000;
+  private static readonly DRIFT_THRESHOLD_S = 2.0;
+  private static readonly API_LOAD_TIMEOUT_MS = 15_000;
+
+  setApiErrorHandler(fn: (msg: string) => void): void {
+    this.apiErrorHandler = fn;
+  }
+
+  getActiveVideoId(): string | null {
+    return this.activeVideoId;
+  }
 
   setVolumeGetter(fn: () => number): void {
     this.volumeFn = fn;
@@ -100,20 +117,40 @@ class YoutubeBgmController {
 
   private loadApi(): Promise<void> {
     if (window.YT?.Player) return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       if (window.YT?.Player) {
         resolve();
         return;
       }
+      let settled = false;
+      const finish = (failed: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (failed) {
+          this.apiLoadFailed = true;
+          const msg =
+            "YouTube player failed to load (adblock, CSP, or network). Room music may be silent.";
+          console.warn("yt-bgm:", msg);
+          this.apiErrorHandler?.(msg);
+          reject(new Error(msg));
+        } else {
+          resolve();
+        }
+      };
+      const timer = setTimeout(() => finish(true), YoutubeBgmController.API_LOAD_TIMEOUT_MS);
       const prev = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
         prev?.();
-        resolve();
+        finish(false);
       };
       if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
         const tag = document.createElement("script");
         tag.src = "https://www.youtube.com/iframe_api";
+        tag.onerror = () => finish(true);
         document.head.appendChild(tag);
+      } else if (window.YT?.Player) {
+        finish(false);
       }
     });
   }
@@ -121,6 +158,7 @@ class YoutubeBgmController {
   private createPlayer(): Promise<void> {
     return new Promise((resolve) => {
       if (!window.YT?.Player) {
+        this.apiLoadFailed = true;
         resolve();
         return;
       }
@@ -156,13 +194,16 @@ class YoutubeBgmController {
 
     if (!this.player || typeof this.player.loadVideoById !== "function") {
       this.pendingPlay = { id: videoId, offset, loop };
-      if (document.getElementById(this.hostId)) void this.init(this.hostId);
+      if (document.getElementById(this.hostId)) {
+        void this.init(this.hostId).catch(() => {});
+      }
       return;
     }
 
     this.cancelFade();
     const gen = ++this.playGen;
     this.syncOffset = offset;
+    this.syncWallAt = Date.now() / 1000;
     this.pendingFadeInMs = YT_FADE_MS;
 
     let currentId: string | null = null;
@@ -185,6 +226,7 @@ class YoutubeBgmController {
     }
 
     this.primeSilent(gen);
+    this.startDriftLoop();
   }
 
   private loadFresh(videoId: string, offset: number): void {
@@ -224,12 +266,44 @@ class YoutubeBgmController {
     if (!this.player?.seekTo || !this.player.getCurrentTime || this.syncOffset <= 0) return;
     try {
       const now = this.player.getCurrentTime();
-      const drift = Math.abs(now - this.syncOffset);
+      const expected = this.expectedPlaybackSeconds();
+      const drift = Math.abs(now - expected);
       if (drift > 1.25) {
-        this.player.seekTo(this.syncOffset, true);
+        this.player.seekTo(expected, true);
       }
     } catch {
       /* ignore */
+    }
+  }
+
+  private expectedPlaybackSeconds(): number {
+    const elapsed = Date.now() / 1000 - this.syncWallAt;
+    return this.syncOffset + Math.max(0, elapsed);
+  }
+
+  private startDriftLoop(): void {
+    this.stopDriftLoop();
+    if (this.syncOffset <= 0) return;
+    this.driftTimer = setInterval(() => {
+      if (this.fadeActive || !this.player?.getCurrentTime) return;
+      try {
+        const PS = window.YT?.PlayerState;
+        if (PS && this.player.getPlayerState() !== PS.PLAYING) return;
+        const now = this.player.getCurrentTime();
+        const expected = this.expectedPlaybackSeconds();
+        if (Math.abs(now - expected) > YoutubeBgmController.DRIFT_THRESHOLD_S) {
+          this.player.seekTo(expected, true);
+        }
+      } catch {
+        /* ignore */
+      }
+    }, YoutubeBgmController.DRIFT_CHECK_MS);
+  }
+
+  private stopDriftLoop(): void {
+    if (this.driftTimer) {
+      clearInterval(this.driftTimer);
+      this.driftTimer = null;
     }
   }
 
@@ -254,9 +328,12 @@ class YoutubeBgmController {
 
   stopNow(): void {
     this.cancelFade();
+    this.stopDriftLoop();
     this.pendingPlay = null;
     this.playGen += 1;
     this.activeVideoId = null;
+    this.syncOffset = 0;
+    this.syncWallAt = 0;
     if (this.player?.stopVideo) {
       try {
         this.player.stopVideo();

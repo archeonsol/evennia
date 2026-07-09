@@ -20,6 +20,18 @@ import { renderNodeHtml } from "./lib/render";
 import { media } from "./lib/media.svelte";
 import { ui } from "./lib/ui.svelte";
 
+const OOB_TRACE_KEY = "underspire.trace.oob";
+
+function oobTrace(event: string, detail?: unknown): void {
+  try {
+    if (localStorage.getItem(OOB_TRACE_KEY) === "1") {
+      console.debug("[oob]", event, detail ?? "");
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 // Legacy global API so in-game MXP links (`<a onclick="Evennia.msg(...)">`) and
 // any code expecting the classic global route to the live socket.
 (window as any).Evennia = {
@@ -111,14 +123,17 @@ connection.on("oob", (env) => {
   } else if (event === "play_yt") {
     const args = Array.isArray(env.args) ? env.args : [];
     const rawId = args[0];
+    oobTrace("play_yt", args);
     if (rawId != null) {
       media.playYoutube(String(rawId), parseFloat(String(args[1] ?? 0)), !!(args[2] === 1 || args[2] === true));
     }
   } else if (event === "stop_music") {
+    oobTrace("stop_music", env.kwargs ?? {});
     const kw = env.kwargs ?? {};
     const fadeMs = kw.fade_out != null ? Number(kw.fade_out) * 1000 : undefined;
     media.stop(fadeMs);
   } else if (event === "stop_music_now") {
+    oobTrace("stop_music_now");
     media.stopNow();
   } else if (event === "STOP_AUDIO") {
     const kw = env.kwargs ?? {};

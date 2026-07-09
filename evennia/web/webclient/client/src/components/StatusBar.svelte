@@ -68,6 +68,16 @@
       <span class="loc glow-text">{@html scene.room.name}</span>
       <span class="mark" aria-hidden="true">⌁</span>
     {/if}
+    {#if media.nowPlaying}
+      <button
+        type="button"
+        class="now-playing"
+        title="Open media panel"
+        onclick={() => media.openNowPlaying()}
+      >
+        {media.nowPlayingLabel()}
+      </button>
+    {/if}
   </div>
 
   <div class="zone right">
@@ -159,6 +169,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .now-playing {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    cursor: pointer;
+    max-width: 14ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .now-playing:hover { color: var(--accent-bright); border-color: var(--accent); }
   .brand { color: var(--accent-bright); letter-spacing: 0.32em; font-weight: 500; }
   .vol { display: flex; align-items: center; gap: 4px; }
   .vol input { width: 4.5rem; accent-color: var(--accent); }

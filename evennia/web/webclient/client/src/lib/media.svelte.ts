@@ -27,11 +27,19 @@ class MediaStore {
   private html5Track: HTMLAudioElement | null = null;
   private html5FadeTimer: ReturnType<typeof setInterval> | null = null;
   private ytPlayPending: { id: string; start: number; loop: boolean } | null = null;
+  private queuedYoutubePlay: { id: string; start: number; loop: boolean } | null = null;
+  private crossfadeOutActive = false;
   private stopGeneration = 0;
+  ytApiWarned = false;
 
   constructor() {
     this.loadVolume();
     ytBgm.setVolumeGetter(() => this.volume);
+    ytBgm.setApiErrorHandler((msg) => {
+      if (this.ytApiWarned) return;
+      this.ytApiWarned = true;
+      session.append(`<span class="media-note warn">♪ ${msg}</span>`, "media");
+    });
   }
 
   private loadVolume(): void {
@@ -70,13 +78,18 @@ class MediaStore {
     }
   }
 
-  private noteNowPlaying(url: string): void {
+  private noteNowPlaying(url: string, opts: { openDock?: boolean } = {}): void {
     const safe = url.replace(/"/g, "&quot;");
     session.append(
       `<span class="media-note">♪ media: <a href="${safe}" target="_blank" rel="noopener">${safe}</a></span>`,
       "media",
     );
-    dock.openView("media");
+    if (opts.openDock) dock.openView("media");
+  }
+
+  private currentYoutubeId(): string | null {
+    if (this.nowPlaying?.type !== "youtube") return null;
+    return youtubeId(this.nowPlaying.url);
   }
 
   add(type: string, url: string, opts: { loop?: boolean; start?: number } = {}): void {
@@ -97,7 +110,7 @@ class MediaStore {
       this.ytLoop = false;
       this.audioLoop = !!opts.loop;
       this.nowPlaying = item;
-      this.noteNowPlaying(url);
+      this.noteNowPlaying(url, { openDock: true });
     } else {
       this.playHtml5(url, { loop: !!opts.loop });
     }
@@ -121,7 +134,50 @@ class MediaStore {
     this.ytPlayPending = null;
     if (!pending) return;
 
-    // Cancel in-flight leave fade; legacy play_yt always calls playYtSequence.
+    const currentId = this.currentYoutubeId() ?? ytBgm.getActiveVideoId();
+    if (currentId === pending.id && (ytBgm.isPlaying() || this.nowPlaying?.type === "youtube")) {
+      this.applyQuietYoutubeSync(pending);
+      return;
+    }
+
+    if (ytBgm.isFadeActive()) {
+      this.queuedYoutubePlay = pending;
+      return;
+    }
+
+    const playingOther =
+      ytBgm.isPlaying() && currentId != null && currentId !== pending.id;
+    if (playingOther) {
+      this.queuedYoutubePlay = pending;
+      if (!this.crossfadeOutActive) {
+        this.crossfadeOutActive = true;
+        ytBgm.fadeOut(YT_FADE_MS, () => {
+          this.crossfadeOutActive = false;
+          this.clearPlayback();
+          this.drainYoutubeQueue();
+        });
+      }
+      return;
+    }
+
+    this.startYoutubePlay(pending);
+  }
+
+  /** Same track, new offset — seek only; no log line or dock. */
+  private applyQuietYoutubeSync(pending: { id: string; start: number; loop: boolean }): void {
+    this.ytStart = pending.start;
+    this.ytLoop = pending.loop;
+    ytBgm.setRoomLoop(pending.loop);
+    ytBgm.playSequence(pending.id, pending.start, pending.loop);
+  }
+
+  private drainYoutubeQueue(): void {
+    const next = this.queuedYoutubePlay;
+    this.queuedYoutubePlay = null;
+    if (next) this.startYoutubePlay(next);
+  }
+
+  private startYoutubePlay(pending: { id: string; start: number; loop: boolean }): void {
     this.stopGeneration += 1;
     ytBgm.cancelFade();
 
@@ -190,7 +246,7 @@ class MediaStore {
     const html = mediaHtml("audio", url);
     if (html) {
       this.nowPlaying = { type: "audio", url, html };
-      this.noteNowPlaying(url);
+      this.noteNowPlaying(url, { openDock: true });
     }
     track.play().catch(() => {
       const resume = () => {
@@ -212,7 +268,10 @@ class MediaStore {
     const done = (): void => {
       if (gen !== this.stopGeneration) return;
       pending -= 1;
-      if (pending <= 0) this.clearPlayback();
+      if (pending <= 0) {
+        this.clearPlayback();
+        this.drainYoutubeQueue();
+      }
     };
 
     const fadeYoutube =
@@ -231,6 +290,8 @@ class MediaStore {
   /** `@musicstop` / `stop_music_now` — immediate cut. */
   stopNow(): void {
     this.stopGeneration += 1;
+    this.queuedYoutubePlay = null;
+    this.crossfadeOutActive = false;
     this.stopYoutubeNow();
     this.stopHtml5Now();
     this.clearPlayback();
@@ -332,6 +393,23 @@ class MediaStore {
         if (this.html5Track) this.html5Track.volume = next / 100;
       }
     }, 50);
+  }
+
+  /** Short label for HUD now-playing chip. */
+  nowPlayingLabel(): string {
+    const np = this.nowPlaying;
+    if (!np) return "";
+    if (np.type === "youtube") {
+      const id = youtubeId(np.url);
+      return id ? `♪ ${id.slice(0, 11)}` : "♪ yt";
+    }
+    if (np.type === "audio") return "♪ audio";
+    if (np.type === "video") return "▶ video";
+    return "";
+  }
+
+  openNowPlaying(): void {
+    if (this.nowPlaying) dock.openView("media");
   }
 
   clearImages(): void {
