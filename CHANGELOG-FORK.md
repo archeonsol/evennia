@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.153 — YouTube BGM fade + sync robustness
+
+### Webclient
+
+- **`youtube-bgm.svelte.ts`:** Defer fade-in until `PLAYING`/`BUFFERING` (volume API
+  is unreliable before playback starts); `mute()`/`unMute()` so `setVolume` ramps
+  are audible; same-track re-enter uses `seekTo` instead of reload; post-play
+  drift correction via `getCurrentTime()`; load YouTube IFrame API from
+  `client2.html` like legacy `base.html`.
+- **`main.ts` / `media.svelte.ts`:** Fractional `play_yt` offset (sub-second sync).
+
+### Game (mootest)
+
+- **`client_media.py` / `rooms/base.py`:** Sub-second BGM offset (`round(time.time
+  - start, 2)`) sent in `play_yt`.
+
 ## 6.0.0+underspire.152 — Room BGM leave fade and re-enter resume
 
 ### Webclient

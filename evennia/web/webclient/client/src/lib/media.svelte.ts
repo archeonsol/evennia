@@ -107,7 +107,7 @@ class MediaStore {
   playYoutube(raw: string, startSeconds = 0, loop = false): void {
     const id = youtubeId(raw);
     if (!id) return;
-    let start = Math.max(0, Math.floor(startSeconds));
+    let start = Math.max(0, Number(startSeconds) || 0);
     if (!startSeconds) {
       const fromUrl = parseYoutubeStart(raw);
       if (fromUrl != null) start = fromUrl;

@@ -112,7 +112,7 @@ connection.on("oob", (env) => {
     const args = Array.isArray(env.args) ? env.args : [];
     const rawId = args[0];
     if (rawId != null) {
-      media.playYoutube(String(rawId), Number(args[1] ?? 0), !!(args[2] === 1 || args[2] === true));
+      media.playYoutube(String(rawId), parseFloat(String(args[1] ?? 0)), !!(args[2] === 1 || args[2] === true));
     }
   } else if (event === "stop_music") {
     const kw = env.kwargs ?? {};

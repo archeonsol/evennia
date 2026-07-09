@@ -3,14 +3,23 @@
 
 export const YT_FADE_MS = 2800;
 
+interface YtVideoData {
+  video_id?: string;
+}
+
 interface YtPlayer {
   setVolume(n: number): void;
   getVolume(): number;
   getPlayerState(): number;
+  getCurrentTime(): number;
+  getVideoData(): YtVideoData;
   loadVideoById(options: { videoId: string; startSeconds?: number }): void;
   stopVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   playVideo(): void;
+  mute(): void;
+  unMute(): void;
+  isMuted(): boolean;
 }
 
 declare global {
@@ -31,8 +40,8 @@ declare global {
           width?: string | number;
           playerVars?: Record<string, number | string>;
           events?: {
-            onReady?: () => void;
-            onStateChange?: (ev: { data: number }) => void;
+            onReady?: (ev: { target: YtPlayer }) => void;
+            onStateChange?: (ev: { data: number; target: YtPlayer }) => void;
           };
         },
       );
@@ -53,6 +62,13 @@ class YoutubeBgmController {
   private volumeFn = (): number => 40;
   private readyPromise: Promise<void> | null = null;
   private hostId = "yt-player";
+  /** Incremented on each load/seek; stale onStateChange handlers are ignored. */
+  private playGen = 0;
+  /** When > 0, fade-in starts on next PLAYING/BUFFERING for current playGen. */
+  private pendingFadeInMs = 0;
+  /** Target sync offset for the active playGen (seconds, may be fractional). */
+  private syncOffset = 0;
+  private activeVideoId: string | null = null;
 
   setVolumeGetter(fn: () => number): void {
     this.volumeFn = fn;
@@ -62,7 +78,6 @@ class YoutubeBgmController {
     return this.fadeActive;
   }
 
-  /** True when the iframe player has active (or paused) media loaded. */
   isPlaying(): boolean {
     if (!this.player?.getPlayerState) return false;
     try {
@@ -75,7 +90,6 @@ class YoutubeBgmController {
     }
   }
 
-  /** Load iframe API and construct YT.Player on `hostId`. */
   init(hostId = "yt-player"): Promise<void> {
     this.hostId = hostId;
     if (!this.readyPromise) {
@@ -87,6 +101,10 @@ class YoutubeBgmController {
   private loadApi(): Promise<void> {
     if (window.YT?.Player) return Promise.resolve();
     return new Promise((resolve) => {
+      if (window.YT?.Player) {
+        resolve();
+        return;
+      }
       const prev = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
         prev?.();
@@ -106,27 +124,24 @@ class YoutubeBgmController {
         resolve();
         return;
       }
-      const p = new window.YT.Player(this.hostId, {
+      new window.YT.Player(this.hostId, {
         height: "1",
         width: "1",
         playerVars: { autoplay: 1, controls: 0, modestbranding: 1, playsinline: 1 },
         events: {
-          onReady: () => {
-            this.player = p as unknown as YtPlayer;
+          onReady: (ev) => {
+            this.player = ev.target;
             if (this.pendingPlay) {
               const pending = this.pendingPlay;
               this.pendingPlay = null;
               this.roomLoop = pending.loop;
               this.playSequence(pending.id, pending.offset, pending.loop);
-            } else {
-              this.applyVolume();
             }
             resolve();
           },
-          onStateChange: (ev) => this.onStateChange(ev),
+          onStateChange: (ev) => this.onStateChange(ev.data, ev.target),
         },
       });
-      void p;
     });
   }
 
@@ -136,25 +151,92 @@ class YoutubeBgmController {
 
   playSequence(videoId: string, offsetSeconds: number, loop: boolean): void {
     this.roomLoop = loop;
-    const offset = Math.max(0, Math.floor(offsetSeconds));
+    const offset = Math.max(0, Number(offsetSeconds) || 0);
+    this.activeVideoId = videoId;
+
     if (!this.player || typeof this.player.loadVideoById !== "function") {
       this.pendingPlay = { id: videoId, offset, loop };
       if (document.getElementById(this.hostId)) void this.init(this.hostId);
       return;
     }
+
     this.cancelFade();
-    this.player.loadVideoById({ videoId, startSeconds: offset });
+    const gen = ++this.playGen;
+    this.syncOffset = offset;
+    this.pendingFadeInMs = YT_FADE_MS;
+
+    let currentId: string | null = null;
     try {
+      currentId = this.player.getVideoData?.()?.video_id ?? null;
+    } catch {
+      /* ignore */
+    }
+
+    // Same track already loaded: seek is more accurate than reload (room re-enter sync).
+    if (currentId === videoId && this.player.seekTo) {
+      try {
+        this.player.seekTo(offset, true);
+        this.player.playVideo();
+      } catch {
+        this.loadFresh(videoId, offset);
+      }
+    } else {
+      this.loadFresh(videoId, offset);
+    }
+
+    this.primeSilent(gen);
+  }
+
+  private loadFresh(videoId: string, offset: number): void {
+    if (!this.player?.loadVideoById) return;
+    const start = Math.floor(offset);
+    this.player.loadVideoById({ videoId, startSeconds: start });
+  }
+
+  /** Mute + volume 0 before playback ramps (legacy playYtSequence parity). */
+  private primeSilent(gen: number): void {
+    if (gen !== this.playGen || !this.player) return;
+    try {
+      if (this.player.isMuted?.()) this.player.unMute();
+      this.player.mute();
       this.player.setVolume(0);
     } catch {
       /* ignore */
     }
-    this.fadeIn(YT_FADE_MS);
+  }
+
+  private beginFadeIn(): void {
+    if (!this.player?.setVolume || this.pendingFadeInMs <= 0) return;
+    const ms = this.pendingFadeInMs;
+    this.pendingFadeInMs = 0;
+    try {
+      if (this.player.isMuted?.()) this.player.unMute();
+      this.player.setVolume(0);
+    } catch {
+      /* ignore */
+    }
+    this.correctSyncDrift();
+    this.fadeIn(ms);
+  }
+
+  /** After load, nudge to server offset if startSeconds drifted (sub-second sync). */
+  private correctSyncDrift(): void {
+    if (!this.player?.seekTo || !this.player.getCurrentTime || this.syncOffset <= 0) return;
+    try {
+      const now = this.player.getCurrentTime();
+      const drift = Math.abs(now - this.syncOffset);
+      if (drift > 1.25) {
+        this.player.seekTo(this.syncOffset, true);
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   applyVolume(): void {
     if (this.fadeActive || !this.player?.setVolume) return;
     try {
+      if (this.player.isMuted?.()) this.player.unMute();
       this.player.setVolume(Math.round(this.volumeFn()));
     } catch {
       /* ignore */
@@ -167,11 +249,14 @@ class YoutubeBgmController {
       this.fadeTimer = null;
     }
     this.fadeActive = false;
+    this.pendingFadeInMs = 0;
   }
 
   stopNow(): void {
     this.cancelFade();
     this.pendingPlay = null;
+    this.playGen += 1;
+    this.activeVideoId = null;
     if (this.player?.stopVideo) {
       try {
         this.player.stopVideo();
@@ -188,6 +273,13 @@ class YoutubeBgmController {
       onDone?.();
       return;
     }
+
+    try {
+      if (this.player.isMuted?.()) this.player.unMute();
+    } catch {
+      /* ignore */
+    }
+
     let startVol = 0;
     try {
       startVol = this.player.getVolume?.() ?? 0;
@@ -201,6 +293,7 @@ class YoutubeBgmController {
       onDone?.();
       return;
     }
+
     const started = Date.now();
     this.fadeActive = true;
     this.fadeTimer = setInterval(() => {
@@ -222,6 +315,11 @@ class YoutubeBgmController {
   fadeIn(durationMs = YT_FADE_MS): void {
     this.cancelFade();
     if (!this.player?.setVolume) return;
+    try {
+      if (this.player.isMuted?.()) this.player.unMute();
+    } catch {
+      /* ignore */
+    }
     const started = Date.now();
     this.fadeActive = true;
     this.fadeTimer = setInterval(() => {
@@ -244,12 +342,19 @@ class YoutubeBgmController {
     }, 50);
   }
 
-  private onStateChange(ev: { data: number }): void {
+  private onStateChange(state: number, target: YtPlayer): void {
+    this.player = target;
+    const PS = window.YT?.PlayerState;
+    if (!PS) return;
+
     if (
-      window.YT?.PlayerState?.ENDED === ev.data &&
-      this.roomLoop &&
-      this.player?.seekTo
+      (state === PS.PLAYING || state === PS.BUFFERING) &&
+      this.pendingFadeInMs > 0
     ) {
+      this.beginFadeIn();
+    }
+
+    if (state === PS.ENDED && this.roomLoop && this.player?.seekTo) {
       try {
         this.player.seekTo(0, true);
         this.player.playVideo();
