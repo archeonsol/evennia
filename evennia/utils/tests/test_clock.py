@@ -245,22 +245,24 @@ class TestSyncCoroutineResultDrain(SimpleTestCase):
     """The no-running-loop path must not orphan child tasks on loop close."""
 
     def test_child_tasks_are_cancelled_not_orphaned(self):
-        cancelled = {}
+        captured = {}
 
         async def child():
-            try:
-                await asyncio.sleep(100)
-            except asyncio.CancelledError:
-                cancelled["hit"] = True
-                raise
+            await asyncio.sleep(100)
 
         async def parent():
-            asyncio.ensure_future(child())  # fire-and-forget child
+            captured["task"] = asyncio.ensure_future(child())  # fire-and-forget child
             return "done"
 
         res = clock.run_coroutine(parent())  # no running loop → _SyncCoroutineResult
         self.assertEqual(res.result(), "done")
-        self.assertTrue(cancelled.get("hit"))  # drained on teardown, not destroyed-pending
+        # The driver steps the parent body off a running loop (to keep ORM off a
+        # run-loop context), so a never-awaited child is drained by cancellation
+        # rather than run first. The contract is that it is not left pending
+        # ("Task was destroyed but it is pending"): it must be settled.
+        task = captured["task"]
+        self.assertTrue(task.done())
+        self.assertTrue(task.cancelled())
 
 
 class TestCallFromThread(_AsyncioLoopMixin, SimpleTestCase):

@@ -284,16 +284,95 @@ class _SyncCoroutineResult:
     """Test-harness result when ``run_coroutine`` is called with no running loop."""
 
     def __init__(self, coro):
-        # asyncio.run drives the coroutine on a fresh loop and, crucially, cancels
-        # and drains any child tasks the coroutine left pending before closing the
-        # loop, so we don't orphan them ("Task was destroyed but it is pending").
         try:
-            self._result = asyncio.run(coro)
+            prev_loop = asyncio.get_event_loop_policy().get_event_loop()
+        except Exception:
+            prev_loop = None
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self._result = self._drive_inline(coro, loop)
             self._exception = None
         except Exception as exc:
             self._result = None
             self._exception = exc
             _log_task_exception_from_exception(exc)
+        finally:
+            # Match asyncio.run's teardown: cancel and drain any fire-and-forget
+            # child tasks the coroutine spawned, so none are orphaned
+            # ("Task was destroyed but it is pending"), then restore the loop.
+            try:
+                self._drain(loop)
+            finally:
+                loop.close()
+                asyncio.set_event_loop(prev_loop)
+
+    @staticmethod
+    def _drive_inline(coro, loop):
+        """Drive ``coro`` to completion by stepping it, off a running loop.
+
+        This branch only runs in the no-loop test harness. Stepping the coroutine
+        *body* with ``coro.send`` rather than handing the whole thing to
+        ``asyncio.run`` is deliberate: Django binds the ORM to a distinct DB
+        connection per running-loop context, so ORM work executed under a running
+        loop lands on a connection that cannot see an enclosing test transaction,
+        and a sqlite write then deadlocks against it ("database table is locked").
+        Stepping inline runs the body in the caller's own context, keeping the ORM
+        on the caller's connection.
+
+        Suspension points are still honoured so this stays a faithful driver:
+
+        * a bare ``None`` yield (``asyncio.sleep(0)`` / a plain reschedule) just
+          continues — there are no competing tasks to yield to;
+        * an already-settled Future feeds its result straight back;
+        * a still-pending Future (a real timer/IO await) is run to completion on
+          ``loop`` (only the awaited Future runs under the loop, never the body),
+          then its result is fed back.
+
+        ``loop`` is also the loop the body's ``ensure_future``/``create_task``
+        calls register their children on (it is the current loop for the drive),
+        so :meth:`_drain` can find and cancel them afterwards.
+        """
+        sent, throw = None, None
+        try:
+            while True:
+                if throw is not None:
+                    waiter, throw = coro.throw(throw), None
+                else:
+                    waiter = coro.send(sent)
+                sent = None
+                if waiter is None:
+                    continue
+                if isinstance(waiter, asyncio.Future):
+                    if not waiter.done():
+                        loop.run_until_complete(waiter)
+                    try:
+                        sent = waiter.result()
+                    except Exception as exc:  # feed the failure back into the coro
+                        throw = exc
+                    continue
+                # A non-Future, non-None yield has no meaning without a real
+                # loop; surface it rather than silently mis-driving.
+                coro.close()
+                raise RuntimeError(
+                    "run_coroutine drove a coroutine that yielded a non-awaitable "
+                    f"{waiter!r} with no running event loop (test-harness context)."
+                )
+        except StopIteration as stop:
+            return getattr(stop, "value", None)
+
+    @staticmethod
+    def _drain(loop):
+        """Cancel and await any tasks the coroutine left pending on ``loop``."""
+        try:
+            pending = asyncio.all_tasks(loop)
+        except RuntimeError:
+            return
+        if not pending:
+            return
+        for task in pending:
+            task.cancel()
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
 
     def add_done_callback(self, callback):
         callback(self)
