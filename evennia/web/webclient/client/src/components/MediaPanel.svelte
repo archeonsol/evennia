@@ -44,8 +44,7 @@
       <div class="player">
         {#if yt}
           <p class="yt-note">
-            YouTube: <a href={media.nowPlaying.url} target="_blank" rel="noopener">{yt}</a>
-            <span class="yt-hint"> — playing in background</span>
+            <a href={media.nowPlaying.url} target="_blank" rel="noopener">{media.nowPlaying.url}</a>
           </p>
         {:else if media.nowPlaying.type === "video"}
           <video bind:this={videoEl} src={media.nowPlaying.url} controls>
@@ -98,8 +97,7 @@
   .player iframe { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border-bright); }
   .player audio, .player video { width: 100%; }
   .yt-note { margin: 0; padding: 8px 10px; font-size: 0.78rem; color: var(--fg-dim); }
-  .yt-note a { color: var(--accent-bright); }
-  .yt-hint { color: var(--fg-faint); font-style: italic; }
+  .yt-note a { color: var(--accent-bright); word-break: break-all; }
   .player video { max-height: 240px; border: 1px solid var(--border-bright); }
   .vol { display: flex; align-items: center; gap: 8px; padding: 6px 10px 9px; }
   .vol input { flex: 1; accent-color: var(--accent); }

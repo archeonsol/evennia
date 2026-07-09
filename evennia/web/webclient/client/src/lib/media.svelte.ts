@@ -40,10 +40,10 @@ class MediaStore {
     }
   }
 
-  private noteNowPlaying(label: string): void {
-    const safe = label.replace(/"/g, "&quot;");
+  private noteNowPlaying(url: string): void {
+    const safe = url.replace(/"/g, "&quot;");
     session.append(
-      `<span class="media-note">♪ media: ${safe} — see the Media panel</span>`,
+      `<span class="media-note">♪ media: <a href="${safe}" target="_blank" rel="noopener">${safe}</a></span>`,
       "media",
     );
     dock.openView("media");
@@ -65,9 +65,7 @@ class MediaStore {
       this.ytStart = 0;
       this.ytLoop = false;
       this.nowPlaying = item;
-      this.noteNowPlaying(
-        `<a href="${url.replace(/"/g, "&quot;")}" target="_blank" rel="noopener">${url.replace(/"/g, "&quot;")}</a>`,
-      );
+      this.noteNowPlaying(url);
     }
   }
 
@@ -89,9 +87,7 @@ class MediaStore {
     const html = mediaHtml("youtube", url);
     if (!html) return;
     this.nowPlaying = { type: "youtube", url, html };
-    this.noteNowPlaying(
-      `<a href="${url}" target="_blank" rel="noopener">YouTube ${id}</a>`,
-    );
+    this.noteNowPlaying(url);
   }
 
   setYtLoop(enabled: boolean): void {
