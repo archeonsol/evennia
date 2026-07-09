@@ -25,6 +25,39 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.150 — Azaban webclient music and YouTube embed fixes
+
+Backfills git-only tags `underspire.146`–`underspire.149`, which shipped without
+bumping `pyproject.toml` / `VERSION.txt` (see `8093cdc53` … `7a36d7e2a`).
+
+### Webclient
+
+- **Azaban shell media OOB (`evennia/web/webclient/client/src/main.ts`):** Handle
+  legacy `play_yt`, `stop_music`, `stop_music_now`, `yt_set_loop`, `play_music`,
+  `PLAY_AUDIO`, `STOP_AUDIO`, and `SET_AUDIO_VOLUME`, plus protocol events
+  `youtube` / `audio` / `video` / `image`. Room DJ and `@music` now reach the
+  Svelte client instead of being dropped silently.
+- **`src/lib/` tracked in git (`.gitignore`):** Anchor `/lib` and `/lib64` at the
+  repo root so `webclient/client/src/lib/` is no longer excluded; fresh clones
+  can rebuild the shell.
+- **`YoutubeBgm` hidden player (`App.svelte`):** Always-mounted 1×1 iframe for
+  background YouTube audio (legacy `#yt-player` parity); Media panel is status +
+  volume only.
+- **YouTube Error 153 (`media.ts`, `client2.html`):** Use `www.youtube.com`
+  embeds with `origin` / `widget_referrer`, iframe
+  `referrerpolicy="strict-origin-when-cross-origin"`, and a document meta
+  referrer tag. Downstream games must also avoid `Referrer-Policy: same-origin`
+  (see mootest `security_headers.py`).
+- **Media log UX (`media.svelte.ts`):** Log line is `♪ media: <url>` only; shell
+  assets cache-busted via `?v=150`.
+- **WebSocket reconnect (`evennia.svelte.ts`):** Exponential backoff and close-code
+  logging on reconnect storms.
+
+### Migration
+
+- Deploy must pin `EVENNIA_REF: underspire.150` (PEP 440 version now matches the
+  git tag). Game repo should ship matching CSP / `client_media.py` helpers.
+
 ## 6.0.0+underspire.145 — Green engine test suite; drop dead contribs; ruff tooling
 
 ### Engine
