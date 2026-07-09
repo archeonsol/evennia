@@ -15,7 +15,6 @@ evennia.contrib.base\_systems
    evennia.contrib.base_systems.building_menu
    evennia.contrib.base_systems.color_markups
    evennia.contrib.base_systems.email_login
-   evennia.contrib.base_systems.godotwebsocket
    evennia.contrib.base_systems.mux_comms_cmds
    evennia.contrib.base_systems.unixcommand
 

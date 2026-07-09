@@ -7,7 +7,7 @@ in the [Community Contribs & Snippets][forum] forum.
 _Contribs_ are optional code snippets and systems contributed by
 the Evennia community. They vary in size and complexity and
 may be more specific about game types and styles than 'core' Evennia.
-This page is auto-generated and summarizes all **29** contribs currently included
+This page is auto-generated and summarizes all **27** contribs currently included
 with the Evennia distribution.
 
 All contrib categories are imported from `evennia.contrib`, such as
@@ -31,10 +31,10 @@ If you want to add a contrib, see [the contrib guidelines](Contribs-Guidelines)!
 |---|---|---|---|---|
 | [achievements](#achievements) | [auditing](#auditing) | [awsstorage](#awsstorage) | [batchprocessor](#batchprocessor) | [building_menu](#building_menu) |
 | [clothing](#clothing) | [color_markups](#color_markups) | [containers](#containers) | [crafting](#crafting) | [debugpy](#debugpy) |
-| [dice](#dice) | [email_login](#email_login) | [gendersub](#gendersub) | [git_integration](#git_integration) | [godotwebsocket](#godotwebsocket) |
-| [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) | [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) |
-| [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) | [random_string_generator](#random_string_generator) | [red_button](#red_button) | [simpledoor](#simpledoor) |
-| [storage](#storage) | [unixcommand](#unixcommand) | [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
+| [dice](#dice) | [email_login](#email_login) | [gendersub](#gendersub) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) |
+| [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) | [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) |
+| [random_string_generator](#random_string_generator) | [red_button](#red_button) | [simpledoor](#simpledoor) | [storage](#storage) | [unixcommand](#unixcommand) |
+| [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
 
 
 
@@ -56,7 +56,6 @@ Contrib-AWSStorage.md
 Contrib-Building-Menu.md
 Contrib-Color-Markups.md
 Contrib-Email-Login.md
-Contrib-Godotwebsocket.md
 Contrib-Mux-Comms-Cmds.md
 Contrib-Unixcommand.md
 ```
@@ -110,18 +109,6 @@ instead of a username to login. Note that it does not verify the email,
 it just uses it as the identifier rather than a username.
 
 [Read the documentation](./Contrib-Email-Login.md) - [Browse the Code](api:evennia.contrib.base_systems.email_login)
-
-
-
-### `godotwebsocket`
-
-_Contribution by ChrisLR, 2022_
-
-This contrib allows you to connect a Godot Client directly to your mud,
-and display regular text with color in Godot's RichTextLabel using BBCode.
-You can use Godot to provide advanced functionality with proper Evennia support.
-
-[Read the documentation](./Contrib-Godotwebsocket.md) - [Browse the Code](api:evennia.contrib.base_systems.godotwebsocket)
 
 
 
@@ -485,7 +472,6 @@ Contribs-Guidelines.md
 
 Contrib-Auditing.md
 Contrib-Debugpy.md
-Contrib-Git-Integration.md
 Contrib-Random-String-Generator.md
 ```
 
@@ -510,16 +496,6 @@ This registers an in-game command `debugpy` which starts the debugpy debugger an
 For now this is only available for Visual Studio Code (VS Code).
 
 [Read the documentation](./Contrib-Debugpy.md) - [Browse the Code](api:evennia.contrib.utils.debugpy)
-
-
-
-### `git_integration`
-
-_Contribution by helpme (2022)_
-
-A module to integrate a stripped-down version of git within the game, allowing developers to view their git status, change branches, and pull updated code of both their local mygame repo and Evennia core. After a successful pull or checkout, the git command will reload the game: Manual restarts may be required to to apply certain changes that would impact persistent scripts etc.
-
-[Read the documentation](./Contrib-Git-Integration.md) - [Browse the Code](api:evennia.contrib.utils.git_integration)
 
 
 

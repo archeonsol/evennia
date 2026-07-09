@@ -41,7 +41,7 @@ The `contrib` folder structure was changed from 0.9.5. All contribs are now in s
 - New [XYZGrid contrib](../Contribs/Contrib-XYZGrid.md), adding x,y,z grid coordinates with in-game map and pathfinding. Controlled outside of the game via custom evennia launcher command (Griatch)
 - New Command cooldown contrib for making it easier to manage commands using
   dynamic cooldowns between uses (owllex)
-- New [Godot Protocol contrib](../Contribs/Contrib-Godotwebsocket.md) for connecting to Evennia from a client written in the open-source game engine [Godot](https://godotengine.org/) (ChrisLR).
+- New Godot Protocol contrib for connecting to Evennia from a client written in the open-source game engine [Godot](https://godotengine.org/) (ChrisLR).
 - New name_generator contrib for building random real-world based or fantasy-names based on phonetic rules (InspectorCaracal)
 - New Buffs contrib for managing temporary and permanent RPG status buffs effects (tegiminis)
 -  The existing RPSystem contrib was refactored and saw a speed boost (InspectorCaracal, other contributors) 

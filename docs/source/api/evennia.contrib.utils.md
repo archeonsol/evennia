@@ -13,7 +13,6 @@ evennia.contrib.utils
 
    evennia.contrib.utils.auditing
    evennia.contrib.utils.debugpy
-   evennia.contrib.utils.git_integration
    evennia.contrib.utils.random_string_generator
 
 ```
