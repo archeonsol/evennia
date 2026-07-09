@@ -38,8 +38,8 @@ make tests=evennia.commands.tests.test_command test  # specific test file
 ## Formatting
 
 ```bash
-make format   # black + isort
-make lint     # black --check
+make format   # ruff format + import sort
+make lint     # ruff format --check + import-sort check
 ```
 
 ## PR Conventions

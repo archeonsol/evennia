@@ -2,13 +2,13 @@
 
 ## Formatting
 
-Do not manually format code. Run `make format` (black + isort) after editing. It handles line length (100 chars), indentation, and import sorting. Use `make lint` to check without modifying.
+Do not manually format code. Run `make format` (`ruff format` + import sort) after editing. It handles line length (100 chars), indentation, and import sorting. Use `make lint` to check without modifying. Ruff is pinned in `pyproject.toml`; run it via `uv run` if it is not on PATH.
 
 ## Docstrings
 
 All modules, classes, functions, and methods must have docstrings. Use Google-style with Markdown formatting.
 
-Import order (isort handles this, but be aware): stdlib → Twisted → Django → `evennia` → `evennia.contrib`
+Import order (ruff's import sorter handles this, but be aware): stdlib → third-party (Django, Twisted, ...) → `evennia` (first-party). Groups are separated by a blank line and sorted within each group.
 
 ### Command Docstrings
 

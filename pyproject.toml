@@ -93,10 +93,9 @@ dependencies = [
   # for unit tests and code formatting
   "mock >= 4.0.3",
   "anything ==0.2.1",
-  "black >= 22.6",
-  "isort >= 5.10",
   "parameterized == 0.9.0",
-  "fakeredis >= 2.21"
+  "fakeredis >= 2.21",
+  "ruff == 0.15.20"
 ]
 
 [project.optional-dependencies]
@@ -122,7 +121,6 @@ extra = [
   "jupyter >= 1.0.0",
   "ipython >= 7.19.0",
   "django-extensions >= 3.1.0",
-
 
   # PostgreSQL support
   "psycopg[binary] >= 3.1.12",
@@ -164,30 +162,6 @@ evennia = "evennia.server.evennia_launcher:main"
 where = ["."]
 include = ["evennia*"]
 
-[tool.black]
-line-length = 100
-target-version = ['py310', 'py311']
-exclude = '''
-
-  (
-    /(
-        \.eggs         # exclude a few common directories in the
-      | \.git          # root of the project
-      | \.hg
-      | \.mypy_cache
-      | \.tox
-      | \.venv
-      | _build
-      | buck-out
-      | build
-      | dist
-    )/
-    | migrations
-    | docs
-
-  )
-'''
-
 [tool.coverage]
 
 [tool.coverage.run]
@@ -221,3 +195,12 @@ exclude = [
   "docs",
 ]
 line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Import sorting only (the isort replacement). Formatting is handled by
+# `ruff format`; broader lint rules can be adopted later by extending `select`.
+select = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["evennia"]

@@ -8,8 +8,8 @@ Use `uv run` to execute commands in the project venv. Prefer `uv` over `pip`.
 
 ```bash
 uv pip install -e .                          # dev install
-make format                                  # black + isort
-make lint                                    # black --check
+make format                                  # ruff format + import sort
+make lint                                    # ruff format --check + import-sort check
 make cleanrot                                # check agent context for rot
 ```
 
