@@ -10,14 +10,17 @@
     "dev": "node scripts/gen-palette.mjs && vite",
     "build": "vite build",
     "watch": "vite build --watch",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "svelte": "^5.19.0",
     "svelte-check": "^4.1.1",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.0.5"
   },
   "dependencies": {
     "dockview-core": "^7.0.2"

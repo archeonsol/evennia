@@ -242,24 +242,9 @@ class YoutubeBgmController {
     this.syncWallAt = Date.now() / 1000;
     this.pendingFadeInMs = YT_FADE_MS;
 
-    let currentId: string | null = null;
-    try {
-      currentId = this.player.getVideoData?.()?.video_id ?? null;
-    } catch {
-      /* ignore */
-    }
-
-    // Same track already loaded: seek is more accurate than reload (room re-enter sync).
-    if (currentId === videoId && this.player.seekTo) {
-      try {
-        this.player.seekTo(offset, true);
-        this.player.playVideo();
-      } catch {
-        this.loadFresh(videoId, offset);
-      }
-    } else {
-      this.loadFresh(videoId, offset);
-    }
+    // Legacy playYtSequence always loadVideoById with startSeconds — seek-only on a
+    // stopped/cued same track after leave often restarts from 0.
+    this.loadFresh(videoId, offset);
 
     this.primeSilent(gen);
     this.startDriftLoop();
@@ -304,7 +289,7 @@ class YoutubeBgmController {
 
   private loadFresh(videoId: string, offset: number): void {
     if (!this.player?.loadVideoById) return;
-    const start = Math.floor(offset);
+    const start = Math.max(0, Math.floor(Number(offset) || 0));
     this.player.loadVideoById({ videoId, startSeconds: start });
   }
 

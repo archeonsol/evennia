@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.157 — BGM re-enter sync offset fix + tests
+
+### Webclient
+
+- **`youtube-bgm.svelte.ts`:** Always `loadVideoById({ startSeconds })` on room
+  re-enter (legacy parity). Same-track `seekTo` after leave/stop often restarted
+  from 0; seek-only kept for audible hello/resync via `syncSameTrack`.
+- **`media.svelte.ts`:** Preserve fractional `play_yt` offset parsing.
+- **`room-bgm.test.ts`:** Vitest suite for leave/re-enter sync contract.
+- **`test_azaban_format.py`:** Assert `play_yt` wire args carry sync offset.
+
+---
+
 ## 6.0.0+underspire.156 — BGM re-enter: restore immediate play_yt
 
 ### Webclient

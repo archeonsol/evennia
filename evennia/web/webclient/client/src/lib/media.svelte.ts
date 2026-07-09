@@ -115,11 +115,12 @@ class MediaStore {
   }
 
   /** Coalesce rapid `youtube` + `play_yt` pairs; last write wins per tick. */
-  playYoutube(raw: string, startSeconds = 0, loop = false): void {
+  playYoutube(raw: string, startSeconds: number | string = 0, loop = false): void {
     const id = youtubeId(raw);
     if (!id) return;
-    let start = Math.max(0, Number(startSeconds) || 0);
-    if (!startSeconds) {
+    const parsed = Number(startSeconds);
+    let start = Math.max(0, Number.isFinite(parsed) ? parsed : 0);
+    if (!Number.isFinite(parsed) || parsed === 0) {
       const fromUrl = parseYoutubeStart(raw);
       if (fromUrl != null) start = fromUrl;
     }

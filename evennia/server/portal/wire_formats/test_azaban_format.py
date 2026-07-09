@@ -67,6 +67,14 @@ class TestAzabanFormat(unittest.TestCase):
         self.assertEqual(env["event"], "channel_msg")
         self.assertEqual(env["args"], [{"chan": "public"}])
 
+    def test_play_yt_carries_sync_offset(self):
+        env = self._env(
+            self.fmt.encode_default("play_yt", "dQw4w9WgXcQ", 47.25, 1)
+        )
+        self.assertEqual(env["t"], "oob")
+        self.assertEqual(env["event"], "play_yt")
+        self.assertEqual(env["args"], ["dQw4w9WgXcQ", 47.25, 1])
+
     def test_options_command_skipped(self):
         self.assertIsNone(self.fmt.encode_default("options", {}))
 
