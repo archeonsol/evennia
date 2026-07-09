@@ -64,20 +64,14 @@ class YoutubeBgmController {
   private hostId = "yt-player";
   /** Incremented on each load/seek; stale onStateChange handlers are ignored. */
   private playGen = 0;
-  /** When > 0, fade-in starts on next PLAYING/BUFFERING for current playGen. */
-  private pendingFadeInMs = 0;
-  /** Target sync offset for the active playGen (seconds, may be fractional). */
+  /** Target sync offset for the active playGen (seconds). */
   private syncOffset = 0;
-  /** Wall-clock second when the current syncOffset was applied. */
-  private syncWallAt = 0;
+  /** playGen value for which we already enforced a post-load seek. */
+  private syncSeekDoneGen = 0;
   private activeVideoId: string | null = null;
-  private driftTimer: ReturnType<typeof setInterval> | null = null;
-  private fadeKickTimers: ReturnType<typeof setTimeout>[] = [];
   private apiErrorHandler: ((msg: string) => void) | null = null;
   apiLoadFailed = false;
 
-  private static readonly DRIFT_CHECK_MS = 30_000;
-  private static readonly DRIFT_THRESHOLD_S = 2.0;
   private static readonly API_LOAD_TIMEOUT_MS = 15_000;
 
   setApiErrorHandler(fn: (msg: string) => void): void {
@@ -110,7 +104,7 @@ class YoutubeBgmController {
 
   /** Audible playback (not fading in/out, volume up). */
   isAudible(): boolean {
-    if (this.fadeActive || this.pendingFadeInMs > 0 || !this.isPlaying()) return false;
+    if (this.fadeActive || !this.isPlaying()) return false;
     try {
       if (this.player?.isMuted?.()) return false;
       return (this.player?.getVolume?.() ?? 0) > 0;
@@ -202,7 +196,7 @@ class YoutubeBgmController {
   /** Same track — seek/sync; skip re-fade when already audible. */
   syncSameTrack(videoId: string, offsetSeconds: number, loop: boolean): void {
     this.roomLoop = loop;
-    const offset = Math.max(0, Number(offsetSeconds) || 0);
+    const offset = Math.max(0, parseInt(String(offsetSeconds), 10) || 0);
     this.activeVideoId = videoId;
     if (!this.player || typeof this.player.seekTo !== "function") {
       this.playSequence(videoId, offset, loop);
@@ -211,10 +205,8 @@ class YoutubeBgmController {
     try {
       if (this.isAudible()) {
         this.syncOffset = offset;
-        this.syncWallAt = Date.now() / 1000;
         this.player.seekTo(offset, true);
         this.player.playVideo?.();
-        this.correctSyncDrift();
         return;
       }
     } catch {
@@ -225,7 +217,8 @@ class YoutubeBgmController {
 
   playSequence(videoId: string, offsetSeconds: number, loop: boolean): void {
     this.roomLoop = loop;
-    const offset = Math.max(0, Number(offsetSeconds) || 0);
+    // Legacy custom-client.js: parseInt(offsetSeconds, 10)
+    const offset = Math.max(0, parseInt(String(offsetSeconds), 10) || 0);
     this.activeVideoId = videoId;
 
     if (!this.player || typeof this.player.loadVideoById !== "function") {
@@ -237,130 +230,57 @@ class YoutubeBgmController {
     }
 
     this.cancelFade();
-    const gen = ++this.playGen;
+    ++this.playGen;
     this.syncOffset = offset;
-    this.syncWallAt = Date.now() / 1000;
-    this.pendingFadeInMs = YT_FADE_MS;
+    this.syncSeekDoneGen = 0;
 
-    // Legacy playYtSequence always loadVideoById with startSeconds — seek-only on a
-    // stopped/cued same track after leave often restarts from 0.
+    // Legacy playYtSequence: cancel fade → loadVideoById → volume 0 → fadeIn immediately.
     this.loadFresh(videoId, offset);
-
-    this.primeSilent(gen);
-    this.startDriftLoop();
-    this.scheduleFadeInKick(gen);
-  }
-
-  private clearFadeKickTimers(): void {
-    for (const t of this.fadeKickTimers) clearTimeout(t);
-    this.fadeKickTimers = [];
-  }
-
-  /** Legacy started fade-in immediately; onStateChange alone can miss same-track seeks. */
-  private scheduleFadeInKick(gen: number): void {
-    this.clearFadeKickTimers();
-    const kick = (): void => {
-      if (gen !== this.playGen || this.pendingFadeInMs <= 0) return;
-      this.tryBeginFadeIn();
-    };
-    this.fadeKickTimers.push(setTimeout(kick, 0));
-    this.fadeKickTimers.push(setTimeout(kick, 400));
-    this.fadeKickTimers.push(setTimeout(kick, 1200));
-  }
-
-  private tryBeginFadeIn(): void {
-    if (this.pendingFadeInMs <= 0 || !this.player?.getPlayerState) return;
     try {
-      const PS = window.YT?.PlayerState;
-      const st = this.player.getPlayerState();
-      if (
-        !PS ||
-        st === PS.PLAYING ||
-        st === PS.BUFFERING ||
-        st === PS.CUED ||
-        st === PS.PAUSED
-      ) {
-        this.beginFadeIn();
-      }
+      if (this.player.isMuted?.()) this.player.unMute();
+      this.player.setVolume(0);
     } catch {
       /* ignore */
     }
+    this.fadeIn(YT_FADE_MS);
   }
 
   private loadFresh(videoId: string, offset: number): void {
     if (!this.player?.loadVideoById) return;
-    const start = Math.max(0, Math.floor(Number(offset) || 0));
+    const start = Math.max(0, parseInt(String(offset), 10) || 0);
+    // YT often ignores startSeconds when reloading the same cued video — stop first.
+    try {
+      const cur = this.player.getVideoData?.()?.video_id;
+      if (cur === videoId && this.player.stopVideo) {
+        this.player.stopVideo();
+      }
+    } catch {
+      /* ignore */
+    }
     this.player.loadVideoById({ videoId, startSeconds: start });
   }
 
-  /** Volume 0 before playback ramps (legacy playYtSequence parity — no mute()). */
-  private primeSilent(gen: number): void {
-    if (gen !== this.playGen || !this.player) return;
-    try {
-      if (this.player.isMuted?.()) this.player.unMute();
-      this.player.setVolume(0);
-    } catch {
-      /* ignore */
+  /** If loadVideoById did not land at syncOffset, seek once when playback starts. */
+  private enforceSyncSeek(state: number): void {
+    if (
+      this.syncSeekDoneGen === this.playGen ||
+      this.syncOffset <= 0 ||
+      !this.player?.seekTo ||
+      !this.player.getCurrentTime
+    ) {
+      return;
     }
-  }
+    const PS = window.YT?.PlayerState;
+    if (PS && state !== PS.PLAYING && state !== PS.BUFFERING) return;
 
-  private beginFadeIn(): void {
-    if (!this.player?.setVolume || this.pendingFadeInMs <= 0) return;
-    const ms = this.pendingFadeInMs;
-    this.pendingFadeInMs = 0;
-    try {
-      if (this.player.isMuted?.()) this.player.unMute();
-      this.player.setVolume(0);
-    } catch {
-      /* ignore */
-    }
-    this.correctSyncDrift();
-    this.fadeIn(ms);
-  }
-
-  /** After load, nudge to server offset if startSeconds drifted (sub-second sync). */
-  private correctSyncDrift(): void {
-    if (!this.player?.seekTo || !this.player.getCurrentTime || this.syncOffset <= 0) return;
     try {
       const now = this.player.getCurrentTime();
-      const expected = this.expectedPlaybackSeconds();
-      const drift = Math.abs(now - expected);
-      if (drift > 1.25) {
-        this.player.seekTo(expected, true);
+      if (Math.abs(now - this.syncOffset) > 1.5) {
+        this.player.seekTo(this.syncOffset, true);
       }
+      this.syncSeekDoneGen = this.playGen;
     } catch {
       /* ignore */
-    }
-  }
-
-  private expectedPlaybackSeconds(): number {
-    const elapsed = Date.now() / 1000 - this.syncWallAt;
-    return this.syncOffset + Math.max(0, elapsed);
-  }
-
-  private startDriftLoop(): void {
-    this.stopDriftLoop();
-    if (this.syncOffset <= 0) return;
-    this.driftTimer = setInterval(() => {
-      if (this.fadeActive || !this.player?.getCurrentTime) return;
-      try {
-        const PS = window.YT?.PlayerState;
-        if (PS && this.player.getPlayerState() !== PS.PLAYING) return;
-        const now = this.player.getCurrentTime();
-        const expected = this.expectedPlaybackSeconds();
-        if (Math.abs(now - expected) > YoutubeBgmController.DRIFT_THRESHOLD_S) {
-          this.player.seekTo(expected, true);
-        }
-      } catch {
-        /* ignore */
-      }
-    }, YoutubeBgmController.DRIFT_CHECK_MS);
-  }
-
-  private stopDriftLoop(): void {
-    if (this.driftTimer) {
-      clearInterval(this.driftTimer);
-      this.driftTimer = null;
     }
   }
 
@@ -380,19 +300,15 @@ class YoutubeBgmController {
       this.fadeTimer = null;
     }
     this.fadeActive = false;
-    this.pendingFadeInMs = 0;
-    this.clearFadeKickTimers();
   }
 
   stopNow(): void {
     this.cancelFade();
-    this.clearFadeKickTimers();
-    this.stopDriftLoop();
     this.pendingPlay = null;
     this.playGen += 1;
     this.activeVideoId = null;
     this.syncOffset = 0;
-    this.syncWallAt = 0;
+    this.syncSeekDoneGen = 0;
     if (this.player?.stopVideo) {
       try {
         this.player.stopVideo();
@@ -483,12 +399,7 @@ class YoutubeBgmController {
     const PS = window.YT?.PlayerState;
     if (!PS) return;
 
-    if (
-      (state === PS.PLAYING || state === PS.BUFFERING) &&
-      this.pendingFadeInMs > 0
-    ) {
-      this.beginFadeIn();
-    }
+    this.enforceSyncSeek(state);
 
     if (state === PS.ENDED && this.roomLoop && this.player?.seekTo) {
       try {

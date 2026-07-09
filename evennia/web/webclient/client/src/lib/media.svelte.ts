@@ -134,29 +134,11 @@ class MediaStore {
     if (!pending) return;
 
     const currentId = this.currentYoutubeId() ?? ytBgm.getActiveVideoId();
-    // Hello/reconnect offset resync only — not while leaving or fading.
-    if (
-      currentId === pending.id &&
-      ytBgm.isAudible() &&
-      !ytBgm.isFadeActive()
-    ) {
-      this.applyQuietYoutubeSync(pending);
-      return;
-    }
-
-    // Legacy: play_yt cancels any in-flight fade and starts at the server offset.
+    // Legacy play_yt always calls playYtSequence — cancel fade and load at server offset.
     const quiet =
       currentId === pending.id &&
       (ytBgm.isFadeActive() || this.nowPlaying?.type === "youtube");
     this.startYoutubePlay(pending, { quiet });
-  }
-
-  /** Same track, new offset — seek only; no log line or dock. */
-  private applyQuietYoutubeSync(pending: { id: string; start: number; loop: boolean }): void {
-    this.ytStart = pending.start;
-    this.ytLoop = pending.loop;
-    ytBgm.setRoomLoop(pending.loop);
-    ytBgm.syncSameTrack(pending.id, pending.start, pending.loop);
   }
 
   private startYoutubePlay(

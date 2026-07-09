@@ -63,6 +63,21 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
     expect(player.seekTo).not.toHaveBeenCalled();
   });
 
+  it("loadFresh stops same video before reload (YT startSeconds quirk)", () => {
+    const player = mockPlayer({
+      getVideoData: vi.fn(() => ({ video_id: "dQw4w9WgXcQ" })),
+    });
+    attachPlayer(player);
+
+    ytBgm.playSequence("dQw4w9WgXcQ", 60, true);
+
+    expect(player.stopVideo).toHaveBeenCalled();
+    expect(player.loadVideoById).toHaveBeenCalledWith({
+      videoId: "dQw4w9WgXcQ",
+      startSeconds: 60,
+    });
+  });
+
   it("syncSameTrack seeks when already audible (hello/resync without reload)", () => {
     const player = mockPlayer({
       getVolume: vi.fn(() => 40),
@@ -73,8 +88,37 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
 
     ytBgm.syncSameTrack("dQw4w9WgXcQ", 55.2, true);
 
-    expect(player.seekTo).toHaveBeenCalledWith(55.2, true);
+    expect(player.seekTo).toHaveBeenCalledWith(55, true);
     expect(player.loadVideoById).not.toHaveBeenCalled();
+  });
+
+  it("enforceSyncSeek on PLAYING when YT landed at 0", () => {
+    vi.stubGlobal("window", {
+      YT: {
+        PlayerState: {
+          PLAYING: 1,
+          BUFFERING: 3,
+          ENDED: 0,
+          UNSTARTED: -1,
+          PAUSED: 2,
+          CUED: 5,
+        },
+      },
+    });
+    const player = mockPlayer({
+      getCurrentTime: vi.fn(() => 0),
+    });
+    attachPlayer(player);
+
+    ytBgm.playSequence("dQw4w9WgXcQ", 60, true);
+    player.seekTo.mockClear();
+
+    const ctl = ytBgm as unknown as {
+      onStateChange: (state: number, target: MockPlayer) => void;
+    };
+    ctl.onStateChange(1, player);
+
+    expect(player.seekTo).toHaveBeenCalledWith(60, true);
   });
 
   it("simulated leave stop then re-enter uses loadVideoById at new offset", () => {

@@ -25,50 +25,31 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.157 — BGM re-enter sync offset fix + tests
-
-### Webclient
-
-- **`youtube-bgm.svelte.ts`:** Always `loadVideoById({ startSeconds })` on room
-  re-enter (legacy parity). Same-track `seekTo` after leave/stop often restarted
-  from 0; seek-only kept for audible hello/resync via `syncSameTrack`.
-- **`media.svelte.ts`:** Preserve fractional `play_yt` offset parsing.
-- **`room-bgm.test.ts`:** Vitest suite for leave/re-enter sync contract.
-- **`test_azaban_format.py`:** Assert `play_yt` wire args carry sync offset.
-
----
-
-## 6.0.0+underspire.156 — BGM re-enter: restore immediate play_yt
-
-### Webclient
-
-- **`media.svelte.ts`:** Remove crossfade queue on `play_yt` during leave fade (legacy
-  cancels fade and starts at the server offset immediately). Tighten quiet sync to
-  audible playback only (hello/reconnect resync, not mid-leave).
-- **`youtube-bgm.svelte.ts`:** Add `isAudible()` helper for sync gating.
-
----
-
 ## 6.0.0+underspire.155 — Azaban room BGM (full parity)
 
-Single release consolidating the `.150`–`.154` fix arc (those tags are removed;
+Single release consolidating the `.150`–`.157` fix arc (those tags are removed;
 pin `EVENNIA_REF: underspire.155`).
 
 ### Webclient
 
 - **Media OOB routing (`main.ts`, `media.svelte.ts`):** Full legacy parity for
   `play_yt`, `stop_music`, `stop_music_now`, HTML5 audio, and coalesced rapid OOB
-  pairs. Room BGM uses `play_yt` only (no dual-`youtube` races). Log line is
-  `♪ media: <url>`; YouTube BGM does not auto-open the Media dock.
+  pairs. Room BGM uses `play_yt` only (no dual-`youtube` races). Every `play_yt`
+  calls `playSequence` like legacy `playYtSequence` (no quiet-sync shortcut that
+  skipped reload on re-enter). Log line is `♪ media: <url>`; YouTube BGM does not
+  auto-open the Media dock.
 - **`youtube-bgm.svelte.ts`:** Hidden `YT.Player` with 2.8s fade in/out, manual
-  loop on `ENDED`, same-track `seekTo` re-sync, fractional offset drift correction,
-  periodic drift loop, IFrame API load timeout + user warning. Fade-in fallback
-  kicks (legacy immediate fade) so playback is not stuck silent until user touches
-  the volume slider; `syncSameTrack()` avoids re-fading on reconnect.
+  loop on `ENDED`, IFrame API load timeout + user warning. Legacy playback path:
+  cancel fade → `loadVideoById({ startSeconds })` → volume 0 → immediate fade-in.
+  `stopVideo()` before reloading the same cued track (YT ignores `startSeconds`
+  otherwise). `enforceSyncSeek()` on `PLAYING`/`BUFFERING` if playback lands at 0
+  but the server offset is non-zero. `syncSameTrack()` for audible seek-only resync.
 - **`StatusBar.svelte`:** Hover-reveal slim volume control (legacy `#volume-slider`
   parity) and clickable now-playing chip.
 - **`client2.html`:** YouTube IFrame API script; Error 153 embed fixes (`origin`,
   referrer policy). Rebuilt shell; cache bust `?v=155`.
+- **Tests:** `room-bgm.test.ts` (vitest) for leave/re-enter offset contract;
+  `test_azaban_format.py` asserts `play_yt` wire args carry sync offset.
 - **Dev:** `localStorage.setItem("underspire.trace.oob", "1")` logs BGM OOB events.
 
 ### Game (mootest)
@@ -79,6 +60,7 @@ pin `EVENNIA_REF: underspire.155`).
 - **`rooms/base.py` / `wilderness_map.py`:** BGM on arrive, fade stop on leave
   (including wilderness rooms).
 - **`dj_flow.py`:** Fractional broadcast offset; `@music` vs `@setmusic` help text.
+- **`test_client_media.py`:** Leave/re-enter offset tests.
 
 ---
 
