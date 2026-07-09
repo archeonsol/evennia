@@ -12,6 +12,7 @@ type MockPlayer = {
   setVolume: ReturnType<typeof vi.fn>;
   getVolume: ReturnType<typeof vi.fn>;
   getPlayerState: ReturnType<typeof vi.fn>;
+  getCurrentTime: ReturnType<typeof vi.fn>;
   getVideoData: ReturnType<typeof vi.fn>;
   isMuted: ReturnType<typeof vi.fn>;
   stopVideo: ReturnType<typeof vi.fn>;
@@ -25,6 +26,7 @@ function mockPlayer(overrides: Partial<MockPlayer> = {}): MockPlayer {
     setVolume: vi.fn(),
     getVolume: vi.fn(() => 0),
     getPlayerState: vi.fn(() => 5),
+    getCurrentTime: vi.fn(() => 0),
     getVideoData: vi.fn(() => ({ video_id: "dQw4w9WgXcQ" })),
     isMuted: vi.fn(() => false),
     stopVideo: vi.fn(),
@@ -39,6 +41,7 @@ function attachPlayer(player: MockPlayer): void {
 describe("room BGM re-enter sync (youtube-bgm)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.stubGlobal("window", { YT: undefined });
     attachPlayer(mockPlayer());
     ytBgm.setVolumeGetter(() => 40);
   });
@@ -49,7 +52,7 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
     vi.useRealTimers();
   });
 
-  it("playSequence loadVideoById uses server offset after leave (same track still loaded)", () => {
+  it("playSequence loadVideoById uses server offset (legacy parseInt floor)", () => {
     const player = mockPlayer();
     attachPlayer(player);
 
@@ -60,39 +63,33 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
       videoId: "dQw4w9WgXcQ",
       startSeconds: 47,
     });
-    expect(player.seekTo).not.toHaveBeenCalled();
   });
 
-  it("loadFresh stops same video before reload (YT startSeconds quirk)", () => {
-    const player = mockPlayer({
-      getVideoData: vi.fn(() => ({ video_id: "dQw4w9WgXcQ" })),
-    });
-    attachPlayer(player);
-
+  it("expectedSyncSeconds advances with wall clock while loading", () => {
     ytBgm.playSequence("dQw4w9WgXcQ", 60, true);
-
-    expect(player.stopVideo).toHaveBeenCalled();
-    expect(player.loadVideoById).toHaveBeenCalledWith({
-      videoId: "dQw4w9WgXcQ",
-      startSeconds: 60,
-    });
+    expect(ytBgm.expectedSyncSeconds()).toBe(60);
+    vi.advanceTimersByTime(5000);
+    expect(ytBgm.expectedSyncSeconds()).toBe(65);
   });
 
-  it("syncSameTrack seeks when already audible (hello/resync without reload)", () => {
+  it("syncSameTrack seeks without reload when already audible", () => {
     const player = mockPlayer({
       getVolume: vi.fn(() => 40),
       getPlayerState: vi.fn(() => 1),
     });
     attachPlayer(player);
+
+    ytBgm.playSequence("dQw4w9WgXcQ", 55, true);
     vi.spyOn(ytBgm, "isAudible").mockReturnValue(true);
+    player.seekTo.mockClear();
 
-    ytBgm.syncSameTrack("dQw4w9WgXcQ", 55.2, true);
+    ytBgm.syncSameTrack("dQw4w9WgXcQ", 70, true);
 
-    expect(player.seekTo).toHaveBeenCalledWith(55, true);
-    expect(player.loadVideoById).not.toHaveBeenCalled();
+    expect(player.seekTo).toHaveBeenCalledWith(70, true);
+    expect(player.loadVideoById).toHaveBeenCalledTimes(1);
   });
 
-  it("enforceSyncSeek on PLAYING when YT landed at 0", () => {
+  it("retries seek on PLAYING when YT landed at 0", () => {
     vi.stubGlobal("window", {
       YT: {
         PlayerState: {
@@ -105,13 +102,17 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
         },
       },
     });
+    let t = 0;
     const player = mockPlayer({
-      getCurrentTime: vi.fn(() => 0),
+      getCurrentTime: vi.fn(() => t),
+      getPlayerState: vi.fn(() => 1),
+    });
+    player.seekTo.mockImplementation((sec: number) => {
+      t = sec;
     });
     attachPlayer(player);
 
     ytBgm.playSequence("dQw4w9WgXcQ", 60, true);
-    player.seekTo.mockClear();
 
     const ctl = ytBgm as unknown as {
       onStateChange: (state: number, target: MockPlayer) => void;
@@ -135,6 +136,20 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
       videoId: "dQw4w9WgXcQ",
       startSeconds: 60,
     });
+  });
+
+  it("playSequence invalidates leave-fade stopNow race", () => {
+    const player = mockPlayer({ getVolume: vi.fn(() => 40) });
+    attachPlayer(player);
+
+    ytBgm.playSequence("dQw4w9WgXcQ", 10, true);
+    ytBgm.fadeOut(2800);
+    ytBgm.playSequence("dQw4w9WgXcQ", 75, true);
+    player.stopVideo.mockClear();
+
+    vi.advanceTimersByTime(3000);
+
+    expect(player.stopVideo).not.toHaveBeenCalled();
   });
 });
 

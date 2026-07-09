@@ -62,17 +62,21 @@ class YoutubeBgmController {
   private volumeFn = (): number => 40;
   private readyPromise: Promise<void> | null = null;
   private hostId = "yt-player";
-  /** Incremented on each load/seek; stale onStateChange handlers are ignored. */
+  /** Incremented on each load; stale retry handlers are ignored. */
   private playGen = 0;
-  /** Target sync offset for the active playGen (seconds). */
-  private syncOffset = 0;
-  /** playGen value for which we already enforced a post-load seek. */
-  private syncSeekDoneGen = 0;
+  /** Server offset (seconds) when play_yt was applied. */
+  private syncAnchorOffset = 0;
+  /** Wall clock (ms) when play_yt was applied — room sync advances while loading. */
+  private syncAnchorWallMs = 0;
+  private syncRetryTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Bumped when a new play starts so a finishing leave-fade cannot stopVideo. */
+  private fadeOutSession = 0;
   private activeVideoId: string | null = null;
   private apiErrorHandler: ((msg: string) => void) | null = null;
   apiLoadFailed = false;
 
   private static readonly API_LOAD_TIMEOUT_MS = 15_000;
+  private static readonly SYNC_TOLERANCE_S = 1.5;
 
   setApiErrorHandler(fn: (msg: string) => void): void {
     this.apiErrorHandler = fn;
@@ -111,6 +115,12 @@ class YoutubeBgmController {
     } catch {
       return false;
     }
+  }
+
+  /** Room elapsed seconds now (server offset + time since play_yt). */
+  expectedSyncSeconds(): number {
+    const elapsed = (Date.now() - this.syncAnchorWallMs) / 1000;
+    return Math.max(0, this.syncAnchorOffset + elapsed);
   }
 
   init(hostId = "yt-player"): Promise<void> {
@@ -193,35 +203,34 @@ class YoutubeBgmController {
     this.roomLoop = enabled;
   }
 
-  /** Same track — seek/sync; skip re-fade when already audible. */
+  /** Same track — seek to live room offset when already audible. */
   syncSameTrack(videoId: string, offsetSeconds: number, loop: boolean): void {
     this.roomLoop = loop;
-    const offset = Math.max(0, parseInt(String(offsetSeconds), 10) || 0);
+    this.setSyncAnchor(offsetSeconds);
     this.activeVideoId = videoId;
     if (!this.player || typeof this.player.seekTo !== "function") {
-      this.playSequence(videoId, offset, loop);
+      this.playSequence(videoId, offsetSeconds, loop);
       return;
     }
     try {
       if (this.isAudible()) {
-        this.syncOffset = offset;
-        this.player.seekTo(offset, true);
+        this.player.seekTo(this.expectedSyncSeconds(), true);
         this.player.playVideo?.();
         return;
       }
     } catch {
       /* fall through to full play */
     }
-    this.playSequence(videoId, offset, loop);
+    this.playSequence(videoId, offsetSeconds, loop);
   }
 
   playSequence(videoId: string, offsetSeconds: number, loop: boolean): void {
     this.roomLoop = loop;
-    // Legacy custom-client.js: parseInt(offsetSeconds, 10)
-    const offset = Math.max(0, parseInt(String(offsetSeconds), 10) || 0);
+    this.setSyncAnchor(offsetSeconds);
     this.activeVideoId = videoId;
 
     if (!this.player || typeof this.player.loadVideoById !== "function") {
+      const offset = Math.max(0, parseFloat(String(offsetSeconds)) || 0);
       this.pendingPlay = { id: videoId, offset, loop };
       if (document.getElementById(this.hostId)) {
         void this.init(this.hostId).catch(() => {});
@@ -229,13 +238,14 @@ class YoutubeBgmController {
       return;
     }
 
+    // Invalidate any in-flight leave-fade completion that would call stopVideo.
+    this.fadeOutSession += 1;
     this.cancelFade();
-    ++this.playGen;
-    this.syncOffset = offset;
-    this.syncSeekDoneGen = 0;
+    const gen = ++this.playGen;
 
     // Legacy playYtSequence: cancel fade → loadVideoById → volume 0 → fadeIn immediately.
-    this.loadFresh(videoId, offset);
+    this.loadFresh(videoId, this.expectedSyncSeconds());
+    this.trySyncSeek(false);
     try {
       if (this.player.isMuted?.()) this.player.unMute();
       this.player.setVolume(0);
@@ -243,45 +253,60 @@ class YoutubeBgmController {
       /* ignore */
     }
     this.fadeIn(YT_FADE_MS);
+    this.scheduleSyncRetries(gen);
   }
 
-  private loadFresh(videoId: string, offset: number): void {
+  private setSyncAnchor(offsetSeconds: number | string): void {
+    this.syncAnchorOffset = Math.max(0, parseFloat(String(offsetSeconds)) || 0);
+    this.syncAnchorWallMs = Date.now();
+  }
+
+  private loadFresh(videoId: string, offsetSeconds: number): void {
     if (!this.player?.loadVideoById) return;
-    const start = Math.max(0, parseInt(String(offset), 10) || 0);
-    // YT often ignores startSeconds when reloading the same cued video — stop first.
-    try {
-      const cur = this.player.getVideoData?.()?.video_id;
-      if (cur === videoId && this.player.stopVideo) {
-        this.player.stopVideo();
-      }
-    } catch {
-      /* ignore */
-    }
+    const start = Math.max(0, Math.floor(offsetSeconds));
     this.player.loadVideoById({ videoId, startSeconds: start });
   }
 
-  /** If loadVideoById did not land at syncOffset, seek once when playback starts. */
-  private enforceSyncSeek(state: number): void {
-    if (
-      this.syncSeekDoneGen === this.playGen ||
-      this.syncOffset <= 0 ||
-      !this.player?.seekTo ||
-      !this.player.getCurrentTime
-    ) {
-      return;
+  /** Seek to live room offset; returns true when within tolerance. */
+  private trySyncSeek(requirePlaying = true): boolean {
+    if (!this.player?.seekTo || !this.player.getCurrentTime) return false;
+    const target = this.expectedSyncSeconds();
+    if (target <= 0) return true;
+
+    if (requirePlaying) {
+      const PS =
+        typeof globalThis !== "undefined" &&
+        "YT" in globalThis &&
+        (globalThis as { YT?: typeof YT }).YT?.PlayerState;
+      if (PS && this.player.getPlayerState() !== PS.PLAYING) return false;
     }
-    const PS = window.YT?.PlayerState;
-    if (PS && state !== PS.PLAYING && state !== PS.BUFFERING) return;
 
     try {
       const now = this.player.getCurrentTime();
-      if (Math.abs(now - this.syncOffset) > 1.5) {
-        this.player.seekTo(this.syncOffset, true);
-      }
-      this.syncSeekDoneGen = this.playGen;
+      if (Math.abs(now - target) <= YoutubeBgmController.SYNC_TOLERANCE_S) return true;
+      this.player.seekTo(target, true);
+      const after = this.player.getCurrentTime();
+      return Math.abs(after - target) <= YoutubeBgmController.SYNC_TOLERANCE_S;
     } catch {
-      /* ignore */
+      return false;
     }
+  }
+
+  private scheduleSyncRetries(gen: number): void {
+    this.clearSyncRetries();
+    for (const delay of [100, 300, 600, 1200, 2500, 5000]) {
+      this.syncRetryTimers.push(
+        setTimeout(() => {
+          if (gen !== this.playGen) return;
+          if (this.trySyncSeek()) this.clearSyncRetries();
+        }, delay),
+      );
+    }
+  }
+
+  private clearSyncRetries(): void {
+    for (const t of this.syncRetryTimers) clearTimeout(t);
+    this.syncRetryTimers = [];
   }
 
   applyVolume(): void {
@@ -304,11 +329,12 @@ class YoutubeBgmController {
 
   stopNow(): void {
     this.cancelFade();
+    this.clearSyncRetries();
     this.pendingPlay = null;
     this.playGen += 1;
     this.activeVideoId = null;
-    this.syncOffset = 0;
-    this.syncSeekDoneGen = 0;
+    this.syncAnchorOffset = 0;
+    this.syncAnchorWallMs = 0;
     if (this.player?.stopVideo) {
       try {
         this.player.stopVideo();
@@ -325,6 +351,8 @@ class YoutubeBgmController {
       onDone?.();
       return;
     }
+
+    const session = this.fadeOutSession;
 
     try {
       if (this.player.isMuted?.()) this.player.unMute();
@@ -352,7 +380,9 @@ class YoutubeBgmController {
       const t = (Date.now() - started) / durationMs;
       if (t >= 1) {
         this.cancelFade();
-        this.stopNow();
+        if (session === this.fadeOutSession) {
+          this.stopNow();
+        }
         onDone?.();
         return;
       }
@@ -399,7 +429,9 @@ class YoutubeBgmController {
     const PS = window.YT?.PlayerState;
     if (!PS) return;
 
-    this.enforceSyncSeek(state);
+    if (state === PS.PLAYING) {
+      this.trySyncSeek(true);
+    }
 
     if (state === PS.ENDED && this.roomLoop && this.player?.seekTo) {
       try {

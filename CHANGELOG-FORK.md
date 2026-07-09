@@ -25,6 +25,20 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.159 — BGM room sync: live offset + seek retries
+
+### Webclient
+
+- **`youtube-bgm.svelte.ts`:** Room BGM sync uses wall-clock anchor (server offset +
+  elapsed since `play_yt`) so re-enter resumes where the **room track is now**, not
+  where you left off. Retry `seekTo` on `PLAYING` until within tolerance (YT often
+  ignores `startSeconds` on first load). Removed pre-load `stopVideo` (legacy
+  parity). Leave-fade completion cannot `stopVideo` after a new `playSequence`
+  starts (`fadeOutSession` guard).
+- Rebuilt shell; cache bust `?v=159`.
+
+---
+
 ## 6.0.0+underspire.158 — BGM re-enter sync (legacy parity)
 
 ### Webclient
