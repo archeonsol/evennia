@@ -1,21 +1,11 @@
 <script lang="ts">
   import { media } from "../lib/media.svelte";
-  import { youtubeId, youtubeEmbedUrl } from "../lib/media";
+  import { youtubeId } from "../lib/media";
 
   let audioEl = $state<HTMLAudioElement | null>(null);
   let videoEl = $state<HTMLVideoElement | null>(null);
-  let ytEl = $state<HTMLIFrameElement | null>(null);
 
   const yt = $derived(media.nowPlaying ? youtubeId(media.nowPlaying.url) : null);
-  const ytSrc = $derived(
-    yt
-      ? youtubeEmbedUrl(yt, {
-          start: media.ytStart,
-          loop: media.ytLoop,
-          autoplay: true,
-        })
-      : "",
-  );
 
   function tryPlay(el: HTMLMediaElement | null): void {
     if (!el) return;
@@ -31,22 +21,11 @@
     });
   }
 
-  // Push the store volume into whichever player is live.
+  // Push the store volume into whichever player is live (YouTube volume is handled by YoutubeBgm).
   $effect(() => {
     const v = media.volume / 100;
     if (audioEl) audioEl.volume = v;
     if (videoEl) videoEl.volume = v;
-    if (ytEl) {
-      // YouTube IFrame API: postMessage a setVolume command (0..100).
-      try {
-        ytEl.contentWindow?.postMessage(
-          JSON.stringify({ event: "command", func: "setVolume", args: [media.volume] }),
-          "*",
-        );
-      } catch {
-        /* ignore */
-      }
-    }
   });
 
   $effect(() => {
@@ -64,14 +43,10 @@
     {#if media.nowPlaying}
       <div class="player">
         {#if yt}
-          <iframe
-            bind:this={ytEl}
-            src={ytSrc}
-            title="YouTube player"
-            frameborder="0"
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowfullscreen
-          ></iframe>
+          <p class="yt-note">
+            YouTube: <a href={media.nowPlaying.url} target="_blank" rel="noopener">{yt}</a>
+            <span class="yt-hint"> — playing in background</span>
+          </p>
         {:else if media.nowPlaying.type === "video"}
           <video bind:this={videoEl} src={media.nowPlaying.url} controls>
             <track kind="captions" />
@@ -122,6 +97,9 @@
   .player { padding: 8px 10px 0; }
   .player iframe { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border-bright); }
   .player audio, .player video { width: 100%; }
+  .yt-note { margin: 0; padding: 8px 10px; font-size: 0.78rem; color: var(--fg-dim); }
+  .yt-note a { color: var(--accent-bright); }
+  .yt-hint { color: var(--fg-faint); font-style: italic; }
   .player video { max-height: 240px; border: 1px solid var(--border-bright); }
   .vol { display: flex; align-items: center; gap: 8px; padding: 6px 10px 9px; }
   .vol input { flex: 1; accent-color: var(--accent); }

@@ -75,7 +75,14 @@ class MediaStore {
   playYoutube(raw: string, startSeconds = 0, loop = false): void {
     const id = youtubeId(raw);
     if (!id) return;
-    this.ytStart = Math.max(0, Math.floor(startSeconds));
+    const start = Math.max(0, Math.floor(startSeconds));
+    const same =
+      this.nowPlaying?.type === "youtube" &&
+      youtubeId(this.nowPlaying.url) === id &&
+      this.ytStart === start &&
+      this.ytLoop === loop;
+    if (same) return;
+    this.ytStart = start;
     this.ytLoop = loop;
     this.audioLoop = false;
     const url = `https://www.youtube.com/watch?v=${id}`;

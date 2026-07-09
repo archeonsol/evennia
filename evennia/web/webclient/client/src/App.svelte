@@ -10,6 +10,7 @@
   import Toasts from "./components/Toasts.svelte";
   import QuitOverlay from "./components/QuitOverlay.svelte";
   import UIHost from "./components/UIHost.svelte";
+  import YoutubeBgm from "./components/YoutubeBgm.svelte";
   import { macros, comboOf } from "./lib/macros.svelte";
   import { keybinds } from "./lib/keybinds.svelte";
   import { connection } from "./lib/evennia.svelte";
@@ -79,6 +80,7 @@
     <QuitOverlay />
   {/if}
   <UIHost />
+  <YoutubeBgm />
   <Toasts />
 </CrtShell>
 
