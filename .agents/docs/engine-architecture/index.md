@@ -20,10 +20,19 @@ which drifted stale as the work shipped (a roadmap rots; a decisions log doesn't
 - **[r1-first-slice.md](r1-first-slice.md)** — the first narrow R1 seam beyond
   the emote plan: structured emote delivery (RenderNode v0) + W1 web consumer.
   Strangler-bounded, touches zero existing overrides. Built + proven.
+- **[r1-view-time-resolution.md](r1-view-time-resolution.md)** captures the
+  arc-wide *why* for R1 (resolve per-viewer names at view time, not emit),
+  shared by the two R1 docs on either side of it.
 - **[r1-universal-pipeline.md](r1-universal-pipeline.md)** — the keystone:
   finishing R1 so every output path (`msg`/`at_say`/`return_appearance`/
-  `get_display_name`) is sugar over `render → RenderNode → deliver`. Strangler
-  order: say → room look → get_display_name → rest → msg. Design.
+  `get_display_name`) is sugar over `render → RenderNode → deliver`. Design.
+- **[r1-migration-status.md](r1-migration-status.md)** tracks the strangler
+  order and which surfaces have flipped (say → room look → get_display_name →
+  rest → msg), the accreting status log for the pipeline work.
+- **[webclient-protocol.md](webclient-protocol.md)** — Azaban, the W1 WebSocket
+  wire protocol for the Svelte shell: typed envelope carrying structured R1
+  RenderNodes + a per-viewer scene model, additive on the subprotocol seam.
+  Design.
 
 If an item moves from speculative to scoped, it graduates from `horizon.md` up to
 `committed.md`, and to `decisions.md` once shipped.
