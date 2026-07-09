@@ -25,6 +25,63 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.145 — Green engine test suite; drop dead contribs; ruff tooling
+
+### Engine
+
+- **`evennia/utils/clock.py` (`_SyncCoroutineResult`):** The no-running-loop path of
+  ``run_coroutine`` (the sync test-harness fallback) drove coroutines via
+  ``asyncio.run``. Django binds the ORM to a distinct DB connection per *running-loop*
+  context, so ORM run under ``asyncio.run`` used a connection that could not see an
+  enclosing ``TestCase`` transaction and sqlite writes deadlocked (``database table is
+  locked``). It now steps the coroutine *body* inline (keeping ORM on the caller's
+  connection) while still running awaited Futures on a loop and draining fire-and-forget
+  child tasks. Fixes sync-test failures for any command that emits or writes via a
+  ``run_coroutine`` continuation (``@examine``, channel ``/boot`` and ``/ban``
+  confirmations).
+
+### Tests / Migration
+
+- Cleared 47 trailing Twisted→asyncio + command-migration test failures; the full engine
+  suite is green (2742 tests, 0 failures). All fixes were test-rot except the engine
+  change above:
+  - **`test_launcher_ipc`:** restore the bound-loop identity on teardown instead of
+    leaking a fresh loop into ``clock._main_loop`` (was resolving ``test_defer``'s
+    ``defer_to_thread`` onto a dead loop).
+  - **eveditor / evmore / pose `_sync` helpers:** drive the now-``async``
+    ``RuleEngine.dispatch`` / ``try_action_dispatch`` coroutines via ``ensureDeferred``
+    instead of calling ``.addCallbacks`` on the coroutine.
+  - **default-verb interactive tests:** patch the renamed ``_get_input_future`` (was
+    ``_get_input_deferred``) in the sethelp / `@py` / create / menu flows.
+  - **accounts / email_login / telnet:** keep ``delay()`` out of sync test bodies (bind a
+    non-running loop, or route through the harness ``deferLater`` shim), since
+    ``call_later`` now needs a loop.
+
+### Contribs
+
+- **Removed `godotwebsocket`:** built a Twisted ``internet.TCPServer`` that cannot start
+  under the asyncio Portal (dead post-migration).
+- **Removed `git_integration`:** the sole GitPython user, unused here.
+- **`xyzgrid`:** its ``scipy`` / ``numpy`` dependencies were promoted from ``[extra]`` to
+  required ``dependencies``; ``gitpython`` dropped from ``[extra]``. Regenerated the API +
+  contrib doc trees and de-linked the removed pages.
+
+### Tooling
+
+- Replaced ``black`` + ``isort`` (two unpinned tools whose resolved versions drifted apart,
+  producing nondeterministic formatting) with a single pinned ``ruff == 0.15.20``:
+  ``ruff format`` for formatting, ``ruff check --select I`` for import sorting. Updated
+  ``make format`` / ``make lint`` and the agent instruction docs, and normalized the whole
+  tree once under the pinned version.
+
+## 6.0.0+underspire.144 — Svelte webclient sender color tags
+
+### Webclient
+
+- **`evennia/web/static/webclient/client2/shell.js`:** Render channel / ticket sender
+  color tags in the Svelte shell (commit ``dccc23ecb``). Backfilled entry: ``.144`` was
+  tagged without a version-file bump or changelog.
+
 ## 6.0.0+underspire.143 — Discord gateway HTTP callback compat
 
 ### Portal / Discord
