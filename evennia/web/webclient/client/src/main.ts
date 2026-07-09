@@ -18,7 +18,6 @@ import { toasts } from "./lib/toasts.svelte";
 import { notify } from "./lib/notify.svelte";
 import { renderNodeHtml } from "./lib/render";
 import { media } from "./lib/media.svelte";
-import { parseYoutubeStart } from "./lib/media";
 import { ui } from "./lib/ui.svelte";
 
 // Legacy global API so in-game MXP links (`<a onclick="Evennia.msg(...)">`) and
@@ -106,13 +105,9 @@ connection.on("oob", (env) => {
     const url = Array.isArray(env.args) ? env.args[0] : env.args;
     const kw = env.kwargs ?? {};
     if (!url) return;
-    if (event === "youtube") {
-      const raw = String(url);
-      const start = Number(kw.start ?? parseYoutubeStart(raw) ?? 0);
-      media.playYoutube(raw, start, !!(kw.loop ?? kw.looping));
-    } else {
-      media.add(event, String(url), { loop: !!(kw.loop ?? kw.looping) });
-    }
+    // Room BGM / @music use play_yt; skip youtube URL OOB for playback (avoids dual-OOB races).
+    if (event === "youtube") return;
+    media.add(event, String(url), { loop: !!(kw.loop ?? kw.looping) });
   } else if (event === "play_yt") {
     const args = Array.isArray(env.args) ? env.args : [];
     const rawId = args[0];

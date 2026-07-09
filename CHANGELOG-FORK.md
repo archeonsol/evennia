@@ -25,6 +25,24 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.152 — Room BGM leave fade and re-enter resume
+
+### Webclient
+
+- **`youtube-bgm.svelte.ts`:** `isPlaying()` via `getPlayerState()`; fade-out uses
+  slider volume fallback when `getVolume()` reports 0 (hidden iframe timing).
+- **`media.svelte.ts`:** Remove metadata dedup that skipped `playSequence` after
+  leave/re-enter; `stopGeneration` guard prevents stale fade callbacks from
+  clearing new playback; `stop()` fades when YT player is active even if UI
+  state desynced; `play_yt` cancels in-flight leave fade.
+- **`main.ts`:** Ignore `youtube` OOB for playback — room BGM uses `play_yt` only
+  (matches legacy client; avoids dual-OOB races).
+
+### Game (mootest, deploy separately)
+
+- **`client_media.py`:** `push_youtube()` sends `play_yt` only (drops redundant
+  `youtube=` OOB).
+
 ## 6.0.0+underspire.151 — Azaban music parity (YT IFrame API, fades, HUD volume)
 
 ### Webclient

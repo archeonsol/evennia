@@ -6,6 +6,7 @@ export const YT_FADE_MS = 2800;
 interface YtPlayer {
   setVolume(n: number): void;
   getVolume(): number;
+  getPlayerState(): number;
   loadVideoById(options: { videoId: string; startSeconds?: number }): void;
   stopVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
@@ -14,7 +15,14 @@ interface YtPlayer {
 
 declare global {
   namespace YT {
-    const PlayerState: { ENDED: number };
+    const PlayerState: {
+      UNSTARTED: number;
+      ENDED: number;
+      PLAYING: number;
+      PAUSED: number;
+      BUFFERING: number;
+      CUED: number;
+    };
     class Player {
       constructor(
         elementId: string,
@@ -52,6 +60,19 @@ class YoutubeBgmController {
 
   isFadeActive(): boolean {
     return this.fadeActive;
+  }
+
+  /** True when the iframe player has active (or paused) media loaded. */
+  isPlaying(): boolean {
+    if (!this.player?.getPlayerState) return false;
+    try {
+      const st = this.player.getPlayerState();
+      const PS = window.YT?.PlayerState;
+      if (!PS) return st === 1 || st === 2 || st === 3;
+      return st === PS.PLAYING || st === PS.BUFFERING || st === PS.PAUSED || st === PS.CUED;
+    } catch {
+      return false;
+    }
   }
 
   /** Load iframe API and construct YT.Player on `hostId`. */
@@ -105,7 +126,6 @@ class YoutubeBgmController {
           onStateChange: (ev) => this.onStateChange(ev),
         },
       });
-      // Player may be ready synchronously in some browsers; onReady still fires.
       void p;
     });
   }
@@ -174,6 +194,8 @@ class YoutubeBgmController {
     } catch {
       /* ignore */
     }
+    const sliderVol = Math.round(this.volumeFn());
+    if (startVol < 1 && sliderVol > 0) startVol = sliderVol;
     if (startVol < 1) {
       this.stopNow();
       onDone?.();

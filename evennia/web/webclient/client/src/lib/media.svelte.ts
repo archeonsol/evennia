@@ -27,6 +27,7 @@ class MediaStore {
   private html5Track: HTMLAudioElement | null = null;
   private html5FadeTimer: ReturnType<typeof setInterval> | null = null;
   private ytPlayPending: { id: string; start: number; loop: boolean } | null = null;
+  private stopGeneration = 0;
 
   constructor() {
     this.loadVolume();
@@ -120,12 +121,9 @@ class MediaStore {
     this.ytPlayPending = null;
     if (!pending) return;
 
-    const same =
-      this.nowPlaying?.type === "youtube" &&
-      youtubeId(this.nowPlaying.url) === pending.id &&
-      this.ytStart === pending.start &&
-      this.ytLoop === pending.loop;
-    if (same) return;
+    // Cancel in-flight leave fade; legacy play_yt always calls playYtSequence.
+    this.stopGeneration += 1;
+    ytBgm.cancelFade();
 
     this.stopHtml5Now();
     this.ytStart = pending.start;
@@ -209,13 +207,17 @@ class MediaStore {
   /** Room leave / `stop_music` — fade out then clear UI state. */
   stop(fadeMs?: number): void {
     const ms = fadeMs ?? YT_FADE_MS;
+    const gen = ++this.stopGeneration;
     let pending = 0;
     const done = (): void => {
+      if (gen !== this.stopGeneration) return;
       pending -= 1;
       if (pending <= 0) this.clearPlayback();
     };
 
-    if (this.nowPlaying?.type === "youtube") {
+    const fadeYoutube =
+      this.nowPlaying?.type === "youtube" || ytBgm.isPlaying();
+    if (fadeYoutube) {
       pending += 1;
       ytBgm.fadeOut(ms, done);
     }
@@ -228,6 +230,7 @@ class MediaStore {
 
   /** `@musicstop` / `stop_music_now` — immediate cut. */
   stopNow(): void {
+    this.stopGeneration += 1;
     this.stopYoutubeNow();
     this.stopHtml5Now();
     this.clearPlayback();
