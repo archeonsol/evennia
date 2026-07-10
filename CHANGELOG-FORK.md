@@ -25,6 +25,32 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.160 — Room-music toggle + BGM load gating
+
+### Webclient
+
+- **`settings.svelte.ts` / `SettingsPanel.svelte`:** New "Room music" setting
+  (Audio group, default on). Acts as a master switch for YouTube room BGM.
+- **`client2.html`:** Removed the eager `youtube.com/iframe_api` `<script>` so the
+  YT IFrame API no longer loads on every page. `ytBgm.loadApi()` injects it lazily
+  on first play, and only when music is enabled. When the setting is off, no
+  `youtube.com` request is ever made. Restored the `color-scheme: dark` meta
+  (dropped in `.148` when the referrer meta was added) so native scrollbars and
+  form controls stay dark.
+- **`youtube-bgm.svelte.ts`:** `setEnabled()` guards `init` / `playSequence` /
+  `syncSameTrack` and stops playback when music is disabled.
+- **`media.svelte.ts`:** `playYoutube` early-returns when music is off (no
+  now-playing chip for silent playback). Fixed `fadeVolumeTo`: its `setInterval`
+  was untracked - uncancellable, invisible to `isFadeActive`, and left the volume
+  slider creeping toward target after playback stopped. Now tracked in
+  `volumeFadeTimer` and cancelled on `setVolume` / `stop` / `stopNow`.
+- Rebuilt shell; cache bust `?v=160`.
+
+Migration notes: none. The `music` setting defaults on, so existing behavior is
+unchanged for current users.
+
+---
+
 ## 6.0.0+underspire.159 — BGM room sync: live offset + seek retries
 
 ### Webclient
