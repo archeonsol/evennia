@@ -232,4 +232,4 @@ html[data-glow] .glow-text {
 
 /* --- Screenreader mode: drop decorative chrome, keep the log readable --- */
 :root[data-screenreader] .crt-overlay,
-:root[data-screenreader] .embers-layer { display: none !important; }
+:root[data-screenreader] .embers { display: none !important; }
