@@ -163,6 +163,7 @@
       </label>
       {@render slider("Ember intensity", "emberIntensity", 0, 100, 5, (v) => `${v}%`)}
     {:else if view === "audio"}
+      {@render toggle("Room music", "music")}
       {@render toggle("Keyboard sound FX", "keyboardSfx")}
     {:else if view === "notify"}
       <button class="row toggle" onclick={onDesktopToggle}>

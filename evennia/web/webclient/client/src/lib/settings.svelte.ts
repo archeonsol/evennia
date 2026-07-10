@@ -70,6 +70,7 @@ interface Persisted {
   emberTheme: string;
   emberIntensity: number; // 0..100
   keyboardSfx: boolean;
+  music: boolean;
   typewriter: boolean;
   sceneStrip: boolean;
   notifyDesktop: boolean;
@@ -95,6 +96,7 @@ const DEFAULTS: Persisted = {
   emberTheme: "ash",
   emberIntensity: 45,
   keyboardSfx: false,
+  music: true,
   typewriter: true,
   sceneStrip: true,
   notifyDesktop: false,
@@ -144,6 +146,7 @@ class Settings {
   emberTheme = $state(DEFAULTS.emberTheme);
   emberIntensity = $state(DEFAULTS.emberIntensity);
   keyboardSfx = $state(DEFAULTS.keyboardSfx);
+  music = $state(DEFAULTS.music);
   typewriter = $state(DEFAULTS.typewriter);
   sceneStrip = $state(DEFAULTS.sceneStrip);
   notifyDesktop = $state(DEFAULTS.notifyDesktop);

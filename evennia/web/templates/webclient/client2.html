@@ -5,6 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="color-scheme" content="dark" />
     <title>{{ game_name|default:"Underspire" }}</title>
     {# Selectable terminal fonts. If a strict CSP blocks fonts.googleapis.com / #}
     {# fonts.gstatic.com, the shell falls back to the system monospace stack. #}
@@ -14,7 +15,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Fira+Code:wght@400;500&family=Space+Mono:wght@400;700&family=Share+Tech+Mono&family=VT323&display=swap"
     />
-    <link rel="stylesheet" href="{% static 'webclient/client2/shell.css' %}?v=159" type="text/css" />
+    <link rel="stylesheet" href="{% static 'webclient/client2/shell.css' %}?v=160" type="text/css" />
   </head>
   <body>
     <div id="evennia-shell"></div>
@@ -34,7 +35,6 @@
       {% endif %}
     </script>
 
-    <script src="https://www.youtube.com/iframe_api"></script>
-    <script src="{% static 'webclient/client2/shell.js' %}?v=159"></script>
+    <script src="{% static 'webclient/client2/shell.js' %}?v=160"></script>
   </body>
 </html>

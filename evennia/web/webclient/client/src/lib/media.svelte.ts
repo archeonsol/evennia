@@ -6,6 +6,7 @@ import { mediaHtml, parseYoutubeStart, youtubeId } from "./media";
 import { session } from "./session.svelte";
 import { dock } from "./dock.svelte";
 import { ytBgm, YT_FADE_MS } from "./youtube-bgm.svelte";
+import { settings } from "./settings.svelte";
 
 export interface MediaItem {
   type: string;
@@ -26,6 +27,7 @@ class MediaStore {
 
   private html5Track: HTMLAudioElement | null = null;
   private html5FadeTimer: ReturnType<typeof setInterval> | null = null;
+  private volumeFadeTimer: ReturnType<typeof setInterval> | null = null;
   private ytPlayPending: { id: string; start: number; loop: boolean } | null = null;
   private stopGeneration = 0;
   ytApiWarned = false;
@@ -64,6 +66,9 @@ class MediaStore {
   }
 
   setVolume(v: number): void {
+    // A direct volume change (slider, non-fading SET_AUDIO_VOLUME) takes over from
+    // any in-flight volume fade.
+    this.cancelVolumeFade();
     this.volume = Math.max(0, Math.min(100, Math.round(v)));
     try {
       localStorage.setItem(VOL_KEY, String(this.volume));
@@ -116,6 +121,9 @@ class MediaStore {
 
   /** Coalesce rapid `youtube` + `play_yt` pairs; last write wins per tick. */
   playYoutube(raw: string, startSeconds: number | string = 0, loop = false): void {
+    // Room music off: no load, no "now playing" chip. The controller guards the
+    // YT API too; this keeps the UI silent as well.
+    if (!settings.music) return;
     const id = youtubeId(raw);
     if (!id) return;
     const parsed = Number(startSeconds);
@@ -229,6 +237,7 @@ class MediaStore {
 
   /** Room leave / `stop_music` — fade out then clear UI state. */
   stop(fadeMs?: number): void {
+    this.cancelVolumeFade();
     const ms = fadeMs ?? YT_FADE_MS;
     const gen = ++this.stopGeneration;
     let pending = 0;
@@ -253,6 +262,7 @@ class MediaStore {
 
   /** `@musicstop` / `stop_music_now` — immediate cut. */
   stopNow(): void {
+    this.cancelVolumeFade();
     this.stopGeneration += 1;
     this.stopYoutubeNow();
     this.stopHtml5Now();
@@ -283,6 +293,13 @@ class MediaStore {
     if (this.html5FadeTimer) {
       clearInterval(this.html5FadeTimer);
       this.html5FadeTimer = null;
+    }
+  }
+
+  private cancelVolumeFade(): void {
+    if (this.volumeFadeTimer) {
+      clearInterval(this.volumeFadeTimer);
+      this.volumeFadeTimer = null;
     }
   }
 
@@ -335,16 +352,17 @@ class MediaStore {
   }
 
   private fadeVolumeTo(targetPct: number, durationMs: number): void {
+    this.cancelVolumeFade();
     const fromPct = this.volume;
     if (durationMs <= 0 || fromPct === targetPct) {
       this.setVolume(targetPct);
       return;
     }
     const t0 = Date.now();
-    const timer = setInterval(() => {
+    this.volumeFadeTimer = setInterval(() => {
       const t = (Date.now() - t0) / durationMs;
       if (t >= 1) {
-        clearInterval(timer);
+        this.cancelVolumeFade();
         this.setVolume(targetPct);
         return;
       }

@@ -74,6 +74,8 @@ class YoutubeBgmController {
   private activeVideoId: string | null = null;
   private apiErrorHandler: ((msg: string) => void) | null = null;
   apiLoadFailed = false;
+  /** Master switch (room-music setting). Off = never touch the YT IFrame API. */
+  private enabled = true;
 
   private static readonly API_LOAD_TIMEOUT_MS = 15_000;
   private static readonly SYNC_TOLERANCE_S = 1.5;
@@ -123,8 +125,15 @@ class YoutubeBgmController {
     return Math.max(0, this.syncAnchorOffset + elapsed);
   }
 
+  /** Room-music setting toggle. Disabling stops playback and blocks all loads. */
+  setEnabled(on: boolean): void {
+    this.enabled = on;
+    if (!on) this.stopNow();
+  }
+
   init(hostId = "yt-player"): Promise<void> {
     this.hostId = hostId;
+    if (!this.enabled) return Promise.resolve();
     if (!this.readyPromise) {
       this.readyPromise = this.loadApi().then(() => this.createPlayer());
     }
@@ -205,6 +214,7 @@ class YoutubeBgmController {
 
   /** Same track — seek to live room offset when already audible. */
   syncSameTrack(videoId: string, offsetSeconds: number, loop: boolean): void {
+    if (!this.enabled) return;
     this.roomLoop = loop;
     this.setSyncAnchor(offsetSeconds);
     this.activeVideoId = videoId;
@@ -225,6 +235,7 @@ class YoutubeBgmController {
   }
 
   playSequence(videoId: string, offsetSeconds: number, loop: boolean): void {
+    if (!this.enabled) return;
     this.roomLoop = loop;
     this.setSyncAnchor(offsetSeconds);
     this.activeVideoId = videoId;
