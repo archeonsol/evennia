@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.161 — Structured runtime foundations
+
+### Engine
+
+- Added universal RenderNode delivery, durable narrative timelines, and stable
+  narrative handles.
+- Hardened scheduler, durable-job, Redis bus, movement, and JSON attribute
+  lifecycle behavior.
+- Added capability-based authorization, structured policies, scoped grants,
+  suspension and recovery controls, legacy-lock migration tooling, and
+  authorization observability.
+- Added database migrations for durable jobs and authorization persistence.
+
 ## 6.0.0+underspire.160 — Room-music toggle + BGM load gating
 
 ### Webclient

@@ -19,8 +19,8 @@
     </div>
     {#if scene.occupants.length}
       <ul>
-        {#each scene.occupants as o (o.char_id)}
-          <li class="char-ref" data-char-id={o.char_id}>
+        {#each scene.occupants as o (o.handle)}
+          <li class="entity-ref" data-entity-handle={o.handle}>
             <span class="sigil" aria-hidden="true">▸</span>{@html o.name}
           </li>
         {/each}

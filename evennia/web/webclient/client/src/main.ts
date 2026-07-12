@@ -19,6 +19,7 @@ import { notify } from "./lib/notify.svelte";
 import { renderNodeHtml } from "./lib/render";
 import { media } from "./lib/media.svelte";
 import { ui } from "./lib/ui.svelte";
+import { dock } from "./lib/dock.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -107,6 +108,15 @@ connection.on("oob", (env) => {
   } else if (event === "ui_remove") {
     const id = (Array.isArray(env.args) ? env.args[0] : env.args)?.id;
     if (id) ui.remove(String(id));
+  } else if (event === "web_panel") {
+    // Fold a magic-link page into the shell: open its URL in a floating iframe.
+    // The iframe carries the shared Django session, so no token is required.
+    const spec = (Array.isArray(env.args) ? env.args[0] : env.args) ?? env.kwargs ?? {};
+    const url = String(spec.url ?? "");
+    if (url) {
+      const id = String(spec.id ?? url);
+      dock.openIframe(id, String(spec.title ?? "Web"), url);
+    }
   } else if (event === "logout") {
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;

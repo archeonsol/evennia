@@ -22,6 +22,7 @@ export interface ChannelMsgPayload {
   text: string;
   html?: string;
   sender: string;
+  sender_html?: string;
   platform?: string;
   ts: number;
   msg_id: string;
@@ -99,6 +100,7 @@ export interface TicketMsgPayload {
   text: string;
   html?: string;
   sender: string;
+  sender_html?: string;
   platform?: string;
   visibility?: string;
   ts: number;
@@ -117,6 +119,9 @@ export interface UiRemovePayload {
 
 /** args[0] = video URL. */
 export type VideoPayload = string;
+
+/** Open an embedded web page in the shell: args[0] = {url, title?, id?}. */
+export type WebPanelPayload = Record<string, any>;
 
 /** args[0] = YouTube URL. */
 export type YoutubePayload = string;
@@ -145,6 +150,7 @@ export type OobEvent =
   | "ui_component"
   | "ui_remove"
   | "video"
+  | "web_panel"
   | "youtube";
 
 export interface OobEventMap {
@@ -171,5 +177,6 @@ export interface OobEventMap {
   "ui_component": UiComponentPayload;
   "ui_remove": UiRemovePayload;
   "video": VideoPayload;
+  "web_panel": WebPanelPayload;
   "youtube": YoutubePayload;
 }

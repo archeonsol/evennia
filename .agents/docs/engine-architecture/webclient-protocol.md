@@ -1,6 +1,6 @@
 # Azaban: the shell wire protocol (design)
 
-Status: **design; portal format scaffolded.** **Azaban** is our own WebSocket
+Status: **R1 render and scene phases shipped.** **Azaban** is our own WebSocket
 wire protocol (subprotocol token `azaban.v1`), purpose-built for the Svelte shell
 and carrying **structured R1 RenderNodes** instead of pre-baked HTML. The name is
 engine-generic (the platform brand, not game-specific); the downstream game is
@@ -111,10 +111,10 @@ now (WebTransport/HTTP/3 reserved, the format is transport-agnostic); JSON defau
 with msgpack a negotiated `caps.encoding` only if profiling shows parse cost.
 
 ## Build phases
-
 1. **Azaban core:** `hello`/`text`/`prompt`/`cmd`/typed `oob`; portal
    `AzabanFormat` + shell negotiation (`render` reserved).
-2. **`render`:** wire `caps.rendersNodes` → `deliver` emits nodes; shell renders
-   the span tree. Retires the `CLIENT_NARRATIVE` flag.
-3. **Scene model + `patch`:** server scene state + deltas; shell reactive model.
+2. **`render` (done):** `caps.rendersNodes` selects immutable `render.v1` nodes;
+   all capable sessions receive them and remaining text normalizes at Azaban.
+3. **Scene model + `patch` (done):** room snapshots and occupant deltas use opaque
+   viewer handles; raw database identity is rejected at the wire boundary.
 4. **Asset channel:** `asset` + binary/URL media.

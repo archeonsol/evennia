@@ -5,7 +5,7 @@
 // handle a whole-scene `set`, with granular sub-path deltas to follow.
 
 export interface Occupant {
-  char_id: number | string;
+  handle: string;
   name: string;
 }
 export interface SceneRoom {
@@ -36,14 +36,14 @@ class Scene {
         this.exits = v.exits ?? [];
         this.present = true;
       } else if (op.op === "add" && path === "/occupants/-") {
-        // Someone entered - append if not already present (dedupe by id).
+        // Someone entered - append if not already present for this perception handle.
         const val = op.value;
-        if (val && !this.occupants.some((o) => o.char_id === val.char_id)) {
+        if (val && !this.occupants.some((o) => o.handle === val.handle)) {
           this.occupants = [...this.occupants, val];
         }
       } else if (op.op === "del" && path === "/occupants") {
-        // Someone left - drop by char_id.
-        this.occupants = this.occupants.filter((o) => o.char_id !== op.char_id);
+        // Someone left - drop by opaque viewer-scoped handle.
+        this.occupants = this.occupants.filter((o) => o.handle !== op.handle);
       }
     }
   }
