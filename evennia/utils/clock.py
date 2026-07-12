@@ -8,6 +8,7 @@ Implementations use native asyncio primitives on the process-owned loop (T3 S9).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import inspect
 import threading
@@ -23,6 +24,13 @@ _default_executor: ThreadPoolExecutor | None = None
 _executor_lock = threading.Lock()
 _main_loop: asyncio.AbstractEventLoop | None = None
 _loop_thread_id: int | None = None
+_runtime_task_kind: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "evennia_runtime_task_kind", default=None
+)
+
+_RUNTIME_TASK_KINDS = frozenset(
+    {"action", "activity", "command", "job", "service", "system", "warmup", "generic", "test"}
+)
 
 
 def bind_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -139,7 +147,14 @@ def _flush_when_running(loop: asyncio.AbstractEventLoop) -> None:
         pending = _pending_when_running[:]
         _pending_when_running.clear()
     for fn, args, kwargs in pending:
-        loop.call_soon(fn, *args, **kwargs)
+        loop.call_soon(
+            _run_runtime_callback,
+            fn,
+            args,
+            kwargs,
+            "generic",
+            context=_isolated_database_context(),
+        )
 
 
 def _ensure_default_executor() -> ThreadPoolExecutor:
@@ -225,7 +240,7 @@ class LoopHandle:
         self._stopped.clear()
         loop = _get_loop()
         _flush_when_running(loop)
-        self._task = loop.create_task(self._loop(now))
+        self._task = _create_runtime_task(loop, self._loop(now), "service")
         return self._stopped
 
     def stop(self):
@@ -278,6 +293,11 @@ class LoopHandle:
             self.running = False
             if self._task is not None and not self._task.done():
                 self._task.cancel()
+        finally:
+            # Repeating roots are intentionally long-lived. Release any ORM
+            # wrapper opened by this iteration rather than retaining one
+            # PgBouncer client for the process lifetime.
+            _close_database_connections()
 
 
 class _SyncCoroutineResult:
@@ -403,20 +423,28 @@ def call_later(seconds, fn, *args, **kwargs):
     """
     loop = _get_loop()
     _flush_when_running(loop)
-    if kwargs:
-        fn = functools.partial(fn, *args, **kwargs)
-        return loop.call_later(seconds, fn)
-    return loop.call_later(seconds, fn, *args)
+    return loop.call_later(
+        seconds,
+        _run_runtime_callback,
+        fn,
+        args,
+        kwargs,
+        "generic",
+        context=_isolated_database_context(),
+    )
 
 
 def call_from_thread(fn, *args, **kwargs):
     """Run ``fn`` on the reactor/loop thread from a worker thread (thread-safe)."""
     loop = _get_loop()
-    if kwargs:
-        fn = functools.partial(fn, *args, **kwargs)
-        return loop.call_soon_threadsafe(fn)
-    # kwargs is empty in this branch; call_soon_threadsafe takes no **kwargs.
-    return loop.call_soon_threadsafe(fn, *args)
+    return loop.call_soon_threadsafe(
+        _run_runtime_callback,
+        fn,
+        args,
+        kwargs,
+        "generic",
+        context=_isolated_database_context(),
+    )
 
 
 def when_running(fn, *args, **kwargs):
@@ -428,7 +456,14 @@ def when_running(fn, *args, **kwargs):
             _pending_when_running.append((fn, args, kwargs))
         return None
     _flush_when_running(loop)
-    return loop.call_soon(fn, *args, **kwargs)
+    return loop.call_soon(
+        _run_runtime_callback,
+        fn,
+        args,
+        kwargs,
+        "generic",
+        context=_isolated_database_context(),
+    )
 
 
 async def maybe_await(result):
@@ -446,8 +481,165 @@ async def maybe_await(result):
     return result
 
 
-def run_coroutine(coro):
-    """Schedule an ``async`` coroutine to run on the event loop.
+def _normalize_task_kind(value: str) -> str:
+    """Return one bounded metric/debug label for a runtime root."""
+
+    normalized = str(value or "generic").strip().lower()
+    return normalized if normalized in _RUNTIME_TASK_KINDS else "generic"
+
+
+def _isolated_database_context() -> contextvars.Context:
+    """Copy application context while detaching inherited Django wrappers.
+
+    ``asgiref.local.Local`` deliberately propagates values into child asyncio
+    tasks. That is useful for tracing and application context, but unsafe for
+    Django connection wrappers: detached roots would otherwise share a wrapper
+    with their parent and keep PgBouncer client sockets alive after completion.
+
+    Removing aliases inside the *copied* context preserves every non-database
+    ContextVar while leaving the parent's wrappers untouched. New wrappers are
+    then owned exclusively by the root and can be closed deterministically.
+    """
+
+    context = contextvars.copy_context()
+
+    def detach() -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # Before loop startup Django uses true thread-local storage. The
+            # future async task will switch to its ContextVar-backed storage,
+            # so there is nothing inherited to detach; deleting here would
+            # instead mutate the bootstrap thread's synchronous namespace.
+            return
+        try:
+            from django.core.exceptions import ImproperlyConfigured
+            from django.db import connections
+
+            local = connections._connections
+            for alias in connections:
+                try:
+                    delattr(local, alias)
+                except AttributeError:
+                    pass
+        except ImproperlyConfigured:
+            # Tiny utility consumers may use the clock without Django.
+            return
+        except Exception as err:
+            raise RuntimeError("could not isolate Django state for runtime root") from err
+
+    context.run(detach)
+    return context
+
+
+def _record_runtime_task(kind: str, event: str, had_connection: bool = False) -> None:
+    """Emit optional low-cardinality task/connection lifecycle metrics."""
+
+    try:
+        from evennia.server.prometheus_metrics import record_runtime_task
+
+        record_runtime_task(kind, event, had_connection=had_connection)
+    except Exception:
+        pass
+
+
+def _close_database_connections() -> bool:
+    """Close wrappers in the current execution context and report use."""
+
+    try:
+        from django.db import connections
+
+        had_connection = any(
+            wrapper.connection is not None for wrapper in connections.all(initialized_only=True)
+        )
+        connections.close_all()
+        return had_connection
+    except Exception:
+        return False
+
+
+def _run_runtime_callback(fn, args, kwargs, task_kind="generic"):
+    """Run one synchronous loop callback under a closing DB scope."""
+
+    kind = _normalize_task_kind(task_kind)
+    token = _runtime_task_kind.set(kind)
+    _record_runtime_task(kind, "started")
+    result_kind = "completed"
+    had_connection = False
+    try:
+        result = fn(*args, **kwargs)
+        if inspect.isawaitable(result):
+            return run_coroutine(result, task_kind=kind)
+        return result
+    except Exception:
+        result_kind = "failed"
+        raise
+    finally:
+        try:
+            had_connection = _close_database_connections()
+        finally:
+            _record_runtime_task(kind, result_kind, had_connection=had_connection)
+            _runtime_task_kind.reset(token)
+
+
+def run_callback(fn, *args, _task_kind="generic", **kwargs):
+    """Run a completion callback in an isolated synchronous DB scope."""
+
+    context = _isolated_database_context()
+    return context.run(_run_runtime_callback, fn, args, kwargs, _task_kind)
+
+
+async def _run_runtime_root(coro, task_kind: str, started: list[bool]):
+    """Run one detached root and release only its owned DB wrappers."""
+
+    started[0] = True
+    kind = _normalize_task_kind(task_kind)
+    token = _runtime_task_kind.set(kind)
+    _record_runtime_task(kind, "started")
+    result = "completed"
+    had_connection = False
+    try:
+        return await coro
+    except asyncio.CancelledError:
+        result = "cancelled"
+        raise
+    except Exception:
+        result = "failed"
+        raise
+    finally:
+        try:
+            had_connection = _close_database_connections()
+        finally:
+            _record_runtime_task(kind, result, had_connection=had_connection)
+            _runtime_task_kind.reset(token)
+
+
+def _create_runtime_task(loop, coro, task_kind: str) -> asyncio.Task:
+    """Create one supervised root on ``loop``, even before it is running."""
+
+    context = _isolated_database_context()
+    started = [False]
+    task = loop.create_task(_run_runtime_root(coro, task_kind, started), context=context)
+
+    def completed(done_task):
+        # If cancellation wins before the wrapper's first bytecode executes,
+        # asyncio closes the wrapper but not the user coroutine stored in its
+        # arguments. Close it explicitly so delayed/action roots never produce
+        # "coroutine was never awaited" or retain captured game objects.
+        if not started[0] and inspect.iscoroutine(coro):
+            coro.close()
+        _log_task_exception(done_task)
+
+    task.add_done_callback(completed)
+    return task
+
+
+def run_coroutine(coro, *, task_kind="generic"):
+    """Schedule a detached runtime root on the event loop.
+
+    The root receives an isolated Django connection context and closes every
+    connection it owns on success, error, or cancellation. Application
+    ContextVars (command tracing, game execution context) still propagate.
 
     Returns an ``asyncio.Task`` when a loop is running. When called from a test
     harness with no running loop, drives the coroutine synchronously and returns
@@ -457,9 +649,13 @@ def run_coroutine(coro):
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return _SyncCoroutineResult(coro)
-    task = loop.create_task(coro)
-    task.add_done_callback(_log_task_exception)
-    return task
+    return _create_runtime_task(loop, coro, task_kind)
+
+
+def current_runtime_task_kind() -> str | None:
+    """Return the owning detached runtime kind, if called inside one."""
+
+    return _runtime_task_kind.get()
 
 
 def make_looping(fn, *args, **kwargs):
@@ -500,8 +696,8 @@ def defer_later(seconds, fn=None, *args, **kwargs):
             return fn(*args, **kwargs)
         return fn(*args)
 
-    loop = _get_loop()
-    return loop.create_task(_delayed())
+    _get_loop()
+    return run_coroutine(_delayed(), task_kind="generic")
 
 
 class _DeferLaterCompat:

@@ -41,14 +41,20 @@ def receive_adminportal2server(packed_data):
 
     elif operation == amp.SRELOAD:
         evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-        clock.run_coroutine(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"))
+        clock.run_coroutine(
+            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"), task_kind="service"
+        )
 
     elif operation == amp.SRESET:
         evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-        clock.run_coroutine(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"))
+        clock.run_coroutine(
+            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"), task_kind="service"
+        )
 
     elif operation == amp.SSHUTD:
-        clock.run_coroutine(evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"))
+        clock.run_coroutine(
+            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"), task_kind="service"
+        )
 
     else:
         raise Exception("operation %(op)s not recognized." % {"op": operation})

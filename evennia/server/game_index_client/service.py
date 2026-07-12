@@ -19,7 +19,9 @@ class EvenniaGameIndexService(Service):
     def __init__(self):
         super().__init__()
         self.client = EvenniaGameIndexClient(on_bad_request=self._die_on_bad_request)
-        self.loop = clock.make_looping(lambda: clock.run_coroutine(self.client.send_game_details()))
+        self.loop = clock.make_looping(
+            lambda: clock.run_coroutine(self.client.send_game_details(), task_kind="service")
+        )
 
     def _on_start(self):
         clock.call_later(_FIRST_UPDATE_DELAY, self.loop.start, _CLIENT_UPDATE_RATE)

@@ -138,9 +138,30 @@ def access_check(
     mode = resource_policy_mode(resource)
     if mode == "legacy":
         return bool(legacy_evaluator()), None
-    decision = authorize(principal, resource, access_type, context=context, default=default)
-    if decision.reason_code == "no_structured_policy":
+
+    # Transitional resources commonly have no structured override yet. Check
+    # the negative-cached policy package first so legacy fallback does not load
+    # grants, suspension state, or scope labels merely to discover there is no
+    # policy to evaluate.
+    try:
+        policy = load_policy(resource, access_type)
+    except Exception:
+        logger.log_trace("authorization policy is invalid or unavailable")
+        # Re-enter the full evaluator so an audited break-glass grant can still
+        # recover a malformed policy. Ordinary principals fail closed.
+        decision = authorize(principal, resource, access_type, context=context, default=default)
+        if mode == "live":
+            return decision.allowed, decision
         return bool(legacy_evaluator()), decision
+    if policy is None:
+        decision = AuthorizationDecision(
+            allowed=bool(default),
+            reason_code="no_structured_policy",
+            public_reason="" if default else "Access denied.",
+        )
+        return bool(legacy_evaluator()), decision
+
+    decision = authorize(principal, resource, access_type, context=context, default=default)
     if mode == "live":
         return decision.allowed, decision
 

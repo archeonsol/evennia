@@ -59,7 +59,8 @@ class MessagingMixin:
         from evennia.utils import clock
 
         return clock.run_coroutine(
-            _CMDHANDLER(self, raw_string, callertype="object", session=session, **kwargs)
+            _CMDHANDLER(self, raw_string, callertype="object", session=session, **kwargs),
+            task_kind="command",
         )
 
     def msg(self, text=None, from_obj=None, session=None, options=None, **kwargs):

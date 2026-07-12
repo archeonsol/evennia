@@ -40,6 +40,9 @@ If an item moves from speculative to scoped, it graduates from `horizon.md` up t
 - **[r3-authorization.md](r3-authorization.md)** documents capability
   authorization, split caches, offline migration, and per-kind freeze through
   R3E.
+- **[runtime-task-lifecycle.md](runtime-task-lifecycle.md)** documents supervised
+  asyncio roots, task-local Django connection ownership, scheduler fast paths,
+  and pooler-safe cleanup.
 
 ## Two-layer thesis
 

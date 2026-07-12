@@ -1716,7 +1716,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         # cmdhandler is `async def` now; run the coroutine on the loop as a Deferred.
         return clock.run_coroutine(
-            _CMDHANDLER(self, raw_string, callertype="account", session=session, **kwargs)
+            _CMDHANDLER(self, raw_string, callertype="account", session=session, **kwargs),
+            task_kind="command",
         )
 
     # channel receive hooks
@@ -2368,9 +2369,10 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # Warm slow-changing capability grants once per login. Resource scope
         # state remains independently lazy and generation-invalidated.
         try:
-            from evennia.authorization.storage import load_grants
+            from evennia.authorization.storage import load_grants, principal_is_suspended
 
             load_grants(self)
+            principal_is_suspended(self)
         except Exception:
             logger.log_trace("at_post_login: authorization grant preload failed")
 
@@ -2809,9 +2811,10 @@ class DefaultGuest(DefaultAccount):
 
         """
         try:
-            from evennia.authorization.storage import load_grants
+            from evennia.authorization.storage import load_grants, principal_is_suspended
 
             load_grants(self)
+            principal_is_suspended(self)
         except Exception:
             logger.log_trace("guest at_post_login: authorization grant preload failed")
         self._send_to_connect_channel(_("|G{key} connected|n").format(key=self.key))

@@ -8,9 +8,11 @@ no running loop.
 """
 
 import asyncio
+import contextvars
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from django.db import connections
 from django.test import SimpleTestCase
 
 from evennia.utils import clock
@@ -331,6 +333,33 @@ class TestCallFromThread(_AsyncioLoopMixin, SimpleTestCase):
         self.assertEqual((got.get("a"), got.get("b")), ("pos", "kw"))
 
 
+class TestRuntimeCallbackDatabaseScope(_AsyncioLoopMixin, SimpleTestCase):
+    """Timer and completion callbacks cannot retain inherited DB wrappers."""
+
+    def test_call_later_closes_callback_database_scope(self):
+        close_all = MagicMock()
+        called = []
+
+        async def drive():
+            with patch.object(connections, "close_all", close_all):
+                clock.call_later(0, called.append, "done")
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+
+        self._loop.run_until_complete(drive())
+        self.assertEqual(called, ["done"])
+        close_all.assert_called_once_with()
+
+    def test_run_callback_detaches_parent_wrapper(self):
+        async def drive():
+            parent = connections["default"]
+            observed = clock.run_callback(lambda: connections["default"])
+            return parent, observed
+
+        parent, observed = self._loop.run_until_complete(drive())
+        self.assertIsNot(parent, observed)
+
+
 class TestRunCoroutineDirect(_AsyncioLoopMixin, SimpleTestCase):
     """`run_coroutine` on a running loop returns a Task that carries the result."""
 
@@ -345,6 +374,108 @@ class TestRunCoroutineDirect(_AsyncioLoopMixin, SimpleTestCase):
             return await task
 
         self.assertEqual(self._loop.run_until_complete(drive()), 42)
+
+
+class TestRuntimeTaskDatabaseScope(_AsyncioLoopMixin, SimpleTestCase):
+    """Detached roots own isolated Django connection state and always release it."""
+
+    def test_root_detaches_database_wrapper_but_preserves_other_context(self):
+        marker = contextvars.ContextVar("clock_test_marker", default="missing")
+
+        async def drive():
+            parent_wrapper = connections["default"]
+            marker.set("trace-123")
+            observed = {}
+
+            async def root():
+                observed["wrapper"] = connections["default"]
+                observed["marker"] = marker.get()
+
+            await clock.run_coroutine(root(), task_kind="test")
+            return parent_wrapper, observed
+
+        parent_wrapper, observed = self._loop.run_until_complete(drive())
+        self.assertIsNot(observed["wrapper"], parent_wrapper)
+        self.assertEqual(observed["marker"], "trace-123")
+
+    def test_root_closes_its_database_scope_on_success(self):
+        close_all = MagicMock()
+
+        async def drive():
+            with patch.object(connections, "close_all", close_all):
+                await clock.run_coroutine(asyncio.sleep(0), task_kind="test")
+
+        self._loop.run_until_complete(drive())
+        close_all.assert_called_once_with()
+
+    def test_root_closes_its_database_scope_on_cancellation(self):
+        close_all = MagicMock()
+
+        async def wait_forever():
+            await asyncio.Event().wait()
+
+        async def drive():
+            with patch.object(connections, "close_all", close_all):
+                task = clock.run_coroutine(wait_forever(), task_kind="test")
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        self._loop.run_until_complete(drive())
+        close_all.assert_called_once_with()
+
+    def test_root_closes_its_database_scope_on_failure(self):
+        close_all = MagicMock()
+
+        async def fail():
+            raise ValueError("root failed")
+
+        async def drive():
+            with patch.object(connections, "close_all", close_all):
+                task = clock.run_coroutine(fail(), task_kind="test")
+                with self.assertRaises(ValueError):
+                    await task
+                await asyncio.sleep(0)
+
+        self._loop.run_until_complete(drive())
+        close_all.assert_called_once_with()
+
+    def test_many_roots_do_not_accumulate_database_wrappers(self):
+        closers = []
+
+        async def drive():
+            parent_wrapper = connections["default"]
+            for _ in range(250):
+
+                async def root():
+                    wrapper = connections["default"]
+                    self.assertIsNot(wrapper, parent_wrapper)
+                    closer = MagicMock()
+                    wrapper.close = closer
+                    closers.append(closer)
+
+                await clock.run_coroutine(root(), task_kind="test")
+
+        self._loop.run_until_complete(drive())
+        self.assertEqual(len(closers), 250)
+        self.assertTrue(all(closer.call_count == 1 for closer in closers))
+
+    def test_cancel_before_first_step_closes_user_coroutine(self):
+        async def never_started():
+            await asyncio.sleep(1)
+
+        async def drive():
+            coro = never_started()
+            task = clock.run_coroutine(coro, task_kind="test")
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            await asyncio.sleep(0)
+            return coro
+
+        coro = self._loop.run_until_complete(drive())
+        self.assertIsNone(coro.cr_frame)
 
 
 class TestLoopHandleDirect(_AsyncioLoopMixin, SimpleTestCase):

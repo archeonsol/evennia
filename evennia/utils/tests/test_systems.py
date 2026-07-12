@@ -219,6 +219,31 @@ class TestEveryTickCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.driver.tick()
         self.assertEqual(self.fires[1].dt, 3.0)
 
+    def test_synchronous_system_does_not_spawn_async_root(self):
+        register(name="s", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
+        with patch.object(systems.clock, "run_coroutine") as spawn:
+            self.driver.tick()
+        spawn.assert_not_called()
+        self.assertEqual(len(self.fires), 1)
+
+    def test_awaitable_system_uses_named_database_root(self):
+        async def run(ctx):
+            self.fires.append(ctx)
+
+        register(name="s", cadence=every_tick(), scope=global_scope(), run=run)
+
+        async def scenario():
+            with patch.object(
+                systems.clock, "run_coroutine", wraps=systems.clock.run_coroutine
+            ) as spawn:
+                self.driver.tick()
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+            spawn.assert_called_once()
+            self.assertEqual(spawn.call_args.kwargs["task_kind"], "system")
+
+        asyncio.new_event_loop().run_until_complete(scenario())
+
 
 class TestWorkloadAdmission(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_invalid_workload_class_rejected(self):

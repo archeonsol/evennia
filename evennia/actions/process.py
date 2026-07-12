@@ -211,7 +211,7 @@ def start_activity(holder, activity):
     if kind in ("done", "cancelled", "error"):
         _finish_activity(activity, gen, completed=(kind == "done"))
     else:
-        clock.run_coroutine(_drive_activity(activity, gen, kind, value))
+        clock.run_coroutine(_drive_activity(activity, gen, kind, value), task_kind="activity")
     return activity
 
 

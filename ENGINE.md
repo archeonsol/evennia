@@ -38,6 +38,18 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 - Offline compiler/differential commands and per-kind freeze settings provide the
   finite migration path. LockHandler removal is reserved for R3F.
 
+### Supervised runtime tasks
+
+- `clock.run_coroutine(..., task_kind=...)` owns detached asyncio roots, preserves
+  application context while isolating Django wrappers, and closes root-owned
+  connections on every terminal path.
+- Synchronous scheduler fires stay inline; async systems, commands, activities,
+  jobs, and service work use named roots. Long-lived loops close DB state after
+  each iteration and worker threads retain no pooler clients.
+- Runtime metrics expose active roots, outcomes, DB-scope closes, and unmanaged
+  asyncio ORM access. Authorization policy packages and negative caching keep
+  warm decisions SQL-free.
+
 ### Tier 1 (command / messaging hot path)
 
 - **`msg_contents`**: precomputed display names, `display_names` passed to actor-stance parser; skips `$` parse when message has no funcparser tokens; `get_message_recipients()` hook on locations

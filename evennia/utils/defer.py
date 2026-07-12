@@ -14,9 +14,9 @@ The callable you pass to `in_thread` / `background` / `threaded` runs in a
 *worker thread*, not on the event loop thread. In that worker it may do only:
 
 - stdlib and network I/O (``requests``, ``socket``, file reads, subprocess);
-- direct Django ORM queries on plain (non-typeclass) models. The helper runs
-  ``close_old_connections()`` around the worker, so ORM use in the pool does
-  not accumulate or reuse stale connections (no "server has gone away");
+- direct Django ORM queries on plain (non-typeclass) models. The helper rejects
+  stale state before work and closes every worker-owned connection afterwards,
+  so ORM use cannot retain PgBouncer client slots between jobs;
 - pure computation.
 
 and it must return plain data (str / bytes / int / dict / list of primitives) —
@@ -33,7 +33,7 @@ for concurrent access; treat all game-object access as event-loop-thread-only.
 All game-object interaction happens *after* the worker returns, in an
 ``await`` or Future callback, which runs back on the event loop thread::
 
-    from evennia.utils import defer
+    from evennia.utils import clock, defer
 
     def _fetch():                  # worker thread: pure I/O, no game objects
         return requests.get(url, timeout=10).json()
@@ -42,7 +42,9 @@ All game-object interaction happens *after* the worker returns, in an
         caller.msg(f"Result: {data['field']}")
 
     defer.in_thread(_fetch).add_done_callback(
-        lambda fut: asyncio.create_task(_deliver(fut.result()))
+        lambda fut: clock.run_coroutine(
+            _deliver(fut.result()), task_kind="generic"
+        )
     )
 
 What this does and does not solve:
@@ -61,7 +63,7 @@ from __future__ import annotations
 import traceback
 from functools import wraps
 
-from django.db import close_old_connections
+from django.db import close_old_connections, connections
 
 from evennia.utils import clock, logger
 
@@ -83,17 +85,16 @@ def _run_with_db_hygiene(fn, args, kwargs):
     """
     Worker-thread entry point: run `fn` with Django connection hygiene.
 
-    Runs in the thread pool. ``close_old_connections`` is called before
-    and after `fn` so a pooled worker thread never reuses a stale DB connection
-    or leaves one open between jobs. Respects ``CONN_MAX_AGE`` (persistent
-    connections are kept until they age out). Cheap and harmless for workers
-    that never touch the ORM.
+    Runs in the thread pool. ``close_old_connections`` rejects stale inherited
+    state before work; ``connections.close_all`` then guarantees the persistent
+    worker retains no PgBouncer client slot between jobs. Cheap and harmless
+    for workers that never touch the ORM.
     """
     close_old_connections()
     try:
         return fn(*args, **kwargs)
     finally:
-        close_old_connections()
+        connections.close_all()
 
 
 def _wire_future_compat(future):
@@ -116,7 +117,7 @@ def _wire_future_compat(future):
             exc = fut.exception()
             if exc is not None:
                 return
-            callback(fut.result(), *args, **kwargs)
+            clock.run_callback(callback, fut.result(), *args, _task_kind="generic", **kwargs)
 
         future.add_done_callback(_done)
         return future
@@ -127,7 +128,9 @@ def _wire_future_compat(future):
                 return
             exc = fut.exception()
             if exc is not None:
-                errback(WorkerFailure(exc), *args, **kwargs)
+                clock.run_callback(
+                    errback, WorkerFailure(exc), *args, _task_kind="generic", **kwargs
+                )
 
         future.add_done_callback(_done)
         return future
@@ -148,9 +151,21 @@ def _wire_future_compat(future):
                 return
             exc = fut.exception()
             if exc is not None:
-                errback(WorkerFailure(exc), *errbackArgs, **errbackKeywords)
+                clock.run_callback(
+                    errback,
+                    WorkerFailure(exc),
+                    *errbackArgs,
+                    _task_kind="generic",
+                    **errbackKeywords,
+                )
             else:
-                callback(fut.result(), *callbackArgs, **callbackKeywords)
+                clock.run_callback(
+                    callback,
+                    fut.result(),
+                    *callbackArgs,
+                    _task_kind="generic",
+                    **callbackKeywords,
+                )
 
         future.add_done_callback(_done)
         return future
@@ -195,7 +210,7 @@ def _attach_done_errback(future, on_error=None):
         if exc is None:
             return
         if on_error is not None:
-            on_error(WorkerFailure(exc))
+            clock.run_callback(on_error, WorkerFailure(exc), _task_kind="generic")
         else:
             logger.log_err(f"defer.background task failed:\n{exc}")
 
@@ -251,8 +266,8 @@ def threaded(fn):
         def fetch_status(url):
             return requests.get(url, timeout=10).status_code
 
-        fetch_status(url).add_done_callback(
-            lambda fut: caller.msg(f"{fut.result()}")
+        fetch_status(url).addCallback(
+            lambda status: caller.msg(f"{status}")
         )
         ```
 

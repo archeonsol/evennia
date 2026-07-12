@@ -3046,7 +3046,7 @@ class CmdExamine(ObjManipCommand):
 
                 from evennia.utils import clock
 
-                clock.run_coroutine(_show_cmdset())
+                clock.run_coroutine(_show_cmdset(), task_kind="command")
 
             else:
                 # for objects without cmdsets we can proceed to examine immediately

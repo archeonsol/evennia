@@ -742,6 +742,10 @@ CHANNEL_SUBSCRIBER_CACHE_ALIAS = "default"
 # PostgreSQL connection defaults (apply via evennia.server.database_postgres.apply_postgres_engine_defaults).
 ENGINE_DATABASE_CONN_MAX_AGE = 600
 ENGINE_DATABASE_CONN_HEALTH_CHECKS = True
+# Async ORM connections on the game loop must belong to a supervised runtime
+# root. ``warn`` preserves third-party compatibility while exposing violations;
+# use ``error`` in CI once a game has removed unmanaged task creation.
+ENGINE_RUNTIME_UNMANAGED_DB_POLICY = "warn"
 ENGINE_DATABASE_STATEMENT_TIMEOUT_MS = 30000
 # Fallbacks for cmdset paths that fail to load. Note that if you change the path for your
 # default cmdsets, you will also need to copy CMDSET_FALLBACKS after your change in your

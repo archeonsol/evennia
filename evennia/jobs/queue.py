@@ -304,7 +304,7 @@ def _deferred_or_awaitable(result):
                 else:
                     on_ok()
 
-            clock.run_coroutine(_runner())
+            clock.run_coroutine(_runner(), task_kind="job")
 
         return _add
     if hasattr(result, "addCallbacks") or hasattr(result, "addBoth"):
@@ -444,7 +444,9 @@ def _retry_or_dead_redis(record: dict) -> None:
         blob = json.dumps(payload, separators=(",", ":"))
         if attempts >= max_attempts:
             r.lpush(dead, blob)  # dead-letter
-            logger.log_err("job_queue: job %s dead-lettered after %d attempts" % (record.get("id"), attempts))
+            logger.log_err(
+                "job_queue: job %s dead-lettered after %d attempts" % (record.get("id"), attempts)
+            )
         else:
             # Redis lists have no delay; requeue immediately for another attempt.
             r.lpush(key, blob)

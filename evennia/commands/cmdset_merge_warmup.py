@@ -47,7 +47,14 @@ async def warm_cmdset_merge_for_session(session, *, callertype: str = "session")
             merge_caller,
             _error_to,
         ) = generate_cmdset_providers(session, session=session)
-        await get_and_merge_cmdsets(merge_caller, cmdset_providers_list, callertype, "", cmdid=None)
+        merged = await get_and_merge_cmdsets(
+            merge_caller, cmdset_providers_list, callertype, "", cmdid=None
+        )
+        commands = getattr(merged, "commands", None)
+        if isinstance(commands, (list, tuple)) and commands:
+            from evennia.authorization.storage import preload_policy_packages
+
+            preload_policy_packages(commands)
     except Exception as exc:
         logger.log_trace(f"cmdset merge warmup: {exc}")
 
@@ -75,7 +82,7 @@ def schedule_cmdset_merge_warmup_for_character(character) -> None:
             logger.log_trace("cmdset merge warmup: sessions.all() failed")
             return
         for sess in sessions_iter:
-            clock.run_coroutine(warm_cmdset_merge_for_session(sess))
+            clock.run_coroutine(warm_cmdset_merge_for_session(sess), task_kind="warmup")
 
     delay(0, _fire)
 
@@ -96,4 +103,4 @@ def warm_all_logged_in_puppet_sessions() -> None:
         get_puppet = getattr(session, "get_puppet", None)
         if not (get_puppet and get_puppet()):
             continue
-        clock.run_coroutine(warm_cmdset_merge_for_session(session))
+        clock.run_coroutine(warm_cmdset_merge_for_session(session), task_kind="warmup")

@@ -45,7 +45,7 @@ class EvenniaServerService(MultiService):
                 self._shutdown_in_progress = False
                 clock.stop_loop()
 
-        clock.run_coroutine(_graceful_stop())
+        clock.run_coroutine(_graceful_stop(), task_kind="service")
         # Emergency fallback only: if the graceful path wedges, stop anyway.
         # Configurable and comfortably larger than the shutdown drain window so
         # it does not guillotine a shutdown that is still making progress. A

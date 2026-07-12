@@ -137,6 +137,7 @@ Worked example (game-side module listed in `SYSTEM_MODULES`)::
 
 import calendar as _stdlib_calendar
 import importlib
+import inspect
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -843,9 +844,7 @@ class SystemDriver:
             # not starved by systems that have run recently
             return now - system.last_run if system.last_run is not None else float("inf")
 
-        due.sort(
-            key=lambda s: (_WORKLOAD_PRIORITY.get(s.workload_class, 99), -_overdue_age(s))
-        )
+        due.sort(key=lambda s: (_WORKLOAD_PRIORITY.get(s.workload_class, 99), -_overdue_age(s)))
 
         cap = getattr(settings, "SYSTEM_TICK_MAX_ADMISSIONS", None)
         admitted = due if not cap else due[: int(cap)]
@@ -942,9 +941,17 @@ class SystemDriver:
         system.fire_count += 1
         system.in_flight = True
 
-        async def _run_fire():
+        def _track(coro):
+            task = clock.run_coroutine(coro, task_kind="system")
+            # Track the handle so shutdown can drain/cancel it; a synchronous
+            # test-mode result has no add_done_callback and needs no tracking.
+            if hasattr(task, "add_done_callback"):
+                self._inflight.add(task)
+                task.add_done_callback(self._inflight.discard)
+
+        async def _await_fire(result):
             try:
-                await self._invoke_async(system, now, dt)
+                await clock.maybe_await(result)
             except Exception:
                 logger.log_trace(
                     f"System '{system.name}' errored on fire (run skipped, driver "
@@ -953,24 +960,39 @@ class SystemDriver:
             finally:
                 system.in_flight = False
 
-        task = clock.run_coroutine(_run_fire())
-        # Track the handle so shutdown can drain/cancel it; a synchronous
-        # test-mode result has no add_done_callback and needs no tracking.
-        if hasattr(task, "add_done_callback"):
-            self._inflight.add(task)
-            task.add_done_callback(self._inflight.discard)
+        if system.scope.kind == _ALL_ENTITIES:
+            _track(_await_fire(self._invoke_async(system, now, dt)))
+            return
+
+        try:
+            if system.scope.kind == _ONLINE_PUPPETS:
+                ctx = SystemContext(now=now, dt=dt, entities=_select_online_puppets())
+            else:
+                ctx = SystemContext(now=now, dt=dt)
+            result = system.run(ctx)
+        except Exception:
+            logger.log_trace(
+                f"System '{system.name}' errored on fire (run skipped, driver "
+                f"and other systems unaffected)."
+            )
+            system.in_flight = False
+            return
+
+        if inspect.isawaitable(result):
+            _track(_await_fire(result))
+        else:
+            # The common scheduler path is synchronous. Keeping it on the
+            # driver context avoids creating one Django async-local connection
+            # namespace per fire.
+            system.in_flight = False
 
     async def _invoke_async(self, system, now, dt):
         scope = system.scope
-        if scope.kind == _ONLINE_PUPPETS:
-            ctx = SystemContext(now=now, dt=dt, entities=_select_online_puppets())
-            return await clock.maybe_await(system.run(ctx))
         if scope.kind == _ALL_ENTITIES:
             entity_ids = await _entity_ids_deferred(scope.component)
             ctx = SystemContext(now=now, dt=dt, entity_ids=entity_ids)
             return await clock.maybe_await(system.run(ctx))
-        ctx = SystemContext(now=now, dt=dt)
-        return await clock.maybe_await(system.run(ctx))
+        raise RuntimeError("_invoke_async is reserved for all_entities systems")
 
 
 # ---------------------------------------------------------------------------

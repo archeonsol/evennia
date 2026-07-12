@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from evennia.authorization import service as authorization_service
 from evennia.authorization.migration import migrate_resource
 from evennia.authorization.service import access_check, authorize
 from evennia.authorization.storage import (
@@ -14,7 +15,9 @@ from evennia.authorization.storage import (
     grant_capability,
     issue_recovery_grant,
     load_grants,
+    load_policy,
     load_resource,
+    preload_policy_packages,
     principal_is_suspended,
     principal_refs,
     set_principal_suspended,
@@ -209,6 +212,80 @@ class AuthorizationStorageTest(TestCase):
         self.assertTrue(allowed)
         self.assertTrue(decision.allowed)
         legacy.assert_not_called()
+
+    @override_settings(AUTHORIZATION_RESOURCE_POLICIES={"object": "live"})
+    def test_missing_policy_falls_back_without_loading_principal_state(self):
+        principal = FakePrincipal()
+        resource = FakeResource(lock_storage="view:all()")
+        legacy = MagicMock(return_value=True)
+
+        with (
+            patch.object(authorization_service, "load_grants") as load_grants,
+            patch.object(authorization_service, "principal_is_suspended") as load_suspension,
+            patch.object(authorization_service, "load_resource") as load_resource,
+        ):
+            allowed, decision = access_check(
+                resource,
+                principal,
+                "view",
+                default=False,
+                legacy_evaluator=legacy,
+            )
+
+        self.assertTrue(allowed)
+        self.assertEqual(decision.reason_code, "no_structured_policy")
+        load_grants.assert_not_called()
+        load_suspension.assert_not_called()
+        load_resource.assert_not_called()
+
+    def test_resource_policy_package_uses_one_query_for_multiple_operations(self):
+        resource = FakeResource()
+        migrate_resource(resource, source="view:all();edit:none()")
+        clear_authorization_caches()
+
+        with self.assertNumQueries(1):
+            self.assertIsNotNone(load_policy(resource, "view"))
+            self.assertIsNotNone(load_policy(resource, "edit"))
+            self.assertIsNone(load_policy(resource, "missing"))
+
+    @override_settings(AUTHORIZATION_RESOURCE_POLICIES={"object": "live"})
+    def test_warm_structured_decision_performs_zero_sql(self):
+        principal = FakePrincipal()
+        resource = FakeResource()
+        migrate_resource(resource, source="view:all()")
+        clear_authorization_caches()
+
+        allowed, _ = access_check(
+            resource,
+            principal,
+            "view",
+            default=False,
+            legacy_evaluator=lambda: False,
+        )
+        self.assertTrue(allowed)
+
+        with self.assertNumQueries(0):
+            allowed, _ = access_check(
+                resource,
+                principal,
+                "view",
+                default=False,
+                legacy_evaluator=lambda: False,
+            )
+        self.assertTrue(allowed)
+
+    def test_policy_packages_batch_warm_in_one_query(self):
+        first = FakeResource(pk=42)
+        second = FakeResource(pk=43)
+        migrate_resource(first, source="view:all()")
+        migrate_resource(second, source="edit:none()")
+        clear_authorization_caches()
+
+        with self.assertNumQueries(1):
+            self.assertEqual(preload_policy_packages((first, second)), 2)
+        with self.assertNumQueries(0):
+            self.assertIsNotNone(load_policy(first, "view"))
+            self.assertIsNotNone(load_policy(second, "edit"))
 
     @override_settings(AUTHORIZATION_FROZEN_RESOURCE_KINDS=("object",))
     def test_frozen_lock_write_updates_policy_not_legacy_field(self):

@@ -11,6 +11,7 @@ import threading
 import time
 from unittest.mock import patch
 
+from django.db import connections
 from django.test import SimpleTestCase
 
 from evennia.utils import defer
@@ -70,13 +71,19 @@ class TestInThread(_AsyncioLoopMixin, SimpleTestCase):
 
     def test_db_connections_cleaned_around_worker_on_worker_thread(self):
         main_ident = threading.get_ident()
-        calls = []
+        old_calls = []
+        close_calls = []
 
         def worker():
             return "x"
 
-        with patch.object(
-            defer, "close_old_connections", lambda: calls.append(threading.get_ident())
+        with (
+            patch.object(
+                defer, "close_old_connections", lambda: old_calls.append(threading.get_ident())
+            ),
+            patch.object(
+                connections, "close_all", lambda: close_calls.append(threading.get_ident())
+            ),
         ):
 
             async def _run():
@@ -84,8 +91,9 @@ class TestInThread(_AsyncioLoopMixin, SimpleTestCase):
 
             self._loop.run_until_complete(_run())
 
-        self.assertEqual(len(calls), 2)
-        self.assertTrue(all(ident != main_ident for ident in calls))
+        self.assertEqual(len(old_calls), 1)
+        self.assertEqual(len(close_calls), 1)
+        self.assertTrue(all(ident != main_ident for ident in old_calls + close_calls))
 
     def test_add_callbacks_runs_on_loop_thread(self):
         main_ident = threading.get_ident()

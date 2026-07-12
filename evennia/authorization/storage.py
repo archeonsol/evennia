@@ -31,7 +31,7 @@ _principal_generation: dict[str, int] = {}
 _resource_generation: dict[str, int] = {}
 _principal_cache: OrderedDict[str, GrantSnapshot] = OrderedDict()
 _resource_cache: OrderedDict[str, ResourceSnapshot] = OrderedDict()
-_policy_cache: OrderedDict[tuple[str, str], object] = OrderedDict()
+_policy_package_cache: OrderedDict[str, tuple[int, dict[str, object]]] = OrderedDict()
 _suspension_cache: OrderedDict[str, tuple[int, bool, float | None]] = OrderedDict()
 _shared_generation_cache: dict[str, tuple[float, int]] = {}
 
@@ -274,9 +274,7 @@ def bump_resource_generation(resource) -> None:
     local = _resource_generation.get(ref, 0) + 1
     _resource_generation[ref] = _publish_generation("resource", ref, local)
     _resource_cache.pop(ref, None)
-    for key in tuple(_policy_cache):
-        if key[0] == ref:
-            _policy_cache.pop(key, None)
+    _policy_package_cache.pop(ref, None)
 
 
 def bump_principal_generation(principal_ref: str) -> None:
@@ -561,21 +559,63 @@ def set_scope_labels(resource, labels, *, source: str = "authored") -> None:
 
 
 def load_policy(resource, access_type: str):
-    """Load a sparse compiled instance policy, or return ``None``."""
+    """Load one policy from a generation-aware, resource-wide package.
+
+    One cold indexed query loads every instance override for the resource.
+    Missing operations are negative-cached with that package and resolve only
+    against immutable registry templates, so steady-state checks perform no
+    authorization SQL.
+    """
 
     ref = resource_ref(resource)
-    key = (ref, str(access_type).lower())
-    if key in _policy_cache:
-        _policy_cache.move_to_end(key)
-        return _policy_cache[key]
-    row = AuthorizationPolicyOverride.objects.filter(resource_ref=ref, access_type=key[1]).first()
-    policy = (
-        policy_from_data(row.policy)
-        if row and row.policy
-        else policy_registry.resolve(resource, ref.split(":", 1)[0], key[1])
+    access_key = str(access_type).lower()
+    generation = _shared_generation("resource", ref, _resource_generation.get(ref, 0))
+    cached = _policy_package_cache.get(ref)
+    if cached is not None and cached[0] == generation:
+        _policy_package_cache.move_to_end(ref)
+        overrides = cached[1]
+    else:
+        overrides = {
+            str(operation).lower(): policy_from_data(data)
+            for operation, data in AuthorizationPolicyOverride.objects.filter(
+                resource_ref=ref
+            ).values_list("access_type", "policy")
+            if data
+        }
+        _bounded_put(_policy_package_cache, ref, (generation, overrides))
+    if access_key in overrides:
+        return overrides[access_key]
+    return policy_registry.resolve(resource, ref.split(":", 1)[0], access_key)
+
+
+def preload_policy_packages(resources) -> int:
+    """Batch-warm instance policy packages for a bounded resource collection.
+
+    Command-set warmup uses this to replace one cold query per command class
+    with one indexed ``resource_ref__in`` query. Existing generation-valid
+    packages are skipped. Registry defaults remain immutable and need no rows.
+    """
+
+    by_ref = {resource_ref(resource): resource for resource in resources}
+    pending: dict[str, int] = {}
+    for ref in by_ref:
+        generation = _shared_generation("resource", ref, _resource_generation.get(ref, 0))
+        cached = _policy_package_cache.get(ref)
+        if cached is None or cached[0] != generation:
+            pending[ref] = generation
+    if not pending:
+        return 0
+
+    grouped: dict[str, dict[str, object]] = {ref: {} for ref in pending}
+    rows = AuthorizationPolicyOverride.objects.filter(resource_ref__in=pending).values_list(
+        "resource_ref", "access_type", "policy"
     )
-    _bounded_put(_policy_cache, key, policy)
-    return policy
+    for ref, operation, data in rows:
+        if data:
+            grouped[ref][str(operation).lower()] = policy_from_data(data)
+    for ref, generation in pending.items():
+        _bounded_put(_policy_package_cache, ref, (generation, grouped[ref]))
+    return len(pending)
 
 
 def clear_authorization_caches() -> None:
@@ -583,6 +623,6 @@ def clear_authorization_caches() -> None:
 
     _principal_cache.clear()
     _resource_cache.clear()
-    _policy_cache.clear()
+    _policy_package_cache.clear()
     _suspension_cache.clear()
     _shared_generation_cache.clear()

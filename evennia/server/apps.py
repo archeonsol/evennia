@@ -12,8 +12,10 @@ class ServerConfig(AppConfig):
     def ready(self):
         """Load authorization definitions and fail on invalid references."""
 
+        # Register async database-scope enforcement before runtime tasks start.
         from evennia.authorization.capabilities import capability_registry
         from evennia.authorization.policy import load_policy_modules
+        from evennia.server import runtime_db  # noqa: F401
 
         capability_registry.load_modules()
         load_policy_modules()

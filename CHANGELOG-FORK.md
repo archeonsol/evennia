@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.162 — Async ORM lifecycle containment
+
+### Runtime
+
+- Detached commands, actions, jobs, services, systems, warmups, timers, and
+  completion callbacks now run in supervised database contexts. Each root owns
+  and closes its Django wrappers on success, failure, or cancellation, while
+  long-lived loops release wrappers after every iteration.
+- Worker jobs close their ORM connections after every unit of work. Runtime
+  auditing and Prometheus metrics expose unmanaged asyncio ORM access and
+  connection-scope closure.
+- Synchronous systems execute inline instead of allocating a task-local Django
+  namespace for every fire.
+
+### Authorization performance
+
+- Legacy fallback checks now avoid grant, suspension, resource, and label reads
+  when no structured policy exists.
+- Structured policies load as generation-aware resource packages. Repeated
+  operation checks are memory-only after one indexed query, and command-set
+  warmup batches policy packages instead of querying once per command.
+
+### Operations
+
+- Production deployments can stop the old runtime before replacing the engine
+  and migrating, preventing old/new PgBouncer client overlap.
+
+Migration notes: no schema migration or downstream code rewrite is required.
+Deployments should restart the full process rather than use a graceful reload.
+
+---
+
 ## 6.0.0+underspire.161 — Structured runtime foundations
 
 ### Engine

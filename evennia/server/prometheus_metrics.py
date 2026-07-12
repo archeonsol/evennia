@@ -31,6 +31,10 @@ RENDER_DELIVERY_TOTAL = None
 RENDER_DELIVERY_DURATION_SECONDS = None
 AUTHORIZATION_DECISIONS_TOTAL = None
 AUTHORIZATION_DURATION_SECONDS = None
+RUNTIME_TASKS_ACTIVE = None
+RUNTIME_TASKS_TOTAL = None
+RUNTIME_DB_SCOPE_CLOSES_TOTAL = None
+RUNTIME_DB_UNMANAGED_TOTAL = None
 
 _METRICS_READY = False
 
@@ -50,6 +54,8 @@ def _init_metrics() -> bool:
     global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
     global RENDER_DELIVERY_TOTAL, RENDER_DELIVERY_DURATION_SECONDS
     global AUTHORIZATION_DECISIONS_TOTAL, AUTHORIZATION_DURATION_SECONDS
+    global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
+    global RUNTIME_DB_UNMANAGED_TOTAL
 
     if _METRICS_READY:
         return ATTR_FLUSH_TOTAL is not None
@@ -133,6 +139,25 @@ def _init_metrics() -> bool:
         "Time spent evaluating one structured authorization decision",
         ("resource_kind",),
         buckets=(0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01),
+    )
+    RUNTIME_TASKS_ACTIVE = Gauge(
+        "evennia_runtime_tasks_active",
+        "Detached runtime roots currently executing",
+        ("task_kind",),
+    )
+    RUNTIME_TASKS_TOTAL = Counter(
+        "evennia_runtime_tasks_total",
+        "Detached runtime roots by terminal result",
+        ("task_kind", "result"),
+    )
+    RUNTIME_DB_SCOPE_CLOSES_TOTAL = Counter(
+        "evennia_runtime_db_scope_closes_total",
+        "Runtime roots that released an opened Django connection",
+        ("task_kind",),
+    )
+    RUNTIME_DB_UNMANAGED_TOTAL = Counter(
+        "evennia_runtime_db_unmanaged_total",
+        "Django connections opened by unmanaged asyncio contexts",
     )
     return True
 
@@ -232,3 +257,29 @@ def record_authorization_decision(
         AUTHORIZATION_DURATION_SECONDS.labels(resource_kind=kind).observe(
             max(0.0, float(duration_seconds))
         )
+
+
+def record_runtime_task(task_kind: str, event: str, *, had_connection: bool = False) -> None:
+    """Record one bounded detached-root lifecycle transition."""
+
+    if not _init_metrics():
+        return
+    kind = str(task_kind or "generic")[:24]
+    if event == "started":
+        if RUNTIME_TASKS_ACTIVE is not None:
+            RUNTIME_TASKS_ACTIVE.labels(task_kind=kind).inc()
+        return
+    if RUNTIME_TASKS_ACTIVE is not None:
+        RUNTIME_TASKS_ACTIVE.labels(task_kind=kind).dec()
+    if RUNTIME_TASKS_TOTAL is not None:
+        result = event if event in {"completed", "failed", "cancelled"} else "failed"
+        RUNTIME_TASKS_TOTAL.labels(task_kind=kind, result=result).inc()
+    if had_connection and RUNTIME_DB_SCOPE_CLOSES_TOTAL is not None:
+        RUNTIME_DB_SCOPE_CLOSES_TOTAL.labels(task_kind=kind).inc()
+
+
+def record_unmanaged_db_connection() -> None:
+    """Record one ORM connection opened outside a supervised root."""
+
+    if _init_metrics() and RUNTIME_DB_UNMANAGED_TOTAL is not None:
+        RUNTIME_DB_UNMANAGED_TOTAL.inc()

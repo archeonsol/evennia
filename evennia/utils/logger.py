@@ -37,7 +37,7 @@ def _future_errback(future, errback):
         if exc is not None:
             from twisted.python.failure import Failure
 
-            errback(Failure(exc))
+            clock.run_callback(errback, Failure(exc), _task_kind="generic")
 
     future.add_done_callback(_done)
     return future
