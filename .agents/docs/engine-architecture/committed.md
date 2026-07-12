@@ -4,7 +4,7 @@ Decided in principle, not yet in the tree. Each lists current partial state and
 the preservation constraints that bind it. Shipped work is in
 [decisions.md](decisions.md); speculative shapes in [horizon.md](horizon.md).
 
-## R1. Display pipeline (the keystone)
+## R1. Display pipeline (shipped)
 
 `msg`, `at_say`, `return_appearance`, `get_display_name`, language filters, scene
 broadcast all run together; there is no "render to a tree for viewer X" step
@@ -21,7 +21,19 @@ consumers, accessibility, offline preview all consume the same render output.
   boundary**. If it flattens to strings mid-pipeline, headless mode and
   alternative consumers (see horizon) become a partial rewrite.
 
-## L1. Lock objects + permission algebra
+R1A-R1D are implemented; see [decisions.md](decisions.md) and
+[r1-migration-status.md](r1-migration-status.md). Remaining surface-specific
+semantic enrichment is additive package/game work, not unfinished core authority.
+
+## R3. Capability authorization (shipped through R3E)
+
+The earlier L1 lock-object proposal was superseded by the capability runtime.
+Namespaced capabilities, positive scoped grants, structured policies, generic
+resource adapters, split caches, audited recovery, offline differential tooling,
+and per-kind write freezing are implemented. See
+[r3-authorization.md](r3-authorization.md). R3F removal is intentionally deferred.
+
+<details><summary>Superseded L1 framing</summary>
 
 `"cmd:perm(Builder) and not perm(Quell)"` is parsed at call time; typos are
 silent; `check_permstring` ignores quell because there is no scope-aware
@@ -36,6 +48,8 @@ with a migration path (P1).
   "objects not strings" spirit exists inside the action engine, but not as the
   global `Lock` / `Permission` replacement the target describes.
 - **Depends on:** the actor abstraction (shipped) for the `check` first arg.
+
+</details>
 
 ## W1. Web / client / protocol modernization
 

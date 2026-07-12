@@ -1,143 +1,397 @@
-"""RenderNode v0 and capability-gated delivery (R1 first slice).
+"""Immutable universal narrative nodes and capability-aware delivery.
 
-This is the first real R1 seam beyond the emote *plan*: the point where a
-per-viewer emote stops being a structured thing and becomes a string. Instead of
-flattening straight into ``viewer.msg``, an emitter builds a :class:`RenderNode`
-and hands it to :func:`deliver_node`, which either:
-
-- flattens it to the **same** string and sends it via ``viewer.msg`` (telnet and
-  any client that has not announced structured-render support), or
-- sends it as a structured ``narrative`` OOB payload to a session whose client
-  announced support (the W1 path).
-
-``RenderNode`` v0 is intentionally minimal: it *wraps* the already-flattened
-``body`` string (so the telnet path is byte-identical) and carries the per-viewer
-target ``refs`` that a rich client wants and plain text cannot express. Splitting
-``body`` into typed inline spans is a later slice; see
-``.agents/docs/engine-architecture/r1-first-slice.md``.
-
-The string API (``msg``/``return_appearance``) is untouched. This module is
-additive.
+Every viewer-facing surface can normalize to :class:`RenderNode`. Text-only
+clients receive the parity-anchor ``body`` while structured clients receive a
+versioned tree with opaque, viewer-scoped references. Engine internals may keep
+viewer-invariant spans containing database identifiers, but wire payloads never
+serialize those identifiers.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import time
+import uuid
+from dataclasses import dataclass, field, replace
+from types import MappingProxyType
+from typing import Any, Mapping
 
-__all__ = ["RenderNode", "deliver_node", "CLIENT_NARRATIVE_FLAG"]
+__all__ = [
+    "CLIENT_NARRATIVE_FLAG",
+    "RENDER_SCHEMA",
+    "EntityRef",
+    "Line",
+    "Paragraph",
+    "Section",
+    "ListBlock",
+    "SystemBlock",
+    "RenderNode",
+    "text_node",
+    "deliver_node",
+]
 
-# Protocol flag a client sets (via the ``narrative_client`` inputfunc) to declare
-# it renders structured narrative nodes rather than plain text lines.
 CLIENT_NARRATIVE_FLAG = "CLIENT_NARRATIVE"
+RENDER_SCHEMA = "render.v1"
+MAX_BODY_CHARS = 128 * 1024
+MAX_REFS = 256
+MAX_BLOCKS = 256
+MAX_METADATA_ITEMS = 64
+_FORBIDDEN_WIRE_KEYS = frozenset({"char_id", "from_id", "referent_id", "object_id"})
 
 
-@dataclass
-class RenderNode:
-    """A minimal, per-viewer unit of structured output.
+def _primitive(value: Any, *, depth: int = 0) -> Any:
+    """Return a bounded JSON-safe copy of ``value``.
 
-    Args:
-        kind (str): node family, e.g. ``"emote"``.
-        msg_type (str): the message type (``"pose"``, ``"say"``, ...), preserved
-            for both the text ``type`` metadata and structured styling.
-        body (str): the fully flattened, per-viewer string. The text path sends
-            this verbatim, so it is the parity anchor.
-        from_id (int | None): dbref id of the emitter (speaker).
-        refs (list[dict]): per-viewer target references, each
-            ``{"name": <name this viewer saw>, "char_id": <dbref id>}``.
-        self_echo (bool): whether this node is the emitter's own echo.
+    Raises:
+        TypeError: If ``value`` contains a live object or unsupported type.
+        ValueError: If the structure exceeds its depth or collection limits.
     """
+    if depth > 8:
+        raise ValueError("render metadata exceeds maximum depth")
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:MAX_BODY_CHARS]
+    if isinstance(value, Mapping):
+        if len(value) > MAX_METADATA_ITEMS:
+            raise ValueError("render mapping exceeds item limit")
+        return {str(key)[:128]: _primitive(item, depth=depth + 1) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        if len(value) > MAX_BLOCKS:
+            raise ValueError("render collection exceeds item limit")
+        return [_primitive(item, depth=depth + 1) for item in value]
+    raise TypeError(f"render payload contains unsupported value {type(value).__name__}")
+
+
+def _contains_forbidden_identity(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            key in _FORBIDDEN_WIRE_KEYS or _contains_forbidden_identity(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_forbidden_identity(item) for item in value)
+    return False
+
+
+def _deep_freeze(value: Any) -> Any:
+    """Freeze nested JSON-safe data so a node is immutable by construction."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _deep_freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class EntityRef:
+    """An interactive entity reference safe to expose to one viewer.
+
+    ``handle`` is opaque and resolves only in the issuing viewer's context.
+    ``label`` is the exact presentation the viewer was authorized to perceive.
+    """
+
+    handle: str
+    label: str
+    kind: str = "entity"
+    recognized: bool = False
+    affordances: tuple[str, ...] = ()
+    role: str = "target"
+
+    def __post_init__(self):
+        object.__setattr__(self, "affordances", tuple(str(item) for item in self.affordances))
+
+    def payload(self) -> dict:
+        """Return the public wire representation."""
+        return {
+            "handle": self.handle[:128],
+            "label": self.label[:4096],
+            "name": self.label[:4096],  # compatibility for the current shell
+            "kind": self.kind[:64],
+            "recognized": bool(self.recognized),
+            "affordances": [str(item)[:64] for item in self.affordances[:32]],
+            "role": self.role[:64],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Line:
+    """A single display line."""
+
+    text: str
+    style: str = ""
+
+    def payload(self) -> dict:
+        return {"type": "line", "text": self.text[:MAX_BODY_CHARS], "style": self.style[:64]}
+
+
+@dataclass(frozen=True, slots=True)
+class Paragraph:
+    """A paragraph block."""
+
+    text: str
+    style: str = ""
+
+    def payload(self) -> dict:
+        return {
+            "type": "paragraph",
+            "text": self.text[:MAX_BODY_CHARS],
+            "style": self.style[:64],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Section:
+    """A named block containing ordered child blocks."""
+
+    key: str
+    title: str = ""
+    children: tuple[Any, ...] = ()
+    style: str = ""
+
+    def __post_init__(self):
+        object.__setattr__(self, "children", tuple(self.children))
+
+    def payload(self) -> dict:
+        return {
+            "type": "section",
+            "key": self.key[:64],
+            "title": self.title[:4096],
+            "style": self.style[:64],
+            "children": [_block_payload(child) for child in self.children[:MAX_BLOCKS]],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ListBlock:
+    """A semantic ordered or unordered list."""
+
+    items: tuple[str, ...]
+    ordered: bool = False
+    style: str = ""
+
+    def __post_init__(self):
+        object.__setattr__(self, "items", tuple(str(item) for item in self.items))
+
+    def payload(self) -> dict:
+        return {
+            "type": "list",
+            "ordered": bool(self.ordered),
+            "items": [str(item)[:4096] for item in self.items[:MAX_BLOCKS]],
+            "style": self.style[:64],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SystemBlock:
+    """A machine-classifiable notice or status block."""
+
+    text: str
+    level: str = "info"
+    code: str = ""
+
+    def payload(self) -> dict:
+        return {
+            "type": "system",
+            "text": self.text[:MAX_BODY_CHARS],
+            "level": self.level[:32],
+            "code": self.code[:128],
+        }
+
+
+def _block_payload(block: Any) -> dict:
+    if hasattr(block, "payload"):
+        data = block.payload()
+    elif isinstance(block, str):
+        data = Line(block).payload()
+    else:
+        raise TypeError(f"unsupported render block {type(block).__name__}")
+    return _primitive(data)
+
+
+def _coerce_ref(ref: EntityRef | Mapping) -> EntityRef:
+    if isinstance(ref, EntityRef):
+        return ref
+    if not isinstance(ref, Mapping):
+        raise TypeError("RenderNode refs must be EntityRef or mappings")
+    if any(key in ref for key in _FORBIDDEN_WIRE_KEYS):
+        raise ValueError("raw database identity is forbidden in RenderNode refs")
+    return EntityRef(
+        handle=str(ref.get("handle") or ""),
+        label=str(ref.get("label") or ref.get("name") or ""),
+        kind=str(ref.get("kind") or "entity"),
+        recognized=bool(ref.get("recognized", False)),
+        affordances=tuple(str(item) for item in ref.get("affordances") or ()),
+        role=str(ref.get("role") or "target"),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RenderNode:
+    """One immutable, versioned unit of viewer-resolved output."""
 
     kind: str
     msg_type: str
     body: str
-    from_id: int | None = None
-    refs: list = field(default_factory=list)
+    from_handle: str | None = None
+    refs: tuple[EntityRef, ...] = ()
     self_echo: bool = False
-    # Optional viewer-invariant span tree(s) behind ``body``. Present once a
-    # surface has been decomposed into spans (a list of per-segment span lists).
-    # ``body`` stays the authoritative flattened text; ``spans`` is the
-    # structure a rich client renders and a store keeps for later re-resolution.
-    spans: list | None = None
+    spans: tuple[tuple[Any, ...], ...] | None = None
+    blocks: tuple[Any, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    correlation_id: str = ""
+    node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    schema: str = RENDER_SCHEMA
+
+    def __post_init__(self):
+        if not self.kind or len(self.kind) > 64:
+            raise ValueError("RenderNode kind must contain 1-64 characters")
+        if len(self.body) > MAX_BODY_CHARS:
+            raise ValueError("RenderNode body exceeds maximum length")
+        refs = tuple(_coerce_ref(ref) for ref in self.refs)
+        if len(refs) > MAX_REFS:
+            raise ValueError("RenderNode has too many entity references")
+        blocks = tuple(self.blocks)
+        if len(blocks) > MAX_BLOCKS:
+            raise ValueError("RenderNode has too many blocks")
+        spans = None if self.spans is None else tuple(tuple(segment) for segment in self.spans)
+        metadata = _deep_freeze(_primitive(dict(self.metadata)))
+        object.__setattr__(self, "refs", refs)
+        object.__setattr__(self, "blocks", blocks)
+        object.__setattr__(self, "spans", spans)
+        object.__setattr__(self, "metadata", metadata)
+
+    def with_refs(self, refs) -> "RenderNode":
+        """Return a copy carrying lazily built viewer references."""
+        return replace(self, refs=tuple(refs))
 
     def payload(self) -> dict:
-        """JSON-friendly payload for the structured OOB path (client contract).
+        """Return the bounded public wire payload.
 
-        Keys are snake_case to match the engine's other OOB surfaces (the
-        ``editor_*`` kwargs and the nested ``refs`` ``char_id``), so a client
-        sees one casing convention across all narrative/editor payloads.
+        Viewer-invariant spans may contain server database identifiers. They are
+        serialized only when their representation is identity-safe; otherwise
+        the structured blocks/body remain available and metadata notes the
+        redaction. Use :meth:`storage_payload` for trusted server-side replay.
         """
+        metadata = dict(self.metadata)
         data = {
+            "schema": self.schema,
+            "node_id": self.node_id,
+            "correlation_id": self.correlation_id,
             "kind": self.kind,
             "msg_type": self.msg_type,
             "body": self.body,
-            "from_id": self.from_id,
-            "refs": self.refs,
+            "from_handle": self.from_handle,
+            "refs": [ref.payload() for ref in self.refs],
             "self_echo": self.self_echo,
+            "blocks": [_block_payload(block) for block in self.blocks],
+            "metadata": metadata,
         }
         if self.spans is not None:
             from evennia.narrative.render import span_to_dict
 
-            data["spans"] = [[span_to_dict(s) for s in seg] for seg in self.spans]
+            serialized = [[span_to_dict(span) for span in segment] for segment in self.spans]
+            if _contains_forbidden_identity(serialized):
+                data["metadata"] = {**metadata, "structure_redacted": True}
+            else:
+                data["spans"] = serialized
+        return _primitive(data)
+
+    def storage_payload(self) -> dict:
+        """Return a trusted server-side payload retaining invariant spans."""
+        data = self.payload()
+        if self.spans is not None:
+            from evennia.narrative.render import span_to_dict
+
+            data["spans"] = [[span_to_dict(span) for span in segment] for segment in self.spans]
         return data
 
 
-def _capable_session(viewer):
-    """Return a viewer session that announced structured-render support, or None."""
+def text_node(text: str, *, msg_type: str = "text", kind: str = "text", **kwargs) -> RenderNode:
+    """Normalize legacy text into a universal node."""
+    return RenderNode(
+        kind=kind,
+        msg_type=msg_type,
+        body=str(text),
+        blocks=(Line(str(text)),),
+        **kwargs,
+    )
+
+
+def _sessions(viewer):
     handler = getattr(viewer, "sessions", None)
     if handler is None:
-        return None
+        return []
     try:
-        sessions = list(handler.all())
+        return list(handler.all())
     except Exception:
-        # The no-handler case is already handled above, so this only fires on a
-        # genuine session-handler fault (e.g. a DB error during _recache). Log it
-        # rather than bury it, then degrade to the text path for this viewer.
         from evennia.utils import logger
 
         logger.log_trace()
-        return None
-    for sess in sessions:
-        flags = getattr(sess, "protocol_flags", None) or {}
-        if flags.get(CLIENT_NARRATIVE_FLAG):
-            return sess
-    return None
+        return []
 
 
-def deliver_node(node: RenderNode, viewer, from_obj=None, refs_builder=None):
-    """Deliver ``node`` to ``viewer``, structured or flattened per capability.
+def _supports_nodes(session) -> bool:
+    flags = getattr(session, "protocol_flags", None) or {}
+    caps = flags.get("AZABAN_CAPS") or {}
+    return bool(flags.get(CLIENT_NARRATIVE_FLAG) or caps.get("rendersNodes"))
 
-    When no session announced support, this is byte-identical to the legacy
-    ``viewer.msg((body, {"type": msg_type}), from_obj=from_obj)`` call, so it is a
-    drop-in for an emote delivery loop's final send.
 
-    Args:
-        node (RenderNode): the per-viewer node to deliver.
-        viewer: the recipient (must expose ``msg``).
-        from_obj: the emitter, passed through to ``msg`` as ``from_obj``.
-        refs_builder (callable, optional): a zero-arg callable returning the
-            per-viewer ``refs`` list. Called only when a capable session is
-            found and ``node.refs`` is empty, so an expensive per-viewer resolver
-            is not run for the common text-only (telnet) viewer.
-    """
-    text_msg = (node.body, {"type": node.msg_type})
-    cap = _capable_session(viewer)
-    if cap is None:
-        # Unchanged text path — the parity anchor. No refs built here.
-        viewer.msg(text_msg, from_obj=from_obj)
+def deliver_node(
+    node: RenderNode,
+    viewer,
+    from_obj=None,
+    refs_builder=None,
+    sessions=None,
+    options=None,
+):
+    """Deliver one node to every viewer session with text parity fallback."""
+    started = time.perf_counter()
+    target_sessions = list(sessions) if sessions is not None else _sessions(viewer)
+    capable = [session for session in target_sessions if _supports_nodes(session)]
+    delivered = node
+    if capable and refs_builder is not None and not node.refs:
+        delivered = node.with_refs(refs_builder())
+    try:
+        from evennia.narrative.timeline import record_delivery
+
+        record_delivery(delivered, viewer)
+    except Exception:
+        from evennia.utils import logger
+
+        logger.log_trace("render timeline sink failed")
+    if not capable:
+        viewer.msg(
+            (node.body, {"type": node.msg_type}),
+            from_obj=from_obj,
+            options=options,
+            _render_delivery=True,
+        )
+        _record_delivery_metric("text", started)
         return
-    if refs_builder is not None and not node.refs:
-        node.refs = refs_builder()
-    # Structured to the capable session; text to any other (e.g. telnet) sessions
-    # the same viewer has open, so a mixed-client player loses nothing.
-    viewer.msg(narrative=([node.payload()], {}), session=cap, from_obj=from_obj)
-    try:
-        others = [s for s in viewer.sessions.all() if s is not cap]
-    except Exception:
-        # cap was just resolved from the same handler, so a fault here is
-        # genuine; log it before degrading to no extra text sends.
-        from evennia.utils import logger
-
-        logger.log_trace()
-        others = []
+    viewer.msg(
+        narrative=([delivered.payload()], {}),
+        session=capable,
+        from_obj=from_obj,
+        options=options,
+        _render_delivery=True,
+    )
+    others = [session for session in target_sessions if session not in capable]
     if others:
-        viewer.msg(text_msg, session=others, from_obj=from_obj)
+        viewer.msg(
+            (node.body, {"type": node.msg_type}),
+            session=others,
+            from_obj=from_obj,
+            options=options,
+            _render_delivery=True,
+        )
+    _record_delivery_metric("mixed" if others else "structured", started)
+
+
+def _record_delivery_metric(mode: str, started: float) -> None:
+    """Record optional engine metrics without coupling delivery to Prometheus."""
+    try:
+        from evennia.server.prometheus_metrics import record_render_delivery
+
+        record_render_delivery(mode, time.perf_counter() - started)
+    except Exception:
+        pass

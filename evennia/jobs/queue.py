@@ -57,13 +57,43 @@ def _resolve_callable(job_type: str) -> Callable:
     return fn
 
 
+def _max_attempts() -> int:
+    return int(getattr(settings, "JOB_QUEUE_MAX_ATTEMPTS", 5) or 5)
+
+
+def _lease_seconds() -> float:
+    return float(getattr(settings, "JOB_QUEUE_LEASE_SECONDS", 60) or 60)
+
+
+def _backoff_seconds(attempts: int) -> float:
+    """Exponential backoff (base 2) for the *next* attempt, bounded."""
+    base = float(getattr(settings, "JOB_QUEUE_BACKOFF_BASE", 2.0) or 2.0)
+    cap = float(getattr(settings, "JOB_QUEUE_BACKOFF_CAP_SECONDS", 300.0) or 300.0)
+    return min(cap, base ** max(0, attempts))
+
+
 def enqueue_job(
-    job_type: str, payload: Optional[dict] = None, *, priority: int = 0
+    job_type: str,
+    payload: Optional[dict] = None,
+    *,
+    priority: int = 0,
+    idempotency_key: Optional[str] = None,
+    max_attempts: Optional[int] = None,
 ) -> Optional[str]:
     """
     Enqueue a whitelisted job. Returns the job id, or None if the queue is
     disabled, the job is rejected, or the backend is unavailable (the job is
     dropped, not deferred).
+
+    Args:
+        job_type: Registered job type (see ``JOB_QUEUE_REGISTRY``).
+        payload: Sanitized dict handed to the handler.
+        priority: Higher runs first.
+        idempotency_key: When set and the Postgres backend is active, a second
+            enqueue with the same key is a no-op and returns the existing job
+            id — safe to retry an enqueue without duplicating work. (The Redis
+            backend does not dedupe; the key is stored in the record only.)
+        max_attempts: Override the retry budget for this job.
     """
     if not _enabled():
         return None
@@ -85,11 +115,14 @@ def enqueue_job(
         "payload": clean,
         "priority": int(priority),
         "created": time.time(),
+        "attempts": 0,
+        "max_attempts": int(max_attempts) if max_attempts else _max_attempts(),
+        "idempotency_key": idempotency_key,
     }
     backend = _backend()
     if backend == "postgres":
-        _enqueue_db(record)
-    elif not _enqueue_redis(record):
+        return _enqueue_db(record)
+    if not _enqueue_redis(record):
         return None
     return job_id
 
@@ -199,13 +232,20 @@ def check_redis_backend() -> bool:
     return False
 
 
-def _enqueue_redis(record: dict) -> bool:
-    """Push a job record to Redis. True if accepted, False if the job was dropped."""
+def _redis_keys():
+    """(pending, processing, dead) list keys for this worker."""
+    key = getattr(settings, "JOB_QUEUE_REDIS_KEY", "evennia:jobs:pending")
+    worker = str(getattr(settings, "SERVER_WORKER_ID", "0"))
+    return key, f"{key}:processing:{worker}", f"{key}:dead"
+
+
+def _enqueue_redis(record: dict) -> Optional[str]:
+    """Push a job record to Redis. Returns the job id, or None if dropped."""
     try:
         from django_redis import get_redis_connection
 
         alias = getattr(settings, "JOB_QUEUE_REDIS_ALIAS", "default")
-        key = getattr(settings, "JOB_QUEUE_REDIS_KEY", "evennia:jobs:pending")
+        key, _processing, _dead = _redis_keys()
         r = get_redis_connection(alias)
         r.lpush(key, json.dumps(record, separators=(",", ":")))
     except Exception as exc:
@@ -220,53 +260,124 @@ def _enqueue_redis(record: dict) -> bool:
     return True
 
 
-def _enqueue_db(record: dict) -> None:
+def _enqueue_db(record: dict) -> Optional[str]:
+    from django.utils import timezone
+
     from evennia.server.models import EngineJob
 
-    EngineJob.objects.create(
-        job_id=record["id"],
+    common = dict(
         job_type=record["type"],
         payload_json=json.dumps(record["payload"], separators=(",", ":")),
         priority=record["priority"],
         status="pending",
+        attempts=0,
+        max_attempts=record["max_attempts"],
+        available_at=timezone.now(),
     )
+    key = record.get("idempotency_key")
+    if key:
+        # Idempotent enqueue: a duplicate key returns the existing job id and
+        # enqueues nothing new.
+        obj, created = EngineJob.objects.get_or_create(
+            idempotency_key=key, defaults={"job_id": record["id"], **common}
+        )
+        return obj.job_id
+    EngineJob.objects.create(job_id=record["id"], **common)
+    return record["id"]
+
+
+def _deferred_or_awaitable(result):
+    """Return a callable ``add_done(on_ok, on_err)`` if ``result`` needs
+    awaiting (asyncio awaitable or a Twisted Deferred), else None."""
+    import inspect
+
+    if inspect.isawaitable(result):
+
+        def _add(on_ok, on_err):
+            from evennia.utils import clock
+
+            async def _runner():
+                try:
+                    await result
+                except Exception as exc:
+                    on_err(exc)
+                else:
+                    on_ok()
+
+            clock.run_coroutine(_runner())
+
+        return _add
+    if hasattr(result, "addCallbacks") or hasattr(result, "addBoth"):
+
+        def _add(on_ok, on_err):
+            result.addCallbacks(lambda _res: on_ok(), lambda failure: on_err(failure))
+
+        return _add
+    return None
 
 
 def process_pending_jobs(*, max_jobs: int = 10) -> int:
     """
-    Drain up to ``max_jobs`` pending jobs, running each handler inline.
+    Lease and run up to ``max_jobs`` due jobs, honoring the durable contract.
+
+    Each job is *leased* (not destructively removed): it is marked complete only
+    after its handler finishes successfully, and an awaitable/Deferred handler's
+    completion is awaited before the job is acked — so a crash mid-run leaves the
+    job reclaimable rather than lost, and slow async work is not counted done
+    early. On handler failure the job is retried with exponential backoff until
+    ``max_attempts``, then dead-lettered.
 
     Call this on the reactor thread (e.g. the global tick / maintenance loop,
     gated by ``JOB_QUEUE_DRAIN_EVERY_N_TICKS``). Job handlers run on the reactor
     thread and may therefore touch game objects freely. Do NOT drain this from a
-    worker thread (``evennia.utils.defer.in_thread`` / ``deferToThread``): the
-    typeclass + idmapper layer is not concurrency-safe, so a handler touching
-    ``.db`` / typeclasses / ``obj.msg`` off the reactor would race game state.
+    worker thread: the typeclass + idmapper layer is not concurrency-safe.
 
-    Keep handlers light. A handler that needs blocking I/O (HTTP webhook, search
-    rebuild) must offload just that part via ``evennia.utils.defer.in_thread`` /
-    ``background`` and deliver the result back in the reactor-thread callback,
-    rather than blocking here. Dequeue itself is plain ORM and is safe on either
-    thread.
-
-    Returns the count of jobs processed.
+    Returns the count of jobs *dispatched* this call (leased and handed to a
+    handler); asynchronous handlers may still be completing after return.
     """
     if not _enabled():
         return 0
-    processed = 0
+    dispatched = 0
     for _ in range(max(1, int(max_jobs))):
         record = _dequeue_one()
         if not record:
             break
-        try:
-            fn = _resolve_callable(record["type"])
-            payload = record.get("payload") or {}
-            fn(payload)
-            processed += 1
-        except Exception:
-            logger.log_trace("job_queue: job %s failed" % record.get("id"))
-            _mark_failed(record)
-    return processed
+        dispatched += 1
+        _run_leased(record)
+    return dispatched
+
+
+def _run_leased(record: dict) -> None:
+    """Run one already-leased job; complete or fail per the contract."""
+    try:
+        fn = _resolve_callable(record["type"])
+        payload = record.get("payload") or {}
+        result = fn(payload)
+    except Exception as exc:
+        logger.log_trace("job_queue: job %s handler raised" % record.get("id"))
+        _fail_job(record, exc)
+        return
+    add_done = _deferred_or_awaitable(result)
+    if add_done is None:
+        _complete_job(record)
+        return
+    # Async handler: ack only when the real work resolves.
+    add_done(lambda: _complete_job(record), lambda exc: _fail_job(record, exc))
+
+
+def _complete_job(record: dict) -> None:
+    if _backend() == "postgres":
+        _complete_db(record)
+    else:
+        _complete_redis(record)
+
+
+def _fail_job(record: dict, exc) -> None:
+    logger.log_err("job_queue: job %s failed: %s" % (record.get("id"), exc))
+    if _backend() == "postgres":
+        _retry_or_dead_db(record)
+    else:
+        _retry_or_dead_redis(record)
 
 
 def _dequeue_one() -> Optional[dict]:
@@ -280,19 +391,22 @@ def _dequeue_redis() -> Optional[dict]:
         from django_redis import get_redis_connection
 
         alias = getattr(settings, "JOB_QUEUE_REDIS_ALIAS", "default")
-        key = getattr(settings, "JOB_QUEUE_REDIS_KEY", "evennia:jobs:pending")
+        key, processing, _dead = _redis_keys()
         r = get_redis_connection(alias)
-        raw = r.rpop(key)
+        # Atomically move the job to a per-worker processing list so a crash
+        # after the pop still leaves the job recoverable (reclaim_jobs moves it
+        # back). Plain RPOP would lose it here.
+        raw = r.rpoplpush(key, processing)
         _on_redis_alive()
         if not raw:
             return None
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8")
-        return json.loads(raw)
+        raw_str = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        record = json.loads(raw_str)
+        # keep the exact serialized form so completion/retry can LREM it
+        record["_raw"] = raw_str
+        record["attempts"] = int(record.get("attempts", 0)) + 1
+        return record
     except Exception as exc:
-        # An unavailable backend on a polled dequeue feeds the availability state
-        # machine (complained about once, then bounded); only genuinely unexpected
-        # errors get a full traceback.
         if _is_redis_unavailable(exc):
             _on_redis_down()
             return None
@@ -300,48 +414,167 @@ def _dequeue_redis() -> Optional[dict]:
         return None
 
 
+def _complete_redis(record: dict) -> None:
+    try:
+        from django_redis import get_redis_connection
+
+        alias = getattr(settings, "JOB_QUEUE_REDIS_ALIAS", "default")
+        _key, processing, _dead = _redis_keys()
+        r = get_redis_connection(alias)
+        if record.get("_raw") is not None:
+            r.lrem(processing, 1, record["_raw"])
+    except Exception:
+        logger.log_trace("job_queue: redis complete failed")
+
+
+def _retry_or_dead_redis(record: dict) -> None:
+    try:
+        from django_redis import get_redis_connection
+
+        alias = getattr(settings, "JOB_QUEUE_REDIS_ALIAS", "default")
+        key, processing, dead = _redis_keys()
+        r = get_redis_connection(alias)
+        raw = record.get("_raw")
+        if raw is not None:
+            r.lrem(processing, 1, raw)
+        attempts = int(record.get("attempts", 1))
+        max_attempts = int(record.get("max_attempts", _max_attempts()))
+        payload = {k: v for k, v in record.items() if k != "_raw"}
+        payload["attempts"] = attempts
+        blob = json.dumps(payload, separators=(",", ":"))
+        if attempts >= max_attempts:
+            r.lpush(dead, blob)  # dead-letter
+            logger.log_err("job_queue: job %s dead-lettered after %d attempts" % (record.get("id"), attempts))
+        else:
+            # Redis lists have no delay; requeue immediately for another attempt.
+            r.lpush(key, blob)
+    except Exception:
+        logger.log_trace("job_queue: redis retry/dead failed")
+
+
 def _dequeue_db() -> Optional[dict]:
     try:
         from django.db import transaction
+        from django.db.models import Q
+        from django.utils import timezone
 
         from evennia.server.models import EngineJob
 
-        # Atomic claim: SELECT FOR UPDATE SKIP LOCKED lets one of N
-        # concurrent workers win a row while the rest see the next
-        # pending job. Falls back to an unlocked SELECT on SQLite where
-        # row-level locking isn't supported; for SQLite a single worker
-        # is assumed (the default Evennia deployment).
+        now = timezone.now()
+        lease_delta = timezone.timedelta(seconds=_lease_seconds())
         with transaction.atomic():
-            qs = EngineJob.objects.filter(status="pending").order_by("-priority", "created_at")
+            # Eligible: pending-and-available, or a leased job whose lease
+            # expired (its worker died mid-run) — reclaimed here.
+            eligible = (Q(status="pending") | Q(status="leased", lease_until__lt=now)) & (
+                Q(available_at__isnull=True) | Q(available_at__lte=now)
+            )
+            qs = EngineJob.objects.filter(eligible).order_by("-priority", "created_at")
             try:
                 job = qs.select_for_update(skip_locked=True).first()
             except Exception:
                 job = qs.first()
             if not job:
                 return None
-            # Re-check under the row lock; a peer that won the row would
-            # have flipped status away from 'pending'.
-            if job.status != "pending":
+            if job.status not in ("pending", "leased"):
                 return None
-            job.status = "running"
-            job.save(update_fields=["status"])
-            payload = json.loads(job.payload_json or "{}")
+            job.status = "leased"
+            job.attempts += 1
+            job.lease_until = now + lease_delta
+            job.save(update_fields=["status", "attempts", "lease_until", "updated_at"])
             return {
                 "id": job.job_id,
                 "type": job.job_type,
-                "payload": payload,
+                "payload": json.loads(job.payload_json or "{}"),
+                "attempts": job.attempts,
+                "max_attempts": job.max_attempts,
             }
     except Exception:
         logger.log_trace("job_queue: db dequeue failed")
         return None
 
 
-def _mark_failed(record: dict) -> None:
-    if _backend() != "postgres":
-        return
+def _complete_db(record: dict) -> None:
     try:
+        from django.utils import timezone
+
         from evennia.server.models import EngineJob
 
-        EngineJob.objects.filter(job_id=record.get("id")).update(status="failed")
+        EngineJob.objects.filter(job_id=record.get("id")).update(
+            status="completed", completed_at=timezone.now(), lease_until=None
+        )
     except Exception:
-        pass
+        logger.log_trace("job_queue: db complete failed")
+
+
+def _retry_or_dead_db(record: dict) -> None:
+    try:
+        from django.utils import timezone
+
+        from evennia.server.models import EngineJob
+
+        attempts = int(record.get("attempts", 1))
+        max_attempts = int(record.get("max_attempts", _max_attempts()))
+        now = timezone.now()
+        if attempts >= max_attempts:
+            EngineJob.objects.filter(job_id=record.get("id")).update(
+                status="dead", lease_until=None, last_error="max attempts reached"
+            )
+            logger.log_err(
+                "job_queue: job %s dead-lettered after %d attempts" % (record.get("id"), attempts)
+            )
+        else:
+            EngineJob.objects.filter(job_id=record.get("id")).update(
+                status="pending",
+                lease_until=None,
+                available_at=now + timezone.timedelta(seconds=_backoff_seconds(attempts)),
+            )
+    except Exception:
+        logger.log_trace("job_queue: db retry/dead failed")
+
+
+def reclaim_jobs() -> int:
+    """
+    Reclaim jobs left in-flight by a crashed worker. Call at server start.
+
+    Postgres: leased rows whose lease has expired are already reclaimed lazily
+    by :func:`_dequeue_db`; this proactively resets any stuck ``leased`` rows
+    (including ones with a null lease) to ``pending`` so they are retried.
+    Redis: the per-worker processing list is drained back onto the pending list.
+
+    Returns the number of jobs reclaimed.
+    """
+    if not _enabled():
+        return 0
+    if _backend() == "postgres":
+        try:
+            from django.db.models import Q
+            from django.utils import timezone
+
+            from evennia.server.models import EngineJob
+
+            now = timezone.now()
+            n = EngineJob.objects.filter(
+                Q(status="leased") & (Q(lease_until__isnull=True) | Q(lease_until__lt=now))
+            ).update(status="pending", lease_until=None)
+            if n:
+                logger.log_info("job_queue: reclaimed %d stuck leased job(s)" % n)
+            return n
+        except Exception:
+            logger.log_trace("job_queue: db reclaim failed")
+            return 0
+    try:
+        from django_redis import get_redis_connection
+
+        alias = getattr(settings, "JOB_QUEUE_REDIS_ALIAS", "default")
+        key, processing, _dead = _redis_keys()
+        r = get_redis_connection(alias)
+        reclaimed = 0
+        while r.rpoplpush(processing, key) is not None:
+            reclaimed += 1
+        if reclaimed:
+            logger.log_info("job_queue: reclaimed %d in-flight job(s) from processing" % reclaimed)
+        return reclaimed
+    except Exception as exc:
+        if not _is_redis_unavailable(exc):
+            logger.log_trace("job_queue: redis reclaim failed")
+        return 0

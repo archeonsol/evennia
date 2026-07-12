@@ -13,6 +13,31 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 
 ## Fork features
 
+### Universal rendering (R1A-R1D)
+
+- Immutable, versioned `render.v1` nodes with semantic blocks, bounded metadata,
+  correlation IDs, and safe server-side replay payloads.
+- Viewer-scoped expiring entity handles replace raw database IDs in narrative and
+  scene payloads; games supply perception/display policy.
+- `msg`, `msg_contents`, emotes, room looks, and Azaban text normalize through one
+  delivery authority with telnet byte parity and multi-session capability routing.
+- Bounded semantic timelines and pluggable read-only sinks support cameras,
+  recordings, accessibility, replay, and headless consumers.
+- The Azaban shell renders nodes/scene patches natively and rejects raw identity in
+  public payloads.
+
+### Capability authorization (R3A-R3E)
+
+- Namespaced, game-extensible capabilities replace tier implication for new
+  authority; bundles are conveniences, not ranks.
+- Positive scoped grants, materialized resource labels, structured policies, and
+  explainable decisions live in `evennia.authorization`.
+- Grant and resource caches invalidate independently; typed actions and RenderNode
+  affordances consume the same decision.
+- Temporary audited recovery replaces an immortal in-game genesis account.
+- Offline compiler/differential commands and per-kind freeze settings provide the
+  finite migration path. LockHandler removal is reserved for R3F.
+
 ### Tier 1 (command / messaging hot path)
 
 - **`msg_contents`**: precomputed display names, `display_names` passed to actor-stance parser; skips `$` parse when message has no funcparser tokens; `get_message_recipients()` hook on locations

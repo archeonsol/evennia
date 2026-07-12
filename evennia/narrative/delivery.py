@@ -21,13 +21,17 @@ from .emote import (
     split_emote_segments,
 )
 from .protocols import KeyNameResolver, NameResolver
-from .rendernode import RenderNode, deliver_node
+from .rendernode import EntityRef, RenderNode, deliver_node
 
 __all__ = ["DefaultEmoteDelivery", "default_emote_delivery"]
 
 
 def _viewer_refs(plan, viewer, resolver):
-    """Per-viewer target references for a RenderNode: name-as-seen + char id."""
+    """Per-viewer target references for a RenderNode: name-as-seen + a
+    viewer-scoped handle (never a raw db id — see
+    :mod:`evennia.narrative.handles`)."""
+    from evennia.narrative.handles import handle_for
+
     refs = []
     seen = set()
     for sp in plan.segment_plans:
@@ -36,7 +40,14 @@ def _viewer_refs(plan, viewer, resolver):
             if cid in seen:
                 continue
             seen.add(cid)
-            refs.append({"name": resolver.display_name(char, viewer), "char_id": cid})
+            name = resolver.display_name(char, viewer)
+            refs.append(
+                EntityRef(
+                    handle=handle_for(viewer, char, name),
+                    label=name,
+                    role="target",
+                )
+            )
     return refs
 
 
@@ -126,11 +137,14 @@ class DefaultEmoteDelivery:
                 # R1 seam: wrap the per-viewer string in a RenderNode and let
                 # deliver_node flatten it (text parity) or send it structured
                 # (W1) per client capability.
+                from evennia.narrative.handles import handle_for
+
+                caller_name = self.resolver.display_name(caller, viewer)
                 node = RenderNode(
                     kind="emote",
                     msg_type=plan.msg_type,
                     body=msg,
-                    from_id=getattr(caller, "id", None),
+                    from_handle=handle_for(viewer, caller, caller_name),
                     self_echo=(viewer == caller),
                 )
                 # refs carry the per-viewer resolver output; build them only
@@ -187,7 +201,28 @@ class DefaultEmoteDelivery:
                 if improvise:
                     msg = "|w%s|n" % msg
                 if hasattr(viewer, "msg"):
-                    viewer.msg((msg, {"type": msg_type}), from_obj=caller)
+                    from evennia.narrative.handles import handle_for
+
+                    caller_name = self.resolver.display_name(caller, viewer)
+                    deliver_node(
+                        RenderNode(
+                            kind="emote",
+                            msg_type=msg_type,
+                            body=msg,
+                            from_handle=handle_for(viewer, caller, caller_name),
+                            refs=(
+                                EntityRef(
+                                    handle=handle_for(viewer, caller, caller_name),
+                                    label=caller_name,
+                                    role="emitter",
+                                ),
+                            ),
+                            self_echo=viewer == caller,
+                            metadata={"literal_third": True, "improvise": bool(improvise)},
+                        ),
+                        viewer,
+                        from_obj=caller,
+                    )
             return None
 
         plan = self.build_plan(caller, text, msg_type=msg_type, improvise=improvise)

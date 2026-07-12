@@ -220,6 +220,91 @@ class TestEveryTickCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.assertEqual(self.fires[1].dt, 3.0)
 
 
+class TestWorkloadAdmission(_SchedulerTestMixin, BaseEvenniaTestCase):
+    def test_invalid_workload_class_rejected(self):
+        with self.assertRaises(systems.SystemRegistrationError):
+            register(
+                name="bad",
+                cadence=every_tick(),
+                scope=global_scope(),
+                run=self._recording_run,
+                workload_class="nonsense",
+            )
+
+    def test_admission_budget_defers_overflow_but_keeps_due(self):
+        fired = []
+        for i in range(4):
+            register(
+                name=f"s{i}",
+                cadence=every_tick(),
+                scope=global_scope(),
+                run=lambda ctx, i=i: fired.append(i),
+            )
+        with override_settings(SYSTEM_TICK_MAX_ADMISSIONS=2):
+            self.clock.set(0.0)
+            self.driver.tick()
+            # only 2 admitted this tick
+            self.assertEqual(len(fired), 2)
+            # the deferred two are still due -> admitted next tick
+            self.clock.set(1.0)
+            self.driver.tick()
+        self.assertEqual(len(fired), 4)
+
+    def test_interactive_class_admitted_before_simulation(self):
+        order = []
+        register(
+            name="sim",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=lambda ctx: order.append("sim"),
+            workload_class=systems.SIMULATION,
+        )
+        register(
+            name="interactive",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=lambda ctx: order.append("interactive"),
+            workload_class=systems.INTERACTIVE,
+        )
+        with override_settings(SYSTEM_TICK_MAX_ADMISSIONS=1):
+            self.clock.set(0.0)
+            self.driver.tick()
+        # interactive wins the single admission slot despite later registration
+        self.assertEqual(order, ["interactive"])
+
+
+class TestQuiesce(_SchedulerTestMixin, BaseEvenniaTestCase):
+    def test_quiesce_cancels_overrunning_fire(self):
+        async def _scenario():
+            async def _long():
+                await asyncio.sleep(60)
+
+            task = asyncio.ensure_future(_long())
+            self.driver._inflight.add(task)
+            task.add_done_callback(self.driver._inflight.discard)
+            # zero drain budget -> the still-running fire is cancelled
+            await self.driver.quiesce(timeout=0)
+            self.assertTrue(task.cancelled() or task.done())
+
+        asyncio.new_event_loop().run_until_complete(_scenario())
+
+    def test_quiesce_awaits_quick_fire(self):
+        async def _scenario():
+            done = []
+
+            async def _quick():
+                done.append(True)
+
+            task = asyncio.ensure_future(_quick())
+            self.driver._inflight.add(task)
+            task.add_done_callback(self.driver._inflight.discard)
+            await self.driver.quiesce(timeout=5)
+            self.assertEqual(done, [True])
+            self.assertFalse(task.cancelled())
+
+        asyncio.new_event_loop().run_until_complete(_scenario())
+
+
 class TestCalendarCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_first_ever_check_primes_and_persists_without_firing(self):
         register(

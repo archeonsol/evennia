@@ -26,7 +26,11 @@ _SA = object.__setattr__
 
 class EvenniaServerService(MultiService):
     def _wrap_sigint_handler(self, *args):
+        # A second signal while a graceful shutdown is running is the operator
+        # asking to stop *now* — that (and only that) triggers immediate
+        # termination.
         if getattr(self, "_shutdown_in_progress", False):
+            logger.log_warn("Second interrupt received; stopping immediately.")
             clock.call_later(0, clock.stop_loop)
             return
 
@@ -42,7 +46,12 @@ class EvenniaServerService(MultiService):
                 clock.stop_loop()
 
         clock.run_coroutine(_graceful_stop())
-        clock.call_later(5, clock.stop_loop)
+        # Emergency fallback only: if the graceful path wedges, stop anyway.
+        # Configurable and comfortably larger than the shutdown drain window so
+        # it does not guillotine a shutdown that is still making progress. A
+        # second signal (above) is the way to stop sooner.
+        emergency = float(getattr(settings, "SERVER_SHUTDOWN_EMERGENCY_TIMEOUT", 30.0))
+        clock.call_later(emergency, clock.stop_loop)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -627,15 +636,24 @@ class EvenniaServerService(MultiService):
         if self.stall_watchdog is not None:
             self.stall_watchdog.stop()
 
-        # stop the system-scheduler driver, then drain the write-behind
-        # attribute cache one final time so no dirty rows are lost on exit
-        # (the flush-attributes system stops with the driver).
+        # quiesce the system-scheduler driver (stop scheduling AND drain any
+        # in-flight fires), then drain the write-behind attribute cache one
+        # final time so no dirty rows are lost on exit and no late fire can
+        # re-dirty state after the final flush.
         if self.system_driver is not None:
-            self.system_driver.stop()
+            drain = float(getattr(settings, "SERVER_SHUTDOWN_DRAIN_TIMEOUT", 5.0))
+            try:
+                await self.system_driver.quiesce(timeout=drain)
+            except Exception:
+                logger.log_trace("shutdown: system driver quiesce failed")
         try:
             from evennia.typeclasses.attributes import flush_all_dirty
+            from evennia.typeclasses.jsonb_handler import spool_remaining_dirty
 
             flush_all_dirty()
+            # Anything the DB refused on the way out is diverted to the durable
+            # spool rather than lost; it is replayed on the next boot.
+            spool_remaining_dirty()
         except Exception:
             logger.log_trace("final attribute flush at shutdown")
 
@@ -686,6 +704,22 @@ class EvenniaServerService(MultiService):
         """
         This is called first when the server is starting, before any other hooks, regardless of how it's starting.
         """
+        # Replay any attribute documents that a past DB outage diverted to the
+        # durable write spool, before normal operation reads them.
+        try:
+            from evennia.typeclasses.jsonb_handler import reclaim_spooled_writes
+
+            reclaim_spooled_writes()
+        except Exception:
+            logger.log_trace("at_server_init: spooled-write reclamation failed")
+        # Reclaim jobs left in-flight by a crashed worker (expired leases /
+        # Redis processing list) so durable jobs are retried, not lost.
+        try:
+            from evennia.jobs.queue import reclaim_jobs
+
+            reclaim_jobs()
+        except Exception:
+            logger.log_trace("at_server_init: job reclamation failed")
         self._call_start_stop("at_server_init")
 
     def at_server_start(self):

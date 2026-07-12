@@ -425,6 +425,40 @@ class TestDryRunAndExplain(unittest.TestCase):
         _sync(ENGINE.explain(Kick(), _actor(), _ctx(AllPhases(fired))))
         self.assertEqual(fired, ["check"])
 
+    def test_explain_evaluates_check_but_suppresses_message_leak(self):
+        # A check body that violates purity by messaging must not leak output
+        # during a read-only explain; the predicate still evaluates.
+        class LeakyCheck:
+            def __init__(self, fired):
+                self.fired = fired
+
+            @rule(Kick, phase="check")
+            def leak(self, action, actor):
+                self.fired.append("check")
+                actor.msg("leaked!")
+                return FAIL("blocked")
+
+        fired = []
+        actor = _actor()
+        with mock.patch.object(logger, "log_warn") as warn:
+            trace = _sync(ENGINE.explain(Kick(), actor, _ctx(LeakyCheck(fired))))
+        self.assertEqual(fired, ["check"])  # predicate still evaluated
+        self.assertEqual(actor.messages, [])  # message suppressed under explain
+        self.assertEqual(trace.outcome, "blocked")  # explain reports the block
+        warn.assert_called_once()
+
+    def test_real_dispatch_check_message_not_suppressed(self):
+        # Outside dry_run the guard is not active: a (non-dry) block sends its
+        # message normally, confirming the guard is explain-only.
+        class BlockingCheck:
+            @rule(Kick, phase="check")
+            def deny(self, action, actor):
+                return FAIL("blocked!")
+
+        actor = _actor()
+        _sync(ENGINE.dispatch(Kick(), actor, _ctx(BlockingCheck())))
+        self.assertIn("blocked!", actor.messages)
+
 
 class TestOutcomeAndProviderOrder(unittest.TestCase):
     def test_no_rules_outcome(self):

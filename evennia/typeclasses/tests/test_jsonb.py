@@ -14,9 +14,18 @@ Covers:
   - unique pk counter per backend instance
 """
 
+import tempfile
 from unittest.mock import patch
 
-from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend, force_flush
+from django.test import override_settings
+
+from evennia.typeclasses.jsonb_handler import (
+    FlushResult,
+    JsonbAttributeBackend,
+    force_flush,
+    reclaim_spooled_writes,
+    spool_pending_count,
+)
 from evennia.typeclasses.jsonb_util import _SENTINEL, from_jsonb, to_jsonb
 from evennia.utils.test_resources import BaseEvenniaTest
 
@@ -323,24 +332,71 @@ class TestFlushRetry(BaseEvenniaTest):
     def test_retry_increments_failure_counter(self):
         self.handler.add("x", 1)
         with patch.object(self.obj1, "save", side_effect=Exception("db down")):
-            self.backend._do_flush()
+            result = self.backend._do_flush()
         self.assertEqual(self.backend._flush_failures, 1)
         self.assertTrue(self.backend._dirty)
+        # not durable yet: still only in the volatile L1 dict
+        self.assertFalse(result)
+        self.assertFalse(result.ok)
+        self.assertFalse(result.spooled)
 
-    def test_give_up_at_limit_clears_dirty(self):
+    def test_at_limit_diverts_to_durable_spool(self):
+        # At the retry limit the write must NOT be dropped: it is diverted to
+        # the durable on-disk spool and only then marked clean.
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                self.handler.add("x", 1)
+                self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
+                with patch.object(self.obj1, "save", side_effect=Exception("db down")):
+                    result = self.backend._do_flush()
+                # dirty cleared (durable now), and the write is on disk
+                self.assertFalse(self.backend._dirty)
+                self.assertTrue(result.spooled)
+                self.assertTrue(result)  # durable
+                self.assertEqual(spool_pending_count(), 1)
+
+    def test_spool_failure_keeps_dirty(self):
+        # If even the spool write fails, the backend stays dirty (never lose).
         self.handler.add("x", 1)
         self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
         with patch.object(self.obj1, "save", side_effect=Exception("db down")):
-            self.backend._do_flush()
-        self.assertEqual(self.backend._flush_failures, self.backend._FLUSH_FAIL_LIMIT)
-        self.assertFalse(self.backend._dirty)
+            with patch(
+                "evennia.typeclasses.jsonb_handler._spool_write", return_value=False
+            ):
+                result = self.backend._do_flush()
+        self.assertTrue(self.backend._dirty)
+        self.assertFalse(result)
+
+    def test_reclaim_replays_spooled_write(self):
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                self.handler.add("x", 42)
+                self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
+                with patch.object(self.obj1, "save", side_effect=Exception("db down")):
+                    self.backend._do_flush()
+                self.assertEqual(spool_pending_count(), 1)
+                # reclamation writes the doc to the DB and clears the spool
+                reclaimed = reclaim_spooled_writes()
+                self.assertEqual(reclaimed, 1)
+                self.assertEqual(spool_pending_count(), 0)
+                self.obj1.refresh_from_db()
+                self.assertEqual(self.obj1.db_attrs["~"]["_d"]["x"], 42)
 
     def test_success_resets_failure_counter(self):
         self.handler.add("x", 1)
         self.backend._flush_failures = 3
-        self.backend.flush_dirty()
+        result = self.backend.flush_dirty()
         self.assertEqual(self.backend._flush_failures, 0)
         self.assertFalse(self.backend._dirty)
+        self.assertTrue(result.ok)
+
+    def test_force_flush_returns_durable_result(self):
+        self.handler.add("x", 1)
+        result = force_flush(self.obj1)
+        self.assertIsInstance(result, FlushResult)
+        self.assertTrue(result)
+        # nothing dirty now -> still a durable no-op result
+        self.assertTrue(force_flush(self.obj1))
 
 
 # ---------------------------------------------------------------------------

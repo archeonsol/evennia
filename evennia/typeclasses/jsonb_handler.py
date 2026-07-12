@@ -43,6 +43,10 @@ Example::
     force_flush(character)
 """
 
+import json
+import os
+import tempfile
+import time
 import weakref
 
 from django.conf import settings
@@ -54,13 +58,208 @@ from evennia.typeclasses.attributes import (
 )
 from evennia.typeclasses.jsonb_util import from_jsonb, to_jsonb
 
-__all__ = ("JsonbAttributeBackend", "force_flush")
+__all__ = (
+    "JsonbAttributeBackend",
+    "FlushResult",
+    "force_flush",
+    "reclaim_spooled_writes",
+    "spool_pending_count",
+)
 
 # Document sub-keys within each category section.
 _NULL_CATEGORY = "~"
 _DATA = "_d"
 _LOCKS = "_l"
 _STRV = "_s"
+
+
+# ---------------------------------------------------------------------------
+# Flush result and durable write spool
+# ---------------------------------------------------------------------------
+
+
+class FlushResult:
+    """
+    Typed outcome of a single attribute-document flush.
+
+    Truthiness is *durability*: ``bool(result)`` is True when the write is
+    safe somewhere — either it reached the database (:attr:`ok`) or it was
+    diverted to the on-disk spool for later reclamation (:attr:`spooled`). A
+    falsy result means the write is still only in the volatile L1 dict and
+    would be lost on a crash; the backend stays dirty and will be retried.
+
+    Safety-critical callers (death state, combat end) should check this and
+    react to a non-durable result rather than assuming persistence.
+
+    Attributes:
+        ok (bool): The document reached the database this attempt.
+        spooled (bool): The document was written to the durable spool instead
+            (the DB write kept failing past the retry limit).
+        error (Exception or None): The DB error, when the write did not land.
+    """
+
+    __slots__ = ("ok", "spooled", "error")
+
+    def __init__(self, ok, spooled=False, error=None):
+        self.ok = ok
+        self.spooled = spooled
+        self.error = error
+
+    @property
+    def durable(self):
+        """True when the write is safe in the DB or the spool."""
+        return bool(self.ok or self.spooled)
+
+    def __bool__(self):
+        return self.durable
+
+    def __repr__(self):
+        return f"<FlushResult ok={self.ok} spooled={self.spooled}>"
+
+
+def _spool_dir():
+    """
+    Directory holding diverted (undurable) attribute documents.
+
+    Configurable via ``settings.JSONB_WRITE_SPOOL_DIR``; defaults to
+    ``<LOG_DIR>/jsonb_spool``.
+    """
+    configured = getattr(settings, "JSONB_WRITE_SPOOL_DIR", None)
+    if configured:
+        return configured
+    log_dir = getattr(settings, "LOG_DIR", None) or tempfile.gettempdir()
+    return os.path.join(log_dir, "jsonb_spool")
+
+
+def _spool_write(obj, document):
+    """
+    Atomically persist ``document`` for ``obj`` to the on-disk spool.
+
+    Last-resort durability when the database write keeps failing: the write is
+    not lost, only deferred to :func:`reclaim_spooled_writes` on the next boot.
+
+    Returns:
+        bool: True if the document was durably written to disk.
+    """
+    pk = getattr(obj, "pk", None)
+    if pk is None:
+        return False
+    try:
+        model_label = obj._meta.label  # e.g. "objects.ObjectDB"
+    except Exception:
+        model_label = type(obj).__name__
+    try:
+        spool = _spool_dir()
+        os.makedirs(spool, exist_ok=True)
+        payload = {
+            "model": model_label,
+            "pk": pk,
+            "db_attrs": document,
+            "ts": time.time(),
+        }
+        # write to a temp file in the same dir then atomically rename
+        fd, tmp = tempfile.mkstemp(dir=spool, prefix=f"{model_label}.{pk}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, separators=(",", ":"))
+                fh.flush()
+                os.fsync(fh.fileno())
+            final = os.path.join(spool, f"{model_label}.{pk}.json")
+            os.replace(tmp, final)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        return True
+    except Exception:
+        from evennia.utils import logger
+
+        logger.log_trace("jsonb spool: could not write spool file")
+        return False
+
+
+def spool_remaining_dirty():
+    """
+    Last-resort: divert every still-dirty attribute document to the durable
+    spool. Call at shutdown *after* a final :func:`flush_all_dirty` so a write
+    the DB refused on the way out is captured on disk instead of lost (it is
+    replayed by :func:`reclaim_spooled_writes` on the next boot).
+
+    Returns:
+        int: Number of documents spooled.
+    """
+    from evennia.utils import logger
+
+    spooled = 0
+    for backend in list(_DIRTY_BACKENDS):
+        if not isinstance(backend, JsonbAttributeBackend) or not backend._dirty:
+            continue
+        if _spool_write(backend.obj, backend._l1):
+            backend._mark_clean()
+            spooled += 1
+        else:
+            logger.log_err(
+                "CRITICAL: could not spool dirty attribute doc for pk=%s at shutdown; "
+                "write may be lost." % getattr(backend.obj, "pk", "?")
+            )
+    if spooled:
+        logger.log_warn(
+            "jsonb spool: diverted %d undurable attribute write(s) to disk at shutdown" % spooled
+        )
+    return spooled
+
+
+def spool_pending_count():
+    """Number of undurable documents currently waiting in the spool."""
+    try:
+        spool = _spool_dir()
+        if not os.path.isdir(spool):
+            return 0
+        return sum(1 for name in os.listdir(spool) if name.endswith(".json"))
+    except Exception:
+        return 0
+
+
+def reclaim_spooled_writes():
+    """
+    Replay any spooled attribute documents into the database.
+
+    Call once at server start, before normal operation, so writes diverted to
+    the spool during a past DB outage are not lost. Each successfully replayed
+    document's spool file is removed; a file whose object no longer exists is
+    dropped. Returns the number of documents reclaimed.
+    """
+    from django.apps import apps
+
+    from evennia.utils import logger
+
+    spool = _spool_dir()
+    if not os.path.isdir(spool):
+        return 0
+    reclaimed = 0
+    for name in sorted(os.listdir(spool)):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(spool, name)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+            app_label, model_name = payload["model"].split(".")
+            model = apps.get_model(app_label, model_name)
+            updated = model.objects.filter(pk=payload["pk"]).update(
+                db_attrs=payload["db_attrs"]
+            )
+            if updated == 0:
+                logger.log_warn(
+                    "jsonb spool: %s no longer exists; dropping spooled write" % payload["model"]
+                )
+            else:
+                reclaimed += 1
+            os.remove(path)
+        except Exception:
+            logger.log_trace(f"jsonb spool: failed to reclaim {name}; leaving it in place")
+    if reclaimed:
+        logger.log_info("jsonb spool: reclaimed %d deferred attribute write(s)" % reclaimed)
+    return reclaimed
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +357,7 @@ class JsonbAttributeBackend(IAttributeBackend):
         super().__init__(handler, attrtype)
         self._dirty = False
         self._flush_failures = 0
+        self._dirty_since = None
         self._pk_counter = 0
         self._l1 = self._load_document()
 
@@ -186,6 +386,8 @@ class JsonbAttributeBackend(IAttributeBackend):
         return self._l1[key]
 
     def _mark_dirty(self):
+        if not self._dirty:
+            self._dirty_since = time.monotonic()
         self._dirty = True
         _DIRTY_BACKENDS.add(self)
 
@@ -396,32 +598,75 @@ class JsonbAttributeBackend(IAttributeBackend):
     def pending_count(self) -> int:
         return 1 if self._dirty else 0
 
+    def dirty_age(self):
+        """Seconds this backend has been continuously dirty (0.0 if clean)."""
+        if not self._dirty or self._dirty_since is None:
+            return 0.0
+        return max(0.0, time.monotonic() - self._dirty_since)
+
+    def _mark_clean(self):
+        self._dirty = False
+        self._dirty_since = None
+        self._flush_failures = 0
+        _DIRTY_BACKENDS.discard(self)
+
     def flush_dirty(self):
-        """Write the L1 dict to ``db_attrs`` and save.  Called by the tick."""
+        """Write the L1 dict to ``db_attrs`` and save.  Called by the tick.
+
+        Returns:
+            FlushResult or None: The flush outcome, or ``None`` when there was
+            nothing dirty to flush.
+        """
         if not self._dirty:
-            return
-        self._do_flush()
+            return None
+        return self._do_flush()
 
     def _do_flush(self):
+        """
+        Persist the L1 document to the DB.
+
+        Never marks the backend clean without durability: on repeated DB
+        failure the write is diverted to the on-disk spool (durable) before
+        the dirty flag is cleared; if even the spool write fails, the backend
+        stays dirty so the write is retried rather than lost.
+
+        Returns:
+            FlushResult: The outcome (see :class:`FlushResult`).
+        """
+        from evennia.utils import logger
+
         try:
             self.obj.db_attrs = self._l1
             self.obj.save(update_fields=["db_attrs"])
-            self._dirty = False
-            self._flush_failures = 0
-            _DIRTY_BACKENDS.discard(self)
-        except Exception:
-            from evennia.utils import logger
-
+            self._mark_clean()
+            return FlushResult(ok=True)
+        except Exception as err:
             self._flush_failures += 1
             _DIRTY_BACKENDS.add(self)
+            past_limit = self._flush_failures >= self._FLUSH_FAIL_LIMIT
             logger.log_trace(
                 f"JsonbAttributeBackend._do_flush: flush attempt #{self._flush_failures} "
                 f"failed for pk={getattr(self.obj, 'pk', '?')}; "
-                f"{'giving up — write lost' if self._flush_failures >= self._FLUSH_FAIL_LIMIT else 'will retry next tick'}."
+                f"{'diverting to durable spool' if past_limit else 'will retry next tick'}."
             )
-            if self._flush_failures >= self._FLUSH_FAIL_LIMIT:
-                self._dirty = False
-                _DIRTY_BACKENDS.discard(self)
+            if past_limit:
+                # Last resort: divert to the durable spool so the write is not
+                # lost, and only then clear dirty. If spooling also fails, keep
+                # the backend dirty — never mark clean without durability.
+                if _spool_write(self.obj, self._l1):
+                    logger.log_err(
+                        "JsonbAttributeBackend: DB write for pk=%s failed %d times; "
+                        "diverted to durable spool (will reclaim on next boot)."
+                        % (getattr(self.obj, "pk", "?"), self._flush_failures)
+                    )
+                    self._mark_clean()
+                    return FlushResult(ok=False, spooled=True, error=err)
+                logger.log_err(
+                    "CRITICAL: JsonbAttributeBackend could not persist NOR spool "
+                    "pk=%s after %d attempts; keeping dirty for retry."
+                    % (getattr(self.obj, "pk", "?"), self._flush_failures)
+                )
+            return FlushResult(ok=False, error=err)
 
     def reset_cache(self):
         """Reload L1 from DB and reset the upper-layer cache."""
@@ -446,10 +691,20 @@ def force_flush(obj):
 
     Args:
         obj (TypedObject): The object to flush.
+
+    Returns:
+        FlushResult: The flush outcome. A falsy result means the write did
+        NOT reach durable storage (neither DB nor spool) and safety-critical
+        callers should react (retry, alert, refuse to proceed). Returns a
+        durable ``FlushResult(ok=True)`` no-op when the backend is inactive or
+        there is nothing dirty to flush.
     """
     try:
         backend = obj.attributes.backend
     except AttributeError:
-        return
+        return FlushResult(ok=True)
     if isinstance(backend, JsonbAttributeBackend):
-        backend._do_flush()
+        if not backend._dirty:
+            return FlushResult(ok=True)
+        return backend._do_flush()
+    return FlushResult(ok=True)

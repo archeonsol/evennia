@@ -555,6 +555,52 @@ class TestContentHandler(BaseEvenniaTest):
         self.assertEqual(self.room2.contents, [self.obj1, self.obj2])
 
 
+class TestMoveResult(BaseEvenniaTest):
+    """The truthful, bool-compatible result of ``move_to`` (MoveResult)."""
+
+    def test_success_is_truthy_and_committed(self):
+        from evennia.objects.mixins.movement import MoveResult
+
+        result = self.obj1.move_to(self.room2)
+        self.assertIsInstance(result, MoveResult)
+        self.assertTrue(result)
+        self.assertTrue(result.committed)
+        self.assertEqual(result.hook_errors, [])
+        self.assertTrue(self.obj1 in self.room2.contents)
+
+    def test_pre_move_veto_is_falsy_and_uncommitted(self):
+        with patch.object(type(self.obj1), "at_pre_move", return_value=False):
+            result = self.obj1.move_to(self.room2)
+        self.assertFalse(result)
+        self.assertFalse(result.committed)
+        self.assertTrue(result.vetoed)
+        self.assertEqual(result.failed_stage, "at_pre_move")
+        # never left the source room
+        self.assertTrue(self.obj1 in self.room1.contents)
+        self.assertFalse(self.obj1 in self.room2.contents)
+
+    def test_post_commit_hook_error_keeps_move_truthful(self):
+        # A post-commit hook that raises must NOT report failure: the object
+        # already moved, so callers must not retry.
+        boom = MagicMock(side_effect=RuntimeError("boom"))
+        with patch.object(type(self.obj1), "at_post_move", boom):
+            result = self.obj1.move_to(self.room2)
+        self.assertTrue(result)  # truthy: the move stands
+        self.assertTrue(result.committed)
+        self.assertEqual(result.failed_stage, "at_post_move")
+        self.assertEqual(len(result.hook_errors), 1)
+        self.assertEqual(result.hook_errors[0][0], "at_post_move")
+        # the object really is in the destination despite the hook error
+        self.assertTrue(self.obj1 in self.room2.contents)
+        self.assertFalse(self.obj1 in self.room1.contents)
+
+    def test_bool_equality_backwards_compatible(self):
+        # legacy code comparing against True/False keeps working
+        self.assertEqual(self.obj1.move_to(self.room2), True)
+        with patch.object(type(self.obj1), "at_pre_move", return_value=False):
+            self.assertEqual(self.obj1.move_to(self.room1), False)
+
+
 class TestExitCommand(BaseEvenniaTest):
     """Test the ExitCommand class."""
 
@@ -925,6 +971,8 @@ class TestMsgContentsRecipients(BaseEvenniaTest):
             text = mock_msg.call_args[1].get("text") or mock_msg.call_args[0][0]
             if isinstance(text, tuple):
                 text = text[0]
+            if hasattr(text, "body"):
+                text = text.body
             self.assertIn("waves", text)
 
 

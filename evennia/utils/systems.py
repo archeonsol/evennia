@@ -162,6 +162,23 @@ _GLOBAL = "global"
 _ONLINE_PUPPETS = "online_puppets"
 _ALL_ENTITIES = "all_entities"
 
+#: Workload classes and their admission priority (lower = admitted first when a
+#: tick is over its admission budget). A due system's firing order within a tick
+#: is (class priority, then oldest-overdue first) so interactive work wins and no
+#: class can be starved indefinitely — a deferred system's overdue age grows and
+#: eventually outranks fresher work.
+INTERACTIVE = "interactive"
+SIMULATION = "simulation"
+PERSISTENCE = "persistence"
+MAINTENANCE = "maintenance"
+_WORKLOAD_PRIORITY = {
+    INTERACTIVE: 0,
+    PERSISTENCE: 1,
+    SIMULATION: 2,
+    MAINTENANCE: 3,
+}
+_DEFAULT_WORKLOAD = SIMULATION
+
 #: Engine-owned system modules, always loaded before `settings.SYSTEM_MODULES`
 #: so a game overriding that setting cannot drop engine systems.
 _ENGINE_SYSTEM_MODULES = ("evennia.server.engine_systems",)
@@ -505,7 +522,7 @@ class System:
 
     """
 
-    def __init__(self, name, cadence, scope, run):
+    def __init__(self, name, cadence, scope, run, workload_class=_DEFAULT_WORKLOAD):
         if not name or not isinstance(name, str):
             raise SystemRegistrationError(f"system name must be a non-empty str, got {name!r}")
         if not isinstance(cadence, Cadence):
@@ -514,10 +531,16 @@ class System:
             raise SystemRegistrationError(f"system '{name}': scope must be a Scope")
         if not callable(run):
             raise SystemRegistrationError(f"system '{name}': run must be callable")
+        if workload_class not in _WORKLOAD_PRIORITY:
+            raise SystemRegistrationError(
+                f"system '{name}': workload_class must be one of "
+                f"{sorted(_WORKLOAD_PRIORITY)}, got {workload_class!r}"
+            )
         self.name = name
         self.cadence = cadence
         self.scope = scope
         self.run = run
+        self.workload_class = workload_class
         self.last_run = None
         self.fire_count = 0
         self.in_flight = False
@@ -562,7 +585,7 @@ def register_system(system):
     return system
 
 
-def register(name, cadence, scope, run):
+def register(name, cadence, scope, run, workload_class=_DEFAULT_WORKLOAD):
     """
     Build and register a `System` in one call.
 
@@ -571,6 +594,9 @@ def register(name, cadence, scope, run):
         cadence (Cadence): From `every`, `calendar` or `every_tick`.
         scope (Scope): From `global_scope`, `online_puppets` or `all_entities`.
         run (callable): The body, called as `run(ctx)` once per fire.
+        workload_class (str): One of `INTERACTIVE`, `SIMULATION` (default),
+            `PERSISTENCE`, `MAINTENANCE`. Sets admission priority when a tick is
+            over its `SYSTEM_TICK_MAX_ADMISSIONS` budget.
 
     Returns:
         System: The registered system.
@@ -579,7 +605,7 @@ def register(name, cadence, scope, run):
         SystemRegistrationError: On invalid arguments or duplicate name.
 
     """
-    return register_system(System(name, cadence, scope, run))
+    return register_system(System(name, cadence, scope, run, workload_class=workload_class))
 
 
 def get_system(name):
@@ -733,6 +759,10 @@ class SystemDriver:
     def __init__(self, now=time.time):
         self._now = now
         self._loop = clock.make_looping(self.tick)
+        # Live fire tasks, kept so shutdown can drain/cancel them before the
+        # final durability barrier (a fire finishing after the last attribute
+        # flush would re-dirty state that then never persists).
+        self._inflight = set()
 
     def start(self):
         """Start ticking at `TICK_INTERVAL`. No-op if already running."""
@@ -741,23 +771,95 @@ class SystemDriver:
         self._loop.start(TICK_INTERVAL, now=False)
 
     def stop(self):
-        """Stop ticking. Safe to call when not running."""
+        """Stop ticking. Safe to call when not running.
+
+        Stops *scheduling* new fires only; in-flight fires are not awaited. Use
+        :meth:`quiesce` in the shutdown path to also drain them.
+        """
         if self._loop.running:
             self._loop.stop()
 
+    async def quiesce(self, timeout=5.0):
+        """
+        Stop scheduling and drain in-flight fires before a durability barrier.
+
+        Stops the loop, then awaits currently-running system fires up to
+        ``timeout`` seconds and cancels any that overrun. After this returns no
+        system body is still mutating state, so a following attribute flush is
+        the true final write.
+        """
+        self.stop()
+        pending = [t for t in list(self._inflight) if hasattr(t, "cancel")]
+        if not pending:
+            return
+        import asyncio
+
+        try:
+            await asyncio.wait(pending, timeout=max(0.0, timeout))
+        except Exception:
+            logger.log_trace("SystemDriver.quiesce: error awaiting in-flight fires")
+        overran = [t for t in pending if not t.done()]
+        for task in overran:
+            task.cancel()
+            logger.log_warn(
+                "SystemDriver.quiesce: cancelled a system fire that overran the "
+                "%.1fs drain window during shutdown" % timeout
+            )
+        if overran:
+            # let the cancellations settle so the tasks are truly finished
+            try:
+                await asyncio.gather(*overran, return_exceptions=True)
+            except Exception:
+                logger.log_trace("SystemDriver.quiesce: error settling cancellations")
+
     def tick(self):
-        """One driver tick: check every registered system, fire the due ones."""
+        """One driver tick: collect due systems, then fire them under a global
+        admission budget in workload-class + oldest-overdue order.
+
+        Firing order is no longer raw registry order: due systems are ranked by
+        workload class (interactive first) then by how overdue they are, so
+        latency-sensitive work wins and a deferred system ages until it
+        outranks fresher work. When `settings.SYSTEM_TICK_MAX_ADMISSIONS` caps
+        how many may start in one tick, the overflow is left due (not dropped)
+        and admitted a later tick."""
         if not _SYSTEM_REGISTRY:
             return
         now = self._now()
+        due = []
         for system in list(_SYSTEM_REGISTRY.values()):
             try:
-                self._maybe_fire(system, now)
+                if self._check_due(system, now):
+                    due.append(system)
             except Exception:
-                # scheduling-side error (cadence bug or durable-store
-                # failure; the latter retries next tick) — body errors are
-                # isolated via the fire Deferred's errback instead
+                # scheduling-side error (cadence bug or durable-store failure;
+                # the latter retries next tick) — body errors are isolated via
+                # the fire coroutine's handler instead
                 logger.log_trace(f"System scheduler: error scheduling '{system.name}'")
+        if not due:
+            return
+
+        def _overdue_age(system):
+            # never-fired (last_run None) ranks as maximally overdue so it is
+            # not starved by systems that have run recently
+            return now - system.last_run if system.last_run is not None else float("inf")
+
+        due.sort(
+            key=lambda s: (_WORKLOAD_PRIORITY.get(s.workload_class, 99), -_overdue_age(s))
+        )
+
+        cap = getattr(settings, "SYSTEM_TICK_MAX_ADMISSIONS", None)
+        admitted = due if not cap else due[: int(cap)]
+        for system in admitted:
+            try:
+                self._fire(system, now)
+            except Exception:
+                logger.log_trace(f"System scheduler: error firing '{system.name}'")
+        deferred = len(due) - len(admitted)
+        if deferred:
+            logger.log_info(
+                "system scheduler: %d due system(s) deferred past the admission "
+                "budget (%s); they age and admit on a later tick." % (deferred, cap)
+            )
 
     def _check_due(self, system, now):
         """
@@ -796,16 +898,20 @@ class SystemDriver:
         return _most_recent_occurrence(system.cadence, now) > system.last_run
 
     def _maybe_fire(self, system, now):
+        """Check due + fire in one call (used by direct callers/tests)."""
+        if not self._check_due(system, now):
+            return
+        self._fire(system, now)
+
+    def _fire(self, system, now):
         """
-        Fire `system` if due and not already in flight.
+        Fire `system` (already determined due) unless it is in flight.
 
         Args:
-            system (System): The system to check and fire.
+            system (System): The due system to fire.
             now (float): Current epoch seconds.
 
         """
-        if not self._check_due(system, now):
-            return
         if system.in_flight:
             system.skip_count += 1
             message = (
@@ -847,7 +953,12 @@ class SystemDriver:
             finally:
                 system.in_flight = False
 
-        clock.run_coroutine(_run_fire())
+        task = clock.run_coroutine(_run_fire())
+        # Track the handle so shutdown can drain/cancel it; a synchronous
+        # test-mode result has no add_done_callback and needs no tracking.
+        if hasattr(task, "add_done_callback"):
+            self._inflight.add(task)
+            task.add_done_callback(self._inflight.discard)
 
     async def _invoke_async(self, system, now, dt):
         scope = system.scope

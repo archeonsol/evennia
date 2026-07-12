@@ -22,11 +22,21 @@ through :func:`render` until they are migrated.
 
 from __future__ import annotations
 
-from evennia.narrative.rendernode import deliver_node
+from evennia.narrative.rendernode import RenderNode, deliver_node, text_node
 
-__all__ = ["register_producer", "get_producer", "producers", "render", "deliver_node"]
+__all__ = [
+    "register_producer",
+    "get_producer",
+    "producers",
+    "register_transform",
+    "unregister_transform",
+    "transforms",
+    "render",
+    "deliver_node",
+]
 
 _PRODUCERS = {}
+_TRANSFORMS = {}
 
 
 def register_producer(kind, fn=None, *, override=False):
@@ -70,9 +80,62 @@ def producers():
     return dict(_PRODUCERS)
 
 
+def register_transform(key, fn=None, *, priority=0, override=False):
+    """Register an ordered universal node transform.
+
+    Transforms receive ``(node, viewer, context)`` and must return a new
+    :class:`RenderNode`. They are suitable for accessibility, perception,
+    language, policy metadata, and other cross-surface concerns.
+    """
+
+    def _set(transform):
+        normalized = str(key or "").strip().lower()
+        if not normalized:
+            raise ValueError("render transform key is required")
+        if normalized in _TRANSFORMS and not override:
+            raise ValueError(f"render transform already registered: {normalized}")
+        _TRANSFORMS[normalized] = (int(priority), transform)
+        return transform
+
+    if fn is None:
+        return _set
+    return _set(fn)
+
+
+def unregister_transform(key):
+    """Remove and return one registered transform."""
+    entry = _TRANSFORMS.pop(str(key or "").strip().lower(), None)
+    return entry[1] if entry else None
+
+
+def transforms():
+    """Return transforms in deterministic execution order."""
+    return tuple(
+        (key, fn)
+        for key, (_priority, fn) in sorted(
+            _TRANSFORMS.items(), key=lambda item: (item[1][0], item[0])
+        )
+    )
+
+
 def render(obj, viewer, *, kind, **ctx):
-    """Dispatch to the producer for ``kind``: ``producer(obj, viewer, **ctx)``."""
+    """Render one surface into an immutable node and run universal transforms."""
     fn = _PRODUCERS.get(kind)
     if fn is None:
         raise LookupError(f"no render producer registered for kind {kind!r}")
-    return fn(obj, viewer, **ctx)
+    produced = fn(obj, viewer, **ctx)
+    if isinstance(produced, RenderNode):
+        node = produced
+    elif isinstance(produced, tuple) and len(produced) == 2 and isinstance(produced[1], dict):
+        node = text_node(
+            produced[0],
+            kind=kind,
+            msg_type=str(produced[1].get("type") or kind),
+        )
+    else:
+        node = text_node(str(produced or ""), kind=kind, msg_type=kind)
+    for _key, transform in transforms():
+        node = transform(node, viewer, dict(ctx))
+        if not isinstance(node, RenderNode):
+            raise TypeError("render transforms must return RenderNode")
+    return node

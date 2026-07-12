@@ -23,6 +23,13 @@ Three-phase pattern for every tick that mutates scalar attributes on many object
         there is no in-process L1 that could overwrite the DB write).
         Must run on the reactor.
 
+        Writes are compare-and-set: Phase 1 records each object's default-
+        category values as a baseline, and Phase 3 only writes a key whose
+        stored value still equals that baseline. A combat hit or player action
+        that changed the value between gather and apply is detected and the
+        stale heartbeat result is skipped (counted in ``ctx.conflicts``) rather
+        than blindly overwriting newer state.
+
 Why not bypass write-behind with direct SQL for cached objects?
     The maintenance tick flushes the *entire* db_attrs document from L1.  A
     partial jsonb_set(...) write directly to the DB would be overwritten by the
@@ -43,6 +50,7 @@ from typing import Any
 from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
 
 _NULL_CAT = "~"  # db_attrs key for the default (category=None) section
+_MISSING = object()  # sentinel: attribute key absent from a section
 
 
 def _assert_io_thread(where: str) -> None:
@@ -80,6 +88,14 @@ class BulkTickContext:
         self._uncached_ids: set[int] = set()
         # Plain Python dicts — safe to hand to a worker thread (no game objects).
         self.rows: list[dict[str, Any]] = []
+        # id → {attr_key: stored value at gather time} — the compare-and-set
+        # baseline. apply() only writes a key whose current stored value still
+        # equals this, so a combat/player write landing between gather and
+        # apply is detected and skipped rather than blindly overwritten.
+        self._baseline: dict[int, dict[str, Any]] = {}
+        # Count of (object, key) writes skipped because the source changed
+        # under us since gather. Readable by the caller after apply().
+        self.conflicts: int = 0
 
     # ------------------------------------------------------------------
     # Phase 1
@@ -132,6 +148,10 @@ class BulkTickContext:
                 continue
 
             self._backends[obj_id] = backend
+            # CAS baseline: a shallow copy of the default-category data dict as
+            # it stands now. Values here are scalars replaced by reference on
+            # write, so a concurrent mutation shows up as an inequality.
+            self._baseline[obj_id] = dict(backend._l1.get(_NULL_CAT, {}).get("_d", {}))
             self.rows.append(snapshot_fn(obj_id, backend._l1))
 
         # Phase 1b — SQL read for objects not in idmapper
@@ -149,6 +169,7 @@ class BulkTickContext:
         ):
             attrs = attrs if isinstance(attrs, dict) else {}
             self._uncached_ids.add(obj_id)
+            self._baseline[obj_id] = dict(attrs.get(_NULL_CAT, {}).get("_d", {}))
             self.rows.append(snapshot_fn(obj_id, attrs))
 
     # ------------------------------------------------------------------
@@ -194,11 +215,18 @@ class BulkTickContext:
                         pass
 
             if backend is not None:
-                # cached path: write to L1
+                # cached path: write to L1 under compare-and-set
                 section = backend._l1.setdefault(_NULL_CAT, {}).setdefault("_d", {})
+                baseline = self._baseline.get(obj_id, {})
                 dirty = False
                 for key, val in row.items():
                     if key == "id":
+                        continue
+                    # CAS: only write if the stored value is still what we
+                    # gathered. A mismatch means combat/player action changed
+                    # it since gather — skip so the newer state is not erased.
+                    if section.get(key, _MISSING) != baseline.get(key, _MISSING):
+                        self.conflicts += 1
                         continue
                     section[key] = val
                     dirty = True
@@ -239,8 +267,21 @@ class BulkTickContext:
             if not updates:
                 continue
             doc = dict(attrs) if isinstance(attrs, dict) else {}
-            doc.setdefault(_NULL_CAT, {}).setdefault("_d", {}).update(updates)
-            docs[obj_id] = doc
+            baseline = self._baseline.get(obj_id, {})
+            current = doc.get(_NULL_CAT, {}).get("_d", {})
+            section = doc.setdefault(_NULL_CAT, {}).setdefault("_d", {})
+            applied = False
+            for key, val in updates.items():
+                # CAS against the freshly re-read DB value: a write that landed
+                # since gather (its stored value differs from our baseline) is
+                # left untouched rather than clobbered by this stale result.
+                if current.get(key, _MISSING) != baseline.get(key, _MISSING):
+                    self.conflicts += 1
+                    continue
+                section[key] = val
+                applied = True
+            if applied:
+                docs[obj_id] = doc
 
         if docs:
             field = ObjectDB._meta.get_field("db_attrs")

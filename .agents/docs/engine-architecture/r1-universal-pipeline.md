@@ -1,7 +1,7 @@
 # R1 completion: the universal render/deliver pipeline
 
-Status: **design; the keystone.** The seams (emote / recording / photo) proved the
-model. This finishes it: **every** viewer-facing output path becomes sugar over
+Status: **shipped through R1D.** The seams (emote / recording / photo) proved the
+model. Every viewer-facing output path can now become sugar over
 `render(obj, viewer) -> RenderNode -> deliver(node, viewer)`. It replaces the
 inherited string-append delivery wholesale, an engine change that benefits the game
 as a whole (robust per-viewer naming, perception, psychosis, recordings, photos, any
@@ -62,6 +62,20 @@ Legacy string callers get a flattened string; structured consumers (shell, store
 get the node. No call site is forced to change; string-building overrides keep
 working until their surface is migrated.
 
+## Shipped R1A-R1D contract
+
+- `RenderNode` is immutable and versioned as `render.v1`, with bounded metadata,
+  semantic blocks, correlation/node IDs, and separate trusted storage payloads.
+- Rich-client references use expiring viewer-scoped handles. Raw database IDs are
+  rejected from narrative and scene-patch wire payloads.
+- `msg()` and `msg_contents()` normalize through the node core for capable
+  sessions; text-only sessions retain byte-parity output. Literal emotes and room
+  looks no longer bypass structured delivery.
+- Every capable session receives nodes. Azaban normalizes remaining text to a text
+  node, and the shell renders blocks and handles natively.
+- A bounded semantic timeline plus read-only sinks provides replay, accessibility,
+  recording, and camera integration seams.
+
 ## Strangler order (each surface parity-gated, then legacy retired)
 
 Reuse the discipline that worked for emotes: build the node producer, gate on a
@@ -78,8 +92,9 @@ paths is gated on prod soak.
 - **Additive + parity-gated.** No surface flips until its node render is
   byte-identical to legacy for the baseline viewer; modifier-active viewers
   (psychosis/perception) are span-authoritative.
-- **Identity ≠ display.** Refs carry real ids to the boundary; passes are cosmetic;
-  mechanics never see distorted output.
+- **Identity is not display.** Trusted invariant spans may retain real IDs inside
+  the server; delivery issues opaque viewer handles. Mechanics never infer identity
+  from distorted output and clients never receive database IDs.
 - **No big bang.** One surface at a time; if a slice needs touching N unrelated
   overrides, it is the wrong slice.
 - **`EVENNIA_REF`** must ship the seam symbols to prod; guarded imports keep it

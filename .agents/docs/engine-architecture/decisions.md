@@ -88,22 +88,22 @@ re-evaluating the multi-puppet question (I2; see [committed.md](committed.md)).
 
 **Decision:** emote output goes through a structured `EmotePlan -> deliver() ->
 EmoteResult` path with pluggable linguistics filters (`evennia/narrative/`). This
-is a narrow, shipped instance of the P2 "render before deliver" principle and the
-first seam of the eventual R1 pipeline.
+is the first shipped instance of the "render before deliver" principle.
+
+## Universal render/deliver pipeline (R1)
+
+**Decision:** immutable `render.v1` nodes are universal output; `msg` is sugar,
+telnet flattens, and Azaban/sinks retain semantics.
 
 ## Typed settings (S1) — dropped
 
-Considered and **dropped** (2026-05-30): a typed hierarchy over ~290 settings
-/ ~1000 read sites was large churn for modest gain (most are server config
-where scoping is meaningless; `OptionHandler` covers per-account
-preferences). If a need surfaces, prefer a narrow per-setting override.
+**Dropped** (2026-05-30): typing ~290 settings / ~1000 reads was high churn; prefer narrow overrides.
 
-## Alpha-hardening pass
+## Capability authorization (R3A-R3E)
 
-**Decision:** before promoting pre-alpha to alpha, run a read-only
-whole-engine audit and burn down the survivors (dead code, shims, stale
-migrations, `except: pass` sites) as one-prompt-per-task. Tracked in the
-[alpha-promotion prompts](../../prompts/README.md).
+**Decision:** namespaced capabilities plus positive scoped grants replace tiers and
+creator ownership. Structured policies, split caches, and a finite lock compiler/
+freeze migration ship through R3E; see [r3-authorization.md](r3-authorization.md).
 
 ## Engine/game boundary migration — complete
 

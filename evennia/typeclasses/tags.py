@@ -950,6 +950,48 @@ class PermissionHandler(TagHandler):
 
     _tagtype = "permission"
 
+    def _invalidate_grants(self):
+        """Invalidate the transitional permission-to-capability bridge."""
+
+        try:
+            from evennia.authorization.storage import (
+                bump_principal_generation,
+                principal_refs,
+            )
+
+            for ref in principal_refs(self.obj):
+                bump_principal_generation(ref)
+        except Exception:
+            pass
+
+    def add(self, key=None, category=None, data=None):
+        """Add permission tags and invalidate derived grant snapshots."""
+
+        result = super().add(key=key, category=category, data=data)
+        self._invalidate_grants()
+        return result
+
+    def remove(self, key=None, category=None):
+        """Remove permission tags and invalidate derived grant snapshots."""
+
+        result = super().remove(key=key, category=category)
+        self._invalidate_grants()
+        return result
+
+    def clear(self, category=None):
+        """Clear permission tags and invalidate derived grant snapshots."""
+
+        result = super().clear(category=category)
+        self._invalidate_grants()
+        return result
+
+    def batch_add(self, *args):
+        """Batch-add permission tags and invalidate once after completion."""
+
+        result = super().batch_add(*args)
+        self._invalidate_grants()
+        return result
+
     def check(self, *permissions, require_all=False):
         """
         Straight-up check the provided permission against this handler. The check will pass if

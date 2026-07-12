@@ -87,7 +87,7 @@ class CmdLook(COMMAND_DEFAULT_CLASS):
             target = caller.search(self.args)
             if not target:
                 return
-        desc = caller.at_look(target)
+        desc = caller.at_look_node(target)
         # add the type=look to the outputfunc to make it
         # easy to separate this output in client.
         self.msg(text=(desc, {"type": "look"}), options=None)

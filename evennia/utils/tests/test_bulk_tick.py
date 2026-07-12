@@ -2,6 +2,8 @@
 Tests for evennia.utils.bulk_tick.
 """
 
+from unittest.mock import patch
+
 from evennia.objects.models import ObjectDB
 from evennia.utils.bulk_tick import _NULL_CAT, BulkTickContext
 from evennia.utils.test_resources import BaseEvenniaTest
@@ -45,3 +47,38 @@ class TestApplyUncached(BaseEvenniaTest):
         attrs = ObjectDB.objects.filter(pk=obj_id).values_list("db_attrs", flat=True).first()
         self.assertEqual(attrs[_NULL_CAT]["_d"]["bulk_tick_test_key"], 7)
         self.assertIn("existing_key", attrs[_NULL_CAT]["_d"])
+
+
+@patch("evennia.utils.bulk_tick._assert_io_thread", lambda where: None)
+class TestCompareAndSet(BaseEvenniaTest):
+    """apply() must not overwrite a value changed since gather (CAS)."""
+
+    def _snapshot(self, obj_id, l1):
+        return {"id": obj_id, "hp": l1.get(_NULL_CAT, {}).get("_d", {}).get("hp")}
+
+    def _section(self, obj):
+        return obj.attributes.backend._l1.setdefault(_NULL_CAT, {}).setdefault("_d", {})
+
+    def test_unchanged_value_is_written(self):
+        self.obj1.attributes.add("hp", 100)
+        ctx = BulkTickContext()
+        ctx.gather_objectdb([self.obj1.id], self._snapshot)
+        # no concurrent write; heartbeat computes hp -> 110
+        patched = ctx.apply([{"id": self.obj1.id, "hp": 110}])
+        self.assertEqual(patched, 1)
+        self.assertEqual(ctx.conflicts, 0)
+        self.assertEqual(self._section(self.obj1)["hp"], 110)
+
+    def test_concurrent_write_is_not_clobbered(self):
+        self.obj1.attributes.add("hp", 100)
+        ctx = BulkTickContext()
+        ctx.gather_objectdb([self.obj1.id], self._snapshot)
+
+        # a combat hit lands between gather and apply, dropping hp to 50
+        self._section(self.obj1)["hp"] = 50
+
+        # the stale heartbeat result (based on hp=100 -> 110) must be skipped
+        patched = ctx.apply([{"id": self.obj1.id, "hp": 110}])
+        self.assertEqual(patched, 0)
+        self.assertEqual(ctx.conflicts, 1)
+        self.assertEqual(self._section(self.obj1)["hp"], 50)

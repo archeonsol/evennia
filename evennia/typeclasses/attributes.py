@@ -45,35 +45,116 @@ def count_pending_dirty():
     Count attribute rows not yet flushed to the database.
 
     Returns:
-        dict: ``backends``, ``pending`` (sum).
+        dict: ``backends``, ``pending`` (sum), ``oldest_age`` (seconds the
+        oldest still-dirty backend has been waiting).
     """
     backends = 0
+    oldest_age = 0.0
     for backend in list(_DIRTY_BACKENDS):
         backends += backend.pending_count()
-    return {"backends": backends, "pending": backends}
+        age_fn = getattr(backend, "dirty_age", None)
+        if age_fn is not None:
+            oldest_age = max(oldest_age, age_fn())
+    return {"backends": backends, "pending": backends, "oldest_age": oldest_age}
+
+
+def has_undurable_writes():
+    """
+    Health gate for graceful reload/shutdown.
+
+    Returns:
+        bool: True if any backend holds a write that has failed to persist at
+        least once and is not yet durable (still in the volatile L1 dict). A
+        graceful-reload path can consult this and refuse to proceed until a
+        flush drains or spools the backlog, so a reboot cannot silently drop
+        the write.
+    """
+    for backend in list(_DIRTY_BACKENDS):
+        if getattr(backend, "_flush_failures", 0) > 0:
+            return True
+    return False
 
 
 def flush_all_dirty():
     """
-    Flush all pending attribute writes to DB. Called from tick handler.
+    Flush all pending attribute writes to DB. Called from the tick handler,
+    from read-your-writes query barriers, and once at shutdown.
+
+    This is a full drain (every dirty backend), which the query barriers rely
+    on for correctness. The per-tick latency cliff of "one ORM save per dirty
+    object" is removed by persisting each concrete model's dirty documents in
+    a single ``bulk_update``; a batched write that raises falls back to
+    per-backend flush so each object still gets retry-counting and the
+    durable-spool fallback.
 
     Returns:
-        dict: ``backends``, ``total``, ``pending`` (pre-flush backlog).
+        dict: ``backends``, ``total``, ``pending`` (pre-flush backlog),
+        ``spooled`` (diverted to the durable spool this run), ``failed``
+        (neither persisted nor spooled), ``oldest_age``.
     """
     import time
+    from collections import defaultdict
+
+    from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
 
     pending_stats = count_pending_dirty()
     t0 = time.perf_counter()
-    backends = 0
-    for backend in list(_DIRTY_BACKENDS):
-        dirty_n = backend.pending_count()
-        backend.flush_dirty()
-        backends += dirty_n
+
+    dirty = [b for b in list(_DIRTY_BACKENDS) if b.pending_count()]
+    # capture pre-flush row counts so "total" stays a row count (a JSONB
+    # backend is one document == 1; a test/legacy backend may report more)
+    pre = {b: b.pending_count() for b in dirty}
+    flushed = spooled = failed = 0
+
+    def _tally(backend, result):
+        nonlocal flushed, spooled, failed
+        n = pre.get(backend, 1)
+        # a legacy backend whose flush_dirty() returns None is assumed durable
+        if result is None or getattr(result, "ok", False):
+            flushed += n
+        elif getattr(result, "spooled", False):
+            spooled += n
+        else:
+            failed += n
+
+    # Group JSONB backends by concrete model for one bulk_update each.
+    jsonb_by_model = defaultdict(list)
+    others = []
+    for backend in dirty:
+        if isinstance(backend, JsonbAttributeBackend):
+            jsonb_by_model[backend.obj._meta.concrete_model].append(backend)
+        else:
+            others.append(backend)
+
+    for model, backends in jsonb_by_model.items():
+        objs = []
+        for backend in backends:
+            backend.obj.db_attrs = backend._l1
+            objs.append(backend.obj)
+        try:
+            if objs:
+                model._base_manager.bulk_update(objs, ["db_attrs"])
+        except Exception:
+            # Batched write failed — fall back to per-object flush so each
+            # gets retry counting and the durable-spool fallback.
+            for backend in backends:
+                _tally(backend, backend.flush_dirty())
+            continue
+        for backend in backends:
+            flushed += pre.get(backend, 1)
+            backend._mark_clean()
+
+    for backend in others:
+        _tally(backend, backend.flush_dirty())
+
     duration = time.perf_counter() - t0
     stats = {
-        "backends": backends,
-        "total": backends,
+        "backends": flushed + spooled + failed,
+        "total": flushed + spooled,
         "pending": pending_stats["pending"],
+        "spooled": spooled,
+        "failed": failed,
+        "oldest_age": pending_stats["oldest_age"],
     }
     from evennia.server.prometheus_metrics import record_attribute_flush
 
@@ -153,7 +234,17 @@ class IAttribute:
             result (bool): If the lock was passed or not.
 
         """
-        result = self.locks.check(accessing_obj, access_type=access_type, default=default)
+        from evennia.authorization.service import access_check
+
+        result, _ = access_check(
+            self,
+            accessing_obj,
+            access_type,
+            default=default,
+            legacy_evaluator=lambda: self.locks.check(
+                accessing_obj, access_type=access_type, default=default
+            ),
+        )
         return result
 
     #

@@ -148,6 +148,14 @@ WEBSOCKET_SUBPROTOCOLS = [
     "terminal.mudstandards.org",
     "v1.evennia.com",
 ]
+# Azaban shell (azaban.v1) public endpoint allowlist. The Azaban decoder routes
+# a client 'req'/'oob' frame's action name into the inputfunc namespace; without
+# an allowlist any global inputfunc name is reachable. Set this to an iterable of
+# permitted action names ("action" or namespace-qualified "ns:action") to enforce
+# deny-by-default: only listed actions are routed, everything else is dropped.
+# When None (default) routing is permissive (a one-time log warns), except that a
+# small always-denied set of introspection/admin inputfuncs is blocked regardless.
+AZABAN_PUBLIC_ACTIONS = None
 # This determine's whether Evennia's custom admin page is used, or if the
 # standard Django admin is used.
 EVENNIA_ADMIN = True
@@ -637,6 +645,32 @@ CMDSET_MERGE_CACHE_MAXSIZE = 1000
 # permissions/locks change without a cmdset update. Command classes that override
 # .access() are auto-skipped (see cmd_access_cache._command_uses_base_access).
 COMMAND_ACCESS_CACHE_ENABLED = True
+# Capability authorization rollout. Resource kinds remain on the legacy oracle
+# until explicitly promoted; R3F removes that oracle in a later release.
+AUTHORIZATION_RESOURCE_POLICIES = {
+    "object": "legacy",
+    "account": "legacy",
+    "command": "legacy",
+    "channel": "legacy",
+    "help": "legacy",
+    "script": "legacy",
+}
+# Once a resource kind is frozen, LockHandler writes compile into structured
+# policy rows rather than creating new lockstrings. Keep empty until its offline
+# differential corpus reaches parity.
+AUTHORIZATION_FROZEN_RESOURCE_KINDS = ()
+# Game/plugin capability registration modules. Import errors and unresolved
+# references fail startup rather than silently removing authority.
+AUTHORIZATION_CAPABILITY_MODULES = ()
+AUTHORIZATION_POLICY_MODULES = ()
+# Optional sampled online diagnostic. Offline differential is the primary gate;
+# this remains off by default to avoid a hot-path double evaluation.
+AUTHORIZATION_DIAGNOSTIC_SAMPLE_RATE = 0.0
+# Cross-process grant/policy mutations publish tiny generation counters through
+# the shared Django cache. Active processes poll each touched key at most once
+# per interval; production should use a shared Redis cache backend.
+AUTHORIZATION_SHARED_INVALIDATION = True
+AUTHORIZATION_GENERATION_POLL_SECONDS = 2.0
 # Log attribute flush batch sizes every N fires of the flush-attributes
 # system (0 = off). Uses attribute_metrics.maybe_log_flush_metrics.
 ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60
@@ -648,6 +682,19 @@ ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60
 ATTRIBUTE_FLUSH_INTERVAL = 60
 # Log a warning when flush_all_dirty() reports pending dirty rows above this (0 = off).
 ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD = 0
+# Graceful-shutdown tuning. On shutdown the system-scheduler driver is quiesced:
+# it stops scheduling and drains in-flight system fires for up to
+# SERVER_SHUTDOWN_DRAIN_TIMEOUT seconds (overrunning fires are cancelled) before
+# the final attribute flush. SERVER_SHUTDOWN_EMERGENCY_TIMEOUT is the hard
+# fallback that stops the reactor if the graceful path wedges; keep it
+# comfortably larger than the drain window. A second interrupt stops immediately.
+SERVER_SHUTDOWN_DRAIN_TIMEOUT = 5.0
+SERVER_SHUTDOWN_EMERGENCY_TIMEOUT = 30.0
+# Max number of due systems the system scheduler may START in a single 1 Hz tick.
+# None = admit all (default). When set, due systems over the budget are left due
+# (not dropped) and admitted on a later tick, ranked by workload class then how
+# overdue they are, so latency-sensitive work wins and nothing starves.
+SYSTEM_TICK_MAX_ADMISSIONS = None
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).
 ENGINE_PROMETHEUS_METRICS_ENABLED = True
 # --- Tier 1 performance (RP / command path) ---

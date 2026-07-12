@@ -31,9 +31,9 @@ legacy path.
    - **Photo capture + look-at-character** (done): capture emits `<<CHAR:id>>`
      placeholders straight from the pipeline, so frozen photo detail re-resolves per
      viewer (retroactive recog + psychosis); the fragile reverse name-match is retired.
-   - **Pending:** knowledge-layered desc (needs a knowledge model) and a structured
-     `room_view` payload over the narrative OOB (gated on the shell consumer, so it
-     is not speculative).
+   - **Structured room view (done):** the same `RoomView` yields `render.v1`
+     sections and perception-safe scene patches. Knowledge-layered descriptions
+     remain game content rather than an R1 engine dependency.
 3. **`get_display_name`** stays the identity **base namer**; it must *not* run
    psychosis/perception (identity ≠ display; mechanics use the real name).
    "Migration" means viewer-facing surfaces render through the resolver, not that
@@ -42,10 +42,10 @@ legacy path.
    broadcast (live camera feed) done; network-handle (comms/SM) keeps string alias
    misattribution for now (span version deferred); OOC account names are out of R1
    scope.
-5. **`msg` itself** is NOT thin-able: `Character.msg` carries multi-puppet relay,
-   traceback capture, drug color-shift, shared-eye, *then* the psychosis filter.
-   Wholesale rerouting is the forbidden big-bang; the endgame is retiring its
-   msg-level string distortions, gated on prod soak.
+5. **`msg` facade (done):** object/account `msg()` normalizes text through the
+   universal node core only for capable sessions; recursive delivery is marked so
+   hooks fire once. Game relay/perception hooks retain their established order and
+   telnet continues through the parity text path.
 
 ## Retirement (the payoff), gated on prod soak
 

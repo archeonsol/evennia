@@ -389,7 +389,25 @@ class Command(metaclass=CommandMeta):
             session (Session, optional): The session to pass to lock functions.
 
         """
-        return self.lockhandler.check(srcobj, access_type, default=default, session=session)
+        from evennia.authorization.engine import AuthorizationContext
+        from evennia.authorization.service import access_check
+
+        result, decision = access_check(
+            self,
+            srcobj,
+            access_type,
+            default=default,
+            context=AuthorizationContext(
+                principal=srcobj,
+                resource=self,
+                session=session,
+            ),
+            legacy_evaluator=lambda: self.lockhandler.check(
+                srcobj, access_type, default=default, session=session
+            ),
+        )
+        self._last_authorization_decision = decision
+        return result
 
     def msg(self, text=None, to_obj=None, from_obj=None, session=None, **kwargs):
         """

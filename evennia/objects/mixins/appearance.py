@@ -508,6 +508,29 @@ class AppearanceMixin:
             **kwargs,
         )
 
+    def return_appearance_node(self, looker, **kwargs):
+        """Return this appearance as a universal structured node.
+
+        Existing ``return_appearance`` overrides remain authoritative during
+        the strangler migration. Games may override this method to provide
+        richer semantic blocks without changing text-client output.
+        """
+        from evennia.narrative.rendernode import Paragraph, RenderNode, Section
+
+        appearance = self.return_appearance(looker, **kwargs) or ""
+        return RenderNode(
+            kind="look",
+            msg_type="look",
+            body=appearance,
+            blocks=(
+                Section(
+                    key="appearance",
+                    children=(Paragraph(appearance),),
+                ),
+            ),
+            metadata={"surface": "return_appearance"},
+        )
+
     @hook(
         event="look",
         phase="composite",
@@ -558,6 +581,33 @@ class AppearanceMixin:
         target.at_desc(looker=self, **kwargs)
 
         return description
+
+    def at_look_node(self, target, **kwargs):
+        """Perform the authoritative look lifecycle and return a RenderNode."""
+        from evennia.narrative.rendernode import RenderNode, text_node
+
+        if not target.access(self, "view"):
+            try:
+                denied = _("Could not view '{target_name}'.").format(
+                    target_name=target.get_display_name(self, **kwargs)
+                )
+            except AttributeError:
+                denied = _("Could not view '{target_name}'.").format(target_name=target.key)
+            return text_node(denied, kind="look", msg_type="look")
+        if getattr(settings, "LOOK_ATTR_PREFETCH_ENABLED", True):
+            try:
+                if hasattr(target, "attributes"):
+                    target.attributes.get_all()
+            except Exception:
+                logger.log_trace("at_look_node attribute prefetch")
+        if hasattr(target, "return_appearance_node"):
+            result = target.return_appearance_node(self, **kwargs)
+        else:
+            result = target.return_appearance(self, **kwargs)
+        target.at_desc(looker=self, **kwargs)
+        if isinstance(result, RenderNode):
+            return result
+        return text_node(result or "", kind="look", msg_type="look")
 
     @hook(
         event="look",

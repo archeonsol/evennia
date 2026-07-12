@@ -314,6 +314,74 @@ class TestRedisTransportQueueBound(SimpleTestCase):
         self.assertEqual(mock_log_err.call_count, 1)
 
 
+@override_settings(**_BUS_SETTINGS)
+@patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
+class TestRedisTransportDurability(TestCase):
+    """Consumer-group durability: no ``$`` skip, un-acked reclaim, writer retry,
+    control vs data drop policy."""
+
+    def setUp(self):
+        self.fake = fakeredis.FakeRedis(decode_responses=False)
+        self.p = patch("redis.Redis.from_url", return_value=self.fake)
+        self.p.start()
+        self.addCleanup(self.p.stop)
+        self.stream = "evennia:testbus:s2p"
+
+    def _transport(self, sink):
+        t = _RedisTransport(self.stream, sink)
+        t._client = self.fake
+        return t
+
+    def test_frames_present_before_reader_are_not_skipped(self):
+        # Frames the peer wrote while this side was "down" must be delivered,
+        # not skipped the way a ``$`` cursor did.
+        got = []
+        t = self._transport(lambda cmd, data: got.append(data))
+        self.fake.xadd(self.stream, {redis_bus._CMD: b"MsgServer2Portal", redis_bus._DATA: b"a"})
+        self.fake.xadd(self.stream, {redis_bus._CMD: b"MsgServer2Portal", redis_bus._DATA: b"b"})
+        t._ensure_group()
+        resp = self.fake.xreadgroup(t._group, t._consumer, {self.stream: ">"}, count=10)
+        for _s, entries in resp:
+            for eid, fields in entries:
+                t._dispatch(eid, fields)
+        self.assertEqual(got, [b"a", b"b"])
+
+    def test_unacked_frames_reclaimed_on_restart(self):
+        # Delivered-but-not-acked frames (a crash between dispatch and ack) are
+        # redelivered on the next start via the pending reclaim.
+        self.fake.xadd(self.stream, {redis_bus._CMD: b"MsgServer2Portal", redis_bus._DATA: b"x"})
+        t1 = self._transport(lambda *a: None)
+        t1._ensure_group()
+        # deliver without acking -> stays pending for this consumer
+        self.fake.xreadgroup(t1._group, t1._consumer, {self.stream: ">"}, count=10)
+
+        got = []
+        t2 = self._transport(lambda cmd, data: got.append(data))
+        t2._drain_pending()
+        self.assertEqual(got, [b"x"])
+
+    def test_xadd_retries_then_succeeds(self):
+        client = MagicMock()
+        client.xadd.side_effect = [Exception("down"), Exception("down"), None]
+        t = _RedisTransport(self.stream, lambda *a: None)
+        t._client = client
+        self.assertTrue(t._xadd_with_retry(self.stream, b"MsgX", b"d", attempts=3))
+        self.assertEqual(client.xadd.call_count, 3)
+
+    def test_xadd_gives_up_reports_false(self):
+        client = MagicMock()
+        client.xadd.side_effect = Exception("down")
+        t = _RedisTransport(self.stream, lambda *a: None)
+        t._client = client
+        self.assertFalse(t._xadd_with_retry(self.stream, b"MsgX", b"d", attempts=2))
+
+    def test_control_frame_classification(self):
+        self.assertTrue(_RedisTransport._is_control(b"AdminPortal2Server"))
+        self.assertTrue(_RedisTransport._is_control(b"AdminServer2Portal"))
+        self.assertFalse(_RedisTransport._is_control(b"MsgPortal2Server"))
+        self.assertFalse(_RedisTransport._is_control(b""))
+
+
 class PidAliveTest(SimpleTestCase):
     """`_pid_alive` reports liveness for real pids without a running loop or DB."""
 

@@ -138,7 +138,18 @@ class HelpEntry(SharedMemoryModel):
             default (bool): What to return if no lock of `access_type` was found.
 
         """
-        return self.locks.check(accessing_obj, access_type=access_type, default=default)
+        from evennia.authorization.service import access_check
+
+        result, _ = access_check(
+            self,
+            accessing_obj,
+            access_type,
+            default=default,
+            legacy_evaluator=lambda: self.locks.check(
+                accessing_obj, access_type=access_type, default=default
+            ),
+        )
+        return result
 
     @property
     def search_index_entry(self):

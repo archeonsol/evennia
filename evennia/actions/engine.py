@@ -17,6 +17,12 @@ Phase semantics (read off the returned :class:`RuleResult`'s ``kind``):
 * **check** — pure predicate phase. Short-circuits on the first blocking result
   and sends its message to the actor. ``CLAIM``/``REDIRECT`` here are a
   phase-control contract violation: logged and ignored. **Strictly synchronous.**
+  A check body must be a *pure predicate*: it inspects state and returns a
+  ``RuleResult``; it must not message, roll RNG, cache, or write. Because it is
+  pure, it (uniquely among the phases) also evaluates under ``dry_run`` so
+  :meth:`RuleEngine.explain` can report whether the action would be blocked. The
+  engine cannot fully prove purity, but it enforces the message rule
+  best-effort under ``dry_run`` (see :meth:`RuleEngine._eval_sync`).
   *Skipped entirely* when the action carries ``_unresolved`` (a required target
   failed to resolve): the miss was already reported, and no gate can meaningfully
   evaluate against a ``None`` target — so gate rules never see one.
@@ -180,9 +186,15 @@ class RuleEngine:
             action (Action): The typed action to dispatch.
             actor: The acting object (carries ``character``/``effective``/``msg``).
             context (ActionContext): The ordered provider list.
-            dry_run (bool): If True, ``requires`` predicates are still evaluated
-                (recorded as SKIP/PASS) but no rule body fires — used by
-                :meth:`explain`. No redirect, block, or suspension occurs.
+            dry_run (bool): If True, no ``before``/``carry_out``/``report`` rule
+                body fires and no redirect, block, or suspension occurs — used
+                by :meth:`explain`. The ``check`` phase is the deliberate
+                exception: its predicates DO evaluate (that is how ``explain``
+                answers "would this be blocked?"), which is safe precisely
+                because ``check`` bodies are contractually pure predicates. The
+                engine enforces this best-effort by neutralizing message
+                emission from a check body during a dry run and logging any
+                attempt as a contract violation.
             record_phases (bool): B3 lazy tracing. When False the engine skips
                 building per-rule :class:`PhaseTrace` records (it still tracks a
                 cheap ``fired`` counter, so ``outcome`` stays correct). The
@@ -352,10 +364,61 @@ class RuleEngine:
         if dry_run and phase != "check":
             self._record(trace, phase, provider, spec, PASS)
             return PASS
-        raw = getattr(provider, spec.rule_name)(action, actor)
+        if dry_run and phase == "check":
+            # check predicates evaluate under explain (they are pure). Guard the
+            # one side effect the engine can cheaply intercept — message
+            # emission — so a misbehaving check cannot leak output during a
+            # read-only explain, and log the violation as a lint signal.
+            raw = self._eval_check_message_safe(provider, spec, actor, action)
+        else:
+            raw = getattr(provider, spec.rule_name)(action, actor)
         result = self._coerce_sync(raw, phase)
         self._record(trace, phase, provider, spec, result)
         return result
+
+    def _eval_check_message_safe(self, provider, spec, actor, action):
+        """
+        Evaluate a check body during a dry run with ``actor.msg`` neutralized.
+
+        Keeps the *same* actor object (identity comparisons in the predicate
+        stay valid); only swaps its ``msg`` for a recorder for the duration of
+        the call. A check that tries to message is a purity-contract violation:
+        the message is suppressed and logged. Best-effort — if ``msg`` cannot be
+        overridden on this actor, the body runs unguarded (the pre-existing
+        behavior).
+        """
+        rule = getattr(provider, spec.rule_name)
+        original = getattr(actor, "msg", None)
+        if original is None:
+            return rule(action, actor)
+        leaked = []
+
+        def _recorder(*args, **kwargs):
+            leaked.append((args, kwargs))
+
+        try:
+            actor.msg = _recorder
+        except Exception:
+            # cannot shadow msg on this actor; fall back to unguarded eval
+            return rule(action, actor)
+        try:
+            return rule(action, actor)
+        finally:
+            try:
+                actor.msg = original
+            except Exception:
+                try:
+                    del actor.msg
+                except Exception:
+                    pass
+            if leaked:
+                from evennia.utils import logger
+
+                logger.log_warn(
+                    "action check %s.%s emitted a message during explain (dry_run); "
+                    "check bodies must be pure predicates — message suppressed."
+                    % (type(provider).__name__, spec.rule_name)
+                )
 
     @staticmethod
     def _coerce_sync(raw, phase) -> RuleResult:

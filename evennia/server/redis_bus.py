@@ -10,13 +10,18 @@ The Portal AMP TCP listener on ``AMP_PORT`` remains for launcher control only.
 Threading: writer/reader threads hand off via ``clock.call_from_thread`` so game
 state is only touched on the reactor thread.
 
-Reload: readers start at ``$`` (new frames only); PSYNC re-establishes session
-state. Durable replay (consumer groups) is a later step.
+Reload: readers use Redis Streams **consumer groups**, so the read cursor lives
+server-side and survives a Server reload. Frames the Portal wrote while the
+Server was down are delivered on restart (no ``$`` skip), and a consumer's
+un-acked (pending) frames from a crash are reclaimed on the next start before new
+frames are read. The writer retries a failed ``XADD`` and never silently drops a
+control frame. PSYNC still re-establishes session metadata on top of this.
 """
 
 import os
 import queue
 import threading
+import time
 
 import psutil
 from django.conf import settings
@@ -63,6 +68,26 @@ class _RedisTransport:
         self._writer = None
         self._reader = None
         self._stop = threading.Event()
+        # Consumer-group identity for the read stream. The group's last-delivered
+        # cursor lives on the redis server, so it survives a Server reload — that
+        # is what stops the old ``$`` reader from skipping frames written during
+        # downtime.
+        self._group = f"{read_stream}:grp"
+        self._consumer = f"{_worker_id()}-{os.getpid()}"
+
+    def _ensure_group(self):
+        """Create the consumer group if absent. New group starts at ``0`` so a
+        first-ever boot reads from the start of the retained stream rather than
+        skipping; an existing group keeps its durable cursor (BUSYGROUP)."""
+        import redis
+
+        try:
+            self._client.xgroup_create(self._read_stream, self._group, id="0", mkstream=True)
+        except redis.exceptions.ResponseError as err:
+            if "BUSYGROUP" not in str(err):
+                logger.log_trace("redis bus: xgroup_create failed")
+        except Exception:
+            logger.log_trace("redis bus: xgroup_create error")
 
     def start(self):
         if self._reader is not None and self._reader.is_alive():
@@ -83,6 +108,7 @@ class _RedisTransport:
             )
             clock.stop_loop()
             return
+        self._ensure_group()
         self._stop.clear()
         self._writer = threading.Thread(
             target=self._writer_loop, name="redis-bus-writer", daemon=True
@@ -129,12 +155,19 @@ class _RedisTransport:
                     % _MAX_QUEUE
                 )
 
-    def _writer_loop(self):
-        while not self._stop.is_set():
-            item = self._q.get()
-            if item is None:
-                break
-            stream, cmdkey, data = item
+    @staticmethod
+    def _is_control(cmdkey):
+        """Admin* frames carry control/administration traffic (session sync,
+        reload, shutdown). They must never share the replaceable-output drop
+        policy of ordinary data frames."""
+        return bool(cmdkey) and bytes(cmdkey).startswith(b"Admin")
+
+    def _xadd_with_retry(self, stream, cmdkey, data, attempts=3):
+        """Publish one frame, retrying a transient failure with backoff. True on
+        success, False if it could not be written within ``attempts``."""
+        for i in range(attempts):
+            if self._stop.is_set():
+                return False
             try:
                 self._client.xadd(
                     stream,
@@ -142,30 +175,92 @@ class _RedisTransport:
                     maxlen=10000,
                     approximate=True,
                 )
+                return True
             except Exception:
-                logger.log_trace("redis bus: publish failed")
+                logger.log_trace("redis bus: xadd attempt %d failed" % (i + 1))
+                time.sleep(min(0.5, 0.05 * (2**i)))
+        return False
+
+    def _writer_loop(self):
+        while not self._stop.is_set():
+            item = self._q.get()
+            if item is None:
+                break
+            stream, cmdkey, data = item
+            if self._xadd_with_retry(stream, cmdkey, data):
+                continue
+            # Persistent failure: a control frame is not replaceable output — do
+            # not silently drop it. Re-queue it (best effort) and escalate; a
+            # data frame follows the best-effort contract and is dropped loudly.
+            if self._is_control(cmdkey):
+                try:
+                    self._q.put_nowait((stream, cmdkey, data))
+                    logger.log_err(
+                        "redis bus: CONTROL frame %r could not be published; re-queued "
+                        "for retry (redis unreachable?)." % cmdkey
+                    )
+                except queue.Full:
+                    logger.log_err(
+                        "redis bus: CONTROL frame %r dropped — queue full during a redis "
+                        "outage. Control traffic may be lost." % cmdkey
+                    )
+            else:
+                logger.log_err("redis bus: data frame %r dropped after retries" % cmdkey)
+
+    def _dispatch(self, entry_id, fields):
+        """Hand one stream entry to the reactor and ack it. At-least-once: the
+        durable group cursor + pending reclaim guarantee no frame is skipped;
+        a rare double-delivery after a crash-between-dispatch-and-ack is
+        tolerable for this transport."""
+        cmdkey = fields.get(_CMD, b"")
+        data = fields.get(_DATA, b"")
+        try:
+            clock.call_from_thread(self._on_frame, cmdkey, data)
+        except Exception:
+            logger.log_trace("redis bus: dispatch failed")
+        try:
+            self._client.xack(self._read_stream, self._group, entry_id)
+        except Exception:
+            logger.log_trace("redis bus: xack failed")
+
+    def _drain_pending(self):
+        """Reclaim this consumer's un-acked frames from a prior crash (delivered
+        but never acked), redelivered by reading the group at id ``0``."""
+        try:
+            resp = self._client.xreadgroup(
+                self._group, self._consumer, {self._read_stream: "0"}, count=256
+            )
+        except Exception:
+            logger.log_trace("redis bus: pending reclaim failed")
+            return
+        for _stream, entries in resp or []:
+            for entry_id, fields in entries:
+                self._dispatch(entry_id, fields)
 
     def _reader_loop(self):
-        last_id = b"$"
+        # First redeliver anything this consumer had in-flight before a restart.
+        self._drain_pending()
         while not self._stop.is_set():
             try:
-                resp = self._client.xread({self._read_stream: last_id}, count=64, block=1000)
+                resp = self._client.xreadgroup(
+                    self._group,
+                    self._consumer,
+                    {self._read_stream: ">"},
+                    count=64,
+                    block=1000,
+                )
             except Exception:
                 if self._stop.is_set():
                     break
-                logger.log_trace("redis bus: xread failed")
+                logger.log_trace("redis bus: xreadgroup failed")
+                # a reconnect may have lost the group; re-ensure and retry
+                self._ensure_group()
                 continue
             if not resp:
                 continue
             for _stream, entries in resp:
                 for entry_id, fields in entries:
-                    last_id = entry_id
-                    cmdkey = fields.get(_CMD, b"")
-                    data = fields.get(_DATA, b"")
-                    try:
-                        clock.call_from_thread(self._on_frame, cmdkey, data)
-                    except Exception:
-                        logger.log_trace("redis bus: dispatch failed")
+                    self._dispatch(entry_id, fields)
 
 
 class _RedisBusMixin:

@@ -90,8 +90,30 @@ class MessagingMixin:
             All extra kwargs will be passed on to the protocol.
 
         """
-        # try send hooks
-        if from_obj:
+        # R1 universal facade: callers may pass an immutable RenderNode directly.
+        # The delivery core preserves text parity for legacy/telnet sessions.
+        from evennia.narrative.rendernode import (
+            RenderNode,
+            _supports_nodes,
+            deliver_node,
+            text_node,
+        )
+
+        render_delivery = bool(kwargs.pop("_render_delivery", False))
+
+        if isinstance(text, RenderNode):
+            sessions = make_iter(session) if session else None
+            return deliver_node(
+                text,
+                self,
+                from_obj=from_obj,
+                sessions=sessions,
+                options=options,
+            )
+
+        # try send hooks once. Recursive text/structured sends from deliver_node
+        # carry the private marker above and bypass these hooks.
+        if from_obj and not render_delivery:
             for obj in make_iter(from_obj):
                 try:
                     obj.at_msg_send(text=text, to_obj=self, **kwargs)
@@ -99,11 +121,35 @@ class MessagingMixin:
                     logger.log_trace()
         kwargs["options"] = options
         try:
-            if not self.at_msg_receive(text=text, from_obj=from_obj, **kwargs):
+            if not render_delivery and not self.at_msg_receive(
+                text=text, from_obj=from_obj, **kwargs
+            ):
                 # if at_msg_receive returns false, we abort message to this object
                 return
         except Exception:
             logger.log_trace()
+
+        target_sessions = list(make_iter(session) if session else self.sessions.all())
+        if (
+            text is not None
+            and not render_delivery
+            and any(_supports_nodes(current) for current in target_sessions)
+        ):
+            body = text
+            metadata = {}
+            if isinstance(text, tuple):
+                body = text[0] if text else ""
+                if len(text) > 1 and isinstance(text[1], dict):
+                    metadata = text[1]
+            option_type = options.get("type") if isinstance(options, dict) else None
+            msg_type = str(metadata.get("type") or option_type or "text")
+            return deliver_node(
+                text_node(str(body), msg_type=msg_type),
+                self,
+                from_obj=from_obj,
+                sessions=target_sessions,
+                options=options,
+            )
 
         if text is not None:
             if not (isinstance(text, str) or isinstance(text, tuple)):
@@ -115,9 +161,8 @@ class MessagingMixin:
             kwargs["text"] = text
 
         # relay to session(s)
-        sessions = make_iter(session) if session else self.sessions.all()
-        for session in sessions:
-            session.data_out(**kwargs)
+        for current in target_sessions:
+            current.data_out(**kwargs)
 
     def for_contents(self, func, exclude=None, **kwargs):
         """
@@ -294,4 +339,38 @@ class MessagingMixin:
 
             outmessage = outmessage.format_map(names)
 
-            receiver.msg(text=(outmessage, outkwargs), from_obj=from_obj, **kwargs)
+            from evennia.narrative.handles import handle_for
+            from evennia.narrative.rendernode import EntityRef, RenderNode
+
+            refs = []
+            seen = set()
+            for role, obj in mapping.items():
+                entity_id = getattr(obj, "id", None)
+                if entity_id is None or entity_id in seen:
+                    continue
+                seen.add(entity_id)
+                label = names.get(role) or str(obj)
+                refs.append(
+                    EntityRef(
+                        handle=handle_for(receiver, obj, label),
+                        label=label,
+                        role=str(role),
+                    )
+                )
+            sender = make_iter(from_obj)[0] if from_obj else None
+            sender_name = (
+                sender.get_display_name(looker=receiver)
+                if sender is not None and hasattr(sender, "get_display_name")
+                else ""
+            )
+            node = RenderNode(
+                kind=str(outkwargs.get("type") or "broadcast"),
+                msg_type=str(outkwargs.get("type") or "text"),
+                body=outmessage,
+                from_handle=(
+                    handle_for(receiver, sender, sender_name) if sender is not None else None
+                ),
+                refs=tuple(refs),
+                metadata={"surface": "msg_contents"},
+            )
+            receiver.msg(text=node, from_obj=from_obj, **kwargs)

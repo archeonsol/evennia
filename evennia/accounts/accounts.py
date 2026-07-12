@@ -1608,7 +1608,26 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             any (dict): All other keywords are passed on to the protocol.
 
         """
-        if from_obj:
+        from evennia.narrative.rendernode import (
+            RenderNode,
+            _supports_nodes,
+            deliver_node,
+            text_node,
+        )
+
+        render_delivery = bool(kwargs.pop("_render_delivery", False))
+
+        if isinstance(text, RenderNode):
+            sessions = make_iter(session) if session else None
+            return deliver_node(
+                text,
+                self,
+                from_obj=from_obj,
+                sessions=sessions,
+                options=options,
+            )
+
+        if from_obj and not render_delivery:
             # call hook
             for obj in make_iter(from_obj):
                 try:
@@ -1617,12 +1636,34 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     # this may not be assigned.
                     logger.log_trace()
         try:
-            if not self.at_msg_receive(text=text, **kwargs):
+            if not render_delivery and not self.at_msg_receive(text=text, **kwargs):
                 # abort message to this account
                 return
         except Exception:
             # this may not be assigned.
             pass
+
+        target_sessions = list(make_iter(session) if session else self.sessions.all())
+        if (
+            text is not None
+            and not render_delivery
+            and any(_supports_nodes(current) for current in target_sessions)
+        ):
+            body = text
+            metadata = {}
+            if isinstance(text, tuple):
+                body = text[0] if text else ""
+                if len(text) > 1 and isinstance(text[1], dict):
+                    metadata = text[1]
+            option_type = options.get("type") if isinstance(options, dict) else None
+            msg_type = str(metadata.get("type") or option_type or "text")
+            return deliver_node(
+                text_node(str(body), msg_type=msg_type),
+                self,
+                from_obj=from_obj,
+                sessions=target_sessions,
+                options=options,
+            )
 
         kwargs["options"] = options
 
@@ -1636,9 +1677,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             kwargs["text"] = text
 
         # session relay
-        sessions = make_iter(session) if session else self.sessions.all()
-        for session in sessions:
-            session.data_out(**kwargs)
+        for current in target_sessions:
+            current.data_out(**kwargs)
 
     def execute_cmd(self, raw_string, session=None, **kwargs):
         """
@@ -2325,6 +2365,15 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             auto-puppeting based on `MULTISESSION_MODE`
 
         """
+        # Warm slow-changing capability grants once per login. Resource scope
+        # state remains independently lazy and generation-invalidated.
+        try:
+            from evennia.authorization.storage import load_grants
+
+            load_grants(self)
+        except Exception:
+            logger.log_trace("at_post_login: authorization grant preload failed")
+
         # if we have saved protocol flags on ourselves, load them here.
         protocol_flags = self.attributes.get("_saved_protocol_flags", {})
         if session and protocol_flags:
@@ -2759,6 +2808,12 @@ class DefaultGuest(DefaultAccount):
                 overriding the call (unused by default).
 
         """
+        try:
+            from evennia.authorization.storage import load_grants
+
+            load_grants(self)
+        except Exception:
+            logger.log_trace("guest at_post_login: authorization grant preload failed")
         self._send_to_connect_channel(_("|G{key} connected|n").format(key=self.key))
         self.puppet_object(session, self.db._last_puppet)
 

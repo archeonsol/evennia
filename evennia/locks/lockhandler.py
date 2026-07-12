@@ -520,6 +520,18 @@ class LockHandler:
                     return False
         if validate_only:
             return True, None
+        # R3E freeze gate: once a resource kind reaches parity, legacy writes
+        # compile directly into structured authorization storage. The old field
+        # remains untouched as rollback evidence until R3F removes LockHandler.
+        try:
+            from evennia.authorization.migration import handle_frozen_add
+
+            frozen_source = handle_frozen_add(self.obj, lockstring)
+        except ImportError:
+            frozen_source = None
+        if frozen_source is not None:
+            self._cache_locks(frozen_source)
+            return True
         # get the lock string
         storage_lockstring = self.obj.lock_storage
         if storage_lockstring:
@@ -605,6 +617,15 @@ class LockHandler:
                 in the lock, this returns `False`.
 
         """
+        try:
+            from evennia.authorization.migration import handle_frozen_remove
+
+            frozen_removed, frozen_source = handle_frozen_remove(self.obj, access_type)
+        except ImportError:
+            frozen_removed, frozen_source = False, None
+        if frozen_source is not None or frozen_removed:
+            self._cache_locks(frozen_source or "")
+            return frozen_removed
         if access_type in self.locks:
             del self.locks[access_type]
             self._save_locks()
@@ -618,7 +639,15 @@ class LockHandler:
         Remove all locks in the handler.
 
         """
+        try:
+            from evennia.authorization.migration import handle_frozen_clear
+
+            frozen = handle_frozen_clear(self.obj)
+        except ImportError:
+            frozen = False
         self.locks = {}
+        if frozen:
+            return
         self.lock_storage = ""
         self._save_locks()
 
@@ -628,7 +657,13 @@ class LockHandler:
         checking.  This is usually called by @reload.
 
         """
-        self._cache_locks(self.obj.lock_storage)
+        try:
+            from evennia.authorization.migration import frozen_source
+
+            source = frozen_source(self.obj)
+        except ImportError:
+            source = None
+        self._cache_locks(source if source is not None else self.obj.lock_storage)
         self.cache_lock_bypass(self.obj)
 
     def append(self, access_type, lockstring, op="or"):

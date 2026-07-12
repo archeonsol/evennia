@@ -419,7 +419,18 @@ class Msg(SharedMemoryModel):
             result (bool): If access was granted or not.
 
         """
-        return self.locks.check(accessing_obj, access_type=access_type, default=default)
+        from evennia.authorization.service import access_check
+
+        result, _ = access_check(
+            self,
+            accessing_obj,
+            access_type,
+            default=default,
+            legacy_evaluator=lambda: self.locks.check(
+                accessing_obj, access_type=access_type, default=default
+            ),
+        )
+        return result
 
 
 # ------------------------------------------------------------
@@ -523,7 +534,18 @@ class TempMsg:
             result (bool): If access was granted or not.
 
         """
-        return self.locks.check(accessing_obj, access_type=access_type, default=default)
+        from evennia.authorization.service import access_check
+
+        result, _ = access_check(
+            self,
+            accessing_obj,
+            access_type,
+            default=default,
+            legacy_evaluator=lambda: self.locks.check(
+                accessing_obj, access_type=access_type, default=default
+            ),
+        )
+        return result
 
 
 # ------------------------------------------------------------

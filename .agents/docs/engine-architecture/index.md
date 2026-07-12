@@ -37,6 +37,10 @@ which drifted stale as the work shipped (a roadmap rots; a decisions log doesn't
 If an item moves from speculative to scoped, it graduates from `horizon.md` up to
 `committed.md`, and to `decisions.md` once shipped.
 
+- **[r3-authorization.md](r3-authorization.md)** documents capability
+  authorization, split caches, offline migration, and per-kind freeze through
+  R3E.
+
 ## Two-layer thesis
 
 The engine should separate two layers it currently collapses:

@@ -6,8 +6,17 @@ announced support.
 """
 
 import unittest
+from dataclasses import FrozenInstanceError
 
-from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG, RenderNode, deliver_node
+from evennia.narrative.rendernode import (
+    CLIENT_NARRATIVE_FLAG,
+    EntityRef,
+    Line,
+    Paragraph,
+    RenderNode,
+    Section,
+    deliver_node,
+)
 
 
 class _Sessions:
@@ -36,7 +45,9 @@ class _Viewer:
 
 
 def _node(body="does a thing", refs=None):
-    return RenderNode(kind="emote", msg_type="pose", body=body, from_id=5, refs=refs or [])
+    return RenderNode(
+        kind="emote", msg_type="pose", body=body, from_handle="eabc123", refs=refs or []
+    )
 
 
 class TestDeliverNode(unittest.TestCase):
@@ -60,16 +71,18 @@ class TestDeliverNode(unittest.TestCase):
     def test_capable_session_gets_structured_payload(self):
         cap = _Session({CLIENT_NARRATIVE_FLAG: True})
         v = _Viewer(sessions=[cap])
-        deliver_node(_node(refs=[{"name": "Kade", "char_id": 42}]), v, from_obj="E")
+        deliver_node(_node(refs=[{"name": "Kade", "handle": "edead42"}]), v, from_obj="E")
         self.assertEqual(len(v.calls), 1)
         _args, kwargs = v.calls[0]
         self.assertIn("narrative", kwargs)
         payload = kwargs["narrative"][0][0]  # (=> [payload], {}) -> payload
         self.assertEqual(payload["body"], "does a thing")
         self.assertEqual(payload["msg_type"], "pose")
-        self.assertEqual(payload["from_id"], 5)
-        self.assertEqual(payload["refs"], [{"name": "Kade", "char_id": 42}])
-        self.assertIs(kwargs["session"], cap)
+        self.assertEqual(payload["from_handle"], "eabc123")
+        self.assertNotIn("from_id", payload)  # no raw db id on the wire
+        self.assertEqual(payload["refs"][0]["name"], "Kade")
+        self.assertEqual(payload["refs"][0]["handle"], "edead42")
+        self.assertEqual(kwargs["session"], [cap])
 
     def test_mixed_sessions_structured_to_capable_text_to_rest(self):
         cap = _Session({CLIENT_NARRATIVE_FLAG: True})
@@ -79,11 +92,20 @@ class TestDeliverNode(unittest.TestCase):
         self.assertEqual(len(v.calls), 2)
         # structured to the capable session
         self.assertIn("narrative", v.calls[0][1])
-        self.assertIs(v.calls[0][1]["session"], cap)
+        self.assertEqual(v.calls[0][1]["session"], [cap])
         # text to the remaining (telnet) session(s)
         args, kwargs = v.calls[1]
         self.assertEqual(args[0], ("does a thing", {"type": "pose"}))
         self.assertEqual(kwargs["session"], [tel])
+
+    def test_every_capable_session_gets_structured_payload(self):
+        cap1 = _Session({CLIENT_NARRATIVE_FLAG: True})
+        cap2 = _Session({"AZABAN_CAPS": {"rendersNodes": True}})
+        v = _Viewer(sessions=[cap1, cap2])
+        deliver_node(_node(), v)
+        self.assertEqual(len(v.calls), 1)
+        self.assertIn("narrative", v.calls[0][1])
+        self.assertEqual(v.calls[0][1]["session"], [cap1, cap2])
 
     def test_refs_builder_not_called_for_incapable_viewer(self):
         # The per-viewer resolver behind refs must not run for a text-only viewer.
@@ -97,19 +119,58 @@ class TestDeliverNode(unittest.TestCase):
 
         def builder():
             calls.append(True)
-            return [{"name": "Kade", "char_id": 42}]
+            return [{"name": "Kade", "handle": "edead42"}]
 
         cap = _Session({CLIENT_NARRATIVE_FLAG: True})
         v = _Viewer(sessions=[cap])
         deliver_node(_node(), v, refs_builder=builder)
         self.assertEqual(calls, [True])
         payload = v.calls[0][1]["narrative"][0][0]
-        self.assertEqual(payload["refs"], [{"name": "Kade", "char_id": 42}])
+        self.assertEqual(payload["refs"][0]["name"], "Kade")
+        self.assertEqual(payload["refs"][0]["handle"], "edead42")
 
 
 class TestRenderNodePayload(unittest.TestCase):
+    def test_node_is_immutable_and_defensively_copies_inputs(self):
+        refs = [{"name": "Kade", "handle": "e1"}]
+        node = RenderNode(kind="emote", msg_type="pose", body="b", refs=refs)
+        refs.append({"name": "Other", "handle": "e2"})
+        self.assertEqual(len(node.refs), 1)
+        with self.assertRaises(FrozenInstanceError):
+            node.body = "changed"
+
+    def test_payload_is_versioned_and_contains_blocks(self):
+        node = RenderNode(
+            kind="look",
+            msg_type="look",
+            body="Atrium\n\nA large room.",
+            blocks=(
+                Section(
+                    key="room",
+                    title="Atrium",
+                    children=(Line("Atrium"), Paragraph("A large room.")),
+                ),
+            ),
+            correlation_id="trace-1",
+        )
+        payload = node.payload()
+        self.assertEqual(payload["schema"], "render.v1")
+        self.assertEqual(payload["correlation_id"], "trace-1")
+        self.assertEqual(payload["blocks"][0]["type"], "section")
+
+    def test_entity_ref_serializes_only_opaque_handle(self):
+        node = RenderNode(
+            kind="emote",
+            msg_type="pose",
+            body="A figure waves.",
+            refs=(EntityRef(handle="e1", label="a figure", recognized=False),),
+        )
+        payload = node.payload()
+        self.assertEqual(payload["refs"][0]["handle"], "e1")
+        self.assertNotIn("char_id", str(payload))
+
     def test_payload_serializes_self_echo(self):
-        node = RenderNode(kind="emote", msg_type="pose", body="b", from_id=1, self_echo=True)
+        node = RenderNode(kind="emote", msg_type="pose", body="b", from_handle="e1", self_echo=True)
         self.assertIs(node.payload()["self_echo"], True)
 
     def test_payload_serializes_spans_as_list_of_lists(self):

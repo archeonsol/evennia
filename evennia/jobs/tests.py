@@ -24,12 +24,33 @@ def _sample_job(payload):
 _sample_job.last_payload = None
 
 
+def _raising_job(payload):
+    raise RuntimeError("handler boom")
+
+
+def _async_job(payload):
+    async def _work():
+        _async_job.ran = True
+
+    return _work()
+
+
+_async_job.ran = False
+
+
+_PG = dict(
+    JOB_QUEUE_ENABLED=True,
+    JOB_QUEUE_BACKEND="postgres",
+    JOB_QUEUE_REGISTRY={
+        "sample": "evennia.jobs.tests._sample_job",
+        "boom": "evennia.jobs.tests._raising_job",
+        "async": "evennia.jobs.tests._async_job",
+    },
+)
+
+
 class TestJobQueue(BaseEvenniaTest):
-    @override_settings(
-        JOB_QUEUE_ENABLED=True,
-        JOB_QUEUE_BACKEND="postgres",
-        JOB_QUEUE_REGISTRY={"sample": "evennia.jobs.tests._sample_job"},
-    )
+    @override_settings(**_PG)
     def test_enqueue_and_process(self):
         register_job_type("sample", "evennia.jobs.tests._sample_job")
         job_id = enqueue_job("sample", {"n": 3})
@@ -40,6 +61,73 @@ class TestJobQueue(BaseEvenniaTest):
 
     def test_rejects_unknown_job_type(self):
         self.assertIsNone(enqueue_job("not_registered", {}))
+
+    @override_settings(**_PG)
+    def test_success_marks_completed(self):
+        from evennia.server.models import EngineJob
+
+        job_id = enqueue_job("sample", {"n": 1})
+        process_pending_jobs(max_jobs=5)
+        job = EngineJob.objects.get(job_id=job_id)
+        self.assertEqual(job.status, "completed")
+        self.assertIsNotNone(job.completed_at)
+
+    @override_settings(**_PG)
+    def test_failure_dead_letters_at_max_attempts(self):
+        from evennia.server.models import EngineJob
+
+        job_id = enqueue_job("boom", {}, max_attempts=1)
+        process_pending_jobs(max_jobs=5)
+        job = EngineJob.objects.get(job_id=job_id)
+        self.assertEqual(job.status, "dead")
+        self.assertEqual(job.attempts, 1)
+
+    @override_settings(**_PG)
+    def test_failure_retries_with_backoff(self):
+        from evennia.server.models import EngineJob
+
+        job_id = enqueue_job("boom", {}, max_attempts=3)
+        process_pending_jobs(max_jobs=5)
+        job = EngineJob.objects.get(job_id=job_id)
+        # first failure: back to pending, not dead, deferred into the future
+        self.assertEqual(job.status, "pending")
+        self.assertEqual(job.attempts, 1)
+        self.assertIsNotNone(job.available_at)
+
+    @override_settings(**_PG)
+    def test_idempotent_enqueue(self):
+        from evennia.server.models import EngineJob
+
+        first = enqueue_job("sample", {"n": 1}, idempotency_key="dedupe-1")
+        second = enqueue_job("sample", {"n": 2}, idempotency_key="dedupe-1")
+        self.assertEqual(first, second)
+        self.assertEqual(EngineJob.objects.filter(idempotency_key="dedupe-1").count(), 1)
+
+    @override_settings(**_PG)
+    def test_expired_lease_is_reclaimed(self):
+        from django.utils import timezone
+
+        from evennia.jobs.queue import reclaim_jobs
+        from evennia.server.models import EngineJob
+
+        job_id = enqueue_job("sample", {"n": 1})
+        # simulate a worker that leased then crashed, lease long expired
+        EngineJob.objects.filter(job_id=job_id).update(
+            status="leased", lease_until=timezone.now() - timezone.timedelta(hours=1)
+        )
+        self.assertEqual(reclaim_jobs(), 1)
+        self.assertEqual(EngineJob.objects.get(job_id=job_id).status, "pending")
+
+    @override_settings(**_PG)
+    def test_async_handler_completes_only_after_await(self):
+        from evennia.server.models import EngineJob
+
+        _async_job.ran = False
+        job_id = enqueue_job("async", {})
+        process_pending_jobs(max_jobs=5)
+        # the coroutine ran and the job is marked completed via its callback
+        self.assertTrue(_async_job.ran)
+        self.assertEqual(EngineJob.objects.get(job_id=job_id).status, "completed")
 
 
 class TestRedisBackoff(BaseEvenniaTest):
@@ -53,14 +141,14 @@ class TestRedisBackoff(BaseEvenniaTest):
         queue._redis_last_down_log = 0.0
 
     def _fake_redis(self):
-        """Return (module, conn); set conn.rpop/conn.ping side effects per test."""
+        """Return (module, conn); set conn.rpoplpush/conn.ping side effects per test."""
         conn = mock.Mock()
         module = types.SimpleNamespace(get_redis_connection=lambda alias=None: conn)
         return module, conn
 
     def test_connection_error_logs_once_no_traceback(self):
         module, conn = self._fake_redis()
-        conn.rpop.side_effect = _RedisConnError("connection refused")
+        conn.rpoplpush.side_effect = _RedisConnError("connection refused")
         with (
             mock.patch.dict(sys.modules, {"django_redis": module}),
             mock.patch.object(queue.logger, "log_trace") as mock_trace,
@@ -89,7 +177,7 @@ class TestRedisBackoff(BaseEvenniaTest):
 
     def test_unexpected_error_still_logs_traceback(self):
         module, conn = self._fake_redis()
-        conn.rpop.side_effect = ValueError("boom")
+        conn.rpoplpush.side_effect = ValueError("boom")
         with (
             mock.patch.dict(sys.modules, {"django_redis": module}),
             mock.patch.object(queue.logger, "log_trace") as mock_trace,

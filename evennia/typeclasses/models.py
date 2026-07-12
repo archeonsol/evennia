@@ -718,12 +718,25 @@ class TypedObject(SharedMemoryModel):
                 use it to feed to its hook methods.
 
         """
-        return self.locks.check(
+        from evennia.authorization.service import access_check
+
+        result, decision = access_check(
+            self,
             accessing_obj,
-            access_type=access_type,
+            access_type,
             default=default,
-            no_superuser_bypass=no_superuser_bypass,
+            legacy_evaluator=lambda: self.locks.check(
+                accessing_obj,
+                access_type=access_type,
+                default=default,
+                no_superuser_bypass=no_superuser_bypass,
+            ),
         )
+        try:
+            self.ndb.last_authorization_decision = decision
+        except AttributeError:
+            pass
+        return result
 
     def check_permstring(self, permstring):
         """

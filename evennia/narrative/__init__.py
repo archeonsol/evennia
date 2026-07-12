@@ -16,7 +16,17 @@ from .emote import (
     split_emote_segments,
 )
 from .protocols import EmoteDelivery, KeyNameResolver, NameResolver
-from .rendernode import RenderNode, deliver_node
+from .rendernode import (
+    EntityRef,
+    Line,
+    ListBlock,
+    Paragraph,
+    RenderNode,
+    Section,
+    SystemBlock,
+    deliver_node,
+    text_node,
+)
 
 __all__ = [
     "NameResolver",
@@ -24,6 +34,13 @@ __all__ = [
     "EmoteDelivery",
     "DefaultEmoteDelivery",
     "RenderNode",
+    "EntityRef",
+    "Line",
+    "Paragraph",
+    "Section",
+    "ListBlock",
+    "SystemBlock",
+    "text_node",
     "deliver_node",
     "EmotePlan",
     "EmoteResult",

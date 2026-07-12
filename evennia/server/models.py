@@ -151,9 +151,141 @@ class GameEvent(models.Model):
         ]
 
 
+class AuthorizationGrant(models.Model):
+    """One positive, scoped capability grant.
+
+    Grants never imply hierarchy or ownership. Generic references allow
+    accounts, objects, sessions, integrations, and future providers to share
+    the same authorization substrate.
+    """
+
+    grant_id = models.CharField(max_length=32, unique=True, db_index=True)
+    principal_ref = models.CharField(max_length=128)
+    capability = models.CharField(max_length=128)
+    scope_kind = models.CharField(max_length=32)
+    scope_key = models.CharField(max_length=255)
+    constraints = models.JSONField(default=dict)
+    provenance = models.CharField(max_length=128, blank=True, default="")
+    parent_grant_id = models.CharField(max_length=32, blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Declare portable grant constraints and hot-path indexes."""
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["principal_ref", "capability", "scope_kind", "scope_key"],
+                condition=models.Q(revoked_at__isnull=True),
+                name="authgrant_active_scope_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["principal_ref", "capability", "revoked_at"],
+                name="authgrant_principal_cap_idx",
+            ),
+            models.Index(fields=["expires_at"], name="authgrant_expires_idx"),
+        ]
+
+
+class AuthorizationScopeLabel(models.Model):
+    """Materialized O(1) scope membership for one generic resource."""
+
+    resource_ref = models.CharField(max_length=160)
+    label = models.CharField(max_length=255)
+    source = models.CharField(max_length=32, default="authored")
+    generation = models.PositiveBigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Declare scope uniqueness and reverse-label lookup."""
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["resource_ref", "label"], name="authscope_resource_label_uniq"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["resource_ref"], name="authscope_resource_idx"),
+            models.Index(fields=["label", "resource_ref"], name="authscope_label_idx"),
+        ]
+
+
+class AuthorizationPolicyOverride(models.Model):
+    """Sparse instance policy override and legacy migration checkpoint."""
+
+    resource_ref = models.CharField(max_length=160)
+    access_type = models.CharField(max_length=64)
+    template_key = models.CharField(max_length=128, blank=True, default="")
+    policy = models.JSONField(default=dict)
+    policy_version = models.PositiveIntegerField(default=1)
+    legacy_shadow = models.TextField(blank=True, default="")
+    legacy_frozen = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Declare one override per resource operation."""
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["resource_ref", "access_type"],
+                name="authpolicy_resource_access_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["resource_ref"], name="authpolicy_resource_idx"),
+            models.Index(fields=["legacy_frozen"], name="authpolicy_frozen_idx"),
+        ]
+
+
+class AuthorizationPrincipalState(models.Model):
+    """Universal suspension state, separate from positive grants."""
+
+    principal_ref = models.CharField(max_length=128, unique=True)
+    suspended = models.BooleanField(default=False)
+    reason = models.CharField(max_length=255, blank=True, default="")
+    suspended_until = models.DateTimeField(null=True, blank=True)
+    generation = models.PositiveBigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class AuthorizationAuditEvent(models.Model):
+    """Append-only audit record for sensitive authorization mutations."""
+
+    event_id = models.CharField(max_length=32, unique=True, db_index=True)
+    kind = models.CharField(max_length=64, db_index=True)
+    principal_ref = models.CharField(max_length=128, blank=True, default="")
+    capability = models.CharField(max_length=128, blank=True, default="")
+    resource_ref = models.CharField(max_length=160, blank=True, default="")
+    actor_ref = models.CharField(max_length=128, blank=True, default="")
+    reason = models.CharField(max_length=255, blank=True, default="")
+    data = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        """Declare audit query indexes."""
+
+        indexes = [
+            models.Index(fields=["principal_ref", "-created_at"], name="authaudit_principal_idx"),
+            models.Index(fields=["kind", "-created_at"], name="authaudit_kind_idx"),
+        ]
+
+
 class EngineJob(models.Model):
     """
-    PostgreSQL-backed job queue (alternative to Redis list).
+    PostgreSQL-backed durable job queue (alternative to the Redis list).
+
+    Lifecycle: ``pending`` -> ``leased`` -> ``completed`` | (retry -> ``pending``)
+    | ``dead``. A leased job whose ``lease_until`` has passed is reclaimable by
+    the next dequeue (the previous worker crashed mid-run). ``attempts`` is
+    bumped on each lease and, once it reaches ``max_attempts``, a failing job is
+    dead-lettered rather than retried forever. ``available_at`` gates
+    backoff-delayed retries. ``idempotency_key`` (when supplied) makes enqueue
+    idempotent.
     """
 
     job_id = models.CharField(max_length=32, unique=True, db_index=True)
@@ -161,9 +293,23 @@ class EngineJob(models.Model):
     payload_json = models.TextField(default="{}")
     priority = models.IntegerField(default=0, db_index=True)
     status = models.CharField(max_length=16, default="pending", db_index=True)
+    # Durable-contract fields.
+    attempts = models.IntegerField(default=0)
+    max_attempts = models.IntegerField(default=5)
+    available_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    lease_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    idempotency_key = models.CharField(
+        max_length=128, null=True, blank=True, unique=True, db_index=True
+    )
+    last_error = models.TextField(blank=True, default="")
+    completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Engine job"
         verbose_name_plural = "Engine jobs"
+        indexes = [
+            # the dequeue predicate: eligible rows ordered for claiming
+            models.Index(fields=["status", "priority", "created_at"]),
+        ]

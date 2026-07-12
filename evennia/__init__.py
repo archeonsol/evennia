@@ -103,6 +103,7 @@ _LAZY_EXPORTS = {
     "ANSIString": ".utils.ansi:ANSIString",
     "signals": ".server.signals:",
     "hooks": ".hooks:",
+    "authorization": ".authorization:",
     "FuncParser": ".utils.funcparser:FuncParser",
     "OnDemandTask": ".scripts.ondemandhandler:OnDemandTask",
     "standalone": ".standalone:standalone",

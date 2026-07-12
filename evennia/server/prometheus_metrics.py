@@ -27,6 +27,10 @@ CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL = None
 CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL = None
 REDIS_ATTR_CACHE_HIT_TOTAL = None
 REDIS_ATTR_CACHE_MISS_TOTAL = None
+RENDER_DELIVERY_TOTAL = None
+RENDER_DELIVERY_DURATION_SECONDS = None
+AUTHORIZATION_DECISIONS_TOTAL = None
+AUTHORIZATION_DURATION_SECONDS = None
 
 _METRICS_READY = False
 
@@ -44,6 +48,8 @@ def _init_metrics() -> bool:
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
     global CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL, CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL
     global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
+    global RENDER_DELIVERY_TOTAL, RENDER_DELIVERY_DURATION_SECONDS
+    global AUTHORIZATION_DECISIONS_TOTAL, AUTHORIZATION_DURATION_SECONDS
 
     if _METRICS_READY:
         return ATTR_FLUSH_TOTAL is not None
@@ -105,6 +111,28 @@ def _init_metrics() -> bool:
     REDIS_ATTR_CACHE_MISS_TOTAL = Counter(
         "evennia_redis_attr_cache_miss_total",
         "Attribute reads that fell through to PG (cache miss or unavailable)",
+    )
+    RENDER_DELIVERY_TOTAL = Counter(
+        "evennia_render_delivery_total",
+        "Universal RenderNode deliveries by protocol mode",
+        ("mode",),
+    )
+    RENDER_DELIVERY_DURATION_SECONDS = Histogram(
+        "evennia_render_delivery_duration_seconds",
+        "Time spent resolving and dispatching one viewer RenderNode",
+        ("mode",),
+        buckets=(0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1),
+    )
+    AUTHORIZATION_DECISIONS_TOTAL = Counter(
+        "evennia_authorization_decisions_total",
+        "Capability authorization decisions by resource kind and result",
+        ("resource_kind", "result"),
+    )
+    AUTHORIZATION_DURATION_SECONDS = Histogram(
+        "evennia_authorization_duration_seconds",
+        "Time spent evaluating one structured authorization decision",
+        ("resource_kind",),
+        buckets=(0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01),
     )
     return True
 
@@ -174,3 +202,33 @@ def record_redis_attr_cache_miss() -> None:
 def observe_attribute_dirty_pending(pending: int) -> None:
     if _init_metrics() and ATTR_DIRTY_PENDING is not None:
         ATTR_DIRTY_PENDING.set(int(pending))
+
+
+def record_render_delivery(mode: str, duration_seconds: float) -> None:
+    """Record one low-cardinality universal-render delivery."""
+    if not _init_metrics():
+        return
+    normalized = mode if mode in {"text", "structured", "mixed"} else "text"
+    if RENDER_DELIVERY_TOTAL is not None:
+        RENDER_DELIVERY_TOTAL.labels(mode=normalized).inc()
+    if RENDER_DELIVERY_DURATION_SECONDS is not None:
+        RENDER_DELIVERY_DURATION_SECONDS.labels(mode=normalized).observe(
+            max(0.0, float(duration_seconds))
+        )
+
+
+def record_authorization_decision(
+    resource_kind: str, allowed: bool, duration_seconds: float
+) -> None:
+    """Record one low-cardinality structured authorization evaluation."""
+
+    if not _init_metrics():
+        return
+    kind = str(resource_kind or "unknown")[:32]
+    result = "allow" if allowed else "deny"
+    if AUTHORIZATION_DECISIONS_TOTAL is not None:
+        AUTHORIZATION_DECISIONS_TOTAL.labels(resource_kind=kind, result=result).inc()
+    if AUTHORIZATION_DURATION_SECONDS is not None:
+        AUTHORIZATION_DURATION_SECONDS.labels(resource_kind=kind).observe(
+            max(0.0, float(duration_seconds))
+        )
