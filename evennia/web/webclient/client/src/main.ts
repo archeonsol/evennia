@@ -20,6 +20,7 @@ import { renderNodeHtml } from "./lib/render";
 import { media } from "./lib/media.svelte";
 import { ui } from "./lib/ui.svelte";
 import { dock } from "./lib/dock.svelte";
+import { createLegacyEmitter } from "./lib/legacy-emitter";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -35,9 +36,11 @@ function oobTrace(event: string, detail?: unknown): void {
 
 // Legacy global API so in-game MXP links (`<a onclick="Evennia.msg(...)">`) and
 // any code expecting the classic global route to the live socket.
+const legacyEmitter = createLegacyEmitter();
 (window as any).Evennia = {
   msg: (cmdname: string, args: any[] = [], kwargs: Record<string, any> = {}) =>
     connection.legacyMsg(cmdname, args, kwargs),
+  emitter: legacyEmitter,
 };
 
 // MXP command links are <a id="mxplink" href="#" onclick="Evennia.msg(...)">.
@@ -170,6 +173,8 @@ connection.on("oob", (env) => {
     if (kw.volume != null) {
       media.setAudioVolume(Number(kw.volume), kw.fade != null ? Number(kw.fade) : 1);
     }
+  } else if (event === "editor_open" || event === "editor_close" || event === "editor_status") {
+    legacyEmitter.emit(event, env.args ?? [], env.kwargs ?? {});
   } else if (event.startsWith("community_")) {
     toasts.fromCommunity(event, env.kwargs ?? {});
   }

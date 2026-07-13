@@ -25,6 +25,95 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.169 — Legacy editor bridge
+
+### Webclient
+
+- Added a minimal `Evennia.emitter` compatibility surface to the Svelte client
+  and forwarded editor lifecycle OOB events through it, restoring the legacy
+  editor integration without bringing back the old webclient runtime.
+- Added focused emitter tests and rebuilt the checked-in production shell.
+
+Migration notes: no downstream changes are required.
+
+---
+
+## 6.0.0+underspire.168 — Paged scheduler inspection
+
+### Systems
+
+- Scheduler inspection now bounds output pages and isolates malformed registry
+  entries so large registries remain visible in structured clients
+  (`fe8f94049`).
+
+Migration notes: no downstream changes are required.
+
+---
+
+## 6.0.0+underspire.167 — Policy authoring actions
+
+### Authorization
+
+- Ported `@scope` and `@policy` to typed, capability-gated actions after the
+  capability-only runtime removed their legacy command route (`b40186958`).
+- Expanded recovery-grant coverage for puppet authorization (`a22f6ca69`).
+
+Migration notes: policy authors should use the typed action routes; command
+syntax is unchanged.
+
+---
+
+## 6.0.0+underspire.166 — Audited staff recovery
+
+### Authorization
+
+- Short-lived break-glass grants can satisfy explicit capability predicates,
+  and `@grant` can assign recovery bundles (`58066d520`).
+
+Migration notes: no downstream changes are required.
+
+---
+
+## 6.0.0+underspire.165 — Capability-only launcher
+
+### Runtime
+
+- Removed the launcher's obsolete `LOCK_FUNC_MODULES` preflight so services can
+  start under the capability-only runtime (`3bcc1a9b8`).
+
+Migration notes: no downstream changes are required.
+
+---
+
+## 6.0.0+underspire.164 — Retire shadow checkpoints
+
+### Authorization
+
+- Capability finalization now removes obsolete shadow and frozen override rows
+  while preserving authored and offline-imported typed overrides
+  (`3bbd440db`).
+
+Migration notes: run the capability finalization and audit commands during the
+R3F rollout.
+
+---
+
+## 6.0.0+underspire.163 — Capability-only authorization
+
+### Authorization
+
+- Replaced runtime lockstrings, permission tiers, and implicit superuser
+  authority with typed policies and scoped capability grants (`b9e13e675`).
+- Removed the legacy lock runtime and migrated engine, command, object, comms,
+  prototype, help, contrib, web, and documentation surfaces to explicit
+  capabilities.
+
+Migration notes: games must replace lock and permission authoring with
+capabilities, then run `auth_finalize_capabilities` and
+`auth_audit_capabilities` before startup.
+
+---
+
 ## 6.0.0+underspire.162 — Async ORM lifecycle containment
 
 ### Runtime
