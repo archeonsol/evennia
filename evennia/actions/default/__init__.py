@@ -9,7 +9,8 @@ any object-model (room/exit/``move_to``) dependency.
 """
 
 from .account import DefaultAccountRules, Option, Password, UserPassword
-from .admin import Access, CharacterAdminRules, Emit, Force, Grant, Wall
+from .admin import (Access, CharacterAdminRules, Emit, Force, Grant, Policy,
+                    Scope, Wall)
 from .emote_nomatch import DefaultEmoteNoMatchRules
 from .events import Arrived, Departed, Moved
 from .general import (CharacterGeneralRules, Help, Home, Look, Nick, NickRules,
@@ -53,6 +54,8 @@ __all__ = [
     "Wall",
     "Force",
     "Grant",
+    "Policy",
+    "Scope",
     "Access",
     "CharacterAdminRules",
     # general verbs

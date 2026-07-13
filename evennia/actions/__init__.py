@@ -20,10 +20,10 @@ from .default import (Access, Arrived, CharacterAdminRules,
                       Drop, Emit, Encoding, Enter, Enterable,
                       EnterableObjectRules, ExitTraversalRules, Force, Get,
                       Give, Grant, Help, Home, Info, Locomotion, Look, Move,
-                      Moved, Nick, NickRules, Option, Password, Put, Py,
-                      PyRules, Quit, Screenreader, SessionLoginRules, SetHelp,
-                      Systems, Tasks, UserPassword, Wall, exit_resolver,
-                      register_exit_resolver)
+                      Moved, Nick, NickRules, Option, Password, Policy, Put,
+                      Py, PyRules, Quit, Scope, Screenreader,
+                      SessionLoginRules, SetHelp, Systems, Tasks, UserPassword,
+                      Wall, exit_resolver, register_exit_resolver)
 from .dispatch import (DispatchMiddleware, ProfilingMiddleware,
                        clear_middlewares, get_middlewares, register_middleware,
                        try_action_dispatch)
@@ -171,6 +171,8 @@ __all__ = [
     "Wall",
     "Force",
     "Grant",
+    "Policy",
+    "Scope",
     "Access",
     "CharacterAdminRules",
     "Nick",

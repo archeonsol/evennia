@@ -9,6 +9,8 @@ The action-engine analogue of the engine's administrative command surface:
 * :class:`Wall` — announce to every connected session.
 * :class:`Force` — make another object execute a command line.
 * :class:`Grant` — grant/revoke registered capabilities with explicit scopes.
+* :class:`Policy` — inspect and author typed resource policies.
+* :class:`Scope` — inspect and author resource scope labels.
 * :class:`Access` — explain the caller's effective capability grants.
 
 Administrative gates are namespaced capability predicates and remain
@@ -38,6 +40,8 @@ __all__ = [
     "Wall",
     "Force",
     "Grant",
+    "Policy",
+    "Scope",
     "Access",
     "CharacterAdminRules",
 ]
@@ -79,6 +83,22 @@ class Grant(ArgAction):
 
     ``@perm[/del|/account] <object|*account> [= <perm>[,<perm>,...]]``.
     """
+
+    __primary_handler__ = DefaultCharacter
+
+
+@action("@policy", "@policies")
+@dataclass
+class Policy(ArgAction):
+    """Inspect or author typed authorization policies on a resource."""
+
+    __primary_handler__ = DefaultCharacter
+
+
+@action("@scope", "@scopes")
+@dataclass
+class Scope(ArgAction):
+    """Inspect or author searchable authorization scope labels."""
 
     __primary_handler__ = DefaultCharacter
 
@@ -290,6 +310,135 @@ class CharacterAdminRules:
                     reason="action @grant",
                 )
             caller.msg(f"Granted {len(capabilities)} capability grant(s) to {obj}.")
+        return CLAIM
+
+    # --- @policy ---------------------------------------------------------------
+
+    @rule(Policy, phase="carry_out", requires=HasCapability("engine.world.build"))
+    def carry_out_policy(self, action, actor):
+        if not self._is_actor(actor):
+            return SKIP
+        from evennia.authorization.policy import (Always, Never,
+                                                  RequiresCapability)
+
+        caller = self
+        if not action.args:
+            caller.msg("Usage: @policy[/set|del] <object>/<operation> [= policy]")
+            return CLAIM
+
+        lhs = action.lhs.strip()
+        resource_name, separator, operation = lhs.rpartition("/")
+        if not separator:
+            resource_name, operation = lhs, ""
+        if resource_name.startswith("*"):
+            resource = caller.search_account(resource_name.lstrip("*"))
+        else:
+            resource = caller.search(resource_name, global_search=True)
+        if not resource:
+            return CLAIM
+        if not (resource.access(caller, "control") or resource.access(caller, "edit")):
+            caller.msg("You are not allowed to author policies on that resource.")
+            return CLAIM
+
+        if "set" in action.switches:
+            if not operation or not action.rhs:
+                caller.msg(
+                    "Usage: @policy/set <object>/<operation> = "
+                    "public|disabled|<capability>"
+                )
+                return CLAIM
+            declaration = action.rhs.strip().lower()
+            if declaration == "public":
+                policy = Always()
+            elif declaration == "disabled":
+                policy = Never()
+            else:
+                try:
+                    policy = RequiresCapability(declaration)
+                except (TypeError, ValueError) as err:
+                    caller.msg(f"Policy not changed: {err}")
+                    return CLAIM
+            try:
+                resource.policies.set(operation, policy)
+            except (TypeError, ValueError) as err:
+                caller.msg(f"Policy not changed: {err}")
+                return CLAIM
+            caller.msg(f"Set {resource}/{operation} to {policy.to_data()!r}.")
+            return CLAIM
+
+        if "del" in action.switches:
+            if not operation:
+                caller.msg("Usage: @policy/del <object>/<operation>")
+                return CLAIM
+            removed = resource.policies.remove(operation)
+            caller.msg(
+                f"{'Removed' if removed else 'No override for'} {resource}/{operation}."
+            )
+            return CLAIM
+
+        if operation:
+            policy = resource.policies.get(operation)
+            caller.msg(
+                f"{resource}/{operation}: "
+                f"{policy.to_data() if policy else '<class default>'}"
+            )
+            return CLAIM
+        policies = resource.policies.all()
+        if not policies:
+            caller.msg(f"{resource} has no instance policy overrides.")
+            return CLAIM
+        caller.msg(
+            "\n".join(
+                f"{key}: {policy.to_data()!r}" for key, policy in policies.items()
+            )
+        )
+        return CLAIM
+
+    # --- @scope ----------------------------------------------------------------
+
+    @rule(Scope, phase="carry_out", requires=HasCapability("engine.world.build"))
+    def carry_out_scope(self, action, actor):
+        if not self._is_actor(actor):
+            return SKIP
+        from evennia.authorization.storage import (resource_ref,
+                                                   set_scope_labels)
+        from evennia.server.models import AuthorizationScopeLabel
+
+        caller = self
+        if not action.args:
+            caller.msg("Usage: @scope[/set|clear] <resource> [= <kind:key>, ...]")
+            return CLAIM
+        resource_name = action.lhs.strip()
+        if resource_name.startswith("*"):
+            resource = caller.search_account(resource_name.lstrip("*"))
+        else:
+            resource = caller.search(resource_name, global_search=True)
+        if not resource:
+            return CLAIM
+        if not (resource.access(caller, "control") or resource.access(caller, "edit")):
+            caller.msg("You are not allowed to author scopes on that resource.")
+            return CLAIM
+        if "set" in action.switches:
+            labels = {part.strip().lower() for part in action.rhslist if part.strip()}
+            if not labels or any(":" not in label for label in labels):
+                caller.msg("Every scope label must use <kind>:<key> syntax.")
+                return CLAIM
+            set_scope_labels(resource, labels)
+            caller.msg(
+                f"Set authored scopes on {resource}: {', '.join(sorted(labels))}"
+            )
+            return CLAIM
+        if "clear" in action.switches:
+            set_scope_labels(resource, ())
+            caller.msg(f"Cleared authored scopes on {resource}.")
+            return CLAIM
+        labels = AuthorizationScopeLabel.objects.filter(
+            resource_ref=resource_ref(resource)
+        ).order_by("label")
+        caller.msg(
+            "\n".join(f"{row.label} ({row.source})" for row in labels)
+            or f"{resource} has no authorization scope labels."
+        )
         return CLAIM
 
     # --- @access ----------------------------------------------------------------
