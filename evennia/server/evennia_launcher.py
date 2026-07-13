@@ -21,7 +21,8 @@ import sys
 import threading
 import time
 from argparse import ArgumentParser
-from subprocess import DEVNULL, STDOUT, CalledProcessError, Popen, call, check_output
+from subprocess import (DEVNULL, STDOUT, CalledProcessError, Popen, call,
+                        check_output)
 
 import django
 import psutil
@@ -34,7 +35,9 @@ SIG = signal.SIGINT
 CTRL_C_EVENT = 0  # Windows SIGINT-like signal
 
 # Set up the main python paths to Evennia
-EVENNIA_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+EVENNIA_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
 import evennia  # noqa
 from evennia.server.amp_serde import pack_status, unpack_status
@@ -612,7 +615,9 @@ def _our_process(pidfile, expected_py_file):
 
 def _local_pidfiles_alive():
     """Return True if a portal or server pidfile points at a live process of ours."""
-    return any(_our_process(pidfile, py_file) for pidfile, py_file in _local_pid_targets())
+    return any(
+        _our_process(pidfile, py_file) for pidfile, py_file in _local_pid_targets()
+    )
 
 
 def _force_kill_local_processes():
@@ -679,18 +684,17 @@ def _cleanup_stale_portal_process():
 
 def _ensure_ipc_connection(*, connect_timeout=None):
     global AMP_CONNECTION
-    from evennia.server.launcher_ipc import (
-        COLD_START_DEADLINE,
-        LauncherSession,
-        connect_session,
-    )
+    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
+                                             LauncherSession, connect_session)
 
     with _AMP_CONNECTION_LOCK:
         if AMP_CONNECTION is not None and isinstance(AMP_CONNECTION, LauncherSession):
             return AMP_CONNECTION
         if connect_timeout is None:
             connect_timeout = COLD_START_DEADLINE
-        AMP_CONNECTION = connect_session(AMP_HOST, AMP_PORT, connect_timeout=connect_timeout)
+        AMP_CONNECTION = connect_session(
+            AMP_HOST, AMP_PORT, connect_timeout=connect_timeout
+        )
         return AMP_CONNECTION
 
 
@@ -761,9 +765,17 @@ def query_status(callback=None):
             print(
                 "Portal: {}{}\nServer: {}{}".format(
                     wmap[pstatus],
-                    " (pid {})".format(get_pid(PORTAL_PIDFILE, ppid)) if pstatus else "",
+                    (
+                        " (pid {})".format(get_pid(PORTAL_PIDFILE, ppid))
+                        if pstatus
+                        else ""
+                    ),
                     wmap[sstatus],
-                    " (pid {})".format(get_pid(SERVER_PIDFILE, spid)) if sstatus else "",
+                    (
+                        " (pid {})".format(get_pid(SERVER_PIDFILE, spid))
+                        if sstatus
+                        else ""
+                    ),
                 )
             )
             _reactor_stop()
@@ -784,14 +796,12 @@ def _wait_for_status_ipc(
     rate=0.5,
     retries=None,
 ):
-    from evennia.server.launcher_ipc import (
-        COLD_START_DEADLINE,
-        SHUTDOWN_WAIT_DEADLINE,
-        LauncherSession,
-        portal_ipc_reachable,
-        query_ipc_status,
-        wait_until_state,
-    )
+    from evennia.server.launcher_ipc import (COLD_START_DEADLINE,
+                                             SHUTDOWN_WAIT_DEADLINE,
+                                             LauncherSession,
+                                             portal_ipc_reachable,
+                                             query_ipc_status,
+                                             wait_until_state)
 
     if retries is None:
         if portal_running is False or server_running is False:
@@ -825,7 +835,9 @@ def _wait_for_status_ipc(
             if portal_running is True:
                 probe = query_ipc_status(AMP_HOST, AMP_PORT)
                 probe_session = LauncherSession(AMP_HOST, AMP_PORT)
-                if probe and probe_session._state_matches(probe, portal_running, server_running):
+                if probe and probe_session._state_matches(
+                    probe, portal_running, server_running
+                ):
                     if callback:
                         callback(probe)
                     else:
@@ -897,10 +909,8 @@ def maybe_collectstatic(force=None):
         force = COLLECTSTATIC_FORCE
     if not force:
         from evennia.server.collectstatic_cache import (
-            compute_static_fingerprint,
-            read_cached_fingerprint,
-            write_cached_fingerprint,
-        )
+            compute_static_fingerprint, read_cached_fingerprint,
+            write_cached_fingerprint)
 
         fingerprint = compute_static_fingerprint()
         if fingerprint == read_cached_fingerprint(GAMEDIR):
@@ -909,10 +919,8 @@ def maybe_collectstatic(force=None):
         write_cached_fingerprint(GAMEDIR, fingerprint)
         return True
     collectstatic()
-    from evennia.server.collectstatic_cache import (
-        compute_static_fingerprint,
-        write_cached_fingerprint,
-    )
+    from evennia.server.collectstatic_cache import (compute_static_fingerprint,
+                                                    write_cached_fingerprint)
 
     write_cached_fingerprint(GAMEDIR, compute_static_fingerprint())
     return True
@@ -951,12 +959,22 @@ def start_evennia(pprofiler=False, sprofiler=False):
 
     def _portal_running(response):
         prun, srun, ppid, spid, _, _ = _parse_status(response)
-        print("Portal is already running as process {pid}. Not restarted.".format(pid=ppid))
+        print(
+            "Portal is already running as process {pid}. Not restarted.".format(
+                pid=ppid
+            )
+        )
         if srun:
-            print("Server is already running as process {pid}. Not restarted.".format(pid=spid))
+            print(
+                "Server is already running as process {pid}. Not restarted.".format(
+                    pid=spid
+                )
+            )
             _reactor_stop()
         else:
-            print("Server starting {}...".format("(under cProfile)" if sprofiler else ""))
+            print(
+                "Server starting {}...".format("(under cProfile)" if sprofiler else "")
+            )
             send_instruction(SSTART, server_cmd)
             wait_for_status(True, True, _server_started)
 
@@ -967,7 +985,9 @@ def start_evennia(pprofiler=False, sprofiler=False):
             if _is_windows():
                 # Windows requires special care
                 create_no_window = 0x08000000
-                Popen(portal_cmd, env=getenv(), bufsize=-1, creationflags=create_no_window)
+                Popen(
+                    portal_cmd, env=getenv(), bufsize=-1, creationflags=create_no_window
+                )
             else:
                 Popen(
                     portal_cmd,
@@ -1049,11 +1069,15 @@ def stop_evennia():
         if srun:
             print("Server stopping ...")
             send_instruction(SSHUTD, {})
-            wait_for_status(True, False, _server_stopped, lambda *_: _force_kill_local_processes())
+            wait_for_status(
+                True, False, _server_stopped, lambda *_: _force_kill_local_processes()
+            )
         else:
             print("Server already stopped.\nStopping Portal ...")
             send_instruction(PSHUTD, {})
-            wait_for_status(False, None, _portal_stopped, lambda *_: _force_kill_local_processes())
+            wait_for_status(
+                False, None, _portal_stopped, lambda *_: _force_kill_local_processes()
+            )
 
     def _portal_not_running(fail):
         if _local_pidfiles_alive():
@@ -1092,11 +1116,15 @@ def reboot_evennia(pprofiler=False, sprofiler=False):
         if srun:
             print("Server stopping ...")
             send_instruction(SSHUTD, {})
-            wait_for_status(True, False, _server_stopped, lambda *_: _force_kill_local_processes())
+            wait_for_status(
+                True, False, _server_stopped, lambda *_: _force_kill_local_processes()
+            )
         else:
             print("Server already stopped.\nStopping Portal ...")
             send_instruction(PSHUTD, {})
-            wait_for_status(False, None, _portal_stopped, lambda *_: _force_kill_local_processes())
+            wait_for_status(
+                False, None, _portal_stopped, lambda *_: _force_kill_local_processes()
+            )
 
     def _portal_not_running(fail):
         print("Evennia not running. Starting ...")
@@ -1159,7 +1187,12 @@ def start_portal_interactive():
         if _is_windows():
             # Windows requires special care
             create_no_window = 0x08000000
-            Popen(server_twistd_cmd, env=getenv(), bufsize=-1, creationflags=create_no_window)
+            Popen(
+                server_twistd_cmd,
+                env=getenv(),
+                bufsize=-1,
+                creationflags=create_no_window,
+            )
         else:
             Popen(server_twistd_cmd, env=getenv(), bufsize=-1)
 
@@ -1172,7 +1205,9 @@ def start_portal_interactive():
             print("... Portal stopped (leaving interactive mode).")
 
     def _portal_running(response):
-        print("Evennia must be shut down completely before running Portal in interactive mode.")
+        print(
+            "Evennia must be shut down completely before running Portal in interactive mode."
+        )
         _reactor_stop()
 
     send_instruction(PSTATUS, None, _portal_running, _iportal)
@@ -1216,7 +1251,9 @@ def stop_server_only(when_stopped=None, interactive=False):
     def _portal_not_running(fail):
         print("Evennia is not running.")
         if interactive:
-            print("Start Evennia normally first, then use `istart` to switch to interactive mode.")
+            print(
+                "Start Evennia normally first, then use `istart` to switch to interactive mode."
+            )
         _reactor_stop()
 
     send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
@@ -1342,7 +1379,10 @@ def tail_log_files(filename1, filename2, start_lines1=20, start_lines2=20, rate=
 
         # set up the next poll
         threading.Timer(
-            rate, _tail_file, args=(filename, file_size, line_count), kwargs={"max_lines": 100}
+            rate,
+            _tail_file,
+            args=(filename, file_size, line_count),
+            kwargs={"max_lines": 100},
         ).start()
 
     _tail_file(filename1, 0, 0, max_lines=start_lines1)
@@ -1373,7 +1413,12 @@ def evennia_version():
         return version
     try:
         rev = (
-            check_output("git rev-parse --short HEAD", shell=True, cwd=EVENNIA_ROOT, stderr=STDOUT)
+            check_output(
+                "git rev-parse --short HEAD",
+                shell=True,
+                cwd=EVENNIA_ROOT,
+                stderr=STDOUT,
+            )
             .strip()
             .decode()
         )
@@ -1399,13 +1444,19 @@ def check_main_evennia_dependencies():
 
     def _test_python_version():
         """Test Python version"""
-        python_version = ".".join(str(num) for num in sys.version_info if isinstance(num, int))
+        python_version = ".".join(
+            str(num) for num in sys.version_info if isinstance(num, int)
+        )
         python_curr = Version(python_version)
         python_min = Version(PYTHON_MIN)
         python_max = Version(PYTHON_MAX_TESTED)
 
         if python_curr < python_min:
-            print(ERROR_PYTHON_VERSION.format(python_version=python_version, python_min=PYTHON_MIN))
+            print(
+                ERROR_PYTHON_VERSION.format(
+                    python_version=python_version, python_min=PYTHON_MIN
+                )
+            )
             return False
         elif python_curr > python_max:
             print(
@@ -1447,7 +1498,9 @@ def check_main_evennia_dependencies():
             print(ERROR_NODJANGO)
             return False
         else:
-            django_version = ".".join(str(num) for num in django.VERSION if isinstance(num, int))
+            django_version = ".".join(
+                str(num) for num in django.VERSION if isinstance(num, int)
+            )
             django_curr = Version(django_version)
             django_min = Version(DJANGO_MIN)
             django_max = Version(DJANGO_MAX_TESTED)
@@ -1464,13 +1517,16 @@ def check_main_evennia_dependencies():
             elif django_curr > django_max:
                 print(
                     NOTE_DJANGO_NEW.format(
-                        django_version=django_version, django_max_tested=DJANGO_MAX_TESTED
+                        django_version=django_version,
+                        django_max_tested=DJANGO_MAX_TESTED,
                     )
                 )
             return True
 
     # return True/False if error was reported or not
-    return all((_test_python_version(), _test_twisted_version(), _test_django_version()))
+    return all(
+        (_test_python_version(), _test_twisted_version(), _test_django_version())
+    )
 
 
 def set_gamedir(path):
@@ -1542,7 +1598,9 @@ def create_settings_file(init=True, secret_settings=False):
     if not init:
         # if not --init mode, settings file may already exist from before
         if os.path.exists(settings_path):
-            inp = input("%s already exists. Do you want to reset it? y/[N]> " % settings_path)
+            inp = input(
+                "%s already exists. Do you want to reset it? y/[N]> " % settings_path
+            )
             if not inp.lower() == "y":
                 print("Aborted.")
                 sys.exit()
@@ -1554,7 +1612,9 @@ def create_settings_file(init=True, secret_settings=False):
                 EVENNIA_TEMPLATE, "server", "conf", "secret_settings.py"
             )
         else:
-            default_settings_path = os.path.join(EVENNIA_TEMPLATE, "server", "conf", "settings.py")
+            default_settings_path = os.path.join(
+                EVENNIA_TEMPLATE, "server", "conf", "settings.py"
+            )
         shutil.copy(default_settings_path, settings_path)
 
     with open(settings_path, "r") as f:
@@ -1679,7 +1739,9 @@ def check_database(always_return=False):
             other = other_superuser[0]
             other_id = other.id
             other_key = other.username
-            print(WARNING_MOVING_SUPERUSER.format(other_key=other_key, other_id=other_id))
+            print(
+                WARNING_MOVING_SUPERUSER.format(other_key=other_key, other_id=other_id)
+            )
             res = ""
             while res.upper() != "Y":
                 # ask for permission
@@ -1896,8 +1958,6 @@ def error_check_python_modules(show_warnings=False):
     _imp(settings.SEARCH_AT_RESULT)
     _imp(settings.CONNECTION_SCREEN_MODULE)
     # imp(settings.AT_INITIAL_SETUP_HOOK_MODULE, split=False)
-    for path in settings.LOCK_FUNC_MODULES:
-        _imp(path, split=False)
 
     from evennia.commands import cmdsethandler
 
@@ -2004,7 +2064,8 @@ def init_game_directory(path, check_db=True, need_gamedir=True):
     # verify existence of log file dir (this can be missing e.g.
     # if the game dir itself was cloned since log files are in .gitignore)
     logdirs = [
-        logfile.rsplit(os.path.sep, 1) for logfile in (SERVER_LOGFILE, PORTAL_LOGFILE, HTTP_LOGFILE)
+        logfile.rsplit(os.path.sep, 1)
+        for logfile in (SERVER_LOGFILE, PORTAL_LOGFILE, HTTP_LOGFILE)
     ]
     if not all(os.path.isdir(pathtup[0]) for pathtup in logdirs):
         errstr = "\n    ".join(
@@ -2019,7 +2080,9 @@ def init_game_directory(path, check_db=True, need_gamedir=True):
         global TWISTED_BINARY
         TWISTED_BINARY = os.path.join(os.path.dirname(sys.executable), "twistd.exe")
         if not os.path.exists(TWISTED_BINARY):  # venv isn't being used
-            TWISTED_BINARY = os.path.join(os.path.dirname(sys.executable), "Scripts\\twistd.exe")
+            TWISTED_BINARY = os.path.join(
+                os.path.dirname(sys.executable), "Scripts\\twistd.exe"
+            )
 
 
 def run_dummyrunner(number_of_dummies):
@@ -2084,7 +2147,9 @@ def list_settings(keys):
         # a specific key
         table = evtable.EvTable(width=131)
         keys = [key.upper() for key in keys]
-        confs = dict((key, var) for key, var in evsettings.__dict__.items() if key in keys)
+        confs = dict(
+            (key, var) for key, var in evsettings.__dict__.items() if key in keys
+        )
         for key, val in confs.items():
             table.add_row(key, str(val))
     print(table)
@@ -2207,7 +2272,8 @@ def run_menu():
         elif inp == 12:
             print("Running 'evennia --settings settings.py test .' ...")
             Popen(
-                [sys.executable, __file__, "--settings", "settings.py", "test", "."], env=getenv()
+                [sys.executable, __file__, "--settings", "settings.py", "test", "."],
+                env=getenv(),
             ).wait()
         elif inp == 13:
             print("Running 'evennia test evennia' ...")
@@ -2225,7 +2291,9 @@ def main():
     """
     # set up argument parser
 
-    parser = ArgumentParser(description=CMDLINE_HELP, formatter_class=argparse.RawTextHelpFormatter)
+    parser = ArgumentParser(
+        description=CMDLINE_HELP, formatter_class=argparse.RawTextHelpFormatter
+    )
     parser.add_argument(
         "--gamedir",
         nargs=1,
@@ -2392,13 +2460,17 @@ def main():
             settings_path = os.path.join(CONFDIR, "secret_settings.py")
             if not os.path.exists(settings_path):
                 create_settings_file(init=False, secret_settings=True)
-                print(f"    ... Created missing secret_settings.py file as {settings_path}.")
+                print(
+                    f"    ... Created missing secret_settings.py file as {settings_path}."
+                )
                 created = True
 
             if created:
                 print(RECREATED_MISSING)
             else:
-                print("    ... No missing resources to create/init. You are good to go.")
+                print(
+                    "    ... No missing resources to create/init. You are good to go."
+                )
         except IOError:
             print(ERROR_INITMISSING)
         sys.exit()
@@ -2512,7 +2584,13 @@ def main():
                 )
                 sys.exit()
 
-        if option in ("shell", "check", "makemigrations", "createsuperuser", "shell_plus"):
+        if option in (
+            "shell",
+            "check",
+            "makemigrations",
+            "createsuperuser",
+            "shell_plus",
+        ):
             # some django commands requires the database to exist,
             # or evennia._init to have run before they work right.
             check_db = True
