@@ -20,12 +20,16 @@ def _normalized_mapping() -> dict[str, tuple[str, ...]]:
     ).items():
         key = str(permission).strip().lower().rstrip("s")
         if not key:
-            raise CommandError("authorization permission migration contains an empty key")
+            raise CommandError(
+                "authorization permission migration contains an empty key"
+            )
         capabilities = []
         for token in tokens:
             token = str(token).strip().lower()
             if token.startswith("bundle:"):
-                capabilities.extend(capability_registry.expand_bundle(token.split(":", 1)[1]))
+                capabilities.extend(
+                    capability_registry.expand_bundle(token.split(":", 1)[1])
+                )
             else:
                 capabilities.append(capability_registry.require(token).key)
         mapping[key] = tuple(sorted(set(capabilities)))
@@ -97,7 +101,15 @@ class Command(BaseCommand):
             from evennia.comms.models import ChannelDB, Msg
             from evennia.help.models import HelpEntry
             from evennia.scripts.models import ScriptDB
+            from evennia.server.models import AuthorizationPolicyOverride
 
             for model in (AccountDB, ObjectDB, ScriptDB, ChannelDB, Msg, HelpEntry):
                 model.objects.exclude(db_lock_storage="").update(db_lock_storage="")
+            # R3D/R3E shadow rows were migration checkpoints, not authored
+            # R3F overrides. Some contain references to providers removed with
+            # the lock runtime, so retaining the row while blanking its shadow
+            # would leave a fail-closed invalid override ahead of the new class
+            # policy. R3F-authored/imported rows always have both markers clear.
+            AuthorizationPolicyOverride.objects.filter(legacy_frozen=True).delete()
+            AuthorizationPolicyOverride.objects.exclude(legacy_shadow="").delete()
         self.stdout.write(self.style.SUCCESS("R3F capability import complete"))

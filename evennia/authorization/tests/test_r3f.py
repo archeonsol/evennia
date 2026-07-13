@@ -9,6 +9,7 @@ from evennia.authorization.policy import Always
 from evennia.authorization.storage import grant_capability
 from evennia.commands.command import Command
 from evennia.objects.models import ObjectDB
+from evennia.server.models import AuthorizationPolicyOverride
 
 
 class CapabilityOnlyRuntimeTest(TestCase):
@@ -54,6 +55,17 @@ class CapabilityOnlyRuntimeTest(TestCase):
         with self.assertRaises(CommandError):
             call_command("auth_audit_capabilities", verbosity=0)
 
+    def test_deployment_audit_rejects_frozen_checkpoint(self):
+        AuthorizationPolicyOverride.objects.create(
+            resource_ref="object:999999",
+            access_type="__frozen__",
+            template_key="migration.empty",
+            policy={},
+            legacy_frozen=True,
+        )
+        with self.assertRaises(CommandError):
+            call_command("auth_audit_capabilities", verbosity=0)
+
     @override_settings(
         AUTHORIZATION_PERMISSION_MIGRATION={
             "Builder": ("engine.world.build",),
@@ -64,6 +76,20 @@ class CapabilityOnlyRuntimeTest(TestCase):
         principal.permissions.add("Builder")
         principal.db_lock_storage = "view:all()"
         principal.save(update_fields=["db_lock_storage"])
+        checkpoint = AuthorizationPolicyOverride.objects.create(
+            resource_ref=f"object:{principal.pk}",
+            access_type="view",
+            template_key="legacy.compiled",
+            policy=Always().to_data(),
+            legacy_shadow="view:all()",
+            legacy_frozen=True,
+        )
+        authored = AuthorizationPolicyOverride.objects.create(
+            resource_ref=f"object:{principal.pk}",
+            access_type="wave",
+            template_key="authored.typed",
+            policy=Always().to_data(),
+        )
 
         call_command(
             "auth_finalize_capabilities",
@@ -74,10 +100,16 @@ class CapabilityOnlyRuntimeTest(TestCase):
         )
 
         self.assertEqual(
-            ObjectDB.objects.filter(pk=principal.pk).values_list(
-                "db_lock_storage", flat=True
-            ).get(),
+            ObjectDB.objects.filter(pk=principal.pk)
+            .values_list("db_lock_storage", flat=True)
+            .get(),
             "",
         )
         self.assertNotIn("Builder", principal.permissions.all())
         self.assertTrue(principal.has_capability("engine.world.build"))
+        self.assertFalse(
+            AuthorizationPolicyOverride.objects.filter(pk=checkpoint.pk).exists()
+        )
+        self.assertTrue(
+            AuthorizationPolicyOverride.objects.filter(pk=authored.pk).exists()
+        )

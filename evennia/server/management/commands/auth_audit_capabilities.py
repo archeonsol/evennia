@@ -26,6 +26,9 @@ class Command(BaseCommand):
         shadow = AuthorizationPolicyOverride.objects.exclude(legacy_shadow="").count()
         if shadow:
             failures.append(f"AuthorizationPolicyOverride: legacy shadows={shadow}")
+        frozen = AuthorizationPolicyOverride.objects.filter(legacy_frozen=True).count()
+        if frozen:
+            failures.append(f"AuthorizationPolicyOverride: frozen checkpoints={frozen}")
         if failures:
             raise CommandError("R3F authorization audit failed: " + "; ".join(failures))
         self.stdout.write(self.style.SUCCESS("R3F authorization audit passed"))
