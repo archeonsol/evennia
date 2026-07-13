@@ -148,6 +148,26 @@ def has_capability(principal, capability: str, *, resource=None, session=None) -
         session=session,
         suspended=suspended,
     )
+    break_glass = evaluate(
+        RequiresCapability("engine.authorization.break_glass"),
+        grants,
+        snapshot,
+        context,
+    ).allowed
+    if break_glass:
+        try:
+            AuthorizationAuditEvent.objects.create(
+                event_id=uuid.uuid4().hex,
+                kind="break_glass_used",
+                principal_ref=grants.principal_ref,
+                capability="engine.authorization.break_glass",
+                resource_ref=snapshot.resource_ref,
+                reason=f"capability:{capability}"[:64],
+            )
+        except Exception:
+            logger.log_trace("break-glass audit failed; capability denied")
+            return False
+        return True
     return evaluate(RequiresCapability(capability), grants, snapshot, context).allowed
 
 

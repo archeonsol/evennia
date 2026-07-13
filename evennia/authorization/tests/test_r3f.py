@@ -4,9 +4,11 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 
+from evennia.accounts.models import AccountDB
 from evennia.actions import HasCapability
 from evennia.authorization.policy import Always
-from evennia.authorization.storage import grant_capability
+from evennia.authorization.storage import (grant_capability,
+                                           issue_recovery_grant)
 from evennia.commands.command import Command
 from evennia.objects.models import ObjectDB
 from evennia.server.models import AuthorizationPolicyOverride
@@ -25,6 +27,20 @@ class CapabilityOnlyRuntimeTest(TestCase):
         )
 
         self.assertTrue(HasCapability("engine.world.build")(None, principal))
+
+    def test_recovery_grant_authorizes_explicit_action_capability(self):
+        principal = AccountDB.objects.create_user(
+            username="recovering-operator",
+            email="recovery@example.com",
+            password="test-password",
+        )
+        issue_recovery_grant(
+            principal.pk,
+            reason="test recovery",
+            ttl_seconds=300,
+        )
+
+        self.assertTrue(HasCapability("engine.runtime.manage")(None, principal))
 
     def test_command_metaclass_rejects_lock_authoring(self):
         with self.assertRaises(TypeError):

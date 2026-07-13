@@ -272,17 +272,24 @@ class CharacterAdminRules:
                 "Grant revoked." if changed else "No active matching grant was found."
             )
         else:
-            capability = capability_registry.require(rhs.strip()).key
-            grant_capability(
-                principal_ref,
-                capability,
-                scope_kind="world",
-                scope_key="*",
-                provenance="action_command",
-                actor_ref=actor_ref,
-                reason="action @grant",
-            )
-            caller.msg(f"Granted {capability} to {obj}.")
+            declaration = rhs.strip().lower()
+            if declaration.startswith("bundle:"):
+                capabilities = capability_registry.expand_bundle(
+                    declaration.split(":", 1)[1]
+                )
+            else:
+                capabilities = (capability_registry.require(declaration).key,)
+            for capability in sorted(capabilities):
+                grant_capability(
+                    principal_ref,
+                    capability,
+                    scope_kind="world",
+                    scope_key="*",
+                    provenance="action_command",
+                    actor_ref=actor_ref,
+                    reason="action @grant",
+                )
+            caller.msg(f"Granted {len(capabilities)} capability grant(s) to {obj}.")
         return CLAIM
 
     # --- @access ----------------------------------------------------------------
