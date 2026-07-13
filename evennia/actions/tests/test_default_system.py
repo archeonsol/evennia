@@ -11,20 +11,14 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from twisted.internet.defer import Deferred
-
 from evennia.actions.default import system as system_module
-from evennia.actions.default.system import (
-    CharacterSystemRules,
-    Py,
-    PyRules,
-    Systems,
-    Tasks,
-)
+from evennia.actions.default.system import (CharacterSystemRules, Py, PyRules,
+                                            Systems, Tasks)
 from evennia.actions.engine import RuleEngine
 from evennia.actions.tests.fakes import FakeChar, dispatch, make_actor
 from evennia.scripts import taskhandler as taskhandler_module
 from evennia.utils import systems as systems_module
+from twisted.internet.defer import Deferred
 
 # the package re-exports shadow the engine submodule with the singleton; fetch
 # the real module for patching its generator-input seam.
@@ -37,6 +31,18 @@ class Wizard(CharacterSystemRules, FakeChar):
     def __init__(self, perms=("Developer",), **kwargs):
         super().__init__(perms=perms, **kwargs)
         self.sessions = SimpleNamespace(all=lambda: [None])
+
+    def has_capability(self, capability):
+        """Model explicit R3F grants without touching the database."""
+
+        if self.permissions.get("developer"):
+            return capability in {
+                "engine.runtime.manage",
+                "engine.system.inspect",
+            }
+        if self.permissions.get("builder"):
+            return capability == "engine.system.inspect"
+        return False
 
 
 def _setup(perms=("Developer",)):
@@ -68,7 +74,9 @@ class TestSystems(unittest.TestCase):
 
     def test_lists_registered_systems(self):
         char, actor = _setup(perms=("Builder",))
-        with mock.patch.object(systems_module, "all_systems", return_value=[_FakeSystem()]):
+        with mock.patch.object(
+            systems_module, "all_systems", return_value=[_FakeSystem()]
+        ):
             self._systems(char, actor)
         out = "\n".join(_texts(char))
         self.assertIn("Registered systems", out)
@@ -80,6 +88,40 @@ class TestSystems(unittest.TestCase):
         with mock.patch.object(systems_module, "all_systems", return_value=[]):
             self._systems(char, actor)
         self.assertTrue(any("No systems" in m for m in _texts(char)))
+
+    def test_large_registry_is_sent_in_bounded_pages(self):
+        char, actor = _setup(perms=("Builder",))
+        registered = [_FakeSystem(f"system-{index}") for index in range(21)]
+        with mock.patch.object(systems_module, "all_systems", return_value=registered):
+            self._systems(char, actor)
+
+        texts = _texts(char)
+        self.assertEqual(len(texts), 3)
+        self.assertIn("(1/3)", texts[0])
+        self.assertIn("(3/3)", texts[2])
+        self.assertIn("system-20", texts[2])
+
+    def test_malformed_entry_does_not_silence_command(self):
+        char, actor = _setup(perms=("Builder",))
+        malformed = _FakeSystem("broken")
+        malformed.cadence = SimpleNamespace(
+            describe=mock.Mock(side_effect=ValueError("bad cadence"))
+        )
+        with (
+            mock.patch.object(
+                systems_module,
+                "all_systems",
+                return_value=[malformed, _FakeSystem("healthy")],
+            ),
+            mock.patch("evennia.utils.logger.log_trace") as log_trace,
+        ):
+            self._systems(char, actor)
+
+        output = "\n".join(_texts(char))
+        self.assertIn("broken", output)
+        self.assertIn("<error>", output)
+        self.assertIn("healthy", output)
+        log_trace.assert_called_once()
 
     def test_gated_for_player(self):
         char, actor = _setup(perms=("Player",))
@@ -137,7 +179,9 @@ class TestTasks(unittest.TestCase):
     def _tasks(self, char, actor, raw="", switches=(), handler=None):
         action = Tasks.parse(raw, actor, switches=switches, verb="@tasks")
         patches = [
-            mock.patch.object(taskhandler_module, "TASK_HANDLER", handler or _FakeTaskHandler()),
+            mock.patch.object(
+                taskhandler_module, "TASK_HANDLER", handler or _FakeTaskHandler()
+            ),
             mock.patch.object(taskhandler_module, "TaskHandlerTask", _FakeTask),
         ]
         with patches[0], patches[1]:
@@ -166,7 +210,9 @@ class TestTasks(unittest.TestCase):
     def test_action_by_unknown_function_name(self):
         char, actor = _setup()
         handler = _FakeTaskHandler({1: _task_entry()})
-        self._tasks(char, actor, raw="bogus_func", switches=("cancel",), handler=handler)
+        self._tasks(
+            char, actor, raw="bogus_func", switches=("cancel",), handler=handler
+        )
         self.assertTrue(any("No tasks deferring" in m for m in _texts(char)))
 
     def test_action_by_id_asks_confirmation(self):
@@ -276,6 +322,9 @@ class TestPyAccountScope(unittest.TestCase):
             def __init__(self, **kwargs):
                 super().__init__(**kwargs)
                 self.sessions = SimpleNamespace(all=lambda: [None])
+
+            def has_capability(self, capability):
+                return capability == "engine.runtime.manage"
 
         account = PyAccount(key="acct", perms=("Developer",))
         actor = make_actor(None, account=account)

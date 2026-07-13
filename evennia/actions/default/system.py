@@ -29,7 +29,6 @@ import datetime
 from dataclasses import dataclass
 
 from django.conf import settings
-
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
@@ -229,25 +228,55 @@ class CharacterSystemRules(PyRules):
         if not registered:
             caller.msg("No systems are registered with the scheduler.")
             return CLAIM
-        table = EvTable(
-            "system", "cadence", "scope", "last fired", "fires", "in flight"
-        )
-        for system in registered:
-            if system.last_run:
-                last_fired = datetime_format(
-                    datetime.datetime.fromtimestamp(system.last_run)
-                )
-            else:
-                last_fired = "-"
-            table.add_row(
-                system.name,
-                system.cadence.describe(),
-                system.scope.describe(),
-                last_fired,
-                system.fire_count,
-                "*" if system.in_flight else "-",
+        # Keep each wire message bounded. A real game commonly registers dozens
+        # of systems, and one monolithic EvTable grows beyond the safe envelope
+        # expected by structured web clients. Isolate each row too: introspection
+        # must remain available when one third-party System has malformed display
+        # metadata.
+        page_size = 10
+        page_count = (len(registered) + page_size - 1) // page_size
+        for page_index in range(page_count):
+            table = EvTable(
+                "system", "cadence", "scope", "last fired", "fires", "in flight"
             )
-        caller.msg("|wRegistered systems|n:\n" + str(table))
+            start = page_index * page_size
+            for system in registered[start : start + page_size]:
+                try:
+                    last_fired = (
+                        datetime_format(
+                            datetime.datetime.fromtimestamp(float(system.last_run))
+                        )
+                        if system.last_run
+                        else "-"
+                    )
+                    row = (
+                        str(system.name)[:32],
+                        str(system.cadence.describe())[:32],
+                        str(system.scope.describe())[:64],
+                        last_fired,
+                        system.fire_count,
+                        "*" if system.in_flight else "-",
+                    )
+                except Exception:
+                    from evennia.utils import logger
+
+                    logger.log_trace(
+                        f"@systems could not render scheduler entry "
+                        f"{getattr(system, 'name', '<unknown>')!r}"
+                    )
+                    row = (
+                        str(getattr(system, "name", "<unknown>"))[:32],
+                        "<error>",
+                        "<error>",
+                        "-",
+                        "?",
+                        "?",
+                    )
+                table.add_row(*row)
+            caller.msg(
+                f"|wRegistered systems|n "
+                f"|x({page_index + 1}/{page_count})|n:\n{table}"
+            )
         return CLAIM
 
     # --- @tasks ------------------------------------------------------------------
