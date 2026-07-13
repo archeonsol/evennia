@@ -3,7 +3,6 @@
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
-
 from evennia.accounts.models import AccountDB
 from evennia.actions import HasCapability
 from evennia.authorization.policy import Always
@@ -41,6 +40,23 @@ class CapabilityOnlyRuntimeTest(TestCase):
         )
 
         self.assertTrue(HasCapability("engine.runtime.manage")(None, principal))
+
+    def test_recovery_grant_follows_account_into_puppeted_character(self):
+        account = AccountDB.objects.create_user(
+            username="puppeted-recovering-operator",
+            email="puppeted-recovery@example.com",
+            password="test-password",
+        )
+
+        class PuppetedCharacter:
+            pk = 987654
+            puppeteer = account
+
+        character = PuppetedCharacter()
+        issue_recovery_grant(account.pk, reason="test recovery", ttl_seconds=300)
+
+        with self.settings(AUTHORIZATION_SHARED_INVALIDATION=False):
+            self.assertTrue(HasCapability("engine.runtime.manage")(None, character))
 
     def test_command_metaclass_rejects_lock_authoring(self):
         with self.assertRaises(TypeError):
