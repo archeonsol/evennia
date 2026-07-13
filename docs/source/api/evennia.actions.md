@@ -23,7 +23,6 @@ evennia.actions
    evennia.actions.muxargs
    evennia.actions.parser
    evennia.actions.perception
-   evennia.actions.permission
    evennia.actions.predicate
    evennia.actions.process
    evennia.actions.registry

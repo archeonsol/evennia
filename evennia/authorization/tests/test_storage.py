@@ -7,27 +7,19 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from evennia.authorization import service as authorization_service
-from evennia.authorization.migration import migrate_resource
+from evennia.authorization.legacy_import.migration import migrate_resource
 from evennia.authorization.service import access_check, authorize
-from evennia.authorization.storage import (
-    clear_authorization_caches,
-    delegate_grant,
-    grant_capability,
-    issue_recovery_grant,
-    load_grants,
-    load_policy,
-    load_resource,
-    preload_policy_packages,
-    principal_is_suspended,
-    principal_refs,
-    set_principal_suspended,
-    set_scope_labels,
-)
-from evennia.locks.lockhandler import LockHandler
-from evennia.server.models import (
-    AuthorizationAuditEvent,
-    AuthorizationPolicyOverride,
-)
+from evennia.authorization.storage import (clear_authorization_caches,
+                                           delegate_grant, grant_capability,
+                                           issue_recovery_grant, load_grants,
+                                           load_policy, load_resource,
+                                           preload_policy_packages,
+                                           principal_is_suspended,
+                                           principal_refs,
+                                           set_principal_suspended,
+                                           set_scope_labels)
+from evennia.server.models import (AuthorizationAuditEvent,
+                                   AuthorizationPolicyOverride)
 
 
 class FakePermissions:
@@ -72,7 +64,6 @@ class FakeResource:
         self.pk = pk
         self.tags = FakeTags()
         self.lock_storage = lock_storage
-        self.locks = MagicMock()
 
 
 class AuthorizationStorageTest(TestCase):
@@ -181,62 +172,41 @@ class AuthorizationStorageTest(TestCase):
         ):
             self.assertFalse(principal_is_suspended(principal))
 
-    def test_migration_retains_source_and_does_not_create_owner(self):
+    def test_migration_drops_source_and_does_not_create_owner(self):
         resource = FakeResource(lock_storage="control:id(7);view:all()")
         result = migrate_resource(resource, freeze=True)
 
-        self.assertTrue(result.frozen)
+        self.assertFalse(result.frozen)
         self.assertEqual(result.grants_written, 1)
         self.assertFalse(hasattr(resource, "owner"))
         row = AuthorizationPolicyOverride.objects.get(
             resource_ref="object:42", access_type="control"
         )
-        self.assertEqual(row.legacy_shadow, resource.lock_storage)
-        self.assertTrue(row.legacy_frozen)
+        self.assertEqual(row.legacy_shadow, "")
+        self.assertFalse(row.legacy_frozen)
 
-    @override_settings(AUTHORIZATION_RESOURCE_POLICIES={"object": "live"})
     def test_access_facade_uses_live_structured_policy(self):
         principal = FakePrincipal()
         resource = FakeResource(lock_storage="view:none()")
         migrate_resource(resource, source="view:all()")
-        legacy = MagicMock(return_value=False)
-
         allowed, decision = access_check(
             resource,
             principal,
             "view",
             default=False,
-            legacy_evaluator=legacy,
         )
 
         self.assertTrue(allowed)
         self.assertTrue(decision.allowed)
-        legacy.assert_not_called()
 
-    @override_settings(AUTHORIZATION_RESOURCE_POLICIES={"object": "live"})
-    def test_missing_policy_falls_back_without_loading_principal_state(self):
+    def test_missing_policy_fails_closed_without_legacy_evaluation(self):
         principal = FakePrincipal()
         resource = FakeResource(lock_storage="view:all()")
-        legacy = MagicMock(return_value=True)
 
-        with (
-            patch.object(authorization_service, "load_grants") as load_grants,
-            patch.object(authorization_service, "principal_is_suspended") as load_suspension,
-            patch.object(authorization_service, "load_resource") as load_resource,
-        ):
-            allowed, decision = access_check(
-                resource,
-                principal,
-                "view",
-                default=False,
-                legacy_evaluator=legacy,
-            )
+        allowed, decision = access_check(resource, principal, "view", default=False)
 
-        self.assertTrue(allowed)
+        self.assertFalse(allowed)
         self.assertEqual(decision.reason_code, "no_structured_policy")
-        load_grants.assert_not_called()
-        load_suspension.assert_not_called()
-        load_resource.assert_not_called()
 
     def test_resource_policy_package_uses_one_query_for_multiple_operations(self):
         resource = FakeResource()
@@ -248,7 +218,6 @@ class AuthorizationStorageTest(TestCase):
             self.assertIsNotNone(load_policy(resource, "edit"))
             self.assertIsNone(load_policy(resource, "missing"))
 
-    @override_settings(AUTHORIZATION_RESOURCE_POLICIES={"object": "live"})
     def test_warm_structured_decision_performs_zero_sql(self):
         principal = FakePrincipal()
         resource = FakeResource()
@@ -260,7 +229,6 @@ class AuthorizationStorageTest(TestCase):
             principal,
             "view",
             default=False,
-            legacy_evaluator=lambda: False,
         )
         self.assertTrue(allowed)
 
@@ -270,7 +238,6 @@ class AuthorizationStorageTest(TestCase):
                 principal,
                 "view",
                 default=False,
-                legacy_evaluator=lambda: False,
             )
         self.assertTrue(allowed)
 
@@ -286,17 +253,3 @@ class AuthorizationStorageTest(TestCase):
         with self.assertNumQueries(0):
             self.assertIsNotNone(load_policy(first, "view"))
             self.assertIsNotNone(load_policy(second, "edit"))
-
-    @override_settings(AUTHORIZATION_FROZEN_RESOURCE_KINDS=("object",))
-    def test_frozen_lock_write_updates_policy_not_legacy_field(self):
-        resource = FakeResource(lock_storage="view:all()")
-        handler = LockHandler(resource)
-
-        self.assertTrue(handler.add("edit:perm(Builder)"))
-
-        self.assertEqual(resource.lock_storage, "view:all()")
-        self.assertTrue(
-            AuthorizationPolicyOverride.objects.filter(
-                resource_ref="object:42", access_type="edit", legacy_frozen=True
-            ).exists()
-        )

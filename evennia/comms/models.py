@@ -25,7 +25,6 @@ from django.db.models.signals import pre_delete
 from django.utils import timezone
 
 from evennia.comms import managers
-from evennia.locks.lockhandler import LockHandler
 from evennia.typeclasses.models import TypedObject
 from evennia.typeclasses.tags import Tag, TagHandler
 from evennia.utils import logger
@@ -49,6 +48,14 @@ _DA = object.__delattr__
 
 class Msg(SharedMemoryModel):
     """
+
+    from evennia.authorization.policy import RequiresCapability
+
+    authorization_policies = {
+        "read": RequiresCapability("engine.message.read"),
+        "edit": RequiresCapability("engine.message.edit"),
+        "delete": RequiresCapability("engine.message.delete"),
+    }
     A single message. This model describes all ooc messages
     sent in-game, both to channels and between accounts.
 
@@ -190,8 +197,15 @@ class Msg(SharedMemoryModel):
         verbose_name = "Msg"
 
     @lazy_property
-    def locks(self):
-        return LockHandler(self)
+    def policies(self):
+        from evennia.authorization.handler import PolicyHandler
+
+        return PolicyHandler(self)
+
+    def authorization_resource_ref(self):
+        """Return the message authorization reference."""
+
+        return f"message:{self.pk}"
 
     @lazy_property
     def tags(self):
@@ -426,9 +440,6 @@ class Msg(SharedMemoryModel):
             accessing_obj,
             access_type,
             default=default,
-            legacy_evaluator=lambda: self.locks.check(
-                accessing_obj, access_type=access_type, default=default
-            ),
         )
         return result
 
@@ -442,6 +453,14 @@ class Msg(SharedMemoryModel):
 
 class TempMsg:
     """
+
+    from evennia.authorization.policy import PredicateRequirement
+
+    authorization_policies = {
+        "read": PredicateRequirement("principal.message_participant"),
+        "edit": PredicateRequirement("principal.message_participant"),
+        "delete": PredicateRequirement("principal.message_participant"),
+    }
     This is a non-persistent object for sending temporary messages that will not be stored.  It
     mimics the "real" Msg object, but doesn't require sender to be given.
 
@@ -454,7 +473,6 @@ class TempMsg:
         message="",
         header="",
         type="",
-        lockstring="",
         hide_from=None,
     ):
         """
@@ -466,7 +484,6 @@ class TempMsg:
             message (str, optional): Message to send.
             header (str, optional): Header of message.
             type (str, optional): Message class, if any.
-            lockstring (str, optional): Lock for the message.
             hide_from (Account, Object, or list, optional): Entities to hide this message from.
 
         """
@@ -475,13 +492,19 @@ class TempMsg:
         self.type = type
         self.header = header
         self.message = message
-        self.lock_storage = lockstring
         self.hide_from = hide_from and make_iter(hide_from) or []
         self.date_created = timezone.now()
 
     @lazy_property
-    def locks(self):
-        return LockHandler(self)
+    def policies(self):
+        from evennia.authorization.handler import PolicyHandler
+
+        return PolicyHandler(self)
+
+    def authorization_resource_ref(self):
+        """Return a process-local reference for a temporary message."""
+
+        return f"message:temporary:{id(self)}"
 
     def __str__(self):
         """
@@ -541,9 +564,6 @@ class TempMsg:
             accessing_obj,
             access_type,
             default=default,
-            legacy_evaluator=lambda: self.locks.check(
-                accessing_obj, access_type=access_type, default=default
-            ),
         )
         return result
 
@@ -640,7 +660,9 @@ class SubscriptionHandler:
                     try:
                         add_subscriber(self.obj, subscriber)
                     except Exception:
-                        logger.log_trace("channel subscriber cache add failed for %s" % subscriber)
+                        logger.log_trace(
+                            "channel subscriber cache add failed for %s" % subscriber
+                        )
         self._recache()
 
     def remove(self, entity):
@@ -662,7 +684,8 @@ class SubscriptionHandler:
                     self.obj.db_object_subscriptions.remove(subscriber)
         self._recache()
         try:
-            from evennia.comms.channel_subscriber_cache import remove_subscriber
+            from evennia.comms.channel_subscriber_cache import \
+                remove_subscriber
         except Exception:
             remove_subscriber = None
         if remove_subscriber is not None:
@@ -672,7 +695,9 @@ class SubscriptionHandler:
                 try:
                     remove_subscriber(self.obj, subscriber)
                 except Exception:
-                    logger.log_trace("channel subscriber cache remove failed for %s" % subscriber)
+                    logger.log_trace(
+                        "channel subscriber cache remove failed for %s" % subscriber
+                    )
 
     def all(self):
         """
@@ -807,7 +832,8 @@ def _drop_channel_subscriber_cache_on_delete(sender, instance, **kwargs):
         instance, "object_subscription_set"
     ):
         return
-    from evennia.comms.channel_subscriber_cache import remove_subscriber_from_all_channels
+    from evennia.comms.channel_subscriber_cache import \
+        remove_subscriber_from_all_channels
 
     remove_subscriber_from_all_channels(instance)
 

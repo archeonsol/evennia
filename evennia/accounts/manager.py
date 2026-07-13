@@ -97,7 +97,9 @@ class AccountDBManager(TypedObjectManager, UserManager):
         end_date = timezone.now()
         tdelta = datetime.timedelta(days)
         start_date = end_date - tdelta
-        return self.filter(last_login__range=(start_date, end_date)).order_by("-last_login")
+        return self.filter(last_login__range=(start_date, end_date)).order_by(
+            "-last_login"
+        )
 
     def get_account_from_email(self, uemail):
         """
@@ -185,7 +187,13 @@ class AccountDBManager(TypedObjectManager, UserManager):
             # try alias match
             matches = self.filter(
                 db_tags__db_tagtype__iexact="alias",
-                **{"db_tags__db_key__iexact" if exact else "db_tags__db_key__icontains": ostring},
+                **{
+                    (
+                        "db_tags__db_key__iexact"
+                        if exact
+                        else "db_tags__db_key__icontains"
+                    ): ostring
+                },
             )
         return matches
 
@@ -196,8 +204,7 @@ class AccountDBManager(TypedObjectManager, UserManager):
         password,
         typeclass=None,
         is_superuser=False,
-        locks=None,
-        permissions=None,
+        policies=None,
         tags=None,
         attributes=None,
         report_to=None,
@@ -214,8 +221,7 @@ class AccountDBManager(TypedObjectManager, UserManager):
         Keyword Args:
             typeclass (str): The typeclass to use for the account.
             is_superuser (bool): Whether or not this account is to be a superuser
-            locks (str): Lockstring.
-            permission (list): List of permission strings.
+            policies (dict): Typed operation policies.
             tags (list): List of Tags on form `(key, category[, data])`
             attributes (list): List of Attributes on form
                  `(key, value [, category, [,lockstring [, default_pass]]])`
@@ -236,8 +242,7 @@ class AccountDBManager(TypedObjectManager, UserManager):
 
         """
         typeclass = typeclass if typeclass else settings.BASE_ACCOUNT_TYPECLASS
-        locks = make_iter(locks) if locks is not None else None
-        permissions = make_iter(permissions) if permissions is not None else None
+        policies = dict(policies or {})
         tags = make_iter(tags) if tags is not None else None
         attributes = make_iter(attributes) if attributes is not None else None
 
@@ -278,8 +283,7 @@ class AccountDBManager(TypedObjectManager, UserManager):
             new_account.set_password(password)
 
         new_account._createdict = dict(
-            locks=locks,
-            permissions=permissions,
+            policies=policies,
             report_to=report_to,
             tags=tags,
             attributes=attributes,

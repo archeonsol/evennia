@@ -31,12 +31,13 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
+from evennia.authorization.policy import (Always, Never, PredicateRequirement,
+                                          RequiresCapability)
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
 from ..muxargs import ArgAction
-from ..predicate import Builder as BuilderCap
-from ..predicate import Helper as HelperCap
+from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
 
@@ -50,6 +51,13 @@ __all__ = [
     "NickRules",
     "CharacterGeneralRules",
 ]
+
+
+def _help_policy(declaration):
+    """Compile one public-or-capability help declaration."""
+
+    value = str(declaration or "public").strip().lower()
+    return Always() if value == "public" else RequiresCapability(value)
 
 
 def _cy(string):
@@ -79,7 +87,13 @@ class Nick(ArgAction):
         else:
             lhs, rhs = [part.strip() for part in parts]
         lhs = lhs.replace("\\=", "=")
-        return cls(args=args, switches=tuple(switches or ()), verb=(verb or ""), lhs=lhs, rhs=rhs)
+        return cls(
+            args=args,
+            switches=tuple(switches or ()),
+            verb=(verb or ""),
+            lhs=lhs,
+            rhs=rhs,
+        )
 
 
 @action("home")
@@ -161,9 +175,15 @@ class NickRules:
         nicktypes = nicktypes if specified_nicktype else ["inputline"]
 
         nicklist = (
-            utils.make_iter(caller.nicks.get(category="inputline", return_obj=True) or [])
-            + utils.make_iter(caller.nicks.get(category="object", return_obj=True) or [])
-            + utils.make_iter(caller.nicks.get(category="account", return_obj=True) or [])
+            utils.make_iter(
+                caller.nicks.get(category="inputline", return_obj=True) or []
+            )
+            + utils.make_iter(
+                caller.nicks.get(category="object", return_obj=True) or []
+            )
+            + utils.make_iter(
+                caller.nicks.get(category="account", return_obj=True) or []
+            )
         )
 
         if "list" in switches or action.verb == "@nicks":
@@ -174,7 +194,10 @@ class NickRules:
                 for inum, nickobj in enumerate(nicklist):
                     _, _, nickvalue, replacement = nickobj.value
                     table.add_row(
-                        str(inum + 1), nickobj.db_category, _cy(nickvalue), _cy(replacement)
+                        str(inum + 1),
+                        nickobj.db_category,
+                        _cy(nickvalue),
+                        _cy(replacement),
                     )
                 string = "|wDefined Nicks:|n\n%s" % table
             caller.msg(string)
@@ -205,7 +228,9 @@ class NickRules:
                 if not specified_nicktype:
                     nicktypes = ("object", "account", "inputline")
                 for nicktype in nicktypes:
-                    oldnicks.append(caller.nicks.get(arg, category=nicktype, return_obj=True))
+                    oldnicks.append(
+                        caller.nicks.get(arg, category=nicktype, return_obj=True)
+                    )
 
             oldnicks = [oldnick for oldnick in oldnicks if oldnick]
             if oldnicks:
@@ -237,7 +262,9 @@ class NickRules:
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(action.lhs):
-                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
+                        strings.append(
+                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
+                        )
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -263,7 +290,9 @@ class NickRules:
             old_nickstring = None
             old_replstring = None
 
-            oldnick = caller.nicks.get(key=nickstring, category=nicktype, return_obj=True)
+            oldnick = caller.nicks.get(
+                key=nickstring, category=nicktype, return_obj=True
+            )
             if oldnick:
                 _, _, old_nickstring, old_replstring = oldnick.value
             if replstring:
@@ -318,7 +347,7 @@ def _sethelp_search_helper(caller, session):
 class CharacterGeneralRules(NickRules):
     """Baseline character-side general rules: nicks, ``home``, ``@sethelp``."""
 
-    @rule(Home, phase="carry_out", requires=BuilderCap)
+    @rule(Home, phase="carry_out", requires=HasCapability("engine.world.build"))
     def carry_out_home(self, action, actor):
         if self is not getattr(actor, "character", None):
             return SKIP
@@ -336,7 +365,7 @@ class CharacterGeneralRules(NickRules):
             caller.move_to(home, move_type="teleport")
         return CLAIM
 
-    @rule(SetHelp, phase="carry_out", requires=HelperCap)
+    @rule(SetHelp, phase="carry_out", requires=HasCapability("engine.help.manage"))
     def carry_out_sethelp(self, action, actor):
         if self is not getattr(actor, "character", None):
             return SKIP
@@ -353,13 +382,8 @@ class CharacterGeneralRules(NickRules):
         reply. ``return CLAIM`` ends the flow as for any carry_out rule.
         """
         from evennia.help.catalog import is_action_help_topic
-        from evennia.help.formatters import (
-            HelpCategory,
-            _loadhelp,
-            _quithelp,
-            _savehelp,
-        )
-        from evennia.locks.lockhandler import LockException
+        from evennia.help.formatters import (HelpCategory, _loadhelp,
+                                             _quithelp, _savehelp)
         from evennia.utils import create
         from evennia.utils.eveditor import EvEditor
         from evennia.utils.utils import inherits_from
@@ -371,7 +395,7 @@ class CharacterGeneralRules(NickRules):
 
         if not action.args:
             caller.msg(
-                "Usage: @sethelp[/switches] <topic>[;alias;alias][,category[,locks]]"
+                "Usage: @sethelp[/switches] <topic>[;alias;alias][,category[,capability]]"
                 " [= <text or new category>]"
             )
             return CLAIM
@@ -402,7 +426,7 @@ class CharacterGeneralRules(NickRules):
         entries = list(all_topics.values()) + all_categories
 
         category = lhslist[1] if nlist > 1 else settings.DEFAULT_HELP_CATEGORY
-        lockstring = ",".join(lhslist[2:]) if nlist > 2 else "read:all()"
+        policy_declaration = ",".join(lhslist[2:]) if nlist > 2 else "public"
 
         for querystr in topicstrlist:
             match, _ = helper.do_search(querystr, entries)
@@ -437,7 +461,10 @@ class CharacterGeneralRules(NickRules):
                 if (repl or "").lower() in ("y", "yes"):
                     db_topics = {**db_help_topics}
                     db_categories = list(
-                        set(HelpCategory(topic.help_category) for topic in db_topics.values())
+                        set(
+                            HelpCategory(topic.help_category)
+                            for topic in db_topics.values()
+                        )
                     )
                     db_entries = list(db_topics.values()) + db_categories
                     match, _ = helper.do_search(querystr, db_entries)
@@ -449,7 +476,7 @@ class CharacterGeneralRules(NickRules):
             else:
                 old_entry = match
                 category = lhslist[1] if nlist > 1 else old_entry.help_category
-                lockstring = ",".join(lhslist[2:]) if nlist > 2 else old_entry.locks.get()
+                policy_declaration = ",".join(lhslist[2:]) if nlist > 2 else "public"
                 break
 
         category = category.lower()
@@ -465,7 +492,7 @@ class CharacterGeneralRules(NickRules):
                     topicstr,
                     action.rhs if action.rhs is not None else "",
                     category=category,
-                    locks=lockstring,
+                    policies={"read": _help_policy(policy_declaration)},
                     aliases=aliases,
                 )
             caller.db._editing_help = helpentry
@@ -481,7 +508,9 @@ class CharacterGeneralRules(NickRules):
 
         if "append" in switches or "merge" in switches or "extend" in switches:
             if not old_entry:
-                caller.msg(f"Could not find topic '{topicstr}'. You must give an exact name.")
+                caller.msg(
+                    f"Could not find topic '{topicstr}'. You must give an exact name."
+                )
                 return CLAIM
             if not action.rhs:
                 caller.msg("You must supply text to append/merge.")
@@ -503,33 +532,37 @@ class CharacterGeneralRules(NickRules):
                 return CLAIM
             category = action.rhs.lower()
             old_entry.help_category = category
-            caller.msg(f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'.")
+            caller.msg(
+                f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'."
+            )
             return CLAIM
 
-        if "locks" in switches:
+        if "policy" in switches:
             if not old_entry:
                 caller.msg(f"Could not find topic '{topicstr}'{aliastxt}.")
                 return CLAIM
-            show_locks = not rhslist
-            clear_locks = rhslist and not rhslist[0]
-            if show_locks:
-                caller.msg(f"Current locks for entry '{topicstr}'{aliastxt} are: {old_entry.locks}")
+            show_policy = not rhslist
+            clear_policy = rhslist and not rhslist[0]
+            if show_policy:
+                policy = old_entry.policies.get("read")
+                caller.msg(
+                    f"Current read policy for '{topicstr}'{aliastxt}: "
+                    f"{policy.to_data() if policy else '<class default>'}"
+                )
                 return CLAIM
-            if clear_locks:
-                old_entry.locks.clear()
-                old_entry.locks.add("read:all()")
-                caller.msg(f"Locks for entry '{topicstr}'{aliastxt} reset to: read:all()")
+            if clear_policy:
+                old_entry.policies.set("read", Always())
+                caller.msg(f"Read policy for '{topicstr}'{aliastxt} reset to public.")
                 return CLAIM
-            lockstring = ",".join(rhslist)
-            existing_locks = old_entry.locks.all()
-            old_entry.locks.clear()
             try:
-                old_entry.locks.add(lockstring)
-            except LockException as e:
-                old_entry.locks.add(existing_locks)
-                caller.msg(str(e) + " Locks not changed.")
-            else:
-                caller.msg(f"Locks for entry '{topicstr}'{aliastxt} changed to: {lockstring}")
+                policy = _help_policy(",".join(rhslist))
+            except (TypeError, ValueError) as err:
+                caller.msg(f"Policy not changed: {err}")
+                return CLAIM
+            old_entry.policies.set("read", policy)
+            caller.msg(
+                f"Read policy for '{topicstr}'{aliastxt} changed to: {policy.to_data()}"
+            )
             return CLAIM
 
         if "delete" in switches or "del" in switches:
@@ -549,8 +582,7 @@ class CharacterGeneralRules(NickRules):
                 old_entry.key = topicstr
                 old_entry.entrytext = action.rhs
                 old_entry.help_category = category
-                old_entry.locks.clear()
-                old_entry.locks.add(lockstring)
+                old_entry.policies.set("read", _help_policy(policy_declaration))
                 old_entry.aliases.add(aliases)
                 old_entry.save()
                 caller.msg(f"Overwrote the old topic '{topicstr}'{aliastxt}.")
@@ -561,10 +593,16 @@ class CharacterGeneralRules(NickRules):
                 )
         else:
             new_entry = create.create_help_entry(
-                topicstr, action.rhs, category=category, locks=lockstring, aliases=aliases
+                topicstr,
+                action.rhs,
+                category=category,
+                policies={"read": _help_policy(policy_declaration)},
+                aliases=aliases,
             )
             if new_entry:
                 caller.msg(f"Topic '{topicstr}'{aliastxt} was successfully created.")
             else:
-                caller.msg(f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin.")
+                caller.msg(
+                    f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin."
+                )
         return CLAIM

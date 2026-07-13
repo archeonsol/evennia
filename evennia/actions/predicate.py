@@ -1,73 +1,15 @@
-"""
-Predicate algebra — the typed, composable replacement for Evennia lock strings.
+"""Typed, composable action predicates.
 
-A lock is just a ``check`` rule whose body is a predicate. This module supplies
-that body type: a small algebra of frozen, slotted dataclass nodes that compose
-with ``&`` / ``|`` / ``~`` into a tree which is *data* — introspectable,
-hashable, internable — rather than an opaque closure or a runtime-parsed string.
-
-Why this shape (CM1 Phase 0f / Gate 5, absorbing L1)
-====================================================
-
-This is the typed authoring surface for *code-defined* command/action gates. It
-does **not** retire Evennia's lock DSL: a string is the right serialization
-format for runtime/persisted per-object locks, and that job stays with the DSL.
-Both surfaces resolve against the one shared capability model (permission.py), so
-a code gate ``requires=Builder`` and a persisted ``perm(Builder)`` agree by
-construction — only the authoring surface differs, never the permission state.
-
-The headline payoff is **introspectability**, not speed: a predicate tree is data,
-so ``describe()`` renders it for help/UI, ``unmet()`` names the first failing
-clause for an actionable error, and a proactive UI can grey out a disabled verb
-*before* the player tries it. The type checker becomes the lock linter. (An opaque
-runtime-parsed lock string offers none of this.)
-
-Design constraints (deliberate):
-
-* stdlib only — no new dependency;
-* no homegrown expression DSL (that is just reinventing the lock string);
-* no JIT/bytecode;
-* no async predicates — ``check`` is synchronous per the AS1/CM1 contract.
-
-The leverage is ``IntFlag`` (permission.py), frozen+slotted dataclasses, cost
-ordering, and end-to-end static typing.
-
-Cost model
-==========
-
-Each leaf declares an integer ``cost`` so :class:`And` / :class:`Or` can evaluate
-cheap leaves first and short-circuit::
-
-    0 = capability bit (int AND)   1 = identity compare
-    2 = attribute read             3 = DB query / arbitrary callable
-
-``And._build`` / ``Or._build`` flatten nested same-type nodes and sort leaves by
-``cost`` ascending **once at construction** (the node is frozen), so
-``Builder & Holds() & HasTag("vip")`` always checks the ~10ns capability bit
-before the DB tag lookup. Identical expressions intern to one shared node, and
-there is no per-dispatch parsing — ever.
-
-The ``requires=`` contract
-==========================
-
-``@rule(..., requires=...)`` accepts a :class:`Predicate`, a
-:class:`~evennia.actions.permission.Capability` (coerced to
-:class:`HasCapability`), or a bare callable ``(action, actor) -> bool`` (coerced
-to a ``cost=3`` leaf). It does **not** accept a lock *string* — that raises
-``TypeError``. Strings are transpiled explicitly via :func:`from_lockstring`.
+Predicate trees are immutable data used for introspection, actionable failure
+explanations, cost ordering, and per-dispatch memoization. A registered
+namespaced capability string compiles directly to :class:`HasCapability`.
+There is no rank hierarchy, expression parser, or compatibility evaluator.
 """
 
-import re
 from dataclasses import dataclass
 
-from .permission import (
-    Capability,
-    Scope,
-    capability_for_name,
-    get_capability_enum,
-    rank_order,
-    resolve_capabilities,
-)
+from evennia.authorization.capabilities import normalize_capability
+from evennia.authorization.service import has_capability
 
 __all__ = [
     "Predicate",
@@ -82,17 +24,9 @@ __all__ = [
     "And",
     "Or",
     "Not",
-    "Builder",
-    "Admin",
-    "Developer",
-    "Player",
-    "Helper",
-    "Guest",
     "ALWAYS",
     "NEVER",
     "coerce_predicate",
-    "from_lockstring",
-    "LegacyLock",
 ]
 
 
@@ -185,19 +119,14 @@ def coerce_predicate(value) -> Predicate:
     """Coerce ``requires=`` input to a :class:`Predicate`.
 
     * :class:`Predicate` → returned unchanged.
-    * :class:`Capability` → :class:`HasCapability` (interned).
+    * namespaced capability string → :class:`HasCapability` (interned).
     * bare callable ``(action, actor) -> bool`` → ``cost=3`` leaf.
-    * ``str`` → ``TypeError`` (lock strings must go through ``from_lockstring``).
+    * namespaced ``str`` → :class:`HasCapability`.
     """
     if isinstance(value, Predicate):
         return value
-    if isinstance(value, Capability):
-        return _intern(HasCapability(value))
     if isinstance(value, str):
-        raise TypeError(
-            "requires= does not accept lock strings; use a Predicate/Capability, "
-            "or transpile explicitly with evennia.actions.from_lockstring()."
-        )
+        return _intern(HasCapability(value))
     if callable(value):
         return _intern(_Callable(value))
     raise TypeError(f"cannot coerce {value!r} to a Predicate")
@@ -222,28 +151,43 @@ class _Const(Predicate):
 
 @dataclass(frozen=True, slots=True)
 class HasCapability(Predicate):
-    """Actor holds a capability bit — the typed equivalent of ``perm()``.
+    """Require one namespaced capability from the structured grant store."""
 
-    The mask is resolved **fresh** on every check via
-    :func:`~evennia.actions.permission.resolve_capabilities` (no stored,
-    staleable ``actor.capabilities``). ``scope`` selects whose permissions count
-    and defaults to :attr:`Scope.EFFECTIVE` (the account+puppet+quell view). The
-    underlying read hits the in-memory tag cache, so cost is 1 (a cheap leaf that
-    still sorts ahead of attribute/DB leaves), not a DB query.
-    """
-
-    cap: Capability
-    scope: Scope = Scope.EFFECTIVE
+    capability: str
+    principal_scope: str = "effective"
     cost = 1
 
+    def __post_init__(self):
+        object.__setattr__(self, "capability", normalize_capability(self.capability))
+        scope = str(self.principal_scope).lower()
+        if scope not in {"effective", "account", "object", "session"}:
+            raise ValueError(f"invalid principal scope {scope!r}")
+        object.__setattr__(self, "principal_scope", scope)
+
     def _obj(self, actor):
-        return getattr(actor, "effective", None) or getattr(actor, "character", None) or actor
+        return (
+            getattr(actor, "effective", None)
+            or getattr(actor, "character", None)
+            or actor
+        )
 
     def __call__(self, action, actor) -> bool:
-        return self.cap in resolve_capabilities(self._obj(actor), scope=self.scope)
+        principal = self._obj(actor)
+        if self.principal_scope == "account":
+            principal = getattr(actor, "account", None) or getattr(
+                principal, "account", None
+            )
+        elif self.principal_scope == "session":
+            principal = getattr(actor, "session", None)
+        if not principal:
+            return False
+        facade = getattr(principal, "has_capability", None)
+        if callable(facade):
+            return bool(facade(self.capability))
+        return has_capability(principal, self.capability)
 
     def describe(self) -> str:
-        return f"requires {self.cap.name.title()}"
+        return f"requires {self.capability}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -498,250 +442,11 @@ class Not(Predicate):
 
 
 # ---------------------------------------------------------------------------
-# Ergonomic singletons — authors never touch the leaf classes directly
+# Constants
 # ---------------------------------------------------------------------------
 ALWAYS = _intern(_Const(True))
 NEVER = _intern(_Const(False))
 
 
-def _cap_singleton(rank_name):
-    """Bind a rank singleton to the active enum's member, or NEVER if absent.
-
-    The standard rank names (GUEST..DEVELOPER) mirror PERMISSION_HIERARCHY; a game
-    that swaps the enum but keeps those names keeps these singletons too.
-    """
-    cap = getattr(get_capability_enum(), rank_name, None)
-    return _intern(HasCapability(cap)) if cap is not None else NEVER
-
-
-Guest = _cap_singleton("GUEST")
-Player = _cap_singleton("PLAYER")
-Helper = _cap_singleton("HELPER")
-Builder = _cap_singleton("BUILDER")
-Admin = _cap_singleton("ADMIN")
-Developer = _cap_singleton("DEVELOPER")
-
 IsAlive = IsAlive()
 InSameRoom = InSameRoom()
-
-
-# ---------------------------------------------------------------------------
-# Lock-string transpiler + LegacyLock fallback (Phase 0f-bis)
-# ---------------------------------------------------------------------------
-# Token regex: a func-call atom OR a boolean operator. The func alternative is
-# listed first so an operator inside arguments is never split out separately.
-_TOKEN_RE = re.compile(r"\w+\([^)]*\)|\bAND\b|\bOR\b|\bNOT\b", re.IGNORECASE)
-_FUNC_RE = re.compile(r"^(\w+)\((.*)\)$", re.DOTALL)
-
-# Once-per-lockstring dedupe so a transpiled LegacyLock warns exactly once.
-_LEGACY_WARNED: set = set()
-
-
-def _parse_args(rest):
-    """Split a lockfunc arg string into positional args (kwargs ignored for
-    mapping; LegacyLock preserves the raw string for full fidelity)."""
-    return [a.strip() for a in rest.split(",") if a.strip() and "=" not in a]
-
-
-@dataclass(frozen=True, slots=True)
-class LegacyLock(Predicate):
-    """Fallback leaf for lock funcs with no typed predicate equivalent.
-
-    Re-enters Evennia's existing lock evaluator (``check_lockstring``) against the
-    actor's effective object, so transpilation NEVER silently drops semantics.
-    Warns once per distinct lockstring so flagged sites can be hand-ported, then
-    the ``LockHandler`` retires once ``LegacyLock`` dispatch hits zero (Phase 8).
-    """
-
-    lockstring: str
-    access_type: str
-    cost = 3
-
-    def __call__(self, action, actor) -> bool:
-        from evennia.locks.lockhandler import check_lockstring
-
-        if self.lockstring not in _LEGACY_WARNED:
-            _LEGACY_WARNED.add(self.lockstring)
-            try:
-                from evennia.utils import logger
-
-                logger.log_warn(
-                    f"LegacyLock fallback for unported lock {self.lockstring!r} "
-                    f"(access_type={self.access_type!r}); hand-port to a predicate."
-                )
-            except Exception:
-                pass
-        obj = getattr(actor, "effective", None) or getattr(actor, "character", None)
-        account = getattr(obj, "account", None) if obj is not None else None
-        if account is None and actor is not None:
-            account = getattr(actor, "account", None)
-        no_bypass = False
-        if account is not None:
-            try:
-                no_bypass = bool(account.attributes.get("_quell"))
-            except (AttributeError, TypeError):
-                no_bypass = False
-        return bool(
-            check_lockstring(
-                obj,
-                self.lockstring,
-                access_type=self.access_type,
-                default=False,
-                no_superuser_bypass=no_bypass,
-            )
-        )
-
-    def describe(self) -> str:
-        return f"legacy lock: {self.lockstring}"
-
-
-def _atom(funcstring, access_type, full_lockstring):
-    """Map one ``funcname(args)`` token to a predicate leaf."""
-    m = _FUNC_RE.match(funcstring.strip())
-    if not m:
-        return LegacyLock(full_lockstring, access_type)
-    name = m.group(1).strip().lower()
-    args = _parse_args(m.group(2))
-
-    if name in ("true", "all"):
-        return ALWAYS
-    if name in ("false", "none"):
-        return NEVER
-    if name in ("perm", "pperm"):
-        # pperm() is account-scoped; perm() uses the effective (quell-aware) view.
-        scope = Scope.ACCOUNT if name == "pperm" else Scope.EFFECTIVE
-        cap = capability_for_name(args[0]) if args else None
-        return (
-            _intern(HasCapability(cap, scope))
-            if cap is not None
-            else LegacyLock(full_lockstring, access_type)
-        )
-    if name in ("perm_above", "pperm_above"):
-        scope = Scope.ACCOUNT if name == "pperm_above" else Scope.EFFECTIVE
-        cap = capability_for_name(args[0]) if args else None
-        ranks = rank_order()
-        if cap is not None and cap in ranks:
-            idx = ranks.index(cap)
-            if idx + 1 < len(ranks):
-                return _intern(HasCapability(ranks[idx + 1], scope))
-        return LegacyLock(full_lockstring, access_type)
-    if name == "holds":
-        return _intern(Holds())
-    if name == "self":
-        return _intern(IsSelf())
-    if name in ("id", "dbref"):
-        try:
-            return _intern(IsObject(int(args[0])))
-        except (ValueError, IndexError):
-            return LegacyLock(full_lockstring, access_type)
-    if name == "tag":
-        key = args[0] if args else ""
-        category = args[1] if len(args) > 1 else None
-        return _intern(HasTag(key, category))
-    if name == "attr":
-        attr_name = args[0] if args else ""
-        value = args[1] if len(args) > 1 else None
-        return _intern(HasAttr(attr_name, value))
-    return LegacyLock(full_lockstring, access_type)
-
-
-def _tokenize(rhs):
-    tokens = []
-    for m in _TOKEN_RE.finditer(rhs):
-        t = m.group(0)
-        up = t.upper()
-        if up in ("AND", "OR", "NOT"):
-            tokens.append((up.lower(),))
-        else:
-            tokens.append(("func", t))
-    return tokens
-
-
-def _parse(tokens, access_type, full_lockstring):
-    """Recursive-descent parse honoring Python precedence: not > and > or."""
-    pos = 0
-
-    def parse_or():
-        nonlocal pos
-        node = parse_and()
-        while pos < len(tokens) and tokens[pos][0] == "or":
-            pos += 1
-            node = node | parse_and()
-        return node
-
-    def parse_and():
-        nonlocal pos
-        node = parse_not()
-        while pos < len(tokens) and tokens[pos][0] == "and":
-            pos += 1
-            node = node & parse_not()
-        return node
-
-    def parse_not():
-        nonlocal pos
-        if pos < len(tokens) and tokens[pos][0] == "not":
-            pos += 1
-            return ~parse_not()
-        tok = tokens[pos]
-        pos += 1
-        return _atom(tok[1], access_type, full_lockstring)
-
-    return parse_or()
-
-
-def from_lockstring(lockstring: str, access_type: str) -> Predicate:
-    """Transpile one Evennia lock string into a predicate tree.
-
-    Known lock funcs map cleanly to typed leaves::
-
-        perm()/pperm()         -> HasCapability      true()/all()  -> ALWAYS
-        perm_above()           -> HasCapability(next) false()/none()-> NEVER
-        holds()                -> Holds              self()        -> IsSelf
-        id()/dbref()           -> IsObject           tag()         -> HasTag
-        attr()                 -> HasAttr
-
-    Unknown / custom game lock funcs become a :class:`LegacyLock` leaf that falls
-    back to the existing evaluator and warns once, so semantics are never
-    silently dropped.
-
-    Args:
-        lockstring (str): A lock string, either a bare definition
-            (``"perm(Builder)"``) or one carrying its access type
-            (``"cmd:perm(Builder)"``); may contain several ``;``-separated
-            access types, in which case ``access_type`` selects the clause.
-        access_type (str): The access type to extract / attach.
-
-    Returns:
-        Predicate: The compiled predicate tree (single leaf or And/Or/Not).
-        Returns :data:`NEVER` if no clause matches the requested access type.
-    """
-    if not isinstance(lockstring, str):
-        raise TypeError("from_lockstring expects a lock string")
-
-    # Locate the clause for the requested access_type. A bare definition with no
-    # "atype:" prefix is treated as already being the requested clause.
-    rhs = None
-    matched_clause = lockstring
-    for clause in lockstring.split(";"):
-        clause = clause.strip()
-        if not clause:
-            continue
-        if ":" in clause:
-            atype, body = (p.strip() for p in clause.split(":", 1))
-            if atype.lower() == access_type.lower():
-                rhs = body
-                matched_clause = clause
-                break
-        else:
-            # no prefix -> this *is* the clause body
-            rhs = clause
-            matched_clause = f"{access_type}:{clause}"
-            break
-
-    if rhs is None:
-        return NEVER
-
-    tokens = _tokenize(rhs)
-    if not tokens:
-        return NEVER
-    return _parse(tokens, access_type, matched_clause)

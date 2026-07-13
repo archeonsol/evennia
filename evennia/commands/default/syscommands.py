@@ -22,7 +22,8 @@ from django.conf import settings
 
 # The command keys the engine is calling
 # (the actual names all start with __)
-from evennia.commands.cmdhandler import CMD_MULTIMATCH, CMD_NOINPUT, CMD_NOMATCH
+from evennia.commands.cmdhandler import (CMD_MULTIMATCH, CMD_NOINPUT,
+                                         CMD_NOMATCH)
 from evennia.comms.models import ChannelDB
 from evennia.utils import create, utils
 from evennia.utils.utils import at_search_result
@@ -39,7 +40,7 @@ class SystemNoInput(COMMAND_DEFAULT_CLASS):
     """
 
     key = CMD_NOINPUT
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         "Do nothing."
@@ -56,7 +57,7 @@ class SystemNoMatch(COMMAND_DEFAULT_CLASS):
     """
 
     key = CMD_NOMATCH
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -86,7 +87,7 @@ class SystemMultimatch(COMMAND_DEFAULT_CLASS):
     """
 
     key = CMD_MULTIMATCH
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -98,4 +99,6 @@ class SystemMultimatch(COMMAND_DEFAULT_CLASS):
         # evennia.commands.cmdparse.create_match for more details.
         matches = self.matches
         # at_search_result will itself msg the multimatch options to the caller.
-        at_search_result([match[2] for match in matches], self.caller, query=matches[0][0])
+        at_search_result(
+            [match[2] for match in matches], self.caller, query=matches[0][0]
+        )

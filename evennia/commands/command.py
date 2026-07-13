@@ -13,12 +13,12 @@ from django.conf import settings
 from django.urls import reverse
 from django.utils.text import slugify
 
-from evennia.locks.lockhandler import LockHandler
+from evennia.authorization.policy import (AllOf, Always, Never, Not, Policy,
+                                          PredicateRequirement,
+                                          RequiresCapability)
 from evennia.utils.ansi import ANSIString
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import is_iter, lazy_property, make_iter
-
-_RE_CMD_LOCKFUNC_IN_LOCKSTRING = re.compile(r"(^|;|\s)cmd\:\w+", re.DOTALL)
 
 
 class InterruptCommand(Exception):
@@ -32,8 +32,8 @@ def _init_command(cls, **kwargs):
     Helper command.
     Makes sure all data are stored as lowercase and
     do checking on all properties that should be in list form.
-    Sets up locks to be more forgiving. This is used both by the metaclass
-    and (optionally) at instantiation time.
+    Compiles the structured authorization declaration. This is used both by
+    the metaclass and (optionally) at instantiation time.
 
     If kwargs are given, these are set as instance-specific properties
     on the command - but note that the Command instance is *re-used* on a given
@@ -49,10 +49,14 @@ def _init_command(cls, **kwargs):
     cls.key = cls.key.lower()
     if cls.aliases and not is_iter(cls.aliases):
         try:
-            cls.aliases = [str(alias).strip().lower() for alias in cls.aliases.split(",")]
+            cls.aliases = [
+                str(alias).strip().lower() for alias in cls.aliases.split(",")
+            ]
         except Exception:
             cls.aliases = []
-    cls.aliases = list(set(alias for alias in cls.aliases if alias and alias != cls.key))
+    cls.aliases = list(
+        set(alias for alias in cls.aliases if alias and alias != cls.key)
+    )
 
     # optimization - a set is much faster to match against than a list. This is useful
     # for 'does any match' kind of queries
@@ -67,20 +71,35 @@ def _init_command(cls, **kwargs):
     if not hasattr(cls, "save_for_next"):
         cls.save_for_next = False
 
-    # pre-process locks as defined in class definition
-    temp = []
-    if hasattr(cls, "permissions"):
-        cls.locks = cls.permissions
-    if not hasattr(cls, "locks"):
-        # default if one forgets to define completely
-        cls.locks = "cmd:all()"
-    if not _RE_CMD_LOCKFUNC_IN_LOCKSTRING.search(cls.locks):
-        cls.locks = "cmd:all();" + cls.locks
-    for lockstring in cls.locks.split(";"):
-        if lockstring and ":" not in lockstring:
-            lockstring = "cmd:%s" % lockstring
-        temp.append(lockstring)
-    cls.lock_storage = ";".join(temp)
+    # R3F command authority is declared as one validated policy token or typed
+    # Policy node. Lockstring declarations are rejected at class creation.
+    if "locks" in cls.__dict__ or "permissions" in cls.__dict__:
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} declares removed command locks; "
+            "use authorization='public' or a namespaced capability"
+        )
+    declaration = cls.__dict__.get(
+        "authorization", getattr(cls, "authorization", "public")
+    )
+    explicit_policy = cls.__dict__.get("authorization_policy")
+    if explicit_policy is not None:
+        if not isinstance(explicit_policy, Policy):
+            raise TypeError("authorization_policy must be a Policy node")
+        cls.authorization_policy = explicit_policy
+    elif declaration == "public":
+        cls.authorization_policy = Always()
+    elif declaration == "disabled":
+        cls.authorization_policy = Never()
+    else:
+        cls.authorization_policy = RequiresCapability(str(declaration))
+    exclusions = tuple(getattr(cls, "authorization_excludes", ()))
+    setting_key = str(getattr(cls, "authorization_setting", "") or "")
+    parts = [cls.authorization_policy]
+    parts.extend(Not(RequiresCapability(capability)) for capability in exclusions)
+    if setting_key:
+        parts.append(PredicateRequirement("setting.enabled", {"key": setting_key}))
+    if len(parts) > 1:
+        cls.authorization_policy = AllOf(tuple(parts))
 
     if hasattr(cls, "arg_regex") and isinstance(cls.arg_regex, str):
         cls.arg_regex = re.compile(r"%s" % cls.arg_regex, re.I + re.UNICODE)
@@ -163,7 +182,7 @@ class Command(metaclass=CommandMeta):
 
     key - identifier for command (e.g. "look")
     aliases - (optional) list of aliases (e.g. ["l", "loo"])
-    locks - lock string (default is "cmd:all()")
+    authorization - ``public``, ``disabled``, or a namespaced capability
     help_category - how to organize this help entry in help system
                     (default is "General")
     auto_help - defaults to True. Allows for turning off auto-help generation
@@ -187,9 +206,11 @@ class Command(metaclass=CommandMeta):
     key = "command"
     # alternative ways to call the command (e.g. 'l', 'glance', 'examine')
     aliases = []
-    # a list of lock definitions on the form
-    #   cmd:[NOT] func(args) [ AND|OR][ NOT] func2(args)
-    locks = settings.COMMAND_DEFAULT_LOCKS
+    # Capability policy declaration. Subclasses may instead provide a typed
+    # ``authorization_policy`` for contextual composition.
+    authorization = "public"
+    authorization_excludes = ()
+    authorization_setting = ""
     # used by the help system to group commands in lists.
     help_category = settings.COMMAND_DEFAULT_HELP_CATEGORY
     # This allows to turn off auto-help entry creation for individual commands.
@@ -214,8 +235,7 @@ class Command(metaclass=CommandMeta):
 
     def __init__(self, **kwargs):
         """
-        The lockhandler works the same as for objects.
-        optional kwargs will be set as properties on the Command at runtime,
+        Optional kwargs are set as properties on the Command at runtime,
         overloading evential same-named class properties.
 
         """
@@ -223,15 +243,19 @@ class Command(metaclass=CommandMeta):
             _init_command(self, **kwargs)
         self._optimize()
 
-    @lazy_property
-    def lockhandler(self):
-        return LockHandler(self)
-
     def __str__(self):
         """
         Print the command key
         """
         return self.key
+
+    @lazy_property
+    def policies(self):
+        """Typed instance-policy overrides for dynamically bound commands."""
+
+        from evennia.authorization.handler import PolicyHandler
+
+        return PolicyHandler(self)
 
     def __eq__(self, cmd):
         """
@@ -401,9 +425,6 @@ class Command(metaclass=CommandMeta):
                 principal=srcobj,
                 resource=self,
                 session=session,
-            ),
-            legacy_evaluator=lambda: self.lockhandler.check(
-                srcobj, access_type, default=default, session=session
             ),
         )
         self._last_authorization_decision = decision
@@ -618,10 +639,14 @@ class Command(metaclass=CommandMeta):
             if switches and self.switch_options:
                 valid_switches, unused_switches, extra_switches = [], [], []
                 for element in switches:
-                    option_check = [opt for opt in self.switch_options if opt == element]
+                    option_check = [
+                        opt for opt in self.switch_options if opt == element
+                    ]
                     if not option_check:
                         option_check = [
-                            opt for opt in self.switch_options if opt.startswith(element)
+                            opt
+                            for opt in self.switch_options
+                            if opt.startswith(element)
                         ]
                     match_count = len(option_check)
                     if match_count > 1:
@@ -651,7 +676,9 @@ class Command(metaclass=CommandMeta):
         # check for arg1, arg2, ... = argA, argB, ... constructs
         lhs, rhs = args.strip(), None
         if lhs:
-            if delimiters and hasattr(delimiters, "__iter__"):  # If delimiter is iterable,
+            if delimiters and hasattr(
+                delimiters, "__iter__"
+            ):  # If delimiter is iterable,
                 best_split = delimiters[0]  # (default to first delimiter)
                 for this_split in delimiters:  # try each delimiter
                     if this_split in lhs:  # to find first successful split
@@ -690,7 +717,9 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
 
     {variables}"""
         variables = [
-            " |w{}|n ({}): {}".format(key, type(val), f'"{val}"' if isinstance(val, str) else val)
+            " |w{}|n ({}): {}".format(
+                key, type(val), f'"{val}"' if isinstance(val, str) else val
+            )
             for key, val in (
                 ("self.key", self.key),
                 ("self.cmdname", self.cmdstring),
@@ -701,12 +730,14 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
                 ("self.caller", self.caller),
                 ("self.obj", self.obj),
                 ("self.session", self.session),
-                ("self.locks", self.locks),
+                ("self.authorization_policy", self.authorization_policy),
                 ("self.help_category", self.help_category),
                 ("self.cmdset", self.cmdset),
             )
         ]
-        output = output_string.format(cmdname=self.key, variables="\n    ".join(variables))
+        output = output_string.format(
+            cmdname=self.key, variables="\n    ".join(variables)
+        )
         self.msg(output)
 
     def func(self):
@@ -790,7 +821,10 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
         try:
             return reverse(
                 "help-entry-detail",
-                kwargs={"category": slugify(self.help_category), "topic": slugify(self.key)},
+                kwargs={
+                    "category": slugify(self.help_category),
+                    "topic": slugify(self.key),
+                },
             )
         except Exception:
             return "#"
@@ -924,15 +958,21 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
         if header_text:
             if color_header:
                 header_text = ANSIString(header_text).clean()
-                header_text = ANSIString("|n|%s%s|n" % (colors["headertext"], header_text))
+                header_text = ANSIString(
+                    "|n|%s%s|n" % (colors["headertext"], header_text)
+                )
             if mode == "header":
                 begin_center = ANSIString(
                     "|n|%s<|%s* |n" % (colors["border"], colors["headerstar"])
                 )
-                end_center = ANSIString("|n |%s*|%s>|n" % (colors["headerstar"], colors["border"]))
+                end_center = ANSIString(
+                    "|n |%s*|%s>|n" % (colors["headerstar"], colors["border"])
+                )
                 center_string = ANSIString(begin_center + header_text + end_center)
             else:
-                center_string = ANSIString("|n |%s%s |n" % (colors["headertext"], header_text))
+                center_string = ANSIString(
+                    "|n |%s%s |n" % (colors["headertext"], header_text)
+                )
         else:
             center_string = ""
 
@@ -946,14 +986,22 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
             right_width = math.floor(remain_fill / 2)
             left_width = math.ceil(remain_fill / 2)
 
-        right_fill = ANSIString("|n|%s%s|n" % (colors["border"], fill_character * int(right_width)))
-        left_fill = ANSIString("|n|%s%s|n" % (colors["border"], fill_character * int(left_width)))
+        right_fill = ANSIString(
+            "|n|%s%s|n" % (colors["border"], fill_character * int(right_width))
+        )
+        left_fill = ANSIString(
+            "|n|%s%s|n" % (colors["border"], fill_character * int(left_width))
+        )
 
         if edge_character:
             edge_fill = ANSIString("|n|%s%s|n" % (colors["border"], edge_character))
             main_string = ANSIString(center_string)
             final_send = (
-                ANSIString(edge_fill) + left_fill + main_string + right_fill + ANSIString(edge_fill)
+                ANSIString(edge_fill)
+                + left_fill
+                + main_string
+                + right_fill
+                + ANSIString(edge_fill)
             )
         else:
             final_send = left_fill + ANSIString(center_string) + right_fill

@@ -13,9 +13,11 @@ from django.db.models import Q
 from evennia.accounts import bots
 from evennia.accounts.models import AccountDB
 from evennia.actions.menus import ask_yes_no
+from evennia.authorization.policy import Always, Never, RequiresCapability
+from evennia.authorization.service import has_capability
+from evennia.authorization.storage import grant_capability, principal_refs
 from evennia.comms.comms import DefaultChannel
 from evennia.comms.models import Msg
-from evennia.locks.lockhandler import LockException
 from evennia.utils import create, logger, search, utils
 from evennia.utils.logger import tail_log_file
 from evennia.utils.utils import class_from_module, strip_unsafe_input
@@ -62,8 +64,8 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
       channel/create channelname[;alias;alias[:typeclass]] [= description]
       channel/destroy channelname [= reason]
       channel/desc channelname = description
-      channel/lock channelname = lockstring
-      channel/unlock channelname = lockstring
+      channel/policy channelname = operation=public|disabled|capability
+      channel/unpolicy channelname = operation
       channel/ban channelname   (list bans)
       channel/ban[/quiet] channelname[, channelname, ...] = subscribername [: reason]
       channel/unban[/quiet] channelname[, channelname, ...] = subscribername
@@ -164,22 +166,21 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
     join the channel you create and everyone will be kicked and loose all aliases
     to a destroyed channel.
 
-    ## lock and unlock
+    ## policy and unpolicy
 
-    Usage: channel/lock channelname = lockstring
-           channel/unlock channelname = lockstring
+    Usage: channel/policy channelname = operation=public|disabled|capability
+           channel/unpolicy channelname = operation
 
     Note: this is an admin command.
 
-    A lockstring is on the form locktype:lockfunc(). Channels understand three
-    locktypes:
+    Channels understand three policy operations:
         listen - who may listen or join the channel.
         send - who may send messages to the channel
         control - who controls the channel. This is usually the one creating
             the channel.
 
-    Common lockfuncs are all() and perm(). To make a channel everyone can
-    listen to but only builders can talk on, use this:
+    To make a channel public to listen but restricted to send, use ``public``
+    for listen and a namespaced capability for send.
 
         listen:all()
         send: perm(Builders)
@@ -211,10 +212,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
     key = "@channel"
     aliases = ["@chan", "@channels"]
     help_category = "Comms"
-    # these cmd: lock controls access to the channel command itself
-    # the admin: lock controls access to /boot/ban/unban switches
-    # the manage: lock  controls access to /create/destroy/desc/lock/unlock switches
-    locks = "cmd:not pperm(channel_banned);admin:all();manage:all();changelocks:perm(Admin)"
+    # Command and administrative authority use explicit capabilities.
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
     switch_options = (
         "list",
         "all",
@@ -228,8 +228,8 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         "create",
         "destroy",
         "desc",
-        "lock",
-        "unlock",
+        "policy",
+        "unpolicy",
         "boot",
         "ban",
         "unban",
@@ -263,14 +263,20 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         """
         caller = self.caller
         # first see if this is a personal alias
-        channelname = caller.nicks.get(key=channelname, category="channel") or channelname
+        channelname = (
+            caller.nicks.get(key=channelname, category="channel") or channelname
+        )
 
         # always try the exact match first.
-        channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(channelname, exact=True)
+        channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(
+            channelname, exact=True
+        )
 
         if not channels and not exact:
             # try fuzzy matching as well
-            channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(channelname, exact=exact)
+            channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(
+                channelname, exact=exact
+            )
 
         # check permissions
         channels = [
@@ -337,7 +343,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
         def send_msg(lines):
             return self.msg(
-                "".join(line.split("[-]", 1)[1] if "[-]" in line else line for line in lines)
+                "".join(
+                    line.split("[-]", 1)[1] if "[-]" in line else line for line in lines
+                )
             )
 
         # asynchronously tail the log file
@@ -364,7 +372,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         # this sets up aliases in post_join_channel by default
         result = channel.connect(caller)
 
-        return result, "" if result else f"Were not allowed to subscribe to channel {channel.key}"
+        return result, (
+            "" if result else f"Were not allowed to subscribe to channel {channel.key}"
+        )
 
     def unsub_from_channel(self, channel, **kwargs):
         """
@@ -388,7 +398,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         # this will also clean aliases
         result = channel.disconnect(caller)
 
-        return result, "" if result else f"Could not unsubscribe from channel {channel.key}"
+        return result, (
+            "" if result else f"Could not unsubscribe from channel {channel.key}"
+        )
 
     def add_alias(self, channel, alias, **kwargs):
         """
@@ -452,7 +464,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
         """
         chan_key = channel.key.lower()
-        nicktuples = self.caller.nicks.get(category="channel", return_tuple=True, return_list=True)
+        nicktuples = self.caller.nicks.get(
+            category="channel", return_tuple=True, return_list=True
+        )
         if nicktuples:
             return [tup[2] for tup in nicktuples if tup[3].lower() == chan_key]
         return []
@@ -514,11 +528,15 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         if typeclass.objects.channel_search(name, exact=True):
             return False, f"Channel {name} already exists."
 
-        # set up the new channel
-        lockstring = "send:all();listen:all();control:id(%s)" % caller.id
-
         new_chan = create.create_channel(
-            name, aliases=aliases, desc=description, locks=lockstring, typeclass=typeclass
+            name, aliases=aliases, desc=description, typeclass=typeclass
+        )
+        grant_capability(
+            principal_refs(caller)[0],
+            "engine.channel.control",
+            scope_kind="resource",
+            scope_key=new_chan.authorization_resource_ref(),
+            provenance="channel_creator",
         )
         self.sub_to_channel(new_chan)
         return new_chan, ""
@@ -551,45 +569,22 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         channel.delete()
         logger.log_sec(f"Channel {channel_key} was deleted by {caller}")
 
-    def set_lock(self, channel, lockstring):
-        """
-        Set a lockstring on a channel. Permissions must have been
-        checked before this call.
+    def set_policy(self, channel, operation, declaration):
+        """Set one typed channel policy declaration."""
 
-        Args:
-            channel (Channel): The channel to operate on.
-            lockstring (str): A lockstring on the form 'type:lockfunc();...'
+        declaration = declaration.strip().lower()
+        if declaration == "public":
+            policy = Always()
+        elif declaration == "disabled":
+            policy = Never()
+        else:
+            policy = RequiresCapability(declaration)
+        channel.policies.set(operation, policy)
 
-        Returns:
-            bool, str: True, None if setting lock was successful. If False,
-                the second part is an error string.
+    def unset_policy(self, channel, operation):
+        """Remove one channel instance-policy override."""
 
-        """
-        try:
-            channel.locks.add(lockstring)
-        except LockException as err:
-            return False, err
-        return True, ""
-
-    def unset_lock(self, channel, lockstring):
-        """
-        Remove locks in a lockstring on a channel. Permissions must have been
-        checked before this call.
-
-        Args:
-            channel (Channel): The channel to operate on.
-            lockstring (str): A lockstring on the form 'type:lockfunc();...'
-
-        Returns:
-            bool, str: True, None if setting lock was successful. If False,
-                the second part is an error string.
-
-        """
-        try:
-            channel.locks.remove(lockstring)
-        except LockException as err:
-            return False, err
-        return True, ""
+        return channel.policies.remove(operation)
 
     def set_desc(self, channel, description):
         """
@@ -634,9 +629,13 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             nick.delete()
         channel.disconnect(target)
         reason = f" Reason: {reason}" if reason else ""
-        target.msg(f"You were booted from channel {channel.key} by {self.caller.key}.{reason}")
+        target.msg(
+            f"You were booted from channel {channel.key} by {self.caller.key}.{reason}"
+        )
         if not quiet:
-            channel.msg(f"{target.key} was booted from channel by {self.caller.key}.{reason}")
+            channel.msg(
+                f"{target.key} was booted from channel by {self.caller.key}.{reason}"
+            )
 
         logger.log_sec(
             f"Channel Boot: {target} (Channel: {channel}, "
@@ -772,16 +771,23 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             "id",
             "channel",
             "my aliases",
-            "locks",
+            "policies",
             "description",
             align="l",
             maxwidth=settings.CLIENT_DEFAULT_WIDTH,
         )
         for chan in subscribed:
-            locks = "-"
+            policies = "-"
             chanid = "-"
             if chan.access(self.caller, "control"):
-                locks = chan.locks
+                authored = chan.policies.all()
+                policies = (
+                    "; ".join(
+                        f"{key}={policy.to_data()!r}"
+                        for key, policy in authored.items()
+                    )
+                    or "class defaults"
+                )
                 chanid = chan.id
 
             my_aliases = ", ".join(self.get_channel_aliases(chan))
@@ -790,10 +796,14 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
                     chanid,
                     "{key}{aliases}".format(
                         key=chan.key,
-                        aliases=";" + ";".join(chan.aliases.all()) if chan.aliases.all() else "",
+                        aliases=(
+                            ";" + ";".join(chan.aliases.all())
+                            if chan.aliases.all()
+                            else ""
+                        ),
                     ),
                     my_aliases,
-                    locks,
+                    policies,
                     chan.db.desc,
                 )
             )
@@ -870,7 +880,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             subscribed, _ = self.list_channels()
             table = self.display_subbed_channels(subscribed)
 
-            self.msg(f"\n|wChannel subscriptions|n (use |w/all|n to see all available):\n{table}")
+            self.msg(
+                f"\n|wChannel subscriptions|n (use |w/all|n to see all available):\n{table}"
+            )
             return
 
         if not self.switches and not self.args:
@@ -879,19 +891,23 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
         if "create" in switches:
             # create a new channel
-            if not self.access(caller, "manage"):
+            if not has_capability(caller, "engine.moderation.manage"):
                 self.msg("You don't have access to use channel/create.")
                 return
 
             config = self.lhs
             if not config:
-                self.msg("To create: channel/create name[;aliases][:typeclass] [= description]")
+                self.msg(
+                    "To create: channel/create name[;aliases][:typeclass] [= description]"
+                )
                 return
             name, *typeclass = config.rsplit(":", 1)
             typeclass = typeclass[0] if typeclass else None
             name, *aliases = name.rsplit(";")
             description = self.rhs or ""
-            chan, err = self.create_channel(name, description, typeclass=typeclass, aliases=aliases)
+            chan, err = self.create_channel(
+                name, description, typeclass=typeclass, aliases=aliases
+            )
             if chan:
                 self.msg(f"Created (and joined) new channel '{chan.key}'.")
             else:
@@ -927,7 +943,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         for channel_name in channel_names:
             # find a channel by fuzzy-matching. This also checks
             # 'listen/control' perms.
-            found_channels = self.search_channel(channel_name, exact=False, handle_errors=False)
+            found_channels = self.search_channel(
+                channel_name, exact=False, handle_errors=False
+            )
             if not found_channels:
                 errors.append(
                     f"No channel found matching '{channel_name}' "
@@ -1013,7 +1031,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             # un-subscribe from a channel
             success, err = self.unsub_from_channel(channel)
             if success:
-                self.msg(f"You un-subscribed from channel {channel.key}. All aliases were cleared.")
+                self.msg(
+                    f"You un-subscribed from channel {channel.key}. All aliases were cleared."
+                )
             else:
                 self.msg(err)
             return
@@ -1049,7 +1069,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         if "destroy" in switches or "delete" in switches:
             # destroy a channel we control
 
-            if not self.access(caller, "manage"):
+            if not has_capability(caller, "engine.moderation.manage"):
                 self.msg("You don't have access to use channel/destroy.")
                 return
 
@@ -1078,7 +1098,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         if "desc" in switches:
             # set channel description
 
-            if not self.access(caller, "manage"):
+            if not has_capability(caller, "engine.channel.control", resource=channel):
                 self.msg("You don't have access to use channel/desc.")
                 return
 
@@ -1095,63 +1115,57 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             self.set_desc(channel, desc)
             self.msg("Updated channel description.")
 
-        if "lock" in switches:
-            # add a lockstring to channel
-
-            if not self.access(caller, "changelocks"):
-                self.msg("You don't have access to use channel/lock.")
+        if "policy" in switches:
+            if not has_capability(caller, "engine.channel.control", resource=channel):
+                self.msg("You don't have access to use channel/policy.")
                 return
 
             if not channel.access(caller, "control"):
-                self.msg("You need 'control'-access to change locks on this channel.")
+                self.msg("You need control access to change policies on this channel.")
                 return
 
-            lockstring = self.rhs.strip()
-
-            if not lockstring:
-                self.msg("Usage: channel/lock channelname = lockstring")
+            operation, separator, declaration = self.rhs.partition("=")
+            if not separator:
+                operation, declaration = "", self.rhs
+            operation = operation.strip()
+            declaration = declaration.strip()
+            if not operation or not declaration:
+                self.msg(
+                    "Usage: channel/policy channel = operation=public|disabled|capability"
+                )
                 return
-
-            success, err = self.set_lock(channel, self.rhs)
-            if success:
-                self.msg("Added/updated lock on channel.")
-            else:
-                self.msg(f"Could not add/update lock: {err}")
+            self.set_policy(channel, operation, declaration)
+            self.msg("Added or updated channel policy.")
             return
 
-        if "unlock" in switches:
-            # remove/update lockstring from channel
-
-            if not self.access(caller, "changelocks"):
-                self.msg("You don't have access to use channel/unlock.")
+        if "unpolicy" in switches:
+            if not has_capability(caller, "engine.channel.control", resource=channel):
+                self.msg("You don't have access to use channel/unpolicy.")
                 return
 
             if not channel.access(caller, "control"):
-                self.msg("You need 'control'-access to change locks on this channel.")
+                self.msg("You need control access to change policies on this channel.")
                 return
 
-            lockstring = self.rhs.strip()
-
-            if not lockstring:
-                self.msg("Usage: channel/unlock channelname = lockstring")
+            operation = self.rhs.strip()
+            if not operation:
+                self.msg("Usage: channel/unpolicy channel = operation")
                 return
-
-            success, err = self.unset_lock(channel, self.rhs)
-            if success:
-                self.msg("Removed lock from channel.")
-            else:
-                self.msg(f"Could not remove lock: {err}")
+            self.unset_policy(channel, operation)
+            self.msg("Removed channel policy override.")
             return
 
         if "boot" in switches:
             # boot a user from channel(s)
 
-            if not self.access(caller, "admin"):
+            if not has_capability(caller, "engine.moderation.manage"):
                 self.msg("You don't have access to use channel/boot.")
                 return
 
             if not self.rhs:
-                self.msg("Usage: channel/boot channel[,channel,...] = username [:reason]")
+                self.msg(
+                    "Usage: channel/boot channel[,channel,...] = username [:reason]"
+                )
                 return
 
             target_str, *reason = self.rhs.rsplit(":", 1)
@@ -1159,7 +1173,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             for chan in channels:
                 if not chan.access(caller, "control"):
-                    self.msg(f"You need 'control'-access to boot a user from {chan.key}.")
+                    self.msg(
+                        f"You need 'control'-access to boot a user from {chan.key}."
+                    )
                     return
 
                 # the target must be a member of all given channels
@@ -1170,15 +1186,21 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             def _boot_user(caller, *args, **kwargs):
                 for chan in channels:
-                    success, err = self.boot_user(chan, target, quiet=False, reason=reason)
+                    success, err = self.boot_user(
+                        chan, target, quiet=False, reason=reason
+                    )
                     if success:
                         self.msg(f"Booted {target.key} from channel {chan.key}.")
                     else:
-                        self.msg(f"Cannot boot {target.key} from channel {chan.key}: {err}")
+                        self.msg(
+                            f"Cannot boot {target.key} from channel {chan.key}: {err}"
+                        )
 
             channames = ", ".join(chan.key for chan in channels)
             reasonwarn = (
-                ". Also note that your reason will be echoed to the channel" if reason else ""
+                ". Also note that your reason will be echoed to the channel"
+                if reason
+                else ""
             )
             ask_yes_no(
                 caller,
@@ -1196,7 +1218,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         if "ban" in switches:
             # ban a user from channel(s)
 
-            if not self.access(caller, "admin"):
+            if not has_capability(caller, "engine.moderation.manage"):
                 self.msg("You don't have access to use channel/ban.")
                 return
 
@@ -1204,7 +1226,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
                 # view bans for channels
 
                 if not channel.access(caller, "control"):
-                    self.msg(f"You need 'control'-access to view bans on channel {channel.key}")
+                    self.msg(
+                        f"You need 'control'-access to view bans on channel {channel.key}"
+                    )
                     return
 
                 bans = [
@@ -1221,7 +1245,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             for chan in channels:
                 # the target must be a member of all given channels
                 if not chan.access(caller, "control"):
-                    self.msg(f"You don't have access to ban users on channel {chan.key}")
+                    self.msg(
+                        f"You don't have access to ban users on channel {chan.key}"
+                    )
                     return
 
                 target = caller.search(target_str, candidates=chan.subscriptions.all())
@@ -1232,15 +1258,21 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             def _ban_user(caller, *args, **kwargs):
                 for chan in channels:
-                    success, err = self.ban_user(chan, target, quiet=False, reason=reason)
+                    success, err = self.ban_user(
+                        chan, target, quiet=False, reason=reason
+                    )
                     if success:
                         self.msg(f"Banned {target.key} from channel {chan.key}.")
                     else:
-                        self.msg(f"Cannot boot {target.key} from channel {chan.key}: {err}")
+                        self.msg(
+                            f"Cannot boot {target.key} from channel {chan.key}: {err}"
+                        )
 
             channames = ", ".join(chan.key for chan in channels)
             reasonwarn = (
-                ". Also note that your reason will be echoed to the channel" if reason else ""
+                ". Also note that your reason will be echoed to the channel"
+                if reason
+                else ""
             )
             ask_yes_no(
                 caller,
@@ -1257,7 +1289,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         if "unban" in switches:
             # unban a previously banned user from channel
 
-            if not self.access(caller, "admin"):
+            if not has_capability(caller, "engine.moderation.manage"):
                 self.msg("You don't have access to use channel/unban.")
                 return
 
@@ -1271,13 +1303,17 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             for chan in channels:
                 # the target must be a member of all given channels
                 if not chan.access(caller, "control"):
-                    self.msg(f"You don't have access to unban users on channel {chan.key}")
+                    self.msg(
+                        f"You don't have access to unban users on channel {chan.key}"
+                    )
                     return
                 banlists.extend(chan.banlist)
 
             target = caller.search(target_str, candidates=banlists)
             if not target:
-                self.msg(f"Could not find a banned user '{target_str}' in given channel(s).")
+                self.msg(
+                    f"Could not find a banned user '{target_str}' in given channel(s)."
+                )
                 return
 
             for chan in channels:
@@ -1327,7 +1363,8 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
     key = "@page"
     aliases = ["@tell"]
     switch_options = ("last", "list")
-    locks = "cmd:not pperm(page_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.message.banned",)
     help_category = "Comms"
 
     # Opt into engine pre-parse caller normalisation: self.caller will
@@ -1341,23 +1378,31 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
         caller = self.caller
 
         # get the messages we've sent (not to channels)
-        pages_we_sent = Msg.objects.get_messages_by_sender(caller).order_by("-db_date_created")
+        pages_we_sent = Msg.objects.get_messages_by_sender(caller).order_by(
+            "-db_date_created"
+        )
         # get only messages tagged as pages or not tagged at all (legacy pages)
         pages_we_sent = pages_we_sent.filter(
             Q(db_tags__db_key__iexact="page", db_tags__db_category__iexact="comms")
             | Q(db_tags__isnull=True)
         )
         # we need to default to True to allow for legacy pages
-        pages_we_sent = [msg for msg in pages_we_sent if msg.access(caller, "read", default=True)]
+        pages_we_sent = [
+            msg for msg in pages_we_sent if msg.access(caller, "read", default=True)
+        ]
 
         # get last messages we've got
-        pages_we_got = Msg.objects.get_messages_by_receiver(caller).order_by("-db_date_created")
+        pages_we_got = Msg.objects.get_messages_by_receiver(caller).order_by(
+            "-db_date_created"
+        )
         pages_we_got = pages_we_got.filter(
             Q(db_tags__db_key__iexact="page", db_tags__db_category__iexact="comms")
             | Q(db_tags__isnull=True)
         )
         # we need to default to True to allow for legacy pages
-        pages_we_got = [msg for msg in pages_we_got if msg.access(caller, "read", default=True)]
+        pages_we_got = [
+            msg for msg in pages_we_got if msg.access(caller, "read", default=True)
+        ]
 
         # get only messages tagged as pages or not tagged at all (legacy pages)
         targets, message, number = [], None, None
@@ -1420,16 +1465,10 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
                 message = f"{caller.key} {message.strip(':').strip()}"
 
             # create the persistent message object
-            target_perms = " or ".join([f"id({target.id})" for target in targets + [caller]])
             create.create_message(
                 caller,
                 message,
                 receivers=targets,
-                locks=(
-                    f"read:{target_perms} or perm(Admin);"
-                    f"delete:id({caller.id}) or perm(Admin);"
-                    f"edit:id({caller.id}) or perm(Admin)"
-                ),
                 tags=[("page", "comms")],
             )
 
@@ -1522,7 +1561,10 @@ def _list_bots(cmd):
 
     """
     ircbots = [
-        bot for bot in AccountDB.objects.filter(db_is_bot=True, username__startswith="ircbot-")
+        bot
+        for bot in AccountDB.objects.filter(
+            db_is_bot=True, username__startswith="ircbot-"
+        )
     ]
     if ircbots:
         table = cmd.styled_table(
@@ -1584,14 +1626,17 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
 
     key = "@irc2chan"
     switch_options = ("delete", "remove", "disconnect", "list", "ssl")
-    locks = "cmd:serversetting(IRC_ENABLED) and pperm(Developer)"
+    authorization = "engine.runtime.manage"
+    authorization_setting = "IRC_ENABLED"
     help_category = "Comms"
 
     def func(self):
         """Setup the irc-channel mapping"""
 
         if not settings.IRC_ENABLED:
-            string = """IRC is not enabled. You need to activate it in game/settings.py."""
+            string = (
+                """IRC is not enabled. You need to activate it in game/settings.py."""
+            )
             self.msg(string)
             return
 
@@ -1600,7 +1645,11 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
             self.msg(_list_bots(self))
             return
 
-        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
+        if (
+            "disconnect" in self.switches
+            or "remove" in self.switches
+            or "delete" in self.switches
+        ):
             botname = f"ircbot-{self.lhs}"
             matches = AccountDB.objects.filter(db_is_bot=True, username=botname)
             dbref = utils.dbref(self.lhs)
@@ -1687,7 +1736,8 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@ircstatus"
-    locks = "cmd:serversetting(IRC_ENABLED) and perm(ircstatus) or perm(Builder))"
+    authorization = "engine.world.build"
+    authorization_setting = "IRC_ENABLED"
     help_category = "Comms"
 
     def func(self):
@@ -1717,7 +1767,9 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
         channel = ircbot.db.irc_channel
         network = ircbot.db.irc_network
         port = ircbot.db.irc_port
-        chtext = f"IRC bot '{ircbot.db.irc_botname}' on channel {channel} ({network}:{port})"
+        chtext = (
+            f"IRC bot '{ircbot.db.irc_botname}' on channel {channel} ({network}:{port})"
+        )
         if option == "ping":
             # check connection by sending outself a ping through the server.
             self.msg(f"Pinging through {chtext}.")
@@ -1727,14 +1779,15 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
             # an asynchronous call.
             self.msg(f"Requesting nicklist from {channel} ({network}:{port}).")
             ircbot.get_nicklist(self.caller)
-        elif self.caller.locks.check_lockstring(
-            self.caller, "dummy:perm(ircstatus) or perm(Developer)"
-        ):
+        else:
+            from evennia.authorization.service import has_capability
+
+            if not has_capability(self.caller, "engine.runtime.manage"):
+                self.msg("You don't have permission to force-reload the IRC bot.")
+                return
             # reboot the client
             self.msg(f"Forcing a disconnect + reconnect of {chtext}.")
             ircbot.reconnect()
-        else:
-            self.msg("You don't have permission to force-reload the IRC bot.")
 
 
 # RSS connection
@@ -1765,7 +1818,8 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
 
     key = "@rss2chan"
     switch_options = ("disconnect", "remove", "list")
-    locks = "cmd:serversetting(RSS_ENABLED) and pperm(Developer)"
+    authorization = "engine.runtime.manage"
+    authorization_setting = "RSS_ENABLED"
     help_category = "Comms"
 
     def func(self):
@@ -1773,7 +1827,9 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
 
         # checking we have all we need
         if not settings.RSS_ENABLED:
-            string = """RSS is not enabled. You need to activate it in game/settings.py."""
+            string = (
+                """RSS is not enabled. You need to activate it in game/settings.py."""
+            )
             self.msg(string)
             return
         try:
@@ -1792,7 +1848,9 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
             # show all connections
             rssbots = [
                 bot
-                for bot in AccountDB.objects.filter(db_is_bot=True, username__startswith="rssbot-")
+                for bot in AccountDB.objects.filter(
+                    db_is_bot=True, username__startswith="rssbot-"
+                )
             ]
             if rssbots:
                 table = self.styled_table(
@@ -1805,19 +1863,28 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
                 )
                 for rssbot in rssbots:
                     table.add_row(
-                        rssbot.id, rssbot.db.rss_rate, rssbot.db.ev_channel, rssbot.db.rss_url
+                        rssbot.id,
+                        rssbot.db.rss_rate,
+                        rssbot.db.ev_channel,
+                        rssbot.db.rss_url,
                     )
                 self.msg(table)
             else:
                 self.msg("No rss bots found.")
             return
 
-        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
+        if (
+            "disconnect" in self.switches
+            or "remove" in self.switches
+            or "delete" in self.switches
+        ):
             botname = f"rssbot-{self.lhs}"
             matches = AccountDB.objects.filter(db_is_bot=True, db_key=botname)
             if not matches:
                 # try dbref match
-                matches = AccountDB.objects.filter(db_is_bot=True, id=self.args.lstrip("#"))
+                matches = AccountDB.objects.filter(
+                    db_is_bot=True, id=self.args.lstrip("#")
+                )
             if matches:
                 matches[0].delete()
                 self.msg("RSS connection destroyed.")
@@ -1872,7 +1939,8 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
 
     key = "@grapevine2chan"
     switch_options = ("disconnect", "remove", "delete", "list")
-    locks = "cmd:serversetting(GRAPEVINE_ENABLED) and pperm(Developer)"
+    authorization = "engine.runtime.manage"
+    authorization_setting = "GRAPEVINE_ENABLED"
     help_category = "Comms"
 
     def func(self):
@@ -1899,24 +1967,34 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
                     maxwidth=settings.CLIENT_DEFAULT_WIDTH,
                 )
                 for gwbot in gwbots:
-                    table.add_row(gwbot.id, gwbot.db.ev_channel, gwbot.db.grapevine_channel)
+                    table.add_row(
+                        gwbot.id, gwbot.db.ev_channel, gwbot.db.grapevine_channel
+                    )
                 self.msg(table)
             else:
                 self.msg("No grapevine bots found.")
             return
 
-        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
+        if (
+            "disconnect" in self.switches
+            or "remove" in self.switches
+            or "delete" in self.switches
+        ):
             botname = f"grapevinebot-{self.lhs}"
             matches = AccountDB.objects.filter(db_is_bot=True, db_key=botname)
 
             if not matches:
                 # try dbref match
-                matches = AccountDB.objects.filter(db_is_bot=True, id=self.args.lstrip("#"))
+                matches = AccountDB.objects.filter(
+                    db_is_bot=True, id=self.args.lstrip("#")
+                )
             if matches:
                 matches[0].delete()
                 self.msg("Grapevine connection destroyed.")
             else:
-                self.msg("Grapevine connection/bot could not be removed, does it exist?")
+                self.msg(
+                    "Grapevine connection/bot could not be removed, does it exist?"
+                )
             return
 
         if not self.args or not self.rhs:
@@ -1939,7 +2017,9 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
                 self.msg(f"Reusing bot '{botname}' ({bot.dbref})")
         else:
             # create a new bot
-            bot = create.create_account(botname, None, None, typeclass=bots.GrapevineBot)
+            bot = create.create_account(
+                botname, None, None, typeclass=bots.GrapevineBot
+            )
 
         bot.start(ev_channel=channel, grapevine_channel=grapevine_channel)
         self.msg(f"Grapevine connection created {channel} <-> {grapevine_channel}.")
@@ -1980,7 +2060,8 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
         "remove",
         "start",
     )
-    locks = "cmd:serversetting(DISCORD_ENABLED) and pperm(Developer)"
+    authorization = "engine.runtime.manage"
+    authorization_setting = "DISCORD_ENABLED"
     help_category = "Comms"
 
     def func(self):
@@ -1993,12 +2074,17 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
             return
 
         discord_bot = [
-            bot for bot in AccountDB.objects.filter(db_is_bot=True, username="DiscordBot")
+            bot
+            for bot in AccountDB.objects.filter(db_is_bot=True, username="DiscordBot")
         ]
         if not discord_bot:
             # create a new discord bot
-            bot_class = class_from_module(settings.DISCORD_BOT_CLASS, fallback=bots.DiscordBot)
-            discord_bot = create.create_account("DiscordBot", None, None, typeclass=bot_class)
+            bot_class = class_from_module(
+                settings.DISCORD_BOT_CLASS, fallback=bots.DiscordBot
+            )
+            discord_bot = create.create_account(
+                "DiscordBot", None, None, typeclass=bot_class
+            )
             discord_bot.start()
             self.msg("Created and initialized a new Discord relay bot.")
         else:
@@ -2047,16 +2133,24 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 # load in the pretty names for the discord channels from cache
                 dc_chan_names = discord_bot.attributes.get("discord_channels", {})
                 for i, (evchan, dcchan) in enumerate(channel_list):
-                    dc_info = dc_chan_names.get(dcchan, {"name": dcchan, "guild": "unknown"})
+                    dc_info = dc_chan_names.get(
+                        dcchan, {"name": dcchan, "guild": "unknown"}
+                    )
                     table.add_row(
-                        i, evchan, f"#{dc_info.get('name', '?')}@{dc_info.get('guild', '?')}"
+                        i,
+                        evchan,
+                        f"#{dc_info.get('name', '?')}@{dc_info.get('guild', '?')}",
                     )
                 self.msg(table)
             else:
                 self.msg("No Discord connections found.")
             return
 
-        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
+        if (
+            "disconnect" in self.switches
+            or "remove" in self.switches
+            or "delete" in self.switches
+        ):
             if channel_list := discord_bot.db.channels:
                 try:
                     lid = int(self.args.strip())
@@ -2066,7 +2160,9 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 if lid < len(channel_list):
                     ev_chan, dc_chan = discord_bot.db.channels.pop(lid)
                     dc_chan_names = discord_bot.attributes.get("discord_channels", {})
-                    dc_info = dc_chan_names.get(dc_chan, {"name": "unknown", "guild": "unknown"})
+                    dc_info = dc_chan_names.get(
+                        dc_chan, {"name": "unknown", "guild": "unknown"}
+                    )
                     self.msg(
                         f"Removed link between {ev_chan} and"
                         f" #{dc_info.get('name', '?')}@{dc_info.get('guild', '?')}"
@@ -2095,13 +2191,19 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 results = False
                 for i, (evchan, dcchan) in enumerate(channel_list):
                     if evchan.lower() == ev_channel.lower():
-                        dc_info = dc_chan_names.get(dcchan, {"name": dcchan, "guild": "unknown"})
-                        table.add_row(i, evchan, f"#{dc_info['name']}@{dc_info['guild']}")
+                        dc_info = dc_chan_names.get(
+                            dcchan, {"name": dcchan, "guild": "unknown"}
+                        )
+                        table.add_row(
+                            i, evchan, f"#{dc_info['name']}@{dc_info['guild']}"
+                        )
                         results = True
                 if results:
                     self.msg(table)
                 else:
-                    self.msg(f"There are no Discord channels connected to {ev_channel}.")
+                    self.msg(
+                        f"There are no Discord channels connected to {ev_channel}."
+                    )
             else:
                 self.msg("There are no active connections to Discord.")
             return
@@ -2125,4 +2227,6 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
             dc_channel_name = dc_chans.get(dc_channel, {}).get("name", dc_channel)
         else:
             dc_channel_name = dc_channel
-        self.msg(f"Discord connection created: {channel_obj.name} <-> #{dc_channel_name}.")
+        self.msg(
+            f"Discord connection created: {channel_obj.name} <-> #{dc_channel_name}."
+        )

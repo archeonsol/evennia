@@ -6,13 +6,7 @@ Account cmdset. Account commands remain available also to Characters.
 """
 
 from evennia.commands.cmdset import CmdSet
-from evennia.commands.default import (
-    admin,
-    building,
-    general,
-    help,
-    system,
-)
+from evennia.commands.default import admin, building, general, help, system
 
 
 class CharacterCmdSet(CmdSet):
@@ -60,7 +54,7 @@ class CharacterCmdSet(CmdSet):
         self.add(admin.CmdBan())
         self.add(admin.CmdUnban())
         self.add(admin.CmdEmit())
-        self.add(admin.CmdPerm())
+        self.add(admin.CmdGrant())
         self.add(admin.CmdWall())
         self.add(admin.CmdForce())
 
@@ -83,7 +77,8 @@ class CharacterCmdSet(CmdSet):
         self.add(building.CmdDestroy())
         self.add(building.CmdExamine())
         self.add(building.CmdTypeclass())
-        self.add(building.CmdLock())
+        self.add(building.CmdPolicy())
+        self.add(building.CmdScope())
         self.add(building.CmdSetHome())
         self.add(building.CmdTag())
         self.add(building.CmdSpawn())

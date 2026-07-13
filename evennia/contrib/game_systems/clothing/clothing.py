@@ -79,15 +79,9 @@ from django.conf import settings
 
 from evennia import DefaultCharacter, DefaultObject, default_cmds
 from evennia.commands.command import Command
-from evennia.utils import (
-    at_search_result,
-    crop,
-    evtable,
-    group_objects_by_key_and_desc,
-    inherits_from,
-    int2str,
-    iter_to_str,
-)
+from evennia.utils import (at_search_result, crop, evtable,
+                           group_objects_by_key_and_desc, inherits_from,
+                           int2str, iter_to_str)
 from evennia.utils.ansi import raw as raw_ansi
 
 # Options start here.
@@ -139,7 +133,9 @@ CLOTHING_TYPE_AUTOCOVER = getattr(
     },
 )
 # Types of clothes that can't be used to cover other clothes.
-CLOTHING_TYPE_CANT_COVER_WITH = getattr(settings, "CLOTHING_TYPE_AUTOCOVER", ["jewelry"])
+CLOTHING_TYPE_CANT_COVER_WITH = getattr(
+    settings, "CLOTHING_TYPE_AUTOCOVER", ["jewelry"]
+)
 
 
 # HELPER FUNCTIONS START HERE
@@ -367,9 +363,7 @@ class ClothedCharacter(DefaultCharacter):
 
         # Create outfit string
         if outfit_list:
-            outfit = (
-                f"{self.get_display_name(looker, **kwargs)} is wearing {iter_to_str(outfit_list)}."
-            )
+            outfit = f"{self.get_display_name(looker, **kwargs)} is wearing {iter_to_str(outfit_list)}."
         else:
             outfit = f"{self.get_display_name(looker, **kwargs)} is wearing nothing."
 
@@ -449,7 +443,8 @@ class CmdWear(Command):
             return
         if not self.rhs:
             # check if the whole string is an object
-            from evennia.objects.search_result import Ambiguous, Found, NotFound
+            from evennia.objects.search_result import (Ambiguous, Found,
+                                                       NotFound)
 
             initial = self.caller.search_for(self.lhs, candidates=self.caller.contents)
             if isinstance(initial, NotFound):
@@ -460,7 +455,9 @@ class CmdWear(Command):
                 clothing = self.caller.search(self.lhs, candidates=self.caller.contents)
             else:
                 # pass the result through the search-result hook
-                matches = [initial.obj] if isinstance(initial, Found) else initial.candidates
+                matches = (
+                    [initial.obj] if isinstance(initial, Found) else initial.candidates
+                )
                 clothing = at_search_result(matches, self.caller, self.lhs)
 
         else:
@@ -488,7 +485,8 @@ class CmdWear(Command):
                 # Adjust the wearstyle
                 clothing.db.worn = self.rhs
                 self.caller.location.msg_contents(
-                    f"$You() $conj(wear) {clothing.name} {self.rhs}.", from_obj=self.caller
+                    f"$You() $conj(wear) {clothing.name} {self.rhs}.",
+                    from_obj=self.caller,
                 )
                 return
 
@@ -566,7 +564,9 @@ class CmdCover(Command):
             self.caller.msg("Usage: cover <worn clothing> with <clothing object>")
             return
 
-        to_cover = self.caller.search(self.lhs, candidates=get_worn_clothes(self.caller))
+        to_cover = self.caller.search(
+            self.lhs, candidates=get_worn_clothes(self.caller)
+        )
         cover_with = self.caller.search(self.rhs, candidates=self.caller.contents)
         if not to_cover or not cover_with:
             return
@@ -583,7 +583,9 @@ class CmdCover(Command):
             return
 
         if covered_by := cover_with.db.covered_by:
-            self.caller.msg(f"{cover_with.name} is already covered by {covered_by.name}.")
+            self.caller.msg(
+                f"{cover_with.name} is already covered by {covered_by.name}."
+            )
             return
         if covered_by := to_cover.db.covered_by:
             self.caller.msg(f"{to_cover.name} is already covered by {covered_by.name}.")
@@ -595,7 +597,8 @@ class CmdCover(Command):
         to_cover.db.covered_by = cover_with
 
         self.caller.location.msg_contents(
-            f"$You() $conj(cover) {to_cover.name} with {cover_with.name}.", from_obj=self.caller
+            f"$You() $conj(cover) {to_cover.name} with {cover_with.name}.",
+            from_obj=self.caller,
         )
 
 
@@ -624,7 +627,9 @@ class CmdUncover(Command):
             self.caller.msg("Usage: uncover <worn clothing object>")
             return
 
-        clothing = self.caller.search(self.args, candidates=get_worn_clothes(self.caller))
+        clothing = self.caller.search(
+            self.args, candidates=get_worn_clothes(self.caller)
+        )
         if not clothing:
             return
         if covered_by := clothing.db.covered_by:
@@ -657,7 +662,7 @@ class CmdInventory(Command):
 
     key = "inventory"
     aliases = ["inv", "i"]
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"$"
 
     def func(self):
@@ -681,7 +686,10 @@ class CmdInventory(Command):
                 "{}|n".format(crop(raw_ansi(desc or ""), width=50) or ""),
             )
         message_list.extend(
-            ["|wYou are carrying:|n", str(carry_table) if carry_table.nrows > 0 else " Nothing."]
+            [
+                "|wYou are carrying:|n",
+                str(carry_table) if carry_table.nrows > 0 else " Nothing.",
+            ]
         )
 
         # worn items
@@ -694,7 +702,10 @@ class CmdInventory(Command):
                 "{}|n".format(crop(raw_ansi(desc or ""), width=50) or ""),
             )
         message_list.extend(
-            ["You are wearing:|n", str(wear_table) if wear_table.nrows > 0 else " Nothing."]
+            [
+                "You are wearing:|n",
+                str(wear_table) if wear_table.nrows > 0 else " Nothing.",
+            ]
         )
 
         # return the composite message

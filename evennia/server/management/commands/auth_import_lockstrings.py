@@ -2,8 +2,18 @@
 
 from django.core.management.base import BaseCommand, CommandError
 
-from evennia.authorization.compiler import CompilationError, compile_lockstring
-from evennia.authorization.migration import migrate_resource
+from evennia.authorization.legacy_import.compiler import CompilationError, compile_lockstring
+from evennia.authorization.legacy_import.migration import migrate_resource
+
+
+def _ensure_native(result):
+    """Reject compatibility nodes that cannot execute in the live runtime."""
+
+    encoded = repr({key: policy.to_data() for key, policy in result.policies.items()})
+    if "legacy." in encoded:
+        raise CompilationError(
+            "legacy predicate/permission requires an explicit capability policy"
+        )
 
 
 def _queryset_for(kind: str):
@@ -35,7 +45,7 @@ def _queryset_for(kind: str):
 class Command(BaseCommand):
     """Dry-run or apply a finite per-kind lock migration."""
 
-    help = "Compile lockstrings into structured authorization policies."
+    help = "Offline-only import of legacy lockstrings into structured policies."
 
     def add_arguments(self, parser):
         """Declare finite migration controls."""
@@ -58,6 +68,11 @@ class Command(BaseCommand):
             if not source:
                 continue
             try:
+                compiled = compile_lockstring(
+                    source,
+                    resource_ref=f"{options['kind']}:{resource.pk}",
+                )
+                _ensure_native(compiled)
                 if options["apply"]:
                     result = migrate_resource(resource, freeze=options["freeze"])
                     migrated += 1
@@ -65,10 +80,7 @@ class Command(BaseCommand):
                         warnings += 1
                         self.stderr.write(f"warning {options['kind']}:{resource.pk}: {warning}")
                 else:
-                    result = compile_lockstring(
-                        source,
-                        resource_ref=f"{options['kind']}:{resource.pk}",
-                    )
+                    result = compiled
                     for warning in result.warnings:
                         warnings += 1
                         self.stderr.write(f"warning {options['kind']}:{resource.pk}: {warning}")

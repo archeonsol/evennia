@@ -18,7 +18,6 @@ from copy import copy
 from django.conf import settings
 from django.utils.encoding import smart_str
 
-from evennia.locks.lockhandler import LockHandler
 from evennia.utils.dbserialize import from_pickle
 from evennia.utils.utils import is_iter, lazy_property, make_iter, to_str
 
@@ -195,8 +194,15 @@ class IAttribute:
     """
 
     @lazy_property
-    def locks(self):
-        return LockHandler(self)
+    def policies(self):
+        from evennia.authorization.handler import PolicyHandler
+
+        return PolicyHandler(self)
+
+    def authorization_resource_ref(self):
+        """Return a stable typed reference for attribute policy overrides."""
+
+        return f"attribute:{getattr(self, 'id', None) or id(self)}"
 
     key = property(lambda self: self.db_key)
     strvalue = property(lambda self: getattr(self, "db_strvalue", None))
@@ -234,18 +240,7 @@ class IAttribute:
             result (bool): If the lock was passed or not.
 
         """
-        from evennia.authorization.service import access_check
-
-        result, _ = access_check(
-            self,
-            accessing_obj,
-            access_type,
-            default=default,
-            legacy_evaluator=lambda: self.locks.check(
-                accessing_obj, access_type=access_type, default=default
-            ),
-        )
-        return result
+        return bool(default)
 
     #
     #
@@ -317,7 +312,9 @@ class AttributeProperty:
     attrhandler_name = "attributes"
     cached_default_name_template = "_property_attribute_default_{key}"
 
-    def __init__(self, default=None, category=None, strattr=False, lockstring="", autocreate=True):
+    def __init__(
+        self, default=None, category=None, strattr=False, lockstring="", autocreate=True
+    ):
         """
         Allows for specifying Attributes as Django-like 'fields' on the class level. Note that while
         one can set a lock on the Attribute, there is no way to *check* said lock when accessing via
@@ -353,7 +350,11 @@ class AttributeProperty:
         self._default = default
         self._category = category
         self._strattr = strattr
-        self._lockstring = lockstring
+        if lockstring:
+            raise ValueError(
+                "per-attribute lockstrings were removed; protect the owning resource"
+            )
+        self._lockstring = ""
         self._autocreate = autocreate
         self._key = ""
 
@@ -372,14 +373,20 @@ class AttributeProperty:
 
         """
         attrhandler = getattr(instance, self.attrhandler_name)
-        value = getattr(attrhandler, self.cached_default_name_template.format(key=self._key), None)
+        value = getattr(
+            attrhandler, self.cached_default_name_template.format(key=self._key), None
+        )
         if value is None:
             if callable(self._default):
                 value = self._default()
             else:
                 value = copy(self._default)
             value = from_pickle(value, db_obj=instance)
-            setattr(attrhandler, self.cached_default_name_template.format(key=self._key), value)
+            setattr(
+                attrhandler,
+                self.cached_default_name_template.format(key=self._key),
+                value,
+            )
         return value
 
     def __get__(self, instance, owner):
@@ -430,7 +437,9 @@ class AttributeProperty:
         removed in code!
 
         """
-        getattr(instance, self.attrhandler_name).remove(key=self._key, category=self._category)
+        getattr(instance, self.attrhandler_name).remove(
+            key=self._key, category=self._category
+        )
 
     def at_set(self, value, obj):
         """
@@ -560,7 +569,10 @@ class IAttributeBackend:
             return
         attrs = self.query_all()
         self._cache = {
-            (to_str(attr.key).lower(), attr.category.lower() if attr.category else None): attr
+            (
+                to_str(attr.key).lower(),
+                attr.category.lower() if attr.category else None,
+            ): attr
             for attr in attrs
         }
         self._cache_complete = True
@@ -620,7 +632,11 @@ class IAttributeBackend:
             attrs (list): The discovered Attributes.
         """
         if settings.TYPECLASS_AGGRESSIVE_CACHE and category in self._catcache:
-            return [attr for ckey, attr in self._cache.items() if ckey[1] == category and attr]
+            return [
+                attr
+                for ckey, attr in self._cache.items()
+                if ckey[1] == category and attr
+            ]
         else:
             # we have to query to make this category up-date in the cache
             attrs = self.query_category(category)
@@ -709,7 +725,9 @@ class IAttributeBackend:
             self._cache.pop((key, category), None)
         else:
             self._cache = {
-                ckey: attrobj for ckey, attrobj in list(self._cache.items()) if ckey[1] != category
+                ckey: attrobj
+                for ckey, attrobj in list(self._cache.items())
+                if ckey[1] != category
             }
         # mark that the category cache is no longer up-to-date
         self._catcache.pop(category, None)
@@ -740,7 +758,9 @@ class IAttributeBackend:
         """
         raise NotImplementedError()
 
-    def create_attribute(self, key, category, lockstring, value, strvalue=False, cache=True):
+    def create_attribute(
+        self, key, category, lockstring, value, strvalue=False, cache=True
+    ):
         """
         Creates Attribute (using the class specified for the backend), (optionally) caches it, and
         returns it.
@@ -777,7 +797,9 @@ class IAttributeBackend:
         """
         raise NotImplementedError()
 
-    def do_batch_update_attribute(self, attr_obj, category, lock_storage, new_value, strvalue):
+    def do_batch_update_attribute(
+        self, attr_obj, category, lock_storage, new_value, strvalue
+    ):
         """
         Called opnly by batch add. For the database backend, this is a method
         of updating that can alter category and lock-storage.
@@ -832,19 +854,27 @@ class IAttributeBackend:
         strattr = kwargs.get("strattr", False)
         for tup in args:
             if not is_iter(tup) or len(tup) < 2:
-                raise RuntimeError("batch_add requires iterables as arguments (got %r)." % tup)
+                raise RuntimeError(
+                    "batch_add requires iterables as arguments (got %r)." % tup
+                )
             ntup = len(tup)
             keystr = str(tup[0]).strip().lower()
             new_value = tup[1]
-            category = str(tup[2]).strip().lower() if ntup > 2 and tup[2] is not None else None
+            category = (
+                str(tup[2]).strip().lower() if ntup > 2 and tup[2] is not None else None
+            )
             lockstring = tup[3] if ntup > 3 else ""
+            if lockstring:
+                raise ValueError("per-attribute lockstrings are not executable")
 
             attr_objs = self._get_cache(keystr, category)
 
             if attr_objs:
                 attr_obj = attr_objs[0]
                 # update an existing attribute object
-                self.do_batch_update_attribute(attr_obj, category, lockstring, new_value, strattr)
+                self.do_batch_update_attribute(
+                    attr_obj, category, lockstring, new_value, strattr
+                )
             else:
                 new_attr = self.do_create_attribute(
                     keystr, category, lockstring, new_value, strvalue=strattr
@@ -926,7 +956,9 @@ class IAttributeBackend:
                 [
                     attr
                     for attr in attrs
-                    if attr.access(accessing_obj, self._attredit, default=default_access)
+                    if attr.access(
+                        accessing_obj, self._attredit, default=default_access
+                    )
                 ]
             )
         else:
@@ -945,9 +977,13 @@ class IAttributeBackend:
         if settings.TYPECLASS_AGGRESSIVE_CACHE:
             if not self._cache_complete:
                 self._full_cache()
-            return sorted([attr for attr in self._cache.values() if attr], key=lambda o: o.id)
+            return sorted(
+                [attr for attr in self._cache.values() if attr], key=lambda o: o.id
+            )
         else:
-            return sorted([attr for attr in self.query_all() if attr], key=lambda o: o.id)
+            return sorted(
+                [attr for attr in self.query_all() if attr], key=lambda o: o.id
+            )
 
 
 class InMemoryAttributeBackend(IAttributeBackend):
@@ -999,7 +1035,11 @@ class InMemoryAttributeBackend(IAttributeBackend):
 
         """
         new_attr = self._attrclass(
-            pk=self._next_id(), key=key, category=category, lock_storage=lockstring, value=value
+            pk=self._next_id(),
+            key=key,
+            category=category,
+            lock_storage=lockstring,
+            value=value,
         )
         self._storage[(key, category)] = new_attr
         self._category_storage[category].append(new_attr)
@@ -1008,7 +1048,9 @@ class InMemoryAttributeBackend(IAttributeBackend):
     def do_update_attribute(self, attr, value, strvalue):
         attr.value = value
 
-    def do_batch_update_attribute(self, attr_obj, category, lock_storage, new_value, strvalue):
+    def do_batch_update_attribute(
+        self, attr_obj, category, lock_storage, new_value, strvalue
+    ):
         """
         No need to bother saving anything. Just set some values.
         """
@@ -1147,13 +1189,10 @@ class AttributeHandler:
             elif return_obj:
                 ret.append(None)
 
-        if accessing_obj:
-            # check 'attrread' locks
-            ret = [
-                attr
-                for attr in ret
-                if attr.access(accessing_obj, self._attrread, default=default_access)
-            ]
+        if accessing_obj and not self.obj.access(
+            accessing_obj, self._attrread, default=default_access
+        ):
+            ret = []
         if strattr:
             ret = ret if return_obj else [attr.strvalue for attr in ret if attr]
         else:
@@ -1174,7 +1213,7 @@ class AttributeHandler:
         default_access=True,
     ):
         """
-        Add attribute to object, with optional `lockstring`.
+        Add an attribute. Per-attribute lockstrings are no longer supported.
 
         Args:
             key (str): An Attribute name to add.
@@ -1194,6 +1233,8 @@ class AttributeHandler:
                 `attrcreate` is defined on the Attribute in question.
 
         """
+        if lockstring:
+            raise ValueError("per-attribute lockstrings are not executable")
         if accessing_obj and not self.obj.access(
             accessing_obj, self._attrcreate, default=default_access
         ):
@@ -1288,7 +1329,9 @@ class AttributeHandler:
 
         if key is None:
             self.clear(
-                category=category, accessing_obj=accessing_obj, default_access=default_access
+                category=category,
+                accessing_obj=accessing_obj,
+                default_access=default_access,
             )
             return
 
@@ -1299,9 +1342,8 @@ class AttributeHandler:
 
             attr_objs = self.backend.get(keystr, category)
             for attr_obj in attr_objs:
-                if not (
-                    accessing_obj
-                    and not attr_obj.access(accessing_obj, self._attredit, default=default_access)
+                if not accessing_obj or self.obj.access(
+                    accessing_obj, self._attredit, default=default_access
                 ):
                     self.backend.delete_attribute(attr_obj)
             if not attr_objs and raise_exception:
@@ -1480,10 +1522,14 @@ def initialize_nick_templates(pattern, replacement, pattern_is_regex=False):
         # Shell pattern syntax - convert $N to argN groups
         # for the shell pattern we make sure we have matching $N on both sides
         pattern_args = [match.group(1) for match in _RE_NICK_RAW_ARG.finditer(pattern)]
-        replacement_args = [match.group(1) for match in _RE_NICK_RAW_ARG.finditer(replacement)]
+        replacement_args = [
+            match.group(1) for match in _RE_NICK_RAW_ARG.finditer(replacement)
+        ]
         if set(pattern_args) != set(replacement_args):
             # We don't have the same amount of argN/$N tags in input/output.
-            raise NickTemplateInvalid("Nicks: Both in/out-templates must contain the same $N tags.")
+            raise NickTemplateInvalid(
+                "Nicks: Both in/out-templates must contain the same $N tags."
+            )
 
         # generate regex from shell pattern
         pattern_regex_string = fnmatch.translate(pattern)
@@ -1495,7 +1541,9 @@ def initialize_nick_templates(pattern, replacement, pattern_is_regex=False):
         pattern_regex_string = pattern_regex_string[:-2] + r"(?:[\n\r]*?)\Z"
 
     # map the replacement to match the arg1 group-names, to make replacement easy
-    replacement_string = _RE_NICK_RAW_ARG.sub(lambda m: "{arg%s}" % m.group(2), replacement)
+    replacement_string = _RE_NICK_RAW_ARG.sub(
+        lambda m: "{arg%s}" % m.group(2), replacement
+    )
 
     return pattern_regex_string, replacement_string
 
@@ -1518,7 +1566,8 @@ def parse_nick_template(string, template_regex, outtemplate):
     match = template_regex.match(string)
     if match:
         matchdict = {
-            key: value if value is not None else "" for key, value in match.groupdict().items()
+            key: value if value is not None else ""
+            for key, value in match.groupdict().items()
         }
         return True, outtemplate.format_map(matchdict)
     return False, string
@@ -1585,7 +1634,14 @@ class NickHandler(AttributeHandler):
                 )
             return None
 
-    def add(self, pattern, replacement, category="inputline", pattern_is_regex=False, **kwargs):
+    def add(
+        self,
+        pattern,
+        replacement,
+        category="inputline",
+        pattern_is_regex=False,
+        **kwargs,
+    ):
         """
         Add a new nick, a mapping pattern -> replacement.
 
@@ -1625,7 +1681,10 @@ class NickHandler(AttributeHandler):
             pattern, replacement, pattern_is_regex=pattern_is_regex
         )
         super().add(
-            pattern, (nick_regex, nick_template, pattern, replacement), category=category, **kwargs
+            pattern,
+            (nick_regex, nick_template, pattern, replacement),
+            category=category,
+            **kwargs,
         )
 
     def remove(self, key, category="inputline", **kwargs):
@@ -1642,7 +1701,9 @@ class NickHandler(AttributeHandler):
         """
         super().remove(key, category=category, **kwargs)
 
-    def nickreplace(self, raw_string, categories=("inputline", "channel"), include_account=True):
+    def nickreplace(
+        self, raw_string, categories=("inputline", "channel"), include_account=True
+    ):
         """
         Apply nick replacement of entries in raw_string with nick replacement.
 
@@ -1680,7 +1741,9 @@ class NickHandler(AttributeHandler):
                 nicks.update(
                     {
                         nick.key: nick
-                        for nick in make_iter(driver.nicks.get(category=category, return_obj=True))
+                        for nick in make_iter(
+                            driver.nicks.get(category=category, return_obj=True)
+                        )
                         if nick and nick.key
                     }
                 )
@@ -1693,7 +1756,9 @@ class NickHandler(AttributeHandler):
                 except re.error:
                     from evennia.utils import logger
 
-                    logger.log_trace("Probably nick being created with unvalidated regex mapping.")
+                    logger.log_trace(
+                        "Probably nick being created with unvalidated regex mapping."
+                    )
                     continue
                 self._regex_cache[nick_regex] = regex
 

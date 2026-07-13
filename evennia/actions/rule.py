@@ -10,14 +10,13 @@ later walks a provider class's MRO and indexes those specs by
 Stacking is supported — decorating one method with several ``@rule`` lines (for
 several action types or phases) appends to the same spec list::
 
-    @rule(OpenDoor, phase="check", requires=Builder)
-    @rule(CloseDoor, phase="check", requires=Builder)
+    @rule(OpenDoor, phase="check", requires="mygame.world.author")
+    @rule(CloseDoor, phase="check", requires="mygame.world.author")
     def staff_only(self, action, actor): ...
 
 `requires` is compiled to a :class:`~evennia.actions.predicate.Predicate` **once,
 here at decoration time** (never re-parsed at dispatch). It accepts a Predicate,
-a Capability, or a bare callable; a lock *string* is rejected (use
-``from_lockstring``).
+a registered namespaced capability string, or a bare callable.
 """
 
 from dataclasses import dataclass, field

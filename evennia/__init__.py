@@ -90,7 +90,6 @@ _LAZY_EXPORTS = {
     "create_help_entry": ".utils.create:create_help_entry",
     # utilities (submodules surface as module objects)
     "settings": "django.conf:settings",
-    "lockfuncs": ".locks:lockfuncs",
     "logger": ".utils.logger:",
     "gametime": ".utils.gametime:",
     "ansi": ".utils.ansi:",
@@ -181,7 +180,9 @@ def _create_version():
         print(err)
     try:
         rev = (
-            check_output("git rev-parse --short HEAD", shell=True, cwd=root, stderr=STDOUT)
+            check_output(
+                "git rev-parse --short HEAD", shell=True, cwd=root, stderr=STDOUT
+            )
             .strip()
             .decode()
         )
@@ -242,11 +243,15 @@ def _init(portal_mode=False):
         # Set up the PortalSessionHandler
         from evennia.server.portal import portalsessionhandler
 
-        portal_sess_handler_class = class_from_module(settings.PORTAL_SESSION_HANDLER_CLASS)
+        portal_sess_handler_class = class_from_module(
+            settings.PORTAL_SESSION_HANDLER_CLASS
+        )
         portalsessionhandler.PORTAL_SESSIONS = portal_sess_handler_class()
         SESSION_HANDLER = portalsessionhandler.PORTAL_SESSIONS
         PORTAL_SESSION_HANDLER = SESSION_HANDLER
-        _evennia_service_class = class_from_module(settings.EVENNIA_PORTAL_SERVICE_CLASS)
+        _evennia_service_class = class_from_module(
+            settings.EVENNIA_PORTAL_SERVICE_CLASS
+        )
         EVENNIA_PORTAL_SERVICE = _evennia_service_class()
         EVENNIA_PORTAL_SERVICE.setServiceParent(TWISTED_APPLICATION)
 
@@ -267,7 +272,9 @@ def _init(portal_mode=False):
         sessionhandler.SESSION_HANDLER = sessionhandler.SESSIONS
         SESSION_HANDLER = sessionhandler.SESSIONS
         SERVER_SESSION_HANDLER = SESSION_HANDLER
-        _evennia_service_class = class_from_module(settings.EVENNIA_SERVER_SERVICE_CLASS)
+        _evennia_service_class = class_from_module(
+            settings.EVENNIA_SERVER_SERVICE_CLASS
+        )
         EVENNIA_SERVER_SERVICE = _evennia_service_class()
         EVENNIA_SERVER_SERVICE.setServiceParent(TWISTED_APPLICATION)
 
@@ -281,7 +288,9 @@ def _init(portal_mode=False):
 
         def _help(self):
             "Returns list of contents"
-            names = [name for name in self.__class__.__dict__ if not name.startswith("_")]
+            names = [
+                name for name in self.__class__.__dict__ if not name.startswith("_")
+            ]
             names += [name for name in self.__dict__ if not name.startswith("_")]
             print(self.__doc__ + "-" * 60 + "\n" + ", ".join(names))
 
@@ -354,16 +363,8 @@ def _init(portal_mode=False):
                 cmdlist = utils.variable_from_module(module, module.__all__)
                 self.__dict__.update(dict([(c.__name__, c) for c in cmdlist]))
 
-            from .commands.default import (
-                account,
-                admin,
-                building,
-                comms,
-                general,
-                help,
-                system,
-                unloggedin,
-            )
+            from .commands.default import (account, admin, building, comms,
+                                           general, help, system, unloggedin)
 
             add_cmds(admin)
             add_cmds(building)

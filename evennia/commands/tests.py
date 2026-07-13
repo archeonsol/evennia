@@ -11,7 +11,8 @@ import evennia
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest, TestCase
+from evennia.utils.test_resources import (BaseEvenniaCommandTest,
+                                          BaseEvenniaTest, TestCase)
 
 # Testing-command sets
 
@@ -110,68 +111,116 @@ class TestCmdSetMergers(TestCase):
         a, c = self.cmdset_a, self.cmdset_c
         cmdset_f = a + c  # same-prio
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2
+        )
         cmdset_f = c + a  # same-prio, inverse order
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
         a.priority = 1
         cmdset_f = a + c  # high prio A
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
 
     def test_intersect(self):
         a, c = self.cmdset_a, self.cmdset_c
         a.mergetype = "Intersect"
         cmdset_f = a + c  # same-prio - c's Union kicks in
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2
+        )
         cmdset_f = c + a  # same-prio - a's Intersect kicks in
         self.assertEqual(len(cmdset_f.commands), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
         a.priority = 1
         cmdset_f = a + c  # high prio A, intersect kicks in
         self.assertEqual(len(cmdset_f.commands), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
 
     def test_replace(self):
         a, c = self.cmdset_a, self.cmdset_c
         c.mergetype = "Replace"
         cmdset_f = a + c  # same-prio. C's Replace kicks in
         self.assertEqual(len(cmdset_f.commands), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 0)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 0
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2
+        )
         cmdset_f = c + a  # same-prio. A's Union kicks in
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
         c.priority = 1
         cmdset_f = c + a  # c higher prio. C's Replace kicks in
         self.assertEqual(len(cmdset_f.commands), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 0)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 0
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 2
+        )
 
     def test_remove(self):
         a, c = self.cmdset_a, self.cmdset_c
         c.mergetype = "Remove"
         cmdset_f = a + c  # same-prio. C's Remove kicks in
         self.assertEqual(len(cmdset_f.commands), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
         cmdset_f = c + a  # same-prio. A's Union kicks in
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 4
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
         c.priority = 1
         cmdset_f = c + a  # c higher prio. C's Remove kicks in
         self.assertEqual(len(cmdset_f.commands), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2)
-        self.assertEqual(sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0)
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "A"), 2
+        )
+        self.assertEqual(
+            sum(1 for cmd in cmdset_f.commands if cmd.from_cmdset == "C"), 0
+        )
 
     def test_system_cmds_not_duplicated_after_replace(self):
         """System commands must appear exactly once after a Replace merge."""
@@ -187,7 +236,9 @@ class TestCmdSetMergers(TestCase):
         c.priority = 1
         cmdset_f = c + a  # c higher prio, Replace kicks in
 
-        sys_cmds_in_commands = [cmd for cmd in cmdset_f.commands if cmd.key.startswith("__")]
+        sys_cmds_in_commands = [
+            cmd for cmd in cmdset_f.commands if cmd.key.startswith("__")
+        ]
         self.assertEqual(len(sys_cmds_in_commands), 1)
 
     def test_system_cmds_not_duplicated_after_union(self):
@@ -209,7 +260,9 @@ class TestCmdSetMergers(TestCase):
         c2.add(_SysCmd("C"))
         a2.priority = 1
         cmdset_f2 = a2 + c2
-        sys_in_commands2 = [cmd for cmd in cmdset_f2.commands if cmd.key.startswith("__")]
+        sys_in_commands2 = [
+            cmd for cmd in cmdset_f2.commands if cmd.key.startswith("__")
+        ]
         self.assertEqual(len(sys_in_commands2), 1)
 
     def test_order(self):
@@ -219,12 +272,18 @@ class TestCmdSetMergers(TestCase):
         self.assertEqual(cmdset_f.priority, 0)
         self.assertEqual(cmdset_f.mergetype, "Union")
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertTrue(all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "A"))
+        self.assertTrue(
+            all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "A")
+        )
         cmdset_f = a + b + c + d  # merge in order of priority
         self.assertEqual(cmdset_f.priority, 0)
         self.assertEqual(cmdset_f.mergetype, "Union")
-        self.assertEqual(len(cmdset_f.commands), 4)  # duplicates setting from A transfers
-        self.assertTrue(all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "D"))
+        self.assertEqual(
+            len(cmdset_f.commands), 4
+        )  # duplicates setting from A transfers
+        self.assertTrue(
+            all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "D")
+        )
 
     def test_priority_order(self):
         "Merge in reverse- and forward order with well-defined prioritities"
@@ -237,12 +296,16 @@ class TestCmdSetMergers(TestCase):
         self.assertEqual(cmdset_f.priority, 2)
         self.assertEqual(cmdset_f.mergetype, "Union")
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertTrue(all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "A"))
+        self.assertTrue(
+            all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "A")
+        )
         cmdset_f = a + b + c + d  # merge in order of priority
         self.assertEqual(cmdset_f.priority, 2)
         self.assertEqual(cmdset_f.mergetype, "Union")
         self.assertEqual(len(cmdset_f.commands), 4)
-        self.assertTrue(all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "A"))
+        self.assertTrue(
+            all(True for cmd in cmdset_f.commands if cmd.from_cmdset == "A")
+        )
 
 
 class TestOptionTransferTrue(TestCase):
@@ -331,7 +394,9 @@ class TestOptionTransferTrue(TestCase):
         b.priority = 1
         c.priority = 0
         d.priority = -1
-        cmdset_f = a + b + c + d  # forward, A top priority. This never happens in practice.
+        cmdset_f = (
+            a + b + c + d
+        )  # forward, A top priority. This never happens in practice.
         self.assertTrue(cmdset_f.no_exits)
         self.assertTrue(cmdset_f.no_objs)
         self.assertTrue(cmdset_f.no_channels)
@@ -631,7 +696,9 @@ class TestOptionTransferFalse(TestCase):
         b.priority = 1
         c.priority = 0
         d.priority = -1
-        cmdset_f = a + b + c + d  # forward, A top priority. This never happens in practice.
+        cmdset_f = (
+            a + b + c + d
+        )  # forward, A top priority. This never happens in practice.
         self.assertFalse(cmdset_f.no_exits)
         self.assertFalse(cmdset_f.no_objs)
         self.assertFalse(cmdset_f.no_channels)
@@ -1072,7 +1139,9 @@ class TestGetAndMergeCmdSets(TwistedTestCase, BaseEvenniaTest):
         ) = cmdhandler.generate_cmdset_providers(self.session)
 
         deferred = ensureDeferred(
-            cmdhandler.get_and_merge_cmdsets(self.session, [self.session], "session", "", error_to)
+            cmdhandler.get_and_merge_cmdsets(
+                self.session, [self.session], "session", "", error_to
+            )
         )
 
         def _callback(cmdset):
@@ -1307,14 +1376,20 @@ class TestCmdParser(TestCase):
         )
         self.assertEqual(cmdparser.try_num_differentiators("t-shirt"), (None, None))
         self.assertEqual(cmdparser.try_num_differentiators("ball"), (None, None))
-        self.assertEqual(cmdparser.try_num_differentiators("1-t-shirt arg"), (1, "t-shirt arg"))
+        self.assertEqual(
+            cmdparser.try_num_differentiators("1-t-shirt arg"), (1, "t-shirt arg")
+        )
         self.assertEqual(
             cmdparser.try_num_differentiators("2-ball some args"), (2, "ball some args")
         )
 
     def test_ordinal_differentiators(self):
-        self.assertEqual(cmdparser.try_multimatch_differentiators("first look"), (0, "look"))
-        self.assertEqual(cmdparser.try_multimatch_differentiators("last look"), ("last", "look"))
+        self.assertEqual(
+            cmdparser.try_multimatch_differentiators("first look"), (0, "look")
+        )
+        self.assertEqual(
+            cmdparser.try_multimatch_differentiators("last look"), ("last", "look")
+        )
 
     @override_settings(SEARCH_MULTIMATCH_REGEX=r"(?P<number>[0-9]+)-(?P<name>.*)")
     def test_cmdparser(self):
@@ -1478,23 +1553,20 @@ class TestIssue3090(BaseEvenniaTest):
 
 class _TestCmd1(Command):
     key = "testcmd"
-    locks = "usecmd:false()"
+    authorization = "disabled"
 
     def func():
         pass
 
 
 class TestIssue3643(BaseEvenniaTest):
-    """
-    Commands with a 'cmd:' anywhere in its string, even `funccmd:` is assumed to
-    be a cmd: type lock, meaning it will not auto-insert `cmd:all()` into the
-    lockstring as intended.
-
-    """
+    """Disabled command declarations compile to an immutable Never policy."""
 
     def test_issue_3643(self):
         cmd = _TestCmd1()
-        self.assertEqual(cmd.locks, "cmd:all();usecmd:false()")
+        from evennia.authorization.policy import Never
+
+        self.assertIsInstance(cmd.authorization_policy, Never)
 
 
 class _CmdCrash(Command):
@@ -1518,7 +1590,10 @@ class TestIssue2627(TwistedTestCase, BaseEvenniaTest):
     def test_cmdhandler_masks_sensitive_input_in_error_log(self, mock_log_err):
         d = ensureDeferred(
             cmdhandler.cmdhandler(
-                self.session, " johnny password123", cmdobj=_CmdCrash(), cmdobj_key="connect"
+                self.session,
+                " johnny password123",
+                cmdobj=_CmdCrash(),
+                cmdobj_key="connect",
             )
         )
 
@@ -1655,186 +1730,6 @@ class TestCmdSetMergeObjBindings(TestCase):
         self.assertNotIn("b", keys)
 
 
-class TestCmdAccessCache(BaseEvenniaTest):
-    """Tests for evennia.commands.cmd_access_cache."""
-
-    def setUp(self):
-        super().setUp()
-        self.char1.ndb._cmd_access_cache = {}
-        self.char1.ndb._cmd_access_cache_gen = 0
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_cache_hit_avoids_second_access_call(self):
-        from evennia.commands.cmd_access_cache import cached_cmd_access
-
-        cmd = _CmdA("test")
-        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
-            mock_access.return_value = True
-            self.assertTrue(cached_cmd_access(cmd, self.char1))
-            self.assertTrue(cached_cmd_access(cmd, self.char1))
-            self.assertEqual(mock_access.call_count, 1)
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_invalidate_bumps_generation(self):
-        from evennia.commands.cmd_access_cache import cached_cmd_access, invalidate_cmd_access_cache
-
-        cmd = _CmdA("test")
-        with patch.object(cmd, "access", return_value=True) as mock_access:
-            cached_cmd_access(cmd, self.char1)
-            invalidate_cmd_access_cache(self.char1)
-            cached_cmd_access(cmd, self.char1)
-            self.assertEqual(mock_access.call_count, 2)
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_cmdset_add_invalidates_caller(self):
-        from evennia.commands import cmd_access_cache
-        from evennia.commands.cmdset import CmdSet
-
-        class _OneCmdSet(CmdSet):
-            def at_cmdset_creation(self):
-                self.add(_CmdA(self))
-
-        cmd = _CmdA("x")
-        with patch.object(
-            cmd_access_cache, "cached_cmd_access", wraps=cmd_access_cache.cached_cmd_access
-        ) as wrapped:
-            wrapped(cmd, self.char1)
-            self.assertEqual(wrapped.call_count, 1)
-            self.char1.cmdset.add(_OneCmdSet)
-            wrapped(cmd, self.char1)
-            self.assertEqual(wrapped.call_count, 2)
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=False)
-    def test_disabled_uses_access_directly(self):
-        from evennia.commands.cmd_access_cache import cached_cmd_access
-
-        cmd = _CmdA("test")
-        with patch.object(cmd, "access", return_value=True) as mock_access:
-            cached_cmd_access(cmd, self.char1)
-            cached_cmd_access(cmd, self.char1)
-            self.assertEqual(mock_access.call_count, 2)
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_cmdparser_with_cache_enabled(self):
-        from evennia.commands.cmdset import CmdSet
-
-        class _SayCmd(Command):
-            key = "saytest"
-            locks = "cmd:all()"
-
-        class _SayCmdSet(CmdSet):
-            def at_cmdset_creation(self):
-                self.add(_SayCmd())
-
-        cmdset = _SayCmdSet()
-        matches = cmdparser.cmdparser("saytest hello", cmdset, self.char1)
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(matches[0][0], "saytest")
-
-
-class TestCmdAccessCacheBypassOnAccessOverride(BaseEvenniaTest):
-    """Commands that override .access() bypass the cache (F-6 auto-skip)."""
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_overriding_access_bypasses_cache(self):
-        from evennia.commands.cmd_access_cache import cached_cmd_access
-
-        class _CustomAccessCmd(_CmdA):
-            def access(self, srcobj, access_type="cmd", default=False, session=None):
-                return super().access(srcobj, access_type, default, session)
-
-        cmd = _CustomAccessCmd("custom")
-        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
-            mock_access.return_value = True
-            cached_cmd_access(cmd, self.char1)
-            cached_cmd_access(cmd, self.char1)
-        self.assertEqual(mock_access.call_count, 2)
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_inherited_override_bypasses_cache(self):
-        """Override two classes up still bypasses (the is-check sees the inherited fn)."""
-        from evennia.commands.cmd_access_cache import cached_cmd_access
-
-        class _OverridingBase(_CmdA):
-            def access(self, srcobj, access_type="cmd", default=False, session=None):
-                return True
-
-        class _InheritsOverride(_OverridingBase):
-            pass
-
-        cmd = _InheritsOverride("inherit")
-        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
-            mock_access.return_value = True
-            cached_cmd_access(cmd, self.char1)
-            cached_cmd_access(cmd, self.char1)
-        self.assertEqual(mock_access.call_count, 2)
-
-    @override_settings(COMMAND_ACCESS_CACHE_ENABLED=True)
-    def test_base_access_still_cached(self):
-        """Stock Command.access subclasses (no override) still get cached."""
-        from evennia.commands.cmd_access_cache import cached_cmd_access
-
-        cmd = _CmdA("base")
-        with patch.object(cmd, "access", wraps=cmd.access) as mock_access:
-            mock_access.return_value = True
-            cached_cmd_access(cmd, self.char1)
-            cached_cmd_access(cmd, self.char1)
-        self.assertEqual(mock_access.call_count, 1)
-
-
-class TestInvalidateCallerAccess(BaseEvenniaTest):
-    """Tests for cmd_access_cache.invalidate_caller_access fan-out."""
-
-    def test_calls_both_inner_invalidations_for_single_target(self):
-        from evennia.commands import cmd_access_cache
-        from evennia.locks import lockhandler
-
-        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
-            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
-                cmd_access_cache.invalidate_caller_access(self.char1)
-        cmd_inv.assert_called_once_with(self.char1)
-        lock_inv.assert_called_once_with(self.char1)
-
-    def test_multi_target_invalidates_each(self):
-        from evennia.commands import cmd_access_cache
-        from evennia.locks import lockhandler
-
-        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
-            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
-                cmd_access_cache.invalidate_caller_access(self.char1, self.account)
-        self.assertEqual(cmd_inv.call_count, 2)
-        self.assertEqual(lock_inv.call_count, 2)
-        cmd_inv.assert_any_call(self.char1)
-        cmd_inv.assert_any_call(self.account)
-        lock_inv.assert_any_call(self.char1)
-        lock_inv.assert_any_call(self.account)
-
-    def test_none_targets_skipped(self):
-        from evennia.commands import cmd_access_cache
-        from evennia.locks import lockhandler
-
-        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
-            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
-                cmd_access_cache.invalidate_caller_access(self.char1, None)
-        cmd_inv.assert_called_once_with(self.char1)
-        lock_inv.assert_called_once_with(self.char1)
-
-    def test_zero_targets_is_noop(self):
-        from evennia.commands import cmd_access_cache
-        from evennia.locks import lockhandler
-
-        with patch.object(cmd_access_cache, "invalidate_cmd_access_cache") as cmd_inv:
-            with patch.object(lockhandler, "invalidate_lock_cache") as lock_inv:
-                cmd_access_cache.invalidate_caller_access()
-        cmd_inv.assert_not_called()
-        lock_inv.assert_not_called()
-
-
-# ----------------------------------------------------------------------------
-# Phase 2 step 1: at_pre_cmd → at_pre_parse rename + post-parse at_pre_cmd
-# ----------------------------------------------------------------------------
-
-
 class TestAtPreCmdRename(BaseEvenniaTest):
     """Hook dispatch order and the __init_subclass__ guard."""
 
@@ -1843,7 +1738,7 @@ class TestAtPreCmdRename(BaseEvenniaTest):
 
         class _CmdOrder(Command):
             key = "order"
-            locks = "cmd:all()"
+            authorization = "public"
 
             def at_pre_parse(self):
                 events.append("at_pre_parse")
@@ -1858,7 +1753,9 @@ class TestAtPreCmdRename(BaseEvenniaTest):
                 events.append("at_post_cmd")
 
         d = ensureDeferred(
-            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdOrder(), cmdobj_key="order")
+            cmdhandler.cmdhandler(
+                self.session, "", cmdobj=_CmdOrder(), cmdobj_key="order"
+            )
         )
 
         def _check(_):
@@ -1875,7 +1772,7 @@ class TestAtPreCmdRename(BaseEvenniaTest):
 
         class _CmdAbortPre(Command):
             key = "abortpre"
-            locks = "cmd:all()"
+            authorization = "public"
 
             def at_pre_parse(self):
                 events.append("at_pre_parse")
@@ -1888,7 +1785,9 @@ class TestAtPreCmdRename(BaseEvenniaTest):
                 events.append("func")
 
         d = ensureDeferred(
-            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPre(), cmdobj_key="abortpre")
+            cmdhandler.cmdhandler(
+                self.session, "", cmdobj=_CmdAbortPre(), cmdobj_key="abortpre"
+            )
         )
 
         def _check(_):
@@ -1904,7 +1803,7 @@ class TestAtPreCmdRename(BaseEvenniaTest):
 
         class _CmdPostParseHook(Command):
             key = "postparsehook"
-            locks = "cmd:all()"
+            authorization = "public"
 
             def at_pre_parse(self):
                 events.append("at_pre_parse")
@@ -1941,7 +1840,7 @@ class TestAtPreCmdRename(BaseEvenniaTest):
 
         class _CmdAbortPost(Command):
             key = "abortpost"
-            locks = "cmd:all()"
+            authorization = "public"
 
             def at_pre_parse(self):
                 events.append("at_pre_parse")
@@ -1960,7 +1859,9 @@ class TestAtPreCmdRename(BaseEvenniaTest):
                 events.append("at_post_cmd")
 
         d = ensureDeferred(
-            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdAbortPost(), cmdobj_key="abortpost")
+            cmdhandler.cmdhandler(
+                self.session, "", cmdobj=_CmdAbortPost(), cmdobj_key="abortpost"
+            )
         )
 
         def _check(_):
@@ -1994,7 +1895,7 @@ class TestFtfyNormalization(BaseEvenniaTest):
 
         class _CmdCapture(Command):
             key = "key"
-            locks = "cmd:all()"
+            authorization = "public"
 
             def func(self):
                 captured["raw_string"] = self.raw_string
@@ -2005,7 +1906,9 @@ class TestFtfyNormalization(BaseEvenniaTest):
     def test_mojibake_normalized_on_raw_string(self):
         cmd, captured = self._capture_cmd()
         d = ensureDeferred(
-            cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key")
+            cmdhandler.cmdhandler(
+                self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key"
+            )
         )
 
         def _check(_):
@@ -2018,7 +1921,9 @@ class TestFtfyNormalization(BaseEvenniaTest):
     def test_setting_off_passes_through(self):
         cmd, captured = self._capture_cmd()
         d = ensureDeferred(
-            cmdhandler.cmdhandler(self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key")
+            cmdhandler.cmdhandler(
+                self.session, self.MOJIBAKE_ARG, cmdobj=cmd, cmdobj_key="key"
+            )
         )
 
         def _check(_):
@@ -2040,7 +1945,7 @@ from evennia.commands.signals import on_command_pre as _on_command_pre
 
 class _CmdSignalsOk(Command):
     key = "ok"
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         pass
@@ -2100,7 +2005,9 @@ class TestCommandSignals(TwistedTestCase, BaseEvenniaTest):
         self.addCleanup(_on_command_pre.disconnect, _bad, dispatch_uid="bad-pre")
 
         d = ensureDeferred(
-            cmdhandler.cmdhandler(self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok")
+            cmdhandler.cmdhandler(
+                self.session, "", cmdobj=_CmdSignalsOk(), cmdobj_key="ok"
+            )
         )
 
         def _check(_):
@@ -2164,7 +2071,8 @@ class TestErrorReportedTraceId(TwistedTestCase, BaseEvenniaTest):
     """Phase 1: ErrorReported carries trace_id when raised inside a trace."""
 
     def test_trace_id_set_inside_trace(self):
-        from evennia.utils.command_trace import begin_command_trace, end_command_trace
+        from evennia.utils.command_trace import (begin_command_trace,
+                                                 end_command_trace)
 
         try:
             tid = begin_command_trace(raw_string="x", cmd_key="x")
@@ -2193,8 +2101,8 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
                 return dict(real_providers)
 
         proxy = _Proxy()
-        providers, _list, _err_list, caller, _error_to = cmdhandler.generate_cmdset_providers(
-            real_session, session=proxy
+        providers, _list, _err_list, caller, _error_to = (
+            cmdhandler.generate_cmdset_providers(real_session, session=proxy)
         )
         self.assertTrue(_Proxy.called)
         self.assertTrue(providers)
@@ -2208,13 +2116,8 @@ class TestSessionProxy(TwistedTestCase, BaseEvenniaTest):
 
 
 from evennia.commands.location_cmdset_cache import (
-    bump_cmdset_generation,
-    clear_location_cmdset_cache,
-    cmdset_generation,
-    get_cached_location_cmdsets,
-    make_cache_key,
-    set_cached_location_cmdsets,
-)
+    bump_cmdset_generation, clear_location_cmdset_cache, cmdset_generation,
+    get_cached_location_cmdsets, make_cache_key, set_cached_location_cmdsets)
 
 
 class TestLocationCmdsetCache(BaseEvenniaTest):
@@ -2227,7 +2130,9 @@ class TestLocationCmdsetCache(BaseEvenniaTest):
 
     def test_generation_bumps_on_cmdset_change(self):
         gen0 = cmdset_generation(self.char1)
-        self.char1.cmdset.add("evennia.commands.default.cmdset_character.CharacterCmdSet")
+        self.char1.cmdset.add(
+            "evennia.commands.default.cmdset_character.CharacterCmdSet"
+        )
         self.assertGreater(cmdset_generation(self.char1), gen0)
         if self.char1.location:
             self.assertGreaterEqual(cmdset_generation(self.char1.location), gen0)
@@ -2258,7 +2163,7 @@ from evennia.commands.command import AccountCommand as _AccountCommand
 
 class _CmdAcctMarker(_AccountCommand):
     key = "acctmarker"
-    locks = "cmd:all()"
+    authorization = "public"
     # retain_instance so the cmd we hand to cmdhandler is the one normalised
     # in-place (the default copy path would rebind to a separate object).
     retain_instance = True
@@ -2357,23 +2262,6 @@ class TestAccountCommandNormalization(TwistedTestCase, BaseEvenniaTest):
         cmd.parse()
         self.assertEqual(cmd.switches, ["Del", "Force"])
 
-    def test_cmd_access_cache_identity_differentiates_command_classes(self):
-        # _cmd_identity keys on class module + name, so a Command and an
-        # AccountCommand with the same key string do not collide in the
-        # cmd_access_cache even though they share a key.
-        from evennia.commands.cmd_access_cache import _cmd_identity
-
-        class _CmdSharedKeyObj(Command):
-            key = "shared"
-
-        class _CmdSharedKeyAcct(_AccountCommand):
-            key = "shared"
-
-        self.assertNotEqual(
-            _cmd_identity(_CmdSharedKeyObj()),
-            _cmd_identity(_CmdSharedKeyAcct()),
-        )
-
 
 # ----------------------------------------------------------------------------
 # Phase 3 step 4: token-boundary matching semantics
@@ -2441,183 +2329,6 @@ class TestTokenBoundaryMatch(TestCase):
 # ----------------------------------------------------------------------------
 
 
-class TestPermissionsChangedSignal(BaseEvenniaCommandTest):
-    """Engine commands that mutate effective permissions invalidate the
-    cmd_access cache for the affected entity and fire the
-    ``permissions_changed`` signal exactly once. Replaces downstream
-    monkey-patches around ``CmdPerm`` / ``CmdQuell``.
-    """
-
-    def setUp(self):
-        super().setUp()
-        from evennia.commands.signals import permissions_changed
-
-        self._captured = []
-
-        def _receiver(sender, **kwargs):
-            self._captured.append((sender, kwargs))
-
-        self._receiver = _receiver
-        permissions_changed.connect(_receiver)
-        self.addCleanup(permissions_changed.disconnect, _receiver)
-
-    def _prime_cache(self, caller):
-        # Put something in the cache so we can detect invalidation by its
-        # absence. Don't go through cached_cmd_access — the cache there
-        # only populates when COMMAND_ACCESS_CACHE_ENABLED is True.
-        caller.ndb._cmd_access_cache = {("sentinel",): True}
-        caller.ndb._cmd_access_cache_gen = 7
-
-    def test_cmd_perm_add_invalidates_target_and_fires(self):
-        from evennia.commands.default import admin
-
-        self._prime_cache(self.obj1)
-        self.call(
-            admin.CmdPerm(),
-            "Obj = Builder",
-            "Permission 'Builder' given to Obj (the Object/Character).",
-        )
-        self.assertIsNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
-        self.assertEqual(len(self._captured), 1)
-        sender, kw = self._captured[0]
-        self.assertIs(sender, admin.CmdPerm)
-        self.assertIs(kw["target"], self.obj1)
-        self.assertEqual(kw["added"], ("Builder",))
-        self.assertEqual(kw["removed"], ())
-        self.assertFalse(kw["account_mode"])
-
-    def test_cmd_perm_del_fires_with_removed(self):
-        from evennia.commands.default import admin
-
-        self.obj1.permissions.add("Builder")
-        self._prime_cache(self.obj1)
-        self.call(
-            admin.CmdPerm(),
-            "/del Obj = Builder",
-            "Permission Builder removed from Obj (if they existed).",
-        )
-        self.assertIsNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
-        self.assertEqual(len(self._captured), 1)
-        sender, kw = self._captured[0]
-        self.assertIs(kw["target"], self.obj1)
-        self.assertEqual(kw["added"], ())
-        self.assertEqual(kw["removed"], ("Builder",))
-
-    def test_cmd_perm_no_op_does_not_fire(self):
-        # Setting a permission that already exists is a no-op — no
-        # mutation, no invalidation, no signal. Case-insensitive check
-        # so input casing doesn't matter.
-        from evennia.commands.default import admin
-
-        self.obj1.permissions.add("Builder")
-        self._prime_cache(self.obj1)
-        self.call(
-            admin.CmdPerm(),
-            "Obj = Builder",
-            "Permission 'Builder' is already defined on Obj.",
-        )
-        # Cache untouched, no signal.
-        self.assertIsNotNone(getattr(self.obj1.ndb, "_cmd_access_cache", None))
-        self.assertEqual(self._captured, [])
-
-    def test_cmd_quell_invalidates_account_and_puppet_and_fires(self):
-        from evennia.commands.default import account as account_cmds
-
-        # Make sure no _quell flag survives from a prior test.
-        self.account.attributes.remove("_quell")
-        self._prime_cache(self.account)
-        self._prime_cache(self.char1)
-        self.call(account_cmds.CmdQuell(), "", caller=self.account)
-        self.assertIsNone(getattr(self.account.ndb, "_cmd_access_cache", None))
-        # The session puppet (char1) should also have been invalidated.
-        self.assertIsNone(getattr(self.char1.ndb, "_cmd_access_cache", None))
-        self.assertEqual(len(self._captured), 1)
-        sender, kw = self._captured[0]
-        self.assertIs(sender, account_cmds.CmdQuell)
-        self.assertIs(kw["target"], self.account)
-        self.assertEqual(kw["added"], ())
-        self.assertEqual(kw["removed"], ())
-        self.assertTrue(kw["account_mode"])
-
-    def test_cmd_unquell_fires_too(self):
-        from evennia.commands.default import account as account_cmds
-
-        # Pre-condition: account is quelled. Otherwise @unquell is a no-op
-        # and shouldn't fire (matches the "no actual mutation" guard).
-        self.account.attributes.add("_quell", True)
-        self._prime_cache(self.account)
-        cmd = account_cmds.CmdQuell()
-        self.call(cmd, "", cmdstring="@unquell", caller=self.account)
-        self.assertIsNone(getattr(self.account.ndb, "_cmd_access_cache", None))
-        self.assertEqual(len(self._captured), 1)
-        sender, kw = self._captured[0]
-        self.assertIs(kw["target"], self.account)
-        self.assertEqual(kw["added"], ())
-        self.assertEqual(kw["removed"], ())
-        self.assertTrue(kw["account_mode"])
-
-
-# ---------------------------------------------------------------------------
-# Phase 4: trie-backed parser + fuzzy suggestions
-# ---------------------------------------------------------------------------
-
-from unittest import mock as _trie_mock
-
-from evennia.commands import cmdparser_trie
-
-
-class _TrieCmdGoShard(Command):
-    key = "go shard"
-    aliases = ["shard"]
-    locks = "cmd:all()"
-
-    def func(self):
-        pass
-
-
-class _TrieCmdGo(Command):
-    key = "go"
-    locks = "cmd:all()"
-
-    def func(self):
-        pass
-
-
-class _TrieCmdLook(Command):
-    key = "look"
-    locks = "cmd:all()"
-
-    def func(self):
-        pass
-
-
-class _TrieCmdLookat(Command):
-    key = "lookat"
-    locks = "cmd:all()"
-
-    def func(self):
-        pass
-
-
-class _TrieCmdZebra(Command):
-    key = "zebraalpha"
-    locks = "cmd:all()"
-
-    def func(self):
-        pass
-
-
-class _TrieCmdZebraOverrideMatch(Command):
-    key = "zebraalpha"
-    locks = "cmd:all()"
-
-    def match(self, search_string):
-        return Command.match(self, search_string)
-
-    def func(self):
-        pass
-
-
 class TestCommandTrie(TestCase):
     def test_insert_multiword_match(self):
         cs = CmdSet()
@@ -2642,7 +2353,9 @@ class TestCommandTrie(TestCase):
         cs.add(_TrieCmdLook())
         cs.add(_TrieCmdLookat())
         trie = cmdparser_trie.CommandTrie.from_cmdset(cs)
-        words, raw = cmdparser_trie._expand_first_token_abbrev(trie, ["loo"], "loo north")
+        words, raw = cmdparser_trie._expand_first_token_abbrev(
+            trie, ["loo"], "loo north"
+        )
         self.assertEqual(words[0], "loo")
         self.assertEqual(raw, "loo north")
 
@@ -2661,7 +2374,7 @@ class TestCommandTrie(TestCase):
             key = "out"
             aliases = []
             is_exit = True
-            locks = "cmd:all()"
+            authorization = "public"
 
             def func(self):
                 pass
@@ -2670,7 +2383,7 @@ class TestCommandTrie(TestCase):
             key = "north"
             aliases = ["n"]
             is_exit = True
-            locks = "cmd:all()"
+            authorization = "public"
 
             def func(self):
                 pass
@@ -2688,7 +2401,7 @@ class TestCommandTrie(TestCase):
         class _DualKey(Command):
             key = "out"
             aliases = ["o"]
-            locks = "cmd:all()"
+            authorization = "public"
 
             def func(self):
                 pass
@@ -2705,7 +2418,7 @@ class TestCommandTrie(TestCase):
             key = "out"
             aliases = ["o"]
             is_exit = True
-            locks = "cmd:all()"
+            authorization = "public"
 
             def func(self):
                 pass
@@ -2757,7 +2470,7 @@ class TestCommandTrie(TestCase):
         class _Rx(Command):
             key = "zebraalpha"
             arg_regex = _re.compile(r"^@")
-            locks = "cmd:all()"
+            authorization = "public"
 
             def func(self):
                 pass
@@ -2849,7 +2562,9 @@ class _PunctRoutingRecorderState(_RPStateProvider):
 
     @_rp_rule(_RPNoMatch, phase="before", priority=9999)
     def on_nomatch(self, action, actor):
-        _POSE_RECORDER.update(routed="nomatch", text=action.raw_string, raw=action._raw_string)
+        _POSE_RECORDER.update(
+            routed="nomatch", text=action.raw_string, raw=action._raw_string
+        )
         return _RP_PASS
 
 
@@ -2893,9 +2608,13 @@ class TestPosePassthroughIntegration(TwistedTestCase):
         # try_action_dispatch is `async def` now; drive the (synchronous)
         # coroutine to an already-fired Deferred.
         d = ensureDeferred(
-            _rp_try_dispatch(self.char, raw, actor=self.actor, engine=_rp_engine, parser=_rp_parser)
+            _rp_try_dispatch(
+                self.char, raw, actor=self.actor, engine=_rp_engine, parser=_rp_parser
+            )
         )
-        d.addCallbacks(lambda r: out.__setitem__("ok", r), lambda f: out.__setitem__("fail", f))
+        d.addCallbacks(
+            lambda r: out.__setitem__("ok", r), lambda f: out.__setitem__("fail", f)
+        )
         if "fail" in out:
             out["fail"].raiseException()
         return _POSE_RECORDER
@@ -2954,7 +2673,9 @@ class TestCmdsetMergeWarmup(BaseEvenniaTest):
         fake_handler.get_sessions.return_value = [unpuppeted]
         with (
             patch.object(evennia, "SESSION_HANDLER", fake_handler),
-            patch.object(cmdset_merge_warmup, "warm_cmdset_merge_for_session") as warm_mock,
+            patch.object(
+                cmdset_merge_warmup, "warm_cmdset_merge_for_session"
+            ) as warm_mock,
         ):
             cmdset_merge_warmup.warm_all_logged_in_puppet_sessions()
         warm_mock.assert_not_called()
@@ -2983,7 +2704,9 @@ class TestBridgeErrorSurfacing(TwistedTestCase):
             "evennia.actions.dispatch.try_action_dispatch",
             side_effect=RuntimeError("bridge kaboom"),
         ):
-            d = ensureDeferred(cmdhandler.cmdhandler(called_by, "kick goblin", callertype="object"))
+            d = ensureDeferred(
+                cmdhandler.cmdhandler(called_by, "kick goblin", callertype="object")
+            )
             d.addCallbacks(
                 lambda r: out.__setitem__("result", r),
                 lambda f: out.__setitem__("fail", f),

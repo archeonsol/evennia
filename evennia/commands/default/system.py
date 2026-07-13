@@ -66,7 +66,7 @@ class CmdReload(COMMAND_DEFAULT_CLASS):
 
     key = "@reload"
     aliases = ["@restart"]
-    locks = "cmd:perm(reload) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
 
     def func(self):
@@ -77,7 +77,9 @@ class CmdReload(COMMAND_DEFAULT_CLASS):
         if self.args:
             reason = "(Reason: %s) " % self.args.rstrip(".")
         if settings.BROADCAST_SERVER_RESTART_MESSAGES:
-            evennia.SESSION_HANDLER.announce_all(f" Server restart initiated {reason}...")
+            evennia.SESSION_HANDLER.announce_all(
+                f" Server restart initiated {reason}..."
+            )
         evennia.SESSION_HANDLER.portal_restart_server()
 
 
@@ -103,7 +105,7 @@ class CmdReset(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@reset"
-    locks = "cmd:perm(reload) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
 
     def func(self):
@@ -125,7 +127,7 @@ class CmdShutdown(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@shutdown"
-    locks = "cmd:perm(shutdown) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
 
     def func(self):
@@ -155,7 +157,12 @@ def _py_code(caller, buf):
     string = "Executing code%s ..." % (" (measure timing)" if measure_time else "")
     caller.msg(string)
     _run_code_snippet(
-        caller, buf, mode="exec", measure_time=measure_time, client_raw=client_raw, show_input=False
+        caller,
+        buf,
+        mode="exec",
+        measure_time=measure_time,
+        client_raw=client_raw,
+        show_input=False,
     )
     return True
 
@@ -377,7 +384,7 @@ class CmdPy(COMMAND_DEFAULT_CLASS):
     key = "@py"
     aliases = ["@!"]
     switch_options = ("time", "edit", "clientraw", "noecho")
-    locks = "cmd:perm(py) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
     arg_regex = ""
 
@@ -459,7 +466,7 @@ class CmdAccounts(COMMAND_DEFAULT_CLASS):
     key = "@accounts"
     aliases = ["@account"]
     switch_options = ("delete",)
-    locks = "cmd:perm(listaccounts) or perm(Admin)"
+    authorization = "engine.moderation.manage"
     help_category = "System"
 
     def func(self):
@@ -470,7 +477,7 @@ class CmdAccounts(COMMAND_DEFAULT_CLASS):
 
         if "delete" in self.switches:
             account = getattr(caller, "account")
-            if not account or not account.check_permstring("Developer"):
+            if not account or not account.has_capability("engine.runtime.manage"):
                 caller.msg("You are not allowed to delete accounts.")
                 return
             if not args:
@@ -487,7 +494,9 @@ class CmdAccounts(COMMAND_DEFAULT_CLASS):
                 return
             if len(accounts) > 1:
                 string = "There were multiple matches:\n"
-                string += "\n".join(" %s %s" % (account.id, account.key) for account in accounts)
+                string += "\n".join(
+                    " %s %s" % (account.id, account.key) for account in accounts
+                )
                 self.msg(string)
                 return
             account = accounts.first()
@@ -536,9 +545,16 @@ class CmdAccounts(COMMAND_DEFAULT_CLASS):
         for path, count in dbtotals.items():
             typetable.add_row(path, count, "%.2f" % ((float(count) / naccounts) * 100))
         # last N table
-        plyrs = AccountDB.objects.all().order_by("db_date_created")[max(0, naccounts - nlim) :]
+        plyrs = AccountDB.objects.all().order_by("db_date_created")[
+            max(0, naccounts - nlim) :
+        ]
         latesttable = self.styled_table(
-            "|wcreated|n", "|wdbref|n", "|wname|n", "|wtypeclass|n", border="cells", align="l"
+            "|wcreated|n",
+            "|wdbref|n",
+            "|wname|n",
+            "|wtypeclass|n",
+            border="cells",
+            align="l",
         )
         for ply in plyrs:
             latesttable.add_row(
@@ -573,7 +589,7 @@ class CmdService(COMMAND_DEFAULT_CLASS):
     key = "@service"
     aliases = ["@services"]
     switch_options = ("list", "start", "stop", "delete")
-    locks = "cmd:perm(service) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
 
     def func(self):
@@ -596,7 +612,9 @@ class CmdService(COMMAND_DEFAULT_CLASS):
                 "|wService|n (use services/start|stop|delete)", "|wstatus", align="l"
             )
             for service in service_collection.services:
-                table.add_row(service.name, service.running and "|gRunning" or "|rNot Running")
+                table.add_row(
+                    service.name, service.running and "|gRunning" or "|rNot Running"
+                )
             caller.msg(str(table))
             return
 
@@ -606,7 +624,9 @@ class CmdService(COMMAND_DEFAULT_CLASS):
             service = service_collection.getServiceNamed(self.args)
         except Exception:
             string = "Invalid service name. This command is case-sensitive. "
-            string += "See service/list for valid service name (enter the full name exactly)."
+            string += (
+                "See service/list for valid service name (enter the full name exactly)."
+            )
             caller.msg(string)
             return
 
@@ -620,7 +640,9 @@ class CmdService(COMMAND_DEFAULT_CLASS):
                 return
             if service.name[:7] == "Evennia":
                 if delmode:
-                    caller.msg("You cannot remove a core Evennia service (named 'Evennia*').")
+                    caller.msg(
+                        "You cannot remove a core Evennia service (named 'Evennia*')."
+                    )
                     return
                 string = (
                     "|RYou seem to be shutting down a core Evennia "
@@ -679,7 +701,7 @@ class CmdAbout(COMMAND_DEFAULT_CLASS):
 
     key = "@about"
     aliases = "@version"
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "System"
 
     def func(self):
@@ -726,7 +748,7 @@ class CmdTime(COMMAND_DEFAULT_CLASS):
 
     key = "@time"
     aliases = "@uptime"
-    locks = "cmd:perm(time) or perm(Player)"
+    authorization = "public"
     help_category = "System"
 
     def func(self):
@@ -735,7 +757,9 @@ class CmdTime(COMMAND_DEFAULT_CLASS):
         table1.add_row("Current uptime", utils.time_format(gametime.uptime(), 3))
         table1.add_row("Portal uptime", utils.time_format(gametime.portal_uptime(), 3))
         table1.add_row("Total runtime", utils.time_format(gametime.runtime(), 2))
-        table1.add_row("First start", datetime.datetime.fromtimestamp(gametime.server_epoch()))
+        table1.add_row(
+            "First start", datetime.datetime.fromtimestamp(gametime.server_epoch())
+        )
         table1.add_row("Current time", datetime.datetime.now())
         table1.reformat_column(0, width=30)
         table2 = self.styled_table(
@@ -745,11 +769,14 @@ class CmdTime(COMMAND_DEFAULT_CLASS):
             width=78,
             border_top=0,
         )
-        epochtxt = "Epoch (%s)" % ("from settings" if settings.TIME_GAME_EPOCH else "server start")
+        epochtxt = "Epoch (%s)" % (
+            "from settings" if settings.TIME_GAME_EPOCH else "server start"
+        )
         table2.add_row(epochtxt, datetime.datetime.fromtimestamp(gametime.game_epoch()))
         table2.add_row("Total time passed:", utils.time_format(gametime.gametime(), 2))
         table2.add_row(
-            "Current time ", datetime.datetime.fromtimestamp(gametime.gametime(absolute=True))
+            "Current time ",
+            datetime.datetime.fromtimestamp(gametime.gametime(absolute=True)),
         )
         table2.reformat_column(0, width=30)
         self.msg(str(table1) + "\n" + str(table2))
@@ -795,7 +822,7 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
     key = "@server"
     aliases = ["@serverload"]
     switch_options = ("mem", "flushmem")
-    locks = "cmd:perm(list) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
 
     def func(self):
@@ -839,7 +866,9 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
             # Display table
             loadtable = self.styled_table("property", "statistic", align="l")
             loadtable.add_row("Total CPU load", "%g %%" % loadavg)
-            loadtable.add_row("Total computer memory usage", "%g MB (%g%%)" % (rmem, pmem))
+            loadtable.add_row(
+                "Total computer memory usage", "%g MB (%g%%)" % (rmem, pmem)
+            )
             (loadtable.add_row("Process ID", "%g" % pid),)
 
         else:
@@ -886,9 +915,12 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
                 % (rusage.ru_majflt, rusage.ru_minflt, rusage.ru_nswap),
             )
             loadtable.add_row(
-                "Disk I/O", "%g reads, %g writes" % (rusage.ru_inblock, rusage.ru_oublock)
+                "Disk I/O",
+                "%g reads, %g writes" % (rusage.ru_inblock, rusage.ru_oublock),
             )
-            loadtable.add_row("Network I/O", "%g in, %g out" % (rusage.ru_msgrcv, rusage.ru_msgsnd))
+            loadtable.add_row(
+                "Network I/O", "%g in, %g out" % (rusage.ru_msgrcv, rusage.ru_msgsnd)
+            )
             loadtable.add_row(
                 "Context switching",
                 "%g vol, %g forced, %g signals"
@@ -908,7 +940,9 @@ class CmdServerLoad(COMMAND_DEFAULT_CLASS):
         )
         memtable = self.styled_table("entity name", "number", "idmapper %", align="l")
         for tup in sorted_cache:
-            memtable.add_row(tup[0], "%i" % tup[1], "%.2f" % (float(tup[1]) / total_num * 100))
+            memtable.add_row(
+                tup[0], "%i" % tup[1], "%.2f" % (float(tup[1]) / total_num * 100)
+            )
 
         string += "\n|w Entity idmapper cache:|n %i items\n%s" % (total_num, memtable)
 
@@ -932,7 +966,7 @@ class CmdSystems(COMMAND_DEFAULT_CLASS):
 
     key = "@systems"
     help_category = "System"
-    locks = "cmd:perm(systems) or perm(Builder)"
+    authorization = "engine.world.build"
 
     def func(self):
         from evennia.utils import systems
@@ -942,10 +976,14 @@ class CmdSystems(COMMAND_DEFAULT_CLASS):
         if not registered:
             self.msg("No systems are registered with the scheduler.")
             return
-        table = self.styled_table("system", "cadence", "scope", "last fired", "fires", "in flight")
+        table = self.styled_table(
+            "system", "cadence", "scope", "last fired", "fires", "in flight"
+        )
         for system in registered:
             if system.last_run:
-                last_fired = datetime_format(datetime.datetime.fromtimestamp(system.last_run))
+                last_fired = datetime_format(
+                    datetime.datetime.fromtimestamp(system.last_run)
+                )
             else:
                 last_fired = "-"
             table.add_row(
@@ -992,7 +1030,7 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
     key = "@tasks"
     aliases = ["@delays", "@task"]
     switch_options = ("pause", "unpause", "do_task", "call", "remove", "cancel")
-    locks = "perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "System"
 
     @staticmethod
@@ -1014,7 +1052,8 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         # get a reference of the global task handler
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import \
+                TASK_HANDLER as _TASK_HANDLER
 
         # verify manipulating the correct task
         task_args = _TASK_HANDLER.tasks.get(task_id, False)
@@ -1037,7 +1076,8 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
         # get a reference of the global task handler
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import \
+                TASK_HANDLER as _TASK_HANDLER
         # handle no tasks active.
         if not _TASK_HANDLER.tasks:
             self.msg("There are no active tasks.")
@@ -1056,7 +1096,9 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
 
             # if the argument is a task id, proccess the action on a single task
             if arg_is_id:
-                err_arg_msg = "Switch and task ID are required when manipulating a task."
+                err_arg_msg = (
+                    "Switch and task ID are required when manipulating a task."
+                )
                 task_comp_msg = "Task completed while processing request."
 
                 # handle missing arguments or switches
@@ -1140,8 +1182,12 @@ class CmdTasks(COMMAND_DEFAULT_CLASS):
                     switch_action = getattr(task, action_request, False)
                     if switch_action:
                         action_return = switch_action()
-                        self.msg(f"Task action {action_request} completed on task ID {task_id}.")
-                        self.msg(f"The task function {action_request} returned: {action_return}")
+                        self.msg(
+                            f"Task action {action_request} completed on task ID {task_id}."
+                        )
+                        self.msg(
+                            f"The task function {action_request} returned: {action_return}"
+                        )
 
                 # provide a message if not tasks of the function name was found
                 if not name_match_found:

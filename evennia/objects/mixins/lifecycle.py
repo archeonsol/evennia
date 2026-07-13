@@ -13,36 +13,6 @@ _ScriptDB = None
 class LifecycleMixin:
     """Mixin providing lifecycle-related methods for DefaultObject."""
 
-    @hook(
-        event="lockstring",
-        phase="composite",
-        actor="self",
-        returns="content",
-        discipline="public",
-        fires_from=("DefaultObject.create",),
-        notes="Per-class default lockstring used during basetype_setup.",
-    )
-    @classmethod
-    def get_default_lockstring(
-        cls, account: "DefaultAccount" = None, caller: "DefaultObject" = None, **kwargs
-    ):
-        """
-        Classmethod called during .create() to determine default locks for the object.
-
-        Args:
-            account (DefaultAccount): Account to attribute this object to.
-            caller (DefaultObject): The object which is creating this one.
-            **kwargs: Arbitrary input.
-
-        Returns:
-            str: A lockstring to use for this object.
-        """
-        pid = f"pid({account.id})" if account else None
-        cid = f"id({caller.id})" if caller else None
-        admin = "perm(Admin)"
-        trio = " or ".join([x for x in [pid, cid, admin] if x])
-        return ";".join([f"{x}:{trio}" for x in ["control", "delete", "edit"]])
-
     @classmethod
     def create(
         cls,
@@ -90,12 +60,6 @@ class LifecycleMixin:
 
         # Get a supplied description, if any
         description = kwargs.pop("description", "")
-
-        # Create a sane lockstring if one wasn't supplied
-        lockstring = kwargs.get("locks")
-        if (account or caller) and not lockstring:
-            lockstring = cls.get_default_lockstring(account=account, caller=caller, **kwargs)
-            kwargs["locks"] = lockstring
 
         # Create object
         try:
@@ -197,7 +161,9 @@ class LifecycleMixin:
         # See if we need to kick the account off.
 
         for session in self.sessions.all():
-            session.msg(_("Your character {key} has been destroyed.").format(key=self.key))
+            session.msg(
+                _("Your character {key} has been destroyed.").format(key=self.key)
+            )
             # no need to disconnect, Account just jumps to OOC mode.
         # sever the connection (important!)
         if self.account:
@@ -227,7 +193,8 @@ class LifecycleMixin:
         # location: removing this object removes its cmdset from the
         # room's available command pool.
         try:
-            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import \
+                bump_cmdset_generation
 
             if self.location is not None:
                 bump_cmdset_generation(self.location)
@@ -240,7 +207,12 @@ class LifecycleMixin:
         return True
 
     def access(
-        self, accessing_obj, access_type="read", default=False, no_superuser_bypass=False, **kwargs
+        self,
+        accessing_obj,
+        access_type="read",
+        default=False,
+        no_superuser_bypass=False,
+        **kwargs,
     ):
         """
         Determines if another object has permission to access this object
@@ -316,10 +288,9 @@ class LifecycleMixin:
             if updates:
                 self.save(update_fields=updates)
 
-            if cdict.get("permissions"):
-                self.permissions.batch_add(*cdict["permissions"])
-            if cdict.get("locks"):
-                self.locks.add(cdict["locks"])
+            if cdict.get("policies"):
+                for operation, policy in cdict["policies"].items():
+                    self.policies.set(operation, policy)
             if cdict.get("aliases"):
                 self.aliases.batch_add(*cdict["aliases"])
             if cdict.get("location"):
@@ -358,25 +329,6 @@ class LifecycleMixin:
         # object. Overload in child for a custom setup. Also creation
         # commands may set this (create an item and you should be its
         # controller, for example)
-
-        self.locks.add(
-            ";".join(
-                [
-                    "control:perm(Developer)",  # edit locks/permissions, delete
-                    "examine:perm(Builder)",  # examine properties
-                    "view:all()",  # look at object (visibility)
-                    "edit:perm(Admin)",  # edit properties/attributes
-                    "delete:perm(Admin)",  # delete object
-                    "get:all()",  # pick up object
-                    "drop:holds()",  # drop only that which you hold
-                    "call:true()",  # allow to call commands on this object
-                    "tell:perm(Admin)",  # allow emits to this object
-                    "puppet:pperm(Developer)",
-                    "teleport:true()",
-                    "teleport_here:true()",
-                ]
-            )
-        )  # lock down puppeting only to staff by default
 
     def basetype_posthook_setup(self):
         """

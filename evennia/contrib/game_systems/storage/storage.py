@@ -23,7 +23,9 @@ class StorageCommand(Command):
         if super().at_pre_parse():
             return True
 
-        self.storage_location_id = self.caller.location.tags.get(category="storage_location")
+        self.storage_location_id = self.caller.location.tags.get(
+            category="storage_location"
+        )
         if not self.storage_location_id:
             self.caller.msg(f"You cannot {self.cmdstring} anything here.")
             return True
@@ -47,7 +49,7 @@ class CmdStore(StorageCommand):
     """
 
     key = "store"
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "Storage"
 
     def func(self):
@@ -83,7 +85,7 @@ class CmdRetrieve(StorageCommand):
     """
 
     key = "retrieve"
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "Storage"
 
     def func(self):
@@ -116,7 +118,7 @@ class CmdList(StorageCommand):
     """
 
     key = "list"
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "Storage"
 
     def func(self):
@@ -145,7 +147,7 @@ class CmdStorage(Command):
     """
 
     key = "@storage"
-    locks = "cmd:perm(Builder)"
+    authorization = "engine.world.build"
 
     def func(self):
         """Set the storage location."""
@@ -169,12 +171,12 @@ class CmdStorage(Command):
             return
 
         if current_storage_id:
-            caller.msg("This is already a storage location: |wstorage/delete|n to remove the tag.")
+            caller.msg(
+                "This is already a storage location: |wstorage/delete|n to remove the tag."
+            )
             return
 
-        new_storage_id = (
-            f"{SHARED_TAG_PREFIX if SHARED_TAG_PREFIX in self.switches else ''}{storage_id}"
-        )
+        new_storage_id = f"{SHARED_TAG_PREFIX if SHARED_TAG_PREFIX in self.switches else ''}{storage_id}"
         location.tags.add(new_storage_id, category="storage_location")
         caller.msg(f"This is now a storage location with id: {new_storage_id}.")
 

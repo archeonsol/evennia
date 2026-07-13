@@ -59,7 +59,7 @@ class SimpleObjectDBSerializer(serializers.ModelSerializer):
 class TypeclassSerializerMixin:
     """
     Mixin that contains types shared by typeclasses. A note about tags,
-    aliases, and permissions. You might note that the methods and fields are
+    aliases, and capabilities. You might note that the methods and fields are
     defined here, but they're included explicitly in each child class. What
     gives? It's a DRF error: serializer method fields which are inherited do
     not resolve correctly in child classes, and as of this current version
@@ -76,7 +76,7 @@ class TypeclassSerializerMixin:
         "db_typeclass_path",
         "aliases",
         "tags",
-        "permissions",
+        "capabilities",
     ]
 
     @staticmethod
@@ -89,7 +89,9 @@ class TypeclassSerializerMixin:
         Returns:
             List of TagSerializer data
         """
-        return TagSerializer(obj.tags.get(return_tagobj=True, return_list=True), many=True).data
+        return TagSerializer(
+            obj.tags.get(return_tagobj=True, return_list=True), many=True
+        ).data
 
     @staticmethod
     def get_aliases(obj):
@@ -101,21 +103,24 @@ class TypeclassSerializerMixin:
         Returns:
             List of TagSerializer data
         """
-        return TagSerializer(obj.aliases.get(return_tagobj=True, return_list=True), many=True).data
+        return TagSerializer(
+            obj.aliases.get(return_tagobj=True, return_list=True), many=True
+        ).data
 
     @staticmethod
-    def get_permissions(obj):
-        """
-        Serializes tags from the object's Permissionshandler
-        Args:
-            obj: Typeclassed object being serialized
+    def get_capabilities(obj):
+        """Serialize explicit capability scopes without grant identifiers."""
 
-        Returns:
-            List of TagSerializer data
-        """
-        return TagSerializer(
-            obj.permissions.get(return_tagobj=True, return_list=True), many=True
-        ).data
+        from evennia.authorization.storage import load_grants
+
+        grants = load_grants(obj)
+        return [
+            {
+                "capability": capability,
+                "scopes": [f"{scope.kind}:{scope.key}" for scope in scopes],
+            }
+            for capability, scopes in sorted(grants.by_capability.items())
+        ]
 
     @staticmethod
     def get_attributes(obj):
@@ -167,7 +172,7 @@ class ObjectDBSerializer(TypeclassSerializerMixin, serializers.ModelSerializer):
     exits = serializers.SerializerMethodField()
     tags = serializers.SerializerMethodField()
     aliases = serializers.SerializerMethodField()
-    permissions = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
 
     class Meta:
         model = DefaultObject
@@ -234,7 +239,7 @@ class AccountSerializer(TypeclassSerializerMixin, serializers.ModelSerializer):
     session_ids = serializers.SerializerMethodField()
     tags = serializers.SerializerMethodField()
     aliases = serializers.SerializerMethodField()
-    permissions = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
 
     @staticmethod
     def get_session_ids(obj):
@@ -250,7 +255,11 @@ class AccountSerializer(TypeclassSerializerMixin, serializers.ModelSerializer):
 
     class Meta:
         model = DefaultAccount
-        fields = ["username", "session_ids", "nicks"] + TypeclassSerializerMixin.shared_fields
+        fields = [
+            "username",
+            "session_ids",
+            "nicks",
+        ] + TypeclassSerializerMixin.shared_fields
         read_only_fields = ["id"]
 
 
@@ -277,7 +286,7 @@ class ScriptDBSerializer(TypeclassSerializerMixin, serializers.ModelSerializer):
     attributes = serializers.SerializerMethodField()
     tags = serializers.SerializerMethodField()
     aliases = serializers.SerializerMethodField()
-    permissions = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
 
     class Meta:
         model = ScriptDB

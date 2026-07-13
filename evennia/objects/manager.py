@@ -10,19 +10,10 @@ from django.db.models import Q
 from django.db.models.fields import exceptions
 
 from evennia.server import signals
-from evennia.typeclasses.managers import (
-    TypeclassManager,
-    TypedObjectManager,
-    _flush_attr_writes,
-    _jsonb_match_pks,
-)
-from evennia.utils.utils import (
-    class_from_module,
-    dbid_to_obj,
-    is_iter,
-    make_iter,
-    string_partial_matching,
-)
+from evennia.typeclasses.managers import (TypeclassManager, TypedObjectManager,
+                                          _flush_attr_writes, _jsonb_match_pks)
+from evennia.utils.utils import (class_from_module, dbid_to_obj, is_iter,
+                                 make_iter, string_partial_matching)
 
 __all__ = ("ObjectManager", "ObjectDBManager")
 _GA = object.__getattribute__
@@ -31,10 +22,7 @@ _GA = object.__getattribute__
 _ATTR = None
 
 from evennia.utils.multimatch import (  # noqa: E402
-    _get_multimatch_input_handler,
-    _multimatch_regex,
-    resolve_multimatch_index,
-)
+    _get_multimatch_input_handler, _multimatch_regex, resolve_multimatch_index)
 
 _ATTR_SEARCH_FORCE_MSG = (
     "{method}() runs an attribute search, which forces a process-wide "
@@ -106,7 +94,9 @@ class ObjectDBManager(TypedObjectManager):
         if not words:
             return r".*"
         word_boundary = r"\m" if connection.vendor == "postgresql" else r"\b"
-        return r".* ".join(f"{word_boundary}{re.escape(word)}" for word in words) + r".*"
+        return (
+            r".* ".join(f"{word_boundary}{re.escape(word)}" for word in words) + r".*"
+        )
 
     def get_object_with_account(self, ostring, exact=True, candidates=None):
         """
@@ -141,9 +131,9 @@ class ObjectDBManager(TypedObjectManager):
             or Q()
         )
         if exact:
-            return self.filter(cand_restriction & Q(db_account__username__iexact=ostring)).order_by(
-                "id"
-            )
+            return self.filter(
+                cand_restriction & Q(db_account__username__iexact=ostring)
+            ).order_by("id")
         else:  # fuzzy matching
             obj_cands = self.select_related().filter(
                 cand_restriction & Q(db_account__username__istartswith=ostring)
@@ -175,7 +165,8 @@ class ObjectDBManager(TypedObjectManager):
             or Q()
         )
         return self.filter(
-            cand_restriction & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
+            cand_restriction
+            & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
         ).order_by("id")
 
     def get_objs_with_attr_value(
@@ -199,13 +190,17 @@ class ObjectDBManager(TypedObjectManager):
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
             or Q()
         )
-        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        type_restriction = (
+            typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        )
         _flush_attr_writes()
         qs = self.filter(cand_restriction & type_restriction)
         if connection.vendor == "postgresql":
             from evennia.typeclasses.jsonb_util import to_jsonb
 
-            return qs.filter(db_attrs__contains={"~": {"_d": {attr_name: to_jsonb(value)}}})
+            return qs.filter(
+                db_attrs__contains={"~": {"_d": {attr_name: to_jsonb(value)}}}
+            )
         return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name, None, value))
 
     def get_objs_with_db_property(self, property_name, candidates=None):
@@ -228,7 +223,9 @@ class ObjectDBManager(TypedObjectManager):
         )
         querykwargs = {property_name: None}
         try:
-            return list(self.filter(cand_restriction).exclude(Q(**querykwargs)).order_by("id"))
+            return list(
+                self.filter(cand_restriction).exclude(Q(**querykwargs)).order_by("id")
+            )
         except exceptions.FieldError:
             return []
 
@@ -257,11 +254,13 @@ class ObjectDBManager(TypedObjectManager):
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
             or Q()
         )
-        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        type_restriction = (
+            typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        )
         try:
-            return self.filter(cand_restriction & type_restriction & Q(**querykwargs)).order_by(
-                "id"
-            )
+            return self.filter(
+                cand_restriction & type_restriction & Q(**querykwargs)
+            ).order_by("id")
         except exceptions.FieldError:
             return self.none()
         except ValueError:
@@ -287,11 +286,19 @@ class ObjectDBManager(TypedObjectManager):
 
         """
         exclude_restriction = (
-            Q(pk__in=[_GA(obj, "id") for obj in make_iter(excludeobj)]) if excludeobj else Q()
+            Q(pk__in=[_GA(obj, "id") for obj in make_iter(excludeobj)])
+            if excludeobj
+            else Q()
         )
-        return self.filter(db_location=location).exclude(exclude_restriction).order_by("id")
+        return (
+            self.filter(db_location=location)
+            .exclude(exclude_restriction)
+            .order_by("id")
+        )
 
-    def get_objs_with_key_or_alias(self, ostring, exact=True, candidates=None, typeclasses=None):
+    def get_objs_with_key_or_alias(
+        self, ostring, exact=True, candidates=None, typeclasses=None
+    ):
         """
         Args:
             ostring (str): A search criterion.
@@ -317,7 +324,9 @@ class ObjectDBManager(TypedObjectManager):
         # build query objects
         candidates_id = [_GA(obj, "id") for obj in make_iter(candidates) if obj]
         cand_restriction = candidates is not None and Q(pk__in=candidates_id) or Q()
-        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        type_restriction = (
+            typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
+        )
         if exact:
             # exact matches only
             return (
@@ -417,19 +426,28 @@ class ObjectDBManager(TypedObjectManager):
             if attribute_name:
                 # attribute/property search (always exact).
                 matches = self.get_objs_with_db_property_value(
-                    attribute_name, searchdata, candidates=candidates, typeclasses=typeclass
+                    attribute_name,
+                    searchdata,
+                    candidates=candidates,
+                    typeclasses=typeclass,
                 )
                 if not matches:
                     # Deliberately no force=True: falling through to an
                     # attribute-value scan from .search()/search_object() is the
                     # game-logic path we want to penalize, so it raises here.
                     matches = self.get_objs_with_attr_value(
-                        attribute_name, searchdata, candidates=candidates, typeclasses=typeclass
+                        attribute_name,
+                        searchdata,
+                        candidates=candidates,
+                        typeclasses=typeclass,
                     )
             else:
                 # normal key/alias search
                 matches = self.get_objs_with_key_or_alias(
-                    searchdata, exact=exact, candidates=candidates, typeclasses=typeclass
+                    searchdata,
+                    exact=exact,
+                    candidates=candidates,
+                    typeclasses=typeclass,
                 )
             if matches and tags:
                 # Filter by all required tags in a single query pass.
@@ -465,7 +483,10 @@ class ObjectDBManager(TypedObjectManager):
             typeclasses = make_iter(typeclass)
             for i, typeclass in enumerate(make_iter(typeclasses)):
                 if callable(typeclass):
-                    typeclasses[i] = "%s.%s" % (typeclass.__module__, typeclass.__name__)
+                    typeclasses[i] = "%s.%s" % (
+                        typeclass.__module__,
+                        typeclass.__name__,
+                    )
                 else:
                     typeclasses[i] = "%s" % typeclass
             typeclass = typeclasses
@@ -482,7 +503,9 @@ class ObjectDBManager(TypedObjectManager):
             parse_input = _get_multimatch_input_handler()
             match_selector, stripped_searchdata = parse_input(str(searchdata))
             if match_selector is not None:
-                matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
+                matches = _searcher(
+                    stripped_searchdata, candidates, typeclass, exact=True
+                )
             else:
                 match_data = _multimatch_regex().match(str(searchdata))
                 if match_data:
@@ -490,7 +513,9 @@ class ObjectDBManager(TypedObjectManager):
                     stripped_searchdata = match_data.group("name") + (
                         match_data.group("args") or ""
                     )
-                    matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
+                    matches = _searcher(
+                        stripped_searchdata, candidates, typeclass, exact=True
+                    )
 
         # at this point, if there are no matches, we give it a chance to find fuzzy matches
         if not exact and not matches:
@@ -522,8 +547,7 @@ class ObjectDBManager(TypedObjectManager):
         new_key=None,
         new_location=None,
         new_home=None,
-        new_permissions=None,
-        new_locks=None,
+        new_policies=None,
         new_aliases=None,
         new_destination=None,
     ):
@@ -559,10 +583,8 @@ class ObjectDBManager(TypedObjectManager):
             new_home = original_object.home
         if not new_aliases:
             new_aliases = original_object.aliases.all()
-        if not new_locks:
-            new_locks = original_object.db_lock_storage
-        if not new_permissions:
-            new_permissions = original_object.permissions.all()
+        if new_policies is None:
+            new_policies = original_object.policies.all()
         if not new_destination:
             new_destination = original_object.destination
 
@@ -575,8 +597,7 @@ class ObjectDBManager(TypedObjectManager):
             key=new_key,
             location=new_location,
             home=new_home,
-            permissions=new_permissions,
-            locks=new_locks,
+            policies=new_policies,
             aliases=new_aliases,
             destination=new_destination,
         )
@@ -584,9 +605,7 @@ class ObjectDBManager(TypedObjectManager):
             return None
 
         # copy over all attributes from old to new.
-        attrs = (
-            (a.key, a.value, a.category, a.lock_storage) for a in original_object.attributes.all()
-        )
+        attrs = ((a.key, a.value, a.category) for a in original_object.attributes.all())
         new_object.attributes.batch_add(*attrs)
 
         # copy over all cmdsets, if any
@@ -602,7 +621,8 @@ class ObjectDBManager(TypedObjectManager):
 
         # copy over all tags, if any
         tags = (
-            (t.db_key, t.db_category, t.db_data) for t in original_object.tags.all(return_objs=True)
+            (t.db_key, t.db_category, t.db_data)
+            for t in original_object.tags.all(return_objs=True)
         )
         new_object.tags.batch_add(*tags)
 
@@ -622,8 +642,7 @@ class ObjectDBManager(TypedObjectManager):
         key=None,
         location=None,
         home=None,
-        permissions=None,
-        locks=None,
+        policies=None,
         aliases=None,
         tags=None,
         destination=None,
@@ -642,8 +661,7 @@ class ObjectDBManager(TypedObjectManager):
                 `#dbref` will be set.
             location (Object or str): Obj or #dbref to use as the location of the new object.
             home (Object or str): Obj or #dbref to use as the object's home location.
-            permissions (list): A list of permission strings or tuples (permstring, category).
-            locks (str): one or more lockstrings, separated by semicolons.
+            policies (dict): Typed operation policies.
             aliases (list): A list of alternative keys or tuples (aliasstring, category).
             tags (list): List of tag keys or tuples (tagkey, category) or (tagkey, category, data).
             destination (Object or str): Obj or #dbref to use as an Exit's target.
@@ -668,8 +686,7 @@ class ObjectDBManager(TypedObjectManager):
         typeclass = typeclass if typeclass else settings.BASE_OBJECT_TYPECLASS
 
         # convenience converters to avoid common usage mistake
-        permissions = make_iter(permissions) if permissions is not None else None
-        locks = make_iter(locks) if locks is not None else None
+        policies = dict(policies or {})
         aliases = make_iter(aliases) if aliases is not None else None
         tags = make_iter(tags) if tags is not None else None
         attributes = make_iter(attributes) if attributes is not None else None
@@ -724,8 +741,7 @@ class ObjectDBManager(TypedObjectManager):
             destination=destination,
             home=home,
             typeclass=typeclass.path,
-            permissions=permissions,
-            locks=locks,
+            policies=policies,
             aliases=aliases,
             tags=tags,
             report_to=report_to,

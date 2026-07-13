@@ -19,8 +19,6 @@ ATTR_FLUSH_TOTAL = None
 ATTR_FLUSH_BACKENDS_TOTAL = None
 ATTR_DIRTY_PENDING = None
 ATTR_FLUSH_DURATION_SECONDS = None
-CMD_ACCESS_CACHE_HIT_TOTAL = None
-CMD_ACCESS_CACHE_MISS_TOTAL = None
 LOCATION_CMDSET_CACHE_HIT_TOTAL = None
 LOCATION_CMDSET_CACHE_MISS_TOTAL = None
 CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL = None
@@ -48,7 +46,6 @@ def _init_metrics() -> bool:
     global _METRICS_READY
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
-    global CMD_ACCESS_CACHE_HIT_TOTAL, CMD_ACCESS_CACHE_MISS_TOTAL
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
     global CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL, CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL
     global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
@@ -85,14 +82,6 @@ def _init_metrics() -> bool:
         "evennia_attribute_flush_duration_seconds",
         "Time spent in flush_all_dirty",
         buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
-    )
-    CMD_ACCESS_CACHE_HIT_TOTAL = Counter(
-        "evennia_cmd_access_cache_hit_total",
-        "cmd.access checks served from per-caller cache",
-    )
-    CMD_ACCESS_CACHE_MISS_TOTAL = Counter(
-        "evennia_cmd_access_cache_miss_total",
-        "cmd.access checks computed and stored in cache",
     )
     LOCATION_CMDSET_CACHE_HIT_TOTAL = Counter(
         "evennia_location_cmdset_cache_hit_total",
@@ -132,7 +121,7 @@ def _init_metrics() -> bool:
     AUTHORIZATION_DECISIONS_TOTAL = Counter(
         "evennia_authorization_decisions_total",
         "Capability authorization decisions by resource kind and result",
-        ("resource_kind", "result"),
+        ("resource_kind", "result", "reason"),
     )
     AUTHORIZATION_DURATION_SECONDS = Histogram(
         "evennia_authorization_duration_seconds",
@@ -162,7 +151,9 @@ def _init_metrics() -> bool:
     return True
 
 
-def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = None) -> None:
+def record_attribute_flush(
+    stats: dict, *, duration_seconds: Optional[float] = None
+) -> None:
     """
     Update Prometheus counters/gauge/histogram after ``flush_all_dirty``.
     """
@@ -182,16 +173,6 @@ def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = N
         ATTR_FLUSH_BACKENDS_TOTAL.inc(backends)
     if duration_seconds is not None and ATTR_FLUSH_DURATION_SECONDS is not None:
         ATTR_FLUSH_DURATION_SECONDS.observe(duration_seconds)
-
-
-def record_cmd_access_cache_hit() -> None:
-    if _init_metrics() and CMD_ACCESS_CACHE_HIT_TOTAL is not None:
-        CMD_ACCESS_CACHE_HIT_TOTAL.inc()
-
-
-def record_cmd_access_cache_miss() -> None:
-    if _init_metrics() and CMD_ACCESS_CACHE_MISS_TOTAL is not None:
-        CMD_ACCESS_CACHE_MISS_TOTAL.inc()
 
 
 def record_location_cmdset_cache_hit() -> None:
@@ -243,7 +224,7 @@ def record_render_delivery(mode: str, duration_seconds: float) -> None:
 
 
 def record_authorization_decision(
-    resource_kind: str, allowed: bool, duration_seconds: float
+    resource_kind: str, allowed: bool, duration_seconds: float, reason: str = "unknown"
 ) -> None:
     """Record one low-cardinality structured authorization evaluation."""
 
@@ -251,15 +232,20 @@ def record_authorization_decision(
         return
     kind = str(resource_kind or "unknown")[:32]
     result = "allow" if allowed else "deny"
+    reason = str(reason or "unknown")[:48]
     if AUTHORIZATION_DECISIONS_TOTAL is not None:
-        AUTHORIZATION_DECISIONS_TOTAL.labels(resource_kind=kind, result=result).inc()
+        AUTHORIZATION_DECISIONS_TOTAL.labels(
+            resource_kind=kind, result=result, reason=reason
+        ).inc()
     if AUTHORIZATION_DURATION_SECONDS is not None:
         AUTHORIZATION_DURATION_SECONDS.labels(resource_kind=kind).observe(
             max(0.0, float(duration_seconds))
         )
 
 
-def record_runtime_task(task_kind: str, event: str, *, had_connection: bool = False) -> None:
+def record_runtime_task(
+    task_kind: str, event: str, *, had_connection: bool = False
+) -> None:
     """Record one bounded detached-root lifecycle transition."""
 
     if not _init_metrics():

@@ -22,28 +22,17 @@ from parameterized import parameterized
 from twisted.internet import task
 
 import evennia
+from evennia.authorization.policy import Always, Never
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command, InterruptCommand
-from evennia.commands.default import (
-    account,
-    admin,
-    building,
-    comms,
-    general,
-    syscommands,
-    system,
-    unloggedin,
-)
+from evennia.commands.default import account, admin, building, comms, general
 from evennia.commands.default import help as help_module
+from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (
-    DefaultCharacter,
-    DefaultExit,
-    DefaultObject,
-    DefaultRoom,
-)
+from evennia.objects.objects import (DefaultCharacter, DefaultExit,
+                                     DefaultObject, DefaultRoom)
 from evennia.prototypes import prototypes as protlib
 from evennia.utils import create, gametime, utils
 from evennia.utils.search import search_object
@@ -107,12 +96,20 @@ class TestGeneral(BaseEvenniaCommandTest):
         self.assertEqual(
             "testaliasedstring2", self.char1.nicks.get("testalias", category="account")
         )
-        self.assertEqual(None, self.char1.account.nicks.get("testalias", category="account"))
-        self.assertEqual("testaliasedstring3", self.char1.nicks.get("testalias", category="object"))
+        self.assertEqual(
+            None, self.char1.account.nicks.get("testalias", category="account")
+        )
+        self.assertEqual(
+            "testaliasedstring3", self.char1.nicks.get("testalias", category="object")
+        )
 
     def test_nick_list(self):
         self.call(general.CmdNick(), "/list", "No nicks defined.")
-        self.call(general.CmdNick(), "test1 = Hello", "Inputline-nick 'test1' mapped to 'Hello'.")
+        self.call(
+            general.CmdNick(),
+            "test1 = Hello",
+            "Inputline-nick 'test1' mapped to 'Hello'.",
+        )
         self.call(general.CmdNick(), "/list", "Defined Nicks:")
 
     def test_get_and_drop(self):
@@ -162,9 +159,13 @@ class TestGeneral(BaseEvenniaCommandTest):
             "Switches matched: ['test', 'testswitch', 'testswitch2']",
         )
         self.call(CmdTest(), "/test", "Switches matched: ['test']")
-        self.call(CmdTest(), "/test/testswitch", "Switches matched: ['test', 'testswitch']")
         self.call(
-            CmdTest(), "/testswitch/testswitch2", "Switches matched: ['testswitch', 'testswitch2']"
+            CmdTest(), "/test/testswitch", "Switches matched: ['test', 'testswitch']"
+        )
+        self.call(
+            CmdTest(),
+            "/testswitch/testswitch2",
+            "Switches matched: ['testswitch', 'testswitch2']",
         )
         self.call(CmdTest(), "/testswitch", "Switches matched: ['testswitch']")
         self.call(CmdTest(), "/testswitch2", "Switches matched: ['testswitch2']")
@@ -200,7 +201,7 @@ class TestGeneral(BaseEvenniaCommandTest):
         )
 
     def test_access(self):
-        self.call(general.CmdAccess(), "", "Permission Hierarchy (climbing):")
+        self.call(general.CmdAccess(), "", "Your capability grants:")
 
 
 class TestHelp(BaseEvenniaCommandTest):
@@ -234,7 +235,12 @@ class TestHelp(BaseEvenniaCommandTest):
             "Topic 'testhelp' was successfully created.",
             cmdset=CharacterCmdSet(),
         )
-        self.call(help_module.CmdHelp(), "testhelp", "Help for testhelp", cmdset=CharacterCmdSet())
+        self.call(
+            help_module.CmdHelp(),
+            "testhelp",
+            "Help for testhelp",
+            cmdset=CharacterCmdSet(),
+        )
         self.call(
             help_module.CmdSetHelp(),
             "/category testhelp = misc",
@@ -290,7 +296,10 @@ class TestHelp(BaseEvenniaCommandTest):
                 "test/creating extra/subsub",  # partial subsub-match
                 "Help for test/creating extra stuff/subsubtopic\n\nA subsubtopic text",
             ),
-            ("test/Something else", "Help for test/something else\n\nSomething else"),  # case
+            (
+                "test/Something else",
+                "Help for test/something else\n\nSomething else",
+            ),  # case
             (
                 "test/More",  # case
                 "Help for test/more\n\nAnother text\n\nSubtopics:\n  test/more/second-more",
@@ -381,7 +390,9 @@ class TestSystem(BaseEvenniaCommandTest):
         from evennia.utils import systems as systems_mod
 
         systems_mod._clear_registry()
-        self.call(system.CmdSystems(), "", "No systems are registered with the scheduler.")
+        self.call(
+            system.CmdSystems(), "", "No systems are registered with the scheduler."
+        )
         systems_mod.register(
             name="test-system",
             cadence=systems_mod.every(60),
@@ -410,7 +421,8 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         self.timedelay = 5
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import \
+                TASK_HANDLER as _TASK_HANDLER
         _TASK_HANDLER.clock = task.Clock()
         self.task_handler = _TASK_HANDLER
         self.task_handler.clear()
@@ -538,7 +550,9 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         text = ""
         for _, _, kwargs in self.char1.msg.mock_calls:
             text += kwargs.get("text", "")
-        self.assertEqual(text, "cancel request completed.The task function cancel returned: True")
+        self.assertEqual(
+            text, "cancel request completed.The task function cancel returned: True"
+        )
         self.assertTrue(self.task.exists())
 
     def test_task_complete_waiting_input(self):
@@ -573,9 +587,7 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         self.assertEqual(text, "Task completed while waiting for input.")
 
     def test_misformed_command(self):
-        wanted_msg = (
-            "Task command misformed.|Proper format tasks[/switch] [function name or task id]"
-        )
+        wanted_msg = "Task command misformed.|Proper format tasks[/switch] [function name or task id]"
         self.call(system.CmdTasks(), f"/cancel", wanted_msg)
 
 
@@ -583,23 +595,27 @@ class TestAdmin(BaseEvenniaCommandTest):
     def test_emit(self):
         self.call(admin.CmdEmit(), "Char2 = Test", "Emitted to Char2:\nTest")
 
-    def test_perm(self):
+    def test_grant(self):
         self.call(
-            admin.CmdPerm(),
-            "Obj = Builder",
-            "Permission 'Builder' given to Obj (the Object/Character).",
+            admin.CmdGrant(),
+            "Obj = engine.object.view",
+            "Granted engine.object.view to Obj.",
         )
         self.call(
-            admin.CmdPerm(),
-            "Char2 = Builder",
-            "Permission 'Builder' given to Char2 (the Object/Character).",
+            admin.CmdGrant(),
+            "Char2 = engine.object.view",
+            "Granted engine.object.view to Char2.",
         )
 
     def test_wall(self):
         self.call(admin.CmdWall(), "Test", "Announcing to all connected sessions ...")
 
     def test_ban(self):
-        self.call(admin.CmdBan(), "Char", "Name-ban 'char' was added. Use @unban to reinstate.")
+        self.call(
+            admin.CmdBan(),
+            "Char",
+            "Name-ban 'char' was added. Use @unban to reinstate.",
+        )
 
     def test_force(self):
         cid = self.char2.id
@@ -637,7 +653,9 @@ class TestAccount(BaseEvenniaCommandTest):
             (3, False, 2, "Account TestAccount"),
         ]
     )
-    def test_ooc_look(self, multisession_mode, auto_puppet, max_nr_chars, expected_result):
+    def test_ooc_look(
+        self, multisession_mode, auto_puppet, max_nr_chars, expected_result
+    ):
         self.account.characters.add(self.char1)
         self.account.unpuppet_all()
 
@@ -660,14 +678,22 @@ class TestAccount(BaseEvenniaCommandTest):
         self.account.characters.add(self.char1)
         self.account.unpuppet_object(self.session)
         self.call(
-            account.CmdIC(), "Char", "You become Char.", caller=self.account, receiver=self.char1
+            account.CmdIC(),
+            "Char",
+            "You become Char.",
+            caller=self.account,
+            receiver=self.char1,
         )
 
     def test_ic__other_object(self):
         self.account.characters.add(self.obj1)
         self.account.unpuppet_object(self.session)
         self.call(
-            account.CmdIC(), "Obj", "You become Obj.", caller=self.account, receiver=self.obj1
+            account.CmdIC(),
+            "Obj",
+            "You become Obj.",
+            caller=self.account,
+            receiver=self.obj1,
         )
 
     def test_ic__nonaccess(self):
@@ -696,11 +722,16 @@ class TestAccount(BaseEvenniaCommandTest):
 
     def test_quit(self):
         self.call(
-            account.CmdQuit(), "", "Quitting. Hope to see you again, soon.", caller=self.account
+            account.CmdQuit(),
+            "",
+            "Quitting. Hope to see you again, soon.",
+            caller=self.account,
         )
 
     def test_sessions(self):
-        self.call(account.CmdSessions(), "", "Your current session(s):", caller=self.account)
+        self.call(
+            account.CmdSessions(), "", "Your current session(s):", caller=self.account
+        )
 
     def test_color_test(self):
         self.call(account.CmdColorTest(), "ansi", "ANSI colors:", caller=self.account)
@@ -728,12 +759,7 @@ class TestAccount(BaseEvenniaCommandTest):
             caller=self.account,
         )
 
-        # Downgrade permissions on account
-        self.account.permissions.add("Player")
-        self.account.permissions.remove("Developer")
-
-        # Set lock on character object to prevent deletion
-        self.char1.locks.add("delete:none()")
+        self.char1.policies.set("delete", Never())
 
         # Try deleting as Player
         self.call(
@@ -743,8 +769,7 @@ class TestAccount(BaseEvenniaCommandTest):
             caller=self.account,
         )
 
-        # Set lock on character object to allow self-delete
-        self.char1.locks.add("delete:pid(%i)" % self.account.id)
+        self.char1.policies.set("delete", Always())
 
         # Try deleting as Player again
         self.call(
@@ -758,7 +783,7 @@ class TestAccount(BaseEvenniaCommandTest):
         self.call(
             account.CmdQuell(),
             "",
-            "Quelling to current puppet's permissions (developer).",
+            "Account grants suppressed; object-scoped puppet grants remain active.",
             caller=self.account,
         )
 
@@ -798,7 +823,9 @@ class TestBuilding(BaseEvenniaCommandTest):
 
         self.char1.db.test = "testval"
         self.call(
-            building.CmdExamine(), "self/test", "Attribute Char/test [category=None]:\n\ntestval"
+            building.CmdExamine(),
+            "self/test",
+            "Attribute Char/test [category=None]:\n\ntestval",
         )
         self.call(building.CmdExamine(), "NotFound", "Could not find 'NotFound'.")
         self.call(building.CmdExamine(), "out", "Name/key: out")
@@ -826,7 +853,9 @@ class TestBuilding(BaseEvenniaCommandTest):
     def test_set_obj_alias(self):
         self.call(building.CmdSetObjAlias(), "Obj =", "Cleared aliases from Obj")
         self.call(
-            building.CmdSetObjAlias(), "Obj = TestObj1b", "Alias(es) for 'Obj' set to 'testobj1b'."
+            building.CmdSetObjAlias(),
+            "Obj = TestObj1b",
+            "Alias(es) for 'Obj' set to 'testobj1b'.",
         )
         self.call(building.CmdSetObjAlias(), "", "Usage: ")
         self.call(building.CmdSetObjAlias(), "NotFound =", "Could not find 'NotFound'.")
@@ -835,7 +864,9 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdSetObjAlias(), "Obj2 =", "Cleared aliases from Obj2")
         self.call(building.CmdSetObjAlias(), "Obj2 =", "No aliases to clear.")
 
-        self.call(building.CmdSetObjAlias(), "Obj =", "Cleared aliases from Obj: testobj1b")
+        self.call(
+            building.CmdSetObjAlias(), "Obj =", "Cleared aliases from Obj: testobj1b"
+        )
         self.call(
             building.CmdSetObjAlias(),
             "/category Obj = testobj1b:category1",
@@ -860,7 +891,11 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Copied Obj to 'TestObj3' (aliases: ['TestObj3b']",
         )
         self.call(building.CmdCopy(), "", "Usage: ")
-        self.call(building.CmdCopy(), "Obj", "Identical copy of Obj, named 'Obj_copy' was created.")
+        self.call(
+            building.CmdCopy(),
+            "Obj",
+            "Identical copy of Obj, named 'Obj_copy' was created.",
+        )
         self.call(building.CmdCopy(), "NotFound = Foo", "Could not find 'NotFound'.")
 
     def test_attribute_commands(self):
@@ -914,10 +949,18 @@ class TestBuilding(BaseEvenniaCommandTest):
             ),
         )
         self.call(building.CmdCpAttr(), "", "Usage: ")
-        self.call(building.CmdCpAttr(), "Obj/test1 = Obj2/test3", "Copied Obj.test1 -> Obj2.test3")
+        self.call(
+            building.CmdCpAttr(),
+            "Obj/test1 = Obj2/test3",
+            "Copied Obj.test1 -> Obj2.test3",
+        )
 
         self.call(building.CmdWipe(), "", "Usage: ")
-        self.call(building.CmdWipe(), "Obj2/test2/test3", "Wiped attributes test2,test3 on Obj2.")
+        self.call(
+            building.CmdWipe(),
+            "Obj2/test2/test3",
+            "Wiped attributes test2,test3 on Obj2.",
+        )
         self.call(building.CmdWipe(), "Obj2", "Wiped all attributes on Obj2.")
 
     def test_nested_attribute_commands(self):
@@ -928,13 +971,19 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Created attribute Obj/test1 [category:None] = [1, 2]",
         )
         self.call(
-            building.CmdSetAttribute(), "Obj/test1", "Attribute Obj/test1 [category:None] = [1, 2]"
+            building.CmdSetAttribute(),
+            "Obj/test1",
+            "Attribute Obj/test1 [category:None] = [1, 2]",
         )
         self.call(
-            building.CmdSetAttribute(), "Obj/test1[0]", "Attribute Obj/test1[0] [category:None] = 1"
+            building.CmdSetAttribute(),
+            "Obj/test1[0]",
+            "Attribute Obj/test1[0] [category:None] = 1",
         )
         self.call(
-            building.CmdSetAttribute(), "Obj/test1[1]", "Attribute Obj/test1[1] [category:None] = 2"
+            building.CmdSetAttribute(),
+            "Obj/test1[1]",
+            "Attribute Obj/test1[1] [category:None] = 2",
         )
         self.call(
             building.CmdSetAttribute(),
@@ -953,7 +1002,9 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Deleted attribute Obj/test1[0] [category:None].",
         )
         self.call(
-            building.CmdSetAttribute(), "Obj/test1[0]", "Attribute Obj/test1[0] [category:None] = 2"
+            building.CmdSetAttribute(),
+            "Obj/test1[0]",
+            "Attribute Obj/test1[0] [category:None] = 2",
         )
         self.call(
             building.CmdSetAttribute(),
@@ -1174,7 +1225,9 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Attribute Obj/test3[0] [category:None] = {}",
         )
         self.call(
-            building.CmdSetAttribute(), "Obj/test3", "Attribute Obj/test3 [category:None] = [{}]"
+            building.CmdSetAttribute(),
+            "Obj/test3",
+            "Attribute Obj/test3 [category:None] = [{}]",
         )
 
         # Naughty keys
@@ -1236,7 +1289,11 @@ class TestBuilding(BaseEvenniaCommandTest):
             # duplicate keys don't cause issues
             "test5[0][0]": [("test5", [0, 0]), ("test5[0]", [0]), ("test5[0][0]", [])],
             # String ints preserved
-            'test6["0"][0]': [("test6", ["0", 0]), ('test6["0"]', [0]), ('test6["0"][0]', [])],
+            'test6["0"][0]': [
+                ("test6", ["0", 0]),
+                ('test6["0"]', [0]),
+                ('test6["0"][0]', []),
+            ],
             # Unmatched []
             "test7[dict": [("test7[dict", [])],
         }
@@ -1279,9 +1336,15 @@ class TestBuilding(BaseEvenniaCommandTest):
         # rename must sync both the username alias and the db_key identity column
         self.assertEqual(self.account.username, "TestAccountRenamed")
         self.assertEqual(self.account.db_key, "TestAccountRenamed")
-        self.call(building.CmdName(), "*NotFound=TestAccountRenamed", "Could not find '*NotFound'")
         self.call(
-            building.CmdName(), "Obj3=Obj4;foo;bar", "Object's name changed to 'Obj4' (foo, bar)."
+            building.CmdName(),
+            "*NotFound=TestAccountRenamed",
+            "Could not find '*NotFound'",
+        )
+        self.call(
+            building.CmdName(),
+            "Obj3=Obj4;foo;bar",
+            "Object's name changed to 'Obj4' (foo, bar).",
         )
         self.call(building.CmdName(), "Obj4=", "No names or aliases defined!")
 
@@ -1302,7 +1365,9 @@ class TestBuilding(BaseEvenniaCommandTest):
 
     def test_desc(self):
         oid = self.obj2.id
-        self.call(building.CmdDesc(), "Obj2=TestDesc", "The description was set on Obj2.")
+        self.call(
+            building.CmdDesc(), "Obj2=TestDesc", "The description was set on Obj2."
+        )
         self.call(building.CmdDesc(), "", "Usage: ")
 
         with patch.object(building, "EvEditor") as mock_ed:
@@ -1374,25 +1439,39 @@ class TestBuilding(BaseEvenniaCommandTest):
         )
 
     def test_dig(self):
-        self.call(building.CmdDig(), "TestRoom1=testroom;tr,back;b", "Created room TestRoom1")
+        self.call(
+            building.CmdDig(), "TestRoom1=testroom;tr,back;b", "Created room TestRoom1"
+        )
         self.call(building.CmdDig(), "", "Usage: ")
 
     def test_exit_commands(self):
         self.call(
-            building.CmdOpen(), "TestExit1=Room2", "Created new Exit 'TestExit1' from Room to Room2"
+            building.CmdOpen(),
+            "TestExit1=Room2",
+            "Created new Exit 'TestExit1' from Room to Room2",
         )
-        self.call(building.CmdLink(), "TestExit1=Room", "Link created TestExit1 -> Room (one way).")
+        self.call(
+            building.CmdLink(),
+            "TestExit1=Room",
+            "Link created TestExit1 -> Room (one way).",
+        )
         self.call(building.CmdUnLink(), "", "Usage: ")
         self.call(building.CmdLink(), "NotFound", "Could not find 'NotFound'.")
         self.call(building.CmdLink(), "TestExit", "TestExit1 is an exit to Room.")
-        self.call(building.CmdLink(), "Obj", "Obj is not an exit. Its home location is Room.")
         self.call(
-            building.CmdUnLink(), "TestExit1", "Former exit TestExit1 no longer links anywhere."
+            building.CmdLink(), "Obj", "Obj is not an exit. Its home location is Room."
+        )
+        self.call(
+            building.CmdUnLink(),
+            "TestExit1",
+            "Former exit TestExit1 no longer links anywhere.",
         )
 
         self.char1.location = self.room2
         self.call(
-            building.CmdOpen(), "TestExit2=Room", "Created new Exit 'TestExit2' from Room2 to Room."
+            building.CmdOpen(),
+            "TestExit2=Room",
+            "Created new Exit 'TestExit2' from Room2 to Room.",
         )
         self.call(
             building.CmdOpen(),
@@ -1402,7 +1481,9 @@ class TestBuilding(BaseEvenniaCommandTest):
 
         # ensure it matches locally first
         self.call(
-            building.CmdLink(), "TestExit=Room2", "Link created TestExit2 -> Room2 (one way)."
+            building.CmdLink(),
+            "TestExit=Room2",
+            "Link created TestExit2 -> Room2 (one way).",
         )
         self.call(
             building.CmdLink(),
@@ -1423,18 +1504,24 @@ class TestBuilding(BaseEvenniaCommandTest):
         # ensure can still match globally when not a local name
         self.call(building.CmdLink(), "TestExit1=Room2", "Note: TestExit1")
         self.call(
-            building.CmdLink(), "TestExit1=", "Former exit TestExit1 no longer links anywhere."
+            building.CmdLink(),
+            "TestExit1=",
+            "Former exit TestExit1 no longer links anywhere.",
         )
 
     def test_set_home(self):
         self.call(
-            building.CmdSetHome(), "Obj = Room2", "Home location of Obj was changed from Room"
+            building.CmdSetHome(),
+            "Obj = Room2",
+            "Home location of Obj was changed from Room",
         )
         self.call(building.CmdSetHome(), "", "Usage: ")
         self.call(building.CmdSetHome(), "self", "Char's current home is Room")
         self.call(building.CmdSetHome(), "Obj", "Obj's current home is Room2")
         self.obj1.home = None
-        self.call(building.CmdSetHome(), "Obj = Room2", "Home location of Obj was set to Room")
+        self.call(
+            building.CmdSetHome(), "Obj = Room2", "Home location of Obj was set to Room"
+        )
 
     def test_list_cmdsets(self):
         self.call(
@@ -1540,30 +1627,18 @@ class TestBuilding(BaseEvenniaCommandTest):
             )
             assert self.obj1.db.desc == "protdesc"
 
-    def test_lock(self):
-        self.call(building.CmdLock(), "", "Usage: ")
-        self.call(building.CmdLock(), "Obj = test:all()", "Added lock 'test:all()' to Obj.")
+    def test_policy(self):
+        self.call(building.CmdPolicy(), "", "Usage: ")
         self.call(
-            building.CmdLock(),
-            "*TestAccount = test:all()",
-            "Added lock 'test:all()' to TestAccount",
+            building.CmdPolicy(),
+            "/set Obj/wave = public",
+            "Set Obj/wave to {'schema': 'auth.policy.v1', 'type': 'always'}.",
         )
-        self.call(building.CmdLock(), "Obj/notfound", "Obj has no lock of access type 'notfound'.")
-        self.call(building.CmdLock(), "Obj/test", "test:all()")
         self.call(
-            building.CmdLock(),
-            "/view Obj = edit:false()",
-            (
-                "Switch(es) view can not be used with a lock assignment. "
-                "Use e.g. lock/del objname/locktype instead."
-            ),
+            building.CmdPolicy(),
+            "Obj/wave",
+            "Obj/wave: {'schema': 'auth.policy.v1', 'type': 'always'}",
         )
-        self.call(building.CmdLock(), "Obj = control:false()")
-        self.call(building.CmdLock(), "Obj = edit:false()")
-        self.call(building.CmdLock(), "Obj/test", "You are not allowed to do that.")
-        self.obj1.locks.add("control:true()")
-        self.call(building.CmdLock(), "Obj", "call:true()")  # etc
-        self.call(building.CmdLock(), "*TestAccount", "boot:perm(Admin)")  # etc
 
     def test_find(self):
         rid2 = self.room2.id
@@ -1571,7 +1646,9 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdFind(), "", "Usage: ")
         self.call(building.CmdFind(), "oom2", "One Match")
         self.call(building.CmdFind(), "oom2 = 1-{}".format(rmax), "One Match")
-        self.call(building.CmdFind(), "oom2 = 1 {}".format(rmax), "One Match")  # space works too
+        self.call(
+            building.CmdFind(), "oom2 = 1 {}".format(rmax), "One Match"
+        )  # space works too
         self.call(building.CmdFind(), "Char2", "One Match", cmdstring="locate")
         self.call(
             building.CmdFind(),
@@ -1608,8 +1685,12 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdFind(), "=", "Usage: ")
 
         # Test bogus dbref range with no search term
-        self.call(building.CmdFind(), "= obj", "Invalid dbref range provided (not a number).")
-        self.call(building.CmdFind(), "= #1a", "Invalid dbref range provided (not a number).")
+        self.call(
+            building.CmdFind(), "= obj", "Invalid dbref range provided (not a number)."
+        )
+        self.call(
+            building.CmdFind(), "= #1a", "Invalid dbref range provided (not a number)."
+        )
 
         # Test valid dbref ranges with no search term
         id1 = self.obj1.id
@@ -1619,11 +1700,21 @@ class TestBuilding(BaseEvenniaCommandTest):
         mdiff = id2 - id1 + 1
 
         self.call(building.CmdFind(), f"=#{id1}", f"{maxdiff} Matches(#{id1}-#{maxid}")
-        self.call(building.CmdFind(), f"={id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
-        self.call(building.CmdFind(), f"={id1} - {id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
-        self.call(building.CmdFind(), f"={id1}- #{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
-        self.call(building.CmdFind(), f"={id1}-#{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
-        self.call(building.CmdFind(), f"=#{id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
+        self.call(
+            building.CmdFind(), f"={id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
+        )
+        self.call(
+            building.CmdFind(), f"={id1} - {id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
+        )
+        self.call(
+            building.CmdFind(), f"={id1}- #{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
+        )
+        self.call(
+            building.CmdFind(), f"={id1}-#{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
+        )
+        self.call(
+            building.CmdFind(), f"=#{id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
+        )
 
     def test_script(self):
         self.call(building.CmdScripts(), "Obj =", "No scripts defined on Obj")
@@ -1684,12 +1775,18 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Obj = Room2",
             "Obj is leaving Room, heading for Room2.|Teleported Obj -> Room2.",
         )
-        self.call(building.CmdTeleport(), "NotFound = Room", "Could not find 'NotFound'.")
         self.call(
-            building.CmdTeleport(), "Obj = Obj", "You can't teleport an object inside of itself!"
+            building.CmdTeleport(), "NotFound = Room", "Could not find 'NotFound'."
+        )
+        self.call(
+            building.CmdTeleport(),
+            "Obj = Obj",
+            "You can't teleport an object inside of itself!",
         )
 
-        self.call(building.CmdTeleport(), "/tonone Obj2", "Teleported Obj2 -> None-location.")
+        self.call(
+            building.CmdTeleport(), "/tonone Obj2", "Teleported Obj2 -> None-location."
+        )
         self.call(building.CmdTeleport(), "/quiet Room2", "Room2")
         self.call(
             building.CmdTeleport(),
@@ -1713,7 +1810,10 @@ class TestBuilding(BaseEvenniaCommandTest):
         from evennia.utils import create
 
         offchar = create.create_object(
-            self.character_typeclass, key="OffChar", location=self.room1, home=self.room1
+            self.character_typeclass,
+            key="OffChar",
+            location=self.room1,
+            home=self.room1,
         )
         offchar.db_account = self.account  # owned, but no session -> not is_puppeted
         self.assertFalse(offchar.is_puppeted)
@@ -1737,9 +1837,17 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Tags on Obj: 'testtag', 'testtag2', 'testtag2' (category: category1), 'testtag3'",
         )
 
-        self.call(building.CmdTag(), "/search NotFound", "No objects found with tag 'NotFound'.")
-        self.call(building.CmdTag(), "/search testtag", "Found 1 object with tag 'testtag':")
-        self.call(building.CmdTag(), "/search testtag2", "Found 1 object with tag 'testtag2':")
+        self.call(
+            building.CmdTag(),
+            "/search NotFound",
+            "No objects found with tag 'NotFound'.",
+        )
+        self.call(
+            building.CmdTag(), "/search testtag", "Found 1 object with tag 'testtag':"
+        )
+        self.call(
+            building.CmdTag(), "/search testtag2", "Found 1 object with tag 'testtag2':"
+        )
         self.call(
             building.CmdTag(),
             "/search testtag2:category1",
@@ -1759,7 +1867,9 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Found 1 object with tag 'None' (category: 'category1'):",
         )
 
-        self.call(building.CmdTag(), "/del Obj = testtag3", "Removed tag 'testtag3' from Obj.")
+        self.call(
+            building.CmdTag(), "/del Obj = testtag3", "Removed tag 'testtag3' from Obj."
+        )
         self.call(
             building.CmdTag(),
             "/del Obj",
@@ -1889,14 +1999,22 @@ class TestBuilding(BaseEvenniaCommandTest):
         ball.delete()
 
         # test calling spawn with an invalid prototype.
-        self.call(building.CmdSpawn(), "'NO_EXIST'", "No prototype named 'NO_EXIST' was found.")
+        self.call(
+            building.CmdSpawn(),
+            "'NO_EXIST'",
+            "No prototype named 'NO_EXIST' was found.",
+        )
 
         # Test listing commands
         self.call(building.CmdSpawn(), "/list", "Key ")
 
         # spawn/examine (missing prototype)
         # lists all prototypes that exist
-        self.call(building.CmdSpawn(), "/examine", "You need to specify a prototype-key to show.")
+        self.call(
+            building.CmdSpawn(),
+            "/examine",
+            "You need to specify a prototype-key to show.",
+        )
 
         # spawn/examine with valid prototype
         # prints the prototype
@@ -1906,7 +2024,9 @@ class TestBuilding(BaseEvenniaCommandTest):
         # spawn/examine with invalid prototype
         # shows error
         self.call(
-            building.CmdSpawn(), "/examine NO_EXISTS", "No prototype named 'NO_EXISTS' was found."
+            building.CmdSpawn(),
+            "/examine NO_EXISTS",
+            "No prototype named 'NO_EXISTS' was found.",
         )
 
     def test_setattr_view_with_category(self):
@@ -1984,7 +2104,8 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.call(self.cmdchannel(), "/sub testchannel", "You are now subscribed")
         self.assertTrue(self.char1 in self.channel.subscriptions.all())
         self.assertEqual(
-            self.char1.nicks.nickreplace("testchannel Hello"), "@channel testchannel = Hello"
+            self.char1.nicks.nickreplace("testchannel Hello"),
+            "@channel testchannel = Hello",
         )
 
     def test_channel__unsub(self):
@@ -2000,7 +2121,9 @@ class TestCommsChannel(BaseEvenniaCommandTest):
             "/alias testchannel = foo",
             "Added/updated your alias 'foo' for channel testchannel.",
         )
-        self.assertEqual(self.char1.nicks.nickreplace("foo Hello"), "@channel testchannel = Hello")
+        self.assertEqual(
+            self.char1.nicks.nickreplace("foo Hello"), "@channel testchannel = Hello"
+        )
 
         # use alias
         self.channel.msg = Mock()
@@ -2018,11 +2141,19 @@ class TestCommsChannel(BaseEvenniaCommandTest):
     def test_channel__unmute(self):
         self.channel.mute(self.char1)
 
-        self.call(self.cmdchannel(), "/unmute testchannel = Char1", "Un-muted channel testchannel")
+        self.call(
+            self.cmdchannel(),
+            "/unmute testchannel = Char1",
+            "Un-muted channel testchannel",
+        )
         self.assertFalse(self.char1 in self.channel.mutelist)
 
     def test_channel__create(self):
-        self.call(self.cmdchannel(), "/create testchannel2", "Created (and joined) new channel")
+        self.call(
+            self.cmdchannel(),
+            "/create testchannel2",
+            "Created (and joined) new channel",
+        )
 
     def test_channel__destroy(self):
         self.channel.msg = Mock()
@@ -2032,7 +2163,9 @@ class TestCommsChannel(BaseEvenniaCommandTest):
             "Are you sure you want to delete channel ",
             inputs=["Yes"],
         )
-        self.channel.msg.assert_called_with("delete reason", bypass_mute=True, senders=self.char1)
+        self.channel.msg.assert_called_with(
+            "delete reason", bypass_mute=True, senders=self.char1
+        )
 
     def test_channel__desc(self):
         self.call(
@@ -2041,16 +2174,22 @@ class TestCommsChannel(BaseEvenniaCommandTest):
             "Updated channel description.",
         )
 
-    def test_channel__lock(self):
+    def test_channel__policy(self):
         self.call(
-            self.cmdchannel(), "/lock testchannel = foo:false()", "Added/updated lock on channel"
+            self.cmdchannel(),
+            "/policy testchannel = send=disabled",
+            "Added or updated channel policy.",
         )
-        self.assertEqual(self.channel.locks.get("foo"), "foo:false()")
+        self.assertIsInstance(self.channel.policies.get("send"), Never)
 
-    def test_channel__unlock(self):
-        self.channel.locks.add("foo:true()")
-        self.call(self.cmdchannel(), "/unlock testchannel = foo", "Removed lock from channel")
-        self.assertEqual(self.channel.locks.get("foo"), "")
+    def test_channel__unpolicy(self):
+        self.channel.policies.set("send", Always())
+        self.call(
+            self.cmdchannel(),
+            "/unpolicy testchannel = send",
+            "Removed channel policy override.",
+        )
+        self.assertIsNone(self.channel.policies.get("send"))
 
     def test_channel__boot(self):
         self.channel.connect(self.char2)
@@ -2104,7 +2243,9 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.assertFalse(self.char2 in self.channel.banlist)
 
     def test_channel__who(self):
-        self.call(self.cmdchannel(), "/who testchannel", "Subscribed to testchannel:\nChar")
+        self.call(
+            self.cmdchannel(), "/who testchannel", "Subscribed to testchannel:\nChar"
+        )
 
 
 from evennia.commands.default import comms  # noqa
@@ -2163,7 +2304,9 @@ class TestDiscord(BaseEvenniaCommandTest):
 
     def test_discord__linking(self):
         self.call(
-            self.cmddiscord(), "nosuchchannel = 5555555", "There is no channel 'nosuchchannel'"
+            self.cmddiscord(),
+            "nosuchchannel = 5555555",
+            "There is no channel 'nosuchchannel'",
         )
         self.call(
             self.cmddiscord(),
@@ -2172,7 +2315,11 @@ class TestDiscord(BaseEvenniaCommandTest):
         )
         self.assertTrue(self.discordbot in self.channel.subscriptions.all())
         self.assertTrue(("testchannel", "5555555") in self.discordbot.db.channels)
-        self.call(self.cmddiscord(), "testchannel = 5555555", "Those channels are already linked.")
+        self.call(
+            self.cmddiscord(),
+            "testchannel = 5555555",
+            "Those channels are already linked.",
+        )
 
     def test_discord__list(self):
         self.discordbot.db.channels = [("testchannel", "5555555")]

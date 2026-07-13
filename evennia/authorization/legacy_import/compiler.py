@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .policy import (
+from ..policy import (
     AllOf,
     Always,
     AnyOf,

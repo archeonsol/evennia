@@ -64,16 +64,14 @@ class SimpleDoor(DefaultExit):
         """
         self.db.return_exit = None
 
-    def setlock(self, lockstring):
-        """
-        Sets identical locks on both sides of the door.
+    def set_traversable(self, traversable: bool):
+        """Set one typed traverse policy on both physical door sides."""
 
-        Args:
-            lockstring (str): A lockstring, like `"traverse:true()"`.
+        from evennia.authorization.policy import Always, Never
 
-        """
-        self.locks.add(lockstring)
-        self.db.return_exit.locks.add(lockstring)
+        policy_type = Always if traversable else Never
+        self.policies.set("traverse", policy_type())
+        self.db.return_exit.policies.set("traverse", policy_type())
 
     def setdesc(self, description):
         """
@@ -113,13 +111,19 @@ class CmdOpen(default_cmds.CmdOpen):
     __doc__ = default_cmds.CmdOpen.__doc__
     # overloading parts of the default CmdOpen command to support doors.
 
-    def create_exit(self, exit_name, location, destination, exit_aliases=None, typeclass=None):
+    def create_exit(
+        self, exit_name, location, destination, exit_aliases=None, typeclass=None
+    ):
         """
         Simple wrapper for the default CmdOpen.create_exit
         """
         # create a new exit as normal
         new_exit = super().create_exit(
-            exit_name, location, destination, exit_aliases=exit_aliases, typeclass=typeclass
+            exit_name,
+            location,
+            destination,
+            exit_aliases=exit_aliases,
+            typeclass=typeclass,
         )
         if hasattr(self, "return_exit_already_created"):
             # we don't create a return exit if it was already created (because
@@ -134,7 +138,11 @@ class CmdOpen(default_cmds.CmdOpen):
             )
             self.return_exit_already_created = True
             back_exit = self.create_exit(
-                exit_name, destination, location, exit_aliases=exit_aliases, typeclass=typeclass
+                exit_name,
+                destination,
+                location,
+                exit_aliases=exit_aliases,
+                typeclass=typeclass,
             )
             new_exit.db.return_exit = back_exit
             back_exit.db.return_exit = new_exit
@@ -158,7 +166,7 @@ class CmdOpenCloseDoor(default_cmds.Command):
 
     key = "open"
     aliases = ["close"]
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "General"
 
     def func(self):
@@ -175,16 +183,16 @@ class CmdOpenCloseDoor(default_cmds.Command):
             return
 
         if self.cmdstring == "open":
-            if door.locks.check(self.caller, "traverse"):
+            if door.access(self.caller, "traverse"):
                 self.caller.msg("%s is already open." % door.key)
             else:
-                door.setlock("traverse:true()")
+                door.set_traversable(True)
                 self.caller.msg("You open %s." % door.key)
         else:  # close
-            if not door.locks.check(self.caller, "traverse"):
+            if not door.access(self.caller, "traverse"):
                 self.caller.msg("%s is already closed." % door.key)
             else:
-                door.setlock("traverse:false()")
+                door.set_traversable(False)
                 self.caller.msg("You close %s." % door.key)
 
 

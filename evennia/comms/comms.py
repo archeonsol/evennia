@@ -9,6 +9,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
 from django.utils.text import slugify
 
+from evennia.authorization.policy import (Always, Never, PredicateRequirement,
+                                          RequiresCapability)
 from evennia.comms.managers import ChannelManager
 from evennia.comms.models import ChannelDB
 from evennia.hooks import hook
@@ -120,6 +122,11 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
     channel_msg_nick_pattern = r"{alias}\s*?|{alias}\s+?(?P<arg1>.+?)"
     channel_msg_nick_replacement = "@channel {channelname} = $1"
 
+    def authorization_resource_ref(self):
+        """Return the stable resource identifier used by scoped grants."""
+
+        return f"channel:{self.id}"
+
     @hook(
         event="creation",
         phase="composite",
@@ -156,8 +163,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
                 self.key = cdict["key"]
             if cdict.get("aliases"):
                 self.aliases.add(cdict["aliases"])
-            if cdict.get("locks"):
-                self.locks.add(cdict["locks"])
+            if cdict.get("policies"):
+                for operation, policy in cdict["policies"].items():
+                    self.policies.set(operation, policy)
             if cdict.get("keep_log"):
                 self.attributes.add("keep_log", cdict["keep_log"])
             if cdict.get("desc"):
@@ -190,8 +198,6 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         # Default locks keep channels open for all players. Override this in a
         # game-specific DefaultChannel subclass to restrict send/listen for
         # production (e.g. "send:perm(Player);listen:perm(Player);control:perm(Admin)").
-        self.locks.add("send:all();listen:all();control:perm(Admin)")
-
         # make sure we don't have access to a same-named old channel's history.
         log_file = self.get_log_filename()
         logger.rotate_log_file(log_file, num_lines_to_append=0)
@@ -471,12 +477,15 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             return (bool): Result of lock check.
 
         """
-        return self.locks.check(
+        from evennia.authorization.service import access_check
+
+        allowed, _decision = access_check(
+            self,
             accessing_obj,
-            access_type=access_type,
+            access_type,
             default=default,
-            no_superuser_bypass=no_superuser_bypass,
         )
+        return allowed
 
     @classmethod
     def create(cls, key, creator=None, *args, **kwargs):
@@ -585,7 +594,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         # the message-pattern allows us to type the channel on its own without
         # needing to use the `channel` command explicitly.
         msg_nick_pattern = self.channel_msg_nick_pattern.format(alias=re.escape(alias))
-        msg_nick_replacement = self.channel_msg_nick_replacement.format(channelname=chan_key)
+        msg_nick_replacement = self.channel_msg_nick_replacement.format(
+            channelname=chan_key
+        )
         user.nicks.add(
             msg_nick_pattern,
             msg_nick_replacement,
@@ -705,9 +716,12 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         senders = make_iter(senders) if senders else []
         receivers = None
         try:
-            from evennia.comms.channel_subscriber_cache import get_cached_subscribers
+            from evennia.comms.channel_subscriber_cache import \
+                get_cached_subscribers
 
-            receivers = get_cached_subscribers(self, online_only=bool(self.send_to_online_only))
+            receivers = get_cached_subscribers(
+                self, online_only=bool(self.send_to_online_only)
+            )
         except Exception:
             receivers = None
         if receivers is None:
@@ -716,7 +730,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             else:
                 receivers = list(self.subscriptions.all().keys())
         if not bypass_mute:
-            receivers = [receiver for receiver in receivers if receiver not in self.mutelist]
+            receivers = [
+                receiver for receiver in receivers if receiver not in self.mutelist
+            ]
 
         send_kwargs = {"senders": senders, "bypass_mute": bypass_mute, **kwargs}
 
@@ -803,7 +819,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
             By default this adds the needed channel nicks to the joiner.
 
         """
-        key_and_aliases = [self.key.lower()] + [alias.lower() for alias in self.aliases.all()]
+        key_and_aliases = [self.key.lower()] + [
+            alias.lower() for alias in self.aliases.all()
+        ]
         for key_or_alias in key_and_aliases:
             self.add_user_channel_alias(joiner, key_or_alias, **kwargs)
 
@@ -834,8 +852,12 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
         """
         chan_key = self.key.lower()
-        key_or_aliases = [self.key.lower()] + [alias.lower() for alias in self.aliases.all()]
-        nicktuples = leaver.nicks.get(category="channel", return_tuple=True, return_list=True)
+        key_or_aliases = [self.key.lower()] + [
+            alias.lower() for alias in self.aliases.all()
+        ]
+        nicktuples = leaver.nicks.get(
+            category="channel", return_tuple=True, return_list=True
+        )
         key_or_aliases += [tup[2] for tup in nicktuples if tup[3].lower() == chan_key]
         for key_or_alias in key_or_aliases:
             self.remove_user_channel_alias(leaver, key_or_alias, **kwargs)
@@ -867,7 +889,8 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
         """
         content_type = ContentType.objects.get_for_model(self.__class__)
         return reverse(
-            "admin:%s_%s_change" % (content_type.app_label, content_type.model), args=(self.id,)
+            "admin:%s_%s_change" % (content_type.app_label, content_type.model),
+            args=(self.id,),
         )
 
     @classmethod
@@ -1008,3 +1031,8 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
 
     # Used by Django Sites/Admin
     get_absolute_url = web_get_detail_url
+    authorization_policies = {
+        "send": Always(),
+        "listen": Always(),
+        "control": RequiresCapability("engine.channel.control"),
+    }

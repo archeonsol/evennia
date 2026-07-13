@@ -2,34 +2,16 @@
 
 from __future__ import annotations
 
-import random
 import time
 import uuid
-
-from django.conf import settings
 
 from evennia.server.models import AuthorizationAuditEvent
 from evennia.utils import logger
 
 from .engine import AuthorizationContext, AuthorizationDecision, evaluate
-from .storage import (
-    load_grants,
-    load_policy,
-    load_resource,
-    principal_is_suspended,
-    resource_ref,
-)
-
-
-def resource_policy_mode(resource) -> str:
-    """Resolve the rollout mode for a resource kind."""
-
-    kind = resource_ref(resource).split(":", 1)[0]
-    modes = getattr(settings, "AUTHORIZATION_RESOURCE_POLICIES", {})
-    mode = str(modes.get(kind, "legacy")).lower()
-    if mode not in {"legacy", "diagnostic", "live"}:
-        raise ValueError(f"invalid authorization mode {mode!r} for {kind}")
-    return mode
+from .policy import RequiresCapability, validate_policy
+from .storage import (load_grants, load_policy, load_resource,
+                      principal_is_suspended, resource_ref)
 
 
 def authorize(
@@ -54,12 +36,14 @@ def authorize(
         """Record low-cardinality timing and return the decision."""
 
         try:
-            from evennia.server.prometheus_metrics import record_authorization_decision
+            from evennia.server.prometheus_metrics import \
+                record_authorization_decision
 
             record_authorization_decision(
                 resource_snapshot.resource_kind,
                 decision.allowed,
                 time.perf_counter() - started,
+                decision.reason_code,
             )
         except Exception:
             pass
@@ -114,12 +98,19 @@ def authorize(
     if policy is None:
         return finish(
             AuthorizationDecision(
-                allowed=bool(default),
+                allowed=False,
                 reason_code="no_structured_policy",
-                public_reason="" if default else "Access denied.",
+                public_reason="Access denied.",
             )
         )
-    auth_context = context or AuthorizationContext(principal=principal, resource=resource)
+    try:
+        validate_policy(policy)
+    except (TypeError, ValueError):
+        logger.log_trace("authorization policy contains an unresolved reference")
+        return finish(AuthorizationDecision(False, "policy_invalid"))
+    auth_context = context or AuthorizationContext(
+        principal=principal, resource=resource
+    )
     auth_context.suspended = suspended
     return finish(evaluate(policy, grants, resource_snapshot, auth_context))
 
@@ -130,55 +121,34 @@ def access_check(
     access_type: str,
     *,
     default: bool,
-    legacy_evaluator,
     context=None,
-) -> tuple[bool, AuthorizationDecision | None]:
-    """Apply per-kind rollout while retaining the legacy oracle through R3E."""
+) -> tuple[bool, AuthorizationDecision]:
+    """Evaluate the capability authority behind stable ``access()`` facades."""
 
-    mode = resource_policy_mode(resource)
-    if mode == "legacy":
-        return bool(legacy_evaluator()), None
+    decision = authorize(
+        principal, resource, access_type, context=context, default=default
+    )
+    return decision.allowed, decision
 
-    # Transitional resources commonly have no structured override yet. Check
-    # the negative-cached policy package first so legacy fallback does not load
-    # grants, suspension state, or scope labels merely to discover there is no
-    # policy to evaluate.
+
+def has_capability(principal, capability: str, *, resource=None, session=None) -> bool:
+    """Check one explicit capability without a synthetic resource policy."""
+
+    resource = resource or principal
     try:
-        policy = load_policy(resource, access_type)
+        grants = load_grants(principal)
+        snapshot = load_resource(resource)
+        suspended = principal_is_suspended(principal)
     except Exception:
-        logger.log_trace("authorization policy is invalid or unavailable")
-        # Re-enter the full evaluator so an audited break-glass grant can still
-        # recover a malformed policy. Ordinary principals fail closed.
-        decision = authorize(principal, resource, access_type, context=context, default=default)
-        if mode == "live":
-            return decision.allowed, decision
-        return bool(legacy_evaluator()), decision
-    if policy is None:
-        decision = AuthorizationDecision(
-            allowed=bool(default),
-            reason_code="no_structured_policy",
-            public_reason="" if default else "Access denied.",
-        )
-        return bool(legacy_evaluator()), decision
-
-    decision = authorize(principal, resource, access_type, context=context, default=default)
-    if mode == "live":
-        return decision.allowed, decision
-
-    # Diagnostic is intentionally sampled; offline differential remains the
-    # promotion gate and avoids doubling every production authorization check.
-    legacy = bool(legacy_evaluator())
-    sample = float(getattr(settings, "AUTHORIZATION_DIAGNOSTIC_SAMPLE_RATE", 0.0) or 0.0)
-    if sample > 0 and random.random() < sample and legacy != decision.allowed:
-        AuthorizationAuditEvent.objects.create(
-            event_id=uuid.uuid4().hex,
-            kind="decision_divergence",
-            principal_ref=load_grants(principal).principal_ref,
-            resource_ref=resource_ref(resource),
-            reason=f"{access_type}:legacy={legacy}:new={decision.allowed}",
-            data={"decision_reason": decision.reason_code},
-        )
-    return legacy, decision
+        logger.log_trace("authorization capability check unavailable")
+        return False
+    context = AuthorizationContext(
+        principal=principal,
+        resource=resource,
+        session=session,
+        suspended=suspended,
+    )
+    return evaluate(RequiresCapability(capability), grants, snapshot, context).allowed
 
 
 def authorized_affordances(principal, resource, access_types) -> tuple[str, ...]:

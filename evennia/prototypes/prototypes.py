@@ -13,7 +13,10 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils.translation import gettext as _
 
-from evennia.locks.lockhandler import check_lockstring, validate_lockstring
+from evennia.authorization.policy import (Always, Never, Policy,
+                                          RequiresCapability, policy_from_data,
+                                          validate_policy)
+from evennia.authorization.service import has_capability
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripts import DefaultScript
 from evennia.utils import dbserialize, logger
@@ -21,15 +24,9 @@ from evennia.utils.create import create_script
 from evennia.utils.evmore import EvMore
 from evennia.utils.evtable import EvTable
 from evennia.utils.funcparser import FuncParser
-from evennia.utils.utils import (
-    all_from_module,
-    class_from_module,
-    dbid_to_obj,
-    is_iter,
-    justify,
-    make_iter,
-    variable_from_module,
-)
+from evennia.utils.utils import (all_from_module, class_from_module,
+                                 dbid_to_obj, is_iter, justify, make_iter,
+                                 variable_from_module)
 
 _MODULE_PROTOTYPE_MODULES = {}
 _MODULE_PROTOTYPES = {}
@@ -37,7 +34,7 @@ _PROTOTYPE_META_NAMES = (
     "prototype_key",
     "prototype_desc",
     "prototype_tags",
-    "prototype_locks",
+    "prototype_policies",
     "prototype_parent",
 )
 _PROTOTYPE_RESERVED_KEYS = _PROTOTYPE_META_NAMES + (
@@ -47,8 +44,7 @@ _PROTOTYPE_RESERVED_KEYS = _PROTOTYPE_META_NAMES + (
     "location",
     "home",
     "destination",
-    "permissions",
-    "locks",
+    "policies",
     "tags",
     "attrs",
 )
@@ -57,10 +53,45 @@ _WARNSTR = _("Warning")
 PROTOTYPE_TAG_CATEGORY = "from_prototype"
 _PROTOTYPE_TAG_META_CATEGORY = "db_prototype"
 
-_PROTOTYPE_FALLBACK_LOCK = "spawn:all();edit:all()"
+_PROTOTYPE_FALLBACK_POLICIES = {"spawn": "public", "edit": "engine.world.build"}
 
 # the protfunc parser
 FUNC_PARSER = FuncParser(settings.PROT_FUNC_MODULES)
+
+
+def _prototype_policy(value) -> Policy:
+    """Compile a bounded prototype declaration without an expression language."""
+
+    if isinstance(value, Policy):
+        policy = value
+    elif isinstance(value, dict):
+        policy = policy_from_data(value)
+    else:
+        declaration = str(value or "disabled").strip().lower()
+        if declaration == "public":
+            policy = Always()
+        elif declaration == "disabled":
+            policy = Never()
+        else:
+            policy = RequiresCapability(declaration)
+    validate_policy(policy)
+    return policy
+
+
+def _prototype_access(caller, prototype, action, default=False):
+    """Evaluate one declarative prototype operation."""
+
+    declaration = dict(prototype.get("prototype_policies") or {}).get(action)
+    if declaration is None:
+        declaration = _PROTOTYPE_FALLBACK_POLICIES.get(action)
+    policy = _prototype_policy(declaration) if declaration is not None else None
+    if isinstance(policy, Always):
+        return True
+    if isinstance(policy, Never) or policy is None or caller is None:
+        return False if policy is not None else bool(default)
+    if isinstance(policy, RequiresCapability):
+        return has_capability(caller, policy.capability)
+    return False
 
 
 class PermissionError(RuntimeError):
@@ -103,6 +134,12 @@ def homogenize_prototype(prototype, custom_keys=None):
             )
         )
 
+    legacy_keys = {"prototype_locks", "locks", "permissions"} & set(prototype)
+    if legacy_keys:
+        raise ValidationError(
+            "Legacy prototype authority keys are not executable; import them with "
+            f"the offline migration tool first: {', '.join(sorted(legacy_keys))}"
+        )
     reserved = _PROTOTYPE_RESERVED_KEYS + (custom_keys or ())
 
     # correct cases of setting None for certain values
@@ -194,10 +231,17 @@ def homogenize_prototype(prototype, custom_keys=None):
     homogenized["prototype_key"] = homogenized.get(
         "prototype_key",
         # assign a random hash as key
-        "prototype-{}".format(hashlib.md5(bytes(str(time.time()), "utf-8")).hexdigest()[:7]),
+        "prototype-{}".format(
+            hashlib.md5(bytes(str(time.time()), "utf-8")).hexdigest()[:7]
+        ),
     )
     homogenized["prototype_tags"] = homogenized.get("prototype_tags", [])
-    homogenized["prototype_locks"] = homogenized.get("prototype_locks", _PROTOTYPE_FALLBACK_LOCK)
+    policies = dict(
+        homogenized.get("prototype_policies") or _PROTOTYPE_FALLBACK_POLICIES
+    )
+    for operation, declaration in policies.items():
+        _prototype_policy(declaration)
+    homogenized["prototype_policies"] = policies
     homogenized["prototype_desc"] = homogenized.get("prototype_desc", "")
     if "typeclass" not in prototype and "prototype_parent" not in prototype:
         homogenized["typeclass"] = settings.BASE_OBJECT_TYPECLASS
@@ -291,15 +335,16 @@ def load_module_prototypes(*mod_or_prototypes, override=True):
             {
                 "prototype_key": actual_prot_key,
                 "prototype_desc": (
-                    prototype["prototype_desc"] if "prototype_desc" in prototype else (mod or "N/A")
+                    prototype["prototype_desc"]
+                    if "prototype_desc" in prototype
+                    else (mod or "N/A")
                 ),
-                "prototype_locks": (
-                    prototype["prototype_locks"]
-                    if "prototype_locks" in prototype
-                    else "use:all();edit:false()"
-                ),
+                "prototype_policies": {"spawn": "public", "edit": "disabled"},
                 "prototype_tags": list(
-                    set(list(make_iter(prototype.get("prototype_tags", []))) + ["module"])
+                    set(
+                        list(make_iter(prototype.get("prototype_tags", [])))
+                        + ["module"]
+                    )
                 ),
             }
         )
@@ -447,13 +492,19 @@ def save_prototype(prototype):
     in_prototype["prototype_desc"] = in_prototype.get(
         "prototype_desc", prototype.get("prototype_desc", "")
     )
-    prototype_locks = in_prototype.get(
-        "prototype_locks", prototype.get("prototype_locks", _PROTOTYPE_FALLBACK_LOCK)
+    prototype_policies = dict(
+        in_prototype.get(
+            "prototype_policies",
+            prototype.get("prototype_policies", _PROTOTYPE_FALLBACK_POLICIES),
+        )
     )
-    is_valid, err = validate_lockstring(prototype_locks)
-    if not is_valid:
-        raise ValidationError("Lock error: {}".format(err))
-    in_prototype["prototype_locks"] = prototype_locks
+    compiled_policies = {
+        operation: _prototype_policy(declaration)
+        for operation, declaration in prototype_policies.items()
+    }
+    in_prototype["prototype_policies"] = {
+        operation: policy.to_data() for operation, policy in compiled_policies.items()
+    }
 
     prototype_tags = [
         _to_batchtuple(tag, _PROTOTYPE_TAG_META_CATEGORY)
@@ -471,7 +522,8 @@ def save_prototype(prototype):
         if prototype_tags:
             stored_prototype.tags.clear(category=PROTOTYPE_TAG_CATEGORY)
             stored_prototype.tags.batch_add(*in_prototype["prototype_tags"])
-        stored_prototype.locks.add(in_prototype["prototype_locks"])
+        for operation, policy in compiled_policies.items():
+            stored_prototype.policies.set(operation, policy)
         stored_prototype.attributes.add("prototype", in_prototype)
     else:
         # create a new prototype
@@ -480,7 +532,7 @@ def save_prototype(prototype):
             key=prototype_key,
             desc=in_prototype["prototype_desc"],
             persistent=True,
-            locks=prototype_locks,
+            policies=compiled_policies,
             tags=in_prototype["prototype_tags"],
             attributes=[("prototype", in_prototype)],
         )
@@ -517,7 +569,9 @@ def delete_prototype(prototype_key, caller=None):
 
     if not stored_prototype:
         raise PermissionError(
-            _("Prototype {prototype_key} was not found.").format(prototype_key=prototype_key)
+            _("Prototype {prototype_key} was not found.").format(
+                prototype_key=prototype_key
+            )
         )
 
     stored_prototype = stored_prototype[0]
@@ -657,7 +711,9 @@ def search_prototype(
                 not_found.append(db_id)
 
         if not_found:
-            not_found_scripts = DefaultScript.objects.filter(pk__in=not_found).order_by("db_key")
+            not_found_scripts = DefaultScript.objects.filter(pk__in=not_found).order_by(
+                "db_key"
+            )
             for script in not_found_scripts:
                 prot = script.attributes.get("prototype")
                 if prot is not None:
@@ -671,7 +727,9 @@ def search_prototype(
 
     module_prototypes, fuzzy_match_db = _search_module_based_prototypes(key, tags)
 
-    db_prototypes = [] if no_db else _search_db_based_prototypes(key, tags, fuzzy_match_db)
+    db_prototypes = (
+        [] if no_db else _search_db_based_prototypes(key, tags, fuzzy_match_db)
+    )
 
     if key and require_single:
         num = len(module_prototypes) + len(db_prototypes)
@@ -698,7 +756,9 @@ def search_objects_with_prototype(prototype_key):
         matches (Queryset): All matching objects spawned from this prototype.
 
     """
-    return ObjectDB.objects.get_by_tag(key=prototype_key, category=PROTOTYPE_TAG_CATEGORY)
+    return ObjectDB.objects.get_by_tag(
+        key=prototype_key, category=PROTOTYPE_TAG_CATEGORY
+    )
 
 
 class PrototypeEvMore(EvMore):
@@ -755,7 +815,9 @@ class PrototypeEvMore(EvMore):
         else:
             # get the correct slice, adjusted for the db-prototypes
             pageno = max(0, pageno - self._npages_db)
-            return modprot_list[pageno * self.height : pageno * self.height + self.height]
+            return modprot_list[
+                pageno * self.height : pageno * self.height + self.height
+            ]
 
     def page_formatter(self, page):
         """
@@ -776,18 +838,14 @@ class PrototypeEvMore(EvMore):
         )
 
         for prototype in page:
-            lock_use = caller.locks.check_lockstring(
-                caller, prototype.get("prototype_locks", ""), access_type="spawn", default=True
-            )
-            if not self.show_non_use and not lock_use:
+            may_spawn = _prototype_access(caller, prototype, "spawn", default=False)
+            if not self.show_non_use and not may_spawn:
                 continue
             if prototype.get("prototype_key", "") in _MODULE_PROTOTYPES:
-                lock_edit = False
+                may_edit = False
             else:
-                lock_edit = caller.locks.check_lockstring(
-                    caller, prototype.get("prototype_locks", ""), access_type="edit", default=True
-                )
-            if not self.show_non_edit and not lock_edit:
+                may_edit = _prototype_access(caller, prototype, "edit", default=False)
+            if not self.show_non_edit and not may_edit:
                 continue
             ptags = []
             for ptag in prototype.get("prototype_tags", []):
@@ -801,7 +859,7 @@ class PrototypeEvMore(EvMore):
 
             table.add_row(
                 prototype.get("prototype_key", "<unset>"),
-                "{}/{}".format("Y" if lock_use else "N", "Y" if lock_edit else "N"),
+                "{}/{}".format("Y" if may_spawn else "N", "Y" if may_edit else "N"),
                 ", ".join(list(set(ptags))),
                 prototype.get("prototype_desc", "<unset>"),
             )
@@ -847,7 +905,12 @@ def list_prototypes(
 
 
 def validate_prototype(
-    prototype, protkey=None, protparents=None, is_prototype_base=True, strict=True, _flags=None
+    prototype,
+    protkey=None,
+    protparents=None,
+    is_prototype_base=True,
+    strict=True,
+    _flags=None,
 ):
     """
     Run validation on a prototype, checking for inifinite regress.
@@ -875,7 +938,13 @@ def validate_prototype(
     protparents = {} if protparents is None else protparents
 
     if _flags is None:
-        _flags = {"visited": [], "depth": 0, "typeclass": False, "errors": [], "warnings": []}
+        _flags = {
+            "visited": [],
+            "depth": 0,
+            "typeclass": False,
+            "errors": [],
+            "warnings": [],
+        }
 
     protkey = protkey and protkey.lower() or prototype.get("prototype_key", None)
 
@@ -889,9 +958,9 @@ def validate_prototype(
     if strict and not (typeclass or prototype_parent):
         if is_prototype_base:
             _flags["errors"].append(
-                _("Prototype {protkey} requires `typeclass` or 'prototype_parent'.").format(
-                    protkey=protkey
-                )
+                _(
+                    "Prototype {protkey} requires `typeclass` or 'prototype_parent'."
+                ).format(protkey=protkey)
             )
         else:
             _flags["warnings"].append(
@@ -926,7 +995,9 @@ def validate_prototype(
             protstring = protstring.lower()
             if protkey is not None and protstring == protkey:
                 _flags["errors"].append(
-                    _("Prototype {protkey} tries to parent itself.").format(protkey=protkey)
+                    _("Prototype {protkey} tries to parent itself.").format(
+                        protkey=protkey
+                    )
                 )
 
             # get prototype parent, first try custom set, then search globally
@@ -972,7 +1043,12 @@ def validate_prototype(
         _flags["typeclass"] = typeclass
 
     # if we get back to the current level without a typeclass it's an error.
-    if strict and is_prototype_base and _flags["depth"] <= 0 and not _flags["typeclass"]:
+    if (
+        strict
+        and is_prototype_base
+        and _flags["depth"] <= 0
+        and not _flags["typeclass"]
+    ):
         _flags["errors"].append(
             _(
                 "Prototype {protkey} has no `typeclass` defined anywhere in its parent\n "
@@ -985,21 +1061,16 @@ def validate_prototype(
         if _flags["errors"]:
             raise RuntimeError(f"{_ERRSTR}:_" + f"\n{_ERRSTR}: ".join(_flags["errors"]))
         if _flags["warnings"]:
-            raise RuntimeWarning(f"{_WARNSTR}: " + f"\n{_WARNSTR}: ".join(_flags["warnings"]))
+            raise RuntimeWarning(
+                f"{_WARNSTR}: " + f"\n{_WARNSTR}: ".join(_flags["warnings"])
+            )
 
-    # make sure prototype_locks are set to defaults
-    prototype_locks = [
-        lstring.split(":", 1)
-        for lstring in prototype.get("prototype_locks", "").split(";")
-        if ":" in lstring
-    ]
-    locktypes = [tup[0].strip() for tup in prototype_locks]
-    if "spawn" not in locktypes:
-        prototype_locks.append(("spawn", "all()"))
-    if "edit" not in locktypes:
-        prototype_locks.append(("edit", "all()"))
-    prototype_locks = ";".join(":".join(tup) for tup in prototype_locks)
-    prototype["prototype_locks"] = prototype_locks
+    policies = dict(prototype.get("prototype_policies") or {})
+    for operation, declaration in _PROTOTYPE_FALLBACK_POLICIES.items():
+        policies.setdefault(operation, declaration)
+    for declaration in policies.values():
+        _prototype_policy(declaration)
+    prototype["prototype_policies"] = policies
 
 
 def protfunc_parser(
@@ -1043,7 +1114,9 @@ def protfunc_parser(
     if not isinstance(value, str):
         return value
 
-    result = FUNC_PARSER.parse_to_any(value, raise_errors=raise_errors, caller=caller, **kwargs)
+    result = FUNC_PARSER.parse_to_any(
+        value, raise_errors=raise_errors, caller=caller, **kwargs
+    )
 
     return result
 
@@ -1079,17 +1152,17 @@ def prototype_to_str(prototype):
     prototype = homogenize_prototype(prototype)
 
     header = """
-|cprototype-key:|n {prototype_key}, |c-tags:|n {prototype_tags}, |c-locks:|n {prototype_locks}|n
+|cprototype-key:|n {prototype_key}, |c-tags:|n {prototype_tags}, |c-policies:|n {prototype_policies}|n
 |c-desc|n: {prototype_desc}
 |cprototype-parent:|n {prototype_parent}
     \n""".format(
         prototype_key=prototype.get("prototype_key", "|r[UNSET](required)|n"),
         prototype_tags=prototype.get("prototype_tags", "|wNone|n"),
-        prototype_locks=prototype.get("prototype_locks", "|wNone|n"),
+        prototype_policies=prototype.get("prototype_policies", "|wNone|n"),
         prototype_desc=prototype.get("prototype_desc", "|wNone|n"),
         prototype_parent=prototype.get("prototype_parent", "|wNone|n"),
     )
-    key = aliases = attrs = tags = locks = permissions = location = home = destination = ""
+    key = aliases = attrs = tags = policies = location = home = destination = ""
     if "key" in prototype:
         key = prototype["key"]
         key = "|ckey:|n {key}".format(key=key)
@@ -1099,19 +1172,17 @@ def prototype_to_str(prototype):
     if "attrs" in prototype:
         attrs = prototype["attrs"]
         out = []
-        for attrkey, value, category, locks in attrs:
-            locks = locks if isinstance(locks, str) else ", ".join(lock for lock in locks if lock)
+        for attrkey, value, category, _legacy in attrs:
             category = "|ccategory:|n {}".format(category) if category else ""
             cat_locks = ""
-            if category or locks:
+            if category:
                 cat_locks = " (|ccategory:|n {category}, ".format(
                     category=category if category else "|wNone|n"
                 )
             out.append(
-                "{attrkey}{cat_locks}{locks} |c=|n {value}".format(
+                "{attrkey}{cat_locks} |c=|n {value}".format(
                     attrkey=attrkey,
                     cat_locks=cat_locks,
-                    locks=" |w(locks:|n {locks})".format(locks=locks) if locks else "",
                     value=value,
                 )
             )
@@ -1122,16 +1193,14 @@ def prototype_to_str(prototype):
         for tagkey, category, data in tags:
             out.append(
                 "{tagkey} (category: {category}{dat})".format(
-                    tagkey=tagkey, category=category, dat=", data: {}".format(data) if data else ""
+                    tagkey=tagkey,
+                    category=category,
+                    dat=", data: {}".format(data) if data else "",
                 )
             )
         tags = "|ctags:|n\n {tags}".format(tags=", ".join(out))
-    if "locks" in prototype:
-        locks = prototype["locks"]
-        locks = "|clocks:|n\n {locks}".format(locks=locks)
-    if "permissions" in prototype:
-        permissions = prototype["permissions"]
-        permissions = "|cpermissions:|n {perms}".format(perms=", ".join(permissions))
+    if "policies" in prototype:
+        policies = "|cpolicies:|n\n {}".format(prototype["policies"])
     if "location" in prototype:
         location = prototype["location"]
         location = "|clocation:|n {location}".format(location=location)
@@ -1144,14 +1213,14 @@ def prototype_to_str(prototype):
 
     body = "\n".join(
         part
-        for part in (key, aliases, attrs, tags, locks, permissions, location, home, destination)
+        for part in (key, aliases, attrs, tags, policies, location, home, destination)
         if part
     )
 
     return header.lstrip() + body.strip()
 
 
-def check_permission(prototype_key, action, default=True):
+def check_permission(prototype_key, action, default=False, caller=None):
     """
     Helper function to check access to actions on given prototype.
 
@@ -1168,9 +1237,13 @@ def check_permission(prototype_key, action, default=True):
         if prototype_key in _MODULE_PROTOTYPES:
             mod = _MODULE_PROTOTYPE_MODULES.get(prototype_key)
             if mod:
-                err = _("{protkey} is a read-only prototype (defined as code in {module}).")
+                err = _(
+                    "{protkey} is a read-only prototype (defined as code in {module})."
+                )
             else:
-                err = _("{protkey} is a read-only prototype (passed directly as a dict).")
+                err = _(
+                    "{protkey} is a read-only prototype (passed directly as a dict)."
+                )
             logger.log_err(err.format(protkey=prototype_key, module=mod))
             return False
 
@@ -1181,11 +1254,7 @@ def check_permission(prototype_key, action, default=True):
         logger.log_err("Prototype {} not found.".format(prototype_key))
         return False
 
-    lockstring = prototype.get("prototype_locks")
-
-    if lockstring:
-        return check_lockstring(None, lockstring, default=default, access_type=action)
-    return default
+    return _prototype_access(caller, prototype, action, default=default)
 
 
 def init_spawn_value(
@@ -1232,7 +1301,8 @@ def value_to_obj_or_any(value):
     if is_iter(value):
         if stype == dict:
             return {
-                value_to_obj_or_any(key): value_to_obj_or_any(val) for key, val in value.items()
+                value_to_obj_or_any(key): value_to_obj_or_any(val)
+                for key, val in value.items()
             }
         else:
             return stype([value_to_obj_or_any(val) for val in value])
@@ -1246,7 +1316,8 @@ def value_to_obj(value, force=True):
     if is_iter(value):
         if stype == dict:
             return {
-                value_to_obj_or_any(key): value_to_obj_or_any(val) for key, val in value.items()
+                value_to_obj_or_any(key): value_to_obj_or_any(val)
+                for key, val in value.items()
             }
         else:
             return stype([value_to_obj_or_any(val) for val in value])

@@ -13,156 +13,45 @@ permission lattice and predicate algebra are public.
 from .action import Action, GameObject, action
 from .actor import Actor
 from .context import ActionContext, ActionContextBuilder, build_context
-from .default import (
-    Access,
-    Arrived,
-    CharacterAdminRules,
-    CharacterGeneralRules,
-    CharacterMovementRules,
-    CharacterObjectRules,
-    CharacterSystemRules,
-    Connect,
-    ContainerPutRules,
-    Create,
-    DefaultAccountRules,
-    Departed,
-    Drop,
-    Emit,
-    Encoding,
-    Enter,
-    Enterable,
-    EnterableObjectRules,
-    ExitTraversalRules,
-    Force,
-    Get,
-    Give,
-    Help,
-    Home,
-    Info,
-    Locomotion,
-    Look,
-    Move,
-    Moved,
-    Nick,
-    NickRules,
-    Option,
-    Password,
-    Perm,
-    Put,
-    Py,
-    PyRules,
-    Quit,
-    Screenreader,
-    SessionLoginRules,
-    SetHelp,
-    Systems,
-    Tasks,
-    UserPassword,
-    Wall,
-    exit_resolver,
-    register_exit_resolver,
-)
-from .dispatch import (
-    DispatchMiddleware,
-    ProfilingMiddleware,
-    clear_middlewares,
-    get_middlewares,
-    register_middleware,
-    try_action_dispatch,
-)
+from .default import (Access, Arrived, CharacterAdminRules,
+                      CharacterGeneralRules, CharacterMovementRules,
+                      CharacterObjectRules, CharacterSystemRules, Connect,
+                      ContainerPutRules, Create, DefaultAccountRules, Departed,
+                      Drop, Emit, Encoding, Enter, Enterable,
+                      EnterableObjectRules, ExitTraversalRules, Force, Get,
+                      Give, Grant, Help, Home, Info, Locomotion, Look, Move,
+                      Moved, Nick, NickRules, Option, Password, Put, Py,
+                      PyRules, Quit, Screenreader, SessionLoginRules, SetHelp,
+                      Systems, Tasks, UserPassword, Wall, exit_resolver,
+                      register_exit_resolver)
+from .dispatch import (DispatchMiddleware, ProfilingMiddleware,
+                       clear_middlewares, get_middlewares, register_middleware,
+                       try_action_dispatch)
 from .engine import RuleEngine, engine
 from .events import Event, EventRegistry, EventSpec, event_registry, subscribe
 from .exceptions import ActionError, AmbiguousTarget, ParseError, RuleConflict
-from .menus import (
-    DisambiguationState,
-    InputCaptureState,
-    MenuInputAction,
-    MenuPrompt,
-    ask_yes_no,
-    confirm,
-    format_menu_prompt,
-    get_input,
-    paginate,
-    parse_menu_choice,
-)
+from .menus import (DisambiguationState, InputCaptureState, MenuInputAction,
+                    MenuPrompt, ask_yes_no, confirm, format_menu_prompt,
+                    get_input, paginate, parse_menu_choice)
 from .muxargs import ArgAction, MuxArgs, mux_parse
-from .parser import (
-    ActionParser,
-    DynamicVerbResolver,
-    LoginStartAction,
-    NoInputAction,
-    NoMatchAction,
-    ParseResult,
-    parser,
-)
-from .perception import filter_visible, get_visibility_filter, is_visible, set_visibility_filter
-from .permission import (
-    STAFF,
-    Capability,
-    DefaultCapability,
-    Scope,
-    capability_for_name,
-    get_capability_enum,
-    rank_order,
-    resolve_capabilities,
-)
-from .predicate import (
-    ALWAYS,
-    NEVER,
-    Admin,
-    And,
-    Builder,
-    Developer,
-    Guest,
-    HasAttr,
-    HasCapability,
-    HasTag,
-    Helper,
-    Holds,
-    InSameRoom,
-    IsAlive,
-    IsObject,
-    IsSelf,
-    LegacyLock,
-    Not,
-    Or,
-    Player,
-    Predicate,
-    coerce_predicate,
-    from_lockstring,
-)
-from .process import (
-    Activity,
-    active_activity,
-    cancel_activity,
-    get_activities,
-    is_active,
-    start_activity,
-)
-from .registry import ActionRegistry, RuleRegistry, action_registry, rule_registry
-from .result import (
-    CLAIM,
-    FAIL,
-    PASS,
-    REDIRECT,
-    SILENT_FAIL,
-    SKIP,
-    ActionTrace,
-    PhaseTrace,
-    RuleResult,
-)
+from .parser import (ActionParser, DynamicVerbResolver, LoginStartAction,
+                     NoInputAction, NoMatchAction, ParseResult, parser)
+from .perception import (filter_visible, get_visibility_filter, is_visible,
+                         set_visibility_filter)
+from .predicate import (ALWAYS, NEVER, And, HasAttr, HasCapability, HasTag,
+                        Holds, InSameRoom, IsAlive, IsObject, IsSelf, Not, Or,
+                        Predicate, coerce_predicate)
+from .process import (Activity, active_activity, cancel_activity,
+                      get_activities, is_active, start_activity)
+from .registry import (ActionRegistry, RuleRegistry, action_registry,
+                       rule_registry)
+from .result import (CLAIM, FAIL, PASS, REDIRECT, SILENT_FAIL, SKIP,
+                     ActionTrace, PhaseTrace, RuleResult)
 from .rule import PHASES, RuleSpec, rule
-from .state import StateProvider, enter_state, exit_state, get_states, has_state
+from .state import (StateProvider, enter_state, exit_state, get_states,
+                    has_state)
 
 __all__ = [
-    "Capability",
-    "DefaultCapability",
-    "Scope",
-    "STAFF",
-    "get_capability_enum",
-    "rank_order",
-    "resolve_capabilities",
-    "capability_for_name",
     "Predicate",
     "HasCapability",
     "Holds",
@@ -173,19 +62,11 @@ __all__ = [
     "And",
     "Or",
     "Not",
-    "Builder",
-    "Admin",
-    "Developer",
-    "Player",
-    "Helper",
-    "Guest",
     "IsAlive",
     "InSameRoom",
     "ALWAYS",
     "NEVER",
     "coerce_predicate",
-    "from_lockstring",
-    "LegacyLock",
     # exceptions
     "ActionError",
     "RuleConflict",
@@ -289,7 +170,7 @@ __all__ = [
     "Emit",
     "Wall",
     "Force",
-    "Perm",
+    "Grant",
     "Access",
     "CharacterAdminRules",
     "Nick",

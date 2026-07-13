@@ -72,7 +72,11 @@ def _update_store(caller, key=None, desc=None, delete=False, swapkey=None):
         elif swapkey:
             # swap positions
             loswapkey = swapkey.lower()
-            swapmatch = [ind for ind, tup in enumerate(caller.db.multidesc) if tup[0] == loswapkey]
+            swapmatch = [
+                ind
+                for ind, tup in enumerate(caller.db.multidesc)
+                if tup[0] == loswapkey
+            ]
             if swapmatch:
                 iswap = swapmatch[0]
                 if idesc == iswap:
@@ -151,7 +155,7 @@ class CmdMultiDesc(default_cmds.Command):
 
     key = "+desc"
     aliases = ["desc"]
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "General"
 
     def func(self):
@@ -172,7 +176,8 @@ class CmdMultiDesc(default_cmds.Command):
                 do_crop = "full" not in switches
                 if do_crop:
                     outtext = [
-                        "|w%s:|n %s" % (key, crop(desc)) for key, desc in caller.db.multidesc
+                        "|w%s:|n %s" % (key, crop(desc))
+                        for key, desc in caller.db.multidesc
                     ]
                 else:
                     outtext = [
@@ -241,7 +246,9 @@ class CmdMultiDesc(default_cmds.Command):
                         new_desc.append(key)
                 new_desc = "".join(new_desc)
                 caller.db.desc = new_desc
-                caller.msg("%s\n\n|wThe above was set as the current description.|n" % new_desc)
+                caller.msg(
+                    "%s\n\n|wThe above was set as the current description.|n" % new_desc
+                )
 
             elif self.rhs or "add" in switches:
                 # add text directly to a new entry or an existing one.

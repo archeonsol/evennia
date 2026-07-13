@@ -12,13 +12,10 @@ from django.core.cache import cache
 from django.db import models, transaction
 from django.utils import timezone
 
-from evennia.server.models import (
-    AuthorizationAuditEvent,
-    AuthorizationGrant,
-    AuthorizationPolicyOverride,
-    AuthorizationPrincipalState,
-    AuthorizationScopeLabel,
-)
+from evennia.server.models import (AuthorizationAuditEvent, AuthorizationGrant,
+                                   AuthorizationPolicyOverride,
+                                   AuthorizationPrincipalState,
+                                   AuthorizationScopeLabel)
 from evennia.utils import logger
 
 from .capabilities import capability_registry
@@ -87,8 +84,8 @@ def _publish_generation(namespace: str, key: str, value: int) -> int:
 def principal_refs(principal) -> tuple[str, ...]:
     """Return every legitimate authority identity for a principal.
 
-    Account and puppet identities are both preserved. This supports legacy
-    identity-lock migration without treating the object creator as an owner.
+    Account and puppet identities are both preserved without treating object
+    creation as ownership.
     """
 
     refs = []
@@ -143,44 +140,16 @@ def resource_ref(resource) -> str:
     return f"{kind}:{pk}"
 
 
-def _legacy_permission_grants(principal) -> dict[str, set[tuple[str, str, str]]]:
-    """Bridge legacy permission tags during the finite R3E migration."""
-
-    result: dict[str, set[tuple[str, str, str]]] = {}
-    sources = [(principal_refs(principal)[-1:] or ("anonymous",))[0], principal]
-    sources = [sources]
-    if hasattr(type(principal), "puppeteer"):
-        account = getattr(principal, "puppeteer", None)
-    else:
-        account = getattr(principal, "account", None)
-    if account is not None:
-        sources.append((f"account:{account.pk}", account))
-    for origin, source in sources:
-        names = set()
-        try:
-            names.update(str(value).lower().rstrip("s") for value in source.permissions.all())
-        except (AttributeError, TypeError):
-            continue
-        hierarchy = [str(value).lower().rstrip("s") for value in settings.PERMISSION_HIERARCHY]
-        highest = max((hierarchy.index(name) for name in names if name in hierarchy), default=-1)
-        names.update(hierarchy[: highest + 1])
-        for name in names:
-            key = f"legacy.permission.{name}"
-            try:
-                capability_registry.require(key)
-            except Exception:
-                continue
-            result.setdefault(key, set()).add((origin, "world", "*"))
-    return result
-
-
 def load_grants(principal) -> GrantSnapshot:
     """Load or return cached positive grants for a principal."""
 
     refs = principal_refs(principal)
     cache_key = "|".join(refs) or "anonymous"
     generation = max(
-        (_shared_generation("principal", ref, _principal_generation.get(ref, 0)) for ref in refs),
+        (
+            _shared_generation("principal", ref, _principal_generation.get(ref, 0))
+            for ref in refs
+        ),
         default=0,
     )
     cached = _principal_cache.get(cache_key)
@@ -196,7 +165,15 @@ def load_grants(principal) -> GrantSnapshot:
         principal_ref__in=refs,
         revoked_at__isnull=True,
     ).filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
-    by_capability = _legacy_permission_grants(principal)
+    by_capability: dict[str, set[GrantScope]] = {}
+    if hasattr(type(principal), "puppeteer"):
+        authority_source = getattr(principal, "puppeteer", None) or principal
+    else:
+        authority_source = getattr(principal, "account", None) or principal
+    try:
+        authority_suppressed = bool(authority_source.attributes.get("_quell"))
+    except AttributeError:
+        authority_suppressed = False
     valid_until = None
     for grant in query.only(
         "principal_ref",
@@ -206,6 +183,8 @@ def load_grants(principal) -> GrantSnapshot:
         "constraints",
         "expires_at",
     ):
+        if authority_suppressed:
+            continue
         constraints = dict(grant.constraints or {})
         if set(constraints) - {"session_id"} or any(
             value is not None and not isinstance(value, (str, int, float, bool))
@@ -260,9 +239,13 @@ def load_resource(resource) -> ResourceSnapshot:
         return cached
     labels = _computed_resource_labels(resource, ref)
     labels.update(
-        AuthorizationScopeLabel.objects.filter(resource_ref=ref).values_list("label", flat=True)
+        AuthorizationScopeLabel.objects.filter(resource_ref=ref).values_list(
+            "label", flat=True
+        )
     )
-    snapshot = ResourceSnapshot(ref, ref.split(":", 1)[0], frozenset(labels), generation)
+    snapshot = ResourceSnapshot(
+        ref, ref.split(":", 1)[0], frozenset(labels), generation
+    )
     _bounded_put(_resource_cache, ref, snapshot)
     return snapshot
 
@@ -281,7 +264,9 @@ def bump_principal_generation(principal_ref: str) -> None:
     """Invalidate grant snapshots affected by a principal mutation."""
 
     local = _principal_generation.get(principal_ref, 0) + 1
-    _principal_generation[principal_ref] = _publish_generation("principal", principal_ref, local)
+    _principal_generation[principal_ref] = _publish_generation(
+        "principal", principal_ref, local
+    )
     _principal_cache.clear()
     _suspension_cache.clear()
 
@@ -305,7 +290,9 @@ def grant_capability(
     constraints = dict(constraints or {})
     unknown_constraints = set(constraints) - {"session_id"}
     if unknown_constraints:
-        raise ValueError(f"unsupported grant constraints: {sorted(unknown_constraints)!r}")
+        raise ValueError(
+            f"unsupported grant constraints: {sorted(unknown_constraints)!r}"
+        )
     if any(
         value is not None and not isinstance(value, (str, int, float, bool))
         for value in constraints.values()
@@ -313,7 +300,9 @@ def grant_capability(
         raise ValueError("grant constraints must contain JSON scalar values")
     with transaction.atomic():
         AuthorizationPrincipalState.objects.get_or_create(principal_ref=principal_ref)
-        AuthorizationPrincipalState.objects.select_for_update().get(principal_ref=principal_ref)
+        AuthorizationPrincipalState.objects.select_for_update().get(
+            principal_ref=principal_ref
+        )
         existing = AuthorizationGrant.objects.filter(
             principal_ref=principal_ref,
             capability=definition.key,
@@ -357,6 +346,7 @@ def grant_capability(
             actor_ref=actor_ref,
             reason=reason,
         )
+        bump_principal_generation(principal_ref)
         transaction.on_commit(lambda: bump_principal_generation(principal_ref))
     return grant
 
@@ -425,7 +415,11 @@ def revoke_grant(grant_id: str, *, actor_ref: str = "", reason: str = "") -> boo
     """Revoke a grant and invalidate its immediate delegated children."""
 
     with transaction.atomic():
-        grant = AuthorizationGrant.objects.select_for_update().filter(grant_id=grant_id).first()
+        grant = (
+            AuthorizationGrant.objects.select_for_update()
+            .filter(grant_id=grant_id)
+            .first()
+        )
         if grant is None or grant.revoked_at is not None:
             return False
         now = timezone.now()
@@ -443,7 +437,9 @@ def revoke_grant(grant_id: str, *, actor_ref: str = "", reason: str = "") -> boo
                 break
             frontier = [child_id for child_id, _ in children]
             affected_principals.update(principal for _, principal in children)
-            AuthorizationGrant.objects.filter(grant_id__in=frontier).update(revoked_at=now)
+            AuthorizationGrant.objects.filter(grant_id__in=frontier).update(
+                revoked_at=now
+            )
         AuthorizationAuditEvent.objects.create(
             event_id=uuid.uuid4().hex,
             kind="grant_revoked",
@@ -452,6 +448,8 @@ def revoke_grant(grant_id: str, *, actor_ref: str = "", reason: str = "") -> boo
             actor_ref=actor_ref,
             reason=reason,
         )
+        for principal in affected_principals:
+            bump_principal_generation(principal)
         transaction.on_commit(
             lambda: [bump_principal_generation(ref) for ref in affected_principals]
         )
@@ -480,7 +478,10 @@ def principal_is_suspended(principal) -> bool:
     refs = principal_refs(principal)
     cache_key = "|".join(refs) or "anonymous"
     generation = max(
-        (_shared_generation("principal", ref, _principal_generation.get(ref, 0)) for ref in refs),
+        (
+            _shared_generation("principal", ref, _principal_generation.get(ref, 0))
+            for ref in refs
+        ),
         default=0,
     )
     cached = _suspension_cache.get(cache_key)
@@ -497,7 +498,9 @@ def principal_is_suspended(principal) -> bool:
             principal_ref__in=refs,
             suspended=True,
         )
-        .filter(models.Q(suspended_until__isnull=True) | models.Q(suspended_until__gt=now))
+        .filter(
+            models.Q(suspended_until__isnull=True) | models.Q(suspended_until__gt=now)
+        )
         .first()
     )
     suspended = row is not None
@@ -521,7 +524,10 @@ def set_principal_suspended(
     """Set universal suspension state and audit the mutation."""
 
     with transaction.atomic():
-        state, _ = AuthorizationPrincipalState.objects.select_for_update().get_or_create(
+        (
+            state,
+            _,
+        ) = AuthorizationPrincipalState.objects.select_for_update().get_or_create(
             principal_ref=principal_ref
         )
         state.suspended = bool(suspended)
@@ -536,6 +542,7 @@ def set_principal_suspended(
             actor_ref=actor_ref,
             reason=reason,
         )
+        bump_principal_generation(principal_ref)
         transaction.on_commit(lambda: bump_principal_generation(principal_ref))
     return state
 
@@ -555,6 +562,7 @@ def set_scope_labels(resource, labels, *, source: str = "authored") -> None:
                 label=label,
                 defaults={"source": source},
             )
+        bump_resource_generation(resource)
         transaction.on_commit(lambda: bump_resource_generation(resource))
 
 
@@ -599,7 +607,9 @@ def preload_policy_packages(resources) -> int:
     by_ref = {resource_ref(resource): resource for resource in resources}
     pending: dict[str, int] = {}
     for ref in by_ref:
-        generation = _shared_generation("resource", ref, _resource_generation.get(ref, 0))
+        generation = _shared_generation(
+            "resource", ref, _resource_generation.get(ref, 0)
+        )
         cached = _policy_package_cache.get(ref)
         if cached is None or cached[0] != generation:
             pending[ref] = generation
@@ -607,9 +617,9 @@ def preload_policy_packages(resources) -> int:
         return 0
 
     grouped: dict[str, dict[str, object]] = {ref: {} for ref in pending}
-    rows = AuthorizationPolicyOverride.objects.filter(resource_ref__in=pending).values_list(
-        "resource_ref", "access_type", "policy"
-    )
+    rows = AuthorizationPolicyOverride.objects.filter(
+        resource_ref__in=pending
+    ).values_list("resource_ref", "access_type", "policy")
     for ref, operation, data in rows:
         if data:
             grouped[ref][str(operation).lower()] = policy_from_data(data)

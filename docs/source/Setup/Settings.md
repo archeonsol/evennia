@@ -47,7 +47,7 @@ Apart from the main `settings.py` file,
 - `connection_screens.py` - all global string variables in this module are interpreted by Evennia as a greeting screen to show when an Account first connects. If more than one string variable is present in the module a random one will be picked.
 - `inlinefuncs.py` - this is where you can define custom [FuncParser functions](../Components/FuncParser.md).
 - `inputfuncs.py` - this is where you define custom [Input functions](../Components/Inputfuncs.md) to handle data from the client.
-- `lockfuncs.py` - this is one of many possible modules to hold your own "safe" *lock functions* to make available to Evennia's [Locks](../Components/Locks.md).
+- `authorization.py` - register game capabilities and policy templates; see [Capability Authorization](../Components/Authorization.md).
 - `mssp.py` - this holds meta information about your game. It is used by MUD search engines (which you often have to register with) in order to display what kind of game you are running along with statistics such as number of online accounts and online status.
 - `oobfuncs.py` - in here you can define custom [OOB functions](../Concepts/OOB.md).
 - `portal_services_plugin.py` - this allows for adding your own custom services/protocols to the Portal. It must define one particular function that will be called by Evennia at startup. There can be any number of service plugin modules, all will be imported and used if defined. More info can be found [here](https://code.google.com/p/evennia/wiki/SessionProtocols#Adding_custom_Protocols).

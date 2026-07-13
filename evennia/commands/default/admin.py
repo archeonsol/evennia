@@ -10,14 +10,13 @@ import time
 from django.conf import settings
 
 import evennia
-from evennia.commands.cmd_access_cache import invalidate_caller_access
-from evennia.commands.signals import permissions_changed
-from evennia.server.models import ServerConfig
+from evennia.authorization.capabilities import capability_registry
+from evennia.authorization.storage import (grant_capability, principal_refs,
+                                           revoke_grant)
+from evennia.server.models import AuthorizationGrant, ServerConfig
 from evennia.utils import class_from_module, evtable, logger, search
 
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
-
-PERMISSION_HIERARCHY = [p.lower() for p in settings.PERMISSION_HIERARCHY]
 
 # limit members for API inclusion
 __all__ = (
@@ -26,7 +25,7 @@ __all__ = (
     "CmdUnban",
     "CmdEmit",
     "CmdNewPassword",
-    "CmdPerm",
+    "CmdGrant",
     "CmdWall",
     "CmdForce",
 )
@@ -49,7 +48,7 @@ class CmdBoot(COMMAND_DEFAULT_CLASS):
 
     key = "@boot"
     switch_options = ("quiet", "sid")
-    locks = "cmd:perm(boot) or perm(Admin)"
+    authorization = "engine.moderation.manage"
     help_category = "Admin"
 
     def func(self):
@@ -92,7 +91,9 @@ class CmdBoot(COMMAND_DEFAULT_CLASS):
                 boot_list.append(match)
 
         if not boot_list:
-            caller.msg("No matching sessions found. The Account does not seem to be online.")
+            caller.msg(
+                "No matching sessions found. The Account does not seem to be online."
+            )
             return
 
         # Carry out the booting of the sessions in the boot list.
@@ -171,7 +172,7 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
 
     key = "@ban"
     aliases = ["@bans"]
-    locks = "cmd:perm(ban) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "Admin"
 
     def func(self):
@@ -192,7 +193,8 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
             banlist = []
 
         if not self.args or (
-            self.switches and not any(switch in ("ip", "name") for switch in self.switches)
+            self.switches
+            and not any(switch in ("ip", "name") for switch in self.switches)
         ):
             self.msg(list_bans(self, banlist))
             return
@@ -248,7 +250,7 @@ class CmdUnban(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@unban"
-    locks = "cmd:perm(unban) or perm(Developer)"
+    authorization = "engine.runtime.manage"
     help_category = "Admin"
 
     def func(self):
@@ -312,7 +314,7 @@ class CmdEmit(COMMAND_DEFAULT_CLASS):
     key = "@emit"
     aliases = ["@pemit", "@remit"]
     switch_options = ("room", "accounts", "contents")
-    locks = "cmd:perm(emit) or perm(Builder)"
+    authorization = "engine.world.build"
     help_category = "Admin"
 
     def func(self):
@@ -380,7 +382,7 @@ class CmdNewPassword(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@userpassword"
-    locks = "cmd:perm(newpassword) or perm(Admin)"
+    authorization = "engine.moderation.manage"
     help_category = "Admin"
 
     def func(self):
@@ -417,152 +419,100 @@ class CmdNewPassword(COMMAND_DEFAULT_CLASS):
         )
 
 
-class CmdPerm(COMMAND_DEFAULT_CLASS):
-    """
-    set the permissions of an account/object
+class CmdGrant(COMMAND_DEFAULT_CLASS):
+    """Manage explicit capability grants.
 
     Usage:
-      @perm[/switch] <object> [= <permission>[,<permission>,...]]
-      @perm[/switch] *<account> [= <permission>[,<permission>,...]]
+      @grant <object or *account>
+      @grant <object or *account> = <capability>[/scope-kind/scope-key]
+      @grant/revoke <object or *account> = <grant-id>
 
-    Switches:
-      del     -  delete the given permission from <object> or <account>.
-      account -  set permission on an account (same as adding * to name)
-
-    This command sets/clears individual permission strings on an object
-    or account. If no permission is given, list all permissions on <object>.
+    Bundles are accepted as ``bundle:<key>`` and expand to explicit grants.
     """
 
-    key = "@perm"
-    aliases = "@setperm"
-    switch_options = ("del", "account")
-    locks = "cmd:perm(perm) or perm(Developer)"
+    key = "@grant"
+    aliases = ["@grants"]
+    switch_options = ("revoke", "account")
+    authorization = "engine.runtime.manage"
     help_category = "Admin"
 
-    def func(self):
-        """Implement function"""
+    def _target(self):
+        """Resolve the grant principal selected by command syntax."""
 
-        caller = self.caller
-        switches = self.switches
-        lhs, rhs = self.lhs, self.rhs
+        name = self.lhs.strip()
+        if "account" in self.switches or name.startswith("*"):
+            return self.caller.search_account(name.lstrip("*"))
+        return self.caller.search(name, global_search=True)
+
+    def func(self):
+        """List, create, or revoke durable positive grants."""
 
         if not self.args:
-            string = "Usage: @perm[/switch] object [ = permission, permission, ...]"
-            caller.msg(string)
+            self.msg("Usage: @grant[/revoke] <object or *account> [= capability]")
             return
-
-        accountmode = "account" in self.switches or lhs.startswith("*")
-        lhs = lhs.lstrip("*")
-
-        if accountmode:
-            obj = caller.search_account(lhs)
-        else:
-            obj = caller.search(lhs, global_search=True)
-        if not obj:
+        target = self._target()
+        if not target:
             return
-
-        if not rhs:
-            if not obj.access(caller, "examine"):
-                caller.msg("You are not allowed to examine this object.")
+        refs = principal_refs(target)
+        if not refs:
+            self.msg("That target has no authorization principal reference.")
+            return
+        account_mode = "account" in self.switches or self.lhs.strip().startswith("*")
+        prefix = "account:" if account_mode else "object:"
+        principal_ref = next((ref for ref in refs if ref.startswith(prefix)), refs[0])
+        if not self.rhs:
+            grants = AuthorizationGrant.objects.filter(
+                principal_ref__in=refs, revoked_at__isnull=True
+            ).order_by("capability", "scope_kind", "scope_key")
+            if not grants:
+                self.msg(f"{target} has no active capability grants.")
                 return
-
-            string = f"Permissions on |w{obj.key}|n: "
-            if not obj.permissions.all():
-                string += "<None>"
-            else:
-                string += ", ".join(obj.permissions.all())
-                if (
-                    hasattr(obj, "account")
-                    and hasattr(obj.account, "is_superuser")
-                    and obj.account.is_superuser
-                ):
-                    string += "\n(... but this object is currently controlled by a SUPERUSER! "
-                    string += "All access checks are passed automatically.)"
-            caller.msg(string)
-            return
-
-        # we supplied an argument on the form obj = perm
-        locktype = "edit" if accountmode else "control"
-        if not obj.access(caller, locktype):
-            accountstr = "account" if accountmode else "object"
-            caller.msg(f"You are not allowed to edit this {accountstr}'s permissions.")
-            return
-
-        caller_result = []
-        target_result = []
-        added = []
-        removed = []
-        if "del" in switches:
-            # delete the given permission(s) from object.
-            for perm in self.rhslist:
-                obj.permissions.remove(perm)
-                if obj.permissions.get(perm):
-                    caller_result.append(
-                        f"\nPermissions {perm} could not be removed from {obj.name}."
-                    )
-                else:
-                    caller_result.append(
-                        f"\nPermission {perm} removed from {obj.name} (if they existed)."
-                    )
-                    target_result.append(
-                        f"\n{caller.name} revokes the permission(s) {perm} from you."
-                    )
-                    removed.append(perm)
-                    logger.log_sec(
-                        f"Permissions Deleted: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
-                    )
-        else:
-            # add a new permission. obj.permissions.all() returns
-            # lowercased strings, so build a case-insensitive set for
-            # the "already defined" check — otherwise typing `Builder`
-            # against a stored `builder` fell through to re-add.
-            permissions_lower = {p.lower() for p in obj.permissions.all()}
-
-            for perm in self.rhslist:
-                # don't allow to set a permission higher in the hierarchy than
-                # the one the caller has (to prevent self-escalation)
-                if perm.lower() in PERMISSION_HIERARCHY and not obj.locks.check_lockstring(
-                    caller, f"dummy:perm({perm})"
-                ):
-                    caller.msg(
-                        "You cannot assign a permission higher than the one you have yourself."
-                    )
-                    return
-
-                if perm.lower() in permissions_lower:
-                    caller_result.append(f"\nPermission '{perm}' is already defined on {obj.name}.")
-                else:
-                    obj.permissions.add(perm)
-                    added.append(perm)
-                    plystring = "the Account" if accountmode else "the Object/Character"
-                    caller_result.append(
-                        f"\nPermission '{perm}' given to {obj.name} ({plystring})."
-                    )
-                    target_result.append(
-                        f"\n{caller.name} gives you ({obj.name}, {plystring}) the permission '{perm}'."
-                    )
-                    logger.log_sec(
-                        f"Permissions Added: {perm}, {obj} (Caller: {caller}, IP: {self.session.address})."
-                    )
-
-        # Engine owns the per-caller access caches; flush them via the
-        # single seam before any downstream listener observes the new
-        # permission state, then fan out the signal. Subscribers that
-        # invalidate their own derived caches see consistent engine state.
-        if added or removed:
-            invalidate_caller_access(obj)
-            permissions_changed.send_robust(
-                sender=type(self),
-                target=obj,
-                added=tuple(added),
-                removed=tuple(removed),
-                actor=caller,
-                account_mode=accountmode,
+            self.msg(
+                "\n".join(
+                    f"{grant.grant_id} {grant.capability} "
+                    f"[{grant.scope_kind}:{grant.scope_key}]"
+                    for grant in grants
+                )
             )
+            return
+        if "revoke" in self.switches:
+            grant_id = self.rhs.strip()
+            grant = AuthorizationGrant.objects.filter(
+                grant_id=grant_id, principal_ref__in=refs
+            ).first()
+            if grant is None or not revoke_grant(
+                grant_id,
+                actor_ref=principal_refs(self.caller)[0],
+                reason="staff @grant/revoke",
+            ):
+                self.msg("No active matching grant was found.")
+                return
+            self.msg(f"Revoked grant {grant_id} from {target}.")
+            return
 
-        caller.msg("".join(caller_result).strip())
-        if target_result:
-            obj.msg("".join(target_result).strip())
+        declaration, *scope_parts = [part.strip() for part in self.rhs.split("/")]
+        scope_kind, scope_key = "world", "*"
+        if scope_parts:
+            if len(scope_parts) != 2:
+                self.msg("Scope must be /<scope-kind>/<scope-key>.")
+                return
+            scope_kind, scope_key = scope_parts
+        capabilities = (
+            capability_registry.expand_bundle(declaration.split(":", 1)[1])
+            if declaration.lower().startswith("bundle:")
+            else (capability_registry.require(declaration).key,)
+        )
+        for capability in sorted(capabilities):
+            grant_capability(
+                principal_ref,
+                capability,
+                scope_kind=scope_kind,
+                scope_key=scope_key,
+                provenance="staff_command",
+                actor_ref=principal_refs(self.caller)[0],
+                reason="staff @grant",
+            )
+        self.msg(f"Granted {', '.join(sorted(capabilities))} to {target}.")
 
 
 class CmdWall(COMMAND_DEFAULT_CLASS):
@@ -577,7 +527,7 @@ class CmdWall(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@wall"
-    locks = "cmd:perm(wall) or perm(Admin)"
+    authorization = "engine.moderation.manage"
     help_category = "Admin"
 
     def func(self):
@@ -602,7 +552,7 @@ class CmdForce(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@force"
-    locks = "cmd:perm(spawn) or perm(Builder)"
+    authorization = "engine.world.build"
     help_category = "Building"
     perm_used = "edit"
 

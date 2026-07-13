@@ -53,7 +53,9 @@ __all__ = (
 CONNECTION_SCREEN_MODULE = settings.CONNECTION_SCREEN_MODULE
 CONNECTION_SCREEN = ""
 try:
-    CONNECTION_SCREEN = ansi.parse_ansi(utils.random_string_from_module(CONNECTION_SCREEN_MODULE))
+    CONNECTION_SCREEN = ansi.parse_ansi(
+        utils.random_string_from_module(CONNECTION_SCREEN_MODULE)
+    )
 except Exception:
     # malformed connection screen or no screen given
     pass
@@ -76,7 +78,7 @@ class CmdUnconnectedConnect(Command):
 
     key = "connect"
     aliases = ["conn", "con", "co"]
-    locks = "cmd:all()"  # not really needed
+    authorization = "public"
 
     def func(self):
         """
@@ -140,7 +142,7 @@ class CmdUnconnectedCreate(Command):
 
     key = "create"
     aliases = ["cre", "cr"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def at_pre_parse(self):
         """Verify that account creation is enabled."""
@@ -185,11 +187,15 @@ class CmdUnconnectedCreate(Command):
         try:
             username, email, password = self.accountinfo
         except ValueError:
-            string = '\n\r Usage (without <>): create "<accountname>" <email> <password>'
+            string = (
+                '\n\r Usage (without <>): create "<accountname>" <email> <password>'
+            )
             session.msg(string)
             return
         if not email or not password:
-            session.msg("\n\r You have to supply an e-mail address followed by a password.")
+            session.msg(
+                "\n\r You have to supply an e-mail address followed by a password."
+            )
             return
         if not utils.validate_email_address(email):
             # check so the email at least looks ok.
@@ -211,22 +217,28 @@ class CmdUnconnectedCreate(Command):
             f"'{password}'.\nIs this what you intended? [Y]/N?"
         )
         if answer.lower() in ("n", "no"):
-            session.msg("Aborted. If your user name contains spaces, surround it by quotes.")
+            session.msg(
+                "Aborted. If your user name contains spaces, surround it by quotes."
+            )
             return
 
         # everything's ok. Create the new player account.
         account, errors = Account.create(
-            username=username, email=email, password=password, ip=address, session=session
+            username=username,
+            email=email,
+            password=password,
+            ip=address,
+            session=session,
         )
         if account:
             # tell the caller everything went well.
             string = "A new account '%s' was created. Welcome!"
             if " " in username:
-                string += (
-                    "\n\nYou can now log in with the command 'connect \"%s\" <your password>'."
-                )
+                string += "\n\nYou can now log in with the command 'connect \"%s\" <your password>'."
             else:
-                string += "\n\nYou can now log with the command 'connect %s <your password>'."
+                string += (
+                    "\n\nYou can now log with the command 'connect %s <your password>'."
+                )
             session.msg(string % (username, username))
         else:
             session.msg("|R%s|n" % "\n".join(errors))
@@ -241,7 +253,7 @@ class CmdUnconnectedQuit(Command):
 
     key = "quit"
     aliases = ["q", "qu"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """Simply close the connection."""
@@ -259,7 +271,7 @@ class CmdUnconnectedLook(Command):
 
     key = CMD_LOGINSTART
     aliases = ["look", "l"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """Show the connect screen."""
@@ -274,7 +286,7 @@ class CmdUnconnectedHelp(Command):
 
     key = "help"
     aliases = ["h", "?"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """Shows help"""

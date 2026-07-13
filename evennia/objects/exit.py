@@ -82,6 +82,16 @@ class DefaultExit(DefaultObject):
     """
 
     _content_types = ("exit",)
+    from evennia.authorization.policy import Always, Never
+
+    authorization_policies = {
+        **DefaultObject.authorization_policies,
+        "traverse": Always(),
+        "get": Never(),
+        "puppet": Never(),
+        "teleport": Never(),
+        "teleport_here": Never(),
+    }
     exit_command = ExitCommand
     priority = 101
 
@@ -110,7 +120,6 @@ class DefaultExit(DefaultObject):
         cmd = self.exit_command(
             key=exidbobj.db_key.strip().lower(),
             aliases=exidbobj.aliases.all(),
-            locks=str(exidbobj.locks),
             auto_help=False,
             destination=exidbobj.db_destination,
             arg_regex=r"^$",
@@ -184,17 +193,9 @@ class DefaultExit(DefaultObject):
 
         description = kwargs.pop("description", "")
 
-        locks = kwargs.get("locks", "")
-
         try:
             # Create the Exit
             obj = create.create_object(**kwargs)
-
-            # Set appropriate locks
-            if not locks:
-                locks = cls.get_default_lockstring(account=account, caller=caller, exit=obj)
-            if locks:
-                obj.locks.add(locks)
 
             # Record creator id and creation IP
             if ip:
@@ -222,19 +223,6 @@ class DefaultExit(DefaultObject):
         """
         super().basetype_setup()
 
-        # setting default locks (overload these in at_object_creation()
-        self.locks.add(
-            ";".join(
-                [
-                    "puppet:false()",  # would be weird to puppet an exit ...
-                    "traverse:all()",  # who can pass through exit by default
-                    "get:false()",  # noone can pick up the exit
-                    "teleport:false()",
-                    "teleport_here:false()",
-                ]
-            )
-        )
-
         # an exit should have a destination - try to make sure it does
         if self.location and not self.destination:
             self.destination = self.location
@@ -255,7 +243,9 @@ class DefaultExit(DefaultObject):
 
         """
 
-        if "force_init" in kwargs or not self.cmdset.has_cmdset("ExitCmdSet", must_be_default=True):
+        if "force_init" in kwargs or not self.cmdset.has_cmdset(
+            "ExitCmdSet", must_be_default=True
+        ):
             # we are resetting, or no exit-cmdset was set. Create one dynamically.
             self.cmdset.add_default(self.create_exit_cmdset(self), persistent=False)
 
@@ -294,7 +284,9 @@ class DefaultExit(DefaultObject):
             self.at_failed_traverse(traversing_object)
             return
         source_location = traversing_object.location
-        if traversing_object.move_to(target_location, move_type="traverse", exit_obj=self):
+        if traversing_object.move_to(
+            target_location, move_type="traverse", exit_obj=self
+        ):
             self.at_post_traverse(traversing_object, source_location)
         else:
             if self.db.err_traverse:
@@ -348,7 +340,9 @@ class DefaultExit(DefaultObject):
             will be a queryset of all matching exits. Otherwise, it will be the first Exit matched.
 
         """
-        query = ObjectDB.objects.filter(db_location=self.destination, db_destination=self.location)
+        query = ObjectDB.objects.filter(
+            db_location=self.destination, db_destination=self.location
+        )
         if return_all:
             return query
         return query.first()

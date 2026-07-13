@@ -11,11 +11,9 @@ import re
 from django.conf import settings
 
 from evennia.utils.logger import log_trace, mask_sensitive_input
-from evennia.utils.multimatch import (
-    _multimatch_regex,
-    parse_multimatch_input,
-    resolve_multimatch_index,
-)
+from evennia.utils.multimatch import (_multimatch_regex,
+                                      parse_multimatch_input,
+                                      resolve_multimatch_index)
 
 
 def create_match(cmdname, string, cmdobj, raw_cmdname):
@@ -85,7 +83,9 @@ def try_multimatch_differentiators(raw_string):
     num_ref_match = _multimatch_regex().match(raw_string)
     if num_ref_match:
         mindex = int(num_ref_match.group("number")) - 1
-        new_raw_string = num_ref_match.group("name") + (num_ref_match.group("args") or "")
+        new_raw_string = num_ref_match.group("name") + (
+            num_ref_match.group("args") or ""
+        )
         return mindex, new_raw_string
     return None, None
 
@@ -157,14 +157,9 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
             matches.extend(build_matches(new_raw_string, cmdset))
 
     # only select command matches we are actually allowed to call.
-    if getattr(settings, "COMMAND_ACCESS_CACHE_ENABLED", False):
-        from evennia.commands.cmd_access_cache import cached_cmd_access
-
-        matches = [
-            match for match in matches if cached_cmd_access(match[2], caller, session=session)
-        ]
-    else:
-        matches = [match for match in matches if match[2].access(caller, "cmd", session=session)]
+    matches = [
+        match for match in matches if match[2].access(caller, "cmd", session=session)
+    ]
 
     # try to bring the number of matches down to 1
     if len(matches) > 1:

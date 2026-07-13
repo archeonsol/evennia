@@ -170,10 +170,17 @@ class ActionRegistry:
             key = verb.lower()
             existing = self._by_verb.get(key)
             if existing is not None and existing is not action_cls:
-                raise RuleConflict(
-                    f"verb {verb!r} already registered to {existing.__name__}; "
-                    f"cannot also bind to {action_cls.__name__}"
+                engine_default = existing.__module__.startswith(
+                    "evennia.actions.default."
                 )
+                game_override = not action_cls.__module__.startswith(
+                    "evennia.actions.default."
+                )
+                if not (engine_default and game_override):
+                    raise RuleConflict(
+                        f"verb {verb!r} already registered to {existing.__name__}; "
+                        f"cannot also bind to {action_cls.__name__}"
+                    )
             self._by_verb[key] = action_cls
         if action_cls not in self._actions:
             self._actions.append(action_cls)
@@ -272,7 +279,9 @@ class ActionRegistry:
             self._symbol_verbs = syms
         return self._symbol_verbs
 
-    def suggest_verbs(self, token: str, max_dist: int = 2, limit: int = 3, reachable=None):
+    def suggest_verbs(
+        self, token: str, max_dist: int = 2, limit: int = 3, reachable=None
+    ):
         """Return up to ``limit`` registered verbs within edit distance
         ``max_dist`` of ``token``, closest first (for "did you mean…" output).
 
@@ -341,7 +350,9 @@ class RuleRegistry:
                     if _is_catch_all(spec.action_type):
                         catchall.setdefault(spec.phase, []).append(spec)
                     else:
-                        concrete.setdefault((spec.action_type, spec.phase), []).append(spec)
+                        concrete.setdefault((spec.action_type, spec.phase), []).append(
+                            spec
+                        )
 
         # sort each bucket by priority desc, stable
         for bucket in concrete.values():

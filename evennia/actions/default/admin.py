@@ -1,25 +1,18 @@
 """
 Default admin actions: engine-shipped staff verbs and their rule providers.
 
-The action-engine analogue of ``evennia/commands/default/admin.py``'s
-``CmdEmit``/``CmdWall``/``CmdForce``/``CmdPerm`` plus ``general.py``'s
-``CmdAccess``:
+The action-engine analogue of the engine's administrative command surface:
 
 * :class:`Emit` — ``@emit`` / ``@remit`` / ``@pemit`` broadcast to objects,
   rooms, or accounts (the alias forces the room/account restriction, exactly
   as the stock command keyed off ``cmdstring``).
 * :class:`Wall` — announce to every connected session.
 * :class:`Force` — make another object execute a command line.
-* :class:`Perm` — view / grant / revoke permission strings on objects or
-  accounts, with the same anti-escalation check, security logging, access-cache
-  invalidation, and ``permissions_changed`` signal as the stock command.
-* :class:`Access` — show the permission hierarchy and the caller's own perms.
+* :class:`Grant` — grant/revoke registered capabilities with explicit scopes.
+* :class:`Access` — explain the caller's effective capability grants.
 
-Permission gates are ``requires=`` capability predicates (quell-aware,
-re-resolved fresh per dispatch): Builder for emit/force, Admin for wall,
-Developer for perm. The stock locks' per-command ``perm(emit)``-style named
-grants are **not** reproduced — a game wanting them overrides the rule with a
-``requires=from_lockstring(...)`` gate.
+Administrative gates are namespaced capability predicates and remain
+quell-aware. There is no tier hierarchy or dynamic permission-name fallback.
 
 A game composes :class:`CharacterAdminRules` into its Character typeclass (the
 same pattern as :class:`~evennia.actions.default.objects.CharacterObjectRules`;
@@ -31,16 +24,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from django.conf import settings
-
 import evennia
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
 from ..muxargs import ArgAction
-from ..predicate import Admin as AdminCap
-from ..predicate import Builder as BuilderCap
-from ..predicate import Developer as DeveloperCap
+from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
 
@@ -48,7 +37,7 @@ __all__ = [
     "Emit",
     "Wall",
     "Force",
-    "Perm",
+    "Grant",
     "Access",
     "CharacterAdminRules",
 ]
@@ -83,10 +72,10 @@ class Force(ArgAction):
     __primary_handler__ = DefaultCharacter
 
 
-@action("@perm", "@setperm")
+@action("@grant", "@grants")
 @dataclass
-class Perm(ArgAction):
-    """View or change permission strings on an object or account.
+class Grant(ArgAction):
+    """View or change explicit capability grants on an object or account.
 
     ``@perm[/del|/account] <object|*account> [= <perm>[,<perm>,...]]``.
     """
@@ -116,7 +105,7 @@ class CharacterAdminRules:
 
     # --- @emit / @remit / @pemit ---------------------------------------------
 
-    @rule(Emit, phase="carry_out", requires=BuilderCap)
+    @rule(Emit, phase="carry_out", requires=HasCapability("engine.world.build"))
     def carry_out_emit(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -173,7 +162,7 @@ class CharacterAdminRules:
 
     # --- @wall -----------------------------------------------------------------
 
-    @rule(Wall, phase="carry_out", requires=AdminCap)
+    @rule(Wall, phase="carry_out", requires=HasCapability("engine.moderation.manage"))
     def carry_out_wall(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -188,7 +177,7 @@ class CharacterAdminRules:
 
     # --- @force ----------------------------------------------------------------
 
-    @rule(Force, phase="carry_out", requires=BuilderCap)
+    @rule(Force, phase="carry_out", requires=HasCapability("engine.world.build"))
     def carry_out_force(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -200,28 +189,32 @@ class CharacterAdminRules:
         if not targ:
             return CLAIM
         if not targ.access(caller, "edit"):
-            caller.msg(f"You don't have permission to force {targ} to execute commands.")
+            caller.msg(
+                f"You don't have permission to force {targ} to execute commands."
+            )
             return CLAIM
         targ.execute_cmd(action.rhs)
         caller.msg(f"You have forced {targ} to: {action.rhs}")
         return CLAIM
 
-    # --- @perm -----------------------------------------------------------------
+    # --- @grant ----------------------------------------------------------------
 
-    @rule(Perm, phase="carry_out", requires=DeveloperCap)
-    def carry_out_perm(self, action, actor):
+    @rule(Grant, phase="carry_out", requires=HasCapability("engine.runtime.manage"))
+    def carry_out_grant(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
-        from evennia.commands.cmd_access_cache import invalidate_caller_access
-        from evennia.commands.signals import permissions_changed
-        from evennia.utils import logger
+        from evennia.authorization.capabilities import capability_registry
+        from evennia.authorization.storage import (grant_capability,
+                                                   principal_refs,
+                                                   revoke_grant)
+        from evennia.server.models import AuthorizationGrant
 
         caller = self
         switches = action.switches
         lhs, rhs = action.lhs, action.rhs
 
         if not action.args:
-            caller.msg("Usage: @perm[/switch] object [ = permission, permission, ...]")
+            caller.msg("Usage: @grant[/revoke] object [ = capability]")
             return CLAIM
 
         accountmode = "account" in switches or lhs.startswith("*")
@@ -239,19 +232,18 @@ class CharacterAdminRules:
                 caller.msg("You are not allowed to examine this object.")
                 return CLAIM
 
-            string = f"Permissions on |w{obj.key}|n: "
-            if not obj.permissions.all():
-                string += "<None>"
-            else:
-                string += ", ".join(obj.permissions.all())
-                if (
-                    hasattr(obj, "account")
-                    and hasattr(obj.account, "is_superuser")
-                    and obj.account.is_superuser
-                ):
-                    string += "\n(... but this object is currently controlled by a SUPERUSER! "
-                    string += "All access checks are passed automatically.)"
-            caller.msg(string)
+            refs = principal_refs(obj)
+            grants = AuthorizationGrant.objects.filter(
+                principal_ref__in=refs, revoked_at__isnull=True
+            ).order_by("capability")
+            caller.msg(
+                "\n".join(
+                    f"{grant.grant_id} {grant.capability} "
+                    f"[{grant.scope_kind}:{grant.scope_key}]"
+                    for grant in grants
+                )
+                or "<No active capability grants>"
+            )
             return CLAIM
 
         locktype = "edit" if accountmode else "control"
@@ -260,78 +252,37 @@ class CharacterAdminRules:
             caller.msg(f"You are not allowed to edit this {accountstr}'s permissions.")
             return CLAIM
 
-        address = getattr(getattr(actor, "session", None), "address", "unknown")
-        hierarchy = [p.lower() for p in settings.PERMISSION_HIERARCHY]
-        caller_result = []
-        target_result = []
-        added = []
-        removed = []
+        refs = principal_refs(obj)
+        prefix = "account:" if accountmode else "object:"
+        principal_ref = next((ref for ref in refs if ref.startswith(prefix)), refs[0])
+        actor_ref = principal_refs(caller)[0]
         if "del" in switches:
-            for perm in action.rhslist:
-                obj.permissions.remove(perm)
-                if obj.permissions.get(perm):
-                    caller_result.append(
-                        f"\nPermissions {perm} could not be removed from {obj.name}."
-                    )
-                else:
-                    caller_result.append(
-                        f"\nPermission {perm} removed from {obj.name} (if they existed)."
-                    )
-                    target_result.append(
-                        f"\n{caller.name} revokes the permission(s) {perm} from you."
-                    )
-                    removed.append(perm)
-                    logger.log_sec(
-                        f"Permissions Deleted: {perm}, {obj} (Caller: {caller}, IP: {address})."
-                    )
-        else:
-            # permissions.all() returns lowercased strings; compare
-            # case-insensitively so `Builder` matches a stored `builder`.
-            permissions_lower = {p.lower() for p in obj.permissions.all()}
-
-            for perm in action.rhslist:
-                # block assigning a permission higher in the hierarchy than the
-                # caller's own (self/peer escalation)
-                if perm.lower() in hierarchy and not obj.locks.check_lockstring(
-                    caller, f"dummy:perm({perm})"
-                ):
-                    caller.msg(
-                        "You cannot assign a permission higher than the one you have yourself."
-                    )
-                    return CLAIM
-
-                if perm.lower() in permissions_lower:
-                    caller_result.append(f"\nPermission '{perm}' is already defined on {obj.name}.")
-                else:
-                    obj.permissions.add(perm)
-                    added.append(perm)
-                    plystring = "the Account" if accountmode else "the Object/Character"
-                    caller_result.append(
-                        f"\nPermission '{perm}' given to {obj.name} ({plystring})."
-                    )
-                    target_result.append(
-                        f"\n{caller.name} gives you ({obj.name}, {plystring}) the permission '{perm}'."
-                    )
-                    logger.log_sec(
-                        f"Permissions Added: {perm}, {obj} (Caller: {caller}, IP: {address})."
-                    )
-
-        # Flush the engine's per-caller access caches before any signal
-        # subscriber observes the new permission state.
-        if added or removed:
-            invalidate_caller_access(obj)
-            permissions_changed.send_robust(
-                sender=type(action),
-                target=obj,
-                added=tuple(added),
-                removed=tuple(removed),
-                actor=caller,
-                account_mode=accountmode,
+            grant = AuthorizationGrant.objects.filter(
+                grant_id=rhs.strip(), principal_ref__in=refs
+            ).first()
+            changed = bool(
+                grant
+                and revoke_grant(
+                    grant.grant_id,
+                    actor_ref=actor_ref,
+                    reason="action @grant/revoke",
+                )
             )
-
-        caller.msg("".join(caller_result).strip())
-        if target_result:
-            obj.msg("".join(target_result).strip())
+            caller.msg(
+                "Grant revoked." if changed else "No active matching grant was found."
+            )
+        else:
+            capability = capability_registry.require(rhs.strip()).key
+            grant_capability(
+                principal_ref,
+                capability,
+                scope_kind="world",
+                scope_key="*",
+                provenance="action_command",
+                actor_ref=actor_ref,
+                reason="action @grant",
+            )
+            caller.msg(f"Granted {capability} to {obj}.")
         return CLAIM
 
     # --- @access ----------------------------------------------------------------
@@ -344,22 +295,13 @@ class CharacterAdminRules:
         from evennia.utils import utils
 
         caller = self
-        hierarchy_full = settings.PERMISSION_HIERARCHY
-        string = "\n|wPermission Hierarchy|n (climbing):\n %s" % ", ".join(hierarchy_full)
+        from evennia.authorization.storage import load_grants
 
-        if caller.account and caller.account.is_superuser:
-            cperms = "<Superuser>"
-            pperms = "<Superuser>"
-        else:
-            cperms = ", ".join(caller.permissions.all())
-            if caller.account:
-                pperms = ", ".join(caller.account.permissions.all())
-            else:
-                pperms = "<No account>"
-
-        string += "\n|wYour access|n:"
-        string += f"\nCharacter |c{caller.key}|n: {cperms}"
-        if utils.inherits_from(caller, DefaultObject) and caller.account:
-            string += f"\nAccount |c{caller.account.key}|n: {pperms}"
+        grants = load_grants(caller)
+        string = "\n|wYour capability grants|n:"
+        for capability, scopes in sorted(grants.by_capability.items()):
+            string += f"\n{capability}: {', '.join(f'{scope.kind}:{scope.key}' for scope in scopes)}"
+        if not grants.by_capability:
+            string += " <None>"
         caller.msg(string)
         return CLAIM

@@ -15,7 +15,7 @@ from typing import Literal
 from evennia.actions.action import Action, GameObject
 from evennia.actions.exceptions import AmbiguousTarget, ParseError
 from evennia.actions.parser import ActionParser, NoMatchAction, ParseResult
-from evennia.actions.predicate import Builder
+from evennia.actions.predicate import HasCapability
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import CLAIM
 from evennia.actions.rule import rule
@@ -279,7 +279,9 @@ class TestDynamicResolver(unittest.TestCase):
         def resolve(stripped, actor):
             token = stripped.lower()
             if token in ambiguous:
-                raise AmbiguousTarget(candidates=[_Obj("a"), _Obj("b")], original_raw=stripped)
+                raise AmbiguousTarget(
+                    candidates=[_Obj("a"), _Obj("b")], original_raw=stripped
+                )
             if token in known:
                 return Move(direction=token)
             return None
@@ -494,7 +496,7 @@ class TestPhraseVerbs(unittest.TestCase):
 # --- gated-verb suggestion filtering (fail-closed suggestions) ---------------
 @dataclass
 class Dig(Action):
-    """A staff verb whose only carry_out path is Builder-gated."""
+    """A staff verb whose only carry_out path is capability-gated."""
 
 
 @dataclass
@@ -516,14 +518,15 @@ class _Perms:
 
 
 class _ProviderChar:
-    """Character-like provider: one Builder-gated and one ungated carry_out."""
+    """Character-like provider with one gated and one public carry-out."""
 
     def __init__(self, perms=("Player",)):
         self.permissions = _Perms(perms)
         self.account = None
         self.location = None
+        self.has_capability = lambda key, **kwargs: key in set(perms)
 
-    @rule(Dig, phase="carry_out", requires=Builder)
+    @rule(Dig, phase="carry_out", requires=HasCapability("engine.world.build"))
     def carry_out_dig(self, action, actor):
         return CLAIM
 
@@ -558,7 +561,7 @@ class TestGatedSuggestions(unittest.TestCase):
         self.assertNotIn("@dig", res.action.suggestions)
 
     def test_gated_verb_suggested_when_gate_passes(self):
-        res = _gated_parser().parse("@dgi", _gated_actor(perms=("Builder",)))
+        res = _gated_parser().parse("@dgi", _gated_actor(perms=("engine.world.build",)))
         self.assertIsInstance(res.action, NoMatchAction)
         self.assertIn("@dig", res.action.suggestions)
 

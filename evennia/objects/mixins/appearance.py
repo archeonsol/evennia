@@ -8,7 +8,8 @@ from django.utils.translation import gettext as _
 
 from evennia.hooks import hook
 from evennia.utils import ansi, logger
-from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
+from evennia.utils.utils import (compress_whitespace, is_iter, iter_to_str,
+                                 make_iter)
 
 _INFLECT = inflect.engine()
 
@@ -42,7 +43,10 @@ class AppearanceMixin:
             obj
             for obj in obj_list
             if obj != looker
-            and (obj.access(looker, "view") and obj.access(looker, "search", default=True))
+            and (
+                obj.access(looker, "view")
+                and obj.access(looker, "search", default=True)
+            )
         ]
 
     # name and return_appearance hooks
@@ -110,7 +114,9 @@ class AppearanceMixin:
             By default, this becomes a string (#dbref) attached to the object's name.
 
         """
-        if looker and self.locks.check_lockstring(looker, "perm(Builder)"):
+        from evennia.authorization.service import has_capability
+
+        if looker and has_capability(looker, "engine.world.build", resource=self):
             return f"(#{self.id})"
         return ""
 
@@ -158,10 +164,14 @@ class AppearanceMixin:
         """
         key = kwargs.get("key", self.get_display_name(looker))
         raw_key = self.name
-        key = ansi.ANSIString(key)  # this is needed to allow inflection of colored names
+        key = ansi.ANSIString(
+            key
+        )  # this is needed to allow inflection of colored names
         try:
             plural = _INFLECT.plural(key, count)
-            plural = "{} {}".format(_INFLECT.number_to_words(count, threshold=12), plural)
+            plural = "{} {}".format(
+                _INFLECT.number_to_words(count, threshold=12), plural
+            )
         except IndexError:
             # this is raised by inflect if the input is not a proper noun
             plural = key
@@ -270,7 +280,9 @@ class AppearanceMixin:
             names.sort(key=lambda name: sort_index.get(name, end_pos))
             return names
 
-        exits = self.filter_visible(self.contents_get(content_type="exit"), looker, **kwargs)
+        exits = self.filter_visible(
+            self.contents_get(content_type="exit"), looker, **kwargs
+        )
         exit_names = (exi.get_display_name(looker, **kwargs) for exi in exits)
         exit_names = iter_to_str(_sort_exit_names(exit_names), endsep=self.list_endsep)
         if not exit_names:
@@ -366,7 +378,9 @@ class AppearanceMixin:
 
         """
         # sort and handle same-named things
-        things = self.filter_visible(self.contents_get(content_type="object"), looker, **kwargs)
+        things = self.filter_visible(
+            self.contents_get(content_type="object"), looker, **kwargs
+        )
 
         grouped_things = defaultdict(list)
         for thing in things:
@@ -565,7 +579,9 @@ class AppearanceMixin:
                     target_name=target.get_display_name(self, **kwargs)
                 )
             except AttributeError:
-                return _("Could not view '{target_name}'.").format(target_name=target.key)
+                return _("Could not view '{target_name}'.").format(
+                    target_name=target.key
+                )
 
         if getattr(settings, "LOOK_ATTR_PREFETCH_ENABLED", True):
             try:
@@ -592,7 +608,9 @@ class AppearanceMixin:
                     target_name=target.get_display_name(self, **kwargs)
                 )
             except AttributeError:
-                denied = _("Could not view '{target_name}'.").format(target_name=target.key)
+                denied = _("Could not view '{target_name}'.").format(
+                    target_name=target.key
+                )
             return text_node(denied, kind="look", msg_type="look")
         if getattr(settings, "LOOK_ATTR_PREFETCH_ENABLED", True):
             try:
@@ -779,7 +797,9 @@ class AppearanceMixin:
 
         """
         if not self.access(dropper, "drop", default=False):
-            dropper.msg(_("You cannot drop {obj}").format(obj=self.get_display_name(dropper)))
+            dropper.msg(
+                _("You cannot drop {obj}").format(obj=self.get_display_name(dropper))
+            )
             return False
         return True
 
@@ -1077,7 +1097,10 @@ class AppearanceMixin:
                 "speech": message,
             }
             self_mapping.update(custom_mapping)
-            self.msg(text=(msg_self.format_map(self_mapping), {"type": msg_type}), from_obj=self)
+            self.msg(
+                text=(msg_self.format_map(self_mapping), {"type": msg_type}),
+                from_obj=self,
+            )
 
         if receivers and msg_receivers:
             receiver_mapping = {
@@ -1103,7 +1126,10 @@ class AppearanceMixin:
                 receiver_mapping.update(individual_mapping)
                 receiver_mapping.update(custom_mapping)
                 receiver.msg(
-                    text=(msg_receivers.format_map(receiver_mapping), {"type": msg_type}),
+                    text=(
+                        msg_receivers.format_map(receiver_mapping),
+                        {"type": msg_type},
+                    ),
                     from_obj=self,
                 )
 
@@ -1112,7 +1138,9 @@ class AppearanceMixin:
                 "self": self.get_self_pronoun(self.location, **kwargs),
                 "object": self,
                 "location": location,
-                "all_receivers": ", ".join(str(recv) for recv in receivers) if receivers else None,
+                "all_receivers": (
+                    ", ".join(str(recv) for recv in receivers) if receivers else None
+                ),
                 "receiver": None,
                 "speech": message,
             }

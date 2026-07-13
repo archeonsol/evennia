@@ -79,7 +79,7 @@ class PolicyRegistry:
         """Register a template idempotently."""
 
         for policy in template.operations.values():
-            _validate_policy_references(policy)
+            validate_policy(policy)
         existing = self._templates.get(template.key)
         if existing is not None and existing != template:
             raise ValueError(f"conflicting authorization template {template.key!r}")
@@ -107,25 +107,55 @@ class PolicyRegistry:
             raise ValueError(f"unknown authorization template {key!r}") from err
 
     def resolve(self, resource, resource_kind: str, operation: str) -> Policy | None:
-        """Resolve explicit resource, exact type, then kind defaults."""
+        """Resolve an authored policy, inherited type binding, then kind default."""
+
+        operation = str(operation).lower()
+        instance_policies = vars(resource).get("authorization_policies")
+        if instance_policies is not None:
+            policy = dict(instance_policies).get(operation)
+            if policy is not None:
+                if not isinstance(policy, Policy):
+                    raise TypeError(
+                        "instance authorization policies must be Policy nodes"
+                    )
+                return policy
+        explicit_policies = getattr(type(resource), "authorization_policies", None)
+        if explicit_policies is not None:
+            policy = dict(explicit_policies).get(operation)
+            if policy is not None:
+                if not isinstance(policy, Policy):
+                    raise TypeError(
+                        "authorization_policies values must be Policy nodes"
+                    )
+                return policy
+        if resource_kind == "command" and operation == "cmd":
+            explicit = getattr(type(resource), "authorization_policy", None)
+            if explicit is not None:
+                if not isinstance(explicit, Policy):
+                    raise TypeError(
+                        "command authorization_policy must be a Policy node"
+                    )
+                return explicit
 
         explicit = getattr(type(resource), "authorization_policy_template", "")
         cls = resource.__class__
-        dotted = f"{cls.__module__}.{cls.__qualname__}".lower()
-        template_key = (
-            str(explicit).lower()
-            if explicit
-            else self._type_bindings.get(dotted) or self._kind_bindings.get(resource_kind.lower())
-        )
+        template_key = str(explicit).lower() if explicit else ""
+        if not template_key:
+            for base in cls.__mro__:
+                dotted = f"{base.__module__}.{base.__qualname__}".lower()
+                template_key = self._type_bindings.get(dotted, "")
+                if template_key:
+                    break
+        template_key = template_key or self._kind_bindings.get(resource_kind.lower())
         if not template_key:
             return None
-        return self.require(template_key).operations.get(str(operation).lower())
+        return self.require(template_key).operations.get(operation)
 
 
 policy_registry = PolicyRegistry()
 
 
-def _validate_policy_references(policy: Policy) -> None:
+def validate_policy(policy: Policy) -> None:
     """Fail closed on unresolved capability or predicate references."""
 
     if isinstance(policy, RequiresCapability):
@@ -134,9 +164,9 @@ def _validate_policy_references(policy: Policy) -> None:
         get_predicate_provider(policy.key)
     elif isinstance(policy, (AllOf, AnyOf)):
         for part in policy.parts:
-            _validate_policy_references(part)
+            validate_policy(part)
     elif isinstance(policy, Not):
-        _validate_policy_references(policy.inner)
+        validate_policy(policy.inner)
 
 
 def load_policy_modules() -> None:

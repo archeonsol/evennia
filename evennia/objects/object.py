@@ -31,23 +31,12 @@ from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import ansi, create, funcparser, logger, search
-from evennia.utils.multimatch import (
-    narrow_candidates,
-    parse_search_qualifiers,
-    resolve_multimatch_index,
-    try_autopick,
-)
-from evennia.utils.utils import (
-    class_from_module,
-    compress_whitespace,
-    dbref,
-    is_iter,
-    iter_to_str,
-    lazy_property,
-    make_iter,
-    to_str,
-    variable_from_module,
-)
+from evennia.utils.multimatch import (narrow_candidates,
+                                      parse_search_qualifiers,
+                                      resolve_multimatch_index, try_autopick)
+from evennia.utils.utils import (class_from_module, compress_whitespace, dbref,
+                                 is_iter, iter_to_str, lazy_property,
+                                 make_iter, to_str, variable_from_module)
 
 _INFLECT = inflect.engine()
 
@@ -91,10 +80,16 @@ class ObjectSessionHandler:
         self._sessid_cache = list(
             set(int(val) for val in (self.obj.db_sessid or "").split(",") if val)
         )
-        if any(sessid for sessid in self._sessid_cache if sessid not in evennia.SESSION_HANDLER):
+        if any(
+            sessid
+            for sessid in self._sessid_cache
+            if sessid not in evennia.SESSION_HANDLER
+        ):
             # cache is out of sync with sessionhandler! Only retain the ones in the handler.
             self._sessid_cache = [
-                sessid for sessid in self._sessid_cache if sessid in evennia.SESSION_HANDLER
+                sessid
+                for sessid in self._sessid_cache
+                if sessid in evennia.SESSION_HANDLER
             ]
             self.obj.db_sessid = ",".join(str(val) for val in self._sessid_cache)
             self.obj.save(update_fields=["db_sessid"])
@@ -117,13 +112,23 @@ class ObjectSessionHandler:
 
         if sessid:
             sessions = (
-                [evennia.SESSION_HANDLER[sessid] if sessid in evennia.SESSION_HANDLER else None]
+                [
+                    (
+                        evennia.SESSION_HANDLER[sessid]
+                        if sessid in evennia.SESSION_HANDLER
+                        else None
+                    )
+                ]
                 if sessid in self._sessid_cache
                 else []
             )
         else:
             sessions = [
-                evennia.SESSION_HANDLER[ssid] if ssid in evennia.SESSION_HANDLER else None
+                (
+                    evennia.SESSION_HANDLER[ssid]
+                    if ssid in evennia.SESSION_HANDLER
+                    else None
+                )
                 for ssid in self._sessid_cache
             ]
         if None in sessions:
@@ -313,7 +318,7 @@ class DefaultObject(
      filter_visible(obj_list, looker, **kwargs)
      get_default_lockstring()
      get_cmdsets(caller, current, **kwargs)
-     check_permstring(permstring)
+     has_capability(capability)
      get_cmdset_providers()
      get_display_name(looker=None, **kwargs)
      get_extra_display_name_info(looker=None, **kwargs)
@@ -554,7 +559,9 @@ class DefaultObject(
         body (and an idle, undriven body is never superuser).
         """
         driver = self.puppeteer
-        return bool(driver and driver.is_superuser and not driver.attributes.get("_quell"))
+        return bool(
+            driver and driver.is_superuser and not driver.attributes.get("_quell")
+        )
 
     def contents_get(self, exclude=None, content_type=None):
         """
@@ -595,3 +602,26 @@ class DefaultObject(
 
         """
         return [exi for exi in self.contents if exi.destination]
+
+    from evennia.authorization.policy import (Always, PredicateRequirement,
+                                              RequiresCapability)
+
+    authorization_policies = {
+        "view": Always(),
+        "search": Always(),
+        "get": Always(),
+        "drop": Always(),
+        "call": Always(),
+        "puppet": PredicateRequirement("principal.controls_resource"),
+        "attrread": Always(),
+        "attrcreate": RequiresCapability("engine.object.edit"),
+        "attredit": RequiresCapability("engine.object.edit"),
+        "control": RequiresCapability("engine.object.control"),
+        "edit": RequiresCapability("engine.object.edit"),
+        "delete": RequiresCapability("engine.object.delete"),
+        "move": RequiresCapability("engine.object.move"),
+        "examine": RequiresCapability("engine.object.examine"),
+        "teleport": RequiresCapability("engine.object.teleport"),
+        "teleport_here": RequiresCapability("engine.object.teleport_here"),
+        "tell": RequiresCapability("engine.object.tell"),
+    }

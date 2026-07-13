@@ -71,7 +71,10 @@ class XYZManager(ObjectManager):
             .filter(
                 Q()
                 if z == wildcard
-                else Q(db_tags__db_key__iexact=str(z), db_tags__db_category=MAP_Z_TAG_CATEGORY)
+                else Q(
+                    db_tags__db_key__iexact=str(z),
+                    db_tags__db_category=MAP_Z_TAG_CATEGORY,
+                )
             )
             .distinct()
         )
@@ -123,7 +126,9 @@ class XYZExitManager(XYZManager):
 
     """
 
-    def filter_xyz_exit(self, xyz=("*", "*", "*"), xyz_destination=("*", "*", "*"), **kwargs):
+    def filter_xyz_exit(
+        self, xyz=("*", "*", "*"), xyz_destination=("*", "*", "*"), **kwargs
+    ):
         """
         Used by exits (objects with a source and -destination property).
         Find all exits out of a source or to a particular destination. This will also find
@@ -169,23 +174,33 @@ class XYZExitManager(XYZManager):
             .filter(
                 Q()
                 if z == wildcard
-                else Q(db_tags__db_key__iexact=str(z), db_tags__db_category=MAP_Z_TAG_CATEGORY)
+                else Q(
+                    db_tags__db_key__iexact=str(z),
+                    db_tags__db_category=MAP_Z_TAG_CATEGORY,
+                )
             )
             .filter(
                 Q()
                 if xdest == wildcard
-                else Q(db_tags__db_key=str(xdest), db_tags__db_category=MAP_XDEST_TAG_CATEGORY)
+                else Q(
+                    db_tags__db_key=str(xdest),
+                    db_tags__db_category=MAP_XDEST_TAG_CATEGORY,
+                )
             )
             .filter(
                 Q()
                 if ydest == wildcard
-                else Q(db_tags__db_key=str(ydest), db_tags__db_category=MAP_YDEST_TAG_CATEGORY)
+                else Q(
+                    db_tags__db_key=str(ydest),
+                    db_tags__db_category=MAP_YDEST_TAG_CATEGORY,
+                )
             )
             .filter(
                 Q()
                 if zdest == wildcard
                 else Q(
-                    db_tags__db_key__iexact=str(zdest), db_tags__db_category=MAP_ZDEST_TAG_CATEGORY
+                    db_tags__db_key__iexact=str(zdest),
+                    db_tags__db_category=MAP_ZDEST_TAG_CATEGORY,
                 )
             )
             .distinct()
@@ -221,26 +236,38 @@ class XYZExitManager(XYZManager):
         xdest, ydest, zdest = xyz_destination
         # mimic get_family
         paths = [self.model.path] + [
-            "%s.%s" % (cls.__module__, cls.__name__) for cls in self._get_subclasses(self.model)
+            "%s.%s" % (cls.__module__, cls.__name__)
+            for cls in self._get_subclasses(self.model)
         ]
         kwargs["db_typeclass_path__in"] = paths
 
         try:
             return (
-                self.filter(db_tags__db_key__iexact=str(z), db_tags__db_category=MAP_Z_TAG_CATEGORY)
+                self.filter(
+                    db_tags__db_key__iexact=str(z),
+                    db_tags__db_category=MAP_Z_TAG_CATEGORY,
+                )
                 .filter(db_tags__db_key=str(x), db_tags__db_category=MAP_X_TAG_CATEGORY)
                 .filter(db_tags__db_key=str(y), db_tags__db_category=MAP_Y_TAG_CATEGORY)
-                .filter(db_tags__db_key=str(xdest), db_tags__db_category=MAP_XDEST_TAG_CATEGORY)
-                .filter(db_tags__db_key=str(ydest), db_tags__db_category=MAP_YDEST_TAG_CATEGORY)
                 .filter(
-                    db_tags__db_key__iexact=str(zdest), db_tags__db_category=MAP_ZDEST_TAG_CATEGORY
+                    db_tags__db_key=str(xdest),
+                    db_tags__db_category=MAP_XDEST_TAG_CATEGORY,
+                )
+                .filter(
+                    db_tags__db_key=str(ydest),
+                    db_tags__db_category=MAP_YDEST_TAG_CATEGORY,
+                )
+                .filter(
+                    db_tags__db_key__iexact=str(zdest),
+                    db_tags__db_category=MAP_ZDEST_TAG_CATEGORY,
                 )
                 .distinct()
                 .get(**kwargs)
             )
         except self.model.DoesNotExist:
-            inp = f"xyz=({x},{y},{z}),xyz_destination=({xdest},{ydest},{zdest})," + ",".join(
-                f"{key}={val}" for key, val in kwargs.items()
+            inp = (
+                f"xyz=({x},{y},{z}),xyz_destination=({xdest},{ydest},{zdest}),"
+                + ",".join(f"{key}={val}" for key, val in kwargs.items())
             )
             raise self.model.DoesNotExist(
                 f"{self.model.__name__} matching query {inp} does not exist."
@@ -300,12 +327,17 @@ class XYZRoom(DefaultRoom):
             if x is None or y is None or z is None:
                 # don't cache unfinished coordinate (probably tags have not finished saving)
                 return tuple(
-                    int(coord) if coord is not None and coord.lstrip("-").isdigit() else coord
+                    (
+                        int(coord)
+                        if coord is not None and coord.lstrip("-").isdigit()
+                        else coord
+                    )
                     for coord in (x, y, z)
                 )
             # cache result, convert to correct types (tags are strings)
             self._xyz = tuple(
-                int(coord) if coord.lstrip("-").isdigit() else coord for coord in (x, y, z)
+                int(coord) if coord.lstrip("-").isdigit() else coord
+                for coord in (x, y, z)
             )
 
         return self._xyz
@@ -314,7 +346,8 @@ class XYZRoom(DefaultRoom):
     def xyzgrid(self):
         global GET_XYZGRID
         if not GET_XYZGRID:
-            from evennia.contrib.grid.xyzgrid.xyzgrid import get_xyzgrid as GET_XYZGRID
+            from evennia.contrib.grid.xyzgrid.xyzgrid import \
+                get_xyzgrid as GET_XYZGRID
         return GET_XYZGRID()
 
     @property
@@ -371,7 +404,9 @@ class XYZRoom(DefaultRoom):
             (str(z), MAP_Z_TAG_CATEGORY),
         )
 
-        return DefaultRoom.create(key, account=account, tags=tags, typeclass=cls, **kwargs)
+        return DefaultRoom.create(
+            key, account=account, tags=tags, typeclass=cls, **kwargs
+        )
 
     def get_display_name(self, looker, **kwargs):
         """
@@ -387,7 +422,9 @@ class XYZRoom(DefaultRoom):
                 privileged to control the room.
 
         """
-        if self.locks.check_lockstring(looker, "perm(Builder)"):
+        from evennia.authorization.service import has_capability
+
+        if has_capability(looker, "engine.world.build", resource=self):
             x, y, z = self.xyz
             return f"{self.name}[#{self.id}({x},{y},{z})]"
         return self.name
@@ -450,17 +487,24 @@ class XYZRoom(DefaultRoom):
         xyz = self.xyz
         xymap = self.xyzgrid.get_map(xyz[2])
 
-        if xymap and kwargs.get("map_display", xymap.options.get("map_display", self.map_display)):
+        if xymap and kwargs.get(
+            "map_display", xymap.options.get("map_display", self.map_display)
+        ):
             # show the near-area map.
             map_character_symbol = kwargs.get(
                 "map_character_symbol",
                 xymap.options.get("map_character_symbol", self.map_character_symbol),
             )
             map_visual_range = kwargs.get(
-                "map_visual_range", xymap.options.get("map_visual_range", self.map_visual_range)
+                "map_visual_range",
+                xymap.options.get("map_visual_range", self.map_visual_range),
             )
-            map_mode = kwargs.get("map_mode", xymap.options.get("map_mode", self.map_mode))
-            map_align = kwargs.get("map_align", xymap.options.get("map_align", self.map_align))
+            map_mode = kwargs.get(
+                "map_mode", xymap.options.get("map_mode", self.map_mode)
+            )
+            map_align = kwargs.get(
+                "map_align", xymap.options.get("map_align", self.map_align)
+            )
             map_target_path_style = kwargs.get(
                 "map_target_path_style",
                 xymap.options.get("map_target_path_style", self.map_target_path_style),
@@ -484,7 +528,9 @@ class XYZRoom(DefaultRoom):
             if map_area_client:
                 display_width = client_width
             else:
-                display_width = max(map_width, max(len(line) for line in room_desc.split("\n")))
+                display_width = max(
+                    map_width, max(len(line) for line in room_desc.split("\n"))
+                )
 
             # align map
             map_indent = 0
@@ -538,7 +584,8 @@ class XYZExit(DefaultExit):
     def xyzgrid(self):
         global GET_XYZGRID
         if not GET_XYZGRID:
-            from evennia.contrib.grid.xyzgrid.xyzgrid import get_xyzgrid as GET_XYZGRID
+            from evennia.contrib.grid.xyzgrid.xyzgrid import \
+                get_xyzgrid as GET_XYZGRID
         return GET_XYZGRID()
 
     @property
@@ -609,7 +656,9 @@ class XYZExit(DefaultExit):
             try:
                 x, y, z = xyz
             except ValueError:
-                return None, ["XYExit.create need either `xyz=(X,Y,Z)` coordinate or a `location`."]
+                return None, [
+                    "XYExit.create need either `xyz=(X,Y,Z)` coordinate or a `location`."
+                ]
             else:
                 source = XYZRoom.objects.get_xyz(xyz=(x, y, z))
                 tags.extend(

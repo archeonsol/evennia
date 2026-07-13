@@ -12,7 +12,6 @@ evennia.commands
 .. toctree::
    :maxdepth: 6
 
-   evennia.commands.cmd_access_cache
    evennia.commands.cmdhandler
    evennia.commands.cmdparser
    evennia.commands.cmdparser_trie

@@ -17,9 +17,11 @@ from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.comms.models import ChannelDB
 from evennia.hooks import hook
 from evennia.scripts.monitorhandler import MONITOR_HANDLER
-from evennia.typeclasses.attributes import AttributeHandler, DbHolder, InMemoryAttributeBackend
+from evennia.typeclasses.attributes import (AttributeHandler, DbHolder,
+                                            InMemoryAttributeBackend)
 from evennia.utils import logger
-from evennia.utils.utils import class_from_module, is_veto, lazy_property, make_iter
+from evennia.utils.utils import (class_from_module, is_veto, lazy_property,
+                                 make_iter)
 
 _GA = object.__getattribute__
 _SA = object.__setattr__
@@ -92,7 +94,9 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
         return [path.strip() for path in self.cmdset_storage_string.split(",")]
 
     def __cmdset_storage_set(self, value):
-        self.cmdset_storage_string = ",".join(str(val).strip() for val in make_iter(value))
+        self.cmdset_storage_string = ",".join(
+            str(val).strip() for val in make_iter(value)
+        )
 
     cmdset_storage = property(__cmdset_storage_get, __cmdset_storage_set)
 
@@ -180,7 +184,6 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
                 self.bid = None
             else:
                 obj.sessions.add(self)
-                obj.locks.cache_lock_bypass(obj)
                 obj.at_post_puppet(reattach=True)
 
         if self.logged_in and self.account and not self.get_puppet():
@@ -573,7 +576,9 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
         try:
             return self._ndb_holder
         except AttributeError:
-            self._ndb_holder = DbHolder(self, "nattrhandler", manager_name="nattributes")
+            self._ndb_holder = DbHolder(
+                self, "nattrhandler", manager_name="nattributes"
+            )
             return self._ndb_holder
 
     # @ndb.setter

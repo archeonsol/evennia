@@ -15,8 +15,8 @@ Each help-entry dict is on the form
     {'key': <str>,
      'text': <str>,
      'category': <str>,   # optional, otherwise settings.DEFAULT_HELP_CATEGORY
-     'aliases': <list>,   # optional
-     'locks': <str>}      # optional, use access-type 'view'. Default is view:all()
+     'aliases': <list>,       # optional
+     'capability': <str>}     # optional namespaced capability; public if omitted
 
 The `text`` should be formatted on the same form as other help entry-texts and
 can contain ``# subtopics`` as normal.
@@ -34,7 +34,7 @@ An example of the contents of a module:
         "key": "The Gods",   # case-insensitive, also partial-matching ('gods') works
         "aliases": ['pantheon', 'religion'],
         "category": "Lore",
-        "locks": "view:all()",   # this is optional unless restricting access
+        "capability": "mygame.lore.restricted",
         "text": '''
             The gods formed the world ...
 
@@ -71,9 +71,11 @@ from django.conf import settings
 from django.urls import reverse
 from django.utils.text import slugify
 
-from evennia.locks.lockhandler import LockHandler
+from evennia.authorization.policy import (Always, Policy, RequiresCapability,
+                                          validate_policy)
 from evennia.utils import logger
-from evennia.utils.utils import all_from_module, lazy_property, make_iter, variable_from_module
+from evennia.utils.utils import (all_from_module, lazy_property, make_iter,
+                                 variable_from_module)
 
 
 @dataclass
@@ -90,6 +92,7 @@ class FileHelpEntry:
     help_category: str
     entrytext: str
     lock_storage: str
+    authorization_policies: dict[str, Policy]
 
     @property
     def search_index_entry(self):
@@ -116,8 +119,15 @@ class FileHelpEntry:
         return hash(self.key)
 
     @lazy_property
-    def locks(self):
-        return LockHandler(self)
+    def policies(self):
+        from evennia.authorization.handler import PolicyHandler
+
+        return PolicyHandler(self)
+
+    def authorization_resource_ref(self):
+        """Return a stable read-only reference for file-authored help."""
+
+        return f"help:file:{self.key.lower()}"
 
     def web_get_detail_url(self):
         r"""
@@ -149,7 +159,10 @@ class FileHelpEntry:
         try:
             return reverse(
                 "help-entry-detail",
-                kwargs={"category": slugify(self.help_category), "topic": slugify(self.key)},
+                kwargs={
+                    "category": slugify(self.help_category),
+                    "topic": slugify(self.key),
+                },
             )
         except Exception:
             return "#"
@@ -176,7 +189,9 @@ class FileHelpEntry:
             default (bool): What to return if no lock of `access_type` was found.
 
         """
-        return self.locks.check(accessing_obj, access_type=access_type, default=default)
+        from evennia.authorization.service import access_check
+
+        return access_check(self, accessing_obj, access_type, default=default)[0]
 
 
 class FileHelpStorageHandler:
@@ -193,7 +208,9 @@ class FileHelpStorageHandler:
         """
         Initialize the storage.
         """
-        self.help_file_modules = [str(part).strip() for part in make_iter(help_file_modules)]
+        self.help_file_modules = [
+            str(part).strip() for part in make_iter(help_file_modules)
+        ]
         self.help_entries = []
         self.help_entries_dict = {}
         self.load()
@@ -206,37 +223,55 @@ class FileHelpStorageHandler:
         loaded_help_dicts = []
 
         for module_or_path in self.help_file_modules:
-            help_dict_list = variable_from_module(module_or_path, variable="HELP_ENTRY_DICTS")
+            help_dict_list = variable_from_module(
+                module_or_path, variable="HELP_ENTRY_DICTS"
+            )
             if not help_dict_list:
                 help_dict_list = [
-                    dct for dct in all_from_module(module_or_path).values() if isinstance(dct, dict)
+                    dct
+                    for dct in all_from_module(module_or_path).values()
+                    if isinstance(dct, dict)
                 ]
             if help_dict_list:
                 loaded_help_dicts.extend(help_dict_list)
             else:
-                logger.log_err(f"Could not find file-help module {module_or_path} (skipping).")
+                logger.log_err(
+                    f"Could not find file-help module {module_or_path} (skipping)."
+                )
 
         # validate and parse dicts into FileEntryHelp objects and make sure they are unique-by-key
         # by letting latter added ones override earlier ones.
         unique_help_entries = {}
 
         for dct in loaded_help_dicts:
+            if "locks" in dct or "permissions" in dct:
+                raise ValueError(
+                    "file help entries use 'capability'; lock/permission declarations "
+                    "are not supported"
+                )
             raw_key = dct.get("key")
             key = raw_key.lower().strip() if raw_key else ""
-            category = dct.get("category", settings.DEFAULT_HELP_CATEGORY).lower().strip()
+            category = (
+                dct.get("category", settings.DEFAULT_HELP_CATEGORY).lower().strip()
+            )
             aliases = list(dct.get("aliases", []))
             entrytext = dct.get("text", "")
-            locks = dct.get("locks", "")
+            declaration = dct.get("capability")
+            policy = RequiresCapability(declaration) if declaration else Always()
+            validate_policy(policy)
 
             if not key or not entrytext:
-                logger.error(f"Cannot load file-help-entry (missing key or text): {dct}")
+                logger.error(
+                    f"Cannot load file-help-entry (missing key or text): {dct}"
+                )
                 continue
 
             unique_help_entries[key] = FileHelpEntry(
                 key=key,
                 help_category=category,
                 aliases=aliases,
-                lock_storage=locks,
+                lock_storage="",
+                authorization_policies={"read": policy, "view": policy},
                 entrytext=entrytext,
             )
 

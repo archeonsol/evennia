@@ -72,11 +72,6 @@ def create_objects():
     superuser.swap_typeclass(account_typeclass, clean_attributes=True)
     superuser.basetype_setup()
     superuser.at_account_creation()
-    superuser.locks.add(
-        "examine:perm(Developer);edit:false();delete:false();boot:false();msg:all()"
-    )
-    # this is necessary for quelling to work correctly.
-    superuser.permissions.add("Developer")
 
     # Limbo is the default "nowhere" starting room
 
@@ -91,11 +86,6 @@ def create_objects():
         if errors:
             raise Exception(str(errors))
 
-    superuser_character.locks.add(
-        "examine:perm(Developer);edit:false();delete:false();boot:false();msg:all();puppet:false()"
-    )
-    # we set this low so that quelling is more useful
-    superuser_character.permissions.add("Developer")
     superuser_character.save()
 
     superuser.attributes.add("_first_login", True)

@@ -6,7 +6,7 @@
 - [evennia.comms](evennia.comms) - in-game channels and messaging
 - [evennia.contrib](evennia.contrib) - game-specific tools and code contributed by the community
 - [evennia.help](evennia.help) - in-game help system
-- [evennia.locks](evennia.locks) - limiting access to various systems and resources
+- [evennia.authorization](evennia.authorization) - capability grants and resource policies
 - [evennia.objects](evennia.objects) - all in-game entities, like Rooms, Characters, Exits etc
 - [evennia.prototypes](evennia.prototypes) - customize entities using dicts
 - [evennia.scripts](evennia.scripts) - all out-of-character game objects
@@ -71,7 +71,7 @@ The flat API is defined in `__init__.py` [viewable here](github:evennia/__init__
 - [evennia.logger](evennia.utils.logger) - logging tools
 - [evennia.ansi](evennia.utils.ansi) - ansi coloring tools
 - [evennia.spawn](evennia.prototypes.spawner.spawn) - spawn/prototype system ([docs](Components/Prototypes.md))
-- [evennia.lockfuncs](evennia.locks.lockfuncs) - default lock functions for access control ([docs](Components/Locks.md))
+- [evennia.authorize](evennia.authorization.service.authorize) - structured authorization decisions ([docs](Components/Authorization.md))
 - [evennia.EvTable](evennia.utils.evtable.EvTable) - text table creater
 - [evennia.EvForm](evennia.utils.evform.EvForm) - text form creator
 - Evennia.EvMore - text paginator

@@ -128,7 +128,9 @@ class HelpFormatter:
         title = f"|CHelp for |w{topic}|n" if topic else "|rNo help found|n"
 
         if aliases:
-            aliases = " |C(aliases: {}|C)|n".format("|C,|n ".join(f"|w{ali}|n" for ali in aliases))
+            aliases = " |C(aliases: {}|C)|n".format(
+                "|C,|n ".join(f"|w{ali}|n" for ali in aliases)
+            )
         else:
             aliases = ""
 
@@ -137,14 +139,17 @@ class HelpFormatter:
         if subtopics:
             if click_topics:
                 subtopics = [
-                    f"|lchelp {topic}/{subtop}|lt|w{topic}/{subtop}|n|le" for subtop in subtopics
+                    f"|lchelp {topic}/{subtop}|lt|w{topic}/{subtop}|n|le"
+                    for subtop in subtopics
                 ]
             else:
                 subtopics = [f"|w{topic}/{subtop}|n" for subtop in subtopics]
             subtopics = "\n|CSubtopics:|n\n  {}".format(
                 "\n  ".join(
                     format_grid(
-                        subtopics, width=self.client_width(), line_prefix=self.index_topic_clr
+                        subtopics,
+                        width=self.client_width(),
+                        line_prefix=self.index_topic_clr,
                     )
                 )
             )
@@ -160,7 +165,9 @@ class HelpFormatter:
             suggested = "\n|COther topic suggestions:|n\n{}".format(
                 "\n  ".join(
                     format_grid(
-                        suggested, width=self.client_width(), line_prefix=self.index_topic_clr
+                        suggested,
+                        width=self.client_width(),
+                        line_prefix=self.index_topic_clr,
                     )
                 )
             )
@@ -174,7 +181,11 @@ class HelpFormatter:
         return "\n".join(part.rstrip() for part in partorder if part)
 
     def format_help_index(
-        self, cmd_help_dict=None, db_help_dict=None, title_lone_category=False, click_topics=True
+        self,
+        cmd_help_dict=None,
+        db_help_dict=None,
+        title_lone_category=False,
+        click_topics=True,
     ):
         """Output a category-ordered g for displaying the main help, grouped by
         category.
@@ -310,7 +321,9 @@ class HelpFormatter:
 
         """
         if inherits_from(cmd_or_topic, "evennia.commands.command.Command"):
-            return cmd_or_topic.auto_help and cmd_or_topic.access(caller, "read", default=True)
+            return cmd_or_topic.auto_help and cmd_or_topic.access(
+                caller, "read", default=True
+            )
         from evennia.help.catalog import is_action_help_topic
 
         if is_action_help_topic(cmd_or_topic):
@@ -339,10 +352,8 @@ class HelpFormatter:
             bool: If command should be listed or not.
 
         Notes:
-            The `.auto_help` propery is checked for commands. For all help entries,
-            the 'view' lock will be checked, and if no such lock is defined, the 'read'
-            lock will be used. If neither lock is defined, the help entry is assumed to be
-            accessible to all.
+            ``auto_help`` is checked for commands. All sources use their typed
+            ``view`` policy and fall back to ``read`` when no view policy exists.
 
         """
         from evennia.help.catalog import is_action_help_topic
@@ -350,22 +361,21 @@ class HelpFormatter:
         if is_action_help_topic(cmd_or_topic):
             if not cmd_or_topic.auto_help:
                 return False
-            return cmd_or_topic.access(caller, "view", default=True, session=self.session)
+            return cmd_or_topic.access(
+                caller, "view", default=True, session=self.session
+            )
 
         if hasattr(cmd_or_topic, "auto_help") and not cmd_or_topic.auto_help:
             return False
 
         has_view = (
-            "view:" in cmd_or_topic.locks
-            if inherits_from(cmd_or_topic, "evennia.commands.command.Command")
-            else cmd_or_topic.locks.get("view")
+            cmd_or_topic.policies.get("view")
+            if hasattr(cmd_or_topic, "policies")
+            else None
         )
-
-        if has_view:
+        if has_view is not None:
             return cmd_or_topic.access(caller, "view", default=True)
-        else:
-            # no explicit 'view' lock - use the 'read' lock
-            return cmd_or_topic.access(caller, "read", default=True)
+        return cmd_or_topic.access(caller, "read", default=True)
 
     def collect_topics(self, caller, mode="list"):
         """
@@ -384,17 +394,21 @@ class HelpFormatter:
 
         """
         from evennia.help.catalog import (
-            actor_for_help,
-            collect_action_help_topics,
-            should_include_action_topics_in_index,
-        )
+            actor_for_help, collect_action_help_topics,
+            should_include_action_topics_in_index)
 
         actor = actor_for_help(caller, self.session)
         cmd_help_topics = {}
         if should_include_action_topics_in_index(actor):
-            cmd_help_topics = collect_action_help_topics(actor, mode=mode, staff_reference=True)
-        file_help_topics = {topic.key.lower().strip(): topic for topic in FILE_HELP_ENTRIES.all()}
-        db_help_topics = {topic.key.lower().strip(): topic for topic in HelpEntry.objects.all()}
+            cmd_help_topics = collect_action_help_topics(
+                actor, mode=mode, staff_reference=True
+            )
+        file_help_topics = {
+            topic.key.lower().strip(): topic for topic in FILE_HELP_ENTRIES.all()
+        }
+        db_help_topics = {
+            topic.key.lower().strip(): topic for topic in HelpEntry.objects.all()
+        }
         if mode == "list":
             db_help_topics = {
                 key: entry
@@ -449,7 +463,10 @@ class HelpFormatter:
             # return of this will either be a HelpCategory, a Command or a
             # HelpEntry/FileHelpEntry.
             matches, suggestions = help_search_with_index(
-                match_query, entries, suggestion_maxnum=self.suggestion_maxnum, fields=search_fields
+                match_query,
+                entries,
+                suggestion_maxnum=self.suggestion_maxnum,
+                fields=search_fields,
             )
             # Move an exact key/alias match to the front of the list.
             for m in matches[:]:
@@ -457,7 +474,9 @@ class HelpFormatter:
                 if not isinstance(m, HelpCategory):
                     # Aliases for help created with 'sethelp' is an AliasHandler
                     aliases += (
-                        list(m.aliases) if isinstance(m.aliases, (list, tuple)) else m.aliases.all()
+                        list(m.aliases)
+                        if isinstance(m.aliases, (list, tuple))
+                        else m.aliases.all()
                     )
                 if query in aliases:
                     matches.remove(m)

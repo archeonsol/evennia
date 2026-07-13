@@ -69,33 +69,6 @@ to remain forward-compatible):
     - ``traceback_text`` (str): output of ``traceback.format_exc()`` for
       the exception, captured at signal-fire time.
 
-``permissions_changed``
-    Fired by engine commands that mutate effective permissions, after the
-    mutation lands and after the engine's own cache invalidation runs. The
-    engine calls
-    :func:`evennia.commands.cmd_access_cache.invalidate_caller_access` for
-    the affected entity *before* firing, which fans out to every
-    engine-owned per-caller access cache (``cmd_access_cache``,
-    ``lock_cache``) so subscribers observe consistent state. New engine
-    paths that mutate effective permissions must call the same helper
-    before firing this signal. Sender is the concrete Command class
-    (``CmdPerm``, ``CmdQuell``).
-
-    - ``target``: the mutated entity. For ``@perm`` this is the Object or
-      Account whose permission list changed; for ``@quell`` this is the
-      Account whose effective stack flipped.
-    - ``added`` (tuple[str]): permission strings added by this dispatch.
-      Empty for ``@quell``.
-    - ``removed`` (tuple[str]): permission strings removed by this
-      dispatch. Empty for ``@quell``.
-    - ``actor``: the caller that ran the command.
-    - ``account_mode`` (bool): ``True`` when the mutation was applied at
-      the account level (``@perm/account``, ``*account`` syntax, or any
-      ``@quell``); ``False`` for object-level ``@perm``.
-
-    For ``@quell`` the engine also invalidates the active puppet's caches
-    so character-level access checks see the flipped effective perms; the
-    signal still fires once with ``target=<account>``.
 """
 
 from django.dispatch import Signal
@@ -105,11 +78,9 @@ __all__ = (
     "on_command_post",
     "on_command_error",
     "on_cmdset_merge_error",
-    "permissions_changed",
 )
 
 on_command_pre = Signal()
 on_command_post = Signal()
 on_command_error = Signal()
 on_cmdset_merge_error = Signal()
-permissions_changed = Signal()

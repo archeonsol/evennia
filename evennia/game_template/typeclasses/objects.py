@@ -107,7 +107,7 @@ class Object(ObjectParent, DefaultObject):
      filter_visible(obj_list, looker, **kwargs)
      get_default_lockstring()
      get_cmdsets(caller, current, **kwargs)
-     check_permstring(permstring)
+     has_capability(capability)
      get_cmdset_providers()
      get_display_name(looker=None, **kwargs)
      get_extra_display_name_info(looker=None, **kwargs)

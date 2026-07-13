@@ -45,7 +45,9 @@ def _get_scriptdb():
 def _get_accountdb():
     from django.contrib.contenttypes.models import ContentType
 
-    return ContentType.objects.get(app_label="accounts", model="accountdb").model_class()
+    return ContentType.objects.get(
+        app_label="accounts", model="accountdb"
+    ).model_class()
 
 
 def _get_msg():
@@ -162,7 +164,7 @@ def create_help_entry(*args, **kwargs):
         key (str): The name of the help entry.
         entrytext (str): The body of te help entry
         category (str, optional): The help category of the entry.
-        locks (str, optional): A lockstring to restrict access.
+        policies (dict, optional): Typed operation policies.
         aliases (list of str, optional): List of alternative (likely shorter) keynames.
         tags (lst, optional): List of tags or tuples `(tag, category)`.
 
@@ -187,7 +189,7 @@ def create_message(*args, **kwargs):
         receivers (Object, Account, Script, str or list): An Account/Object to send
             to, or a list of them. If a string, it's an identifier for an external
             receiver.
-        locks (str): Lock definition string.
+        policies (dict): Typed operation-to-Policy overrides.
         tags (list): A list of tags or tuples `(tag, category)`.
         header (str): Mime-type or other optional information for the message
 
@@ -214,7 +216,7 @@ def create_channel(*args, **kwargs):
     Keyword Args:
         aliases (list of str): List of alternative (likely shorter) keynames.
         desc (str): A description of the channel, for use in listings.
-        locks (str): Lockstring.
+        policies (dict): Typed operation-to-Policy overrides.
         keep_log (bool): Log channel throughput.
         typeclass (str or class): The typeclass of the Channel (not
             often used).

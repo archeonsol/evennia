@@ -16,7 +16,6 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
-from evennia.locks.lockfuncs import perm as perm_lockfunc
 from evennia.utils.utils import make_iter, to_str
 
 # ------------------------------------------------------------
@@ -54,7 +53,12 @@ class Tag(models.Model):
         "key", max_length=255, null=True, help_text="tag identifier", db_index=True
     )
     db_category = models.CharField(
-        "category", max_length=64, null=True, blank=True, help_text="tag category", db_index=True
+        "category",
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="tag category",
+        db_index=True,
     )
     db_data = models.TextField(
         "data",
@@ -64,7 +68,11 @@ class Tag(models.Model):
     )
     # this is "objectdb" etc. Required behind the scenes
     db_model = models.CharField(
-        "model", max_length=32, null=True, help_text="database model to Tag", db_index=True
+        "model",
+        max_length=32,
+        null=True,
+        help_text="database model to Tag",
+        db_index=True,
     )
     # this is None, alias or permission
     db_tagtype = models.CharField(
@@ -90,7 +98,10 @@ class Tag(models.Model):
     def __str__(self):
         return str(
             "<Tag: %s%s>"
-            % (self.db_key, "(category:%s)" % self.db_category if self.db_category else "")
+            % (
+                self.db_key,
+                "(category:%s)" % self.db_category if self.db_category else "",
+            )
         )
 
 
@@ -145,7 +156,10 @@ class TagProperty:
         """
         try:
             return getattr(instance, self.taghandler_name).get(
-                key=self._key, category=self._category, return_list=False, raise_exception=True
+                key=self._key,
+                category=self._category,
+                return_list=False,
+                raise_exception=True,
             )
         except AttributeError:
             self.__set__(instance, self._category)
@@ -169,7 +183,9 @@ class TagProperty:
         TagProperty is also removed in code!
 
         """
-        getattr(instance, self.taghandler_name).remove(key=self._key, category=self._category)
+        getattr(instance, self.taghandler_name).remove(
+            key=self._key, category=self._category
+        )
 
 
 class TagCategoryProperty:
@@ -269,7 +285,9 @@ class TagCategoryProperty:
         use `del` on this property and re-access the property with the changed default list.
 
         """
-        getattr(instance, self.taghandler_name).batch_add(*[(tag, self._category) for tag in args])
+        getattr(instance, self.taghandler_name).batch_add(
+            *[(tag, self._category) for tag in args]
+        )
 
     def __delete__(self, instance):
         """
@@ -435,7 +453,9 @@ class TagHandler(object):
             self._cache_from_prefetch()
         if key:
             cachekey = "%s-%s" % (key, category)
-            tag = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(cachekey, None)
+            tag = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(
+                cachekey, None
+            )
             if tag and (not hasattr(tag, "pk") or tag.pk is None):
                 # clear out Tags deleted from elsewhere. We must search this anew.
                 tag = None
@@ -709,7 +729,10 @@ class TagHandler(object):
             # that when no objects reference the tag anymore (but how to check)?
             # For now, tags are never deleted, only their connection to objects.
             tagobj = getattr(self.obj, self._m2m_fieldname).filter(
-                db_key=tagstr, db_category=category, db_model=self._model, db_tagtype=self._tagtype
+                db_key=tagstr,
+                db_category=category,
+                db_model=self._model,
+                db_tagtype=self._tagtype,
             )
             if tagobj:
                 getattr(self.obj, self._m2m_fieldname).remove(tagobj[0])
@@ -955,9 +978,7 @@ class PermissionHandler(TagHandler):
 
         try:
             from evennia.authorization.storage import (
-                bump_principal_generation,
-                principal_refs,
-            )
+                bump_principal_generation, principal_refs)
 
             for ref in principal_refs(self.obj):
                 bump_principal_generation(ref)
@@ -993,45 +1014,8 @@ class PermissionHandler(TagHandler):
         return result
 
     def check(self, *permissions, require_all=False):
-        """
-        Straight-up check the provided permission against this handler. The check will pass if
+        """Reject use of metadata tags as runtime authority."""
 
-        - any/all given permission exists on the handler (depending on if `require_all` is set).
-        - If handler sits on puppeted object and this is a hierarachical perm, the puppeting
-          Account's permission will also be included in the check, prioritizing the Account's perm
-          (this avoids escalation exploits by puppeting a too-high prio character)
-        - a permission is also considered to exist on the handler, if it is *lower* than
-          a permission on the handler and this is a 'hierarchical' permission given
-          in `settings.PERMISSION_HIERARCHY`. Example: If the 'Developer' hierarchical
-          perm perm is set on the handler, and we check for the 'Builder' perm, the
-          check will pass.
-
-        Args:
-            *permissions (str): Any number of permissions to check. By default,
-                the permission is passed if any of these (or higher, if a
-                hierarchical permission defined in settings.PERMISSION_HIERARCHY)
-                exists in the handler. Permissions are not case-sensitive.
-            require_all (bool): If set, *all* provided permissions much pass
-                the check for the entire check to pass. By default only one
-                needs to pass.
-
-        Returns:
-            bool: If the provided permission(s) pass the check on this handler.
-
-        Example:
-            ::
-                can_enter = obj.permissions.check("Blacksmith", "Builder")
-
-        Notes:
-            This works the same way as the `perms` lockfunc and could be
-            replicated with a lock check against the lockstring
-
-                "locktype: perm(perm1) OR perm(perm2) OR ..."
-
-            (using AND for the `require_all` condition).
-
-        """
-        if require_all:
-            return all(perm_lockfunc(self.obj, None, perm) for perm in permissions)
-        else:
-            return any(perm_lockfunc(self.obj, None, perm) for perm in permissions)
+        raise RuntimeError(
+            "permission tags are metadata only; use obj.has_capability() or obj.access()"
+        )

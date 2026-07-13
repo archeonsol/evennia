@@ -381,7 +381,9 @@ BROADCAST_SERVER_RESTART_MESSAGES = True
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": os.getenv("TEST_DB_PATH", os.path.join(GAME_DIR, "server", "evennia.db3")),
+        "NAME": os.getenv(
+            "TEST_DB_PATH", os.path.join(GAME_DIR, "server", "evennia.db3")
+        ),
         "USER": "",
         "PASSWORD": "",
         "HOST": "",
@@ -566,7 +568,6 @@ MSSP_META_MODULE = "server.conf.mssp"
 WEB_PLUGINS_MODULE = "server.conf.web_plugins"
 # Tuple of modules implementing lock functions. All callable functions
 # inside these modules will be available as lock functions.
-LOCK_FUNC_MODULES = ("evennia.locks.lockfuncs", "server.conf.lockfuncs")
 # Module holding handlers for managing incoming data from the client. These
 # will be loaded in order, meaning functions in later modules may overload
 # previous ones if having the same name.
@@ -640,32 +641,26 @@ CMDSET_PATHS = ["commands", "evennia", "evennia.contrib"]
 # entry is evicted. Increase if your game has many unique rooms/objects; decrease
 # to save memory.
 CMDSET_MERGE_CACHE_MAXSIZE = 1000
-# Cache cmd.access(caller, "cmd") during parsing (evennia.commands.cmd_access_cache).
-# Invalidated on cmdset stack changes; call invalidate_caller_access(caller) when
-# permissions/locks change without a cmdset update. Command classes that override
-# .access() are auto-skipped (see cmd_access_cache._command_uses_base_access).
-COMMAND_ACCESS_CACHE_ENABLED = True
-# Capability authorization rollout. Resource kinds remain on the legacy oracle
-# until explicitly promoted; R3F removes that oracle in a later release.
-AUTHORIZATION_RESOURCE_POLICIES = {
-    "object": "legacy",
-    "account": "legacy",
-    "command": "legacy",
-    "channel": "legacy",
-    "help": "legacy",
-    "script": "legacy",
-}
-# Once a resource kind is frozen, LockHandler writes compile into structured
-# policy rows rather than creating new lockstrings. Keep empty until its offline
-# differential corpus reaches parity.
-AUTHORIZATION_FROZEN_RESOURCE_KINDS = ()
 # Game/plugin capability registration modules. Import errors and unresolved
 # references fail startup rather than silently removing authority.
 AUTHORIZATION_CAPABILITY_MODULES = ()
 AUTHORIZATION_POLICY_MODULES = ()
-# Optional sampled online diagnostic. Offline differential is the primary gate;
-# this remains off by default to avoid a hot-path double evaluation.
-AUTHORIZATION_DIAGNOSTIC_SAMPLE_RATE = 0.0
+# One-time R3F import map. Runtime authorization never reads permission tags;
+# ``auth_finalize_capabilities`` expands these tokens into durable grants before
+# a capability-only release starts. Games may extend this mapping.
+AUTHORIZATION_PERMISSION_MIGRATION = {
+    "helper": ("engine.help.manage",),
+    "builder": ("bundle:world_builder", "engine.help.manage"),
+    "admin": ("bundle:world_builder", "bundle:moderator", "engine.help.manage"),
+    "developer": (
+        "bundle:runtime_operator",
+        "bundle:world_builder",
+        "bundle:moderator",
+        "engine.help.manage",
+    ),
+    "channel_banned": ("engine.channel.banned",),
+    "page_banned": ("engine.message.banned",),
+}
 # Cross-process grant/policy mutations publish tiny generation counters through
 # the shared Django cache. Active processes poll each touched key at most once
 # per interval; production should use a shared Redis cache backend.
@@ -702,7 +697,6 @@ ENGINE_PROMETHEUS_METRICS_ENABLED = True
 LOCATION_CMDSET_CACHE_ENABLED = True
 LOCATION_CMDSET_CACHE_MAXSIZE = 512
 # lockhandler: per-caller ndb cache for Command lock checks (no pk).
-LOCK_CHECK_CACHE_ENABLED = True
 # at_look: prefetch all attributes on target before return_appearance.
 LOOK_ATTR_PREFETCH_ENABLED = True
 # --- Tier 1D: command trace ---
@@ -779,8 +773,7 @@ COMMAND_DEFAULT_ARG_REGEX = r"^[ /]|\n|$"
 # calling the Command. This may be more intuitive for users in certain
 # multisession modes.
 COMMAND_DEFAULT_MSG_ALL_SESSIONS = False
-# The default lockstring of a command.
-COMMAND_DEFAULT_LOCKS = ""
+# Commands declare immutable authorization policies in code.
 
 ######################################################################
 # Typeclasses and other paths
@@ -977,7 +970,10 @@ FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED = False
 # Only functions defined globally (and not starting with '_') in
 # these modules will be considered valid inlinefuncs. The list
 # is loaded from left-to-right, same-named functions will overload
-FUNCPARSER_OUTGOING_MESSAGES_MODULES = ["evennia.utils.funcparser", "server.conf.inlinefuncs"]
+FUNCPARSER_OUTGOING_MESSAGES_MODULES = [
+    "evennia.utils.funcparser",
+    "server.conf.inlinefuncs",
+]
 # Prototype values are also parsed with FuncParser. These modules
 # define which $func callables are available to use in prototypes.
 FUNCPARSER_PROTOTYPE_PARSING_MODULES = [
@@ -1032,26 +1028,6 @@ MAX_NR_SIMULTANEOUS_PUPPETS = 1
 # an account can have (not how many you can puppet at the same time). Set to
 # None for no limit.
 MAX_NR_CHARACTERS = 1
-# The access hierarchy, in climbing order. A higher permission in the
-# hierarchy includes access of all levels below it. Used by the perm()/pperm()
-# lock functions, which accepts both plural and singular (Admin & Admins)
-PERMISSION_HIERARCHY = [
-    "Guest",  # note-only used if GUEST_ENABLED=True
-    "Player",
-    "Helper",
-    "Builder",
-    "Admin",
-    "Developer",
-]
-# The default permission given to all new accounts
-PERMISSION_ACCOUNT_DEFAULT = "Player"
-# Dotted path to the Capability IntFlag enum used by the action system's typed
-# command/action gates (evennia.actions). Must subclass
-# evennia.actions.permission.Capability (a member-less base, so it stays
-# subclassable) and declare its rank order via __rank_order__. Leave as None to
-# use the built-in evennia.actions.permission.DefaultCapability, whose ranks
-# mirror PERMISSION_HIERARCHY.
-CAPABILITY_ENUM = None
 # Default sizes for client window (in number of characters), if client
 # is not supplying this on its own
 CLIENT_DEFAULT_WIDTH = 78
@@ -1068,7 +1044,7 @@ LOGIN_THROTTLE_TIMEOUT = 5 * 60
 # since they can be exploitative. This list defines Account-level permissions
 # (and higher) that bypass this stripping. It is used as a fallback if a
 # specific list of perms are not given to the helper function.
-INPUT_CLEANUP_BYPASS_PERMISSIONS = ["Builder"]
+INPUT_CLEANUP_BYPASS_CAPABILITIES = ["engine.world.build"]
 
 
 ######################################################################
@@ -1393,7 +1369,9 @@ AUTH_USER_MODEL = "accounts.AccountDB"
 # Password validation plugins
 # https://docs.djangoproject.com/en/4.1/ref/settings/#auth-password-validators
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
         "OPTIONS": {"min_length": 8},
@@ -1442,11 +1420,11 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ],
     # default permission checks used by the EvenniaPermission class
-    "DEFAULT_CREATE_PERMISSION": "builder",
-    "DEFAULT_LIST_PERMISSION": "builder",
-    "DEFAULT_VIEW_LOCKS": ["examine"],
-    "DEFAULT_DESTROY_LOCKS": ["delete"],
-    "DEFAULT_UPDATE_LOCKS": ["control", "edit"],
+    "CREATE_CAPABILITY": "engine.object.create",
+    "LIST_CAPABILITY": "engine.object.examine",
+    "VIEW_OPERATIONS": ["examine"],
+    "DESTROY_OPERATIONS": ["delete"],
+    "UPDATE_OPERATIONS": ["control", "edit"],
     # No throttle class set by default. Setting one also requires a cache backend to be specified.
 }
 
@@ -1496,7 +1474,9 @@ SERVER_SESSION_HANDLER_CLASS = "evennia.server.sessionhandler.ServerSessionHandl
 # the protocol in use. It is responsible for keeping them going and informing
 # the Server Session Handler of the connections and synchronizing them across the
 # AMP connection. You shouldn't ever need to change this. But you can.
-PORTAL_SESSION_HANDLER_CLASS = "evennia.server.portal.portalsessionhandler.PortalSessionHandler"
+PORTAL_SESSION_HANDLER_CLASS = (
+    "evennia.server.portal.portalsessionhandler.PortalSessionHandler"
+)
 
 
 # These are members / properties / attributes kept on both Server and

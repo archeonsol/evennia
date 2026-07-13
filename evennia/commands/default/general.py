@@ -40,7 +40,7 @@ class CmdHome(COMMAND_DEFAULT_CLASS):
     """
 
     key = "home"
-    locks = "cmd:perm(home) or perm(Builder)"
+    authorization = "engine.world.build"
     arg_regex = r"$"
 
     def func(self):
@@ -70,7 +70,7 @@ class CmdLook(COMMAND_DEFAULT_CLASS):
 
     key = "look"
     aliases = ["l", "ls"]
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"\s|$"
 
     def func(self):
@@ -139,7 +139,7 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
     key = "@nick"
     switch_options = ("inputline", "object", "account", "list", "delete", "clearall")
     aliases = ["@nickname", "@nicks"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def parse(self):
         """
@@ -164,14 +164,24 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
 
         caller = self.caller
         switches = self.switches
-        nicktypes = [switch for switch in switches if switch in ("object", "account", "inputline")]
+        nicktypes = [
+            switch
+            for switch in switches
+            if switch in ("object", "account", "inputline")
+        ]
         specified_nicktype = bool(nicktypes)
         nicktypes = nicktypes if specified_nicktype else ["inputline"]
 
         nicklist = (
-            utils.make_iter(caller.nicks.get(category="inputline", return_obj=True) or [])
-            + utils.make_iter(caller.nicks.get(category="object", return_obj=True) or [])
-            + utils.make_iter(caller.nicks.get(category="account", return_obj=True) or [])
+            utils.make_iter(
+                caller.nicks.get(category="inputline", return_obj=True) or []
+            )
+            + utils.make_iter(
+                caller.nicks.get(category="object", return_obj=True) or []
+            )
+            + utils.make_iter(
+                caller.nicks.get(category="account", return_obj=True) or []
+            )
         )
 
         if "list" in switches or self.cmdstring in ("@nicks",):
@@ -182,7 +192,10 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                 for inum, nickobj in enumerate(nicklist):
                     _, _, nickvalue, replacement = nickobj.value
                     table.add_row(
-                        str(inum + 1), nickobj.db_category, _cy(nickvalue), _cy(replacement)
+                        str(inum + 1),
+                        nickobj.db_category,
+                        _cy(nickvalue),
+                        _cy(replacement),
                     )
                 string = "|wDefined Nicks:|n\n%s" % table
             caller.msg(string)
@@ -214,7 +227,9 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                 if not specified_nicktype:
                     nicktypes = ("object", "account", "inputline")
                 for nicktype in nicktypes:
-                    oldnicks.append(caller.nicks.get(arg, category=nicktype, return_obj=True))
+                    oldnicks.append(
+                        caller.nicks.get(arg, category=nicktype, return_obj=True)
+                    )
 
             oldnicks = [oldnick for oldnick in oldnicks if oldnick]
             if oldnicks:
@@ -246,7 +261,9 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(self.lhs):
-                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
+                        strings.append(
+                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
+                        )
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -263,11 +280,15 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                     obj = account
                 else:
                     obj = caller
-                nicks = utils.make_iter(obj.nicks.get(category=nicktype, return_obj=True))
+                nicks = utils.make_iter(
+                    obj.nicks.get(category=nicktype, return_obj=True)
+                )
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(self.lhs):
-                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
+                        strings.append(
+                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
+                        )
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -284,11 +305,15 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                     obj = account
                 else:
                     obj = caller
-                nicks = utils.make_iter(obj.nicks.get(category=nicktype, return_obj=True))
+                nicks = utils.make_iter(
+                    obj.nicks.get(category=nicktype, return_obj=True)
+                )
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(self.lhs):
-                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
+                        strings.append(
+                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
+                        )
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -316,7 +341,9 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
             old_nickstring = None
             old_replstring = None
 
-            oldnick = caller.nicks.get(key=nickstring, category=nicktype, return_obj=True)
+            oldnick = caller.nicks.get(
+                key=nickstring, category=nicktype, return_obj=True
+            )
             if oldnick:
                 _, _, old_nickstring, old_replstring = oldnick.value
             if replstring:
@@ -360,7 +387,7 @@ class CmdInventory(COMMAND_DEFAULT_CLASS):
 
     key = "inventory"
     aliases = ["inv", "i"]
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"$"
 
     def func(self):
@@ -372,7 +399,9 @@ class CmdInventory(COMMAND_DEFAULT_CLASS):
             from evennia.utils.ansi import raw as raw_ansi
 
             table = self.styled_table(border="header")
-            for key, desc, _ in utils.group_objects_by_key_and_desc(items, caller=self.caller):
+            for key, desc, _ in utils.group_objects_by_key_and_desc(
+                items, caller=self.caller
+            ):
                 table.add_row(
                     f"|C{key}|n",
                     "{}|n".format(utils.crop(raw_ansi(desc or ""), width=50) or ""),
@@ -431,7 +460,7 @@ class CmdGet(NumberedTargetCommand):
 
     key = "get"
     aliases = "grab"
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"\s|$"
 
     def func(self):
@@ -478,8 +507,12 @@ class CmdGet(NumberedTargetCommand):
             # none of the objects were successfully moved
             self.msg("That can't be picked up.")
         else:
-            obj_name = moved[0].get_numbered_name(len(moved), caller, return_string=True)
-            caller.location.msg_contents(f"$You() $conj(pick) up {obj_name}.", from_obj=caller)
+            obj_name = moved[0].get_numbered_name(
+                len(moved), caller, return_string=True
+            )
+            caller.location.msg_contents(
+                f"$You() $conj(pick) up {obj_name}.", from_obj=caller
+            )
 
 
 class CmdDrop(NumberedTargetCommand):
@@ -494,7 +527,7 @@ class CmdDrop(NumberedTargetCommand):
     """
 
     key = "drop"
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"\s|$"
 
     def func(self):
@@ -538,8 +571,12 @@ class CmdDrop(NumberedTargetCommand):
             # none of the objects were successfully moved
             self.msg("That can't be dropped.")
         else:
-            obj_name = moved[0].get_numbered_name(len(moved), caller, return_string=True)
-            caller.location.msg_contents(f"$You() $conj(drop) {obj_name}.", from_obj=caller)
+            obj_name = moved[0].get_numbered_name(
+                len(moved), caller, return_string=True
+            )
+            caller.location.msg_contents(
+                f"$You() $conj(drop) {obj_name}.", from_obj=caller
+            )
 
 
 class CmdGive(NumberedTargetCommand):
@@ -555,7 +592,7 @@ class CmdGive(NumberedTargetCommand):
 
     key = "give"
     rhs_split = ("=", " to ")  # Prefer = delimiter, but allow " to " usage.
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"\s|$"
 
     def func(self):
@@ -586,7 +623,9 @@ class CmdGive(NumberedTargetCommand):
 
         singular, plural = to_give[0].get_numbered_name(len(to_give), caller)
         if target == caller:
-            caller.msg(f"You keep {plural if len(to_give) > 1 else singular} to yourself.")
+            caller.msg(
+                f"You keep {plural if len(to_give) > 1 else singular} to yourself."
+            )
             return
 
         # if any of the objects aren't allowed to be given, cancel the give
@@ -606,7 +645,9 @@ class CmdGive(NumberedTargetCommand):
         if not moved:
             caller.msg(f"You could not give that to {target.get_display_name(caller)}.")
         else:
-            obj_name = to_give[0].get_numbered_name(len(moved), caller, return_string=True)
+            obj_name = to_give[0].get_numbered_name(
+                len(moved), caller, return_string=True
+            )
             caller.msg(f"You give {obj_name} to {target.get_display_name(caller)}.")
             target.msg(f"{caller.get_display_name(target)} gives you {obj_name}.")
 
@@ -624,7 +665,7 @@ class CmdSetDesc(COMMAND_DEFAULT_CLASS):
     """
 
     key = "setdesc"
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"\s|$"
 
     def func(self):
@@ -650,7 +691,7 @@ class CmdSay(COMMAND_DEFAULT_CLASS):
 
     key = "say"
     aliases = ['"', "'"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     # don't require a space after `say/'/"`
     arg_regex = None
@@ -693,7 +734,7 @@ class CmdWhisper(COMMAND_DEFAULT_CLASS):
     """
 
     key = "whisper"
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """Run the whisper command"""
@@ -747,7 +788,7 @@ class CmdPose(COMMAND_DEFAULT_CLASS):
 
     key = "pose"
     aliases = [":", "emote"]
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = ""
 
     # we want to be able to pose without whitespace between
@@ -774,7 +815,9 @@ class CmdPose(COMMAND_DEFAULT_CLASS):
             self.msg(msg)
         else:
             msg = f"{self.caller.name}{self.args}"
-            self.caller.location.msg_contents(text=(msg, {"type": "pose"}), from_obj=self.caller)
+            self.caller.location.msg_contents(
+                text=(msg, {"type": "pose"}), from_obj=self.caller
+            )
 
 
 class CmdAccess(COMMAND_DEFAULT_CLASS):
@@ -784,34 +827,25 @@ class CmdAccess(COMMAND_DEFAULT_CLASS):
     Usage:
       @access
 
-    This command shows you the permission hierarchy and
-    which permission groups you are a member of.
+    This command shows your explicit capability grants.
     """
 
     key = "@access"
     aliases = ["@groups", "@hierarchy"]
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"$"
 
     def func(self):
-        """Load the permission groups"""
+        """Display active structured grants."""
+
+        from evennia.authorization.storage import load_grants
 
         caller = self.caller
-        hierarchy_full = settings.PERMISSION_HIERARCHY
-        string = "\n|wPermission Hierarchy|n (climbing):\n %s" % ", ".join(hierarchy_full)
-
-        if caller.account and caller.account.is_superuser:
-            cperms = "<Superuser>"
-            pperms = "<Superuser>"
-        else:
-            cperms = ", ".join(caller.permissions.all())
-            if caller.account:
-                pperms = ", ".join(caller.account.permissions.all())
-            else:
-                pperms = "<No account>"
-
-        string += "\n|wYour access|n:"
-        string += f"\nCharacter |c{caller.key}|n: {cperms}"
-        if utils.inherits_from(caller, DefaultObject) and caller.account:
-            string += f"\nAccount |c{caller.account.key}|n: {pperms}"
+        grants = load_grants(caller)
+        string = "\n|wYour capability grants|n:"
+        for capability, scopes in sorted(grants.by_capability.items()):
+            rendered = ", ".join(f"{scope.kind}:{scope.key}" for scope in scopes)
+            string += f"\n{capability}: {rendered}"
+        if not grants.by_capability:
+            string += " <None>"
         caller.msg(string)

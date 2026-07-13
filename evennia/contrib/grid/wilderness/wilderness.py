@@ -123,7 +123,10 @@ create a new wilderness (with the name "default") but using our new map provider
 
 """
 
-from evennia import DefaultExit, DefaultRoom, DefaultScript, create_object, create_script
+from evennia import (DefaultExit, DefaultRoom, DefaultScript, create_object,
+                     create_script)
+from evennia.authorization.policy import (Always, Never, PredicateRequirement,
+                                          RequiresCapability)
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils import inherits_from
 from evennia.utils.utils import is_veto
@@ -375,7 +378,9 @@ class WildernessScript(DefaultScript):
 
             # First, create the room
             room = create_object(
-                typeclass=self.mapprovider.room_typeclass, key="Wilderness", report_to=report_to
+                typeclass=self.mapprovider.room_typeclass,
+                key="Wilderness",
+                report_to=report_to,
             )
 
             # Then the exits
@@ -576,9 +581,11 @@ class WildernessRoom(DefaultRoom):
             valid = self.wilderness.is_valid_coordinates((x, y))
 
             if valid:
-                exit.locks.add("traverse:true();view:true()")
+                exit.policies.set("traverse", Always())
+                exit.policies.set("view", Always())
             else:
-                exit.locks.add("traverse:false();view:false()")
+                exit.policies.set("traverse", Never())
+                exit.policies.set("view", Never())
 
         # Finally call the at_prepare_room hook to give a chance to further
         # customise it
@@ -605,7 +612,9 @@ class WildernessRoom(DefaultRoom):
             searching, and is expected to produce something useful for
             builders.
         """
-        if self.locks.check_lockstring(looker, "perm(Builder)"):
+        from evennia.authorization.service import has_capability
+
+        if has_capability(looker, "engine.world.build", resource=self):
             name = "{}(#{})".format(self.location_name, self.id)
         else:
             name = self.location_name
@@ -658,7 +667,9 @@ class WildernessExit(DefaultExit):
         """
         return self.wilderness.mapprovider
 
-    def at_traverse_coordinates(self, traversing_object, current_coordinates, new_coordinates):
+    def at_traverse_coordinates(
+        self, traversing_object, current_coordinates, new_coordinates
+    ):
         """
         Called when an object wants to travel from one place inside the
         wilderness to another place inside the wilderness.

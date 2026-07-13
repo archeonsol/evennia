@@ -70,7 +70,7 @@ class SetGender(Command):
 
     key = "gender"
     aliases = "sex"
-    locks = "call:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -158,7 +158,9 @@ class GenderCharacter(DefaultCharacter):
                     *text[1:],
                 )
             else:
-                text = _RE_GENDER_PRONOUN.sub(lambda x: self._get_pronoun(x, source=from_obj), text)
+                text = _RE_GENDER_PRONOUN.sub(
+                    lambda x: self._get_pronoun(x, source=from_obj), text
+                )
         except TypeError:
             pass
         except Exception as e:

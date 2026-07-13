@@ -10,14 +10,9 @@ outside the game in modules given by ``settings.FILE_HELP_ENTRY_MODULES``.
 
 from django.conf import settings
 
-from evennia.help.formatters import (
-    HelpCategory,
-    HelpFormatter,
-    _loadhelp,
-    _quithelp,
-    _savehelp,
-)
-from evennia.locks.lockhandler import LockException
+from evennia.authorization.policy import Always, RequiresCapability
+from evennia.help.formatters import (HelpCategory, HelpFormatter, _loadhelp,
+                                     _quithelp, _savehelp)
 from evennia.utils import create, evmore
 from evennia.utils.eveditor import EvEditor
 from evennia.utils.utils import class_from_module, inherits_from
@@ -28,6 +23,15 @@ DEFAULT_HELP_CATEGORY = settings.DEFAULT_HELP_CATEGORY
 
 # limit symbol import for API
 __all__ = ("CmdHelp", "CmdSetHelp")
+
+
+def _help_policy(declaration):
+    """Compile one deliberately tiny, typed help-policy declaration."""
+
+    value = str(declaration or "public").strip().lower()
+    if value == "public":
+        return Always()
+    return RequiresCapability(value)
 
 
 class CmdHelp(COMMAND_DEFAULT_CLASS, HelpFormatter):
@@ -47,7 +51,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS, HelpFormatter):
 
     key = "help"
     aliases = ["?"]
-    locks = "cmd:all()"
+    authorization = "public"
     arg_regex = r"\s|$"
 
     # this is a special cmdhandler flag that makes the cmdhandler also pack
@@ -84,7 +88,11 @@ class CmdHelp(COMMAND_DEFAULT_CLASS, HelpFormatter):
                 # adding the 'text_kwargs' keyword means it will be sent with the text outputfunc
                 # for every page.
                 evmore.msg(
-                    self.caller, text, session=self.session, text_kwargs={"type": "help"}, **kwargs
+                    self.caller,
+                    text,
+                    session=self.session,
+                    text_kwargs={"type": "help"},
+                    **kwargs,
                 )
                 return
 
@@ -108,7 +116,8 @@ class CmdHelp(COMMAND_DEFAULT_CLASS, HelpFormatter):
 
         if self.args:
             self.subtopics = [
-                part.strip().lower() for part in self.args.split(self.subtopic_separator_char)
+                part.strip().lower()
+                for part in self.args.split(self.subtopic_separator_char)
             ]
             self.topic = self.subtopics.pop(0)
         else:
@@ -135,7 +144,7 @@ class CmdSetHelp(CmdHelp):
     Edit the help database.
 
     Usage:
-      @sethelp[/switches] <topic>[[;alias;alias][,category[,locks]]
+      @sethelp[/switches] <topic>[[;alias;alias][,category[,capability]]
                 [= <text or new value>]
     Switches:
       edit - open a line editor to edit the topic's help text.
@@ -143,19 +152,19 @@ class CmdSetHelp(CmdHelp):
       append - add text to the end of existing topic with a newline between.
       extend - as append, but don't add a newline.
       category - change category of existing help topic.
-      locks - change locks of existing help topic.
+      policy - change the read policy of an existing help topic.
       delete - remove help topic.
 
     Examples:
       @sethelp lore = In the beginning was ...
       @sethelp/append pickpocketing,Thievery = This steals ...
-      @sethelp/replace pickpocketing, ,attr(is_thief) = This steals ...
+      @sethelp/replace pickpocketing, ,engine.help.read = This steals ...
       @sethelp/edit thievery
-      @sethelp/locks thievery = read:all()
+      @sethelp/policy thievery = public
       @sethelp/category thievery = classes
 
     If not assigning a category, the `settings.DEFAULT_HELP_CATEGORY` category
-    will be used. If no lockstring is specified, everyone will be able to read
+    will be used. If no capability is specified, everyone will be able to read
     the help entry.  Sub-topics are embedded in the help text.
 
     Note that this cannot modify command-help entries - these are modified
@@ -199,8 +208,16 @@ class CmdSetHelp(CmdHelp):
 
     key = "@sethelp"
     aliases = []
-    switch_options = ("edit", "replace", "append", "extend", "category", "locks", "delete")
-    locks = "cmd:perm(Helper)"
+    switch_options = (
+        "edit",
+        "replace",
+        "append",
+        "extend",
+        "category",
+        "policy",
+        "delete",
+    )
+    authorization = "engine.help.manage"
     help_category = "Building"
     arg_regex = None
 
@@ -217,7 +234,7 @@ class CmdSetHelp(CmdHelp):
 
         if not self.args:
             self.msg(
-                "Usage: sethelp[/switches] <topic>[[;alias;alias][,category[,locks]] [= <text or new category>]"
+                "Usage: sethelp[/switches] <topic>[[;alias;alias][,category[,capability]] [= <text or new category>]"
             )
             return
 
@@ -253,7 +270,7 @@ class CmdSetHelp(CmdHelp):
 
         # default setup
         category = lhslist[1] if nlist > 1 else DEFAULT_HELP_CATEGORY
-        lockstring = ",".join(lhslist[2:]) if nlist > 2 else "read:all()"
+        policy_declaration = ",".join(lhslist[2:]) if nlist > 2 else "public"
 
         # search for existing entries of this or other types
         old_entry = None
@@ -294,7 +311,10 @@ class CmdSetHelp(CmdHelp):
                         # find a db-based help entry if one already exists
                         db_topics = {**db_help_topics}
                         db_categories = list(
-                            set(HelpCategory(topic.help_category) for topic in db_topics.values())
+                            set(
+                                HelpCategory(topic.help_category)
+                                for topic in db_topics.values()
+                            )
                         )
                         entries = list(db_topics.values()) + db_categories
                         match, _ = self.do_search(querystr, entries)
@@ -307,7 +327,9 @@ class CmdSetHelp(CmdHelp):
                     # a db-based help entry - this is OK
                     old_entry = match
                     category = lhslist[1] if nlist > 1 else old_entry.help_category
-                    lockstring = ",".join(lhslist[2:]) if nlist > 2 else old_entry.locks.get()
+                    policy_declaration = (
+                        ",".join(lhslist[2:]) if nlist > 2 else "public"
+                    )
                     break
 
         category = category.lower()
@@ -325,7 +347,7 @@ class CmdSetHelp(CmdHelp):
                     topicstr,
                     self.rhs if self.rhs is not None else "",
                     category=category,
-                    locks=lockstring,
+                    policies={"read": _help_policy(policy_declaration)},
                     aliases=aliases,
                 )
             self.caller.db._editing_help = helpentry
@@ -343,7 +365,9 @@ class CmdSetHelp(CmdHelp):
         if "append" in switches or "merge" in switches or "extend" in switches:
             # merge/append operations
             if not old_entry:
-                self.msg(f"Could not find topic '{topicstr}'. You must give an exact name.")
+                self.msg(
+                    f"Could not find topic '{topicstr}'. You must give an exact name."
+                )
                 return
             if not self.rhs:
                 self.msg("You must supply text to append/merge.")
@@ -366,36 +390,38 @@ class CmdSetHelp(CmdHelp):
                 return
             category = self.rhs.lower()
             old_entry.help_category = category
-            self.msg(f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'.")
+            self.msg(
+                f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'."
+            )
             return
 
-        if "locks" in switches:
-            # set the locks
+        if "policy" in switches:
+            # set the typed read policy
             if not old_entry:
                 self.msg(f"Could not find topic '{topicstr}'{aliastxt}.")
                 return
-            show_locks = not rhslist
-            clear_locks = rhslist and not rhslist[0]
-            if show_locks:
-                self.msg(f"Current locks for entry '{topicstr}'{aliastxt} are: {old_entry.locks}")
+            show_policy = not rhslist
+            clear_policy = rhslist and not rhslist[0]
+            if show_policy:
+                policy = old_entry.policies.get("read")
+                self.msg(
+                    f"Current read policy for '{topicstr}'{aliastxt}: "
+                    f"{policy.to_data() if policy else '<class default>'}"
+                )
                 return
-            if clear_locks:
-                old_entry.locks.clear()
-                old_entry.locks.add("read:all()")
-                self.msg(f"Locks for entry '{topicstr}'{aliastxt} reset to: read:all()")
+            if clear_policy:
+                old_entry.policies.set("read", Always())
+                self.msg(f"Read policy for '{topicstr}'{aliastxt} reset to public.")
                 return
-            lockstring = ",".join(rhslist)
-            # locks.validate() does not throw an exception for things like "read:id(1),read:id(6)"
-            # but locks.add() does
-            existing_locks = old_entry.locks.all()
-            old_entry.locks.clear()
             try:
-                old_entry.locks.add(lockstring)
-            except LockException as e:
-                old_entry.locks.add(existing_locks)
-                self.msg(str(e) + " Locks not changed.")
-            else:
-                self.msg(f"Locks for entry '{topicstr}'{aliastxt} changed to: {lockstring}")
+                policy = _help_policy(",".join(rhslist))
+            except (TypeError, ValueError) as err:
+                self.msg(f"Policy not changed: {err}")
+                return
+            old_entry.policies.set("read", policy)
+            self.msg(
+                f"Read policy for '{topicstr}'{aliastxt} changed to: {policy.to_data()}"
+            )
             return
 
         if "delete" in switches or "del" in switches:
@@ -417,8 +443,7 @@ class CmdSetHelp(CmdHelp):
                 old_entry.key = topicstr
                 old_entry.entrytext = self.rhs
                 old_entry.help_category = category
-                old_entry.locks.clear()
-                old_entry.locks.add(lockstring)
+                old_entry.policies.set("read", _help_policy(policy_declaration))
                 old_entry.aliases.add(aliases)
                 old_entry.save()
                 self.msg(f"Overwrote the old topic '{topicstr}'{aliastxt}.")
@@ -430,7 +455,11 @@ class CmdSetHelp(CmdHelp):
         else:
             # no old entry. Create a new one.
             new_entry = create.create_help_entry(
-                topicstr, self.rhs, category=category, locks=lockstring, aliases=aliases
+                topicstr,
+                self.rhs,
+                category=category,
+                policies={"read": _help_policy(policy_declaration)},
+                aliases=aliases,
             )
             if new_entry:
                 self.msg(f"Topic '{topicstr}'{aliastxt} was successfully created.")
@@ -447,4 +476,6 @@ class CmdSetHelp(CmdHelp):
                     )
                     return
             else:
-                self.msg(f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin.")
+                self.msg(
+                    f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin."
+                )

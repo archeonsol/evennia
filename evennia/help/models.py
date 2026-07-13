@@ -17,7 +17,6 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from evennia.help.manager import HelpEntryManager
-from evennia.locks.lockhandler import LockHandler
 from evennia.typeclasses.models import AliasHandler, Tag, TagHandler
 from evennia.utils.idmapper.models import SharedMemoryModel
 from evennia.utils.utils import lazy_property
@@ -72,7 +71,9 @@ class HelpEntry(SharedMemoryModel):
         "help entry", blank=True, help_text="the main body of help text"
     )
     # lock string storage
-    db_lock_storage = models.TextField("locks", blank=True, help_text="normally view:all().")
+    db_lock_storage = models.TextField(
+        "locks", blank=True, help_text="normally view:all()."
+    )
     # tags are primarily used for permissions
     db_tags = models.ManyToManyField(
         Tag,
@@ -82,7 +83,9 @@ class HelpEntry(SharedMemoryModel):
     )
     # Creation date. This is not changed once the object is created. This is in UTC,
     # use the property date_created to get it in local time.
-    db_date_created = models.DateTimeField("creation date", editable=False, auto_now=True)
+    db_date_created = models.DateTimeField(
+        "creation date", editable=False, auto_now=True
+    )
 
     # Database manager
     objects = HelpEntryManager()
@@ -91,8 +94,10 @@ class HelpEntry(SharedMemoryModel):
     # lazy-loaded handlers
 
     @lazy_property
-    def locks(self):
-        return LockHandler(self)
+    def policies(self):
+        from evennia.authorization.handler import PolicyHandler
+
+        return PolicyHandler(self)
 
     @lazy_property
     def tags(self):
@@ -145,9 +150,6 @@ class HelpEntry(SharedMemoryModel):
             accessing_obj,
             access_type,
             default=default,
-            legacy_evaluator=lambda: self.locks.check(
-                accessing_obj, access_type=access_type, default=default
-            ),
         )
         return result
 
@@ -180,7 +182,8 @@ class HelpEntry(SharedMemoryModel):
         """
         content_type = ContentType.objects.get_for_model(self.__class__)
         return reverse(
-            "admin:%s_%s_change" % (content_type.app_label, content_type.model), args=(self.id,)
+            "admin:%s_%s_change" % (content_type.app_label, content_type.model),
+            args=(self.id,),
         )
 
     @classmethod
@@ -247,7 +250,10 @@ class HelpEntry(SharedMemoryModel):
         try:
             return reverse(
                 "%s-detail" % slugify(self._meta.verbose_name),
-                kwargs={"category": slugify(self.db_help_category), "topic": slugify(self.db_key)},
+                kwargs={
+                    "category": slugify(self.db_help_category),
+                    "topic": slugify(self.db_key),
+                },
             )
         except Exception:
             return "#"
@@ -283,7 +289,10 @@ class HelpEntry(SharedMemoryModel):
         try:
             return reverse(
                 "%s-update" % slugify(self._meta.verbose_name),
-                kwargs={"category": slugify(self.db_help_category), "topic": slugify(self.db_key)},
+                kwargs={
+                    "category": slugify(self.db_help_category),
+                    "topic": slugify(self.db_key),
+                },
             )
         except Exception:
             return "#"
@@ -318,10 +327,21 @@ class HelpEntry(SharedMemoryModel):
         try:
             return reverse(
                 "%s-delete" % slugify(self._meta.verbose_name),
-                kwargs={"category": slugify(self.db_help_category), "topic": slugify(self.db_key)},
+                kwargs={
+                    "category": slugify(self.db_help_category),
+                    "topic": slugify(self.db_key),
+                },
             )
         except Exception:
             return "#"
 
     # Used by Django Sites/Admin
     get_absolute_url = web_get_detail_url
+    from evennia.authorization.policy import Always, RequiresCapability
+
+    authorization_policies = {
+        "read": Always(),
+        "view": Always(),
+        "edit": RequiresCapability("engine.help.manage"),
+        "delete": RequiresCapability("engine.help.manage"),
+    }

@@ -28,7 +28,7 @@ evennia
    evennia.help
    evennia.hooks
    evennia.jobs
-   evennia.locks
+   evennia.authorization
    evennia.narrative
    evennia.objects
    evennia.prototypes

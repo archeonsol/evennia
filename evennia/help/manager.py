@@ -154,11 +154,15 @@ class HelpEntryManager(TypedObjectManager):
         """
         ostring = ostring.strip().lower()
         if help_category:
-            return self.filter(db_key__iexact=ostring, db_help_category__iexact=help_category)
+            return self.filter(
+                db_key__iexact=ostring, db_help_category__iexact=help_category
+            )
         else:
             return self.filter(db_key__iexact=ostring)
 
-    def create_help(self, key, entrytext, category="General", locks=None, aliases=None, tags=None):
+    def create_help(
+        self, key, entrytext, category="General", policies=None, aliases=None, tags=None
+    ):
         """
         Create a static help entry in the help database. Note that Command
         help entries are dynamic and directly taken from the __doc__
@@ -170,7 +174,7 @@ class HelpEntryManager(TypedObjectManager):
             key (str): The name of the help entry.
             entrytext (str): The body of te help entry
             category (str, optional): The help category of the entry.
-            locks (str, optional): A lockstring to restrict access.
+            policies (dict, optional): Typed operation policies.
             aliases (list of str, optional): List of alternative (likely shorter) keynames.
             tags (lst, optional): List of tags or tuples `(tag, category)`.
 
@@ -183,13 +187,13 @@ class HelpEntryManager(TypedObjectManager):
             new_help.key = key
             new_help.entrytext = entrytext
             new_help.help_category = category
-            if locks:
-                new_help.locks.add(locks)
             if aliases:
                 new_help.aliases.add(make_iter(aliases))
             if tags:
                 new_help.tags.batch_add(*tags)
             new_help.save()
+            for operation, policy in dict(policies or {}).items():
+                new_help.policies.set(operation, policy)
             signals.SIGNAL_HELPENTRY_POST_CREATE.send(sender=new_help)
             return new_help
         except IntegrityError:

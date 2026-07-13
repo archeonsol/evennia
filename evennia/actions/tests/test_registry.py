@@ -6,8 +6,7 @@ from types import SimpleNamespace
 
 from evennia.actions.action import Action, action
 from evennia.actions.exceptions import RuleConflict
-from evennia.actions.permission import DefaultCapability as Capability
-from evennia.actions.predicate import Builder, HasCapability
+from evennia.actions.predicate import HasCapability
 from evennia.actions.registry import ActionRegistry, RuleRegistry
 from evennia.actions.result import CLAIM, FAIL, PASS
 from evennia.actions.rule import PHASES, RuleSpec, rule
@@ -113,7 +112,9 @@ class TestActionBase(unittest.TestCase):
 
 class TestRuleDecorator(unittest.TestCase):
     def test_attaches_specs(self):
-        @rule(_Kick, phase="check", priority=5, requires=Builder)
+        requirement = HasCapability("engine.world.build")
+
+        @rule(_Kick, phase="check", priority=5, requires=requirement)
         def my_rule(self, action, actor):
             return PASS
 
@@ -123,7 +124,7 @@ class TestRuleDecorator(unittest.TestCase):
         self.assertEqual(s.action_type, _Kick)
         self.assertEqual(s.phase, "check")
         self.assertEqual(s.priority, 5)
-        self.assertIs(s.requires, Builder)
+        self.assertIs(s.requires, requirement)
 
     def test_tuple_expands(self):
         @rule((_Kick, _Look), phase="report")
@@ -149,14 +150,14 @@ class TestRuleDecorator(unittest.TestCase):
                 return PASS
 
     def test_requires_compiled_once_to_predicate(self):
-        @rule(_Kick, phase="check", requires=Capability.ADMIN)
+        @rule(_Kick, phase="check", requires="engine.runtime.manage")
         def r(self, action, actor):
             return PASS
 
         self.assertIsInstance(r.__evennia_rule_specs__[0].requires, HasCapability)
 
     def test_requires_lockstring_rejected(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
 
             @rule(_Kick, phase="check", requires="perm(Builder)")
             def r(self, action, actor):

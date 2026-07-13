@@ -76,7 +76,7 @@ class Account(DefaultAccount):
      - is_typeclass(typeclass, exact=False)
      - swap_typeclass(new_typeclass, clean_attributes=False, no_default=True)
      - access(accessing_obj, access_type='read', default=False, no_superuser_bypass=False, **kwargs)
-     - check_permstring(permstring)
+     - has_capability(capability)
      - get_cmdsets(caller, current, **kwargs)
      - get_cmdset_providers()
      - uses_screenreader(session=None)

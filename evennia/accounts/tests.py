@@ -7,12 +7,11 @@ from django.test import override_settings
 from mock import MagicMock, Mock, patch
 
 import evennia
-from evennia.accounts.accounts import (
-    AccountSessionHandler,
-    DefaultAccount,
-    DefaultGuest,
-)
+from evennia.accounts.accounts import (AccountSessionHandler, DefaultAccount,
+                                       DefaultGuest)
 from evennia.accounts.models import ControlBinding
+from evennia.authorization.policy import Always
+from evennia.authorization.storage import grant_capability
 from evennia.utils import create
 from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.utils.utils import uses_database
@@ -55,7 +54,9 @@ class TestAccountSessionHandler(TestCase):
         evennia.SESSION_HANDLER[s3.uid] = s3
 
         self.assertEqual([s.uid for s in self.handler.get()], [s1.uid])
-        self.assertEqual([s.uid for s in [self.handler.get(self.account.uid)]], [s1.uid])
+        self.assertEqual(
+            [s.uid for s in [self.handler.get(self.account.uid)]], [s1.uid]
+        )
         self.assertEqual([s.uid for s in self.handler.get(self.account.uid + 1)], [])
 
     def test_all(self):
@@ -87,7 +88,8 @@ class TestDefaultGuest(BaseEvenniaTest):
         # Create a second guest account
         account, errors = DefaultGuest.authenticate(ip=self.ip)
         self.assertFalse(
-            account, "Two guest accounts were created with a single entry on the guest list!"
+            account,
+            "Two guest accounts were created with a single entry on the guest list!",
         )
 
     @patch("evennia.accounts.accounts.ChannelDB.objects.get_channel")
@@ -151,13 +153,17 @@ class TestDefaultAccountAuth(BaseEvenniaTest):
 
         # Try creating a duplicate account
         account2, errors = DefaultAccount.create(username="Ziggy", password="starman11")
-        self.assertFalse(account2, "Duplicate account name should not have been allowed.")
+        self.assertFalse(
+            account2, "Duplicate account name should not have been allowed."
+        )
         account.delete()
 
     def test_throttle(self):
         "Confirm throttle activates on too many failures."
         for x in range(20):
-            obj, errors = DefaultAccount.authenticate(self.account.name, "xyzzy", ip="12.24.36.48")
+            obj, errors = DefaultAccount.authenticate(
+                self.account.name, "xyzzy", ip="12.24.36.48"
+            )
             self.assertFalse(
                 obj,
                 "Authentication was provided a bogus password; this should NOT have returned an account!",
@@ -209,7 +215,9 @@ class TestDefaultAccountAuth(BaseEvenniaTest):
 
         # Should not allow duplicate username
         result, error = DefaultAccount.validate_username(self.account.name)
-        self.assertFalse(result, "Duplicate username should not have passed validation.")
+        self.assertFalse(
+            result, "Duplicate username should not have passed validation."
+        )
 
         # Should not allow username too short
         result, error = DefaultAccount.validate_username("xx")
@@ -322,7 +330,9 @@ class TestDefaultAccount(TestCase):
         account.puppet_object(self.s1, obj)
 
         self.assertTrue(
-            self.s1.data_out.call_args[1]["text"].startswith("You don't have permission to puppet")
+            self.s1.data_out.call_args[1]["text"].startswith(
+                "You don't have permission to puppet"
+            )
         )
         self.assertIsNone(obj.at_post_puppet.call_args)
 
@@ -358,7 +368,9 @@ class TestDefaultAccount(TestCase):
             account.puppet_object(self.s1, obj)
         # works because django.conf.settings.MULTISESSION_MODE is not in (1, 3)
         self.assertTrue(
-            self.s1.data_out.call_args[1]["text"].endswith("from another of your sessions.|n")
+            self.s1.data_out.call_args[1]["text"].endswith(
+                "from another of your sessions.|n"
+            )
         )
         self.assertTrue(obj.at_post_puppet.call_args[1] == {})
 
@@ -434,7 +446,9 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
         self.account.unpuppet_object(self.session)
         self.account.at_puppet_added.reset_mock()
         self.account.puppet_object(self.session, self.char1)
-        self.account.at_puppet_added.assert_called_once_with(self.char1, session=self.session)
+        self.account.at_puppet_added.assert_called_once_with(
+            self.char1, session=self.session
+        )
 
     def test_added_does_not_fire_on_session_takeover(self):
         # Initial puppet already happened in setup_session. Simulate a second
@@ -468,7 +482,9 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
     def test_removed_fires_on_last_detach(self):
         self.account.at_puppet_removed = MagicMock()
         self.account.unpuppet_object(self.session)
-        self.account.at_puppet_removed.assert_called_once_with(self.char1, session=self.session)
+        self.account.at_puppet_removed.assert_called_once_with(
+            self.char1, session=self.session
+        )
 
 
 class TestAccountFocusPushPop(BaseEvenniaTest):
@@ -479,7 +495,7 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         super().setUp()
         # self.session already drives self.char1 (the meat body). char2 stands
         # in for the avatar/vehicle layered on top.
-        self.char2.locks.add("puppet:all()")
+        self.char2.policies.set("puppet", Always())
 
     def test_push_layers_body_and_keeps_identity(self):
         self.account.puppet_object(self.session, self.char2, push=True)
@@ -522,7 +538,9 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
 
         sess2 = ServerSession()
         # distinct address: ServerSession.__eq__ compares by address.
-        sess2.init_session("telnet", ("localhost", "testmode2"), evennia.SESSION_HANDLER)
+        sess2.init_session(
+            "telnet", ("localhost", "testmode2"), evennia.SESSION_HANDLER
+        )
         sess2.sessid = 43
         sess2.uname = self.account.username
         sess2.logged_in = True
@@ -548,7 +566,7 @@ class TestAccountDisconnectRestore(BaseEvenniaTest):
 
     def setUp(self):
         super().setUp()
-        self.char2.locks.add("puppet:all()")
+        self.char2.policies.set("puppet", Always())
         self.account.db._last_puppet = self.char1
 
     def test_disconnect_preserves_pushed_stack(self):
@@ -636,8 +654,10 @@ class TestControllerVsOwnership(BaseEvenniaTest):
     possession is where they diverge."""
 
     def _npc(self, key="NPC"):
-        npc = create.create_object(self.character_typeclass, key=key, location=self.room1)
-        npc.locks.add("puppet:all()")
+        npc = create.create_object(
+            self.character_typeclass, key=key, location=self.room1
+        )
+        npc.policies.set("puppet", Always())
         return npc
 
     def test_possession_leaves_ownership_untouched(self):
@@ -687,16 +707,14 @@ class TestControllerVsOwnership(BaseEvenniaTest):
         self.assertIsNone(self.session.get_puppet())
 
     def test_is_ooc_follows_driver_under_possession(self):
-        from evennia.locks import lockfuncs
-
         # actively possessing an unowned NPC is IC, not OOC.
         npc = self._npc()
         self.account.unpuppet_object(self.session)
         self.account.puppet_object(self.session, npc)
-        self.assertFalse(lockfuncs.is_ooc(npc, npc, session=self.session))
+        self.assertIs(npc.puppeteer, self.account)
         # an undriven body has no in-character driver -> OOC.
         idle = self._npc("Idle")
-        self.assertTrue(lockfuncs.is_ooc(idle, idle, session=self.session))
+        self.assertIsNone(idle.puppeteer)
 
     def test_nickreplace_uses_driver_account_nicks(self):
         # account-level nicks belong to the *driver*: a possessed (unowned) NPC
@@ -709,40 +727,47 @@ class TestControllerVsOwnership(BaseEvenniaTest):
         self.assertEqual(npc.nicks.nickreplace("hi"), "hello")
 
 
-class TestPermissionsFollowDriver(BaseEvenniaTest):
+class TestCapabilitiesFollowDriver(BaseEvenniaTest):
     """The permissions that apply when a body acts come from the live *driver*
     (``puppeteer``), never the durable *owner* (``account``). A stale or
     higher-perm owner must not leak to whoever is driving the body."""
 
     def _body_owned_by(self, owner, key="Body"):
-        body = create.create_object(self.character_typeclass, key=key, location=self.room1)
+        body = create.create_object(
+            self.character_typeclass, key=key, location=self.room1
+        )
         body.account = owner
-        body.locks.add("puppet:all()")
+        body.policies.set("puppet", Always())
         return body
 
-    def test_owner_perms_do_not_leak_to_driver(self):
-        from evennia.locks.lockfuncs import perm
+    def test_owner_grants_do_not_leak_to_driver(self):
 
         # body OWNED by an Admin account, DRIVEN by a plain-player account.
-        self.account.permissions.remove("Developer")  # drop the test base's elevation
-        self.account.permissions.add("Player")
-        self.account2.permissions.add("Admin")
+        grant_capability(
+            f"account:{self.account2.id}",
+            "engine.object.msg",
+            scope_kind="world",
+            scope_key="*",
+        )
         body = self._body_owned_by(self.account2)
         body.sessions.add(self.session)  # driver is self.account (Player)
         self.assertEqual(body.puppeteer, self.account)
         # the owner's Admin must NOT pass — the driver is only a player.
-        self.assertFalse(perm(body, body, "Admin"))
+        self.assertFalse(body.has_capability("engine.object.msg"))
         # the driver's own (lower) perm still passes.
-        self.assertTrue(perm(body, body, "Player"))
 
-    def test_driver_perms_apply_when_possessing(self):
-        from evennia.locks.lockfuncs import perm
+    def test_driver_grants_apply_when_possessing(self):
 
         # body OWNED by a plain account, DRIVEN by an Admin (staff possession).
-        self.account.permissions.add("Admin")
+        grant_capability(
+            f"account:{self.account.id}",
+            "engine.object.msg",
+            scope_kind="world",
+            scope_key="*",
+        )
         body = self._body_owned_by(self.account2)
         body.sessions.add(self.session)  # driver is self.account (Admin)
-        self.assertTrue(perm(body, body, "Admin"))
+        self.assertTrue(body.has_capability("engine.object.msg"))
 
     def test_superuser_owner_does_not_leak_via_driver(self):
         self.account2.is_superuser = True
@@ -750,7 +775,7 @@ class TestPermissionsFollowDriver(BaseEvenniaTest):
         body = self._body_owned_by(self.account2)
         body.sessions.add(self.session)  # driver self.account is not a superuser
         self.assertFalse(body.is_superuser)
-        self.assertFalse(body.check_permstring("Developer"))
+        self.assertFalse(body.has_capability("engine.authorization.break_glass"))
 
 
 class TestAccountPuppetDeletion(BaseEvenniaTest):
@@ -802,7 +827,9 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.account.msg = MagicMock()
         with self.settings(MULTISESSION_MODE=2):
             self.account.puppet_object(self.session, self.char1)
-            self.account.msg.assert_called_with("You are already puppeting this object.")
+            self.account.msg.assert_called_with(
+                "You are already puppeting this object."
+            )
 
     @patch("evennia.accounts.accounts.time.time", return_value=10000)
     def test_idle_time(self, mock_time):
@@ -811,7 +838,9 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.assertEqual(idle, 10)
 
         # test no sessions
-        with patch("evennia.SESSION_HANDLER.sessions_from_account", return_value=[]) as mock_sessh:
+        with patch(
+            "evennia.SESSION_HANDLER.sessions_from_account", return_value=[]
+        ) as mock_sessh:
             idle = self.account.idle_time
             self.assertEqual(idle, None)
 
@@ -822,7 +851,9 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.assertEqual(conn, 10)
 
         # test no sessions
-        with patch("evennia.SESSION_HANDLER.sessions_from_account", return_value=[]) as mock_sessh:
+        with patch(
+            "evennia.SESSION_HANDLER.sessions_from_account", return_value=[]
+        ) as mock_sessh:
             idle = self.account.connection_time
             self.assertEqual(idle, None)
 
@@ -832,8 +863,15 @@ class TestDefaultAccountEv(BaseEvenniaTest):
             "test@test.com",
             "testpassword123",
             locks="test:all()",
-            tags=[("tag1", "category1"), ("tag2", "category2", "data1"), ("tag3", None)],
-            attributes=[("key1", "value1", "category1", "edit:false()", True), ("key2", "value2")],
+            tags=[
+                ("tag1", "category1"),
+                ("tag2", "category2", "data1"),
+                ("tag3", None),
+            ],
+            attributes=[
+                ("key1", "value1", "category1", "edit:false()", True),
+                ("key2", "value2"),
+            ],
         )
         acct.save()
         self.assertTrue(acct.pk)

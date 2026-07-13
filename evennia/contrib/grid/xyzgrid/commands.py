@@ -22,7 +22,9 @@ COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 
 
 # temporary store of goto/path data when using the auto-stepper
-PathData = namedtuple("PathData", ("target", "xymap", "directions", "step_sequence", "task"))
+PathData = namedtuple(
+    "PathData", ("target", "xymap", "directions", "step_sequence", "task")
+)
 
 
 class CmdXYZTeleport(building.CmdTeleport):
@@ -153,7 +155,9 @@ class CmdXYZOpen(building.CmdOpen):
             inp = self.rhs.strip("()")
             X, Y, *Z = inp.split(",", 2)
             if not Z:
-                self.caller.msg("A full (X,Y,Z) coordinate must be given for the destination.")
+                self.caller.msg(
+                    "A full (X,Y,Z) coordinate must be given for the destination."
+                )
                 raise InterruptCommand
             Z = Z[0]
             # search by coordinate
@@ -195,7 +199,7 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
     key = "goto"
     aliases = "path"
     help_category = "General"
-    locks = "cmd:all()"
+    authorization = "public"
 
     # how quickly to step (seconds)
     auto_step_delay = 2
@@ -268,25 +272,33 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
             if xyz_start != expected_xyz:
                 # we are not where we expected to be (maybe the user moved
                 # manually)  - we must recalculate the path to target
-                caller.msg("Path changed - recalculating ('goto' to abort)", session=session)
+                caller.msg(
+                    "Path changed - recalculating ('goto' to abort)", session=session
+                )
 
                 try:
                     xyz_end = path_data.target.xyz
                 except AttributeError:
                     caller.ndb.xy_path_data = None
-                    caller.msg("Goto aborted - target outside of area.", session=session)
+                    caller.msg(
+                        "Goto aborted - target outside of area.", session=session
+                    )
                     return
 
                 if xyz_start[2] != xyz_end[2]:
                     # can't go to another map
                     caller.ndb.xy_path_data = None
-                    caller.msg("Goto aborted - target outside of area.", session=session)
+                    caller.msg(
+                        "Goto aborted - target outside of area.", session=session
+                    )
                     return
 
                 # recalculate path
                 xy_start = xyz_start[:2]
                 xy_end = xyz_end[:2]
-                directions, step_sequence = path_data.xymap.get_shortest_path(xy_start, xy_end)
+                directions, step_sequence = path_data.xymap.get_shortest_path(
+                    xy_start, xy_end
+                )
 
                 # try again with this path, rebuilding the data
                 try:
@@ -319,14 +331,17 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
 
             # the exit name does not need to be the same as the cardinal direction!
             exit_name, *_ = first_link.spawn_aliases.get(
-                direction, current_node.direction_spawn_defaults.get(direction, ("unknown",))
+                direction,
+                current_node.direction_spawn_defaults.get(direction, ("unknown",)),
             )
 
             exit_obj = caller.search(exit_name)
             if not exit_obj:
                 # extra safety measure to avoid trying to walk over and over
                 # if there's something wrong with the exit's name
-                caller.msg(f"No exit '{exit_name}' found at current location. Aborting goto.")
+                caller.msg(
+                    f"No exit '{exit_name}' found at current location. Aborting goto."
+                )
                 caller.ndb.xy_path_data = None
                 return
 
@@ -334,14 +349,16 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
                 # premature stop of pathfind-step because of map node/link of interrupt type
                 if hasattr(interrupt_node_or_link, "node_index"):
                     message = exit_obj.destination.attributes.get(
-                        "xyz_path_interrupt_msg", default=self.default_xyz_path_interrupt_msg
+                        "xyz_path_interrupt_msg",
+                        default=self.default_xyz_path_interrupt_msg,
                     )
                     # we move into the node/room and then stop
                     caller.execute_cmd(exit_name, session=session)
                 else:
                     # if the link is interrupted we don't cross it at all
                     message = exit_obj.attributes.get(
-                        "xyz_path_interrupt_msg", default=self.default_xyz_path_interrupt_msg
+                        "xyz_path_interrupt_msg",
+                        default=self.default_xyz_path_interrupt_msg,
                     )
                 caller.msg(message)
                 return
@@ -380,7 +397,9 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
                         caller.msg(f"Aborted auto-walking to {target_name}.")
                         return
                 # goto/path-command will show current path
-                current_path = list_to_string([f"|w{step}|n" for step in path_data.directions])
+                current_path = list_to_string(
+                    [f"|w{step}|n" for step in path_data.directions]
+                )
                 moving = "(moving)" if task and task.active() else ""
                 caller.msg(f"Path to {target_name}{moving}: {current_path}")
             else:
@@ -399,10 +418,14 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
         try:
             xyz_start = caller.location.xyz
         except AttributeError:
-            self.caller.msg("Cannot path-find since the current location is not on the grid.")
+            self.caller.msg(
+                "Cannot path-find since the current location is not on the grid."
+            )
             return
 
-        allow_xyz_query = caller.locks.check_lockstring(caller, "perm(Builder)")
+        from evennia.authorization.service import has_capability
+
+        allow_xyz_query = has_capability(caller, "engine.world.build")
         if allow_xyz_query and all(char in self.args for char in ("(", ")", ",")):
             # search by (X,Y)
             target = self._search_by_xyz(self.args, xyz_start)
@@ -416,7 +439,9 @@ class CmdGoto(COMMAND_DEFAULT_CLASS):
         try:
             xyz_end = target.xyz
         except AttributeError:
-            self.caller.msg("Target location is not on the grid and cannot be auto-walked to.")
+            self.caller.msg(
+                "Target location is not on the grid and cannot be auto-walked to."
+            )
             return
 
         xymap = xyzgrid.get_map(xyz_start[2])
@@ -455,7 +480,7 @@ class CmdMap(COMMAND_DEFAULT_CLASS):
     """
 
     key = "map"
-    locks = "cmd:perm(Builders)"
+    authorization = "engine.world.build"
 
     def func(self):
         """Implement command"""

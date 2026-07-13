@@ -29,9 +29,7 @@ from evennia.accounts.accounts import DefaultAccount
 
 from ..action import action
 from ..muxargs import ArgAction
-from ..permission import Scope, get_capability_enum
-from ..predicate import NEVER, HasCapability
-from ..predicate import Admin as AdminCap
+from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
 from .general import NickRules
@@ -40,15 +38,10 @@ __all__ = [
     "Option",
     "Password",
     "UserPassword",
-    "PlayerAccountCap",
     "DefaultAccountRules",
 ]
 
-_PLAYER_CAP = getattr(get_capability_enum(), "PLAYER", None)
-#: ``pperm(Player)`` analogue: the Player rank resolved at ACCOUNT scope.
-PlayerAccountCap = (
-    HasCapability(_PLAYER_CAP, scope=Scope.ACCOUNT) if _PLAYER_CAP is not None else NEVER
-)
+AccountAdminCap = HasCapability("engine.moderation.manage")
 
 
 @action("@option", "@options")
@@ -84,7 +77,9 @@ class DefaultAccountRules(NickRules):
     """
 
     def _is_account(self, actor) -> bool:
-        return self is getattr(actor, "account", None) or self is getattr(actor, "effective", None)
+        return self is getattr(actor, "account", None) or self is getattr(
+            actor, "effective", None
+        )
 
     # --- @option -----------------------------------------------------------------
 
@@ -114,7 +109,9 @@ class DefaultAccountRules(NickRules):
                 msg("|gCleared all saved options.")
 
             options = dict(flags)
-            saved_options = dict(caller.attributes.get("_saved_protocol_flags", default={}))
+            saved_options = dict(
+                caller.attributes.get("_saved_protocol_flags", default={})
+            )
 
             if "SCREENWIDTH" in options:
                 if len(options["SCREENWIDTH"]) == 1:
@@ -141,7 +138,9 @@ class DefaultAccountRules(NickRules):
                 if saved_options:
                     saved = " |YYes|n" if key in saved_options else ""
                     changed = (
-                        "|y*|n" if key in saved_options and flags[key] != saved_options[key] else ""
+                        "|y*|n"
+                        if key in saved_options and flags[key] != saved_options[key]
+                        else ""
                     )
                     row.append("%s%s" % (saved, changed))
                 table.add_row(*row)
@@ -221,7 +220,9 @@ class DefaultAccountRules(NickRules):
             msg("|rNo option named '|w%s|r'." % name)
         if optiondict:
             if "save" in action.switches:
-                saved_options = caller.attributes.get("_saved_protocol_flags", default={})
+                saved_options = caller.attributes.get(
+                    "_saved_protocol_flags", default={}
+                )
                 saved_options.update(optiondict)
                 caller.attributes.add("_saved_protocol_flags", saved_options)
                 for key in optiondict:
@@ -235,7 +236,7 @@ class DefaultAccountRules(NickRules):
 
     # --- @password ----------------------------------------------------------------
 
-    @rule(Password, phase="carry_out", requires=PlayerAccountCap)
+    @rule(Password, phase="carry_out")
     def carry_out_password(self, action, actor):
         if not self._is_account(actor):
             return SKIP
@@ -265,12 +266,14 @@ class DefaultAccountRules(NickRules):
             account.save()
             msg("Password changed.")
             address = getattr(session, "address", "unknown")
-            logger.log_sec(f"Password Changed: {account} (Caller: {account}, IP: {address}).")
+            logger.log_sec(
+                f"Password Changed: {account} (Caller: {account}, IP: {address})."
+            )
         return CLAIM
 
     # --- @userpassword ---------------------------------------------------------------
 
-    @rule(UserPassword, phase="carry_out", requires=AdminCap)
+    @rule(UserPassword, phase="carry_out", requires=AccountAdminCap)
     def carry_out_userpassword(self, action, actor):
         if not self._is_account(actor):
             return SKIP
@@ -304,5 +307,7 @@ class DefaultAccountRules(NickRules):
         if account.character != caller:
             account.msg(f"{caller.name} has changed your password to '{newpass}'.")
         address = getattr(session, "address", "unknown")
-        logger.log_sec(f"Password Changed: {account} (Caller: {caller}, IP: {address}).")
+        logger.log_sec(
+            f"Password Changed: {account} (Caller: {caller}, IP: {address})."
+        )
         return CLAIM

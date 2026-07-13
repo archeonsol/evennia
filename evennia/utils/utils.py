@@ -199,7 +199,9 @@ def wrap(text, width=None, indent=0):
     if not text:
         return ""
     indent = " " * indent
-    return to_str(textwrap.fill(text, width, initial_indent=indent, subsequent_indent=indent))
+    return to_str(
+        textwrap.fill(text, width, initial_indent=indent, subsequent_indent=indent)
+    )
 
 
 # alias - fill
@@ -256,7 +258,11 @@ def crop(text, width=None, suffix="[...]"):
         return text
     else:
         lsuffix = len(suffix)
-        text = text[:width] if lsuffix >= width else "%s%s" % (text[: width - lsuffix], suffix)
+        text = (
+            text[:width]
+            if lsuffix >= width
+            else "%s%s" % (text[: width - lsuffix], suffix)
+        )
         return to_str(text)
 
 
@@ -296,7 +302,8 @@ def dedent(text, baseline_index=None, indent=None):
         baseline = lines[baseline_index]
         spaceremove = len(baseline) - len(baseline.lstrip(" "))
         return "\n".join(
-            line[min(spaceremove, len(line) - len(line.lstrip(" "))) :] for line in lines
+            line[min(spaceremove, len(line) - len(line.lstrip(" "))) :]
+            for line in lines
         )
 
 
@@ -342,7 +349,9 @@ def justify(text, width=None, align="l", indent=0, fillchar=" "):
         if line_rest > 0:
             if align == "l":
                 if line[-1] == "\n\n":
-                    line[-1] = sp * (line_rest - 1) + "\n" + sp * width + "\n" + sp * width
+                    line[-1] = (
+                        sp * (line_rest - 1) + "\n" + sp * width + "\n" + sp * width
+                    )
                 else:
                     line[-1] += sp * line_rest
             elif align == "r":
@@ -352,7 +361,12 @@ def justify(text, width=None, align="l", indent=0, fillchar=" "):
                 line[0] = pad + line[0]
                 if line[-1] == "\n\n":
                     line[-1] += (
-                        pad + sp * (line_rest % 2 - 1) + "\n" + sp * width + "\n" + sp * width
+                        pad
+                        + sp * (line_rest % 2 - 1)
+                        + "\n"
+                        + sp * width
+                        + "\n"
+                        + sp * width
                     )
                 else:
                     line[-1] = line[-1] + pad + sp * (line_rest % 2)
@@ -560,7 +574,9 @@ def iter_to_str(iterable, sep=",", endsep=", and", addquote=False):
     elif len_iter == 2:
         return f"{endsep} ".join(str(v) for v in iterable)
     else:
-        return f"{sep} ".join(str(v) for v in iterable[:-1]) + f"{endsep} {iterable[-1]}"
+        return (
+            f"{sep} ".join(str(v) for v in iterable[:-1]) + f"{endsep} {iterable[-1]}"
+        )
 
 
 # legacy aliases
@@ -916,7 +932,11 @@ def dbref(inp, reqhash=True):
     if reqhash:
         num = (
             int(inp.lstrip("#"))
-            if (isinstance(inp, str) and inp.startswith("#") and inp.lstrip("#").isdigit())
+            if (
+                isinstance(inp, str)
+                and inp.startswith("#")
+                and inp.lstrip("#").isdigit()
+            )
             else None
         )
         return num if isinstance(num, int) and num > 0 else None
@@ -1067,7 +1087,9 @@ def to_bytes(text, session=None):
         except Exception:
             text = repr(text)
 
-    default_encoding = session.protocol_flags.get("ENCODING", "utf-8") if session else "utf-8"
+    default_encoding = (
+        session.protocol_flags.get("ENCODING", "utf-8") if session else "utf-8"
+    )
     try:
         return text.encode(default_encoding)
     except (LookupError, UnicodeEncodeError):
@@ -1106,7 +1128,9 @@ def to_str(text, session=None):
         except Exception:
             return repr(text)
 
-    default_encoding = session.protocol_flags.get("ENCODING", "utf-8") if session else "utf-8"
+    default_encoding = (
+        session.protocol_flags.get("ENCODING", "utf-8") if session else "utf-8"
+    )
     try:
         return text.decode(default_encoding)
     except (LookupError, UnicodeDecodeError):
@@ -1166,7 +1190,9 @@ def inherits_from(obj, parent):
         # this is a class
         obj_paths = ["%s.%s" % (mod.__module__, mod.__name__) for mod in obj.mro()]
     else:
-        obj_paths = ["%s.%s" % (mod.__module__, mod.__name__) for mod in obj.__class__.mro()]
+        obj_paths = [
+            "%s.%s" % (mod.__module__, mod.__name__) for mod in obj.__class__.mro()
+        ]
 
     if isinstance(parent, str):
         # a given string path, for direct matching
@@ -1342,7 +1368,9 @@ def mod_import_from_path(path):
     try:
         return importlib.machinery.SourceFileLoader(modname, path).load_module()
     except OSError:
-        logger.log_trace(f"Could not find module '{modname}' ({modname}.py) at path '{dirpath}'")
+        logger.log_trace(
+            f"Could not find module '{modname}' ({modname}.py) at path '{dirpath}'"
+        )
         return None
 
 
@@ -1424,7 +1452,9 @@ def callables_from_module(module):
     if not mod:
         return {}
     # make sure to only return callables actually defined in this module (not imports)
-    members = getmembers(mod, predicate=lambda obj: callable(obj) and getmodule(obj) == mod)
+    members = getmembers(
+        mod, predicate=lambda obj: callable(obj) and getmodule(obj) == mod
+    )
     return dict((key, val) for key, val in members if not key.startswith("_"))
 
 
@@ -1467,7 +1497,9 @@ def variable_from_module(module, variable=None, default=None):
     else:
         # get all
         result = [
-            val for key, val in mod.__dict__.items() if not (key.startswith("_") or ismodule(val))
+            val
+            for key, val in mod.__dict__.items()
+            if not (key.startswith("_") or ismodule(val))
         ]
 
     if len(result) == 1:
@@ -1585,7 +1617,9 @@ def class_from_module(path, defaultpaths=None, fallback=None):
         if "." in path:
             testpath, clsname = testpath.rsplit(".", 1)
         else:
-            raise ImportError("the path '%s' is not on the form modulepath.Classname." % path)
+            raise ImportError(
+                "the path '%s' is not on the form modulepath.Classname." % path
+            )
 
         try:
             if not importlib.util.find_spec(testpath, package="evennia"):
@@ -1762,12 +1796,17 @@ def group_objects_by_key_and_desc(objects, caller=None, **kwargs):
 
     for obj in objects:
         key_descs[
-            (obj.get_display_name(caller, **kwargs), obj.get_display_desc(caller, **kwargs))
+            (
+                obj.get_display_name(caller, **kwargs),
+                obj.get_display_desc(caller, **kwargs),
+            )
         ].append(obj)
 
     return (
         (
-            objs[0].get_numbered_name(len(objs), caller, return_string=return_string, **kwargs),
+            objs[0].get_numbered_name(
+                len(objs), caller, return_string=return_string, **kwargs
+            ),
             desc,
             objs,
         )
@@ -1962,11 +2001,15 @@ def format_grid(elements, width=78, sep="  ", verbatim_elements=None, line_prefi
         will look strange for a single line.
         """
         wls = [display_len((elem)) for elem in elements]
-        wls_percentile = [wl for iw, wl in enumerate(wls) if iw not in verbatim_elements]
+        wls_percentile = [
+            wl for iw, wl in enumerate(wls) if iw not in verbatim_elements
+        ]
 
         if wls_percentile:
             # get the nth percentile as a good representation of average width
-            averlen = int(percentile(sorted(wls_percentile), 0.9)) + 2  # include extra space
+            averlen = (
+                int(percentile(sorted(wls_percentile), 0.9)) + 2
+            )  # include extra space
             aver_per_row = width // averlen + 1
         else:
             # no adjustable rows, just keep all as-is
@@ -2337,14 +2380,10 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
         checking multimatches for (e.g. Objects or Commands)
 
     """
-    from evennia.utils.multimatch import (
-        apply_multimatch_template,
-        format_multimatch_footer,
-        invalid_other_message,
-        location_hint,
-        multimatch_label,
-        try_autopick,
-    )
+    from evennia.utils.multimatch import (apply_multimatch_template,
+                                          format_multimatch_footer,
+                                          invalid_other_message, location_hint,
+                                          multimatch_label, try_autopick)
 
     if not quiet and len(matches) > 1 and not kwargs.get("_search_had_qualifier"):
         picked = try_autopick(matches, caller)
@@ -2354,7 +2393,9 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
     error = ""
     if not matches:
         # no results.
-        error = kwargs.get("nofound_string") or _("Could not find '{query}'.").format(query=query)
+        error = kwargs.get("nofound_string") or _("Could not find '{query}'.").format(
+            query=query
+        )
         matches = None
     elif len(matches) > 1:
         if kwargs.get("invalid_other"):
@@ -2363,14 +2404,18 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
         if multimatch_string:
             error = "%s\n" % multimatch_string
         elif not error:
-            error = _("More than one match for '{query}' (please narrow target):\n").format(
-                query=query
-            )
+            error = _(
+                "More than one match for '{query}' (please narrow target):\n"
+            ).format(query=query)
 
         # group results by display name to properly disambiguate
         grouped_matches = defaultdict(list)
         for item in matches:
-            item_key = item.get_display_name(caller) if hasattr(item, "get_display_name") else query
+            item_key = (
+                item.get_display_name(caller)
+                if hasattr(item, "get_display_name")
+                else query
+            )
             # the actual searching is case-insensitive, so we force grouping keys to lower
             grouped_matches[item_key.lower()].append((item_key, item))
 
@@ -2381,7 +2426,9 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
                 if hasattr(result.aliases, "all"):
                     aliases = result.aliases.all(return_objs=True)
                     aliases = [
-                        alias.db_key for alias in aliases if alias.db_category != "plural_key"
+                        alias.db_key
+                        for alias in aliases
+                        if alias.db_category != "plural_key"
                     ]
                 else:
                     aliases = getattr(result, "aliases", []) or []
@@ -2396,7 +2443,9 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
                     settings.SEARCH_MULTIMATCH_TEMPLATE,
                     label=label,
                     name=result_key,
-                    aliases=" [{alias}]".format(alias=";".join(aliases)) if aliases else "",
+                    aliases=(
+                        " [{alias}]".format(alias=";".join(aliases)) if aliases else ""
+                    ),
                     info=info,
                     number=num + 1,
                 )
@@ -2491,7 +2540,9 @@ def get_game_dir_path():
                 return gpath
         else:
             os.chdir(os.pardir)
-    raise RuntimeError("server/conf/settings.py not found: Must start from inside game dir.")
+    raise RuntimeError(
+        "server/conf/settings.py not found: Must start from inside game dir."
+    )
 
 
 def get_all_typeclasses(parent=None):
@@ -2762,30 +2813,28 @@ def strip_unsafe_input(txt, session=None, bypass_perms=None):
 
     Args:
         txt (str): The text to clean.
-        session (Session, optional): A Session in order to determine if
-            the check should be bypassed by permission (will be checked
-            with the 'perm' lock, taking permission hierarchies into account).
-        bypass_perms (list, optional): Iterable of permission strings
-            to check for bypassing the strip. If not given, use
-            `settings.INPUT_CLEANUP_BYPASS_PERMISSIONS`.
+        session (Session, optional): Session whose principal may hold a bypass.
+        bypass_perms (list, optional): Iterable of capability identifiers.
 
     Returns:
         str: The cleaned string.
 
     Notes:
-        The `INPUT_CLEANUP_BYPASS_PERMISSIONS` list defines what account
-        permissions are required to bypass this strip.
+        ``INPUT_CLEANUP_BYPASS_CAPABILITIES`` defines explicit bypass authority.
 
     """
     global _STRIP_UNSAFE_TOKENS
     if not _STRIP_UNSAFE_TOKENS:
-        from evennia.utils.ansi import strip_unsafe_tokens as _STRIP_UNSAFE_TOKENS
+        from evennia.utils.ansi import \
+            strip_unsafe_tokens as _STRIP_UNSAFE_TOKENS
 
     if session:
         _puppet = session.get_puppet()
         obj = _puppet if _puppet else session.account
-        bypass_perms = bypass_perms or settings.INPUT_CLEANUP_BYPASS_PERMISSIONS
-        if obj.permissions.check(*bypass_perms):
+        from evennia.authorization.service import has_capability
+
+        bypass_perms = bypass_perms or settings.INPUT_CLEANUP_BYPASS_CAPABILITIES
+        if any(has_capability(obj, capability) for capability in bypass_perms):
             return txt
 
     # remove html codes
@@ -3080,7 +3129,9 @@ def ip_from_request(request, exclude=None) -> str:
         if all(not match_ip(addr, pattern) for pattern in exclude):
             return addr
 
-    logger.log_warn("ip_from_request: No valid IP address found in request. Using remote_addr.")
+    logger.log_warn(
+        "ip_from_request: No valid IP address found in request. Using remote_addr."
+    )
     return remote_addr
 
 

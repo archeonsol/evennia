@@ -493,9 +493,9 @@ PORTAL_SERVICES_PLUGIN_MODULES = ["server.conf.portal_services_plugins"]
 MSSP_META_MODULE = "server.conf.mssp"
 # Module for web plugins.
 WEB_PLUGINS_MODULE = "server.conf.web_plugins"
-# Tuple of modules implementing lock functions. All callable functions
-# inside these modules will be available as lock functions.
-LOCK_FUNC_MODULES = ("evennia.locks.lockfuncs", "server.conf.lockfuncs")
+# Game/plugin registration modules for namespaced capabilities and policies.
+AUTHORIZATION_CAPABILITY_MODULES = ()
+AUTHORIZATION_POLICY_MODULES = ()
 # Module holding handlers for managing incoming data from the client. These
 # will be loaded in order, meaning functions in later modules may overload
 # previous ones if having the same name.
@@ -817,19 +817,7 @@ MAX_NR_SIMULTANEOUS_PUPPETS = 1
 # an account can have (not how many you can puppet at the same time). Set to
 # None for no limit.
 MAX_NR_CHARACTERS = 1
-# The access hierarchy, in climbing order. A higher permission in the
-# hierarchy includes access of all levels below it. Used by the perm()/pperm()
-# lock functions, which accepts both plural and singular (Admin & Admins)
-PERMISSION_HIERARCHY = [
-    "Guest",  # note-only used if GUEST_ENABLED=True
-    "Player",
-    "Helper",
-    "Builder",
-    "Admin",
-    "Developer",
-]
-# The default permission given to all new accounts
-PERMISSION_ACCOUNT_DEFAULT = "Player"
+# Authority is supplied by explicit capability grants, not account defaults.
 # Default sizes for client window (in number of characters), if client
 # is not supplying this on its own
 CLIENT_DEFAULT_WIDTH = 78

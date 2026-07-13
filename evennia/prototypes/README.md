@@ -22,7 +22,7 @@ triggered when the prototype is used to spawn a new instance. Below is an exampl
 
  "prototype_key": "base_goblin",
  "prototype_desc": "A basic goblin",
- "prototype_locks": "edit:all();spawn:all()",
+ "prototype_policies": {"edit": "engine.world.build", "spawn": "public"},
  "prototype_tags": "mobs",
 
 # fixed-meaning keys, modifying the spawned instance. 'typeclass' may be
@@ -109,7 +109,7 @@ prototype key expects.
         variable holding the prototype dict will become the prototype_key if it's not explicitly
         given.
     - `prototype_desc` (str, optional): describes prototype in listings
-    - `prototype_locks` (str, optional): locks for restricting access to this prototype. Locktypes
+    - `prototype_policies` (dict, optional): typed edit/spawn authorization declarations.
         supported are 'edit' and 'use'.
     - `prototype_tags` (list, optional): List of tags or tuples (tag, category) used to group prototype
         in listings
@@ -137,8 +137,7 @@ prototype key expects.
         `(tagstr, category)`. Plain strings will be result in tags with no category (default tags).
     - `attrs` (tuple or list, optional): tuple or list of tuples of Attributes to add. This
         form allows more complex Attributes to be set. Tuples at least specify `(key, value)`
-        but can also specify up to `(key, value, category, lockstring)`. If you want to specify a
-        lockstring but not a category, set the category to `None`.
+        and may specify an optional category as a third item. Per-attribute locks are unsupported.
     - `ndb_<name>` (any): value of a nattribute (`ndb_` is stripped). This is usually not useful to
 	put in a prototype unless the NAttribute is used immediately upon spawning.
     - `other` (any): any other name is interpreted as the key of an Attribute with

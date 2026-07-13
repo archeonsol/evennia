@@ -6,6 +6,7 @@ Re-exported via `objects.py` for full backward compatibility.
 
 from django.utils.translation import gettext as _
 
+from evennia.authorization.policy import Always, Never
 from evennia.objects.object import DefaultObject
 from evennia.utils import create, logger
 
@@ -19,6 +20,13 @@ class DefaultRoom(DefaultObject):
     # A tuple of strings used for indexing this object inside an inventory.
     # Generally, a room isn't expected to HAVE a location, but maybe in some games?
     _content_types = ("room",)
+    authorization_policies = {
+        **DefaultObject.authorization_policies,
+        "get": Never(),
+        "puppet": Never(),
+        "teleport": Never(),
+        "teleport_here": Always(),
+    }
 
     # Used by get_display_desc when self.db.desc is None
     default_description = _("This is a room.")
@@ -74,18 +82,9 @@ class DefaultRoom(DefaultObject):
         # Get description, if provided
         description = kwargs.pop("description", "")
 
-        # get locks if provided
-        locks = kwargs.pop("locks", "")
-
         try:
             # Create the Room
             obj = create.create_object(**kwargs)
-
-            # Add locks
-            if not locks:
-                locks = cls.get_default_lockstring(account=account, caller=caller, room=obj)
-            if locks:
-                obj.locks.add(locks)
 
             # Record creator id and creation IP
             if ip:
@@ -110,7 +109,4 @@ class DefaultRoom(DefaultObject):
         """
 
         super().basetype_setup()
-        self.locks.add(
-            ";".join(["get:false()", "puppet:false()", "teleport:false()", "teleport_here:true()"])
-        )  # would be weird to puppet a room ...
         self.location = None

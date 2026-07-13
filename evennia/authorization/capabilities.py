@@ -30,7 +30,9 @@ def normalize_capability(value: str) -> str:
 
     key = str(value or "").strip().lower()
     if len(key) > 128 or not _CAPABILITY_RE.fullmatch(key):
-        raise InvalidCapability(f"capability {value!r} must be a lowercase three-part namespace")
+        raise InvalidCapability(
+            f"capability {value!r} must be a lowercase three-part namespace"
+        )
     return key
 
 
@@ -103,18 +105,6 @@ class CapabilityRegistry:
         """Return a definition or fail closed for an unknown reference."""
 
         normalized = normalize_capability(key)
-        # The finite R3E compiler must preserve arbitrary historical permission
-        # tags (many games used command names as permissions). Quarantine this
-        # compatibility wildcard to the legacy namespace; R3F deletes it with
-        # the permission hierarchy and requires explicit definitions everywhere.
-        if normalized.startswith("legacy.permission.") and normalized not in self._definitions:
-            self.register(
-                CapabilityDefinition(
-                    normalized,
-                    description="Generated compatibility capability for R3 migration",
-                    delegable=False,
-                )
-            )
         try:
             return self._definitions[normalized]
         except KeyError as err:
@@ -181,9 +171,18 @@ def _register_engine_defaults() -> None:
         "engine.exit.traverse": (True, False),
         "engine.character.puppet": (False, True),
         "engine.command.execute": (True, False),
+        "engine.world.build": (True, True),
+        "engine.help.manage": (True, False),
+        "engine.moderation.manage": (False, True),
+        "engine.runtime.manage": (False, True),
+        "engine.channel.banned": (False, False),
+        "engine.message.banned": (False, False),
         "engine.channel.listen": (True, False),
         "engine.channel.send": (True, False),
         "engine.channel.control": (False, True),
+        "engine.message.read": (True, False),
+        "engine.message.edit": (True, False),
+        "engine.message.delete": (False, True),
         "engine.help.read": (True, False),
         "engine.script.control": (False, True),
         "engine.system.inspect": (False, True),
@@ -192,14 +191,10 @@ def _register_engine_defaults() -> None:
         capability_registry.register(
             CapabilityDefinition(key, delegable=delegable, sensitive=sensitive)
         )
-    for legacy in ("guest", "player", "helper", "builder", "admin", "developer"):
-        capability_registry.register(
-            CapabilityDefinition(f"legacy.permission.{legacy}", delegable=False)
-        )
-
     capability_registry.register_bundle(
         "world_builder",
         (
+            "engine.world.build",
             "engine.object.view",
             "engine.object.edit",
             "engine.object.move",
@@ -208,7 +203,35 @@ def _register_engine_defaults() -> None:
     )
     capability_registry.register_bundle(
         "moderator",
-        ("engine.channel.listen", "engine.channel.send", "engine.channel.control"),
+        (
+            "engine.moderation.manage",
+            "engine.channel.listen",
+            "engine.channel.send",
+            "engine.channel.control",
+        ),
+    )
+    capability_registry.register_bundle(
+        "runtime_operator",
+        (
+            "engine.runtime.manage",
+            "engine.moderation.manage",
+            "engine.world.build",
+            "engine.object.view",
+            "engine.object.edit",
+            "engine.object.delete",
+            "engine.object.control",
+            "engine.object.move",
+            "engine.object.examine",
+            "engine.object.teleport",
+            "engine.object.teleport_here",
+            "engine.object.tell",
+            "engine.object.boot",
+            "engine.channel.listen",
+            "engine.channel.send",
+            "engine.channel.control",
+            "engine.script.control",
+            "engine.system.inspect",
+        ),
     )
 
 

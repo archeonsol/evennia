@@ -23,9 +23,7 @@ from codecs import lookup as codecs_lookup
 from django.conf import settings
 
 import evennia
-from evennia.commands.cmd_access_cache import invalidate_caller_access
 from evennia.commands.command import AccountCommand
-from evennia.commands.signals import permissions_changed
 from evennia.utils import create, logger, search, utils
 
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
@@ -63,9 +61,9 @@ class MuxAccountLookCommand(AccountCommand):
         playable = self.account.characters
         # store playable property
         if self.args:
-            self.playable = dict((utils.to_str(char.key.lower()), char) for char in playable).get(
-                self.args.lower(), None
-            )
+            self.playable = dict(
+                (utils.to_str(char.key.lower()), char) for char in playable
+            ).get(self.args.lower(), None)
         else:
             self.playable = playable
 
@@ -94,7 +92,7 @@ class CmdOOCLook(MuxAccountLookCommand):
 
     key = "@look"
     aliases = ["@l", "@ls"]
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "General"
 
     # this is used by the parent
@@ -108,9 +106,15 @@ class CmdOOCLook(MuxAccountLookCommand):
             self.msg("You currently have no ability to look around.")
             return
 
-        if settings.AUTO_PUPPET_ON_LOGIN and settings.MAX_NR_CHARACTERS == 1 and self.playable:
+        if (
+            settings.AUTO_PUPPET_ON_LOGIN
+            and settings.MAX_NR_CHARACTERS == 1
+            and self.playable
+        ):
             # only one exists and is allowed - simplify
-            self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
+            self.msg(
+                "You are out-of-character (OOC).\nUse |w@ic|n to get back into the game."
+            )
             return
 
         # call on-account look helper method
@@ -131,7 +135,7 @@ class CmdCharCreate(AccountCommand):
     """
 
     key = "@charcreate"
-    locks = "cmd:pperm(Player)"
+    authorization = "public"
     help_category = "General"
 
     # this is used by the parent
@@ -171,7 +175,7 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
     """
 
     key = "@chardelete"
-    locks = "cmd:pperm(Player)"
+    authorization = "public"
     help_category = "General"
 
     def func(self):
@@ -223,9 +227,7 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
                 self.msg("You do not have permission to delete this character.")
                 return
 
-            prompt = (
-                "|rThis will permanently destroy '%s'. This cannot be undone.|n Continue yes/[no]?"
-            )
+            prompt = "|rThis will permanently destroy '%s'. This cannot be undone.|n Continue yes/[no]?"
             get_input(account, prompt % match.key, _callback)
 
 
@@ -249,7 +251,7 @@ class CmdIC(AccountCommand):
 
     key = "@ic"
     # lock must be all() for different puppeted objects to access it.
-    locks = "cmd:all()"
+    authorization = "public"
     aliases = "@puppet"
     help_category = "General"
 
@@ -266,7 +268,9 @@ class CmdIC(AccountCommand):
         character_candidates = []
 
         if not self.args:
-            character_candidates = [account.db._last_puppet] if account.db._last_puppet else []
+            character_candidates = (
+                [account.db._last_puppet] if account.db._last_puppet else []
+            )
             if not character_candidates:
                 self.msg("Usage: @ic <character>")
                 return
@@ -286,7 +290,9 @@ class CmdIC(AccountCommand):
                     )
                 )
 
-            if account.locks.check_lockstring(account, "perm(Builder)"):
+            from evennia.authorization.service import has_capability
+
+            if has_capability(account, "engine.world.build"):
                 # builders and higher should be able to puppet more than their
                 # playable characters.
                 _session_puppet = session.get_puppet()
@@ -332,7 +338,9 @@ class CmdIC(AccountCommand):
         if len(character_candidates) > 1:
             self.msg(
                 "Multiple targets with the same name:\n %s"
-                % ", ".join("%s(#%s)" % (obj.key, obj.id) for obj in character_candidates)
+                % ", ".join(
+                    "%s(#%s)" % (obj.key, obj.id) for obj in character_candidates
+                )
             )
             return
         else:
@@ -369,7 +377,7 @@ class CmdOOC(MuxAccountLookCommand):
     """
 
     key = "@ooc"
-    locks = "cmd:pperm(Player)"
+    authorization = "public"
     aliases = "@unpuppet"
     help_category = "General"
 
@@ -394,9 +402,15 @@ class CmdOOC(MuxAccountLookCommand):
             account.unpuppet_object(session)
             self.msg("\n|GYou go OOC.|n\n")
 
-            if settings.AUTO_PUPPET_ON_LOGIN and settings.MAX_NR_CHARACTERS == 1 and self.playable:
+            if (
+                settings.AUTO_PUPPET_ON_LOGIN
+                and settings.MAX_NR_CHARACTERS == 1
+                and self.playable
+            ):
                 # only one character exists and is allowed - simplify
-                self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
+                self.msg(
+                    "You are out-of-character (OOC).\nUse |w@ic|n to get back into the game."
+                )
                 return
 
             self.msg(account.at_look(target=self.playable, session=session))
@@ -417,7 +431,7 @@ class CmdSessions(AccountCommand):
     """
 
     key = "@sessions"
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "General"
 
     # this is used by the parent
@@ -455,7 +469,7 @@ class CmdWho(AccountCommand):
 
     key = "@who"
     aliases = "@doing"
-    locks = "cmd:all()"
+    authorization = "public"
 
     # this is used by the parent
 
@@ -471,9 +485,7 @@ class CmdWho(AccountCommand):
         if self.cmdstring == "@doing":
             show_session_data = False
         else:
-            show_session_data = account.check_permstring("Developer") or account.check_permstring(
-                "Admins"
-            )
+            show_session_data = account.has_capability("engine.runtime.manage")
 
         naccounts = evennia.SESSION_HANDLER.account_count()
         if show_session_data:
@@ -500,11 +512,15 @@ class CmdWho(AccountCommand):
                     utils.crop(session_account.get_display_name(account), width=25),
                     utils.time_format(delta_conn, 0),
                     utils.time_format(delta_cmd, 1),
-                    utils.crop(puppet.get_display_name(account) if puppet else "None", width=25),
+                    utils.crop(
+                        puppet.get_display_name(account) if puppet else "None", width=25
+                    ),
                     utils.crop(location, width=25),
                     session.cmd_total,
                     session.protocol_key,
-                    isinstance(session.address, tuple) and session.address[0] or session.address,
+                    isinstance(session.address, tuple)
+                    and session.address[0]
+                    or session.address,
                 )
         else:
             # unprivileged
@@ -548,7 +564,7 @@ class CmdOption(AccountCommand):
     key = "@option"
     aliases = "@options"
     switch_options = ("save", "clear")
-    locks = "cmd:all()"
+    authorization = "public"
 
     # this is used by the parent
 
@@ -575,7 +591,9 @@ class CmdOption(AccountCommand):
                 self.msg("|gCleared all saved options.")
 
             options = dict(flags)  # make a copy of the flag dict
-            saved_options = dict(self.caller.attributes.get("_saved_protocol_flags", default={}))
+            saved_options = dict(
+                self.caller.attributes.get("_saved_protocol_flags", default={})
+            )
 
             if "SCREENWIDTH" in options:
                 if len(options["SCREENWIDTH"]) == 1:
@@ -602,7 +620,9 @@ class CmdOption(AccountCommand):
                 if saved_options:
                     saved = " |YYes|n" if key in saved_options else ""
                     changed = (
-                        "|y*|n" if key in saved_options and flags[key] != saved_options[key] else ""
+                        "|y*|n"
+                        if key in saved_options and flags[key] != saved_options[key]
+                        else ""
                     )
                     row.append("%s%s" % (saved, changed))
                 table.add_row(*row)
@@ -689,7 +709,9 @@ class CmdOption(AccountCommand):
             # a valid setting
             if "save" in self.switches:
                 # save this option only
-                saved_options = self.account.attributes.get("_saved_protocol_flags", default={})
+                saved_options = self.account.attributes.get(
+                    "_saved_protocol_flags", default={}
+                )
                 saved_options.update(optiondict)
                 self.account.attributes.add("_saved_protocol_flags", saved_options)
                 for key in optiondict:
@@ -697,7 +719,9 @@ class CmdOption(AccountCommand):
             if "clear" in self.switches:
                 # clear this save
                 for key in optiondict:
-                    self.account.attributes.get("_saved_protocol_flags", {}).pop(key, None)
+                    self.account.attributes.get("_saved_protocol_flags", {}).pop(
+                        key, None
+                    )
                     self.msg(f"|gCleared saved {key}.")
             self.session.update_flags(**optiondict)
 
@@ -713,7 +737,7 @@ class CmdPassword(AccountCommand):
     """
 
     key = "@password"
-    locks = "cmd:pperm(Player)"
+    authorization = "public"
 
     # this is used by the parent
 
@@ -761,7 +785,7 @@ class CmdQuit(AccountCommand):
 
     key = "@quit"
     switch_options = ("all",)
-    locks = "cmd:all()"
+    authorization = "public"
 
     # this is used by the parent
 
@@ -771,7 +795,8 @@ class CmdQuit(AccountCommand):
 
         if "all" in self.switches:
             account.msg(
-                "|RQuitting|n all sessions. Hope to see you soon again.", session=self.session
+                "|RQuitting|n all sessions. Hope to see you soon again.",
+                session=self.session,
             )
             reason = "quit/all"
             for session in account.sessions.all():
@@ -780,7 +805,10 @@ class CmdQuit(AccountCommand):
             nsess = len(account.sessions.all())
             reason = "quit"
             if nsess == 2:
-                account.msg("|RQuitting|n. One session is still connected.", session=self.session)
+                account.msg(
+                    "|RQuitting|n. One session is still connected.",
+                    session=self.session,
+                )
             elif nsess > 2:
                 account.msg(
                     "|RQuitting|n. %i sessions are still connected." % (nsess - 1),
@@ -788,7 +816,9 @@ class CmdQuit(AccountCommand):
                 )
             else:
                 # we are quitting the last available session
-                account.msg("|RQuitting|n. Hope to see you again, soon.", session=self.session)
+                account.msg(
+                    "|RQuitting|n. Hope to see you again, soon.", session=self.session
+                )
             account.disconnect_session_from_account(self.session, reason)
 
 
@@ -807,7 +837,7 @@ class CmdColorTest(AccountCommand):
     """
 
     key = "@color"
-    locks = "cmd:all()"
+    authorization = "public"
     help_category = "General"
 
     # this is used by the parent
@@ -848,9 +878,7 @@ class CmdColorTest(AccountCommand):
         if g > 255:
             g = 510 - g
 
-        return (
-            f"#{hex(round(r))[2:].zfill(2)}{hex(round(g))[2:].zfill(2)}{hex(round(b))[2:].zfill(2)}"
-        )
+        return f"#{hex(round(r))[2:].zfill(2)}{hex(round(g))[2:].zfill(2)}{hex(round(b))[2:].zfill(2)}"
 
     def func(self):
         """Show color tables"""
@@ -871,11 +899,13 @@ class CmdColorTest(AccountCommand):
                 for code, _ in ap.ansi_map[self.slice_dark_fg]
             ]
             dark_bg = [
-                "%s%s|n" % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
+                "%s%s|n"
+                % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
                 for code, _ in ap.ansi_map[self.slice_dark_bg]
             ]
             bright_bg = [
-                "%s%s|n" % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
+                "%s%s|n"
+                % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
                 for code, _ in ap.ansi_xterm256_bright_bg_map[self.slice_bright_bg]
             ]
             dark_fg.extend(["" for _ in range(len(bright_fg) - len(dark_fg))])
@@ -897,11 +927,21 @@ class CmdColorTest(AccountCommand):
                 for ig in range(6):
                     for ib in range(6):
                         # foreground table
-                        table[ir].append("|%i%i%i%s|n" % (ir, ig, ib, "||%i%i%i" % (ir, ig, ib)))
+                        table[ir].append(
+                            "|%i%i%i%s|n" % (ir, ig, ib, "||%i%i%i" % (ir, ig, ib))
+                        )
                         # background table
                         table[6 + ir].append(
                             "|%i%i%i|[%i%i%i%s|n"
-                            % (5 - ir, 5 - ig, 5 - ib, ir, ig, ib, "||[%i%i%i" % (ir, ig, ib))
+                            % (
+                                5 - ir,
+                                5 - ig,
+                                5 - ib,
+                                ir,
+                                ig,
+                                ib,
+                                "||[%i%i%i" % (ir, ig, ib),
+                            )
                         )
             table = self.table_format(table)
             string = (
@@ -915,7 +955,9 @@ class CmdColorTest(AccountCommand):
                     letter = chr(97 + (ibatch * 6 + igray))
                     inverse = chr(122 - (ibatch * 6 + igray))
                     table[0 + igray].append("|=%s%s |n" % (letter, "||=%s" % letter))
-                    table[6 + igray].append("|=%s|[=%s%s |n" % (inverse, letter, "||[=%s" % letter))
+                    table[6 + igray].append(
+                        "|=%s|[=%s%s |n" % (inverse, letter, "||[=%s" % letter)
+                    )
             for igray in range(6):
                 # the last row (y, z) has empty columns
                 if igray < 2:
@@ -941,7 +983,8 @@ class CmdColorTest(AccountCommand):
             display_width = self.client_width()
             num_colors = display_width * 1
             color_block = [
-                f"|[{self.make_hex_color_from_column(i, num_colors)} " for i in range(num_colors)
+                f"|[{self.make_hex_color_from_column(i, num_colors)} "
+                for i in range(num_colors)
             ]
             color_block = [
                 "".join(color_block[iline : iline + display_width])
@@ -980,71 +1023,56 @@ class CmdQuell(AccountCommand):
 
     key = "@quell"
     aliases = ["@unquell"]
-    locks = "cmd:pperm(Player)"
+    authorization = "public"
     help_category = "General"
 
     # this is used by the parent
 
-    def _recache_locks(self, account):
-        """Helper method to reset the lockhandler on an already puppeted object"""
+    def _invalidate_authority(self, account):
+        """Invalidate grant snapshots for the account and active puppet."""
         if self.session:
             char = self.session.get_puppet()
             if char:
-                # we are already puppeting an object. We need to reset
-                # the lock caches (otherwise the superuser status change
-                # won't be visible until repuppet)
-                char.locks.reset()
-        account.locks.reset()
+                from evennia.authorization.storage import (
+                    bump_principal_generation, principal_refs)
+
+                for principal_ref in principal_refs(char):
+                    bump_principal_generation(principal_ref)
+        from evennia.authorization.storage import (bump_principal_generation,
+                                                   principal_refs)
+
+        for principal_ref in principal_refs(account):
+            bump_principal_generation(principal_ref)
 
     def func(self):
         """Perform the command"""
         account = self.account
-        permstr = (
-            account.is_superuser and "(superuser)" or "(%s)" % ", ".join(account.permissions.all())
-        )
         mutated = False
         if self.cmdstring == "@unquell":
             if not account.attributes.get("_quell"):
-                self.msg(f"Already using normal Account permissions {permstr}.")
+                self.msg("Account capability grants are already active.")
             else:
                 account.attributes.remove("_quell")
-                self.msg(f"Account permissions {permstr} restored.")
+                self.msg("Account capability grants restored.")
                 mutated = True
         else:
             if account.attributes.get("_quell"):
-                self.msg(f"Already quelling Account {permstr} permissions.")
+                self.msg("Account capability grants are already suppressed.")
                 return
             account.attributes.add("_quell", True)
             mutated = True
             puppet = self.session.get_puppet() if self.session else None
             if puppet:
-                cpermstr = "(%s)" % ", ".join(puppet.permissions.all())
-                cpermstr = f"Quelling to current puppet's permissions {cpermstr}."
-                cpermstr += (
-                    f"\n(Note: If this is higher than Account permissions {permstr},"
-                    " the lowest of the two will be used.)"
+                self.msg(
+                    "Account grants suppressed; object-scoped puppet grants remain active. "
+                    "Use @unquell to restore account grants."
                 )
-                cpermstr += "\nUse @unquell to return to normal permission usage."
-                self.msg(cpermstr)
             else:
-                self.msg(f"Quelling Account permissions {permstr}. Use @unquell to get them back.")
-        self._recache_locks(account)
-
-        # Quell flips the effective permission stack without changing the
-        # raw permission list. Invalidate engine access caches for the
-        # account *and* the active puppet so character-level access
-        # checks see the new effective perms, then fire the signal.
+                self.msg(
+                    "Account capability grants suppressed. Use @unquell to restore them."
+                )
         if mutated:
-            puppet = self.session.get_puppet() if self.session else None
-            invalidate_caller_access(account, puppet)
-            permissions_changed.send_robust(
-                sender=type(self),
-                target=account,
-                added=(),
-                removed=(),
-                actor=self.caller,
-                account_mode=True,
-            )
+            self._invalidate_authority(account)
 
 
 class CmdStyle(COMMAND_DEFAULT_CLASS):
@@ -1074,7 +1102,10 @@ class CmdStyle(COMMAND_DEFAULT_CLASS):
         for op_key in self.account.options.options_dict.keys():
             op_found = self.account.options.get(op_key, return_obj=True)
             table.add_row(
-                op_key, op_found.description, op_found.__class__.__name__, op_found.display()
+                op_key,
+                op_found.description,
+                op_found.__class__.__name__,
+                op_found.display(),
             )
         self.msg(str(table))
 

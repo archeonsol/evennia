@@ -171,13 +171,17 @@ class ScriptDBManager(TypedObjectManager):
         # not a dbref; normal search
         obj_restriction = obj and Q(db_obj=obj) or Q()
         typeclass_restriction = typeclass and Q(db_typeclass_path=typeclass) or Q()
-        scripts = self.filter(obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring))
+        scripts = self.filter(
+            obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring)
+        )
         return scripts
 
     # back-compatibility alias
     script_search = search_script
 
-    def copy_script(self, original_script, new_key=None, new_obj=None, new_locks=None):
+    def copy_script(
+        self, original_script, new_key=None, new_obj=None, new_policies=None
+    ):
         """
         Make an identical copy of the original_script.
 
@@ -185,8 +189,7 @@ class ScriptDBManager(TypedObjectManager):
             original_script (Script): The Script to copy.
             new_key (str, optional): Rename the copy.
             new_obj (Object, optional): Place copy on different Object.
-            new_locks (str, optional): Give copy different locks from
-                the original.
+            new_policies (dict, optional): Override copied typed policies.
 
         Returns:
             script_copy (Script): A new Script instance, copied from
@@ -195,11 +198,15 @@ class ScriptDBManager(TypedObjectManager):
         typeclass = original_script.typeclass_path
         new_key = new_key if new_key is not None else original_script.key
         new_obj = new_obj if new_obj is not None else original_script.obj
-        new_locks = new_locks if new_locks is not None else original_script.db_lock_storage
+        new_policies = (
+            new_policies if new_policies is not None else original_script.policies.all()
+        )
 
         from evennia.utils import create
 
-        new_script = create.create_script(typeclass, key=new_key, obj=new_obj, locks=new_locks)
+        new_script = create.create_script(
+            typeclass, key=new_key, obj=new_obj, policies=new_policies
+        )
         return new_script
 
     def create_script(
@@ -208,7 +215,7 @@ class ScriptDBManager(TypedObjectManager):
         key=None,
         obj=None,
         account=None,
-        locks=None,
+        policies=None,
         persistent=None,
         report_to=None,
         desc=None,
@@ -229,7 +236,7 @@ class ScriptDBManager(TypedObjectManager):
                 is `None`, we are creating a "global" script.
             account (Account): The account on which this Script sits. It is
                 exclusiv to `obj`.
-            locks (str): one or more lockstrings, separated by semicolons.
+            policies (dict): Typed operation policies.
             persistent (bool): If this Script survives a server shutdown
                 or not (all Scripts will survive a reload).
             report_to (Object): The object to return error messages to.
@@ -279,7 +286,7 @@ class ScriptDBManager(TypedObjectManager):
             key=key,
             obj=obj,
             account=account,
-            locks=locks,
+            policies=dict(policies or {}),
             persistent=persistent,
             report_to=report_to,
             desc=desc,

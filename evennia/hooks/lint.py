@@ -116,7 +116,6 @@ def _has_inherited_spec(cls, name):
 # module-walk during lint.
 _AUX_HANDLER_PATHS = (
     "evennia.commands.cmdsethandler:CmdSetHandler",
-    "evennia.locks.lockhandler:LockHandler",
     "evennia.server.serversession:ServerSession",
     "evennia.server.service:EvenniaServerService",
 )

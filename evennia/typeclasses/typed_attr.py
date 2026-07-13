@@ -130,9 +130,13 @@ class AttrField:
                 f"Bag field '{name}' expected {self.type_.__name__}, got {type(value).__name__}."
             )
         if self.min is not None and value < self.min:
-            raise ValueError(f"Bag field '{name}' value {value!r} is below minimum {self.min}.")
+            raise ValueError(
+                f"Bag field '{name}' value {value!r} is below minimum {self.min}."
+            )
         if self.max is not None and value > self.max:
-            raise ValueError(f"Bag field '{name}' value {value!r} exceeds maximum {self.max}.")
+            raise ValueError(
+                f"Bag field '{name}' value {value!r} exceeds maximum {self.max}."
+            )
         if self.choices is not None and value not in self.choices:
             raise ValueError(
                 f"Bag field '{name}' value {value!r} is not in choices {self.choices!r}."
@@ -367,7 +371,9 @@ class TypedAttr:
         self.max = max
         self.choices = choices
         self.autocreate = autocreate
-        self.lockstring = lockstring
+        if lockstring:
+            raise ValueError("typed attributes no longer accept lockstrings")
+        self.lockstring = ""
         self.strattr = strattr
         self.attr_key = ""  # populated by __set_name__
 
@@ -515,7 +521,9 @@ class TypedAttr:
         )
 
     def __delete__(self, instance):
-        getattr(instance, self._attrhandler_name).remove(key=self.attr_key, category=self.category)
+        getattr(instance, self._attrhandler_name).remove(
+            key=self.attr_key, category=self.category
+        )
 
     # ------------------------------------------------------------------
     # Query helper
@@ -655,7 +663,9 @@ def apply_schema_migrations(obj):
         return
 
     migrations = getattr(obj.__class__, "_attr_migrations", {})
-    stored = obj.attributes.get(_SCHEMA_VERSION_KEY, category=_SCHEMA_VERSION_CATEGORY) or 0
+    stored = (
+        obj.attributes.get(_SCHEMA_VERSION_KEY, category=_SCHEMA_VERSION_CATEGORY) or 0
+    )
 
     if stored >= declared:
         return

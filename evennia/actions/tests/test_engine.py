@@ -27,9 +27,8 @@ engine_mod = sys.modules["evennia.actions.engine"]
 from evennia.actions.actor import Actor
 from evennia.actions.context import ActionContext
 from evennia.actions.exceptions import ActionError
-from evennia.actions.predicate import Builder, HasTag
+from evennia.actions.predicate import HasCapability, HasTag
 from evennia.actions.result import CLAIM, FAIL, PASS, REDIRECT
-from evennia.locks import lockhandler
 from evennia.utils import logger
 
 
@@ -62,6 +61,7 @@ def _actor(perms=(), tags_has=None):
         account=None,
         ndb=SimpleNamespace(),
     )
+    eff.has_capability = lambda key, **kwargs: key in set(perms)
     if tags_has is not None:
         eff.tags = SimpleNamespace(has=tags_has)
     eff.msg = lambda text, **kw: msgs.append(text)
@@ -84,7 +84,9 @@ def _sync(d):
         # dispatch/engine are now `async def`; run the coroutine to a Deferred.
         d = ensureDeferred(d)
     out = {}
-    d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
+    d.addCallbacks(
+        lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f)
+    )
     if "fail" in out:
         out["fail"].raiseException()
     if "result" not in out:
@@ -180,7 +182,7 @@ class StaffOnly:
     def __init__(self, fired):
         self.fired = fired
 
-    @rule(Kick, phase="carry_out", requires=Builder)
+    @rule(Kick, phase="carry_out", requires=HasCapability("engine.world.build"))
     def staff_work(self, action, actor):
         self.fired.append("staff_work")
         return PASS
@@ -383,13 +385,18 @@ class TestRequiresGate(unittest.TestCase):
 
     def test_requires_true_runs_body(self):
         fired = []
-        _sync(ENGINE.dispatch(Kick(), _actor(perms=["Builder"]), _ctx(StaffOnly(fired))))
+        _sync(
+            ENGINE.dispatch(
+                Kick(), _actor(perms=["engine.world.build"]), _ctx(StaffOnly(fired))
+            )
+        )
         self.assertEqual(fired, ["staff_work"])
 
-    def test_capability_predicate_does_not_parse_lockstrings(self):
-        with mock.patch.object(lockhandler, "check_lockstring") as chk:
-            _sync(ENGINE.dispatch(Kick(), _actor(perms=["Builder"]), _ctx(StaffOnly([]))))
-        self.assertEqual(chk.call_count, 0)
+    def test_capability_predicate_uses_structured_facade(self):
+        actor = _actor(perms=["engine.world.build"])
+        actor.effective.has_capability = mock.Mock(return_value=True)
+        _sync(ENGINE.dispatch(Kick(), actor, _ctx(StaffOnly([]))))
+        actor.effective.has_capability.assert_called_once_with("engine.world.build")
 
 
 class TestPerDispatchMemo(unittest.TestCase):
@@ -406,13 +413,20 @@ class TestDryRunAndExplain(unittest.TestCase):
     def test_dry_run_skips_bodies_but_evaluates_requires(self):
         fired = []
         trace = _sync(
-            ENGINE.dispatch(Kick(), _actor(perms=["Builder"]), _ctx(StaffOnly(fired)), dry_run=True)
+            ENGINE.dispatch(
+                Kick(),
+                _actor(perms=["engine.world.build"]),
+                _ctx(StaffOnly(fired)),
+                dry_run=True,
+            )
         )
         self.assertEqual(fired, [])  # body skipped
         self.assertTrue(any(pt.result.is_pass for pt in trace.phases))
 
     def test_dry_run_requires_false_still_skips(self):
-        trace = _sync(ENGINE.dispatch(Kick(), _actor(perms=[]), _ctx(StaffOnly([])), dry_run=True))
+        trace = _sync(
+            ENGINE.dispatch(Kick(), _actor(perms=[]), _ctx(StaffOnly([])), dry_run=True)
+        )
         self.assertTrue(any(pt.result.is_skip for pt in trace.phases))
 
     def test_explain_returns_full_trace_all_phases(self):
@@ -484,7 +498,9 @@ class TestInteractiveRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_deferred)
+        return mock.patch.object(
+            engine_mod, "_get_input_future", side_effect=fake_deferred
+        )
 
     def test_interactive_resumes_with_input_and_claim_stops_phase(self):
         fired = []
@@ -502,7 +518,9 @@ class TestInteractiveRule(unittest.TestCase):
 
     def test_numeric_yield_pauses_via_sleep(self):
         fired = []
-        with mock.patch.object(engine_mod, "_sleep", return_value=succeed(None)) as slept:
+        with mock.patch.object(
+            engine_mod, "_sleep", return_value=succeed(None)
+        ) as slept:
             _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Waiter(fired))))
         self.assertEqual(fired, ["before_wait", "after_wait"])
         slept.assert_called_once_with(5)
@@ -533,7 +551,9 @@ class TestMenuPromptRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_deferred)
+        return mock.patch.object(
+            engine_mod, "_get_input_future", side_effect=fake_deferred
+        )
 
     def test_menu_prompt_resumes_with_numeric_choice(self):
         fired = []

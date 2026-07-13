@@ -35,8 +35,7 @@ from evennia.objects.character import DefaultCharacter
 from ..action import action
 from ..menus import ask_yes_no
 from ..muxargs import ArgAction
-from ..predicate import Builder as BuilderCap
-from ..predicate import Developer as DeveloperCap
+from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
 
@@ -99,7 +98,9 @@ def _coll_date_func(task):
     return t_comp_date, t_func_mem_ref
 
 
-def _make_task_action(caller, task_id, t_comp_date, t_func_mem_ref, task_action, action_request):
+def _make_task_action(
+    caller, task_id, t_comp_date, t_func_mem_ref, task_action, action_request
+):
     """Build the confirmed-action callback for a single-task ``@tasks`` request.
 
     Closure-based (no state on the shared provider instance): re-verifies the
@@ -128,7 +129,7 @@ def _make_task_action(caller, task_id, t_comp_date, t_func_mem_ref, task_action,
 class PyRules:
     """Baseline ``@py`` rule; composable into both character and account shells."""
 
-    @rule(Py, phase="carry_out", requires=DeveloperCap)
+    @rule(Py, phase="carry_out", requires=HasCapability("engine.runtime.manage"))
     def carry_out_py(self, action, actor):
         if self is not getattr(actor, "effective", None):
             return SKIP
@@ -141,7 +142,8 @@ class PyRules:
             # StateProvider, so it works on the dispatch path). Reuse the stock
             # module-level load/save/quit funcs - they are picklable, which the
             # persistent editor requires.
-            from evennia.commands.default.system import _py_code, _py_load, _py_quit
+            from evennia.commands.default.system import (_py_code, _py_load,
+                                                         _py_quit)
             from evennia.utils.eveditor import EvEditor
 
             caller.db._py_measure_time = "time" in switches
@@ -182,12 +184,10 @@ class PyRules:
         from evennia.commands.default.system import EvenniaPythonConsole
 
         console = EvenniaPythonConsole(caller)
-        banner = (
-            "|gEvennia Interactive Python mode{echomode}\nPython {version} on {platform}".format(
-                echomode=" (no echoing of prompts)" if noecho else "",
-                version=sys.version,
-                platform=sys.platform,
-            )
+        banner = "|gEvennia Interactive Python mode{echomode}\nPython {version} on {platform}".format(
+            echomode=" (no echoing of prompts)" if noecho else "",
+            version=sys.version,
+            platform=sys.platform,
         )
         caller.msg(banner)
         line = ""
@@ -216,7 +216,7 @@ class CharacterSystemRules(PyRules):
 
     # --- @systems ----------------------------------------------------------------
 
-    @rule(Systems, phase="carry_out", requires=BuilderCap)
+    @rule(Systems, phase="carry_out", requires=HasCapability("engine.system.inspect"))
     def carry_out_systems(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -229,10 +229,14 @@ class CharacterSystemRules(PyRules):
         if not registered:
             caller.msg("No systems are registered with the scheduler.")
             return CLAIM
-        table = EvTable("system", "cadence", "scope", "last fired", "fires", "in flight")
+        table = EvTable(
+            "system", "cadence", "scope", "last fired", "fires", "in flight"
+        )
         for system in registered:
             if system.last_run:
-                last_fired = datetime_format(datetime.datetime.fromtimestamp(system.last_run))
+                last_fired = datetime_format(
+                    datetime.datetime.fromtimestamp(system.last_run)
+                )
             else:
                 last_fired = "-"
             table.add_row(
@@ -248,7 +252,7 @@ class CharacterSystemRules(PyRules):
 
     # --- @tasks ------------------------------------------------------------------
 
-    @rule(Tasks, phase="carry_out", requires=DeveloperCap)
+    @rule(Tasks, phase="carry_out", requires=HasCapability("engine.runtime.manage"))
     def carry_out_tasks(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -340,8 +344,12 @@ class CharacterSystemRules(PyRules):
                 switch_action = getattr(task, action_request, False)
                 if switch_action:
                     action_return = switch_action()
-                    caller.msg(f"Task action {action_request} completed on task ID {task_id}.")
-                    caller.msg(f"The task function {action_request} returned: {action_return}")
+                    caller.msg(
+                        f"Task action {action_request} completed on task ID {task_id}."
+                    )
+                    caller.msg(
+                        f"The task function {action_request} returned: {action_return}"
+                    )
 
             if not name_match_found:
                 caller.msg(f"No tasks deferring function name {arg_func_name} found.")
@@ -382,7 +390,8 @@ class CharacterSystemRules(PyRules):
             *tasks_header, table=tasks_list, maxwidth=width, border="cells", align="c"
         )
         actions = (
-            f"/{switch}" for switch in ("pause", "unpause", "do_task", "call", "remove", "cancel")
+            f"/{switch}"
+            for switch in ("pause", "unpause", "do_task", "call", "remove", "cancel")
         )
         helptxt = f"\nActions: {iter_to_str(actions)}"
         caller.msg(str(tasks_table) + helptxt)

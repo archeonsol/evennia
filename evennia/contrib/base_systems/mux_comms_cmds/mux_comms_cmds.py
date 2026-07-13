@@ -67,7 +67,8 @@ class CmdAddCom(CmdChannel):
     key = "addcom"
     aliases = ["aliaschan", "chanalias"]
     help_category = "Comms"
-    locks = "cmd:not pperm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
 
@@ -112,7 +113,9 @@ class CmdAddCom(CmdChannel):
         if alias:
             # create a nick and add it to the caller.
             self.add_alias(channel, alias)
-            self.msg(f" You can now refer to the channel {channel} with the alias '{alias}'.")
+            self.msg(
+                f" You can now refer to the channel {channel} with the alias '{alias}'."
+            )
         else:
             string += " No alias added."
             self.msg(string)
@@ -135,7 +138,8 @@ class CmdDelCom(CmdChannel):
     key = "delcom"
     aliases = ["delaliaschan", "delchanalias"]
     help_category = "Comms"
-    locks = "cmd:not perm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
 
@@ -194,7 +198,8 @@ class CmdAllCom(CmdChannel):
 
     key = "allcom"
     aliases = []  # important to not inherit parent's aliases
-    locks = "cmd: not pperm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
@@ -265,7 +270,8 @@ class CmdCdestroy(CmdChannel):
     key = "cdestroy"
     aliases = []
     help_category = "Comms"
-    locks = "cmd: not pperm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
 
@@ -313,7 +319,8 @@ class CmdCBoot(CmdChannel):
     key = "cboot"
     aliases = []
     switch_options = ("quiet",)
-    locks = "cmd: not pperm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
@@ -372,7 +379,8 @@ class CmdCWho(CmdChannel):
 
     key = "cwho"
     aliases = []
-    locks = "cmd: not pperm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
@@ -409,7 +417,8 @@ class CmdChannelCreate(CmdChannel):
 
     key = "ccreate"
     aliases = "channelcreate"
-    locks = "cmd:not pperm(channel_banned) and pperm(Player)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
@@ -440,19 +449,18 @@ class CmdChannelCreate(CmdChannel):
 
 
 class CmdClock(CmdChannel):
-    """
-    change channel locks of a channel you control
+    """Inspect or set one typed channel policy.
 
     Usage:
-      clock <channel> [= <lockstring>]
+      clock <channel> [= <operation>=public|disabled|capability]
 
-    Changes the lock access restrictions of a channel. If no
-    lockstring was given, view the current lock definitions.
+    This compatibility command name now authors structured policies only.
     """
 
     key = "clock"
     aliases = ["clock"]
-    locks = "cmd:not pperm(channel_banned) and perm(Admin)"
+    authorization = "engine.moderation.manage"
+    authorization_excludes = ("engine.channel.banned",)
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent
@@ -461,7 +469,7 @@ class CmdClock(CmdChannel):
         """run the function"""
 
         if not self.args:
-            string = "Usage: clock channel [= lockstring]"
+            string = "Usage: clock channel [= operation=public|disabled|capability]"
             self.msg(string)
             return
 
@@ -470,20 +478,29 @@ class CmdClock(CmdChannel):
             return
 
         if not self.rhs:
-            # no =, so just view the current locks
-            self.msg(f"Current locks on {channel.key}\n{channel.locks}")
+            policies = channel.policies.all()
+            self.msg(
+                f"Current policies on {channel.key}\n"
+                + (
+                    "\n".join(
+                        f"{key}: {value.to_data()}" for key, value in policies.items()
+                    )
+                    or "Class defaults"
+                )
+            )
             return
         # we want to add/change a lock.
         if not channel.access(self.caller, "control"):
             string = "You don't control this channel."
             self.msg(string)
             return
-        # Try to add the lock
-        success, err = self.set_lock(channel, self.rhs)
-        if success:
-            self.msg(f"Lock(s) applied. Current locks on {channel.key}:\n{channel.locks}")
-        else:
-            self.msg(err)
+        try:
+            operation, declaration = (part.strip() for part in self.rhs.split("=", 1))
+            self.set_policy(channel, operation, declaration)
+        except (TypeError, ValueError) as err:
+            self.msg(f"Policy not changed: {err}")
+            return
+        self.msg(f"Policy {operation!r} updated on {channel.key}.")
 
 
 class CmdCdesc(CmdChannel):
@@ -500,7 +517,8 @@ class CmdCdesc(CmdChannel):
 
     key = "cdesc"
     aliases = []
-    locks = "cmd:not pperm(channel_banned)"
+    authorization = "public"
+    authorization_excludes = ("engine.channel.banned",)
     help_category = "Comms"
 
     # this is used by the COMMAND_DEFAULT_CLASS parent

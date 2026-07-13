@@ -52,6 +52,18 @@ class BotStarter(DefaultScript):
 
 class Bot(DefaultAccount):
     """
+
+    from evennia.authorization.policy import Always, Never, RequiresCapability
+
+    authorization_policies = {
+        **DefaultAccount.authorization_policies,
+        "examine": RequiresCapability("engine.object.examine"),
+        "edit": RequiresCapability("engine.object.edit"),
+        "delete": RequiresCapability("engine.object.delete"),
+        "boot": RequiresCapability("engine.object.boot"),
+        "msg": Never(),
+        "noidletimeout": Always(),
+    }
     A Bot will start itself when the server starts (it will generally
     not do so on a reload - that will be handled by the normal Portal
     session resync)
@@ -65,12 +77,6 @@ class Bot(DefaultAccount):
         """
         # the text encoding to use.
         self.db.encoding = "utf-8"
-        # A basic security setup (also avoid idle disconnects)
-        lockstring = (
-            "examine:perm(Admin);edit:perm(Admin);delete:perm(Admin);"
-            "boot:perm(Admin);msg:false();noidletimeout:true()"
-        )
-        self.locks.add(lockstring)
         # set the basics of being a bot
         self.scripts.add(BotStarter, key="bot_starter")
         self.is_bot = True
@@ -87,7 +93,9 @@ class Bot(DefaultAccount):
         Evennia -> outgoing protocol
 
         """
-        super().msg(text=text, from_obj=from_obj, session=session, options=options, **kwargs)
+        super().msg(
+            text=text, from_obj=from_obj, session=session, options=options, **kwargs
+        )
 
     def execute_cmd(self, raw_string, session=None):
         """
@@ -293,17 +301,27 @@ class IRCBot(Bot):
         if kwargs["type"] == "nicklist":
             # the return of a nicklist request
             if hasattr(self, "_nicklist_callers") and self._nicklist_callers:
-                chstr = f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
-                nicklist = ", ".join(sorted(kwargs["nicklist"], key=lambda n: n.lower()))
+                chstr = (
+                    f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
+                )
+                nicklist = ", ".join(
+                    sorted(kwargs["nicklist"], key=lambda n: n.lower())
+                )
                 for obj in self._nicklist_callers:
-                    obj.msg("Nicks at {chstr}:\n {nicklist}".format(chstr=chstr, nicklist=nicklist))
+                    obj.msg(
+                        "Nicks at {chstr}:\n {nicklist}".format(
+                            chstr=chstr, nicklist=nicklist
+                        )
+                    )
                 self._nicklist_callers = []
             return
 
         elif kwargs["type"] == "ping":
             # the return of a ping
             if hasattr(self, "_ping_callers") and self._ping_callers:
-                chstr = f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
+                chstr = (
+                    f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
+                )
                 for obj in self._ping_callers:
                     obj.msg(
                         "IRC ping return from {chstr} took {time}s.".format(
@@ -400,7 +418,11 @@ class RSSBot(Bot):
             self.db.rss_rate = rss_rate
         # instruct the server and portal to create a new session with
         # the stored configuration
-        configdict = {"uid": self.dbid, "url": self.db.rss_url, "rate": self.db.rss_rate}
+        configdict = {
+            "uid": self.dbid,
+            "url": self.db.rss_url,
+            "rate": self.db.rss_rate,
+        }
         evennia.SESSION_HANDLER.start_bot_session(
             "evennia.server.portal.rss.RSSBotFactory", configdict
         )
@@ -557,7 +579,9 @@ class DiscordBot(Bot):
             for channel_name in list(channel_set):
                 channel = search.search_channel(channel_name)
                 if not channel:
-                    logger.log_err(f"Evennia Channel {channel_name} not found; skipping.")
+                    logger.log_err(
+                        f"Evennia Channel {channel_name} not found; skipping."
+                    )
                     continue
                 channel = channel[0]
                 self.ndb.ev_channels[channel_name] = channel
@@ -583,7 +607,9 @@ class DiscordBot(Bot):
 
         for channel in self.ndb.ev_channels.values():
             if not channel.connect(self):
-                logger.log_warn(f"{self} could not connect to Evennia channel {channel}.")
+                logger.log_warn(
+                    f"{self} could not connect to Evennia channel {channel}."
+                )
             if not channel.access(self, "send"):
                 logger.log_warn(
                     f"{self} doesn't have permission to send messages to Evennia channel {channel}."
@@ -623,7 +649,9 @@ class DiscordBot(Bot):
         if channel_list := self.db.channels:
             # get all the discord channels connected to this evennia channel
             channel_name = channel.name
-            for dc_chan in [dcid for evchan, dcid in channel_list if evchan == channel_name]:
+            for dc_chan in [
+                dcid for evchan, dcid in channel_list if evchan == channel_name
+            ]:
                 # send outputfunc channel(msg, discord channel)
                 super().msg(channel=(strip_ansi(message.strip()), dc_chan))
 
@@ -699,7 +727,13 @@ class DiscordBot(Bot):
         pass
 
     def relay_to_channel(
-        self, message, to_channel, sender=None, from_channel=None, from_server=None, **kwargs
+        self,
+        message,
+        to_channel,
+        sender=None,
+        from_channel=None,
+        from_server=None,
+        **kwargs,
     ):
         """
         Formats and sends a Discord -> Evennia message. Called when the Discord bot receives a
@@ -763,7 +797,9 @@ class DiscordBot(Bot):
         # normal channel message
         if type == "channel":
             channel_id = kwargs.get("channel_id")
-            channel_name = self.db.discord_channels.get(channel_id, {}).get("name", channel_id)
+            channel_name = self.db.discord_channels.get(channel_id, {}).get(
+                "name", channel_id
+            )
             guild_id = kwargs.get("guild_id")
             guild = self.db.guilds.get(guild_id)
 

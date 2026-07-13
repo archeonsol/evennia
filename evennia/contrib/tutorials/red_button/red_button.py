@@ -54,7 +54,7 @@ class CmdPushLidClosed(Command):
 
     key = "push button"
     aliases = ["push", "press button", "press"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -65,7 +65,9 @@ class CmdPushLidClosed(Command):
         check if the lid is open or closed.
 
         """
-        self.caller.msg("You cannot push the button = there is a glass lid covering it.")
+        self.caller.msg(
+            "You cannot push the button = there is a glass lid covering it."
+        )
 
 
 class CmdNudge(Command):
@@ -81,7 +83,7 @@ class CmdNudge(Command):
 
     key = "nudge lid"  # two-word command name!
     aliases = ["nudge"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -112,7 +114,7 @@ class CmdSmashGlass(Command):
 
     key = "smash glass"
     aliases = ["smash lid", "break lid", "smash"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -122,7 +124,8 @@ class CmdSmashGlass(Command):
         """
         rand = random.random()
         self.caller.location.msg_contents(
-            f"{self.caller.name} tries to smash the glass of the button.", exclude=self.caller
+            f"{self.caller.name} tries to smash the glass of the button.",
+            exclude=self.caller,
         )
 
         if rand < 0.2:
@@ -157,7 +160,7 @@ class CmdOpenLid(Command):
 
     key = "open lid"
     aliases = ["open button"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         "simply call the right function."
@@ -217,7 +220,7 @@ class CmdPushLidOpen(Command):
 
     key = "push button"
     aliases = ["push", "press button", "press"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     @interactive
     def func(self):
@@ -238,7 +241,8 @@ class CmdPushLidOpen(Command):
 
         name = self.caller.name
         self.caller.location.msg_contents(
-            f"{name} presses the button. BOOM! {name} is blinded by a flash!", exclude=self.caller
+            f"{name} presses the button. BOOM! {name} is blinded by a flash!",
+            exclude=self.caller,
         )
         self.obj.blind_target(self.caller)
 
@@ -255,7 +259,7 @@ class CmdCloseLid(Command):
 
     key = "close lid"
     aliases = ["close"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         "Close the lid"
@@ -306,7 +310,7 @@ class CmdBlindLook(Command):
 
     key = "look"
     aliases = ["l", "get", "examine", "ex", "feel", "listen"]
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         "This replaces all the senses when blinded."
@@ -345,7 +349,7 @@ class CmdBlindHelp(Command):
 
     key = "help"
     aliases = "h"
-    locks = "cmd:all()"
+    authorization = "public"
 
     def func(self):
         """
@@ -432,16 +436,16 @@ class RedButton(DefaultObject):
     # these are the pre-set descriptions. Setting attributes will override
     # these on the fly.
 
-    desc_closed_lid = (
-        "This is a large red button, inviting yet evil-looking. A closed glass lid protects it."
-    )
+    desc_closed_lid = "This is a large red button, inviting yet evil-looking. A closed glass lid protects it."
     desc_open_lid = (
         "This is a large red button, inviting yet evil-looking. "
         "Its glass cover is open and the button exposed."
     )
     auto_close_msg = "The button's glass lid silently slides back in place."
     lamp_breaks_msg = "The lamp flickers, the button going dark."
-    desc_add_lamp_broken = "\nThe big red button has stopped blinking for the time being."
+    desc_add_lamp_broken = (
+        "\nThe big red button has stopped blinking for the time being."
+    )
     # note that this is a list. A random message will display each time
     blink_msgs = [
         "The red button flashes briefly.",
@@ -540,7 +544,10 @@ class RedButton(DefaultObject):
 
         # wait 20s then call self.to_closed_state with a message as argument
         delay(
-            35, self.to_closed_state, self.db.auto_close_msg or self.auto_close_msg, persistent=True
+            35,
+            self.to_closed_state,
+            self.db.auto_close_msg or self.auto_close_msg,
+            persistent=True,
         )
 
     def _unblind_target(self, caller):

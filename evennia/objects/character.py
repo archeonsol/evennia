@@ -25,44 +25,22 @@ class DefaultCharacter(DefaultObject):
     # Tuple of types used for indexing inventory contents. Characters generally wouldn't be in
     # anyone's inventory, but this also governs displays in room contents.
     _content_types = ("character",)
-    # lockstring of newly created rooms, for easy overloading.
-    # Will be formatted with the appropriate attributes.
-    lockstring = (
-        "puppet:id({character_id}) or pid({account_id}) or perm(Developer) or pperm(Developer);"
-        "delete:id({account_id}) or perm(Admin);"
-        "edit:pid({account_id}) or perm(Admin)"
-    )
+    from evennia.authorization.policy import (Never, PredicateRequirement,
+                                              RequiresCapability)
+
+    authorization_policies = {
+        **DefaultObject.authorization_policies,
+        "puppet": PredicateRequirement("principal.controls_resource"),
+        "delete": RequiresCapability("engine.object.delete"),
+        "edit": RequiresCapability("engine.object.edit"),
+        "get": Never(),
+        "call": Never(),
+        "teleport": RequiresCapability("engine.object.teleport"),
+        "teleport_here": RequiresCapability("engine.object.teleport_here"),
+    }
 
     # Used by get_display_desc when self.db.desc is None
     default_description = _("This is a character.")
-
-    @classmethod
-    def get_default_lockstring(
-        cls, account: "DefaultAccount" = None, caller: "DefaultObject" = None, **kwargs
-    ):
-        """
-        Classmethod called during .create() to determine default locks for the object.
-
-        Args:
-            account (DefaultAccount): Account to attribute this object to.
-            caller (DefaultObject): The object which is creating this one.
-            **kwargs: Arbitrary input.
-
-        Returns:
-            str: A lockstring to use for this object.
-
-        """
-        pid = f"pid({account.id})" if account else None
-        character = kwargs.get("character", None)
-        cid = f"id({character})" if character else None
-
-        puppet = "puppet:" + " or ".join(
-            [x for x in [pid, cid, "perm(Developer)", "pperm(Developer)"] if x]
-        )
-        delete = "delete:" + " or ".join([x for x in [pid, "perm(Admin)"] if x])
-        edit = "edit:" + " or ".join([x for x in [pid, "perm(Admin)"] if x])
-
-        return ";".join([puppet, delete, edit])
 
     @classmethod
     def create(
@@ -113,14 +91,8 @@ class DefaultCharacter(DefaultObject):
         # Set the supplied key as the name of the intended object
         kwargs["key"] = key
 
-        # Get permissions
-        kwargs["permissions"] = kwargs.get("permissions", settings.PERMISSION_ACCOUNT_DEFAULT)
-
         # Get description if provided
         description = kwargs.pop("description", "")
-
-        # Get locks if provided
-        locks = kwargs.pop("locks", "")
 
         try:
             # Check to make sure account does not have too many chars
@@ -139,15 +111,6 @@ class DefaultCharacter(DefaultObject):
             if account:
                 obj.db.creator_id = account.id
                 account.characters.add(obj)
-
-            # Add locks
-            if not locks:
-                # Allow only the character itself and the creator account to puppet this character
-                # (and Developers).
-                locks = cls.get_default_lockstring(account=account, character=obj)
-
-            if locks:
-                obj.locks.add(locks)
 
             # Set description if provided
             if description:
@@ -201,7 +164,9 @@ class DefaultCharacter(DefaultObject):
 
         """
         if account and cls.objects.filter_family(db_key__iexact=name):
-            return _("|rA character named '|w{name}|r' already exists.|n").format(name=name)
+            return _("|rA character named '|w{name}|r' already exists.|n").format(
+                name=name
+            )
 
     def basetype_setup(self):
         """
@@ -214,16 +179,6 @@ class DefaultCharacter(DefaultObject):
 
         """
         super().basetype_setup()
-        self.locks.add(
-            ";".join(
-                [
-                    "get:false()",
-                    "call:false()",
-                    "teleport:perm(Admin)",
-                    "teleport_here:perm(Admin)",
-                ]
-            )  # noone can pick up the character
-        )  # no commands can be called on character from outside
         # add the default cmdset
         self.cmdset.add_default(settings.CMDSET_CHARACTER, persistent=True)
 
@@ -249,16 +204,21 @@ class DefaultCharacter(DefaultObject):
         if self.location is None:
             # Make sure character's location is never None before being puppeted.
             # Return to last location (or home, which should always exist)
-            location = self.db.prelogout_location if self.db.prelogout_location else self.home
+            location = (
+                self.db.prelogout_location if self.db.prelogout_location else self.home
+            )
             if location:
                 self.location = location
                 self.location.at_post_arrive(self, None)
 
         if self.location:
-            self.db.prelogout_location = self.location  # save location again to be sure.
+            self.db.prelogout_location = (
+                self.location
+            )  # save location again to be sure.
         else:
             account.msg(
-                _("|r{obj} has no location and no home is set.|n").format(obj=self), session=session
+                _("|r{obj} has no location and no home is set.|n").format(obj=self),
+                session=session,
             )
 
     def at_post_puppet(self, **kwargs):
@@ -295,7 +255,9 @@ class DefaultCharacter(DefaultObject):
 
         def message(obj, from_obj):
             obj.msg(
-                _("{name} has entered the game.").format(name=self.get_display_name(obj)),
+                _("{name} has entered the game.").format(
+                    name=self.get_display_name(obj)
+                ),
                 from_obj=from_obj,
             )
 

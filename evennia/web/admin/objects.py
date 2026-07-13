@@ -235,9 +235,7 @@ class ObjectAdmin(admin.ModelAdmin):
 
         return str(dbserialize.pack_dbobj(obj))
 
-    serialized_string.help_text = (
-        "Copy & paste this string into an Attribute's `value` field to store this object there."
-    )
+    serialized_string.help_text = "Copy & paste this string into an Attribute's `value` field to store this object there."
 
     def get_fieldsets(self, request, obj=None):
         """
@@ -300,7 +298,7 @@ class ObjectAdmin(admin.ModelAdmin):
 
         - Set account.db._last_puppet to this object
         - Add object to account.characters
-        - Change object locks to allow puppeting by account
+        - Grant account-scoped puppeting authority for this object
 
         """
         obj = self.get_object(request, object_id)
@@ -310,15 +308,25 @@ class ObjectAdmin(admin.ModelAdmin):
             account.db._last_puppet = obj
             account.characters.add(obj)
             if not obj.access(account, "puppet"):
-                lock = obj.locks.get("puppet")
-                lock += f" or pid({account.id})"
-                obj.locks.add(lock)
+                from evennia.authorization.storage import (grant_capability,
+                                                           principal_refs,
+                                                           resource_ref)
+
+                grant_capability(
+                    principal_refs(account)[0],
+                    "engine.character.puppet",
+                    scope_kind="resource",
+                    scope_key=resource_ref(obj),
+                    provenance="django_admin",
+                    actor_ref=f"django:{request.user.pk}",
+                    reason="link object to account",
+                )
             self.message_user(
                 request,
                 "Did the following (where possible): "
                 f"Set Account.db._last_puppet = {obj}, "
                 f"Added {obj} to Account.characters list, "
-                f"Added 'puppet:pid({account.id})' lock to {obj}.",
+                f"Granted resource-scoped puppet authority for {obj}.",
             )
         else:
             self.message_user(
@@ -329,7 +337,9 @@ class ObjectAdmin(admin.ModelAdmin):
             )
 
         # stay on the same page
-        return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[obj.pk]))
+        return HttpResponseRedirect(
+            reverse("admin:objects_objectdb_change", args=[obj.pk])
+        )
 
     def save_model(self, request, obj, form, change):
         """
@@ -358,4 +368,6 @@ class ObjectAdmin(admin.ModelAdmin):
         from django.http import HttpResponseRedirect
         from django.urls import reverse
 
-        return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[obj.id]))
+        return HttpResponseRedirect(
+            reverse("admin:objects_objectdb_change", args=[obj.id])
+        )

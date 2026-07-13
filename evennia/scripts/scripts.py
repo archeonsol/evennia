@@ -86,10 +86,9 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
             if updates:
                 self.save(update_fields=updates)
 
-            if cdict.get("permissions"):
-                self.permissions.batch_add(*cdict["permissions"])
-            if cdict.get("locks"):
-                self.locks.add(cdict["locks"])
+            if cdict.get("policies"):
+                for operation, policy in cdict["policies"].items():
+                    self.policies.set(operation, policy)
             if cdict.get("tags"):
                 # this should be a list of tags, tuples (key, category) or (key, category, data)
                 self.tags.batch_add(*cdict["tags"])
@@ -244,6 +243,14 @@ class DefaultScript(ScriptBase):
 
     """
 
+    from evennia.authorization.policy import RequiresCapability
+
+    authorization_policies = {
+        "control": RequiresCapability("engine.script.control"),
+        "edit": RequiresCapability("engine.script.control"),
+        "delete": RequiresCapability("engine.script.control"),
+    }
+
     @classmethod
     def create(cls, key, **kwargs):
         """
@@ -269,7 +276,9 @@ class DefaultScript(ScriptBase):
             obj = create.create_script(**kwargs)
         except Exception:
             logger.log_trace()
-            errors.append("The script '%s' encountered errors and could not be created." % key)
+            errors.append(
+                "The script '%s' encountered errors and could not be created." % key
+            )
 
         return obj, errors
 

@@ -55,7 +55,7 @@ All keys starting with `prototype_` are for book keeping.
  - `prototype_desc` - this is optional and used when listing the prototype in in-game listings.
  - `protototype_tags` - this is optional and allows for tagging the prototype in order to find it
    easier later.
- - `prototype_locks` - two lock types are supported: `edit` and `spawn`. The first lock restricts the copying and editing of the prototype when loaded through the OLC. The second determines who may use the prototype to create new objects.
+ - `prototype_policies` - typed `edit` and `spawn` declarations. Values are `public`, `disabled`, a namespaced capability, or serialized policy data.
 
 
 The remaining keys determine actual aspects of the objects to spawn from this prototype:
@@ -65,8 +65,7 @@ The remaining keys determine actual aspects of the objects to spawn from this pr
  - `location` - this should be a `#dbref`.
  - `home` - a valid `#dbref`. Defaults to `location` or `settings.DEFAULT_HOME` if location does not exist.
  - `destination` - a valid `#dbref`. Only used by exits.
- - `permissions` - list of permission strings, like `["Accounts", "may_use_red_door"]`
- - `locks` - a [lock-string](./Locks.md) like `"edit:all();control:perm(Builder)"`
+ - `policies` - serialized typed operation policies applied to the spawned object.
  - `aliases` - list of strings for use as aliases
  - `tags` - list [Tags](./Tags.md). These are given as tuples `(tag, category, data)`.
  - `attrs` - list of [Attributes](./Attributes.md). These are given as tuples `(attrname, value, category, lockstring)`
@@ -78,7 +77,7 @@ The remaining keys determine actual aspects of the objects to spawn from this pr
 - The prototype keys that start with `prototype_*` are all unique to each prototype. They are _never_ inherited from parent to child.
 - The prototype fields `'attr': [(key, value, category, lockstring),...]` and `'tags': [(key, category, data), ...]` are inherited in a _complementary_ fashion. That means that only colliding key+category matches will be replaced, not the entire list. Remember that the category `None` is also considered a valid category!
 - Adding an Attribute as a simple `key:value` will under the hood be translated into an Attribute tuple `(key, value, None, '')` and may replace an Attribute in the parent if it the same key  and a `None` category.
-- All other keys (`permissions`, `destination`, `aliases` etc) are completely _replaced_ by the child's value if given. For the parent's value to be retained, the child must not define these keys at all.
+- All other keys (`policies`, `destination`, `aliases` etc) are completely _replaced_ by the child's value if given. For the parent's value to be retained, the child must not define these keys at all.
 
 ### Prototype values
 

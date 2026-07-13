@@ -9,32 +9,19 @@ any object-model (room/exit/``move_to``) dependency.
 """
 
 from .account import DefaultAccountRules, Option, Password, UserPassword
-from .admin import Access, CharacterAdminRules, Emit, Force, Perm, Wall
+from .admin import Access, CharacterAdminRules, Emit, Force, Grant, Wall
 from .emote_nomatch import DefaultEmoteNoMatchRules
 from .events import Arrived, Departed, Moved
-from .general import CharacterGeneralRules, Help, Home, Look, Nick, NickRules, Quit, SetHelp
-from .movement import (
-    CharacterMovementRules,
-    ExitTraversalRules,
-    Locomotion,
-    Move,
-    exit_resolver,
-    register_exit_resolver,
-)
+from .general import (CharacterGeneralRules, Help, Home, Look, Nick, NickRules,
+                      Quit, SetHelp)
+from .movement import (CharacterMovementRules, ExitTraversalRules, Locomotion,
+                       Move, exit_resolver, register_exit_resolver)
 from .nomatch import DefaultNoMatchRules, nomatch_providers
-from .objects import (
-    CharacterObjectRules,
-    ContainerPutRules,
-    Drop,
-    Enter,
-    Enterable,
-    EnterableObjectRules,
-    Get,
-    Give,
-    Put,
-)
+from .objects import (CharacterObjectRules, ContainerPutRules, Drop, Enter,
+                      Enterable, EnterableObjectRules, Get, Give, Put)
 from .system import CharacterSystemRules, Py, PyRules, Systems, Tasks
-from .unloggedin import Connect, Create, Encoding, Info, Screenreader, SessionLoginRules
+from .unloggedin import (Connect, Create, Encoding, Info, Screenreader,
+                         SessionLoginRules)
 
 __all__ = [
     "DefaultNoMatchRules",
@@ -65,7 +52,7 @@ __all__ = [
     "Emit",
     "Wall",
     "Force",
-    "Perm",
+    "Grant",
     "Access",
     "CharacterAdminRules",
     # general verbs

@@ -19,7 +19,7 @@ class CmdDebugPy(COMMAND_DEFAULT_CLASS):
     """
 
     key = "debugpy"
-    locks = "cmd:perm(debugpy) or perm(Builder)"
+    authorization = "engine.world.build"
 
     def func(self):
 

@@ -341,7 +341,11 @@ def build_map(caller, game_map, legend, iterations=1, build_exits=True):
                     # obs - we must use == for strings
                     if game_map[y][x] == key:
                         room = legend[key](
-                            x, y, iteration=iteration, room_dict=room_dict, caller=caller
+                            x,
+                            y,
+                            iteration=iteration,
+                            room_dict=room_dict,
+                            caller=caller,
                         )
                         if iteration == 0:
                             room_dict[(x, y)] = room
@@ -434,7 +438,7 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
     key = "@mapbuilder"
     aliases = ["@buildmap"]
-    locks = "cmd:superuser()"
+    authorization = "engine.runtime.manage"
     help_category = "Building"
 
     def func(self):
@@ -445,7 +449,9 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
         # Check if arguments passed.
         if not self.args or (len(args) != 2):
-            caller.msg("Usage: @mapbuilder <path.to.module.VARNAME> <path.to.module.MAP_LEGEND>")
+            caller.msg(
+                "Usage: @mapbuilder <path.to.module.VARNAME> <path.to.module.MAP_LEGEND>"
+            )
             return
 
         # Set up base variables.
