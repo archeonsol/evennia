@@ -2,11 +2,26 @@
   import { session } from "../lib/session.svelte";
   import { logview, categorize, CATS } from "../lib/logview.svelte";
   import { keybinds } from "../lib/keybinds.svelte";
+  import { typewriter, markBacklog } from "../lib/typewriter";
+  import { settings } from "../lib/settings.svelte";
+  import { onMount } from "svelte";
 
   let el = $state<HTMLDivElement | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
   let pinned = $state(true);
   let matchPos = $state(0);
+
+  // Freeze the existing backlog so only lines that arrive after mount type in.
+  onMount(() => markBacklog(session.lines.at(-1)?.id ?? -1));
+
+  // Follow the newest line to the bottom as its characters reveal.
+  function keepPinned() {
+    if (el && pinned && !logview.searchOpen) el.scrollTop = el.scrollHeight;
+  }
+
+  const twEnabled = $derived(
+    settings.typewriter && !settings.reduceMotion && !settings.screenreader,
+  );
 
   const filtered = $derived(
     session.lines.filter((l) => logview.filters[categorize(l.type)]),
@@ -137,7 +152,7 @@
         class:hit={matchIds.includes(line.id)}
         class:active={matchIds[matchPos] === line.id}
       >
-        {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span class="body">{@html line.html}</span>
+        {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span class="body" use:typewriter={{ id: line.id, enabled: twEnabled, onstep: keepPinned }}>{@html line.html}</span>
       </div>
     {/each}
   </div>

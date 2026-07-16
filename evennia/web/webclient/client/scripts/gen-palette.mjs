@@ -47,6 +47,7 @@ for (let i = 0; i < 256; i++) {
 }
 // text2html extras that parse_html can emit as classes.
 lines.push(".blink{animation:ev-blink 1s step-end infinite}");
+lines.push(":root[data-calm] .blink{animation:none}");
 lines.push(".underline{text-decoration:underline}");
 lines.push("@keyframes ev-blink{50%{opacity:0}}");
 lines.push("");

@@ -21,8 +21,9 @@
   }
 
   $effect(() => {
-    // Re-run when embers/theme/intensity change.
-    const on = settings.embers;
+    // Re-run when embers/theme/intensity change. Reduce motion / screenreader
+    // stop the particle loop outright, not just hide the canvas.
+    const on = settings.embers && !settings.reduceMotion && !settings.screenreader;
     const themeId = settings.emberTheme;
     const intensity = settings.emberIntensity;
     const el = canvas;

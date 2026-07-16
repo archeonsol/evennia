@@ -15,10 +15,15 @@
   let shown = $state(0);
   let closing = $state(false);
 
+  // Reduce motion / screenreader render the boot instantly, like the log typewriter.
+  const animate = $derived(
+    settings.typewriter && !settings.reduceMotion && !settings.screenreader,
+  );
+
   function finish() {
     if (closing) return;
     closing = true;
-    setTimeout(ondone, settings.typewriter ? 420 : 0);
+    setTimeout(ondone, animate ? 420 : 0);
   }
 
   function skip() {
@@ -27,7 +32,7 @@
   }
 
   $effect(() => {
-    if (!settings.typewriter) {
+    if (!animate) {
       shown = LINES.length;
       // brief hold so it reads as a boot, not a flash
       const t = setTimeout(finish, 350);

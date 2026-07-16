@@ -514,5 +514,6 @@
 .bgcolor-254{background-color:#e4e4e4}
 .bgcolor-255{background-color:#eeeeee}
 .blink{animation:ev-blink 1s step-end infinite}
+:root[data-calm] .blink{animation:none}
 .underline{text-decoration:underline}
 @keyframes ev-blink{50%{opacity:0}}

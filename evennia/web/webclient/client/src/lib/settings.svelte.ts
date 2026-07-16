@@ -185,12 +185,13 @@ class Settings {
     root.style.setProperty("--shell-line-height", String(this.lineHeight));
     root.style.setProperty("--scanline-opacity", String(this.scanlineOpacity / 100));
     root.style.setProperty("--vignette-intensity", String(this.vignetteIntensity / 100));
+    // Shared hook so CSS-only effects (e.g. ANSI blink) can suppress motion.
+    root.toggleAttribute("data-calm", calm);
     root.toggleAttribute("data-scanlines", this.scanlines && !calm);
     root.toggleAttribute("data-flicker", this.flicker && !calm);
     root.toggleAttribute("data-vignette", this.vignette && !calm);
     root.toggleAttribute("data-glow", this.glow && !calm);
     root.toggleAttribute("data-embers", this.embers && !calm);
-    root.toggleAttribute("data-typewriter", this.typewriter && !this.screenreader);
     root.toggleAttribute("data-scene-strip", this.sceneStrip);
     root.toggleAttribute("data-kbd-sfx", this.keyboardSfx);
     root.toggleAttribute("data-screenreader", this.screenreader);
