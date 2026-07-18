@@ -25,6 +25,24 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.171 — Puppet patch metadata
+
+### Webclient protocol
+
+- Preserved bounded, identity-safe patch metadata in Azaban envelopes so
+  stable puppet ID, live slot, recognized name, revision, and action ID reach
+  the reactive client instead of degrading to `P0`, `#<id>`, and revision 0.
+- Made puppet manifests establish feed identity before the first scene
+  snapshot, retaining correct slot/name display across reconnects and older
+  metadata-less snapshots.
+- Added wire-format and Svelte store regression coverage and rebuilt the
+  checked-in production shell.
+
+Migration notes: downstream games using patch metadata must pin this release.
+No database migration is required.
+
+---
+
 ## 6.0.0+underspire.170 — Multi-puppet viewpoints
 
 ### Webclient

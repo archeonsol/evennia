@@ -234,9 +234,14 @@ class AzabanFormat(WireFormat):
                 safe_nodes.append(node)
             return _frame({"t": "render", "nodes": safe_nodes})
         if cmdname == "patch":
-            # Scene-model delta: {target, ops} carried in kwargs.
+            # Scene-model delta: {target, ops, meta} carried in kwargs.
             ops = kwargs.get("ops", [])
-            if _contains_raw_identity(ops) or not _within_limits(ops):
+            meta = kwargs.get("meta", {})
+            if (
+                not isinstance(meta, dict)
+                or _contains_raw_identity((ops, meta))
+                or not _within_limits((ops, meta))
+            ):
                 logger.log_warn("azaban: rejected unsafe scene patch")
                 return None
             return _frame(
@@ -244,6 +249,7 @@ class AzabanFormat(WireFormat):
                     "t": "patch",
                     "target": kwargs.get("target", "scene"),
                     "ops": ops,
+                    "meta": meta,
                 }
             )
         # Generic typed OOB event.

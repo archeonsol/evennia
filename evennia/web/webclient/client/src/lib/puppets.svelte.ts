@@ -53,7 +53,23 @@ export class PuppetScenes {
       for (const entry of manifest.entries ?? []) {
         const key = String(entry.npc_id);
         const current = this.feeds.get(key);
-        if (current) this.feeds.set(key, { ...current, slot: Number(entry.slot) });
+        this.feeds.set(
+          key,
+          current
+            ? {
+                ...current,
+                slot: Number(entry.slot),
+                name: String(entry.name ?? current.name),
+              }
+            : {
+                npcId: Number(entry.npc_id),
+                slot: Number(entry.slot),
+                name: String(entry.name ?? `#${entry.npc_id}`),
+                revision: 0,
+                scene: { room: {}, occupants: [], exits: [] },
+                resyncing: false,
+              },
+        );
       }
     }
 

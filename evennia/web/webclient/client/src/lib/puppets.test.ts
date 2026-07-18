@@ -60,6 +60,36 @@ describe("puppet scene protocol", () => {
     expect(scenes.list[0].slot).toBe(2);
   });
 
+  it("manifest establishes slot and name before the first scene snapshot", () => {
+    const scenes = new PuppetScenes();
+
+    scenes.apply({
+      target: "puppets",
+      ops: [
+        {
+          op: "sync",
+          path: "/",
+          ids: [71],
+          entries: [{ npc_id: 71, slot: 2, name: "Kaeden Denzel" }],
+        },
+      ],
+    });
+    scenes.apply({
+      target: "puppets",
+      ops: [
+        {
+          op: "set",
+          path: "/71/scene",
+          value: { room: { name: "Unification area" }, occupants: [], exits: [] },
+        },
+      ],
+    });
+
+    expect(scenes.list).toHaveLength(1);
+    expect(scenes.list[0].slot).toBe(2);
+    expect(scenes.list[0].name).toBe("Kaeden Denzel");
+  });
+
   it("applies contiguous deltas", () => {
     const scenes = new PuppetScenes();
     scenes.apply(snapshot(123, 2, 1));

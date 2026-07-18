@@ -66,12 +66,16 @@ class TestAzabanFormat(unittest.TestCase):
     def test_patch_envelope(self):
         env = self._env(
             self.fmt.encode_default(
-                "patch", target="scene", ops=[{"op": "set", "path": "/", "value": {"a": 1}}]
+                "patch",
+                target="scene",
+                ops=[{"op": "set", "path": "/", "value": {"a": 1}}],
+                meta={"npc_id": 71, "slot": 2, "revision": 4},
             )
         )
         self.assertEqual(env["t"], "patch")
         self.assertEqual(env["target"], "scene")
         self.assertEqual(env["ops"][0]["value"], {"a": 1})
+        self.assertEqual(env["meta"], {"npc_id": 71, "slot": 2, "revision": 4})
 
     def test_patch_rejects_raw_database_identity(self):
         self.assertIsNone(
