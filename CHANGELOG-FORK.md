@@ -25,6 +25,21 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.170 — Multi-puppet viewpoints
+
+### Webclient
+
+- Added a stable-ID Puppets workspace panel that consumes revisioned scene
+  patches without losing viewpoint state when display slots renumber.
+- Added resynchronization requests for missed puppet-scene revisions and a
+  compact per-puppet room, atmosphere, exits, and occupant view.
+- Added focused store tests and rebuilt the checked-in production shell.
+
+Migration notes: downstream games must emit the `puppets` patch target and pin
+this engine release before enabling the panel.
+
+---
+
 ## 6.0.0+underspire.169 — Legacy editor bridge
 
 ### Webclient
