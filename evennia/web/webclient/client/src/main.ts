@@ -99,8 +99,18 @@ puppets.setResyncRequester((npcId, revision) => {
   connection.sendCommand(`@sync_puppet_scene ${npcId} ${revision}`);
 });
 
+function refreshPuppetManifest() {
+  connection
+    .request("puppets", "puppet_manifest")
+    .then((reply: any) => puppets.setManifest(reply?.puppets ?? []))
+    .catch(() => {
+      /* non-staff / offline: no roster */
+    });
+}
+
 connection.on("connection_open", () => {
   connection.sendCommand("@sync_context");
+  refreshPuppetManifest();
 });
 
 // Typed OOB events - routed by name. Channel/chat events feed the chat store;

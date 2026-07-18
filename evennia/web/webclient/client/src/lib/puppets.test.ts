@@ -130,6 +130,54 @@ describe("puppet scene protocol", () => {
     expect(scenes.list[0].revision).toBe(1);
   });
 
+  function feedEnv(npcId: number, body: string, revision = 1) {
+    return {
+      target: "puppets",
+      meta: { npc_id: npcId, slot: 2, name: `NPC ${npcId}`, revision },
+      ops: [{ op: "add", path: `/${npcId}/feed/-`, value: { body, meta: { revision } } }],
+    };
+  }
+
+  it("appends prose to a per-NPC feed and counts it unread", () => {
+    const scenes = new PuppetScenes();
+    scenes.apply(snapshot(71, 2, 1));
+
+    scenes.apply(feedEnv(71, "Bob waves."));
+    scenes.apply(feedEnv(71, "Bob leaves.", 2));
+
+    const feed = scenes.feeds.get("71")!;
+    expect(feed.feed.map((line) => line.body)).toEqual(["Bob waves.", "Bob leaves."]);
+    expect(feed.unread).toBe(2);
+  });
+
+  it("opening a terminal clears its unread and marks it active", () => {
+    const request = vi.fn();
+    const scenes = new PuppetScenes(request);
+    scenes.apply(feedEnv(71, "Bob waves."));
+    expect(scenes.feeds.get("71")!.unread).toBe(1);
+
+    scenes.setActive(71);
+
+    expect(scenes.activeId).toBe(71);
+    expect(scenes.feeds.get("71")!.unread).toBe(0);
+    expect(request).toHaveBeenCalledWith(71, expect.any(Number));
+
+    // Feed for the active terminal does not accrue unread.
+    scenes.apply(feedEnv(71, "Bob returns.", 2));
+    expect(scenes.feeds.get("71")!.unread).toBe(0);
+  });
+
+  it("setManifest establishes the roster and prunes stale feeds", () => {
+    const scenes = new PuppetScenes();
+    scenes.apply(snapshot(71, 2, 1));
+    scenes.apply(snapshot(72, 3, 1));
+
+    scenes.setManifest([{ npc_id: 72, slot: 2, name: "Kept" }]);
+
+    expect(scenes.list.map((feed) => feed.npcId)).toEqual([72]);
+    expect(scenes.list[0].name).toBe("Kept");
+  });
+
   it("accepts a full snapshot after a server revision reset", () => {
     const scenes = new PuppetScenes();
     scenes.apply(snapshot(123, 2, 20));

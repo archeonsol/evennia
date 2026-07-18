@@ -126,6 +126,21 @@
     }
   });
 
+  // Surface total unread puppet activity on the Puppets tab so a GM juggling
+  // several NPCs sees which needs attention without opening the panel.
+  $effect(() => {
+    const panel: any = api?.getPanel?.("puppets");
+    if (!panel) return;
+    const unread = puppets.totalUnread;
+    const title = unread ? `Puppets (${unread})` : "Puppets";
+    try {
+      if (typeof panel.setTitle === "function") panel.setTitle(title);
+      else if (panel.api?.setTitle) panel.api.setTitle(title);
+    } catch {
+      /* dockview title update is best-effort */
+    }
+  });
+
   // Staff-only: the server pushes ticket_inbox to Builder+ sessions, so we add the
   // unified Tickets help-desk panel the moment that data appears. Players never do.
   $effect(() => {
