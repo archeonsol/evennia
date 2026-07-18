@@ -1,0 +1,156 @@
+import type { Occupant, SceneExit, SceneRoom } from "./scene.svelte";
+import { SvelteMap } from "svelte/reactivity";
+
+export interface PuppetScene {
+  room: SceneRoom;
+  occupants: Occupant[];
+  exits: SceneExit[];
+}
+
+export interface PuppetFeed {
+  npcId: number;
+  slot: number;
+  name: string;
+  revision: number;
+  actionId?: string;
+  scene: PuppetScene;
+  resyncing: boolean;
+}
+
+type ResyncRequester = (npcId: number, revision: number) => void;
+
+function npcIdFromPath(path: string): number | null {
+  const match = /^\/(\d+)(?:\/|$)/.exec(path);
+  return match ? Number(match[1]) : null;
+}
+
+export class PuppetScenes {
+  feeds = new SvelteMap<string, PuppetFeed>();
+  private requestResync: ResyncRequester | null;
+
+  constructor(requestResync: ResyncRequester | null = null) {
+    this.requestResync = requestResync;
+  }
+
+  get list(): PuppetFeed[] {
+    return [...this.feeds.values()].sort((a, b) => a.slot - b.slot || a.npcId - b.npcId);
+  }
+
+  setResyncRequester(requester: ResyncRequester): void {
+    this.requestResync = requester;
+  }
+
+  apply(env: Record<string, any>): void {
+    if (env.target !== "puppets") return;
+    const ops = Array.isArray(env.ops) ? env.ops : [];
+
+    const manifest = ops.find((op: any) => op.op === "sync" && op.path === "/");
+    if (manifest) {
+      const keep = new Set((manifest.ids ?? []).map((id: any) => String(id)));
+      for (const key of this.feeds.keys()) {
+        if (!keep.has(key)) this.feeds.delete(key);
+      }
+      for (const entry of manifest.entries ?? []) {
+        const key = String(entry.npc_id);
+        const current = this.feeds.get(key);
+        if (current) this.feeds.set(key, { ...current, slot: Number(entry.slot) });
+      }
+    }
+
+    let toreDown = false;
+    for (const op of ops) {
+      const path = String(op.path ?? "");
+      const id = npcIdFromPath(path);
+      if (op.op === "del" && id != null && path === `/${id}`) {
+        this.remove(id);
+        toreDown = true;
+      }
+    }
+    if (toreDown) return;
+
+    const meta = env.meta ?? {};
+    const pathId = ops.map((op: any) => npcIdFromPath(String(op.path ?? ""))).find(Boolean);
+    const npcId = Number(meta.npc_id ?? pathId);
+    if (!Number.isFinite(npcId) || npcId <= 0) return;
+    const snapshot = ops.find(
+      (op: any) => op.op === "set" && op.path === `/${npcId}/scene`,
+    );
+    const key = String(npcId);
+    const current = this.feeds.get(key);
+    const revision = Number(meta.revision ?? 0);
+
+    if (snapshot) {
+      const value = snapshot.value ?? {};
+      this.feeds.set(
+        key,
+        {
+          npcId,
+          slot: Number(meta.slot ?? current?.slot ?? 0),
+          name: String(meta.name ?? current?.name ?? `#${npcId}`),
+          revision,
+          actionId: meta.action_id ?? undefined,
+          scene: {
+            room: value.room ?? {},
+            occupants: value.occupants ?? [],
+            exits: value.exits ?? [],
+          },
+          resyncing: false,
+        },
+      );
+      return;
+    }
+
+    if (!current) {
+      this.requestOnce(npcId, 0);
+      return;
+    }
+    if (revision <= current.revision) return;
+    if (revision !== current.revision + 1) {
+      this.requestOnce(npcId, current.revision);
+      return;
+    }
+
+    let scene = current.scene;
+    for (const op of ops) {
+      const path = String(op.path ?? "").replace(`/${npcId}/scene`, "");
+      if (op.op === "add" && path === "/occupants/-") {
+        const occupant = op.value;
+        if (occupant && !scene.occupants.some((item) => item.handle === occupant.handle)) {
+          scene = { ...scene, occupants: [...scene.occupants, occupant] };
+        }
+      } else if (op.op === "del" && path === "/occupants") {
+        scene = {
+          ...scene,
+          occupants: scene.occupants.filter((item) => item.handle !== op.handle),
+        };
+      }
+    }
+    this.feeds.set(
+      key,
+      {
+        ...current,
+        slot: Number(meta.slot ?? current.slot),
+        name: String(meta.name ?? current.name),
+        revision,
+        actionId: meta.action_id ?? current.actionId,
+        scene,
+        resyncing: false,
+      },
+    );
+  }
+
+  private requestOnce(npcId: number, revision: number): void {
+    const current = this.feeds.get(String(npcId));
+    if (current?.resyncing) return;
+    if (current) {
+      this.feeds.set(String(npcId), { ...current, resyncing: true });
+    }
+    this.requestResync?.(npcId, revision);
+  }
+
+  private remove(npcId: number): void {
+    this.feeds.delete(String(npcId));
+  }
+}
+
+export const puppets = new PuppetScenes();

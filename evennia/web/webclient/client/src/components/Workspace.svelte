@@ -16,6 +16,8 @@
   import MediaPanel from "./MediaPanel.svelte";
   import SpawnsPanel from "./SpawnsPanel.svelte";
   import MyTicketsPanel from "./MyTicketsPanel.svelte";
+  import PuppetsPanel from "./PuppetsPanel.svelte";
+  import { puppets } from "../lib/puppets.svelte";
 
   let host = $state<HTMLDivElement | null>(null);
   let api = $state<DockviewApi | null>(null);
@@ -52,6 +54,7 @@
         media: MediaPanel,
         spawns: SpawnsPanel,
         mytickets: MyTicketsPanel,
+        puppets: PuppetsPanel,
       }),
     });
     api = dv;
@@ -102,6 +105,25 @@
       api = null;
       dock.set(null);
     };
+  });
+
+  // A first remote scene proves this session has a multi-puppet feed; add its
+  // stable-ID panel without forcing it into every player's saved layout.
+  $effect(() => {
+    if (puppets.list.length && api && !api.getPanel("puppets")) {
+      try {
+        api.addPanel({
+          id: "puppets",
+          component: "puppets",
+          title: "Puppets",
+          position: api.getPanel("scene")
+            ? { referencePanel: "scene", direction: "within" }
+            : undefined,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
   });
 
   // Staff-only: the server pushes ticket_inbox to Builder+ sessions, so we add the

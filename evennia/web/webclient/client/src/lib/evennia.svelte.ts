@@ -205,6 +205,7 @@ class AzabanConnection {
         caps: CLIENT_CAPS,
         resume: { token: this.clientToken, last_seq: this.lastSeq },
       });
+      this.handlers.get("connection_open")?.({ t: "connection_open" });
     };
     ws.onclose = (ev: CloseEvent) => {
       this.state = "closed";

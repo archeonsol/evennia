@@ -6,6 +6,7 @@ import "./styles/ansi-palette.css";
 import { connection } from "./lib/evennia.svelte";
 import { session } from "./lib/session.svelte";
 import { scene } from "./lib/scene.svelte";
+import { puppets } from "./lib/puppets.svelte";
 import { settings } from "./lib/settings.svelte";
 import { commands } from "./lib/commands.svelte";
 import { macros } from "./lib/macros.svelte";
@@ -91,6 +92,15 @@ connection.on("render", (env) => {
 // Scene-model deltas keep the room panel in sync (reactive, off the log).
 connection.on("patch", (env) => {
   scene.apply(env.target, env.ops ?? []);
+  puppets.apply(env);
+});
+
+puppets.setResyncRequester((npcId, revision) => {
+  connection.sendCommand(`@sync_puppet_scene ${npcId} ${revision}`);
+});
+
+connection.on("connection_open", () => {
+  connection.sendCommand("@sync_context");
 });
 
 // Typed OOB events - routed by name. Channel/chat events feed the chat store;
