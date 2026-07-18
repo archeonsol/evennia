@@ -19,8 +19,9 @@
     if (el && pinned && !logview.searchOpen) el.scrollTop = el.scrollHeight;
   }
 
-  const twEnabled = $derived(
-    settings.typewriter && !settings.reduceMotion && !settings.screenreader,
+  // Per-line reveal duration; reduce-motion / screenreader force it instant.
+  const twDuration = $derived(
+    settings.reduceMotion || settings.screenreader ? 0 : settings.typewriterMs,
   );
 
   const filtered = $derived(
@@ -152,7 +153,7 @@
         class:hit={matchIds.includes(line.id)}
         class:active={matchIds[matchPos] === line.id}
       >
-        {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span class="body" use:typewriter={{ id: line.id, enabled: twEnabled, onstep: keepPinned }}>{@html line.html}</span>
+        {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span class="body" use:typewriter={{ id: line.id, durationMs: twDuration, onstep: keepPinned }}>{@html line.html}</span>
       </div>
     {/each}
   </div>

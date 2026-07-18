@@ -10,13 +10,15 @@ export function markBacklog(maxId: number): void {
 
 interface TWParams {
   id: number;
-  /** False when typewriter/reduce-motion/screenreader says render instantly. */
-  enabled: boolean;
+  /**
+   * Milliseconds to reveal this line in full, regardless of its length, so a
+   * help file and a one-liner finish together. 0 (reduce-motion / screenreader
+   * / slider at off) renders instantly.
+   */
+  durationMs: number;
   /** Called each frame so the caller can keep the log scrolled to bottom. */
   onstep?: () => void;
 }
-
-const CHARS_PER_SEC = 140;
 
 /**
  * Given each text node's full text and a total number of characters to reveal,
@@ -43,8 +45,8 @@ export function typewriter(node: HTMLElement, params: TWParams) {
   let cancelled = false;
   let raf = 0;
 
-  const { id, enabled, onstep } = params;
-  const skip = revealed.has(id) || id <= baselineId || !enabled;
+  const { id, durationMs, onstep } = params;
+  const skip = revealed.has(id) || id <= baselineId || durationMs <= 0;
   revealed.add(id);
 
   if (!skip) {
@@ -60,20 +62,20 @@ export function typewriter(node: HTMLElement, params: TWParams) {
     }
 
     if (total > 0) {
-      let shown = 0;
-      let last = 0;
+      // Reveal the whole line over durationMs: speed scales with length so
+      // every line finishes together, no matter how long.
+      let start = 0;
       const frame = (ts: number) => {
         if (cancelled) return;
-        if (!last) last = ts;
-        const target = Math.min(total, shown + Math.ceil(((ts - last) / 1000) * CHARS_PER_SEC));
-        last = ts;
+        if (!start) start = ts;
+        const progress = Math.min(1, (ts - start) / durationMs);
+        const target = Math.ceil(progress * total);
         const slices = sliceChunks(chunks.map((c) => c.text), target);
         for (let i = 0; i < chunks.length; i++) {
           if (chunks[i].node.data !== slices[i]) chunks[i].node.data = slices[i];
         }
-        shown = target;
         onstep?.();
-        if (shown < total) raf = requestAnimationFrame(frame);
+        if (progress < 1) raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);
     }

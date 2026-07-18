@@ -71,7 +71,7 @@ interface Persisted {
   emberIntensity: number; // 0..100
   keyboardSfx: boolean;
   music: boolean;
-  typewriter: boolean;
+  typewriterMs: number; // per-line reveal duration; 0 = off
   sceneStrip: boolean;
   notifyDesktop: boolean;
   notifySound: boolean;
@@ -97,7 +97,7 @@ const DEFAULTS: Persisted = {
   emberIntensity: 45,
   keyboardSfx: false,
   music: true,
-  typewriter: true,
+  typewriterMs: 275,
   sceneStrip: true,
   notifyDesktop: false,
   notifySound: true,
@@ -115,6 +115,7 @@ const RANGES = {
   scanlineOpacity: [0, 30],
   vignetteIntensity: [0, 100],
   emberIntensity: [0, 100],
+  typewriterMs: [0, 1500],
 } as const;
 
 function load(): Persisted {
@@ -147,7 +148,7 @@ class Settings {
   emberIntensity = $state(DEFAULTS.emberIntensity);
   keyboardSfx = $state(DEFAULTS.keyboardSfx);
   music = $state(DEFAULTS.music);
-  typewriter = $state(DEFAULTS.typewriter);
+  typewriterMs = $state(DEFAULTS.typewriterMs);
   sceneStrip = $state(DEFAULTS.sceneStrip);
   notifyDesktop = $state(DEFAULTS.notifyDesktop);
   notifySound = $state(DEFAULTS.notifySound);

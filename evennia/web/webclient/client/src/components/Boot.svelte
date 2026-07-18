@@ -17,7 +17,7 @@
 
   // Reduce motion / screenreader render the boot instantly, like the log typewriter.
   const animate = $derived(
-    settings.typewriter && !settings.reduceMotion && !settings.screenreader,
+    settings.typewriterMs > 0 && !settings.reduceMotion && !settings.screenreader,
   );
 
   function finish() {
