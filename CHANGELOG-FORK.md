@@ -25,6 +25,18 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.172 — Puppet terminal buffer tools
+
+### Webclient
+
+- Added download buffer and clear buffer buttons to the puppet terminal panel in the Svelte client.
+- Added `clearFeed` method to `PuppetScenes` with corresponding unit test coverage in `puppets.test.ts`.
+- Rebuilt precompiled shell assets (`shell.js` and `shell.css`) to bundle these new terminal controls.
+
+Migration notes: no database migration or downstream changes are required.
+
+---
+
 ## 6.0.0+underspire.171 — Puppet patch metadata
 
 ### Webclient protocol
