@@ -21,6 +21,29 @@
     puppets.setActive(null);
   }
 
+  function toPlain(body: string): string {
+    const el = document.createElement("div");
+    el.innerHTML = toHtml(body);
+    return el.textContent ?? "";
+  }
+  function clearFeed() {
+    if (active && active.feed.length && confirm(`Clear ${active.name}'s buffer?`)) {
+      puppets.clearFeed(active.npcId);
+    }
+  }
+  function downloadFeed() {
+    if (!active) return;
+    const text = active.feed.map((line) => toPlain(line.body)).join("\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.href = url;
+    a.download = `puppet-${active.npcId}-${stamp}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Auto-scroll the terminal to the newest line as the feed grows.
   $effect(() => {
     if (active && active.feed.length && feedEl) {
@@ -52,6 +75,8 @@
       {#if active.scene.room.name}
         <span class="where">{@html active.scene.room.name}</span>
       {/if}
+      <button class="tool" onclick={downloadFeed} title="download buffer" aria-label="download buffer" disabled={!active.feed.length}>⭳</button>
+      <button class="tool" onclick={clearFeed} title="clear buffer" aria-label="clear buffer" disabled={!active.feed.length}>⌫</button>
     </header>
 
     <div class="term-feed" bind:this={feedEl}>
@@ -117,6 +142,10 @@
   .term-head { display: flex; gap: 7px; align-items: baseline; padding-bottom: 4px; border-bottom: 1px solid color-mix(in srgb, var(--gold) 30%, transparent); }
   .term-head .name { font-weight: 600; }
   .back { background: none; border: 0; color: var(--gold); font-size: 1.2em; line-height: 1; cursor: pointer; padding: 0 4px 0 0; }
+  .term-head .tool { flex: none; background: none; border: 0; color: var(--muted, #889); cursor: pointer; padding: 0 3px; font-size: 0.95em; }
+  .term-head .tool:hover:not(:disabled) { color: var(--gold); }
+  .term-head .tool:disabled { opacity: 0.4; cursor: default; }
+  .term-head .where { max-width: 40%; }
   .term-feed { flex: 1; overflow-y: auto; padding: 6px 2px; display: flex; flex-direction: column; gap: 2px; }
   .term-line { color: var(--fg, #cdd); font-size: 0.9em; white-space: pre-wrap; word-break: break-word; }
   .term-input { display: flex; gap: 6px; align-items: center; padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--gold) 30%, transparent); }
