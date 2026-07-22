@@ -8,6 +8,7 @@ from unittest import mock
 
 from parameterized import parameterized
 
+from evennia.authorization.policy import RequiresCapability
 from evennia.help import filehelp
 from evennia.help import utils as help_utils
 from evennia.utils.test_resources import TestCase
@@ -142,6 +143,18 @@ class TestFileHelp(TestCase):
             self.assertEqual(HELP_ENTRY_DICTS[inum].get("aliases", []), helpentry.aliases)
             self.assertEqual(HELP_ENTRY_DICTS[inum]["category"].lower(), helpentry.help_category)
             self.assertEqual(HELP_ENTRY_DICTS[inum]["text"], helpentry.entrytext)
+
+    def test_game_template_uses_capability_policy(self):
+        """The shipped game template must load under structured authorization."""
+
+        storage = filehelp.FileHelpStorageHandler(
+            help_file_modules=["evennia.game_template.world.help_entries"]
+        )
+
+        entry = storage.all(return_dict=True)["evennia"]
+        expected = RequiresCapability("engine.help.manage")
+        self.assertEqual(entry.authorization_policies["read"], expected)
+        self.assertEqual(entry.authorization_policies["view"], expected)
 
 
 class HelpUtils(TestCase):

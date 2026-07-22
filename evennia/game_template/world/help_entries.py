@@ -14,13 +14,11 @@ Each dict is on the form
 ::
 
     {'key': <str>,
-     'text': <str>}``     # the actual help text. Can contain # subtopic sections
+     'text': <str>,       # the actual help text. Can contain # subtopic sections
      'category': <str>,   # optional, otherwise settings.DEFAULT_HELP_CATEGORY
-     'aliases': <list>,   # optional
-     'locks': <str>       # optional, 'view' controls seeing in help index, 'read'
-                          #           if the entry can be read. If 'view' is unset,
-                          #           'read' is used for the index. If unset, everyone
-                          #           can read/view the entry.
+     'aliases': <list>,      # optional
+     'capability': <str>}    # optional capability required to read or list the entry;
+                             # if unset, everyone can read and view it
 
 """
 
@@ -29,7 +27,7 @@ HELP_ENTRY_DICTS = [
         "key": "evennia",
         "aliases": ["ev"],
         "category": "General",
-        "locks": "read:perm(Developer)",
+        "capability": "engine.help.manage",
         "text": """
             Evennia is a MU-game server and framework written in Python. You can read more
             on https://www.evennia.com.
