@@ -82,6 +82,13 @@ export class PuppetScenes {
     this.requestResync?.(npcId, current?.revision ?? 0);
   }
 
+  /** Wipe one NPC terminal's scrollback (the structured scene is untouched). */
+  clearFeed(npcId: number): void {
+    const key = String(npcId);
+    const current = this.feeds.get(key);
+    if (current && current.feed.length) this.feeds.set(key, { ...current, feed: [] });
+  }
+
   markRead(npcId: number): void {
     const key = String(npcId);
     const current = this.feeds.get(key);

@@ -167,6 +167,19 @@ describe("puppet scene protocol", () => {
     expect(scenes.feeds.get("71")!.unread).toBe(0);
   });
 
+  it("clearFeed wipes scrollback but keeps the puppet and its scene", () => {
+    const scenes = new PuppetScenes();
+    scenes.apply(snapshot(71, 2, 1));
+    scenes.apply(feedEnv(71, "Bob waves."));
+
+    scenes.clearFeed(71);
+
+    const feed = scenes.feeds.get("71")!;
+    expect(feed.feed).toEqual([]);
+    expect(feed.scene.room.name).toBe("Room 71");
+    expect(scenes.list).toHaveLength(1);
+  });
+
   it("setManifest establishes the roster and prunes stale feeds", () => {
     const scenes = new PuppetScenes();
     scenes.apply(snapshot(71, 2, 1));
