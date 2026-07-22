@@ -331,8 +331,8 @@ class TagHandler(object):
         self._catcache = {}
         # full cache was run on all tags
         self._cache_complete = False
-        # whether we've already attempted to seed the cache from a
-        # prefetch_related('db_tags') set on the object (done at most once)
+        # whether the cache was seeded from a prefetch_related('db_tags') set
+        # or explicitly reset away from a potentially stale prefetch snapshot
         self._prefetch_checked = False
 
     def _query_all(self):
@@ -442,14 +442,14 @@ class TagHandler(object):
         """
         key = str(key).strip().lower() if key else None
         category = category.strip().lower() if category else None
-        # one-shot: if this object was loaded with prefetch_related('db_tags'),
-        # seed the full cache from it before falling through to any query
+        # Django may access the handler while constructing the object, before
+        # prefetch_related() attaches its result. Keep probing until a prefetch
+        # is actually found and seeds the full cache.
         if (
             settings.TYPECLASS_AGGRESSIVE_CACHE
             and not self._cache_complete
             and not self._prefetch_checked
         ):
-            self._prefetch_checked = True
             self._cache_from_prefetch()
         if key:
             cachekey = "%s-%s" % (key, category)
@@ -571,9 +571,13 @@ class TagHandler(object):
         self._cache_complete = False
         self._cache = {}
         self._catcache = {}
-        # an explicit reset wants fresh data from the DB, not the in-memory
-        # prefetch snapshot captured at load time
-        self._prefetch_checked = True
+        # Discard any stale Django prefetch snapshot. A later
+        # prefetch_related() may attach a fresh one to this idmapped instance,
+        # which _getcache() must remain able to consume.
+        prefetched = getattr(self.obj, "_prefetched_objects_cache", None)
+        if prefetched:
+            prefetched.pop(self._m2m_fieldname, None)
+        self._prefetch_checked = False
 
     def add(self, key=None, category=None, data=None):
         """
