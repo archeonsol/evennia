@@ -1,13 +1,14 @@
 """Tests for the engine-shipped admin actions (``evennia.actions.default.admin``).
 
 The action-engine analogue of the ``CmdEmit``/``CmdWall``/``CmdForce``/
-``CmdPerm``/``CmdAccess`` command tests: each verb dispatches through a real
+capability administration command tests: each verb dispatches through a real
 :class:`~evennia.actions.engine.RuleEngine` over fake world objects, asserting
 player-visible messages, side effects, and the ``requires=`` capability gates
 (a non-staff actor must leave the dispatch fully gated, never half-run).
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from evennia.actions.default import admin as admin_module
@@ -16,12 +17,13 @@ from evennia.actions.default.admin import (
     CharacterAdminRules,
     Emit,
     Force,
-    Perm,
+    Grant,
+    Policy,
+    Scope,
     Wall,
 )
 from evennia.actions.tests.fakes import (
     FakeChar,
-    FakeLocks,
     FakeObj,
     FakeSessionHandler,
     dispatch,
@@ -33,8 +35,8 @@ class Staffer(CharacterAdminRules, FakeChar):
     """Provider fixture: a character carrying the admin rules."""
 
 
-def _setup(perms=("Builder",)):
-    char = Staffer(perms=perms)
+def _setup(capabilities=("engine.world.build",)):
+    char = Staffer(capabilities=capabilities)
     actor = make_actor(char)
     return char, actor
 
@@ -99,7 +101,7 @@ class TestEmit(unittest.TestCase):
         self.assertTrue(any("not allowed to emit" in m for m in char.messages))
 
     def test_gated_for_non_builder(self):
-        char, actor = _setup(perms=("Player",))
+        char, actor = _setup(capabilities=())
         trace = self._emit(char, actor, "bob = hi")
         self.assertFalse(char.messages)
         self.assertEqual(trace.carry_out_fired, 0)
@@ -113,12 +115,12 @@ class TestWall(unittest.TestCase):
         return dispatch(action, actor, [char])
 
     def test_usage_without_args(self):
-        char, actor = _setup(perms=("Admin",))
+        char, actor = _setup(capabilities=("engine.moderation.manage",))
         self._wall(char, actor, "")
         self.assertTrue(any("Usage" in m for m in char.messages))
 
     def test_announces_to_all_sessions(self):
-        char, actor = _setup(perms=("Admin",))
+        char, actor = _setup(capabilities=("engine.moderation.manage",))
         handler = FakeSessionHandler()
         with mock.patch.object(admin_module.evennia, "SESSION_HANDLER", handler):
             self._wall(char, actor, "server restart soon")
@@ -126,7 +128,7 @@ class TestWall(unittest.TestCase):
         self.assertTrue(any("Announcing" in m for m in char.messages))
 
     def test_gated_for_builder(self):
-        char, actor = _setup(perms=("Builder",))
+        char, actor = _setup(capabilities=("engine.world.build",))
         trace = self._wall(char, actor, "hi all")
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
@@ -160,113 +162,140 @@ class TestForce(unittest.TestCase):
         self.assertTrue(any("You have forced bob to: get stick" in m for m in char.messages))
 
     def test_gated_for_non_builder(self):
-        char, actor = _setup(perms=("Player",))
+        char, actor = _setup(capabilities=())
         trace = self._force(char, actor, "bob = get stick")
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
 
 
-# --- @perm ---------------------------------------------------------------------
-class TestPerm(unittest.TestCase):
-    def _perm(self, char, actor, raw, switches=()):
-        action = Perm.parse(raw, actor, switches=switches, verb="@perm")
+# --- @grant --------------------------------------------------------------------
+class TestGrant(unittest.TestCase):
+    def _grant(self, char, actor, raw, switches=()):
+        action = Grant.parse(raw, actor, switches=switches, verb="@grant")
         return dispatch(action, actor, [char])
 
     def test_usage_without_args(self):
-        char, actor = _setup(perms=("Developer",))
-        self._perm(char, actor, "")
-        self.assertTrue(any("Usage" in m for m in char.messages))
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        self._grant(char, actor, "")
+        self.assertTrue(any("Usage" in message for message in char.messages))
 
-    def test_view_permissions(self):
-        char, actor = _setup(perms=("Developer",))
-        bob = FakeObj(key="bob", perms=("Helper",))
-        char.search_map["bob"] = bob
-        self._perm(char, actor, "bob")
-        self.assertTrue(any("Permissions on" in m and "helper" in m for m in char.messages))
+    def test_grants_registered_capability(self):
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        char.pk = 1
+        target = FakeObj(key="bob")
+        target.pk = 2
+        char.search_map["bob"] = target
+        with mock.patch("evennia.authorization.storage.grant_capability") as grant:
+            self._grant(char, actor, "bob = engine.world.build")
+        grant.assert_called_once_with(
+            "object:2",
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            provenance="action_command",
+            actor_ref="object:1",
+            reason="action @grant",
+        )
+        self.assertTrue(any("Granted 1" in message for message in char.messages))
 
-    def test_add_permission(self):
-        char, actor = _setup(perms=("Developer",))
-        bob = FakeObj(key="bob")
-        char.search_map["bob"] = bob
-        self._perm(char, actor, "bob = Helper")
-        self.assertTrue(bob.permissions.get("helper"))
-        self.assertTrue(any("given to bob" in m for m in char.messages))
-        self.assertTrue(any("gives you" in m for m in bob.messages))
-
-    def test_already_defined(self):
-        char, actor = _setup(perms=("Developer",))
-        bob = FakeObj(key="bob", perms=("Helper",))
-        char.search_map["bob"] = bob
-        self._perm(char, actor, "bob = Helper")
-        self.assertTrue(any("already defined" in m for m in char.messages))
-
-    def test_escalation_blocked(self):
-        char, actor = _setup(perms=("Developer",))
-        bob = FakeObj(key="bob")
-        bob.locks = FakeLocks(allow=False)  # caller fails the perm() lock check
-        char.search_map["bob"] = bob
-        self._perm(char, actor, "bob = Developer")
-        self.assertFalse(bob.permissions.get("developer"))
-        self.assertTrue(any("cannot assign" in m for m in char.messages))
-
-    def test_delete_permission(self):
-        char, actor = _setup(perms=("Developer",))
-        bob = FakeObj(key="bob", perms=("Helper",))
-        char.search_map["bob"] = bob
-        self._perm(char, actor, "bob = Helper", switches=("del",))
-        self.assertFalse(bob.permissions.get("helper"))
-        self.assertTrue(any("removed from bob" in m for m in char.messages))
-
-    def test_account_mode_star_prefix(self):
-        char, actor = _setup(perms=("Developer",))
-        bobacct = FakeObj(key="bob")
-        char.account_search_map["bob"] = bobacct
-        self._perm(char, actor, "*bob = Helper")
-        self.assertTrue(bobacct.permissions.get("helper"))
-        self.assertTrue(any("the Account" in m for m in char.messages))
-
-    def test_edit_access_required_for_change(self):
-        char, actor = _setup(perms=("Developer",))
-        bob = FakeObj(key="bob", access={"control": False})
-        char.search_map["bob"] = bob
-        self._perm(char, actor, "bob = Helper")
-        self.assertFalse(bob.permissions.get("helper"))
-        self.assertTrue(any("not allowed to edit" in m for m in char.messages))
-
-    def test_gated_for_admin(self):
-        # @perm is Developer-gated; even Admin is refused.
-        char, actor = _setup(perms=("Admin",))
-        trace = self._perm(char, actor, "bob = Helper")
+    def test_gated_without_runtime_manage(self):
+        char, actor = _setup()
+        trace = self._grant(char, actor, "bob = engine.world.build")
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
 
 
-# --- @access --------------------------------------------------------------------
+class FakePolicies:
+    """Sparse policy handler used by admin-action tests."""
+
+    def __init__(self):
+        self.values = {}
+
+    def get(self, operation):
+        return self.values.get(operation)
+
+    def set(self, operation, policy):
+        self.values[operation] = policy
+
+    def remove(self, operation):
+        return self.values.pop(operation, None) is not None
+
+    def all(self):
+        return dict(self.values)
+
+
+# --- @policy -------------------------------------------------------------------
+class TestPolicy(unittest.TestCase):
+    def _policy(self, char, actor, raw, switches=()):
+        action = Policy.parse(raw, actor, switches=switches, verb="@policy")
+        return dispatch(action, actor, [char])
+
+    def test_sets_typed_policy(self):
+        char, actor = _setup()
+        target = FakeObj(key="bob")
+        target.policies = FakePolicies()
+        char.search_map["bob"] = target
+        self._policy(char, actor, "bob/view = disabled", switches=("set",))
+        self.assertEqual(target.policies.get("view").to_data()["type"], "never")
+        self.assertTrue(any("bob/view" in message for message in char.messages))
+
+    def test_control_required(self):
+        char, actor = _setup()
+        target = FakeObj(key="bob", access={"control": False, "edit": False})
+        target.policies = FakePolicies()
+        char.search_map["bob"] = target
+        self._policy(char, actor, "bob/view = public", switches=("set",))
+        self.assertIsNone(target.policies.get("view"))
+        self.assertTrue(any("not allowed" in message for message in char.messages))
+
+
+# --- @scope --------------------------------------------------------------------
+class TestScope(unittest.TestCase):
+    def _scope(self, char, actor, raw, switches=()):
+        action = Scope.parse(raw, actor, switches=switches, verb="@scope")
+        return dispatch(action, actor, [char])
+
+    def test_sets_scope_labels(self):
+        char, actor = _setup()
+        target = FakeObj(key="bob")
+        char.search_map["bob"] = target
+        with mock.patch("evennia.authorization.storage.set_scope_labels") as setter:
+            self._scope(
+                char,
+                actor,
+                "bob = zone:market, project:renovation",
+                switches=("set",),
+            )
+        setter.assert_called_once_with(target, {"zone:market", "project:renovation"})
+        self.assertTrue(any("project:renovation" in message for message in char.messages))
+
+
+# --- @access -------------------------------------------------------------------
 class TestAccess(unittest.TestCase):
     def _access(self, char, actor):
         action = Access.parse("", actor, verb="@access")
         return dispatch(action, actor, [char])
 
-    def test_shows_hierarchy_and_own_perms(self):
-        char, actor = _setup(perms=("Builder",))
-        self._access(char, actor)
+    def test_shows_effective_capability_grants(self):
+        char, actor = _setup(capabilities=())
+        grants = SimpleNamespace(
+            by_capability={
+                "engine.world.build": (SimpleNamespace(kind="world", key="*"),)
+            }
+        )
+        with mock.patch("evennia.authorization.storage.load_grants", return_value=grants):
+            trace = self._access(char, actor)
         out = "\n".join(char.messages)
-        self.assertIn("Permission Hierarchy", out)
-        self.assertIn("builder", out)
-
-    def test_ungated_for_player(self):
-        char, actor = _setup(perms=("Player",))
-        trace = self._access(char, actor)
-        self.assertTrue(any("Permission Hierarchy" in m for m in char.messages))
+        self.assertIn("Your capability grants", out)
+        self.assertIn("engine.world.build: world:*", out)
         self.assertEqual(trace.carry_out_gated, 0)
 
-    def test_superuser_account_branch(self):
-        char, actor = _setup(perms=("Player",))
-        char.account = FakeObj(key="boss")
-        char.account.is_superuser = True
-        self._access(char, actor)
-        out = "\n".join(char.messages)
-        self.assertIn("<Superuser>", out)
+    def test_no_grants(self):
+        char, actor = _setup(capabilities=())
+        grants = SimpleNamespace(by_capability={})
+        with mock.patch("evennia.authorization.storage.load_grants", return_value=grants):
+            self._access(char, actor)
+        self.assertTrue(any("<None>" in message for message in char.messages))
 
 
 if __name__ == "__main__":

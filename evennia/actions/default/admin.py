@@ -81,7 +81,7 @@ class Force(ArgAction):
 class Grant(ArgAction):
     """View or change explicit capability grants on an object or account.
 
-    ``@perm[/del|/account] <object|*account> [= <perm>[,<perm>,...]]``.
+    ``@grant[/revoke|/account] <object|*account> [= capability|bundle:name]``.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -106,7 +106,7 @@ class Scope(ArgAction):
 @action("@access", "@groups", "@hierarchy")
 @dataclass
 class Access(ArgAction):
-    """Show the permission hierarchy and the caller's own memberships."""
+    """Show the caller's effective capability grants and scopes."""
 
     __primary_handler__ = DefaultCharacter
 
@@ -269,7 +269,7 @@ class CharacterAdminRules:
         locktype = "edit" if accountmode else "control"
         if not obj.access(caller, locktype):
             accountstr = "account" if accountmode else "object"
-            caller.msg(f"You are not allowed to edit this {accountstr}'s permissions.")
+            caller.msg(f"You are not allowed to manage grants for this {accountstr}.")
             return CLAIM
 
         refs = principal_refs(obj)
