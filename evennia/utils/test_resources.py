@@ -333,8 +333,11 @@ class EvenniaTestMixin:
         PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"]
     )
     def tearDown(self):
+        from evennia.authorization.storage import clear_authorization_caches
+
         flush_cache()
         discard_dirty_backends()
+        clear_authorization_caches()
         try:
             evennia.SESSION_HANDLER.data_out = self.backups[0]
             evennia.SESSION_HANDLER.disconnect = self.backups[1]

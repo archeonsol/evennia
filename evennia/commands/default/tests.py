@@ -2077,9 +2077,12 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.cmdchannel.account_command_caller = False
 
     def tearDown(self):
-        self.cmdchannel.account_command_caller = self._orig_acct_caller
-        if self.channel.pk:
-            self.channel.delete()
+        try:
+            self.cmdchannel.account_command_caller = self._orig_acct_caller
+            if self.channel.pk:
+                self.channel.delete()
+        finally:
+            super().tearDown()
 
     # test channel command
     def test_channel__noarg(self):
