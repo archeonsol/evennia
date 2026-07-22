@@ -248,7 +248,7 @@ class _SaverMutable:
         return self._data | other
 
     def __ror__(self, other):
-        return self._data | other
+        return other | self._data
 
     @_save
     def __setitem__(self, key, value):
@@ -321,7 +321,9 @@ class _SaverDict(_SaverMutable, MutableMapping):
 
     @_save
     def update(self, *args, **kwargs):
-        self._data.update(*args, **kwargs)
+        self._data.update(
+            (key, self._convert_mutables(value)) for key, value in dict(*args, **kwargs).items()
+        )
 
 
 class _SaverDefaultDict(_SaverDict):

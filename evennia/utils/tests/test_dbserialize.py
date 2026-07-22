@@ -78,6 +78,24 @@ class TestDbSerialize(TestCase):
         self.obj.db.test |= {"c": 5}
         self.assertEqual(self.obj.db.test, {"a": True, "b": False, "c": 5})
 
+    def test_saverdict__reverse_or_keeps_right_operand_precedence(self):
+        """Reverse dict union gives the SaverDict operand precedence."""
+        self.obj.db.test = {"shared": "attribute", "attribute": True}
+
+        result = {"shared": "mapping", "mapping": True} | self.obj.db.test
+
+        self.assertEqual(result, {"shared": "attribute", "mapping": True, "attribute": True})
+
+    def test_saverdict__update_converts_nested_mutables(self):
+        """Nested mutables added by update persist their later in-place changes."""
+        self.obj.db.test = {}
+        self.obj.db.test.update({"nested": []})
+        self.obj.db.test["nested"].append("saved")
+
+        self.obj.attributes.reset_cache()
+
+        self.assertEqual(self.obj.db.test, {"nested": ["saved"]})
+
     @parameterized.expand(
         [
             ("list", list, dbserialize._SaverList, [1, 2, 3]),
