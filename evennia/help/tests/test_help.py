@@ -194,3 +194,7 @@ class HelpUtils(TestCase):
         entries, _ = help_utils.help_search_with_index(search_term, self.candidate_entries)
 
         self.assertEqual(entries, expected_entry, error_msg)
+
+    def test_help_search_with_empty_candidates(self):
+        """An empty help catalog returns no matches or suggestions."""
+        self.assertEqual(help_utils.help_search_with_index("anything", []), ([], []))

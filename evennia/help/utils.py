@@ -156,6 +156,8 @@ def help_search_with_index(query, candidate_entries, suggestion_maxnum=5, fields
     from lunr.exceptions import QueryParseError
 
     indx = [cnd.search_index_entry for cnd in candidate_entries]
+    if not indx:
+        return [], []
     mapping = {indx[ix]["key"]: cand for ix, cand in enumerate(candidate_entries)}
 
     if not fields:
@@ -165,6 +167,15 @@ def help_search_with_index(query, candidate_entries, suggestion_maxnum=5, fields
             {"field_name": "category", "boost": 6},
             {"field_name": "tags", "boost": 5},
         ]
+
+    # lunr.py divides by the number of documents containing each configured
+    # field. Empty optional fields therefore cause division by zero when every
+    # candidate has an empty value (for example a catalog with no tags).
+    fields = [
+        field
+        for field in fields
+        if any(document.get(field["field_name"]) for document in indx)
+    ]
 
     lunr_search = LunrSearch()
 

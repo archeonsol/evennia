@@ -65,17 +65,20 @@ An example of the contents of a module:
 
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from django.conf import settings
 from django.urls import reverse
 from django.utils.text import slugify
 
-from evennia.authorization.policy import (Always, Policy, RequiresCapability,
-                                          validate_policy)
+from evennia.authorization.policy import Always, Policy, RequiresCapability, validate_policy
 from evennia.utils import logger
-from evennia.utils.utils import (all_from_module, lazy_property, make_iter,
-                                 variable_from_module)
+from evennia.utils.utils import all_from_module, lazy_property, make_iter, variable_from_module
+
+
+def _public_help_policies():
+    """Build independent public read/view policies for one file entry."""
+    return {"read": Always(), "view": Always()}
 
 
 @dataclass
@@ -92,7 +95,7 @@ class FileHelpEntry:
     help_category: str
     entrytext: str
     lock_storage: str
-    authorization_policies: dict[str, Policy]
+    authorization_policies: dict[str, Policy] = field(default_factory=_public_help_policies)
 
     @property
     def search_index_entry(self):
