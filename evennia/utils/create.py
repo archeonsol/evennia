@@ -94,8 +94,7 @@ def create_object(*args, **kwargs):
             `#dbref` will be set.
         location (Object or str): Obj or #dbref to use as the location of the new object.
         home (Object or str): Obj or #dbref to use as the object's home location.
-        permissions (list): A list of permission strings or tuples (permstring, category).
-        locks (str): one or more lockstrings, separated by semicolons.
+        policies (dict): Typed operation-to-Policy overrides.
         aliases (list): A list of alternative keys or tuples (aliasstring, category).
         tags (list): List of tag keys or tuples (tagkey, category) or (tagkey, category, data).
         destination (Object or str): Obj or #dbref to use as an Exit's target.
@@ -103,9 +102,8 @@ def create_object(*args, **kwargs):
         nohome (bool): This allows the creation of objects without a
             default home location; only used when creating the default
             location itself or during unittests.
-        attributes (list): Tuples on the form (key, value) or (key, value, category),
-            (key, value, lockstring) or (key, value, lockstring, default_access).
-            to set as Attributes on the new object.
+        attributes (list): Tuples on the form `(key, value)` or
+            `(key, value, category)` to set as Attributes on the new object.
         nattributes (list): Non-persistent tuples on the form (key, value). Note that
             adding this rarely makes sense since this data will not survive a reload.
 
@@ -134,14 +132,14 @@ def create_script(*args, **kwargs):
             is `None`, we are creating a "global" script.
         account (Account): The account on which this Script sits. It is
             exclusiv to `obj`.
-        locks (str): one or more lockstrings, separated by semicolons.
+        policies (dict): Typed operation-to-Policy overrides.
         persistent (bool): If this Script survives a server shutdown
             or not (all Scripts will survive a reload).
         report_to (Object): The object to return error messages to.
         desc (str): Optional description of script
         tags (list): List of tags or tuples (tag, category).
-        attributes (list): List if tuples (key, value) or (key, value, category)
-           (key, value, lockstring) or (key, value, lockstring, default_access).
+        attributes (list): Tuples on the form `(key, value)` or
+            `(key, value, category)`.
 
     Returns:
         script (obj): An instance of the script created
@@ -243,11 +241,9 @@ def create_account(*args, **kwargs):
     Keyword Args:
         typeclass (str): The typeclass to use for the account.
         is_superuser (bool): Whether or not this account is to be a superuser
-        locks (str): Lockstring.
-        permission (list): List of permission strings.
+        policies (dict): Typed operation-to-Policy overrides.
         tags (list): List of Tags on form `(key, category[, data])`
-        attributes (list): List of Attributes on form
-             `(key, value [, category, [,lockstring [, default_pass]]])`
+        attributes (list): Attributes on form `(key, value[, category])`.
         report_to (Object): An object with a msg() method to report
             errors to. If not given, errors will be logged.
 
@@ -257,10 +253,8 @@ def create_account(*args, **kwargs):
         ValueError: If `key` already exists in database.
 
     Notes:
-        Usually only the server admin should need to be superuser, all
-        other access levels can be handled with more fine-grained
-        permissions or groups. A superuser bypasses all lock checking
-        operations and is thus not suitable for play-testing the game.
+        ``is_superuser`` grants Django administration only. Game authority
+        requires explicit capability grants.
     """
     return AccountDB.objects.create_account(*args, **kwargs)
 

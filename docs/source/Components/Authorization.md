@@ -111,3 +111,6 @@ The capability-only cutover is deliberately one-way:
 The database columns that formerly stored locks remain inert for a compatibility
 release so existing databases require no schema migration. They are cleared by
 the finalizer and ignored by every runtime decision.
+
+For a game-repository checklist and concrete API replacements, see
+[Capability-only game migration](../Setup/Capability-Authorization-Migration.md).

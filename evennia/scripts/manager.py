@@ -242,8 +242,8 @@ class ScriptDBManager(TypedObjectManager):
             report_to (Object): The object to return error messages to.
             desc (str): Optional description of script
             tags (list): List of tags or tuples (tag, category).
-            attributes (list): List if tuples (key, value) or (key, value, category)
-               (key, value, lockstring) or (key, value, lockstring, default_access).
+            attributes (list): Tuples on the form `(key, value)` or
+                `(key, value, category)`.
 
         Returns:
             script (obj): An instance of the script created

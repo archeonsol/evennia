@@ -2,6 +2,9 @@
 
 This is relevant to you already having code in an older Evennia version. If you are new, or don't have much code yet, it may be easier to just start fresh with the [Installation](./Installation.md) instructions and copy over things manually.
 
+Games moving to the capability-only Underspire runtime must also follow the
+[capability authorization migration guide](./Capability-Authorization-Migration.md).
+
 ## Evennia v0.9.5 to 1.0+
 
 ### Upgrading the Evennia library

@@ -13,6 +13,7 @@ Installation-Docker
 Installation-Troubleshooting
 Installation-Android
 Installation-Upgrade
+Capability-Authorization-Migration
 Installation-Non-Interactive
 Running-Evennia
 Updating-Evennia

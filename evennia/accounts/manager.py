@@ -223,8 +223,7 @@ class AccountDBManager(TypedObjectManager, UserManager):
             is_superuser (bool): Whether or not this account is to be a superuser
             policies (dict): Typed operation policies.
             tags (list): List of Tags on form `(key, category[, data])`
-            attributes (list): List of Attributes on form
-                 `(key, value [, category, [,lockstring [, default_pass]]])`
+            attributes (list): Attributes on form `(key, value[, category])`.
             report_to (Object): An object with a msg() method to report
                 errors to. If not given, errors will be logged.
 
@@ -235,10 +234,8 @@ class AccountDBManager(TypedObjectManager, UserManager):
 
 
         Notes:
-            Usually only the server admin should need to be superuser, all
-            other access levels can be handled with more fine-grained
-            permissions or groups. A superuser bypasses all lock checking
-            operations and is thus not suitable for play-testing the game.
+            ``is_superuser`` grants Django administration only. Game authority
+            requires explicit capability grants.
 
         """
         typeclass = typeclass if typeclass else settings.BASE_ACCOUNT_TYPECLASS

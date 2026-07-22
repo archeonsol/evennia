@@ -669,9 +669,8 @@ class ObjectDBManager(TypedObjectManager):
             nohome (bool): This allows the creation of objects without a
                 default home location; only used when creating the default
                 location itself or during unittests.
-            attributes (list): Tuples on the form (key, value) or (key, value, category),
-                (key, value, lockstring) or (key, value, lockstring, default_access).
-                to set as Attributes on the new object.
+            attributes (list): Tuples on the form `(key, value)` or
+                `(key, value, category)` to set as Attributes on the new object.
             nattributes (list): Non-persistent tuples on the form (key, value). Note that
                 adding this rarely makes sense since this data will not survive a reload.
 
