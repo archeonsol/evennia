@@ -5,6 +5,7 @@ Tests of create functions
 
 from django.test import TestCase
 
+from evennia.authorization.policy import Always, Never
 from evennia.scripts.scripts import DefaultScript
 from evennia.utils import create
 from evennia.utils.test_resources import BaseEvenniaTest
@@ -63,7 +64,7 @@ class TestCreateHelpEntry(TestCase):
         self.assertFalse(create.create_help_entry("testentry", "testtext"))
 
     def test_create_help_entry__complex(self):
-        locks = "foo:false();bar:true()"
+        policies = {"read": Never(), "view": Always()}
         aliases = ["foo", "bar", "tst"]
         tags = [("tag1", "help"), ("tag2", "help"), ("tag3", "help")]
 
@@ -71,12 +72,13 @@ class TestCreateHelpEntry(TestCase):
             "testentry",
             self.help_entry,
             category="Testing",
-            locks=locks,
+            policies=policies,
             aliases=aliases,
             tags=tags,
         )
-        self.assertTrue(all(lock in entry.locks.all() for lock in locks.split(";")))
-        self.assertEqual(list(entry.aliases.all()).sort(), aliases.sort())
+        self.assertEqual(entry.policies.get("read"), Never())
+        self.assertEqual(entry.policies.get("view"), Always())
+        self.assertCountEqual(entry.aliases.all(), aliases)
         self.assertEqual(entry.tags.all(return_key_and_category=True), tags)
 
 
@@ -100,18 +102,19 @@ class TestCreateMessage(BaseEvenniaTest):
         self.assertEqual(msg.receivers, [self.char2, "ExternalReceiver"])
 
     def test_create_msg__custom(self):
-        locks = "foo:false();bar:true()"
+        policies = {"read": Never(), "edit": Always()}
         tags = ["tag1", "tag2", "tag3"]
         msg = create.create_message(
             self.char1,
             self.msgtext,
             header="TestHeader",
             receivers=[self.char1, self.char2, "ExternalReceiver"],
-            locks=locks,
+            policies=policies,
             tags=tags,
         )
         self.assertEqual(set(msg.receivers), set([self.char1, self.char2, "ExternalReceiver"]))
-        self.assertTrue(all(lock in msg.locks.all() for lock in locks.split(";")))
+        self.assertEqual(msg.policies.get("read"), Never())
+        self.assertEqual(msg.policies.get("edit"), Always())
         self.assertEqual(msg.tags.all(), tags)
 
 
@@ -122,13 +125,18 @@ class TestCreateChannel(TestCase):
         self.assertEqual(chan.db.desc, "Testing channel")
 
     def test_create_channel__complex(self):
-        locks = "foo:false();bar:true()"
+        policies = {"send": Never(), "listen": Always()}
         tags = ["tag1", "tag2", "tag3"]
         aliases = ["foo", "bar", "tst"]
 
         chan = create.create_channel(
-            "TestChannel2", desc="Testing channel", aliases=aliases, locks=locks, tags=tags
+            "TestChannel2",
+            desc="Testing channel",
+            aliases=aliases,
+            policies=policies,
+            tags=tags,
         )
-        self.assertTrue(all(lock in chan.locks.all() for lock in locks.split(";")))
+        self.assertEqual(chan.policies.get("send"), Never())
+        self.assertEqual(chan.policies.get("listen"), Always())
         self.assertEqual(chan.tags.all(), tags)
-        self.assertEqual(list(chan.aliases.all()).sort(), aliases.sort())
+        self.assertCountEqual(chan.aliases.all(), aliases)

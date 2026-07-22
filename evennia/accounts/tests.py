@@ -870,23 +870,26 @@ class TestDefaultAccountEv(BaseEvenniaTest):
             self.assertEqual(idle, None)
 
     def test_create_account(self):
+        from evennia.authorization.policy import Never
+
         acct = create.account(
             "TestAccount3",
             "test@test.com",
             "testpassword123",
-            locks="test:all()",
+            policies={"edit": Never()},
             tags=[
                 ("tag1", "category1"),
                 ("tag2", "category2", "data1"),
                 ("tag3", None),
             ],
             attributes=[
-                ("key1", "value1", "category1", "edit:false()", True),
+                ("key1", "value1", "category1"),
                 ("key2", "value2"),
             ],
         )
         acct.save()
         self.assertTrue(acct.pk)
+        self.assertEqual(acct.policies.get("edit"), Never())
 
     def test_at_look(self):
         ret = self.account.at_look()
