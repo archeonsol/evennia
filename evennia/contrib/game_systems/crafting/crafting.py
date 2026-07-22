@@ -1046,8 +1046,9 @@ class CmdCraft(Command):
         """
         Perform crafting.
 
-        Will check the `craft` locktype. If a consumable/ingredient does not pass
-        this check, we will check for the 'crafting_consumable_err_msg'
+        Will check the `craft` authorization policy. Objects inherit a public
+        policy by default. If a consumable/ingredient does not pass this check,
+        we will check for the 'crafting_consumable_err_msg'
         Attribute, otherwise will use a default. If failing on a tool, will use
         the `crafting_tool_err_msg` if available.
 
@@ -1072,10 +1073,10 @@ class CmdCraft(Command):
             if (
                 not inherits_from(obj, "evennia.objects.models.ObjectDB")
                 or obj.sessions.all()
-                or not obj.access(caller, "craft", default=True)
+                or not obj.access(caller, "craft")
             ):
-                # We don't allow to include puppeted objects nor those with the
-                # 'negative' permission 'nocraft'.
+                # We don't allow puppeted objects or objects whose explicit
+                # craft policy denies this caller.
                 caller.msg(
                     obj.attributes.get(
                         "crafting_consumable_err_msg",
@@ -1093,7 +1094,7 @@ class CmdCraft(Command):
             obj = caller.search(tool_key)
             if not obj:
                 return None
-            if not obj.access(caller, "craft", default=True):
+            if not obj.access(caller, "craft"):
                 caller.msg(
                     obj.attributes.get(
                         "crafting_tool_err_msg",

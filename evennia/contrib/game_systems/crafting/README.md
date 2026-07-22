@@ -50,6 +50,12 @@ available to you:
 
     craft <recipe> [from <ingredient>,...] [using <tool>, ...]
 
+The command checks each ingredient and tool's `craft` authorization policy.
+`DefaultObject` makes this operation public. To restrict an object, override
+`authorization_policies["craft"]` on its typeclass or set a sparse per-object
+policy with `obj.policies.set("craft", policy)`. Legacy `craft:` lockstrings are
+inert and must be replaced with a typed policy.
+
 In code, you can craft using the
 `evennia.contrib.game_systems.crafting.craft` function:
 
@@ -297,4 +303,3 @@ If you want to build something even more custom (maybe using different input typ
 you could also look at the `CraftingRecipe` parent class `CraftingRecipeBase`.
 It implements just the minimum needed to be a recipe and for big changes you may be better off starting
 from this rather than the more opinionated `CraftingRecipe`.
-

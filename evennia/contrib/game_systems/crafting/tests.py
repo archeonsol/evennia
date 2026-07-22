@@ -8,6 +8,7 @@ from unittest import mock
 from django.core.exceptions import ObjectDoesNotExist
 from django.test import override_settings
 
+from evennia.authorization.policy import Always, Never
 from evennia.commands.default.tests import BaseEvenniaCommandTest
 from evennia.utils.create import create_object
 from evennia.utils.test_resources import BaseEvenniaTestCase
@@ -683,7 +684,7 @@ class TestCraftCommand(BaseEvenniaCommandTest):
     def setUp(self):
         super().setUp()
 
-        tools, consumables = _MockRecipe.seed(
+        self.tools, self.consumables = _MockRecipe.seed(
             tool_kwargs={"location": self.char1}, consumable_kwargs={"location": self.char1}
         )
 
@@ -694,6 +695,19 @@ class TestCraftCommand(BaseEvenniaCommandTest):
             "testrecipe from cons1, cons2, cons3 using tool1, tool2",
             _MockRecipe.success_message.format(outputs="Result1"),
         )
+
+    def test_craft__denied_by_policy(self):
+        """An explicit craft policy can deny an otherwise public ingredient."""
+        ingredient = self.consumables[0]
+        ingredient.policies.set("craft", Never())
+        try:
+            self.call(
+                crafting.CmdCraft(),
+                "testrecipe from cons1, cons2, cons3 using tool1, tool2",
+                "Cons1 can't be used for this.",
+            )
+        finally:
+            ingredient.policies.set("craft", Always())
 
     def test_craft__notools__failure(self):
         "Craft fail no tools"

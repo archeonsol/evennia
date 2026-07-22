@@ -612,6 +612,7 @@ class DefaultObject(
         "get": Always(),
         "drop": Always(),
         "call": Always(),
+        "craft": Always(),
         "puppet": PredicateRequirement("principal.controls_resource"),
         "attrread": Always(),
         "attrcreate": RequiresCapability("engine.object.edit"),

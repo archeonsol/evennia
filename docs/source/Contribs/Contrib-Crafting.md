@@ -50,6 +50,12 @@ available to you:
 
     craft <recipe> [from <ingredient>,...] [using <tool>, ...]
 
+The command checks each ingredient and tool's `craft` authorization policy.
+`DefaultObject` makes this operation public. To restrict an object, override
+`authorization_policies["craft"]` on its typeclass or set a sparse per-object
+policy with `obj.policies.set("craft", policy)`. Legacy `craft:` lockstrings are
+inert and must be replaced with a typed policy.
+
 In code, you can craft using the
 `evennia.contrib.game_systems.crafting.craft` function:
 
