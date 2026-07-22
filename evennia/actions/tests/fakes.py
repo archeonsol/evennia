@@ -1,7 +1,7 @@
 """Shared no-DB fakes for default-action provider tests.
 
-These model just enough of the typeclass surface (permissions, locks, access,
-msg, search) for the engine to dispatch default actions against plain Python
+These model just enough of the typeclass surface (capabilities, access, msg,
+search) for the engine to dispatch default actions against plain Python
 objects. Provider test fixtures subclass a rules mixin together with
 :class:`FakeChar` so the rule methods ride a fake world object.
 """
@@ -104,6 +104,7 @@ class FakeObj:
         key="thing",
         location=None,
         perms=(),
+        capabilities=(),
         access=None,
         puppeted=False,
     ):
@@ -112,6 +113,7 @@ class FakeObj:
         self.location = location
         self.home = None
         self.permissions = FakePerms(perms)
+        self.capabilities = frozenset(capabilities)
         self.locks = FakeLocks()
         self.account = None
         self.is_puppeted = puppeted
@@ -135,6 +137,10 @@ class FakeObj:
 
     def access(self, accessing_obj, access_type, default=False):
         return self._access.get(access_type, True)
+
+    def has_capability(self, capability, **kwargs):
+        """Return whether this fake principal carries an explicit capability."""
+        return capability in self.capabilities
 
     def execute_cmd(self, raw_string, **kwargs):
         self.executed.append(raw_string)

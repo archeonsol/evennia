@@ -6,9 +6,8 @@ The action-engine analogue of ``evennia/commands/default/account.py``'s
 
 * :class:`Option` — view/set client protocol options on the current session,
   with ``/save`` and ``/clear`` persistence on the account.
-* :class:`Password` — change your own password (old = new), gated on the
-  account-scope Player rank (the ``pperm(Player)`` analogue: quell does not
-  lock you out of your own password).
+* :class:`Password` — change your own password (old = new). Authentication by
+  the old password is the authority check, so no gameplay capability is needed.
 * :class:`UserPassword` — staff verb to set another account's password
   (Admin gate).
 

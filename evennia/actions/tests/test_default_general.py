@@ -15,6 +15,7 @@ from twisted.internet.defer import Deferred
 from evennia.actions.default import general as general_module
 from evennia.actions.default.general import CharacterGeneralRules, Home, Nick, SetHelp
 from evennia.actions.tests.fakes import FakeChar, FakeObj, dispatch, make_actor
+from evennia.authorization.policy import Always, RequiresCapability
 from evennia.typeclasses.attributes import NickTemplateInvalid
 
 engine_mod = sys.modules["evennia.actions.engine"]
@@ -71,13 +72,13 @@ class FakeNicks:
 class Citizen(CharacterGeneralRules, FakeChar):
     """Provider fixture: a character carrying the general rules + nicks."""
 
-    def __init__(self, perms=("Player",), **kwargs):
-        super().__init__(perms=perms, **kwargs)
+    def __init__(self, capabilities=(), **kwargs):
+        super().__init__(capabilities=capabilities, **kwargs)
         self.nicks = FakeNicks()
 
 
-def _setup(perms=("Player",)):
-    char = Citizen(perms=perms)
+def _setup(capabilities=()):
+    char = Citizen(capabilities=capabilities)
     actor = make_actor(char)
     return char, actor
 
@@ -193,13 +194,13 @@ class TestHome(unittest.TestCase):
         return dispatch(action, actor, [char])
 
     def test_no_home(self):
-        char, actor = _setup(perms=("Builder",))
+        char, actor = _setup(capabilities=("engine.world.build",))
         char.home = None
         self._home(char, actor)
         self.assertTrue(any("no home" in m for m in char.messages))
 
     def test_already_home(self):
-        char, actor = _setup(perms=("Builder",))
+        char, actor = _setup(capabilities=("engine.world.build",))
         room = FakeObj(key="cottage")
         char.home = room
         char.location = room
@@ -207,7 +208,7 @@ class TestHome(unittest.TestCase):
         self.assertTrue(any("already home" in m for m in char.messages))
 
     def test_teleports_home(self):
-        char, actor = _setup(perms=("Builder",))
+        char, actor = _setup(capabilities=("engine.world.build",))
         cottage = FakeObj(key="cottage")
         plaza = FakeObj(key="plaza")
         char.home = cottage
@@ -218,14 +219,14 @@ class TestHome(unittest.TestCase):
         self.assertTrue(any("no place like home" in m for m in char.messages))
 
     def test_args_show_usage(self):
-        char, actor = _setup(perms=("Builder",))
+        char, actor = _setup(capabilities=("engine.world.build",))
         char.home = FakeObj(key="cottage")
         self._home(char, actor, "north")
         self.assertEqual(char.moves, [])
         self.assertTrue(any("Usage: home" in m for m in char.messages))
 
     def test_gated_for_player(self):
-        char, actor = _setup(perms=("Player",))
+        char, actor = _setup()
         char.home = FakeObj(key="cottage")
         trace = self._home(char, actor)
         self.assertFalse(char.messages)
@@ -233,26 +234,17 @@ class TestHome(unittest.TestCase):
 
 
 # --- @sethelp --------------------------------------------------------------------
-class FakeLocksHandler:
-    """Lock handler stub for a help entry: get/all/clear/add/check."""
+class FakePolicies:
+    """Policy handler stub for a help entry."""
 
-    def __init__(self, locks="read:all()"):
-        self._locks = locks
+    def __init__(self):
+        self._policies = {"read": Always()}
 
-    def get(self):
-        return self._locks
+    def get(self, operation):
+        return self._policies.get(operation)
 
-    def all(self):
-        return [self._locks] if self._locks else []
-
-    def clear(self):
-        self._locks = ""
-
-    def add(self, lockstring):
-        self._locks = ",".join(lockstring) if isinstance(lockstring, (list, tuple)) else lockstring
-
-    def __str__(self):
-        return self._locks
+    def set(self, operation, policy):
+        self._policies[operation] = policy
 
 
 class FakeAliases:
@@ -270,7 +262,7 @@ class FakeHelpEntry:
         self.key = key
         self.entrytext = entrytext
         self.help_category = help_category
-        self.locks = FakeLocksHandler()
+        self.policies = FakePolicies()
         self.aliases = FakeAliases()
         self.saved = False
         self.deleted = False
@@ -307,14 +299,14 @@ class StubHelper:
 class Helpdesk(CharacterGeneralRules, FakeChar):
     """Provider fixture: a character carrying the general rules, Helper-ranked."""
 
-    def __init__(self, perms=("Helper",), **kwargs):
-        super().__init__(perms=perms, **kwargs)
+    def __init__(self, capabilities=("engine.help.manage",), **kwargs):
+        super().__init__(capabilities=capabilities, **kwargs)
         self.nicks = FakeNicks()
 
 
 class TestSetHelp(unittest.TestCase):
-    def _setup(self, perms=("Helper",)):
-        char = Helpdesk(perms=perms)
+    def _setup(self, capabilities=("engine.help.manage",)):
+        char = Helpdesk(capabilities=capabilities)
         actor = make_actor(char)
         return char, actor
 
@@ -327,7 +319,7 @@ class TestSetHelp(unittest.TestCase):
             return dispatch(action, actor, [char])
 
     def test_gated_for_player(self):
-        char, actor = self._setup(perms=("Player",))
+        char, actor = self._setup(capabilities=())
         action = SetHelp.parse("lore = text", actor, verb="@sethelp")
         trace = dispatch(action, actor, [char])
         self.assertFalse(char.messages)
@@ -388,13 +380,21 @@ class TestSetHelp(unittest.TestCase):
         self.assertEqual(entry.help_category, "classes")
         self.assertTrue(any("changed to 'classes'" in m for m in char.messages))
 
-    def test_locks_change(self):
+    def test_policy_change(self):
         char, actor = self._setup()
         entry = FakeHelpEntry(key="lore")
         helper = StubHelper(search_results=[entry])
-        self._sethelp(char, actor, "lore = read:perm(Builder)", switches=("locks",), helper=helper)
-        self.assertEqual(entry.locks.get(), "read:perm(Builder)")
-        self.assertTrue(any("changed to: read:perm(Builder)" in m for m in char.messages))
+        self._sethelp(
+            char,
+            actor,
+            "lore = engine.world.build",
+            switches=("policy",),
+            helper=helper,
+        )
+        self.assertEqual(
+            entry.policies.get("read"), RequiresCapability("engine.world.build")
+        )
+        self.assertTrue(any("engine.world.build" in m for m in char.messages))
 
     def test_clash_warning_abort(self):
         from evennia.help.formatters import HelpCategory

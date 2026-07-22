@@ -22,8 +22,8 @@ class Account(DefaultAccountRules, FakeAccount):
     """Provider fixture: an account carrying the account-shell rules."""
 
 
-def _setup(perms=("Player",), flags=None):
-    account = Account(perms=perms)
+def _setup(capabilities=(), flags=None):
+    account = Account(capabilities=capabilities)
     session = FakeSession(flags=flags)
     actor = make_actor(None, session=session, account=account)
     return account, session, actor
@@ -124,11 +124,11 @@ class TestPassword(unittest.TestCase):
         self.assertTrue(account.saved)
         self.assertTrue(any("Password changed" in m for m in account.messages))
 
-    def test_gated_without_player_perm(self):
-        account, _, actor = _setup(perms=())
+    def test_not_gated_by_capability(self):
+        account, _, actor = _setup()
         trace = self._password(account, actor, "secret = hunter2")
-        self.assertFalse(account.messages)
-        self.assertGreaterEqual(trace.carry_out_gated, 1)
+        self.assertEqual(account.password, "hunter2")
+        self.assertEqual(trace.carry_out_gated, 0)
 
 
 # --- @userpassword ---------------------------------------------------------------
@@ -138,12 +138,12 @@ class TestUserPassword(unittest.TestCase):
         return dispatch(action, actor, [account])
 
     def test_usage_without_rhs(self):
-        account, _, actor = _setup(perms=("Admin",))
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
         self._userpassword(account, actor, "bob")
         self.assertTrue(any("Usage" in m for m in account.messages))
 
     def test_sets_target_password(self):
-        account, _, actor = _setup(perms=("Admin",))
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
         target = FakeAccount(key="bob", password="old")
         account.account_search_map["bob"] = target
         self._userpassword(account, actor, "bob = newpass")
@@ -153,7 +153,7 @@ class TestUserPassword(unittest.TestCase):
         self.assertTrue(any("changed your password" in m for m in target.messages))
 
     def test_invalid_password_reported(self):
-        account, _, actor = _setup(perms=("Admin",))
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
         target = FakeAccount(key="bob", valid_password=False)
         account.account_search_map["bob"] = target
         self._userpassword(account, actor, "bob = x")
@@ -161,7 +161,7 @@ class TestUserPassword(unittest.TestCase):
         self.assertTrue(any("failed validation" in m for m in account.messages))
 
     def test_gated_for_builder(self):
-        account, _, actor = _setup(perms=("Builder",))
+        account, _, actor = _setup(capabilities=("engine.world.build",))
         trace = self._userpassword(account, actor, "bob = newpass")
         self.assertFalse(account.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
