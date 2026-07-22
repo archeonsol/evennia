@@ -9,17 +9,21 @@ from django.utils import timezone
 from evennia.authorization import service as authorization_service
 from evennia.authorization.legacy_import.migration import migrate_resource
 from evennia.authorization.service import access_check, authorize
-from evennia.authorization.storage import (clear_authorization_caches,
-                                           delegate_grant, grant_capability,
-                                           issue_recovery_grant, load_grants,
-                                           load_policy, load_resource,
-                                           preload_policy_packages,
-                                           principal_is_suspended,
-                                           principal_refs,
-                                           set_principal_suspended,
-                                           set_scope_labels)
-from evennia.server.models import (AuthorizationAuditEvent,
-                                   AuthorizationPolicyOverride)
+from evennia.authorization.storage import (
+    clear_authorization_caches,
+    delegate_grant,
+    grant_capability,
+    issue_recovery_grant,
+    load_grants,
+    load_policy,
+    load_resource,
+    preload_policy_packages,
+    principal_is_suspended,
+    principal_refs,
+    set_principal_suspended,
+    set_scope_labels,
+)
+from evennia.server.models import AuthorizationAuditEvent, AuthorizationPolicyOverride
 
 
 class FakePermissions:
@@ -66,6 +70,15 @@ class FakeResource:
         self.lock_storage = lock_storage
 
 
+class UnsafeRefResource(FakeResource):
+    """Resource whose explicit reference is unsafe for Memcached keys."""
+
+    def authorization_resource_ref(self):
+        """Return a reference containing spaces and exceeding key limits."""
+
+        return f"help:file:{'unsafe topic ' * 30}"
+
+
 class AuthorizationStorageTest(TestCase):
     """Persistent grants and materialized labels remain independently cached."""
 
@@ -100,6 +113,18 @@ class AuthorizationStorageTest(TestCase):
         self.assertTrue(decision.allowed)
         self.assertIn("project:market", load_resource(resource).labels)
         self.assertIn("engine.object.edit", load_grants(principal).by_capability)
+
+    def test_generation_cache_keys_are_backend_safe_and_bounded(self):
+        resource = UnsafeRefResource()
+
+        with patch(
+            "evennia.authorization.storage.cache.get", return_value=0
+        ) as cache_get:
+            load_resource(resource)
+
+        cache_key = cache_get.call_args.args[0]
+        self.assertNotRegex(cache_key, r"[\x00-\x20\x7f]")
+        self.assertLessEqual(len(cache_key), 250)
 
     def test_live_driver_not_durable_owner_supplies_account_principal(self):
         driver = type("Account", (), {"pk": 9})()

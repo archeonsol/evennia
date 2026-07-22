@@ -6,16 +6,20 @@ import time
 import uuid
 from collections import OrderedDict
 from datetime import timedelta
+from hashlib import sha256
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import models, transaction
 from django.utils import timezone
 
-from evennia.server.models import (AuthorizationAuditEvent, AuthorizationGrant,
-                                   AuthorizationPolicyOverride,
-                                   AuthorizationPrincipalState,
-                                   AuthorizationScopeLabel)
+from evennia.server.models import (
+    AuthorizationAuditEvent,
+    AuthorizationGrant,
+    AuthorizationPolicyOverride,
+    AuthorizationPrincipalState,
+    AuthorizationScopeLabel,
+)
 from evennia.utils import logger
 
 from .capabilities import capability_registry
@@ -42,12 +46,19 @@ def _bounded_put(cache: OrderedDict, key, value) -> None:
         cache.popitem(last=False)
 
 
+def _generation_cache_key(namespace: str, key: str) -> str:
+    """Return a deterministic generation key safe for every Django backend."""
+
+    digest = sha256(str(key).encode("utf-8")).hexdigest()
+    return f"evennia:authgen:{namespace}:{digest}"
+
+
 def _shared_generation(namespace: str, key: str, local: int) -> int:
     """Poll a cross-process generation counter under a short local TTL."""
 
     if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
         return local
-    cache_key = f"evennia:authgen:{namespace}:{key}"
+    cache_key = _generation_cache_key(namespace, key)
     now = time.monotonic()
     cached = _shared_generation_cache.get(cache_key)
     interval = max(
@@ -70,7 +81,7 @@ def _publish_generation(namespace: str, key: str, value: int) -> int:
 
     if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
         return value
-    cache_key = f"evennia:authgen:{namespace}:{key}"
+    cache_key = _generation_cache_key(namespace, key)
     try:
         cache.add(cache_key, 0, timeout=None)
         published = int(cache.incr(cache_key))
