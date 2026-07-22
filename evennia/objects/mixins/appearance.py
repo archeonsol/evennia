@@ -522,6 +522,15 @@ class AppearanceMixin:
             **kwargs,
         )
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="target",
+        returns="content",
+        discipline="public",
+        fires_from=("AppearanceMixin.at_look_node",),
+        notes="Structured renderer. Preserves return_appearance overrides during migration.",
+    )
     def return_appearance_node(self, looker, **kwargs):
         """Return this appearance as a universal structured node.
 
@@ -598,6 +607,15 @@ class AppearanceMixin:
 
         return description
 
+    @hook(
+        event="look",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes="Structured look lifecycle. Returns a RenderNode and fires at_desc on the target.",
+    )
     def at_look_node(self, target, **kwargs):
         """Perform the authoritative look lifecycle and return a RenderNode."""
         from evennia.narrative.rendernode import RenderNode, text_node

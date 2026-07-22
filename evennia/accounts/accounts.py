@@ -2187,7 +2187,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         actor="target",
         returns="ignored",
         discipline="public",
-        fires_from=("LockHandler.check",),
+        fires_from=("DefaultAccount.access",),
         notes="Account override of LifecycleMixin.at_post_access.",
     )
     def at_post_access(self, result, accessing_obj, access_type, **kwargs):

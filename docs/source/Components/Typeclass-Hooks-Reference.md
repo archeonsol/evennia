@@ -226,6 +226,7 @@ the authoritative roster.
 | Hook | Class | Actor | Returns |
 |---|---|---|---|
 | `at_look` | `AppearanceMixin` | self | Composite. Returns the description; caller messages it. Fires at_desc on target as a side effect. |
+| `at_look_node` | `AppearanceMixin` | self | Structured look lifecycle. Returns a RenderNode and fires at_desc on the target. |
 | `get_content_group_label` | `AppearanceMixin` | target | Per-group label injected into the rendered listings. |
 | `get_display_characters` | `AppearanceMixin` | target | Rendered characters block. |
 | `get_display_desc` | `AppearanceMixin` | target | Reads desc attribute by default. |
@@ -242,6 +243,7 @@ the authoritative roster.
 | `get_say_template_self` | `AppearanceMixin` | self | str.format-ready template for the speaker's self-echo. |
 | `get_self_pronoun` | `AppearanceMixin` | target | Pronoun from the looker's perspective. Default returns 'You' when looker is self. |
 | `return_appearance` | `AppearanceMixin` | target | Composite renderer. Joins get_display_* providers via appearance_template. |
+| `return_appearance_node` | `AppearanceMixin` | target | Structured renderer. Preserves return_appearance overrides during migration. |
 | `at_look` | `DefaultAccount` | self | Distinct from Object.at_look. Account.at_look is the OOC character picker. |
 | `at_sync_restore_puppet` | `DefaultAccount` | self | Reattach puppet after server reload when bid-based at_sync could not restore focus. |
 | `get_all_puppets` | `DefaultAccount` | self | Returns all currently puppeted characters on the account. |
@@ -257,7 +259,6 @@ the authoritative roster.
 | `get_cmdset_providers` | `DefaultObject` | self | Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider]. See command-system.md. |
 | `get_nicklist` | `IRCBot` | self | IRCBot-specific: returns the nicklist of the connected channel. |
 | `get_cmdsets` | `LifecycleMixin` | self | Returns the per-class cmdset stack as (current, cmdsets). See command-system.md. |
-| `get_default_lockstring` | `LifecycleMixin` | self | Per-class default lockstring used during basetype_setup. |
 | `get_message_recipients` | `MessagingMixin` | self | Resolves the recipient set for a msg_contents broadcast. |
 | `get_search_candidates` | `SearchMixin` | self | Search-pipeline stage 3: compute candidate set (location/contents-aware). |
 | `get_search_query_replacement` | `SearchMixin` | self | Search-pipeline stage 1: rewrite the raw search string (nick replacement etc). |
@@ -311,7 +312,7 @@ the authoritative roster.
 | `at_object_creation` | `LifecycleMixin` | self | One-shot creation hook. Fires once per object via at_first_save. |
 | `at_object_post_copy` | `LifecycleMixin` | source | Fires on the SOURCE object (not the new copy). |
 | `at_object_post_creation` | `LifecycleMixin` | self | Fires after at_object_creation, lets game-side code run final setup. |
-| `at_post_access` | `LifecycleMixin` | target | Fires after a lock check resolves. Gets the result and the accessing object. |
+| `at_post_access` | `LifecycleMixin` | target | Fires after an access check resolves. Gets the result and the accessing object. |
 | `at_post_load` | `LifecycleMixin` | self | Object override of TypedObject.at_post_load (shadows it; apply_schema_migrations does not run for objects). Reinstalls persisted input-capture states. Fires on every cache load; overrides must be idempotent. |
 | `at_post_puppet` | `LifecycleMixin` | target | Reattach path fires with reattach=True kwarg. |
 | `at_post_unpuppet` | `LifecycleMixin` | target | Fires after the session detaches. The focus stack has collapsed off this body. |

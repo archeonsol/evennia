@@ -662,8 +662,8 @@ class LifecycleMixin:
         actor="target",
         returns="ignored",
         discipline="public",
-        fires_from=("LockHandler.check",),
-        notes="Fires after a lock check resolves. Gets the result and the accessing object.",
+        fires_from=("LifecycleMixin.access",),
+        notes="Fires after an access check resolves. Gets the result and the accessing object.",
     )
     def at_post_access(self, result, accessing_obj, access_type, **kwargs):
         """
