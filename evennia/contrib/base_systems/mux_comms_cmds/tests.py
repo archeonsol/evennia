@@ -47,8 +47,8 @@ class TestLegacyMuxComms(BaseEvenniaCommandTest):
     def test_clock(self):
         self.call(
             comms.CmdClock(),
-            "testchan=send:all()",
-            "Lock(s) applied. Current locks on testchan:",
+            "testchan=send=public",
+            "Policy 'send' updated on testchan.",
             receiver=self.account,
         )
 
