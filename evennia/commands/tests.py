@@ -3,16 +3,16 @@ Unit testing for the Command system itself.
 
 """
 
+from unittest import mock as _trie_mock
 from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
 import evennia
-from evennia.commands import cmdparser
+from evennia.commands import cmdparser, cmdparser_trie
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
-from evennia.utils.test_resources import (BaseEvenniaCommandTest,
-                                          BaseEvenniaTest, TestCase)
+from evennia.utils.test_resources import BaseEvenniaCommandTest, BaseEvenniaTest, TestCase
 
 # Testing-command sets
 
@@ -2327,6 +2327,71 @@ class TestTokenBoundaryMatch(TestCase):
 # ----------------------------------------------------------------------------
 # Phase 2 follow-up: engine-owned permission cache invalidation + signal
 # ----------------------------------------------------------------------------
+
+
+class _TrieCmdGoShard(Command):
+    """Public multiword command fixture."""
+
+    key = "go shard"
+    aliases = ["shard"]
+    authorization = "public"
+
+    def func(self):
+        """Provide a no-op command body for parser tests."""
+
+
+class _TrieCmdGo(Command):
+    """Public single-word command fixture."""
+
+    key = "go"
+    authorization = "public"
+
+    def func(self):
+        """Provide a no-op command body for parser tests."""
+
+
+class _TrieCmdLook(Command):
+    """Public look command fixture."""
+
+    key = "look"
+    authorization = "public"
+
+    def func(self):
+        """Provide a no-op command body for parser tests."""
+
+
+class _TrieCmdLookat(Command):
+    """Public lookat command fixture."""
+
+    key = "lookat"
+    authorization = "public"
+
+    def func(self):
+        """Provide a no-op command body for parser tests."""
+
+
+class _TrieCmdZebra(Command):
+    """Public command fixture for fast-path tests."""
+
+    key = "zebraalpha"
+    authorization = "public"
+
+    def func(self):
+        """Provide a no-op command body for parser tests."""
+
+
+class _TrieCmdZebraOverrideMatch(Command):
+    """Public command fixture with an explicit match override."""
+
+    key = "zebraalpha"
+    authorization = "public"
+
+    def match(self, search_string):
+        """Delegate matching while preserving the class override."""
+        return Command.match(self, search_string)
+
+    def func(self):
+        """Provide a no-op command body for parser tests."""
 
 
 class TestCommandTrie(TestCase):
