@@ -170,15 +170,10 @@ class TestJsonbBackendCRUD(BaseEvenniaTest):
         self.handler.add("x", 1, category="traits")
         self.assertIn("traits", self.backend._l1)
 
-    def test_lockstring_stored_and_retrievable(self):
-        self.handler.add("secret", 42, lockstring="read:perm(Admin)")
-        attr = self.handler.get("secret", return_obj=True)
-        self.assertIsNotNone(attr)
-        self.assertEqual(attr.lock_storage, "read:perm(Admin)")
-        # Also accessible via backend directly:
-        attrs = self.backend.query_key("secret", None)
-        self.assertTrue(attrs)
-        self.assertEqual(attrs[0].lock_storage, "read:perm(Admin)")
+    def test_lockstring_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not executable"):
+            self.handler.add("secret", 42, lockstring="read:perm(Admin)")
+        self.assertIsNone(self.handler.get("secret"))
 
     def test_marks_dirty_on_write(self):
         self.assertFalse(self.backend._dirty)

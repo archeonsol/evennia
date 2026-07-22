@@ -841,6 +841,7 @@ class IAttributeBackend:
 
         Raises:
             RuntimeError: If trying to pass a non-iterable as argument.
+            ValueError: If any tuple contains a legacy per-attribute lockstring.
 
         Notes:
             The indata tuple order matters, so if you want a lockstring but no
@@ -857,6 +858,10 @@ class IAttributeBackend:
                 raise RuntimeError(
                     "batch_add requires iterables as arguments (got %r)." % tup
                 )
+            if len(tup) > 3 and tup[3]:
+                raise ValueError("per-attribute lockstrings are not executable")
+
+        for tup in args:
             ntup = len(tup)
             keystr = str(tup[0]).strip().lower()
             new_value = tup[1]
@@ -864,9 +869,6 @@ class IAttributeBackend:
                 str(tup[2]).strip().lower() if ntup > 2 and tup[2] is not None else None
             )
             lockstring = tup[3] if ntup > 3 else ""
-            if lockstring:
-                raise ValueError("per-attribute lockstrings are not executable")
-
             attr_objs = self._get_cache(keystr, category)
 
             if attr_objs:
@@ -1221,8 +1223,8 @@ class AttributeHandler:
                 `strattr` keyword is set, this *must* be a string.
             category (str, optional): The category for the Attribute.
                 The default `None` is the normal category used.
-            lockstring (str, optional): A lock string limiting access
-                to the attribute.
+            lockstring (str, optional): Unsupported legacy argument. Any non-empty
+                value raises `ValueError`.
             strattr (bool, optional): Make this a string-only Attribute.
                 This is only ever useful for optimization purposes.
             accessing_obj (object, optional): An entity to check for

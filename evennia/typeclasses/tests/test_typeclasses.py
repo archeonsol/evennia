@@ -99,11 +99,10 @@ class TestAttributes(BaseEvenniaTest):
             ("key3", "value3"),
             ("key4", "value4", "category4", "attrread:id(1)", False),
         ]
-        new_attrs = self.obj1.attributes.batch_add(*attrs)
-        attrobj = self.obj1.attributes.get(key="key4", category="category4", return_obj=True)
-        self.assertEqual(attrobj.value, "value4")
-        self.assertEqual(attrobj.category, "category4")
-        self.assertEqual(attrobj.locks.all(), ["attrread:id(1)"])
+        with self.assertRaisesRegex(ValueError, "not executable"):
+            self.obj1.attributes.batch_add(*attrs)
+        for key in ("key1", "key2", "key3", "key4"):
+            self.assertFalse(self.obj1.attributes.has(key))
 
     def test_value_vs_strvalue(self):
         self.obj1.attributes.add("test", "one")
