@@ -25,6 +25,61 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.173 — Constant-duration typewriter; buffer tools reshipped
+
+### Webclient
+
+- Reveal each freshly-appended log line over a fixed duration regardless of its
+  length, so a help file and a one-liner finish together instead of long output
+  crawling at a fixed characters-per-second rate. The typewriter on/off toggle
+  is replaced by a per-line reveal-duration slider (0 disables it, default
+  275ms); reduce-motion and screenreader modes still force instant reveal.
+- Rebuilt the precompiled shell assets (`shell.js`, `shell.css`) from the merged
+  sources so the bundle carries both the typewriter work and the puppet terminal
+  buffer tools. The two landed on diverging branches and each had rebuilt the
+  bundle independently, so only a regenerated artifact contains both.
+
+### Release hygiene
+
+The `underspire.172` tag was placed on `a50e68d99` ("per-NPC puppet terminal +
+unread badges") rather than on that release's version-bump commit. As a result
+the tag does **not** contain `d9e4ff421`, the puppet terminal download/clear
+buffer tools — even though the `.172` changelog entry below describes them.
+
+The tag is left as-is rather than moved, since it has been published and
+consumers may have fetched it. `.173` is therefore the first tag that actually
+ships the buffer tools. Anyone pinned to `underspire.172` does not have them and
+should move to `.173`; `.github/workflows/deploy.yml` in the game repo pins
+`EVENNIA_REF` and needs the same bump.
+
+### Testing
+
+This release ships without a green engine suite, which is a pre-existing
+condition rather than a property of these changes. Both ways of running it fail
+identically at `underspire.172`:
+
+- From a game dir with customised settings: 55 failures, 121 errors, largely
+  upstream tests still passing `locks=` to APIs the capability refactor
+  (`feat(auth)!: replace locks with capabilities`) removed.
+- From a freshly initialised game dir with default settings — the way CI runs
+  it — the suite does not start at all: `ValueError: file help entries use
+  'capability'; lock/permission declarations are not supported`. The default
+  game-dir template's file help entries were never migrated off lock/permission
+  declarations, so the engine rejects a game dir it just generated.
+
+What *is* verified for this release: it changes only webclient assets and no
+Python, its client suite passes (25 tests, covering both the typewriter and
+puppet-buffer sides of the merge), and the downstream game's full suite of 3936
+tests passes against this engine.
+
+Fixing the file-help template mismatch would restore the gate for future
+releases and is worth doing on its own; while the suite cannot run, nothing
+mechanically catches a mistake like the misplaced `.172` tag described above.
+
+Migration notes: no database migration or downstream API changes are required.
+
+---
+
 ## 6.0.0+underspire.172 — Puppet terminal buffer tools
 
 ### Webclient
