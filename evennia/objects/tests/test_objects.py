@@ -1,5 +1,6 @@
 from mock import MagicMock, patch
 
+from evennia.authorization.policy import Always, Never, PredicateRequirement, RequiresCapability
 from evennia.objects.models import ObjectDB
 from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.objects.search_result import Ambiguous, Found, NotFound
@@ -222,15 +223,11 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertIsInstance(result, Ambiguous)
         self.assertEqual(result.candidates, [coin1, coin2, coin3])
 
-    def test_get_default_lockstring_base(self):
-        pattern = (
-            f"control:pid({self.account.id}) or id({self.char1.id}) or"
-            f" perm(Admin);delete:pid({self.account.id}) or id({self.char1.id}) or"
-            f" perm(Admin);edit:pid({self.account.id}) or id({self.char1.id}) or perm(Admin)"
-        )
-        self.assertEqual(
-            DefaultObject.get_default_lockstring(account=self.account, caller=self.char1), pattern
-        )
+    def test_default_object_authorization_policies(self):
+        policies = DefaultObject.authorization_policies
+        self.assertEqual(policies["control"], RequiresCapability("engine.object.control"))
+        self.assertEqual(policies["delete"], RequiresCapability("engine.object.delete"))
+        self.assertEqual(policies["edit"], RequiresCapability("engine.object.edit"))
 
     def test_search_by_tag_kwarg(self):
         "Test the by_tag method"
@@ -251,36 +248,26 @@ class DefaultObjectTest(BaseEvenniaTest):
         )
         self.assertEqual(list(search.search_object("Obj", tags=[("dummy", "adventure")])), [])
 
-    def test_get_default_lockstring_room(self):
-        pattern = (
-            f"control:pid({self.account.id}) or id({self.char1.id}) or"
-            f" perm(Admin);delete:pid({self.account.id}) or id({self.char1.id}) or"
-            f" perm(Admin);edit:pid({self.account.id}) or id({self.char1.id}) or perm(Admin)"
-        )
-        self.assertEqual(
-            DefaultRoom.get_default_lockstring(account=self.account, caller=self.char1), pattern
-        )
+    def test_default_room_authorization_policies(self):
+        policies = DefaultRoom.authorization_policies
+        self.assertEqual(policies["get"], Never())
+        self.assertEqual(policies["teleport"], Never())
+        self.assertEqual(policies["teleport_here"], Always())
 
-    def test_get_default_lockstring_exit(self):
-        pattern = (
-            f"control:pid({self.account.id}) or id({self.char1.id}) or"
-            f" perm(Admin);delete:pid({self.account.id}) or id({self.char1.id}) or"
-            f" perm(Admin);edit:pid({self.account.id}) or id({self.char1.id}) or perm(Admin)"
-        )
-        self.assertEqual(
-            DefaultExit.get_default_lockstring(account=self.account, caller=self.char1), pattern
-        )
+    def test_default_exit_authorization_policies(self):
+        policies = DefaultExit.authorization_policies
+        self.assertEqual(policies["traverse"], Always())
+        self.assertEqual(policies["get"], Never())
+        self.assertEqual(policies["teleport_here"], Never())
 
-    def test_get_default_lockstring_character(self):
-        pattern = (
-            f"puppet:pid({self.account.id}) or perm(Developer) or"
-            f" pperm(Developer);delete:pid({self.account.id}) or"
-            f" perm(Admin);edit:pid({self.account.id}) or perm(Admin)"
-        )
+    def test_default_character_authorization_policies(self):
+        policies = DefaultCharacter.authorization_policies
         self.assertEqual(
-            DefaultCharacter.get_default_lockstring(account=self.account, caller=self.char1),
-            pattern,
+            policies["puppet"], PredicateRequirement("principal.controls_resource")
         )
+        self.assertEqual(policies["delete"], RequiresCapability("engine.object.delete"))
+        self.assertEqual(policies["edit"], RequiresCapability("engine.object.edit"))
+        self.assertEqual(policies["get"], Never())
 
     def test_get_name_without_article(self):
         self.assertEqual(self.obj1.get_numbered_name(1, self.char1, return_string=True), "an Obj")
