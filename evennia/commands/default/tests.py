@@ -30,6 +30,7 @@ from evennia.commands.default import account, admin, building, comms, general
 from evennia.commands.default import help as help_module
 from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.default.cmdset_character import CharacterCmdSet
+from evennia.narrative.rendernode import RenderNode
 from evennia.objects.models import ObjectDB
 from evennia.objects.objects import (DefaultCharacter, DefaultExit,
                                      DefaultObject, DefaultRoom)
@@ -72,9 +73,11 @@ class TestGeneral(BaseEvenniaCommandTest):
     def test_pose(self):
         self.char2.msg = Mock()
         self.call(general.CmdPose(), "looks around", "Char looks around")
-        self.char2.msg.assert_called_with(
-            text=("Char looks around", {"type": "pose"}), from_obj=self.char1
-        )
+        node = self.char2.msg.call_args[1]["text"]
+        self.assertIsInstance(node, RenderNode)
+        self.assertEqual(node.body, "Char looks around")
+        self.assertEqual(node.msg_type, "pose")
+        self.assertEqual(self.char2.msg.call_args[1]["from_obj"], self.char1)
 
     def test_nick(self):
         self.call(

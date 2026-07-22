@@ -17,6 +17,23 @@ from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.utils.utils import uses_database
 
 
+def _last_data_out_text(session):
+    """Extract text parity from the session's latest output call.
+
+    Args:
+        session (ServerSession): Session with a mocked ``data_out`` method.
+
+    Returns:
+        str: Text payload, whether delivered directly or as a narrative node.
+
+    """
+    kwargs = session.data_out.call_args[1]
+    if "text" in kwargs:
+        return kwargs["text"]
+    payloads, _options = kwargs["narrative"]
+    return payloads[-1]["body"]
+
+
 class TestAccountSessionHandler(TestCase):
     "Check AccountSessionHandler class"
 
@@ -305,9 +322,10 @@ class TestDefaultAccount(TestCase):
         obj = Mock()
         self.s1.get_puppet = Mock(return_value=obj)
         account.puppet_object(self.s1, obj)
-        self.s1.data_out.assert_called_with(
-            options=None, text="You are already puppeting this object."
+        self.assertEqual(
+            _last_data_out_text(self.s1), "You are already puppeting this object."
         )
+        self.assertIsNone(self.s1.data_out.call_args[1]["options"])
         self.assertIsNone(obj.at_post_puppet.call_args)
 
     def test_puppet_object_no_permission(self):
@@ -330,9 +348,7 @@ class TestDefaultAccount(TestCase):
         account.puppet_object(self.s1, obj)
 
         self.assertTrue(
-            self.s1.data_out.call_args[1]["text"].startswith(
-                "You don't have permission to puppet"
-            )
+            _last_data_out_text(self.s1).startswith("You don't have permission to puppet")
         )
         self.assertIsNone(obj.at_post_puppet.call_args)
 
@@ -368,9 +384,7 @@ class TestDefaultAccount(TestCase):
             account.puppet_object(self.s1, obj)
         # works because django.conf.settings.MULTISESSION_MODE is not in (1, 3)
         self.assertTrue(
-            self.s1.data_out.call_args[1]["text"].endswith(
-                "from another of your sessions.|n"
-            )
+            _last_data_out_text(self.s1).endswith("from another of your sessions.|n")
         )
         self.assertTrue(obj.at_post_puppet.call_args[1] == {})
 
@@ -403,9 +417,7 @@ class TestDefaultAccount(TestCase):
 
         account.puppet_object(self.s1, obj)
         self.assertTrue(
-            self.s1.data_out.call_args[1]["text"].endswith(
-                "is already puppeted by another Account."
-            )
+            _last_data_out_text(self.s1).endswith("is already puppeted by another Account.")
         )
         self.assertIsNone(obj.at_post_puppet.call_args)
 

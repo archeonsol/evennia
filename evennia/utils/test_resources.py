@@ -51,6 +51,25 @@ from evennia.utils.utils import (all_from_module, class_from_module,
 _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
 
+def _mock_message_to_text(message):
+    """Normalize a captured message to its text-client representation.
+
+    Args:
+        message (any): Positional message captured from a mocked ``.msg``.
+
+    Returns:
+        str: Legacy text suitable for command-output assertions.
+
+    """
+    from evennia.narrative.rendernode import RenderNode
+
+    if isinstance(message, tuple):
+        message = message[0]
+    if isinstance(message, RenderNode):
+        return message.body
+    return str(message)
+
+
 # set up a 'pristine' setting, unaffected by any changes in mygame
 DEFAULT_SETTING_RESETS = dict(
     CONNECTION_SCREEN_MODULE="evennia.game_template.server.conf.connection_screens",
@@ -583,11 +602,7 @@ class EvenniaCommandTestMixin:
             # we can return this now, we are done using the mock
             receiver.msg = unmocked_msg_methods[receiver]
 
-            # Get the first element of a tuple if msg received a tuple instead of a string
-            stored_msg = [
-                str(smsg[0]) if isinstance(smsg, tuple) else str(smsg)
-                for smsg in stored_msg
-            ]
+            stored_msg = [_mock_message_to_text(smsg) for smsg in stored_msg]
             if expected_msg is None:
                 # no expected_msg; just build the returned_msgs dict
 
