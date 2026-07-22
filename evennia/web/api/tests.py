@@ -10,6 +10,8 @@ from django.test import override_settings
 from django.urls import include, path, reverse
 from rest_framework.test import APIClient
 
+from evennia.authorization.policy import RequiresCapability
+from evennia.authorization.storage import grant_capability
 from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.web.api import serializers
 
@@ -29,8 +31,25 @@ class TestEvenniaRESTApi(BaseEvenniaTest):
         self.account.is_superuser = True
         self.account.save()
         self.client.force_login(self.account)
-        # scripts do not have default locks. Without them, even superuser access check fails
-        self.script.locks.add("edit: perm(Admin); examine: perm(Admin); delete: perm(Admin)")
+        principal_ref = f"account:{self.account.pk}"
+        for capability in (
+            "engine.object.create",
+            "engine.object.control",
+            "engine.object.delete",
+            "engine.object.edit",
+            "engine.object.examine",
+            "engine.script.control",
+        ):
+            grant_capability(
+                principal_ref,
+                capability,
+                scope_kind="world",
+                scope_key="*",
+                provenance="test",
+            )
+        self.script.policies.set(
+            "examine", RequiresCapability("engine.script.control")
+        )
 
     def tearDown(self):
         try:

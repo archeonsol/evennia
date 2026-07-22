@@ -46,8 +46,7 @@ class ObjectDetailView(EvenniaDetailView):
 
     # -- Evennia constructs --
     #
-    # What lock type to check for the requesting user, authenticated or not.
-    # https://github.com/evennia/evennia/wiki/Locks#valid-access_types
+    # What authorization operation to check for the requesting user.
     access_type = "view"
 
     # What attributes of the object you wish to display on the page. Model-level

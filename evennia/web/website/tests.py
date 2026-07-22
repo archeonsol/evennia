@@ -3,7 +3,10 @@ from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils.text import slugify
 
+from evennia.authorization.policy import RequiresCapability
+from evennia.authorization.storage import grant_capability, resource_ref, revoke_grant
 from evennia.help import filehelp
+from evennia.server.models import AuthorizationGrant
 from evennia.utils import class_from_module
 from evennia.utils.create import create_help_entry
 from evennia.utils.test_resources import BaseEvenniaTest
@@ -38,15 +41,22 @@ class EvenniaWebTest(BaseEvenniaTest):
         self.account2.characters.add(self.char2)
 
         for account in (self.account, self.account2):
-            # Demote accounts to Player permissions
-            account.permissions.add("Player")
-            account.permissions.remove("Developer")
-
-            # Grant permissions to chars
+            principal_ref = f"account:{account.pk}"
+            for grant_id in AuthorizationGrant.objects.filter(
+                principal_ref=principal_ref,
+                capability__in=("engine.object.edit", "engine.object.delete"),
+                revoked_at__isnull=True,
+            ).values_list("grant_id", flat=True):
+                revoke_grant(grant_id)
             for char in account.characters:
-                char.locks.add("edit:id(%s) or perm(Admin)" % account.pk)
-                char.locks.add("delete:id(%s) or perm(Admin)" % account.pk)
-                char.locks.add("view:all()")
+                for capability in ("engine.object.edit", "engine.object.delete"):
+                    grant_capability(
+                        principal_ref,
+                        capability,
+                        scope_kind="resource",
+                        scope_key=resource_ref(char),
+                        provenance="test",
+                    )
 
     def test_valid_chars(self):
         "Make sure account has playable characters"
@@ -202,12 +212,12 @@ class HelpLockedDetailTest(EvenniaWebTest):
     def setUp(self):
         super().setUp()
 
-        # create a db entry with a lock
+        # create a DB entry requiring an explicit capability
         self.db_help_entry = create_help_entry(
             "unit test locked topic",
             "unit test locked entrytext",
             category="General",
-            locks="read:perm(Developer)",
+            policies={"read": RequiresCapability("engine.help.manage")},
         )
 
     def get_kwargs(self):
@@ -218,10 +228,16 @@ class HelpLockedDetailTest(EvenniaWebTest):
         response = self.client.get(reverse(self.url_name, kwargs=self.get_kwargs()), follow=True)
         self.assertEqual(response.context["entry_text"], "Failed to find entry.")
 
-    def test_lock_with_perm(self):
-        # log TestAccount in, grant permission required, read the entry
+    def test_policy_with_capability(self):
+        # Log TestAccount in, grant the required capability, and read the entry.
         self.login()
-        self.account.permissions.add("Developer")
+        grant_capability(
+            f"account:{self.account.pk}",
+            "engine.help.manage",
+            scope_kind="resource",
+            scope_key=resource_ref(self.db_help_entry),
+            provenance="test",
+        )
         response = self.client.get(reverse(self.url_name, kwargs=self.get_kwargs()), follow=True)
         self.assertEqual(response.context["entry_text"], "unit test locked entrytext")
 

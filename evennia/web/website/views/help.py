@@ -75,8 +75,7 @@ def can_read_topic(cmd_or_topic, account):
         bool: If command can be viewed or not.
 
     Notes:
-        This uses the 'read' lock. If no 'read' lock is defined, the topic is assumed readable
-        by all.
+        This evaluates the topic's ``read`` authorization policy.
         Even if this returns False, the entry will still be visible in the help index unless
         `can_list_topic` is also returning False.
     """
@@ -256,22 +255,17 @@ class HelpDetailView(HelpMixin, DetailView):
 
         # Find the index position of the given obj in the category set
         objs = list(category_set)
-        for i, x in enumerate(objs):
-            if obj is x:
-                break
+        position = next((i for i, entry in enumerate(objs) if obj is entry), None)
 
         # Find the previous and next topics, if either exist
-        try:
-            assert i + 1 <= len(objs) and objs[i + 1] is not obj
-            context["topic_next"] = objs[i + 1]
-        except (AssertionError, IndexError):
-            context["topic_next"] = None
-
-        try:
-            assert i - 1 >= 0 and objs[i - 1] is not obj
-            context["topic_previous"] = objs[i - 1]
-        except (AssertionError, IndexError):
-            context["topic_previous"] = None
+        context["topic_next"] = (
+            objs[position + 1]
+            if position is not None and position + 1 < len(objs)
+            else None
+        )
+        context["topic_previous"] = (
+            objs[position - 1] if position is not None and position > 0 else None
+        )
 
         # Get the help entry text
         text = "Failed to find entry."
