@@ -1,4 +1,5 @@
 from evennia import create_object
+from evennia.authorization.policy import Never
 from evennia.utils.test_resources import (
     BaseEvenniaCommandTest,  # noqa
     BaseEvenniaTest,
@@ -55,9 +56,8 @@ class TestContainerCmds(BaseEvenniaCommandTest):
             "You get an Obj from a Box.",
         )
 
-    def test_locked_get_put(self):
-        # lock container
-        self.container.locks.add("get_from:false()")
+    def test_policy_denied_get_put(self):
+        self.container.policies.set("get_from", Never())
         # move object to container to try getting
         self.obj1.location = self.container
         self.call(CmdContainerGet(), "obj from box", "You can't get things from that.")

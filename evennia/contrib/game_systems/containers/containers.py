@@ -23,7 +23,7 @@ The ContainerCmdSet includes:
  - a new `put` command to put objects from your inventory into other objects
 
 Create objects with the `ContribContainer` typeclass to easily create containers,
-or implement the same locks/hooks in your own typeclasses.
+or implement the same policies/hooks in your own typeclasses.
 
 `ContribContainer` implements the following new methods:
 
@@ -59,12 +59,12 @@ class ContribContainer(_BASE_OBJECT_TYPECLASS):
 
     def at_object_creation(self):
         """
-        Extends the base object `at_object_creation` method by setting the "get_from" lock to "true",
-        allowing other objects to be put inside and removed from this object.
+        Extends the base object `at_object_creation` method by making the
+        "get_from" operation public, allowing other objects to be put inside
+        and removed from this object.
 
-        By default, a lock type not being explicitly set will fail access checks, so objects without
-        the new "get_from" access lock will fail the access checks and continue behaving as
-        non-container objects.
+        Missing operations fail closed, so objects without a "get_from" policy
+        continue behaving as non-container objects.
         """
         super().at_object_creation()
         self.policies.set("get_from", Always())
@@ -185,7 +185,7 @@ class CmdContainerGet(CmdGet):
             location = caller.search(self.rhs)
             if not location:
                 return
-            # check access lock
+            # check the container policy
             if not location.access(caller, "get_from"):
                 # supports custom error messages on individual containers
                 if location.db.get_from_err_msg:
@@ -274,7 +274,7 @@ class CmdPut(CmdDrop):
         if not container:
             return
 
-        # check access lock
+        # check the container policy
         if not container.access(caller, "get_from"):
             # supports custom error messages on individual containers
             if container.db.put_err_msg:

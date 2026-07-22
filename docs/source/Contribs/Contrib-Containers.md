@@ -36,13 +36,14 @@ In game:
 
     set box/capacity = 5
 
-You can also make any other objects usable as containers by setting the `get_from` lock type on it.
+You can also make any other object usable as a container by making its
+`get_from` authorization policy public.
 
-    lock mysterious box = get_from:true()
+    @policy/set mysterious box/get_from = public
 
 ## Extending
 
-The `ContribContainer` class is intended to be usable as-is, but you can also inherit from it for your own container classes to extend its functionality. Aside from having the container lock pre-set on object creation, it comes with three main additions:
+The `ContribContainer` class is intended to be usable as-is, but you can also inherit from it for your own container classes to extend its functionality. Aside from having the container policy pre-set on object creation, it comes with three main additions:
 
 ### `capacity` property
 
