@@ -175,7 +175,7 @@
       {@render toggle("Screenreader mode", "screenreader")}
       {@render toggle("Reduce motion", "reduceMotion")}
     {:else if view === "text"}
-      {@render toggle("Typewriter animations", "typewriter")}
+      {@render slider("Typewriter reveal", "typewriterMs", 0, 1500, 50, (v) => (v ? `${v}ms` : "off"))}
       {@render toggle("Show scene panel", "sceneStrip")}
       {@render toggle("Hide prompt line", "hidePrompt")}
     {:else if view === "panels"}
