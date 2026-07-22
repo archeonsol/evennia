@@ -184,6 +184,33 @@ class TestContextBuilder(unittest.TestCase):
         ctx = ActionContextBuilder().build(actor, "")
         self.assertEqual(ctx.providers, [actor.effective])
 
+    def test_location_contributes_nested_providers(self):
+        """A room's ``nested_action_providers`` hook injects extra providers
+        right after the room (e.g. a vehicle shell wrapping a nested cabin)."""
+        shell = FakeObj("shell")
+        room = FakeObj("room")
+        room.nested_action_providers = lambda: [shell]
+        char = FakeChar(location=room)
+        actor = Actor(character=char)
+
+        ctx = ActionContextBuilder().build(actor, "")
+
+        self.assertEqual(ctx.providers, [char, room, shell])
+
+    def test_nested_providers_hook_failure_is_tolerated(self):
+        """A missing, non-callable, or raising hook leaves the ordinary set."""
+        room = FakeObj("room")
+
+        def boom():
+            raise RuntimeError("nope")
+
+        room.nested_action_providers = boom
+        char = FakeChar(location=room)
+
+        ctx = ActionContextBuilder().build(Actor(character=char), "")
+
+        self.assertEqual(ctx.providers, [char, room])
+
     def test_account_callertype_inserts_account_provider(self):
         acct = FakeObj("acct")
         char = FakeChar(key="Hero")
