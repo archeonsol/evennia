@@ -110,6 +110,7 @@ class ActionContextBuilder:
             *actor_providers,
             *actor.equipped_items,
             location,
+            *self._location_providers(location),
             *targets,
             *self._room_contents(location),
         ]
@@ -125,6 +126,33 @@ class ActionContextBuilder:
             raw_string=raw_string,
             trace_id=trace_id,
         )
+
+    @staticmethod
+    def _location_providers(location):
+        """Extra rule providers a room contributes beyond itself.
+
+        A room one level up the containment graph from its occupants — a vehicle
+        shell wrapping a nested cabin, say — carries ``@rule`` methods that must
+        respond for occupants, yet it is neither the actor's ``location`` nor in
+        that room's ``contents``, so it would never enter the provider list. A
+        room opts such an object in by defining ``nested_action_providers()``
+        returning an iterable of world objects; the engine stays ignorant of what
+        they are (toolkit, not game). Inserted right after ``location`` so the
+        room's own rules still take priority on ties.
+
+        Best-effort: a missing hook, a non-callable, or a raising one yields
+        ``[]`` and the dispatch proceeds with the ordinary provider set.
+        """
+        if location is None:
+            return []
+        hook = getattr(location, "nested_action_providers", None)
+        if not callable(hook):
+            return []
+        try:
+            result = hook()
+        except Exception:
+            return []
+        return list(result) if result else []
 
     @staticmethod
     def _room_contents(location):
