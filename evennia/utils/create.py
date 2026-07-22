@@ -189,7 +189,8 @@ def create_message(*args, **kwargs):
         receivers (Object, Account, Script, str or list): An Account/Object to send
             to, or a list of them. If a string, it's an identifier for an external
             receiver.
-        policies (dict): Typed operation-to-Policy overrides.
+        policies (dict): Operation-to-Policy overrides. Values may be typed
+            Policy nodes or serialized policy mappings.
         tags (list): A list of tags or tuples `(tag, category)`.
         header (str): Mime-type or other optional information for the message
 

@@ -1,10 +1,11 @@
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
 from django.test import SimpleTestCase
 
 from evennia.commands.default.comms import CmdChannel
 from evennia.comms.comms import DefaultChannel
-from evennia.utils.create import create_message
+from evennia.utils.create import create_channel, create_message
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -30,6 +31,24 @@ class ObjectCreationTest(BaseEvenniaTest):
         msg = create_message("peewee herman", "heh-heh!", header="mail time!")
         self.assertTrue(msg)
         self.assertEqual(str(msg), "peewee herman->: heh-heh!")
+
+    def test_default_channel_settings_use_typed_policies(self):
+        """Shipped channel definitions must create with their intended access."""
+
+        mudinfo = create_channel(
+            **{**settings.CHANNEL_MUDINFO, "key": "TestMudInfo"}
+        )
+        public = create_channel(
+            **{**settings.DEFAULT_CHANNELS[0], "key": "TestPublic"}
+        )
+
+        self.assertTrue(mudinfo.access(self.account, "control"))
+        self.assertTrue(mudinfo.access(self.account, "listen"))
+        self.assertFalse(mudinfo.access(self.account, "send"))
+        self.assertFalse(mudinfo.access(self.account2, "listen"))
+        self.assertTrue(public.access(self.account2, "listen"))
+        self.assertTrue(public.access(self.account2, "send"))
+        self.assertFalse(public.access(self.account2, "control"))
 
 
 class ChannelSubscriptionTests(BaseEvenniaTest):

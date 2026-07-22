@@ -357,8 +357,7 @@ class MsgManager(TypedObjectManager):
             new_message.receivers = receiver
         for operation, policy in dict(policies or {}).items():
             new_message.policies.set(operation, policy)
-        from evennia.authorization.storage import (grant_capability,
-                                                   principal_refs)
+        from evennia.authorization.storage import grant_capability, principal_refs
 
         sender_refs = {
             ref for sender in make_iter(senderobj) for ref in principal_refs(sender)
@@ -524,7 +523,8 @@ class ChannelDBManager(TypedObjectManager):
         Keyword Args:
             aliases (list of str): List of alternative (likely shorter) keynames.
             desc (str): A description of the channel, for use in listings.
-            policies (dict): Typed operation-to-Policy overrides.
+            policies (dict): Operation-to-Policy overrides. Serialized policy
+                mappings are accepted for settings compatibility.
             keep_log (bool): Log channel throughput.
             typeclass (str or class): The typeclass of the Channel (not
                 often used).
@@ -535,6 +535,20 @@ class ChannelDBManager(TypedObjectManager):
             channel (Channel): A newly created channel.
 
         """
+        from evennia.authorization.policy import Policy, policy_from_data, validate_policy
+
+        normalized_policies = {}
+        for operation, policy in dict(policies or {}).items():
+            operation = str(operation).strip().lower()
+            if not operation:
+                raise ValueError("channel policy operations cannot be empty")
+            if isinstance(policy, dict):
+                policy = policy_from_data(policy)
+            if not isinstance(policy, Policy):
+                raise ValueError("channel policies require typed Policy nodes or policy data")
+            validate_policy(policy)
+            normalized_policies[operation] = policy
+
         typeclass = typeclass if typeclass else settings.BASE_CHANNEL_TYPECLASS
 
         if isinstance(typeclass, str):
@@ -549,7 +563,7 @@ class ChannelDBManager(TypedObjectManager):
             key=key,
             aliases=aliases,
             desc=desc,
-            policies=policies,
+            policies=normalized_policies,
             keep_log=keep_log,
             tags=tags,
             attrs=attrs,

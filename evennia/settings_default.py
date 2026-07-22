@@ -1080,7 +1080,19 @@ CHANNEL_MUDINFO = {
     "key": "MudInfo",
     "aliases": "",
     "desc": "Connection log",
-    "locks": "control:perm(Developer);listen:perm(Admin);send:false()",
+    "policies": {
+        "control": {
+            "schema": "auth.policy.v1",
+            "type": "capability",
+            "capability": "engine.channel.control",
+        },
+        "listen": {
+            "schema": "auth.policy.v1",
+            "type": "capability",
+            "capability": "engine.channel.listen",
+        },
+        "send": {"schema": "auth.policy.v1", "type": "never"},
+    },
 }
 # Optional channel (same form as CHANNEL_MUDINFO) that will receive connection
 # messages like ("<account> has (dis)connected"). While the MudInfo channel
@@ -1088,8 +1100,9 @@ CHANNEL_MUDINFO = {
 # None, this information will only be logged.
 CHANNEL_CONNECTINFO = None
 # New accounts will auto-sub to the default channels given below (but they can
-# unsub at any time). Traditionally, at least 'public' should exist. Entries
-# will be (re)created on the next reload, but removing or updating a same-key
+# unsub at any time). Traditionally, at least 'public' should exist. Authorization
+# policies are serialized so settings remain plain data. Entries will be (re)created
+# on the next reload, but removing or updating a same-key
 # channel from this list will NOT automatically change/remove it in the game,
 # that needs to be done manually. Note: To create other, non-auto-subbed
 # channels, create them manually in server/conf/at_initial_setup.py.
@@ -1098,7 +1111,15 @@ DEFAULT_CHANNELS = [
         "key": "Public",
         "aliases": ("pub",),
         "desc": "Public discussion",
-        "locks": "control:perm(Admin);listen:all();send:all()",
+        "policies": {
+            "control": {
+                "schema": "auth.policy.v1",
+                "type": "capability",
+                "capability": "engine.channel.control",
+            },
+            "listen": {"schema": "auth.policy.v1", "type": "always"},
+            "send": {"schema": "auth.policy.v1", "type": "always"},
+        },
     }
 ]
 
