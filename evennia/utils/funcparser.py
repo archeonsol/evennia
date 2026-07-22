@@ -1127,8 +1127,8 @@ def funcparser_callable_search(*args, caller=None, access="control", **kwargs):
         type (str): One of 'obj', 'account', 'script'
         caller (Entity): Supplied to Parser. This is required and will
             be passed into the access check for the entity being searched for.
-            The 'control' permission is required.
-        access (str): Which locktype access to check. Unset to disable the
+            The 'control' operation is required.
+        access (str): Which authorization operation to check. Unset to disable the
             security check.
         **kwargs: Will be passed into the main search.
 

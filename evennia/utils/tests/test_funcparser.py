@@ -14,6 +14,8 @@ from django.test import TestCase, override_settings
 from parameterized import parameterized
 from simpleeval import simple_eval
 
+from evennia.authorization.policy import RequiresCapability
+from evennia.authorization.storage import grant_capability, principal_refs, resource_ref
 from evennia.utils import funcparser, test_resources
 
 
@@ -879,6 +881,19 @@ class TestCallableSearch(test_resources.BaseEvenniaTest):
         super().setUp()
         self.parser = funcparser.FuncParser(funcparser.SEARCHING_CALLABLES)
 
+    def grant_control(self, target, capability):
+        """Grant this test character resource-scoped control of a target."""
+        principal_ref = next(
+            ref for ref in principal_refs(self.char1) if ref.startswith("object:")
+        )
+        grant_capability(
+            principal_ref,
+            capability,
+            scope_kind="resource",
+            scope_key=resource_ref(target),
+            provenance="test",
+        )
+
     def test_search_obj(self):
         """
         Test searching for an object
@@ -897,7 +912,10 @@ class TestCallableSearch(test_resources.BaseEvenniaTest):
         """
         string = "$search(TestAccount, type=account)"
         expected = self.account
-        self.account.locks.add("control:id(%s)" % self.char1.dbref)
+        self.account.policies.set(
+            "control", RequiresCapability("engine.object.control")
+        )
+        self.grant_control(self.account, "engine.object.control")
 
         ret = self.parser.parse(string, caller=self.char1, return_str=False, raise_errors=True)
         self.assertEqual(expected, ret)
@@ -909,7 +927,7 @@ class TestCallableSearch(test_resources.BaseEvenniaTest):
         """
         string = "$search(Script, type=script)"
         expected = self.script
-        self.script.locks.add("control:id(%s)" % self.char1.dbref)
+        self.grant_control(self.script, "engine.script.control")
 
         ret = self.parser.parse(string, caller=self.char1, return_str=False, raise_errors=True)
         self.assertEqual(expected, ret)
