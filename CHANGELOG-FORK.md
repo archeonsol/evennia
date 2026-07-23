@@ -25,6 +25,33 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.175 — `grid/wilderness` and `grid/xyzgrid` removed
+
+### Contribs
+
+- Removed `evennia/contrib/grid/wilderness` and `evennia/contrib/grid/xyzgrid`
+  (~10,800 lines including docs). Underspire vendored the parts it actually
+  used and no longer imports either: the wilderness room/exit/script machinery
+  now lives in the game at `world/wilderness/engine.py`, and the XYZ
+  coordinate-aware room/exit typeclasses at `world/grid/engine.py`.
+
+  Only `xyzgrid/xyzroom.py` was ever in use by the game. The ASCII map compiler
+  (`xymap`, `xymap_legend`), its launcher command and its builder commands were
+  dormant: Underspire authors its grid through its own tooling, so those ~4,100
+  lines were dropped rather than vendored. The wilderness contrib was vendored
+  in full, since the game was already subclassing all three of its classes and
+  reimplementing the room-recycling internals.
+
+  No engine code imported either contrib; the only references were documentation
+  and index entries, removed with them. Nothing in the database referenced the
+  XYZ contrib either, because coordinates are stored as tag *categories* (data,
+  not code paths) and the game's own typeclasses subclass the vendored ones.
+
+  Note for anyone restoring these: the wilderness contrib's exits were created
+  with its own `WildernessExit`, so a world that ran the old contrib holds rows
+  pointing at the deleted path. Underspire migrates those on server start
+  (`ensure_colony_wilderness` -> `_migrate_legacy_typeclasses`); that migration
+  must run before a world upgraded past this release is considered safe.
 ## 6.0.0+underspire.174 — Capability cutover repair
 
 ### Engine correctness
@@ -85,6 +112,7 @@ startup.
   included.
 
 ---
+=======
 
 ## 6.0.0+underspire.173 — Constant-duration typewriter; buffer tools reshipped
 

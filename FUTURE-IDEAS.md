@@ -106,7 +106,9 @@ Discovery via `settings.INSTALLED_PLUGINS` list. Hook into
 settings-list (`LOCK_FUNC_MODULES`, etc.) gets a plugin-merge step that
 appends plugin contributions.
 
-Dogfood case: convert `grid/xyzgrid` to the plugin shape as proof.
+Dogfood case: pick a contrib with real settings-list surface and convert it to
+the plugin shape as proof. (`grid/xyzgrid` was the original candidate; it was
+removed from the fork once Underspire vendored the parts it used.)
 
 ### Real-shape additions (another ~week)
 
@@ -146,12 +148,12 @@ Dogfood case: convert `grid/xyzgrid` to the plugin shape as proof.
 
 ### Recommended sequence when picked up
 
-1. One spike PR: MVP only, settings-list discovery, xyzgrid as
+1. One spike PR: MVP only, settings-list discovery, one contrib as
    dogfood. Goal: prove the seam end-to-end. Not a release; an
    experiment.
 2. Sit on it for a release or two. Use it through Underspire. Find
    where the contract is wrong.
-3. Iterate to v1: entry-points, wilderness as second dogfood, contract
+3. Iterate to v1: entry-points, a second dogfood contrib, contract
    docs. Tag the release that formally closes new-contrib additions.
 
 ### Risks worth naming

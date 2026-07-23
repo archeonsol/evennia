@@ -34,7 +34,6 @@ If you want to add a contrib, see [the contrib guidelines](Contribs-Guidelines)!
 | [dice](#dice) | [email_login](#email_login) | [gendersub](#gendersub) | [health_bar](#health_bar) | [ingame_map_display](#ingame_map_display) |
 | [mail](#mail) | [mapbuilder](#mapbuilder) | [mirror](#mirror) | [multidescer](#multidescer) | [mux_comms_cmds](#mux_comms_cmds) |
 | [random_string_generator](#random_string_generator) | [red_button](#red_button) | [simpledoor](#simpledoor) | [storage](#storage) | [unixcommand](#unixcommand) |
-| [wilderness](#wilderness) | [xyzgrid](#xyzgrid) |
 
 
 
@@ -283,8 +282,6 @@ Contribs-Guidelines.md
 Contrib-Ingame-Map-Display.md
 Contrib-Mapbuilder.md
 Contrib-Simpledoor.md
-Contrib-Wilderness.md
-Contrib-XYZGrid.md
 ```
 
 
@@ -323,31 +320,6 @@ destroyable etc.
 
 
 
-### `wilderness`
-
-_Contribution by titeuf87, 2017_
-
-This contrib provides a wilderness map without actually creating a large number
-of rooms - as you move, you instead end up back in the same room but its description
-changes. This means you can make huge areas with little database use as
-long as the rooms are relatively similar (e.g. only the names/descs changing).
-
-[Read the documentation](./Contrib-Wilderness.md) - [Browse the Code](api:evennia.contrib.grid.wilderness)
-
-
-
-### `xyzgrid`
-
-_Contribution by Griatch 2021_
-
-Places Evennia's game world on an xy (z being different maps) coordinate grid.
-Grid is created and maintained externally by drawing and parsing 2D ASCII maps,
-including teleports, map transitions and special markers to aid pathfinding.
-Supports very fast shortest-route pathfinding on each map. Also includes a
-fast view function for seeing only a limited number of steps away from your
-current location (useful for displaying the grid as an in-game, updating map).
-
-[Read the documentation](./Contrib-XYZGrid.md) - [Browse the Code](api:evennia.contrib.grid.xyzgrid)
 
 
 
