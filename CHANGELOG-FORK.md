@@ -25,6 +25,67 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.174 — Capability cutover repair
+
+### Engine correctness
+
+- Restored persistent mutable semantics in `dbserialize`: reverse dictionary
+  union now gives the wrapped right operand normal precedence, and nested
+  lists/dictionaries introduced through `SaverDict.update()` remain attached
+  to persistence tracking.
+- Fixed late Django tag-prefetch consumption, sparse and inaccessible help
+  catalogs, and hook-registry coverage for structured appearance hooks.
+- Added the missing public `craft` policy, restored the container `get_from`
+  policy contract, and made Attribute batch rejection of removed per-Attribute
+  lockstrings atomic.
+- Bounded shared authorization generation keys with deterministic hashes, so
+  long or whitespace-bearing resource references remain valid on Memcached and
+  cross-process invalidation no longer silently degrades.
+
+### Fresh-game startup
+
+- Migrated the shipped file-help template from `locks` to the
+  `engine.help.manage` capability and added a regression that loads the actual
+  game template.
+- Migrated `CHANNEL_MUDINFO` and `DEFAULT_CHANNELS` to serialized typed policy
+  data. `create_channel` now validates either typed Policy nodes or serialized
+  policy mappings before saving, keeping Django settings import-safe.
+
+### Migration
+
+Games must follow the
+[capability-only game migration guide](docs/source/Setup/Capability-Authorization-Migration.md).
+The required downstream checks include:
+
+- replace factory `locks=`, command lock declarations,
+  `get_default_lockstring()`, per-Attribute lockstrings, and permission-tier
+  administration with typed policies and scoped grants;
+- replace file-help `locks`/`permissions` with `capability`;
+- replace custom channel-setting `locks` with serialized `policies`;
+- grant web/API operators explicit capabilities because Django
+  `is_superuser` is not game authority; and
+- review `craft`, `get_from`, and FuncParser `$search(access=...)` operations
+  for an explicit policy and matching grant.
+
+No new database schema migration is introduced. Existing legacy authority must
+still be imported/finalized offline and pass `auth_audit_capabilities` before
+startup.
+
+### Test-suite repair
+
+- Rebuilt command-trie fixtures, normalized structured narrative assertions,
+  and converted remaining engine/contrib/web fixtures from removed locks and
+  permission tiers to capability-native fakes, policies, and grants.
+- Isolated process authorization caches across transactional tests and drained
+  cancelled init-hook tasks before event-loop teardown, removing order-dependent
+  failures and unawaited-coroutine shutdown warnings.
+- Release gate: `evennia test --keepdb evennia` from the test game directory
+  passed **2,753 tests** with **38 skipped**, zero failures, and zero errors. The
+  run used normal host-local socket permission so the launcher IPC bind test was
+  included.
+
+---
+
 ## 6.0.0+underspire.173 — Constant-duration typewriter; buffer tools reshipped
 
 ### Webclient
