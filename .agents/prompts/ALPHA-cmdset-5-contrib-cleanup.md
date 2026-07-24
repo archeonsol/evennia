@@ -19,7 +19,7 @@ zombies that still import. They are the sole external surface keeping
 `game_systems/achievements`, `game_systems/clothing`, `game_systems/containers`,
 `game_systems/crafting`, `game_systems/gendersub`, `game_systems/storage`,
 `grid/ingame_map_display`, `grid/mapbuilder`, `grid/simpledoor`,
-`grid/slow_exit`, `grid/xyzgrid`, `rpg/dice`, `rpg/llm`,
+`grid/slow_exit`, `rpg/dice`, `rpg/llm`,
 `tutorials/red_button`, `utils/debugpy`, `utils/git_integration`.
 
 ## Goal

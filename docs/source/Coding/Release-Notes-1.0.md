@@ -38,7 +38,7 @@ The `contrib` folder structure was changed from 0.9.5. All contribs are now in s
 
 - New Traits contrib, converted and expanded from Ainneve project. (whitenoise, Griatch)
 - New [Crafting contrib](../Contribs/Contrib-Crafting.md), adding a full crafting subsystem (Griatch)
-- New [XYZGrid contrib](../Contribs/Contrib-XYZGrid.md), adding x,y,z grid coordinates with in-game map and pathfinding. Controlled outside of the game via custom evennia launcher command (Griatch)
+- New XYZGrid contrib, adding x,y,z grid coordinates with in-game map and pathfinding. Controlled outside of the game via custom evennia launcher command (Griatch). (Removed from this fork; see `CHANGELOG-FORK.md`.)
 - New Command cooldown contrib for making it easier to manage commands using
   dynamic cooldowns between uses (owllex)
 - New Godot Protocol contrib for connecting to Evennia from a client written in the open-source game engine [Godot](https://godotengine.org/) (ChrisLR).

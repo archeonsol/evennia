@@ -1,8 +1,5 @@
 # Adding room coordinates to your game
 
-```{sidebar} The XYZGrid 
-See also the [XYZGrid contrib](../Contribs/Contrib-XYZGrid.md), which adds coordinate support and pathfinding.
-```
 This tutorial is moderately difficult in content.  You might want to be familiar and at ease with some Python concepts (like properties) and possibly Django concepts (like queries), although this tutorial will try to walk you through the process and give enough explanations each time.  If you don't feel very confident with math, don't hesitate to pause, go to the example section, which shows a tiny map, and try to walk around the code or read the explanation.
 
 Evennia doesn't have a coordinate system by default.  Rooms and other objects are linked by location and content:
