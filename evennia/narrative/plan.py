@@ -619,6 +619,23 @@ def deliver_resolved(
         node = transform(node, viewer, dict(ctx))
         if not isinstance(node, RenderNode):
             raise TypeError("render transforms must return RenderNode")
+    # A game may mirror what a viewer perceives to somewhere else: a puppeteer's
+    # feed, a remote terminal, an observer window. This is the one place to do
+    # it. Every route ends here — a canonical plan through :func:`deliver`, and
+    # an already-resolved node from a surface that shapes its own output — and
+    # it is still upstream of protocol fan-out, which sends a variable number of
+    # times per event depending on what the client can take. A mirror hung off
+    # ``msg`` instead fires twice for a client accepting both payloads and not
+    # at all for a nodes-only one, whose call carries no text.
+    if not msg_kwargs.get("_perception_relay"):
+        mirror = getattr(viewer, "at_narrative_delivery", None)
+        if callable(mirror):
+            try:
+                mirror(node, context=dict(ctx))
+            except Exception:
+                from evennia.utils import logger
+
+                logger.log_trace("narrative delivery mirror failed")
     return deliver_node(
         node,
         viewer,
