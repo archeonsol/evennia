@@ -32,6 +32,36 @@ class TestLoginInputfunc(unittest.TestCase):
         login_session.assert_not_called()
 
 
+class TestAzabanHelloInputfunc(unittest.TestCase):
+    """The Azaban handshake must survive Server/Portal session resync."""
+
+    def test_capabilities_are_synchronized_to_the_portal(self):
+        """Capability flags use the session synchronization API, not local mutation."""
+        from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
+        from evennia.server.serversession import ServerSession
+
+        session = ServerSession.__new__(ServerSession)
+        session.protocol_flags = {}
+        session.sessionhandler = mock.MagicMock()
+
+        synchronized = inputfuncs.azaban_hello(
+            session,
+            caps={"rendersNodes": True, "patches": True, "unknown": "preserved"},
+        )
+
+        self.assertTrue(synchronized)
+        self.assertTrue(session.protocol_flags[CLIENT_NARRATIVE_FLAG])
+        self.assertEqual(
+            session.protocol_flags["AZABAN_CAPS"],
+            {
+                "rendersNodes": True,
+                "patches": True,
+                "unknown": "preserved",
+            },
+        )
+        session.sessionhandler.session_portal_sync.assert_called_once_with(session)
+
+
 class TestMonitoredInputfunc(BaseEvenniaTest):
     """
     Regressions for monitor/monitored inputfunc handling.

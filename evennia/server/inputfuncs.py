@@ -717,15 +717,20 @@ def azaban_hello(session, *args, **kwargs):
 
     Kwargs:
         caps (dict): the client capability map from the hello envelope.
+
+    Returns:
+        bool: ``True`` after the capabilities have been synchronized.
     """
     from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
 
-    caps = kwargs.get("caps") or {}
-    session.protocol_flags[CLIENT_NARRATIVE_FLAG] = bool(caps.get("rendersNodes"))
-    try:
-        session.protocol_flags["AZABAN_CAPS"] = dict(caps)
-    except Exception:
-        pass
+    caps = dict(kwargs.get("caps") or {})
+    session.update_flags(
+        **{
+            CLIENT_NARRATIVE_FLAG: bool(caps.get("rendersNodes")),
+            "AZABAN_CAPS": caps,
+        }
+    )
+    return True
 
 
 def editor_save(session, *args, **kwargs):

@@ -101,7 +101,6 @@ class TestRedisReloadSurvival(TestCase):
     def test_azaban_ws_survives_reload_and_delivers_post_reload_text(self):
         """B3: asyncio WS session + azaban hello survives reload; output after PSYNC."""
         from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
-        from evennia.server.inputfuncs import azaban_hello
         from evennia.server.portal.asyncio_transport import AsyncioTransportShim
         from evennia.server.portal.webclient import WebSocketClient
         from evennia.server.portal.wire_formats.azaban import AzabanFormat
@@ -110,13 +109,15 @@ class TestRedisReloadSurvival(TestCase):
         inner.connected = True
         ws = WebSocketClient()
         ws.sessid = 1
-        ws.protocol_flags = {}
+        ws.protocol_flags = {
+            CLIENT_NARRATIVE_FLAG: True,
+            "AZABAN_CAPS": {"rendersNodes": True, "patches": True},
+        }
         ws.wire_format = AzabanFormat()
         ws.transport = AsyncioTransportShim(inner)
         ws.sessionhandler = evennia.PORTAL_SESSION_HANDLER
         evennia.PORTAL_SESSION_HANDLER[1] = ws
 
-        azaban_hello(ws, caps={"rendersNodes": True})
         self.assertTrue(ws.protocol_flags.get(CLIENT_NARRATIVE_FLAG))
 
         outbound = []
@@ -131,15 +132,18 @@ class TestRedisReloadSurvival(TestCase):
         self.assertIn(1, evennia.PORTAL_SESSION_HANDLER)
 
         evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.reset_mock()
+        sessiondata = ws.get_sync_data()
         self.portal_bus.send_AdminPortal2Server(
             amp.DUMMYSESSION,
             operation=amp.PSYNC,
             server_restart_mode="reload",
-            sessiondata=[{"sessid": 1, "uid": 42}],
+            sessiondata=[sessiondata],
             portal_start_time=time.time(),
         )
         _drain_bus(0.3)
-        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.assert_called_once()
+        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.assert_called_once_with([sessiondata])
+        synced = evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.call_args.args[0][0]
+        self.assertTrue(synced["protocol_flags"]["AZABAN_CAPS"]["patches"])
 
         outbound.clear()
         evennia.PORTAL_SESSION_HANDLER.data_out(ws, text=[["after reload"], {}])
