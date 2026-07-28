@@ -25,6 +25,37 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.178 — Persistent Azaban capabilities
+
+### Engine
+
+[`azaban_hello`](evennia/server/inputfuncs.py) now stores the client's
+RenderNode and patch capabilities through `ServerSession.update_flags()`.
+Previously it mutated the Server-side `protocol_flags` dictionary directly,
+so the Portal never received `AZABAN_CAPS`. After a Server reload, PSYNC rebuilt
+the live session without `patches: true`; the Svelte client was then treated as
+a plain client and structured consumers such as puppet feeds fell back to
+inline text.
+
+The input function returns `True` after synchronization. Downstream games can
+use that result to retain a compatibility shim for older engine releases
+without sending a duplicate Portal update after upgrading.
+
+### Migration
+
+No settings or protocol changes are required. Clients continue to send the
+same `hello` envelope. Games that wrapped `azaban_hello` solely to compensate
+for the missing synchronization may remove that fallback after requiring
+`6.0.0+underspire.178`.
+
+### Tests
+
+[`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py) asserts that the
+handshake uses the Server-to-Portal synchronization API.
+[`test_redis_reload.py`](evennia/server/tests/test_redis_reload.py) now carries
+the real Portal-owned protocol flags through PSYNC and verifies that
+`AZABAN_CAPS.patches` survives.
+
 ## 6.0.0+underspire.177 — Delivery mirror hook
 
 ### Engine
