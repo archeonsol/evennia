@@ -25,6 +25,69 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.176 — Canonical render plans
+
+### Engine
+
+R1 could deliver structured nodes but had no way to represent an event
+independently of who was reading it. A
+[`RenderNode`](evennia/narrative/rendernode.py) is already resolved, so
+persisting one stored a single viewer's perspective as though it were the
+event, and any consumer that wanted to re-present it had to re-run whatever
+produced it.
+
+[`evennia/narrative/plan.py`](evennia/narrative/plan.py) adds `RenderPlan`: the
+canonical event, immutable and viewer-invariant, carrying references
+(characters, exits, items, senders, speech) rather than names.
+`resolve(plan, viewer)` derives the `RenderNode`. The two types stay separate
+so a producer cannot bake a name into canonical structure by accident — there
+is nowhere to put one, because `body` does not exist until resolution.
+
+New surface:
+
+- `resolve(plan, viewer)` / `deliver(plan, viewer)` / `deliver_to(plan, viewers)`
+  — resolve and deliver, recording the canonical event exactly once per event
+  rather than once per recipient.
+- `frame_plan(plan, prefix, relay=..., metadata=...)` — re-frame an existing
+  event for a relay without rebuilding it, so borrowed senses and listening
+  devices present the same truth with a different prefix and attenuation.
+- `text_plan(text)` — the escape hatch for surfaces that genuinely have no
+  structure yet.
+- `plan.storage_payload()` / `RenderPlan.from_storage()` — persist an event and
+  replay it later against a different viewer at a different competence.
+- `set_span_resolver` / `set_entity_lookup` — injection points so the engine
+  does not import game identity code.
+
+[`timeline.py`](evennia/narrative/timeline.py) gains registerable canonical
+sinks (`register_canonical_sink`, `record_event`, `recent_events`), letting a
+downstream consumer observe events without the producer knowing it exists.
+
+[`objects/mixins/messaging.py`](evennia/objects/mixins/messaging.py) routes
+`msg_contents` through a plan, so room broadcasts resolve per recipient
+instead of rendering one string for everyone.
+
+### Migration
+
+`msg_contents` now delivers through the plan path. A text-tier recipient
+receives the flattened `(body, metadata)` outputfunc pair it always did;
+what changed is that the `RenderNode` is no longer passed as `text=` for
+surfaces that previously bypassed `deliver_node`. Code asserting on
+`msg(text=<RenderNode>)` for poses and room broadcasts should read
+`call_args[0][0]` instead. `evennia.commands.default.tests.TestGeneral.test_pose`
+is updated as the worked example.
+
+`AccountDB.msg` distinguishes a node arriving from the render pipeline
+(`_render_delivery=True`) from one handed in by a caller, so delivery is not
+re-entered.
+
+### Tests
+
+[`evennia/narrative/tests/test_plan.py`](evennia/narrative/tests/test_plan.py)
+covers construction, reference validation, storage round-trips, framing, and
+per-viewer resolution divergence. `evennia.narrative` is green at 82 tests;
+`evennia.objects`, `evennia.accounts`, `evennia.comms` and `evennia.commands`
+are green at 455.
+
 ## 6.0.0+underspire.175 — `grid/wilderness` and `grid/xyzgrid` removed
 
 ### Contribs

@@ -42,11 +42,9 @@ resolver. **Target:** `Permission.Builder`, `Scope.Effective`, etc. as objects;
 `check(actor, perm, scope=...)` resolves quell correctly. String form deprecated
 with a migration path (P1).
 
-- **Partial today:** the action engine already has a `Scope` enum
-  (`actions/permission.py`), predicate objects (`Holds` / `IsSelf` / …), and a
-  `from_lockstring` transpiler bridging old lockstrings to predicates — i.e. the
-  "objects not strings" spirit exists inside the action engine, but not as the
-  global `Lock` / `Permission` replacement the target describes.
+- **Partial at the time:** the action engine already had predicate objects such
+  as `Holds` and `IsSelf`; the capability runtime later superseded the proposed
+  global `Lock` / `Permission` replacement.
 - **Depends on:** the actor abstraction (shipped) for the `check` first arg.
 
 </details>

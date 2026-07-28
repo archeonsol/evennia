@@ -71,13 +71,20 @@ class TestGeneral(BaseEvenniaCommandTest):
         self.call(general.CmdInventory(), "", "You are not carrying anything.")
 
     def test_pose(self):
+        """Poses reach an observer through the canonical plan path.
+
+        ``msg_contents`` now builds a RenderPlan and delivers it per viewer, so
+        a text-tier recipient receives the flattened body plus outputfunc
+        metadata rather than the node itself. The node is still the thing that
+        was resolved; it is simply not what crosses the session boundary.
+        """
         self.char2.msg = Mock()
         self.call(general.CmdPose(), "looks around", "Char looks around")
-        node = self.char2.msg.call_args[1]["text"]
-        self.assertIsInstance(node, RenderNode)
-        self.assertEqual(node.body, "Char looks around")
-        self.assertEqual(node.msg_type, "pose")
+        body, meta = self.char2.msg.call_args[0][0]
+        self.assertEqual(body, "Char looks around")
+        self.assertEqual(meta["type"], "pose")
         self.assertEqual(self.char2.msg.call_args[1]["from_obj"], self.char1)
+        self.assertTrue(self.char2.msg.call_args[1]["_render_delivery"])
 
     def test_nick(self):
         self.call(

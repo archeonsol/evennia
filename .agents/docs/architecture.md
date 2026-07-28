@@ -31,7 +31,7 @@ Default commands are in `commands/default/` organized by category: `general.py`,
 ## Key Subsystems
 
 - **Scripts** (`scripts/`) — Timed/persistent objects. Houses global handlers: `TICKER_HANDLER`, `MONITOR_HANDLER`, `TASK_HANDLER`, `ON_DEMAND_HANDLER`.
-- **Locks** (`locks/`) — String-based permission system parsed at runtime. Lock functions in `lockfuncs.py`.
+- **Authorization** (`authorization/`) — Structured capabilities, grants, and policies; legacy lockstrings have offline import tooling only.
 - **Help** (`help/`) — Database-backed help entries plus auto-generated help from command docstrings.
 - **Prototypes** (`prototypes/`) — Dict-based templates for spawning objects via `evennia.spawn()`.
 - **Web** (`web/`) — Django views, REST API (`web/api/`), webclient (`web/webclient/`), admin interface.

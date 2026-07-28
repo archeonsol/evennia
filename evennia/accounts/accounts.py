@@ -32,17 +32,25 @@ from evennia.hooks import hook
 from evennia.objects.models import ObjectDB
 from evennia.scripts.scripthandler import ScriptHandler
 from evennia.server.models import ServerConfig
-from evennia.server.signals import (SIGNAL_ACCOUNT_POST_CREATE,
-                                    SIGNAL_ACCOUNT_POST_LOGIN_FAIL,
-                                    SIGNAL_OBJECT_POST_PUPPET,
-                                    SIGNAL_OBJECT_POST_UNPUPPET)
+from evennia.server.signals import (
+    SIGNAL_ACCOUNT_POST_CREATE,
+    SIGNAL_ACCOUNT_POST_LOGIN_FAIL,
+    SIGNAL_OBJECT_POST_PUPPET,
+    SIGNAL_OBJECT_POST_UNPUPPET,
+)
 from evennia.server.throttle import Throttle
 from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import class_from_module, create, logger
 from evennia.utils.optionhandler import OptionHandler
-from evennia.utils.utils import (is_iter, is_veto, lazy_property, make_iter,
-                                 to_str, variable_from_module)
+from evennia.utils.utils import (
+    is_iter,
+    is_veto,
+    lazy_property,
+    make_iter,
+    to_str,
+    variable_from_module,
+)
 
 __all__ = ("DefaultAccount", "DefaultGuest")
 
@@ -105,9 +113,7 @@ class AccountSessionHandler(object):
 
         """
         if sessid:
-            return make_iter(
-                evennia.SESSION_HANDLER.session_from_account(self.account, sessid)
-            )
+            return make_iter(evennia.SESSION_HANDLER.session_from_account(self.account, sessid))
         else:
             return evennia.SESSION_HANDLER.sessions_from_account(self.account)
 
@@ -537,8 +543,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             return bool(session.protocol_flags.get("SCREENREADER", False))
         else:
             return any(
-                session.protocol_flags.get("SCREENREADER")
-                for session in self.sessions.all()
+                session.protocol_flags.get("SCREENREADER") for session in self.sessions.all()
             )
 
     @hook(
@@ -639,9 +644,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         was_already_live = driving_account == self and bool(live_sessions)
         if not obj.access(self, "puppet"):
             # no access
-            self.msg(
-                _("You don't have permission to puppet '{key}'.").format(key=obj.key)
-            )
+            self.msg(_("You don't have permission to puppet '{key}'.").format(key=obj.key))
             return
         # If a takeover detaches another of our sessions, the new session
         # reattaches to that session's existing binding (preserving any pushed
@@ -653,38 +656,32 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 # we may take over another of our sessions
                 # output messages to the affected sessions
                 if settings.MULTISESSION_MODE in (1, 3):
-                    txt1 = _(
-                        "Sharing |c{name}|n with another of your sessions."
-                    ).format(name=obj.name)
-                    txt2 = _(
-                        "|c{name}|n|G is now shared from another of your sessions.|n"
-                    ).format(name=obj.name)
+                    txt1 = _("Sharing |c{name}|n with another of your sessions.").format(
+                        name=obj.name
+                    )
+                    txt2 = _("|c{name}|n|G is now shared from another of your sessions.|n").format(
+                        name=obj.name
+                    )
                     self.msg(txt1, session=session)
                     self.msg(txt2, session=obj.sessions.all())
                 else:
-                    txt1 = _(
-                        "Taking over |c{name}|n from another of your sessions."
-                    ).format(name=obj.name)
-                    txt2 = _(
-                        "|c{name}|n|R is now acted from another of your sessions.|n"
-                    ).format(name=obj.name)
+                    txt1 = _("Taking over |c{name}|n from another of your sessions.").format(
+                        name=obj.name
+                    )
+                    txt2 = _("|c{name}|n|R is now acted from another of your sessions.|n").format(
+                        name=obj.name
+                    )
                     self.msg(txt1, session=session)
                     self.msg(txt2, session=obj.sessions.all())
                     # Detach the old session WITHOUT collapsing so a pushed
                     # avatar/vehicle stack survives; capture its binding so the
                     # new session reattaches to the same graph below.
                     takeover_sessions = list(make_iter(obj.sessions.get()))
-                    takeover_binding = (
-                        takeover_sessions[0].binding if takeover_sessions else None
-                    )
+                    takeover_binding = takeover_sessions[0].binding if takeover_sessions else None
                     self.unpuppet_object(takeover_sessions, collapse=False)
             elif driving_account.is_connected:
                 # controlled by another account
-                self.msg(
-                    _("|c{key}|R is already puppeted by another Account.").format(
-                        key=obj.key
-                    )
-                )
+                self.msg(_("|c{key}|R is already puppeted by another Account.").format(key=obj.key))
                 return
 
         # A focus push keeps the session's current body in the stack (the meat
@@ -790,9 +787,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 if collapse and last_session and binding is not None:
                     binding.collapse_to_floor()
                 obj.at_post_unpuppet(self, session=session)
-                SIGNAL_OBJECT_POST_UNPUPPET.send(
-                    sender=obj, session=session, account=self
-                )
+                SIGNAL_OBJECT_POST_UNPUPPET.send(sender=obj, session=session, account=self)
                 if last_session:
                     # Puppet-set membership change; fires once per last-detach.
                     try:
@@ -943,9 +938,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             from evennia.actions.engine import engine as _engine
 
             actor = Actor.from_caller(session, callertype="session")
-            _engine.emit(
-                FocusChanged(actor=actor, body=body, change=change, focus=actor.focus)
-            )
+            _engine.emit(FocusChanged(actor=actor, body=body, change=change, focus=actor.focus))
         except Exception:
             logger.log_trace("account._emit_focus_changed failed")
 
@@ -1002,11 +995,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         """
         return list(
-            {
-                session.get_puppet()
-                for session in self.sessions.all()
-                if session.get_puppet()
-            }
+            {session.get_puppet() for session in self.sessions.all() if session.get_puppet()}
         )
 
     def __get_single_puppet(self):
@@ -1130,9 +1119,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         # See if authentication is currently being throttled
         if ip and LOGIN_THROTTLE.check(ip):
-            errors.append(
-                _("Too many login failures; please try again in a few minutes.")
-            )
+            errors.append(_("Too many login failures; please try again in a few minutes."))
 
             # With throttle active, do not log continued hits-- it is a
             # waste of storage and can be abused to make your logs harder to
@@ -1348,15 +1335,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         if (slots := self.get_available_character_slots()) is not None:
             if slots <= 0:
-                if not (
-                    self.is_superuser or self.has_capability("engine.runtime.manage")
-                ):
-                    plural = (
-                        "" if (max_slots := self.get_character_slots()) == 1 else "s"
-                    )
-                    return (
-                        f"You may only have a maximum of {max_slots} character{plural}."
-                    )
+                if not (self.is_superuser or self.has_capability("engine.runtime.manage")):
+                    plural = "" if (max_slots := self.get_character_slots()) == 1 else "s"
+                    return f"You may only have a maximum of {max_slots} character{plural}."
 
     def create_character(self, *args, **kwargs):
         """
@@ -1470,9 +1451,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         if ip and CREATION_THROTTLE.check(ip):
             errors.append(
-                _(
-                    "You are creating too many accounts. Please log into an existing account."
-                )
+                _("You are creating too many accounts. Please log into an existing account.")
             )
             return None, errors
 
@@ -1510,9 +1489,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # everything's ok. Create the new account.
         try:
             try:
-                account = create.create_account(
-                    username, email, password, typeclass=typeclass
-                )
+                account = create.create_account(username, email, password, typeclass=typeclass)
                 logger.log_sec(f"Account Created: {account} (IP: {ip}).")
 
             except Exception:
@@ -1547,17 +1524,13 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                         )
                         logger.log_err(string)
                 else:
-                    logger.log_err(
-                        f"Default channel '{chan_info}' is missing a 'key' field!"
-                    )
+                    logger.log_err(f"Default channel '{chan_info}' is missing a 'key' field!")
 
             if account and settings.AUTO_CREATE_CHARACTER_WITH_ACCOUNT:
                 # Auto-create a character to go with this account
 
                 character, errs = account.create_character(
-                    typeclass=kwargs.get(
-                        "character_typeclass", account.default_character_typeclass
-                    )
+                    typeclass=kwargs.get("character_typeclass", account.default_character_typeclass)
                 )
                 if errs:
                     errors.extend(errs)
@@ -1566,9 +1539,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             # We are in the middle between logged in and -not, so we have
             # to handle tracebacks ourselves at this point. If we don't,
             # we won't see any errors at all.
-            errors.append(
-                _("An error occurred. Please e-mail an admin if the problem persists.")
-            )
+            errors.append(_("An error occurred. Please e-mail an admin if the problem persists."))
             logger.log_trace()
 
         # Update the throttle to indicate a new account was created from this IP
@@ -1601,9 +1572,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             except RuntimeError:
                 # no puppet to disconnect from
                 pass
-            session.sessionhandler.disconnect(
-                session, reason=_("Account being deleted.")
-            )
+            session.sessionhandler.disconnect(session, reason=_("Account being deleted."))
         self.scripts.delete()
         self.attributes.clear()
         self.nicks.clear()
@@ -1637,20 +1606,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             any (dict): All other keywords are passed on to the protocol.
 
         """
-        from evennia.narrative.rendernode import (RenderNode, _supports_nodes,
-                                                  deliver_node, text_node)
+        from evennia.narrative.rendernode import RenderNode, deliver_node, text_node
 
         render_delivery = bool(kwargs.pop("_render_delivery", False))
-
-        if isinstance(text, RenderNode):
-            sessions = make_iter(session) if session else None
-            return deliver_node(
-                text,
-                self,
-                from_obj=from_obj,
-                sessions=sessions,
-                options=options,
-            )
 
         if from_obj and not render_delivery:
             # call hook
@@ -1668,12 +1626,23 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             # this may not be assigned.
             pass
 
+        if isinstance(text, RenderNode) and not render_delivery:
+            sessions = make_iter(session) if session else None
+            passthrough = {key: value for key, value in kwargs.items() if key != "options"}
+            return deliver_node(
+                text,
+                self,
+                from_obj=from_obj,
+                sessions=sessions,
+                options=options,
+                transform_context={"hooks_applied": True},
+                **passthrough,
+            )
+
         target_sessions = list(make_iter(session) if session else self.sessions.all())
-        if (
-            text is not None
-            and not render_delivery
-            and any(_supports_nodes(current) for current in target_sessions)
-        ):
+        # R1: every message normalizes through the node core, capable client or
+        # not; protocol capability decides only the final flattening step.
+        if text is not None and not render_delivery:
             body = text
             metadata = {}
             if isinstance(text, tuple):
@@ -1682,12 +1651,21 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     metadata = text[1]
             option_type = options.get("type") if isinstance(options, dict) else None
             msg_type = str(metadata.get("type") or option_type or "text")
+            # Metadata beyond `type` is the caller's outputfunc contract.
+            extra_meta = {key: value for key, value in metadata.items() if key != "type"}
+            passthrough = {key: value for key, value in kwargs.items() if key != "options"}
             return deliver_node(
-                text_node(str(body), msg_type=msg_type),
+                text_node(
+                    str(body),
+                    msg_type=msg_type,
+                    metadata={"text_kwargs": extra_meta} if extra_meta else {},
+                ),
                 self,
                 from_obj=from_obj,
                 sessions=target_sessions,
                 options=options,
+                transform_context={"hooks_applied": True},
+                **passthrough,
             )
 
         kwargs["options"] = options
@@ -1741,9 +1719,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         # cmdhandler is `async def` now; run the coroutine on the loop as a Deferred.
         return clock.run_coroutine(
-            _CMDHANDLER(
-                self, raw_string, callertype="account", session=session, **kwargs
-            ),
+            _CMDHANDLER(self, raw_string, callertype="account", session=session, **kwargs),
             task_kind="command",
         )
 
@@ -1799,9 +1775,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         """
         if senders:
-            sender_string = ", ".join(
-                sender.get_display_name(self) for sender in senders
-            )
+            sender_string = ", ".join(sender.get_display_name(self) for sender in senders)
             message_lstrip = message.lstrip()
             if message_lstrip.startswith((":", ";")):
                 # this is a pose, should show as e.g. "User1 smiles to channel"
@@ -1910,13 +1884,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 )
 
         if search_object:
-            matches = list(
-                ObjectDB.objects.object_search(searchdata, typeclass=typeclass)
-            )
+            matches = list(ObjectDB.objects.object_search(searchdata, typeclass=typeclass))
         else:
-            matches = list(
-                AccountDB.objects.account_search(searchdata, typeclass=typeclass)
-            )
+            matches = list(AccountDB.objects.account_search(searchdata, typeclass=typeclass))
 
         if not matches:
             return NotFound(search_string=original_searchdata)
@@ -1977,9 +1947,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if isinstance(result, Found):
             match = result.obj
             if return_puppet:
-                puppets = (
-                    match.get_all_puppets() if hasattr(match, "get_all_puppets") else []
-                )
+                puppets = match.get_all_puppets() if hasattr(match, "get_all_puppets") else []
                 return puppets[0] if puppets else None
             return match
 
@@ -2347,9 +2315,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         if _MUDINFO_CHANNEL is None:
             if settings.CHANNEL_MUDINFO:
                 try:
-                    _MUDINFO_CHANNEL = ChannelDB.objects.get(
-                        db_key=settings.CHANNEL_MUDINFO["key"]
-                    )
+                    _MUDINFO_CHANNEL = ChannelDB.objects.get(db_key=settings.CHANNEL_MUDINFO["key"])
                 except ChannelDB.DoesNotExist:
                     logger.log_trace()
             else:
@@ -2409,8 +2375,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # Warm slow-changing capability grants once per login. Resource scope
         # state remains independently lazy and generation-invalidated.
         try:
-            from evennia.authorization.storage import (load_grants,
-                                                       principal_is_suspended)
+            from evennia.authorization.storage import load_grants, principal_is_suspended
 
             load_grants(self)
             principal_is_suspended(self)
@@ -2443,11 +2408,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                     else None
                 )
                 focus = binding.focus if binding else None
-                if (
-                    focus is not None
-                    and focus is not identity
-                    and not isinstance(focus, AccountDB)
-                ):
+                if focus is not None and focus is not identity and not isinstance(focus, AccountDB):
                     self.reattach_focus(session, binding)
                 else:
                     self.puppet_object(session, identity)
@@ -2458,9 +2419,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         else:
             # In this mode we don't auto-connect but by default end up at a character selection
             # screen. We execute look on the account.
-            self.msg(
-                self.at_look(target=self.characters, session=session), session=session
-            )
+            self.msg(self.at_look(target=self.characters, session=session), session=session)
 
     @hook(
         event="login",
@@ -2704,9 +2663,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         # sessions
         sess_strings = []
         for isess, sess in enumerate(sessions):
-            ip_addr = (
-                sess.address[0] if isinstance(sess.address, tuple) else sess.address
-            )
+            ip_addr = sess.address[0] if isinstance(sess.address, tuple) else sess.address
             addr = f"{sess.protocol_key} ({ip_addr})"
             sess_str = (
                 f"|w* {isess + 1}|n"
@@ -2722,9 +2679,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             txt_characters = "You don't have a character yet. Use |wcharcreate|n."
         else:
             _max_chars = settings.MAX_NR_CHARACTERS
-            max_chars = (
-                "unlimited" if self.is_superuser or _max_chars is None else _max_chars
-            )
+            max_chars = "unlimited" if self.is_superuser or _max_chars is None else _max_chars
 
             char_strings = []
             for char in characters:
@@ -2735,13 +2690,10 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                         sid = sess in sessions and sessions.index(sess) + 1
                         if sess and sid:
                             char_strings.append(
-                                f" - |G{char.name}|n "
-                                f"(played by you in session {sid})"
+                                f" - |G{char.name}|n (played by you in session {sid})"
                             )
                         else:
-                            char_strings.append(
-                                f" - |R{char.name}|n " "(played by someone else)"
-                            )
+                            char_strings.append(f" - |R{char.name}|n (played by someone else)")
                 else:
                     # character is "free to puppet"
                     char_strings.append(f" - {char.name}")
@@ -2805,9 +2757,7 @@ class DefaultGuest(DefaultAccount):
                     username = name
                     break
             if not username:
-                errors.append(
-                    _("All guest accounts are in use. Please try again later.")
-                )
+                errors.append(_("All guest accounts are in use. Please try again later."))
                 if ip:
                     LOGIN_THROTTLE.update(ip, "Too many requests for Guest access.")
                 return None, errors
@@ -2842,9 +2792,7 @@ class DefaultGuest(DefaultAccount):
             # We are in the middle between logged in and -not, so we have
             # to handle tracebacks ourselves at this point. If we don't,
             # we won't see any errors at all.
-            errors.append(
-                _("An error occurred. Please e-mail an admin if the problem persists.")
-            )
+            errors.append(_("An error occurred. Please e-mail an admin if the problem persists."))
             logger.log_trace()
             return None, errors
 
@@ -2863,8 +2811,7 @@ class DefaultGuest(DefaultAccount):
 
         """
         try:
-            from evennia.authorization.storage import (load_grants,
-                                                       principal_is_suspended)
+            from evennia.authorization.storage import load_grants, principal_is_suspended
 
             load_grants(self)
             principal_is_suspended(self)
