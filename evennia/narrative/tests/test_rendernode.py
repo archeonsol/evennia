@@ -143,11 +143,10 @@ class TestRenderNodePayload(unittest.TestCase):
         node = RenderNode(
             kind="look",
             msg_type="look",
-            body="Atrium\n\nA large room.",
+            body="Atrium\nA large room.",
             blocks=(
                 Section(
                     key="room",
-                    title="Atrium",
                     children=(Line("Atrium"), Paragraph("A large room.")),
                 ),
             ),
@@ -157,6 +156,15 @@ class TestRenderNodePayload(unittest.TestCase):
         self.assertEqual(payload["schema"], "render.v1")
         self.assertEqual(payload["correlation_id"], "trace-1")
         self.assertEqual(payload["blocks"][0]["type"], "section")
+
+    def test_node_rejects_a_body_that_disagrees_with_its_blocks(self):
+        with self.assertRaises(ValueError):
+            RenderNode(
+                kind="look",
+                msg_type="look",
+                body="distorted",
+                blocks=(Line("reality"),),
+            )
 
     def test_entity_ref_serializes_only_opaque_handle(self):
         node = RenderNode(

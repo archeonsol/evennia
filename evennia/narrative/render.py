@@ -27,7 +27,7 @@ is what gates switching a live surface over (see the game-side parity harness).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Protocol, runtime_checkable
 
 __all__ = [
@@ -36,8 +36,14 @@ __all__ = [
     "CharRef",
     "PronounRef",
     "SpeechSpan",
+    "ObjectRef",
+    "ExitRef",
+    "ItemRef",
+    "SelfRef",
+    "SenderRef",
     "SpanResolver",
     "KeyResolver",
+    "set_default_lookup",
     "render_spans",
     "span_to_dict",
     "span_from_dict",
@@ -69,14 +75,14 @@ class ViewerContext:
 # a string only at render time by the resolver.
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TextSpan:
     """Literal text, rendered verbatim."""
 
     text: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class CharRef:
     """A reference to a character mentioned in the content.
 
@@ -96,7 +102,7 @@ class CharRef:
     formatted: bool = True
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PronounRef:
     """A pronoun whose rendering depends on whether its referent is the viewer.
 
@@ -112,7 +118,7 @@ class PronounRef:
     original: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SpeechSpan:
     """Quoted speech, garbled per the viewer's languages by the resolver.
 
@@ -127,6 +133,111 @@ class SpeechSpan:
     text: str
     lang: str | None = None
     quoted: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectRef:
+    """A reference to a non-character entity (exit, item, vehicle, door, ...).
+
+    The generic inline reference: everything that is *not* a character, a
+    pronoun, or speech. ``kind`` lets one resolver method dispatch by category
+    without a class per category; :func:`ExitRef` and :func:`ItemRef` are the
+    conventional constructors.
+
+    Args:
+        object_id: dbref id of the referenced entity.
+        kind (str): category (``"object"``, ``"exit"``, ``"item"``, ...).
+            Resolvers gate perception and formatting on it (a false exit, an
+            unidentified weapon).
+        role (str): why it is referenced (``"target"``, ``"instrument"``, ...).
+        possessive (bool): whether the mention was possessive.
+        formatted (bool): whether the resolver applies presentation formatting.
+        fallback (str): what to render when the viewer cannot perceive the
+            entity at all and the resolver has no better answer.
+    """
+
+    object_id: int | None
+    kind: str = "object"
+    role: str = "target"
+    possessive: bool = False
+    formatted: bool = True
+    fallback: str = "something"
+
+
+def ExitRef(object_id, *, role="exit", possessive=False, formatted=True, fallback="somewhere"):
+    """An :class:`ObjectRef` for an exit (``kind="exit"``).
+
+    Exits are the reference kind that makes *stable false exits* possible: the
+    plan says "the exit id 42", and the viewer's resolver decides whether that
+    renders as its real name, a hallucinated one, or nothing.
+    """
+    return ObjectRef(
+        object_id=object_id,
+        kind="exit",
+        role=role,
+        possessive=possessive,
+        formatted=formatted,
+        fallback=fallback,
+    )
+
+
+def ItemRef(object_id, *, role="target", possessive=False, formatted=True, fallback="something"):
+    """An :class:`ObjectRef` for a carried/wielded item (``kind="item"``)."""
+    return ObjectRef(
+        object_id=object_id,
+        kind="item",
+        role=role,
+        possessive=possessive,
+        formatted=formatted,
+        fallback=fallback,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SelfRef:
+    """The viewer themself, in a given grammatical form.
+
+    Distinct from a :class:`CharRef` that happens to point at the viewer: a
+    ``SelfRef`` is authored when the text *means* "you" regardless of who reads
+    it (a self-echo, a second-person system line), so no identity is consulted.
+
+    Args:
+        form (str): ``"subject"`` (you), ``"object"`` (you), ``"poss_det"``
+            (your), ``"poss"`` (yours), ``"reflexive"`` (yourself).
+        capitalize (bool): render capitalized (sentence-initial).
+    """
+
+    form: str = "subject"
+    capitalize: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SenderRef:
+    """A network/comms sender identity, resolved at delivery.
+
+    Network attribution is a *reference*, not a name: the alias a viewer sees
+    for a sender depends on their handle book, signal quality, and psychosis
+    state. Keeping it structured is what makes misattribution a resolver
+    decision instead of a regex over a finished line.
+
+    Args:
+        sender_id: dbref id of the sending entity (server-side only).
+        alias (str): the alias the sender transmitted under.
+        channel (str): transport the message arrived on (``"matrix"``, ...).
+    """
+
+    sender_id: int | None
+    alias: str = ""
+    channel: str = ""
+
+
+_SELF_FORMS = {
+    "subject": "you",
+    "object": "you",
+    "poss_det": "your",
+    "poss": "yours",
+    "reflexive": "yourself",
+}
 
 
 @runtime_checkable
@@ -150,6 +261,39 @@ class SpanResolver(Protocol):
         """Render quoted speech for the viewer."""
         ...
 
+    def obj(self, ref: ObjectRef, ctx: ViewerContext) -> str:
+        """Render a non-character entity reference for the viewer."""
+        ...
+
+    def selfref(self, ref: SelfRef, ctx: ViewerContext) -> str:
+        """Render a second-person self reference for the viewer."""
+        ...
+
+    def sender(self, ref: SenderRef, ctx: ViewerContext) -> str:
+        """Render a network sender identity for the viewer."""
+        ...
+
+
+def _self_text(ref: SelfRef) -> str:
+    """Default second-person rendering for a :class:`SelfRef`."""
+    value = _SELF_FORMS.get(ref.form, "you")
+    return value.capitalize() if ref.capitalize else value
+
+
+_DEFAULT_LOOKUP = None
+
+
+def set_default_lookup(fn):
+    """Install the process-wide ``fn(entity_id) -> object`` used when naming refs.
+
+    A resolver that does not inject its own lookup (including the fallback used
+    for reference kinds a game resolver predates) still names entities, rather
+    than silently degrading every one of them to its perception fallback.
+    """
+    global _DEFAULT_LOOKUP
+    _DEFAULT_LOOKUP = fn
+    return fn
+
 
 class KeyResolver:
     """Engine-default resolver: name characters by ``key``, no perception rules.
@@ -158,11 +302,12 @@ class KeyResolver:
     """
 
     def __init__(self, lookup=None):
-        # lookup(char_id) -> object; defaults to None so subclasses/tests inject.
+        # lookup(char_id) -> object; falls back to the process-wide default.
         self._lookup = lookup
 
     def _obj(self, char_id):
-        return self._lookup(char_id) if self._lookup else None
+        lookup = self._lookup or _DEFAULT_LOOKUP
+        return lookup(char_id) if lookup else None
 
     def char(self, ref: CharRef, ctx: ViewerContext) -> str:
         obj = self._obj(ref.char_id)
@@ -174,6 +319,33 @@ class KeyResolver:
 
     def speech(self, ref: SpeechSpan, ctx: ViewerContext) -> str:
         return f'"{ref.text}"' if getattr(ref, "quoted", True) else ref.text
+
+    def obj(self, ref: ObjectRef, ctx: ViewerContext) -> str:
+        """Name an entity as this viewer sees it.
+
+        Defers to ``get_display_name(looker=viewer)`` -- the identity base namer
+        (R1 keeps it as such: identity is not display). A game layers
+        perception, disguise and psychosis on top via passes, not by changing
+        what this returns.
+        """
+        entity = self._obj(ref.object_id)
+        if entity is None:
+            return ref.fallback + ("'s" if ref.possessive else "")
+        getter = getattr(entity, "get_display_name", None)
+        if callable(getter):
+            try:
+                name = getter(looker=ctx.viewer)
+            except Exception:
+                name = getattr(entity, "key", str(ref.object_id))
+        else:
+            name = getattr(entity, "key", str(ref.object_id))
+        return str(name) + ("'s" if ref.possessive else "")
+
+    def selfref(self, ref: SelfRef, ctx: ViewerContext) -> str:
+        return _self_text(ref)
+
+    def sender(self, ref: SenderRef, ctx: ViewerContext) -> str:
+        return ref.alias
 
 
 @dataclass
@@ -282,9 +454,28 @@ def render_spans(spans, ctx: ViewerContext, resolver: SpanResolver) -> str:
             out.append(resolver.pron(span, ctx))
         elif isinstance(span, SpeechSpan):
             out.append(resolver.speech(span, ctx))
+        elif isinstance(span, ObjectRef):
+            out.append(_delegate(resolver, "obj", span, ctx, KeyResolver.obj))
+        elif isinstance(span, SelfRef):
+            out.append(_delegate(resolver, "selfref", span, ctx, KeyResolver.selfref))
+        elif isinstance(span, SenderRef):
+            out.append(_delegate(resolver, "sender", span, ctx, KeyResolver.sender))
         else:  # pragma: no cover - forward-compat for new span kinds
             out.append(str(getattr(span, "text", "")))
     return "".join(out)
+
+
+def _delegate(resolver, method, span, ctx, default):
+    """Call ``resolver.method``, falling back to the engine default.
+
+    The newer reference kinds land in games that already ship a resolver. A
+    resolver written before they existed still renders them (by ``key``) rather
+    than raising, so adding a reference kind to a plan is never a hard break.
+    """
+    fn = getattr(resolver, method, None)
+    if callable(fn):
+        return fn(span, ctx)
+    return default(KeyResolver(), span, ctx)
 
 
 # -- pass pipeline (R1 core: register passes, don't wire them per surface) ----
@@ -332,10 +523,28 @@ class PipelineResolver:
         self._char_namer = None
         self._pron_namer = None
         self._speech_namer = None
+        self._obj_namer = None
+        self._self_namer = None
+        self._sender_namer = None
         self._passes = []
 
     def set_char_namer(self, fn):
         self._char_namer = fn
+        return self
+
+    def set_obj_namer(self, fn):
+        """Set the namer for :class:`ObjectRef` (exits, items, vehicles, doors)."""
+        self._obj_namer = fn
+        return self
+
+    def set_self_namer(self, fn):
+        """Set the namer for :class:`SelfRef` (second-person forms)."""
+        self._self_namer = fn
+        return self
+
+    def set_sender_namer(self, fn):
+        """Set the namer for :class:`SenderRef` (network attribution)."""
+        self._sender_namer = fn
         return self
 
     def set_pron_namer(self, fn):
@@ -391,6 +600,33 @@ class PipelineResolver:
             return value
         return self._fold("speech", value, ref, ctx)
 
+    def obj(self, ref: ObjectRef, ctx: ViewerContext) -> str:
+        if self._obj_namer is None:
+            value, final = KeyResolver().obj(ref, ctx), False
+        else:
+            value, final = self._split(self._obj_namer(ref, ctx))
+        if final:
+            return value
+        return self._fold("obj", value, ref, ctx)
+
+    def selfref(self, ref: SelfRef, ctx: ViewerContext) -> str:
+        if self._self_namer is None:
+            value, final = _self_text(ref), False
+        else:
+            value, final = self._split(self._self_namer(ref, ctx))
+        if final:
+            return value
+        return self._fold("selfref", value, ref, ctx)
+
+    def sender(self, ref: SenderRef, ctx: ViewerContext) -> str:
+        if self._sender_namer is None:
+            value, final = ref.alias, False
+        else:
+            value, final = self._split(self._sender_namer(ref, ctx))
+        if final:
+            return value
+        return self._fold("sender", value, ref, ctx)
+
     def text(self, span: TextSpan, ctx: ViewerContext) -> str:
         return self._fold("text", span.text, span, ctx)
 
@@ -402,6 +638,9 @@ _SPAN_KINDS = {
     "char": CharRef,
     "pron": PronounRef,
     "speech": SpeechSpan,
+    "obj": ObjectRef,
+    "self": SelfRef,
+    "sender": SenderRef,
 }
 _KIND_BY_TYPE = {cls: kind for kind, cls in _SPAN_KINDS.items()}
 
@@ -411,7 +650,7 @@ def span_to_dict(span) -> dict:
     kind = _KIND_BY_TYPE.get(type(span))
     if kind is None:  # pragma: no cover
         raise TypeError(f"Unserializable span: {span!r}")
-    data = dict(span.__dict__)
+    data = {item.name: getattr(span, item.name) for item in fields(span)}
     data["_"] = kind
     return data
 

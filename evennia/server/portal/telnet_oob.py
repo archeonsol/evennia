@@ -110,6 +110,10 @@ class TelnetOOB:
         """
         self.MSDP = True
         self.protocol().protocol_flags["OOB"] = True
+        # Which OOB transport is live matters to structured senders: MSDP's
+        # table/array encoding cannot carry a deeply nested payload (an R1
+        # render node), GMCP's JSON can. See narrative.rendernode.
+        self.protocol().protocol_flags["OOB_MSDP"] = True
         self.protocol().handshake_done()
 
     def no_gmcp(self, option):
@@ -133,6 +137,7 @@ class TelnetOOB:
         """
         self.GMCP = True
         self.protocol().protocol_flags["OOB"] = True
+        self.protocol().protocol_flags["OOB_GMCP"] = True
         self.protocol().handshake_done()
 
     # encoders

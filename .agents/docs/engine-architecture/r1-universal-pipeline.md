@@ -1,41 +1,46 @@
 # R1 completion: the universal render/deliver pipeline
 
-Status: **shipped through R1D.** The seams (emote / recording / photo) proved the
-model. Every viewer-facing output path can now become sugar over
-`render(obj, viewer) -> RenderNode -> deliver(node, viewer)`. It replaces the
-inherited string-append delivery wholesale, an engine change that benefits the game
-as a whole (robust per-viewer naming, perception, psychosis, recordings, photos, any
-future consumer), independent of any client.
+Status: **engine substrate and documented game-surface migration complete.** The two
+are tracked separately in [r1-migration-status.md](r1-migration-status.md) —
+"the engine can do this" and "the game does this" are different claims, and
+reading them as one hid real work.
+
+The seams (emote / recording / photo) proved the model. Every viewer-facing output
+path can become sugar over `plan(obj) -> resolve(plan, viewer) -> deliver(node,
+viewer)`. This engine change serves per-viewer naming, perception, psychosis,
+recordings, photos, and future consumers independently of client.
 
 ## The problem with inherited delivery
 
-Output today is built *and* flattened in one step, per call site: `msg`, `at_say`,
-`return_appearance`, `get_display_name`, scene broadcast each produce a finished
-**string**, with names/perception/psychosis already baked in via scattered
-regex/NLP. There is no "render to a structured tree for viewer X" step separate from
-"send." That is why identity is lost at the boundary, why psychosis distortions
-string-match and silently fail, why photos re-parse rendered text, and why every
-subsystem re-implements per-viewer naming.
+Inherited call sites build and flatten a finished string in one step, with
+names/perception/psychosis baked in. Without a separate viewer-resolution step,
+identity is lost, psychosis must string-match, photos re-parse prose, and every
+subsystem reimplements naming.
 
 ## The seam
 
-Two functions, one contract:
+Three functions, two types:
 
 ```
-render(obj, viewer, *, kind, **ctx)  -> RenderNode      # structured, viewer-invariant refs
-deliver(node, viewer, session=None)  -> None            # resolve per viewer, flatten per protocol, send
+plan_for(obj, *, kind, **ctx)   -> RenderPlan    # canonical, viewer-invariant refs
+resolve(plan, viewer)           -> RenderNode    # references become this viewer's text
+deliver(plan, viewer)           -> None          # resolve, transform, flatten per protocol, send
 ```
 
-- **`render`** builds a `RenderNode`: a tree of blocks and inline spans holding
-  *references* (character, exit, item, speech), not resolved names. Viewer-shaped
-  facts (recog, disguise) are *not* pre-applied.
-- **`deliver`** runs the per-viewer resolver + passes (identity, perception,
-  psychosis, language), then flattens to the target protocol (ANSI for telnet,
-  structured payload for the shell, plain for AI/accessibility, stored tree for
-  recordings/photos). This is the single point where names become text.
+- **`RenderPlan`** is a deeply immutable, bounded tree whose inline spans hold
+  references, not resolved names. It has no `body`, preventing viewer-resolved
+  output from being stored as canonical structure.
+- **`resolve`** runs the per-viewer resolver + passes (identity, perception,
+  psychosis, language) and derives everything the viewer gets — the flattened
+  `body`, the block tree, the opaque handles — from that one resolution.
+- **`deliver`** publishes the canonical event once, runs the ordered universal transforms, and flattens to the target
+  protocol (markup → ANSI for telnet, structured payload for the shell/GMCP,
+  plain for AI/accessibility, `storage_payload()` for recordings/photos).
 
-`RenderNode` stays structured **all the way to the delivery boundary**, never
-flattened mid-pipeline. That is what makes one render feed many consumers.
+The plan stays structured **all the way to the delivery boundary**, never
+flattened mid-pipeline. That is what makes one event feed many consumers.
+`flatten_blocks` emits Evennia markup, never ANSI or HTML, so one flatten result
+serves xterm256, no-colour and screenreader sessions alike.
 
 ## The node model (generalize the span work)
 
@@ -62,19 +67,26 @@ Legacy string callers get a flattened string; structured consumers (shell, store
 get the node. No call site is forced to change; string-building overrides keep
 working until their surface is migrated.
 
+When blocks exist, transforms map their leaves and the engine re-derives
+`RenderNode.body`. Body-only changes are rejected, preventing telnet and
+structured clients from receiving different realities.
+
 ## Shipped R1A-R1D contract
 
-- `RenderNode` is immutable and versioned as `render.v1`, with bounded metadata,
+- `RenderPlan` and its spans are deeply immutable and bounded before resolution;
+  `RenderNode` is immutable and versioned as `render.v1`, with bounded metadata,
   semantic blocks, correlation/node IDs, and separate trusted storage payloads.
 - Rich-client references use expiring viewer-scoped handles. Raw database IDs are
   rejected from narrative and scene-patch wire payloads.
-- `msg()` and `msg_contents()` normalize through the node core for capable
-  sessions; text-only sessions retain byte-parity output. Literal emotes and room
-  looks no longer bypass structured delivery.
+- `msg()` and `msg_contents()` normalize through the node core for every session.
+  Object and account message hooks run once before the universal transforms, and
+  protocol fan-out cannot re-run either. Text-only sessions retain byte-parity
+  output. Literal emotes and room looks no longer bypass structured delivery.
 - Every capable session receives nodes. Azaban normalizes remaining text to a text
   node, and the shell renders blocks and handles natively.
 - A bounded semantic timeline plus read-only sinks provides replay, accessibility,
-  recording, and camera integration seams.
+  recording, and camera integration seams. Canonical publication is idempotent by
+  plan ID; relays deliver another perspective without publishing another event.
 
 ## Strangler order (each surface parity-gated, then legacy retired)
 
@@ -89,14 +101,12 @@ paths is gated on prod soak.
 
 ## Guardrails (unchanged, load-bearing)
 
-- **Additive + parity-gated.** No surface flips until its node render is
-  byte-identical to legacy for the baseline viewer; modifier-active viewers
-  (psychosis/perception) are span-authoritative.
+- **Additive + parity-gated.** A surface flips only at baseline byte parity;
+  modifier-active viewers are span-authoritative.
 - **Identity is not display.** Trusted invariant spans may retain real IDs inside
   the server; delivery issues opaque viewer handles. Mechanics never infer identity
   from distorted output and clients never receive database IDs.
-- **No big bang.** One surface at a time; if a slice needs touching N unrelated
-  overrides, it is the wrong slice.
+- **No big bang.** Migrate one surface at a time.
 - **`EVENNIA_REF`** must ship the seam symbols to prod; guarded imports keep it
   dormant until pinned.
 

@@ -1,5 +1,7 @@
 """Messaging mixin for DefaultObject."""
 
+import re
+
 from django.conf import settings
 from django.utils.translation import gettext as _
 
@@ -9,6 +11,62 @@ from evennia.utils.utils import is_iter, make_iter, to_str
 
 _CMDHANDLER = None
 _MSG_CONTENTS_PARSER = funcparser.FuncParser(funcparser.ACTOR_STANCE_CALLABLES)
+_TEMPLATE_KEY = re.compile(r"\{(\w+)\}")
+
+
+def _template_plan(inmessage, mapping, outkwargs, from_obj):
+    """Turn a director-stance ``{key}`` template into a canonical render plan.
+
+    The migration lever for the bulk of existing call sites: no caller changes,
+    but ``"{attacker} attacks {defender}."`` stops being flattened per receiver
+    and becomes literal text around two entity references, resolved at the
+    delivery boundary like any other R1 event.
+
+    Returns:
+        RenderPlan or None: ``None`` when the template cannot be structuralized
+        faithfully (an unmapped key, or a mapping value that is not an entity),
+        in which case the caller keeps the legacy per-receiver path.
+    """
+    from evennia.narrative.plan import CharRef, Line, ObjectRef, RenderPlan, TextSpan
+
+    if not inmessage:
+        return None
+    spans = []
+    position = 0
+    for match in _TEMPLATE_KEY.finditer(inmessage):
+        key = match.group(1)
+        if key not in mapping:
+            return None  # format_map would raise; preserve that behaviour
+        target = mapping[key]
+        entity_id = getattr(target, "id", None)
+        if entity_id is None or not hasattr(target, "get_display_name"):
+            return None  # a plain string/number: no identity to preserve
+        if match.start() > position:
+            spans.append(TextSpan(inmessage[position : match.start()]))
+        try:
+            is_character = target.is_typeclass(
+                "evennia.objects.objects.DefaultCharacter", exact=False
+            )
+        except Exception:
+            is_character = getattr(target, "account", None) is not None
+        spans.append(
+            CharRef(char_id=entity_id, role=key)
+            if is_character
+            else ObjectRef(object_id=entity_id, kind="object", role=key)
+        )
+        position = match.end()
+    if not any(isinstance(span, (CharRef, ObjectRef)) for span in spans):
+        return None  # nothing to keep unresolved; legacy path is equivalent
+    if position < len(inmessage):
+        spans.append(TextSpan(inmessage[position:]))
+    sender = make_iter(from_obj)[0] if from_obj else None
+    return RenderPlan(
+        kind=str(outkwargs.get("type") or "broadcast"),
+        msg_type=str(outkwargs.get("type") or "text"),
+        blocks=(Line(spans=tuple(spans)),),
+        subject_id=getattr(sender, "id", None),
+        metadata={"surface": "msg_contents", "third_person": True},
+    )
 
 
 class MessagingMixin:
@@ -92,25 +150,10 @@ class MessagingMixin:
 
         """
         # R1 universal facade: callers may pass an immutable RenderNode directly.
-        # The delivery core preserves text parity for legacy/telnet sessions.
-        from evennia.narrative.rendernode import (
-            RenderNode,
-            _supports_nodes,
-            deliver_node,
-            text_node,
-        )
+        # Hooks and transforms still run exactly once before protocol fan-out.
+        from evennia.narrative.rendernode import RenderNode, deliver_node, text_node
 
         render_delivery = bool(kwargs.pop("_render_delivery", False))
-
-        if isinstance(text, RenderNode):
-            sessions = make_iter(session) if session else None
-            return deliver_node(
-                text,
-                self,
-                from_obj=from_obj,
-                sessions=sessions,
-                options=options,
-            )
 
         # try send hooks once. Recursive text/structured sends from deliver_node
         # carry the private marker above and bypass these hooks.
@@ -130,12 +173,25 @@ class MessagingMixin:
         except Exception:
             logger.log_trace()
 
+        if isinstance(text, RenderNode) and not render_delivery:
+            sessions = make_iter(session) if session else None
+            passthrough = {key: value for key, value in kwargs.items() if key != "options"}
+            return deliver_node(
+                text,
+                self,
+                from_obj=from_obj,
+                sessions=sessions,
+                options=options,
+                transform_context={"hooks_applied": True},
+                **passthrough,
+            )
+
         target_sessions = list(make_iter(session) if session else self.sessions.all())
-        if (
-            text is not None
-            and not render_delivery
-            and any(_supports_nodes(current) for current in target_sessions)
-        ):
+        # R1: *every* message normalizes through the node core, not only those
+        # bound for a structured client. Protocol capability decides the final
+        # flattening step and nothing else, so timelines, sinks, telemetry and
+        # universal transforms see a telnet recipient's traffic identically.
+        if text is not None and not render_delivery:
             body = text
             metadata = {}
             if isinstance(text, tuple):
@@ -144,12 +200,24 @@ class MessagingMixin:
                     metadata = text[1]
             option_type = options.get("type") if isinstance(options, dict) else None
             msg_type = str(metadata.get("type") or option_type or "text")
+            # Other outputfuncs in the same call (prompt, oob data) still ride
+            # along; only the text argument is what the node core owns.
+            passthrough = {key: value for key, value in kwargs.items() if key != "options"}
+            # Any metadata beyond `type` is the caller's outputfunc contract and
+            # is restored verbatim on the way out.
+            extra_meta = {key: value for key, value in metadata.items() if key != "type"}
             return deliver_node(
-                text_node(str(body), msg_type=msg_type),
+                text_node(
+                    str(body),
+                    msg_type=msg_type,
+                    metadata={"text_kwargs": extra_meta} if extra_meta else {},
+                ),
                 self,
                 from_obj=from_obj,
                 sessions=target_sessions,
                 options=options,
+                transform_context={"hooks_applied": True},
+                **passthrough,
             )
 
         if text is not None:
@@ -309,6 +377,36 @@ class MessagingMixin:
 
         contents = self.get_message_recipients(exclude=exclude)
 
+        use_funcparser = settings.FUNCPARSER_START_CHAR in (inmessage or "")
+        if not use_funcparser:
+            # R1: a director-stance template plus a mapping *is* a span plan --
+            # literal text around entity references. Build it once, resolve it
+            # per recipient at delivery, and identity survives to the boundary
+            # instead of being destroyed by an early format_map.
+            plan = _template_plan(inmessage, mapping, outkwargs, from_obj)
+            if plan is not None:
+                from evennia.narrative.plan import deliver_to
+
+                deliver_to(plan, contents, from_obj=from_obj, **kwargs)
+                return plan
+            # Identity-free room output is still one canonical event, not one
+            # unrelated text node per recipient. This gives relays, cameras,
+            # accessibility and forensic sinks the same source object even
+            # when the authoring API was the old string facade.
+            if isinstance(inmessage, str):
+                from evennia.narrative.plan import deliver_to, text_plan
+
+                msg_type = str(outkwargs.get("type") or "text")
+                plan = text_plan(
+                    inmessage,
+                    kind=msg_type if msg_type != "text" else "broadcast",
+                    msg_type=msg_type,
+                    subject_id=getattr(make_iter(from_obj)[0] if from_obj else None, "id", None),
+                    metadata={"surface": "msg_contents"},
+                )
+                deliver_to(plan, contents, from_obj=from_obj, **kwargs)
+                return plan
+
         display_names_by_receiver = {}
         for receiver in contents:
             display_names_by_receiver[id(receiver)] = {
@@ -319,8 +417,6 @@ class MessagingMixin:
                 )
                 for key, obj in mapping.items()
             }
-
-        use_funcparser = settings.FUNCPARSER_START_CHAR in (inmessage or "")
 
         for receiver in contents:
             names = display_names_by_receiver[id(receiver)]
@@ -374,4 +470,9 @@ class MessagingMixin:
                 refs=tuple(refs),
                 metadata={"surface": "msg_contents"},
             )
-            receiver.msg(text=node, from_obj=from_obj, **kwargs)
+            # Actor-stance ($You/$conj) output is viewer-shaped by construction,
+            # so it stays per-receiver -- but it still crosses the one delivery
+            # boundary, so the universal transforms apply here too.
+            from evennia.narrative.plan import deliver_resolved
+
+            deliver_resolved(node, receiver, from_obj=from_obj, **kwargs)

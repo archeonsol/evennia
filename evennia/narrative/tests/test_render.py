@@ -12,7 +12,6 @@ from evennia.narrative.render import (
     KeyResolver,
     PipelineResolver,
     PronounRef,
-    Section,
     SectionedView,
     SpeechSpan,
     TextSpan,
@@ -234,57 +233,6 @@ class TestPipelineResolver(unittest.TestCase):
         # no speech namer => engine default quoting, unquoted honoured
         self.assertEqual(r.speech(SpeechSpan(text="hi"), ctx), '"hi"')
         self.assertEqual(r.speech(SpeechSpan(text="hi", quoted=False), ctx), "hi")
-
-
-class TestNamedCore(unittest.TestCase):
-    def test_register_dispatch_and_missing(self):
-        from evennia.narrative import pipeline
-
-        @pipeline.register_producer("greet_test")
-        def _greet(obj, viewer, punct="!"):
-            return f"{obj}->{viewer}{punct}"
-
-        try:
-            node = pipeline.render("A", "B", kind="greet_test", punct="?")
-            self.assertEqual(node.body, "A->B?")
-            self.assertEqual(node.kind, "greet_test")
-            self.assertIn("greet_test", pipeline.producers())
-            with self.assertRaises(LookupError):
-                pipeline.render("A", "B", kind="no_such_kind_xyz")
-        finally:
-            pipeline._PRODUCERS.pop("greet_test", None)
-
-    def test_re_registration_raises_without_override(self):
-        from evennia.narrative import pipeline
-
-        pipeline.register_producer("dup_test", lambda o, v: "one")
-        try:
-            with self.assertRaises(ValueError):
-                pipeline.register_producer("dup_test", lambda o, v: "two")
-            # explicit override replaces the producer
-            pipeline.register_producer("dup_test", lambda o, v: "three", override=True)
-            self.assertEqual(pipeline.render("A", "B", kind="dup_test").body, "three")
-        finally:
-            pipeline._PRODUCERS.pop("dup_test", None)
-
-    def test_registered_transform_runs_after_normalization(self):
-        from dataclasses import replace
-
-        from evennia.narrative import pipeline
-
-        pipeline.register_producer("transform_test", lambda _o, _v: "before")
-        pipeline.register_transform(
-            "suffix_test",
-            lambda node, _viewer, _ctx: replace(node, body=node.body + " after"),
-        )
-        try:
-            self.assertEqual(
-                pipeline.render("A", "B", kind="transform_test").body,
-                "before after",
-            )
-        finally:
-            pipeline._PRODUCERS.pop("transform_test", None)
-            pipeline.unregister_transform("suffix_test")
 
 
 if __name__ == "__main__":
