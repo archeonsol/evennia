@@ -25,6 +25,47 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.177 — Delivery mirror hook
+
+### Engine
+
+[`deliver_resolved`](evennia/narrative/plan.py) now invokes an
+`at_narrative_delivery(node, context)` hook on the viewer, when one exists and
+the delivery is not itself a relay.
+
+A game that mirrors what a viewer perceives to somewhere else — a puppeteer's
+feed, a remote terminal, an observer window — had nowhere correct to hang that.
+`at_narrative_plan` fires only on the canonical path in
+[`deliver`](evennia/narrative/plan.py), so a surface that resolves its own
+output (`$You()`/`$conj()` templates in
+[`msg_contents`](evennia/objects/mixins/messaging.py), which short-circuit
+before the plan branch) never reached it. The remaining option was to hook
+`msg`, which is downstream of the tier split in
+[`deliver_node`](evennia/narrative/rendernode.py) and therefore fires a
+variable number of times per event: twice for a client taking both the
+structured payload and the text line, and once with no `text` at all for a
+nodes-only session.
+
+`deliver_resolved` is the single funnel — the canonical path ends there too —
+so the hook fires exactly once per event per viewer on every route, upstream of
+protocol fan-out. It runs after the universal transforms, so a mirror sees the
+same text the viewer was shown rather than an untransformed copy.
+
+### Migration
+
+Optional hook; objects without it are unaffected. A game currently mirroring
+perception from `msg` should move to `at_narrative_delivery` — the `msg`-level
+approach cannot express "once per event" now that one event can produce one,
+two, or zero `msg` calls depending on the attached client.
+
+`at_narrative_plan` is unchanged and still the right hook for consumers that
+need the canonical plan itself (recording, replay, re-framing), rather than one
+viewer's resolved text.
+
+### Tests
+
+`evennia.narrative` and `evennia.objects` green at 197.
+
 ## 6.0.0+underspire.176 — Canonical render plans
 
 ### Engine
