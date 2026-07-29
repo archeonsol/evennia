@@ -25,6 +25,46 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.181 — Physical placement categories & per-viewer DROP_DELIVERY
+
+### Engine — Objects
+
+[`DefaultObject`](evennia/objects/object.py) gains a `placement` property that
+returns `"portable"` (default), `"fixture"`, or `"anchored"`. Typeclasses set
+`default_placement`; an explicit `db.placement` attribute overrides the class
+default. Convenience predicates `is_fixture` and `is_fixed` derive from it.
+
+[`AppearanceMixin`](evennia/objects/mixins/appearance.py) groups contents by
+placement category when rendering appearance blocks.
+[`MovementMixin`](evennia/objects/mixins/movement.py) refuses containment moves
+for objects whose placement is `"fixture"` or `"anchored"`.
+
+### Engine — Narrative
+
+[`pipeline.DROP_DELIVERY`](evennia/narrative/pipeline.py) is a new sentinel that
+a render transform may return to suppress delivery for one viewer without
+affecting other viewers or the canonical event record. The sentinel
+short-circuits the transform chain: later transforms are never called for a
+dropped delivery. [`deliver_resolved`](evennia/narrative/plan.py) returns `None`
+when a transform drops delivery, so callers that inspect the return value can
+distinguish a suppressed delivery from a successful one.
+
+### Tests
+
+- Object placement categories: default value, per-instance override,
+  fixture/anchored denial of containment moves, and appearance grouping.
+- `DROP_DELIVERY`: a low-priority transform drops delivery, verifies the viewer
+  receives nothing and later transforms are never invoked.
+
+### Migration
+
+No schema or downstream changes required. Games that register custom render
+transforms should be aware that returning `DROP_DELIVERY` is now a valid
+transform contract; existing transforms that always return `RenderNode` are
+unaffected.
+
+---
+
 ## 6.0.0+underspire.180 — Restore fresh-session character puppeting
 
 ### Authorization
