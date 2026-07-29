@@ -25,6 +25,42 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.180 — Restore fresh-session character puppeting
+
+### Authorization
+
+[`principal.controls_resource`](evennia/authorization/engine.py) now compares
+the non-null database primary keys of the principal and resource accounts. The
+predicate previously used Python object identity, so separately materialized
+instances of the same durable `AccountDB` row could not authorize an owned
+character after the previous browser session had closed. Already-attached
+sessions hid the fault because `DefaultAccount.puppet_object` returns before
+the access check when that session already puppets the character.
+
+Foreign account primary keys still fail closed. The predicate remains one
+ordinary policy requirement, so a game-side `StaffCharacter` policy composing
+it with an additional capability continues to require that capability.
+
+### Player impact and migration
+
+Accounts can freshly attach to characters they own through
+`ObjectDB.db_account`, including after reconnecting through a newly materialized
+account instance. No schema or downstream adapter change is required; games can
+adopt this release by updating their engine pin.
+
+The action-dispatch `You can't do that.` response observed after the failed
+attach was secondary fallout: an unpuppeted session acts through its account,
+so character-only actions have no responding provider. The dispatch behavior
+is unchanged.
+
+### Tests
+
+Pure evaluator regressions distinguish equal durable account identity from
+Python object identity, retain foreign-account denial, and prove that a
+composed capability remains required. A database-backed account regression
+exercises `DefaultCharacter.access` and `DefaultAccount.puppet_object` from a
+fresh session using a separate equal account instance.
+
 ## 6.0.0+underspire.179 — Native default roleplay and building actions
 
 ### Action engine
