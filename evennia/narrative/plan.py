@@ -598,9 +598,11 @@ def deliver_resolved(
     The delivery boundary for surfaces that still resolve their own output. It
     exists so "not yet migrated to a plan" never means "skips the transforms" --
     a partially migrated game must not have perception or psychosis apply on
-    some surfaces and not others.
+    some surfaces and not others. A transform may return the pipeline's explicit
+    ``DROP_DELIVERY`` sentinel to suppress this viewer's delivery without
+    emitting an empty structured message.
     """
-    from evennia.narrative.pipeline import transforms
+    from evennia.narrative.pipeline import DROP_DELIVERY, transforms
     from evennia.narrative.rendernode import deliver_node
 
     ctx = {"from_obj": from_obj, **(context or {})}
@@ -617,8 +619,10 @@ def deliver_resolved(
         ctx["hooks_applied"] = True
     for _key, transform in transforms():
         node = transform(node, viewer, dict(ctx))
+        if node is DROP_DELIVERY:
+            return None
         if not isinstance(node, RenderNode):
-            raise TypeError("render transforms must return RenderNode")
+            raise TypeError("render transforms must return RenderNode or DROP_DELIVERY")
     # A game may mirror what a viewer perceives to somewhere else: a puppeteer's
     # feed, a remote terminal, an observer window. This is the one place to do
     # it. Every route ends here — a canonical plan through :func:`deliver`, and

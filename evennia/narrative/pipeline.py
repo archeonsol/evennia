@@ -12,6 +12,7 @@ from evennia.narrative.plan import RenderPlan, deliver, deliver_to, resolve, tex
 from evennia.narrative.rendernode import deliver_node
 
 __all__ = [
+    "DROP_DELIVERY",
     "register_transform",
     "unregister_transform",
     "transforms",
@@ -26,12 +27,23 @@ __all__ = [
 _TRANSFORMS = {}
 
 
+class _DropDelivery:
+    """Private sentinel returned by a transform to suppress one delivery."""
+
+    __slots__ = ()
+
+
+DROP_DELIVERY = _DropDelivery()
+
+
 def register_transform(key, fn=None, *, priority=0, override=False):
     """Register an ordered universal node transform.
 
     Transforms receive ``(node, viewer, context)`` and must return a new
-    :class:`RenderNode`. They are suitable for accessibility, perception,
-    language, policy metadata, and other cross-surface concerns.
+    :class:`RenderNode` or :data:`DROP_DELIVERY`. They are suitable for
+    accessibility, perception, language, policy metadata, and other
+    cross-surface concerns. A drop is private to this viewer; the canonical
+    event has already been published.
     """
 
     def _set(transform):

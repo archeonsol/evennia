@@ -395,6 +395,31 @@ class TestDelivery(PlanTestCase):
         self.assertEqual(payload["body"], text_body)
         self.assertEqual(payload["blocks"][0]["text"], text_body)
 
+    def test_transform_can_privately_drop_one_delivery(self):
+        from evennia.narrative import pipeline
+
+        later_calls = []
+        pipeline.register_transform(
+            "test-drop",
+            lambda node, viewer, ctx: pipeline.DROP_DELIVERY,
+            priority=-10,
+            override=True,
+        )
+        pipeline.register_transform(
+            "test-after-drop",
+            lambda node, viewer, ctx: later_calls.append(node) or node,
+            override=True,
+        )
+        self.addCleanup(pipeline.unregister_transform, "test-drop")
+        self.addCleanup(pipeline.unregister_transform, "test-after-drop")
+        viewer = _Viewer("Ana", sessions=[_Session({})], knows=[1])
+
+        result = deliver(self._plan(), viewer)
+
+        self.assertIsNone(result)
+        self.assertEqual(viewer.calls, [])
+        self.assertEqual(later_calls, [])
+
     def test_single_viewer_delivery_publishes_the_event(self):
         from evennia.narrative import timeline
 
