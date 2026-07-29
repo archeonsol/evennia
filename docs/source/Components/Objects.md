@@ -40,6 +40,27 @@ The `Object` class is meant to be used as the basis for creating things that are
 
 You should not use Objects for game _systems_. Don't use an 'invisible' Object for tracking weather, combat, economy or guild memberships - that's what [Scripts](./Scripts.md) are for. 
 
+### Physical placement
+
+`DefaultObject` has a canonical physical-placement category:
+
+- `portable` is the default and allows ordinary object movement.
+- `fixture` represents an installed object. It vetoes pickup and every ordinary
+  `move_to` operation; an explicit `move_type="teleport"` remains available to
+  building and maintenance tools.
+- `anchored` represents another fixed object without classifying it as a
+  room-presented fixture. It has the same movement invariant as `fixture`.
+
+Set one object with `obj.db.placement = "fixture"`, or make a typeclass default
+to fixtures with `default_placement = "fixture"`. An explicit
+`obj.db.placement = "portable"` overrides the typeclass default. The
+`obj.placement`, `obj.is_fixture`, and `obj.is_fixed` properties expose the
+normalized result.
+
+Games remain responsible for fixture presentation and builder commands. A
+game that does not use fixtures can ignore the category; every object remains
+portable by default.
+
 ##  ObjectParent - Adding common functionality
 
 `Object`,  as well as `Character`, `Room` and `Exit` classes all additionally inherit from `mygame.typeclasses.objects.ObjectParent`.

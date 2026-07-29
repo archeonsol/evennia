@@ -39,6 +39,47 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertIsNone(obj.db.desc)
         self.assertEqual(obj.default_description, obj.get_display_desc(obj))
 
+    def test_object_is_portable_by_default(self):
+        obj, errors = DefaultObject.create("console", location=self.room1)
+        self.assertTrue(obj, errors)
+        self.assertFalse(errors, errors)
+        self.assertEqual(obj.placement, "portable")
+        self.assertFalse(obj.is_fixture)
+
+    def test_fixture_placement_blocks_pickup_and_ordinary_movement(self):
+        obj, errors = DefaultObject.create("console", location=self.room1)
+        self.assertTrue(obj, errors)
+        self.assertFalse(errors, errors)
+        obj.db.placement = "fixture"
+
+        with patch.object(self.char1, "msg") as message:
+            self.assertFalse(obj.at_pre_get(self.char1))
+        self.assertIn("fixture", message.call_args.args[0].lower())
+        self.assertFalse(obj.move_to(self.char1, quiet=True, move_type="get"))
+        self.assertIs(obj.location, self.room1)
+
+    def test_fixture_placement_allows_explicit_teleport(self):
+        obj, errors = DefaultObject.create("console", location=self.room1)
+        self.assertTrue(obj, errors)
+        self.assertFalse(errors, errors)
+        obj.db.placement = "fixture"
+
+        self.assertTrue(obj.move_to(self.room2, quiet=True, move_type="teleport"))
+        self.assertIs(obj.location, self.room2)
+
+    def test_anchored_placement_is_fixed_without_being_a_fixture(self):
+        obj, errors = DefaultObject.create("bulkhead", location=self.room1)
+        self.assertTrue(obj, errors)
+        self.assertFalse(errors, errors)
+        obj.db.placement = "anchored"
+
+        self.assertEqual(obj.placement, "anchored")
+        self.assertTrue(obj.is_fixed)
+        self.assertFalse(obj.is_fixture)
+        self.assertFalse(obj.at_pre_get(self.char1))
+        self.assertFalse(obj.move_to(self.room2, quiet=True, move_type="move"))
+        self.assertIs(obj.location, self.room1)
+
     def test_character_create(self):
         description = "A furry green monster, reeking of garbage."
         home = self.room1.dbref

@@ -375,11 +375,25 @@ class MovementMixin:
             **kwargs: Arbitrary, optional arguments for users overriding
                 the call (unused by default).
 
+        Fixture and anchored placement permit only explicit teleportation. This
+        makes fixed placement a containment invariant rather than a
+        command-specific pickup check; ordinary get, give, put, and scripted
+        moves all veto.
+
         Returns:
             bool or None: `False` (or non-None falsy) to abort the move,
             otherwise allow it.
 
         """
+        if getattr(self, "is_fixed", False) and move_type != "teleport":
+            mover = kwargs.get("mover") or kwargs.get("move_initiator")
+            recipient = mover or (destination if hasattr(destination, "msg") else None)
+            if recipient is not None:
+                if getattr(self, "is_fixture", False):
+                    recipient.msg("You can't move that normally—it is installed as a fixture.")
+                else:
+                    recipient.msg("You can't move that normally—it is fixed in place.")
+            return False
         return True
 
     @hook(

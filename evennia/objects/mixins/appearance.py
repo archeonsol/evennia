@@ -673,11 +673,22 @@ class AppearanceMixin:
             **kwargs: Arbitrary, optional arguments for users overriding
                 the call (unused by default).
 
+        Objects with fixture or anchored placement always veto pickup. Games
+        may toggle the category with ``obj.db.placement`` or declare a
+        typeclass default.
+
         Returns:
             bool or None: `False` (or non-None falsy) to abort, otherwise
             allow the pickup.
 
         """
+        if getattr(self, "is_fixed", False):
+            if getter is not None and hasattr(getter, "msg"):
+                if getattr(self, "is_fixture", False):
+                    getter.msg("You cannot pick that up; it is installed as a fixture.")
+                else:
+                    getter.msg("You cannot pick that up; it is fixed in place.")
+            return False
         return True
 
     # deprecated

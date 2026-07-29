@@ -445,6 +445,36 @@ class DefaultObject(
     """
 
     plural_category = "plural_key"
+    default_placement = "portable"
+
+    @property
+    def placement(self):
+        """Return this object's canonical physical-placement category.
+
+        Typeclasses may set ``default_placement``. An explicit ``db.placement``
+        of ``"portable"``, ``"fixture"``, or ``"anchored"`` overrides that
+        class default.
+
+        Returns:
+            str: ``"portable"``, ``"fixture"``, or ``"anchored"``.
+        """
+        explicit = getattr(self.db, "placement", None)
+        if explicit in ("portable", "fixture", "anchored"):
+            return explicit
+        if self.default_placement in ("fixture", "anchored"):
+            return self.default_placement
+        return "portable"
+
+    @property
+    def is_fixture(self):
+        """Return whether this object is installed rather than portable."""
+        return self.placement == "fixture"
+
+    @property
+    def is_fixed(self):
+        """Return whether ordinary containment moves must be denied."""
+        return self.placement in ("fixture", "anchored")
+
     # on-object properties
 
     @lazy_property
