@@ -14,6 +14,7 @@ evennia.actions.default
 
    evennia.actions.default.account
    evennia.actions.default.admin
+   evennia.actions.default.building
    evennia.actions.default.emote_nomatch
    evennia.actions.default.events
    evennia.actions.default.general
@@ -22,6 +23,7 @@ evennia.actions.default
    evennia.actions.default.nomatch
    evennia.actions.default.objects
    evennia.actions.default.roleplay
+   evennia.actions.default.script_paging
    evennia.actions.default.system
    evennia.actions.default.unloggedin
 

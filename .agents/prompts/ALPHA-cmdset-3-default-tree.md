@@ -1,6 +1,7 @@
 # ALPHA cmdset retirement — chunk 3: delete the commands/default/ tree
 
-Status: todo. **Gated on chunk 1** (help formatters extracted). Third of six
+Status: todo. **Gated on chunk 1** (help formatters extracted) and the native
+default-action prerequisite ports below. Third of six
 chunks; see [`ALPHA-cmdset-retirement-audit.md`](ALPHA-cmdset-retirement-audit.md).
 
 ## Why
@@ -8,13 +9,23 @@ chunks; see [`ALPHA-cmdset-retirement-audit.md`](ALPHA-cmdset-retirement-audit.m
 `evennia/commands/default/` (~14.2k lines: `account.py`, `admin.py`,
 `building.py` at 4.6k, `comms.py`, `general.py`, `help.py`, `system.py`,
 `syscommands.py`, `unloggedin.py`, + the `cmdset_*.py` anchors) is the stock MUX
-command suite. It is **dead**: `cmdhandler` always tries `try_action_dispatch`
-first, and every verb was reimplemented as a native engine action in
-`evennia/actions/default/` (`.92`, see [`CM1-port-ledger.md`](CM1-port-ledger.md)).
-Login is engine-owned (`.95`). Nothing relocates; this is a delete.
+command suite. It is not safe to delete merely because `cmdhandler` tries
+`try_action_dispatch` first: the old claim that every default verb was already
+native was false. Login is engine-owned (`.95`), but deletion must wait until
+the useful generic defaults have native action/rule implementations and their
+downstream providers are installed. Nothing relocates during chunk 3 itself;
+the prerequisite ports happen before it.
+
+The `.179` prerequisite port added canonical `say`/`whisper` roleplay,
+`@set`, `@alias`, `@copy`, `@cpattr`, `@link`, `@unlink`, `@sethome`, `@wipe`,
+cmdset-free `@examine`, `@objects`, and storage-only `@scripts` under
+`evennia/actions/default/`. `@cmdsets` is intentionally **not** ported: it
+inspects the substrate this six-chunk sequence retires. Do not recreate it as
+an action.
 
 The single live carve-out (`help.py`'s formatters) is removed by **chunk 1**;
-confirm that landed before starting.
+confirm that landed and that downstream games have installed the `.179`
+roleplay/building/system providers before starting.
 
 ## Goal
 

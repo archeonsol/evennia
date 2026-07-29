@@ -21,7 +21,7 @@ from .default import (Access, Arrived, CharacterAdminRules,
                       EnterableObjectRules, ExitTraversalRules, Force, Get,
                       Give, Grant, Help, Home, Info, Locomotion, Look, Move,
                       Moved, Nick, NickRules, Option, Password, Policy, Put,
-                      Py, PyRules, Quit, Scope, Screenreader,
+                      Objects, Py, PyRules, Quit, Scope, Screenreader, Scripts,
                       SessionLoginRules, SetHelp, Systems, Tasks, UserPassword,
                       Wall, exit_resolver, register_exit_resolver)
 from .dispatch import (DispatchMiddleware, ProfilingMiddleware,
@@ -175,6 +175,23 @@ __all__ = [
     "Scope",
     "Access",
     "CharacterAdminRules",
+    "Say",
+    "Whisper",
+    "Pose",
+    "Emote",
+    "DefaultRoleplayRules",
+    "SetAttribute",
+    "Set",
+    "SetObjAlias",
+    "Alias",
+    "Copy",
+    "CpAttr",
+    "Link",
+    "Unlink",
+    "SetHome",
+    "Wipe",
+    "Examine",
+    "CharacterBuildingRules",
     "Nick",
     "Home",
     "Help",
@@ -191,6 +208,8 @@ __all__ = [
     "Tasks",
     "Py",
     "PyRules",
+    "Objects",
+    "Scripts",
     "CharacterSystemRules",
     "Connect",
     "Create",
@@ -206,3 +225,16 @@ __all__ = [
     "clear_middlewares",
     "get_middlewares",
 ]
+
+
+def __getattr__(name):
+    """Resolve collision-prone defaults without importing them with action core."""
+    if name in (
+        "Say", "Whisper", "Pose", "Emote", "DefaultRoleplayRules",
+        "SetAttribute", "Set", "SetObjAlias", "Alias", "Copy", "CpAttr",
+        "Link", "Unlink", "SetHome", "Wipe", "Examine", "CharacterBuildingRules",
+    ):
+        from . import default
+
+        return getattr(default, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
