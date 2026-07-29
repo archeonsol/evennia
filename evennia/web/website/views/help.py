@@ -259,9 +259,7 @@ class HelpDetailView(HelpMixin, DetailView):
 
         # Find the previous and next topics, if either exist
         context["topic_next"] = (
-            objs[position + 1]
-            if position is not None and position + 1 < len(objs)
-            else None
+            objs[position + 1] if position is not None and position + 1 < len(objs) else None
         )
         context["topic_previous"] = (
             objs[position - 1] if position is not None and position > 0 else None

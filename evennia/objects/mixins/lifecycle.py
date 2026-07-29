@@ -161,9 +161,7 @@ class LifecycleMixin:
         # See if we need to kick the account off.
 
         for session in self.sessions.all():
-            session.msg(
-                _("Your character {key} has been destroyed.").format(key=self.key)
-            )
+            session.msg(_("Your character {key} has been destroyed.").format(key=self.key))
             # no need to disconnect, Account just jumps to OOC mode.
         # sever the connection (important!)
         if self.account:
@@ -193,8 +191,7 @@ class LifecycleMixin:
         # location: removing this object removes its cmdset from the
         # room's available command pool.
         try:
-            from evennia.commands.location_cmdset_cache import \
-                bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
 
             if self.location is not None:
                 bump_cmdset_generation(self.location)

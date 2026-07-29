@@ -250,9 +250,7 @@ class TestInitHooks(TestCase):
         for task in pending:
             task.cancel()
         if pending:
-            self._loop.run_until_complete(
-                asyncio.gather(*pending, return_exceptions=True)
-            )
+            self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         self._loop.run_until_complete(self._loop.shutdown_asyncgens())
         asyncio.set_event_loop(None)
         self._loop.close()

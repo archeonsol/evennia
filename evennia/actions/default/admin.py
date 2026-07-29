@@ -209,9 +209,7 @@ class CharacterAdminRules:
         if not targ:
             return CLAIM
         if not targ.access(caller, "edit"):
-            caller.msg(
-                f"You don't have permission to force {targ} to execute commands."
-            )
+            caller.msg(f"You don't have permission to force {targ} to execute commands.")
             return CLAIM
         targ.execute_cmd(action.rhs)
         caller.msg(f"You have forced {targ} to: {action.rhs}")
@@ -224,9 +222,7 @@ class CharacterAdminRules:
         if not self._is_actor(actor):
             return SKIP
         from evennia.authorization.capabilities import capability_registry
-        from evennia.authorization.storage import (grant_capability,
-                                                   principal_refs,
-                                                   revoke_grant)
+        from evennia.authorization.storage import grant_capability, principal_refs, revoke_grant
         from evennia.server.models import AuthorizationGrant
 
         caller = self
@@ -258,8 +254,7 @@ class CharacterAdminRules:
             ).order_by("capability")
             caller.msg(
                 "\n".join(
-                    f"{grant.grant_id} {grant.capability} "
-                    f"[{grant.scope_kind}:{grant.scope_key}]"
+                    f"{grant.grant_id} {grant.capability} [{grant.scope_kind}:{grant.scope_key}]"
                     for grant in grants
                 )
                 or "<No active capability grants>"
@@ -288,15 +283,11 @@ class CharacterAdminRules:
                     reason="action @grant/revoke",
                 )
             )
-            caller.msg(
-                "Grant revoked." if changed else "No active matching grant was found."
-            )
+            caller.msg("Grant revoked." if changed else "No active matching grant was found.")
         else:
             declaration = rhs.strip().lower()
             if declaration.startswith("bundle:"):
-                capabilities = capability_registry.expand_bundle(
-                    declaration.split(":", 1)[1]
-                )
+                capabilities = capability_registry.expand_bundle(declaration.split(":", 1)[1])
             else:
                 capabilities = (capability_registry.require(declaration).key,)
             for capability in sorted(capabilities):
@@ -318,8 +309,7 @@ class CharacterAdminRules:
     def carry_out_policy(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
-        from evennia.authorization.policy import (Always, Never,
-                                                  RequiresCapability)
+        from evennia.authorization.policy import Always, Never, RequiresCapability
 
         caller = self
         if not action.args:
@@ -342,10 +332,7 @@ class CharacterAdminRules:
 
         if "set" in action.switches:
             if not operation or not action.rhs:
-                caller.msg(
-                    "Usage: @policy/set <object>/<operation> = "
-                    "public|disabled|<capability>"
-                )
+                caller.msg("Usage: @policy/set <object>/<operation> = public|disabled|<capability>")
                 return CLAIM
             declaration = action.rhs.strip().lower()
             if declaration == "public":
@@ -371,27 +358,20 @@ class CharacterAdminRules:
                 caller.msg("Usage: @policy/del <object>/<operation>")
                 return CLAIM
             removed = resource.policies.remove(operation)
-            caller.msg(
-                f"{'Removed' if removed else 'No override for'} {resource}/{operation}."
-            )
+            caller.msg(f"{'Removed' if removed else 'No override for'} {resource}/{operation}.")
             return CLAIM
 
         if operation:
             policy = resource.policies.get(operation)
             caller.msg(
-                f"{resource}/{operation}: "
-                f"{policy.to_data() if policy else '<class default>'}"
+                f"{resource}/{operation}: {policy.to_data() if policy else '<class default>'}"
             )
             return CLAIM
         policies = resource.policies.all()
         if not policies:
             caller.msg(f"{resource} has no instance policy overrides.")
             return CLAIM
-        caller.msg(
-            "\n".join(
-                f"{key}: {policy.to_data()!r}" for key, policy in policies.items()
-            )
-        )
+        caller.msg("\n".join(f"{key}: {policy.to_data()!r}" for key, policy in policies.items()))
         return CLAIM
 
     # --- @scope ----------------------------------------------------------------
@@ -400,8 +380,7 @@ class CharacterAdminRules:
     def carry_out_scope(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
-        from evennia.authorization.storage import (resource_ref,
-                                                   set_scope_labels)
+        from evennia.authorization.storage import resource_ref, set_scope_labels
         from evennia.server.models import AuthorizationScopeLabel
 
         caller = self
@@ -424,9 +403,7 @@ class CharacterAdminRules:
                 caller.msg("Every scope label must use <kind>:<key> syntax.")
                 return CLAIM
             set_scope_labels(resource, labels)
-            caller.msg(
-                f"Set authored scopes on {resource}: {', '.join(sorted(labels))}"
-            )
+            caller.msg(f"Set authored scopes on {resource}: {', '.join(sorted(labels))}")
             return CLAIM
         if "clear" in action.switches:
             set_scope_labels(resource, ())
@@ -456,7 +433,9 @@ class CharacterAdminRules:
         grants = load_grants(caller)
         string = "\n|wYour capability grants|n:"
         for capability, scopes in sorted(grants.by_capability.items()):
-            string += f"\n{capability}: {', '.join(f'{scope.kind}:{scope.key}' for scope in scopes)}"
+            string += (
+                f"\n{capability}: {', '.join(f'{scope.kind}:{scope.key}' for scope in scopes)}"
+            )
         if not grants.by_capability:
             string += " <None>"
         caller.msg(string)

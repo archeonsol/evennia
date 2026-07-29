@@ -186,13 +186,9 @@ def roll(
             f"and '{dicetype}'."
         )
     if 0 < dicenum > max_dicenum:
-        raise TypeError(
-            f"Invalid number of dice rolled (must be between 1 and {max_dicenum})."
-        )
+        raise TypeError(f"Invalid number of dice rolled (must be between 1 and {max_dicenum}).")
     if 0 < dicetype > max_dicetype:
-        raise TypeError(
-            f"Invalid die-size used (must be between 1 and {max_dicetype} sides)."
-        )
+        raise TypeError(f"Invalid die-size used (must be between 1 and {max_dicetype} sides).")
 
     # roll all dice, remembering each roll
     rolls = tuple([randint(1, dicetype) for _ in range(dicenum)])
@@ -278,9 +274,7 @@ class CmdDice(default_cmds.Command):
         nsidelimit = 10000  # Maximum number of sides
         try:
             if int(parts[0]) > ndicelimit or int(parts[2]) > nsidelimit:
-                self.caller.msg(
-                    "The maximum roll allowed is %sd%s." % (ndicelimit, nsidelimit)
-                )
+                self.caller.msg("The maximum roll allowed is %sd%s." % (ndicelimit, nsidelimit))
                 return
         except ValueError:
             self.caller.msg(f"Malformed input. {helptxt}")
@@ -332,9 +326,7 @@ class CmdDice(default_cmds.Command):
             return
         # format output
         if len(rolls) > 1:
-            rolls = (
-                ", ".join(str(roll) for roll in rolls[:-1]) + " and " + str(rolls[-1])
-            )
+            rolls = ", ".join(str(roll) for roll in rolls[:-1]) + " and " + str(rolls[-1])
         else:
             rolls = rolls[0]
         if outcome is None:

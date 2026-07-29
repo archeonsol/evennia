@@ -71,9 +71,7 @@ class HelpEntry(SharedMemoryModel):
         "help entry", blank=True, help_text="the main body of help text"
     )
     # lock string storage
-    db_lock_storage = models.TextField(
-        "locks", blank=True, help_text="normally view:all()."
-    )
+    db_lock_storage = models.TextField("locks", blank=True, help_text="normally view:all().")
     # tags are primarily used for permissions
     db_tags = models.ManyToManyField(
         Tag,
@@ -83,9 +81,7 @@ class HelpEntry(SharedMemoryModel):
     )
     # Creation date. This is not changed once the object is created. This is in UTC,
     # use the property date_created to get it in local time.
-    db_date_created = models.DateTimeField(
-        "creation date", editable=False, auto_now=True
-    )
+    db_date_created = models.DateTimeField("creation date", editable=False, auto_now=True)
 
     # Database manager
     objects = HelpEntryManager()

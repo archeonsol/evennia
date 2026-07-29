@@ -279,9 +279,7 @@ class TestAccess(unittest.TestCase):
     def test_shows_effective_capability_grants(self):
         char, actor = _setup(capabilities=())
         grants = SimpleNamespace(
-            by_capability={
-                "engine.world.build": (SimpleNamespace(kind="world", key="*"),)
-            }
+            by_capability={"engine.world.build": (SimpleNamespace(kind="world", key="*"),)}
         )
         with mock.patch("evennia.authorization.storage.load_grants", return_value=grants):
             trace = self._access(char, actor)

@@ -76,9 +76,7 @@ class DefaultAccountRules(NickRules):
     """
 
     def _is_account(self, actor) -> bool:
-        return self is getattr(actor, "account", None) or self is getattr(
-            actor, "effective", None
-        )
+        return self is getattr(actor, "account", None) or self is getattr(actor, "effective", None)
 
     # --- @option -----------------------------------------------------------------
 
@@ -108,9 +106,7 @@ class DefaultAccountRules(NickRules):
                 msg("|gCleared all saved options.")
 
             options = dict(flags)
-            saved_options = dict(
-                caller.attributes.get("_saved_protocol_flags", default={})
-            )
+            saved_options = dict(caller.attributes.get("_saved_protocol_flags", default={}))
 
             if "SCREENWIDTH" in options:
                 if len(options["SCREENWIDTH"]) == 1:
@@ -137,9 +133,7 @@ class DefaultAccountRules(NickRules):
                 if saved_options:
                     saved = " |YYes|n" if key in saved_options else ""
                     changed = (
-                        "|y*|n"
-                        if key in saved_options and flags[key] != saved_options[key]
-                        else ""
+                        "|y*|n" if key in saved_options and flags[key] != saved_options[key] else ""
                     )
                     row.append("%s%s" % (saved, changed))
                 table.add_row(*row)
@@ -219,9 +213,7 @@ class DefaultAccountRules(NickRules):
             msg("|rNo option named '|w%s|r'." % name)
         if optiondict:
             if "save" in action.switches:
-                saved_options = caller.attributes.get(
-                    "_saved_protocol_flags", default={}
-                )
+                saved_options = caller.attributes.get("_saved_protocol_flags", default={})
                 saved_options.update(optiondict)
                 caller.attributes.add("_saved_protocol_flags", saved_options)
                 for key in optiondict:
@@ -265,9 +257,7 @@ class DefaultAccountRules(NickRules):
             account.save()
             msg("Password changed.")
             address = getattr(session, "address", "unknown")
-            logger.log_sec(
-                f"Password Changed: {account} (Caller: {account}, IP: {address})."
-            )
+            logger.log_sec(f"Password Changed: {account} (Caller: {account}, IP: {address}).")
         return CLAIM
 
     # --- @userpassword ---------------------------------------------------------------
@@ -306,7 +296,5 @@ class DefaultAccountRules(NickRules):
         if account.character != caller:
             account.msg(f"{caller.name} has changed your password to '{newpass}'.")
         address = getattr(session, "address", "unknown")
-        logger.log_sec(
-            f"Password Changed: {account} (Caller: {caller}, IP: {address})."
-        )
+        logger.log_sec(f"Password Changed: {account} (Caller: {caller}, IP: {address}).")
         return CLAIM

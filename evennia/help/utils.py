@@ -172,9 +172,7 @@ def help_search_with_index(query, candidate_entries, suggestion_maxnum=5, fields
     # field. Empty optional fields therefore cause division by zero when every
     # candidate has an empty value (for example a catalog with no tags).
     fields = [
-        field
-        for field in fields
-        if any(document.get(field["field_name"]) for document in indx)
+        field for field in fields if any(document.get(field["field_name"]) for document in indx)
     ]
 
     lunr_search = LunrSearch()

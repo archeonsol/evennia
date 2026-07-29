@@ -31,12 +31,23 @@ from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.typeclasses.attributes import NickHandler
 from evennia.typeclasses.models import TypeclassBase
 from evennia.utils import ansi, create, funcparser, logger, search
-from evennia.utils.multimatch import (narrow_candidates,
-                                      parse_search_qualifiers,
-                                      resolve_multimatch_index, try_autopick)
-from evennia.utils.utils import (class_from_module, compress_whitespace, dbref,
-                                 is_iter, iter_to_str, lazy_property,
-                                 make_iter, to_str, variable_from_module)
+from evennia.utils.multimatch import (
+    narrow_candidates,
+    parse_search_qualifiers,
+    resolve_multimatch_index,
+    try_autopick,
+)
+from evennia.utils.utils import (
+    class_from_module,
+    compress_whitespace,
+    dbref,
+    is_iter,
+    iter_to_str,
+    lazy_property,
+    make_iter,
+    to_str,
+    variable_from_module,
+)
 
 _INFLECT = inflect.engine()
 
@@ -80,16 +91,10 @@ class ObjectSessionHandler:
         self._sessid_cache = list(
             set(int(val) for val in (self.obj.db_sessid or "").split(",") if val)
         )
-        if any(
-            sessid
-            for sessid in self._sessid_cache
-            if sessid not in evennia.SESSION_HANDLER
-        ):
+        if any(sessid for sessid in self._sessid_cache if sessid not in evennia.SESSION_HANDLER):
             # cache is out of sync with sessionhandler! Only retain the ones in the handler.
             self._sessid_cache = [
-                sessid
-                for sessid in self._sessid_cache
-                if sessid in evennia.SESSION_HANDLER
+                sessid for sessid in self._sessid_cache if sessid in evennia.SESSION_HANDLER
             ]
             self.obj.db_sessid = ",".join(str(val) for val in self._sessid_cache)
             self.obj.save(update_fields=["db_sessid"])
@@ -112,23 +117,13 @@ class ObjectSessionHandler:
 
         if sessid:
             sessions = (
-                [
-                    (
-                        evennia.SESSION_HANDLER[sessid]
-                        if sessid in evennia.SESSION_HANDLER
-                        else None
-                    )
-                ]
+                [(evennia.SESSION_HANDLER[sessid] if sessid in evennia.SESSION_HANDLER else None)]
                 if sessid in self._sessid_cache
                 else []
             )
         else:
             sessions = [
-                (
-                    evennia.SESSION_HANDLER[ssid]
-                    if ssid in evennia.SESSION_HANDLER
-                    else None
-                )
+                (evennia.SESSION_HANDLER[ssid] if ssid in evennia.SESSION_HANDLER else None)
                 for ssid in self._sessid_cache
             ]
         if None in sessions:
@@ -559,9 +554,7 @@ class DefaultObject(
         body (and an idle, undriven body is never superuser).
         """
         driver = self.puppeteer
-        return bool(
-            driver and driver.is_superuser and not driver.attributes.get("_quell")
-        )
+        return bool(driver and driver.is_superuser and not driver.attributes.get("_quell"))
 
     def contents_get(self, exclude=None, content_type=None):
         """
@@ -603,8 +596,7 @@ class DefaultObject(
         """
         return [exi for exi in self.contents if exi.destination]
 
-    from evennia.authorization.policy import (Always, PredicateRequirement,
-                                              RequiresCapability)
+    from evennia.authorization.policy import Always, PredicateRequirement, RequiresCapability
 
     authorization_policies = {
         "view": Always(),

@@ -20,16 +20,12 @@ def _normalized_mapping() -> dict[str, tuple[str, ...]]:
     ).items():
         key = str(permission).strip().lower().rstrip("s")
         if not key:
-            raise CommandError(
-                "authorization permission migration contains an empty key"
-            )
+            raise CommandError("authorization permission migration contains an empty key")
         capabilities = []
         for token in tokens:
             token = str(token).strip().lower()
             if token.startswith("bundle:"):
-                capabilities.extend(
-                    capability_registry.expand_bundle(token.split(":", 1)[1])
-                )
+                capabilities.extend(capability_registry.expand_bundle(token.split(":", 1)[1]))
             else:
                 capabilities.append(capability_registry.require(token).key)
         mapping[key] = tuple(sorted(set(capabilities)))
@@ -64,8 +60,7 @@ class Command(BaseCommand):
         ):
             for principal in queryset:
                 names = {
-                    str(name).strip().lower().rstrip("s")
-                    for name in principal.permissions.all()
+                    str(name).strip().lower().rstrip("s") for name in principal.permissions.all()
                 }
                 selected = sorted(names & mapping.keys())
                 if not selected:

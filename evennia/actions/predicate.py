@@ -165,18 +165,12 @@ class HasCapability(Predicate):
         object.__setattr__(self, "principal_scope", scope)
 
     def _obj(self, actor):
-        return (
-            getattr(actor, "effective", None)
-            or getattr(actor, "character", None)
-            or actor
-        )
+        return getattr(actor, "effective", None) or getattr(actor, "character", None) or actor
 
     def __call__(self, action, actor) -> bool:
         principal = self._obj(actor)
         if self.principal_scope == "account":
-            principal = getattr(actor, "account", None) or getattr(
-                principal, "account", None
-            )
+            principal = getattr(actor, "account", None) or getattr(principal, "account", None)
         elif self.principal_scope == "session":
             principal = getattr(actor, "session", None)
         if not principal:

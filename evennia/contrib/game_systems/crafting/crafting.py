@@ -126,8 +126,7 @@ from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command
 from evennia.prototypes.spawner import spawn
 from evennia.utils.create import create_object
-from evennia.utils.utils import (callables_from_module, inherits_from,
-                                 iter_to_str, make_iter)
+from evennia.utils.utils import callables_from_module, inherits_from, iter_to_str, make_iter
 
 _RECIPE_CLASSES = {}
 
@@ -337,9 +336,7 @@ class CraftingRecipeBase:
             # possibly turn off re-use depending on class setting
             self.allow_craft = self.allow_reuse
         elif not self.allow_reuse:
-            raise CraftingError(
-                "Cannot re-run crafting without re-initializing recipe first."
-            )
+            raise CraftingError("Cannot re-run crafting without re-initializing recipe first.")
         if craft_result is None and raise_exception:
             raise CraftingError(f"Crafting of {self.name} failed.")
         return craft_result
@@ -602,9 +599,9 @@ class CraftingRecipe(CraftingRecipeBase):
         else:
             self.tool_names = self.tool_tags
 
-        assert isinstance(
-            self.output_prototypes, (list, tuple)
-        ), "Crafting {self.__class__}.output_prototypes must be a list or tuple."
+        assert isinstance(self.output_prototypes, (list, tuple)), (
+            "Crafting {self.__class__}.output_prototypes must be a list or tuple."
+        )
 
         if self.output_names:
             assert len(self.output_names) == len(self.output_prototypes), (
@@ -636,16 +633,11 @@ class CraftingRecipe(CraftingRecipeBase):
         mapping.update(
             {
                 f"i{ind}": self.consumable_names[ind]
-                for ind, name in enumerate(
-                    self.consumable_names or self.consumable_tags
-                )
+                for ind, name in enumerate(self.consumable_names or self.consumable_tags)
             }
         )
         mapping.update(
-            {
-                f"o{ind}": self.output_names[ind]
-                for ind, name in enumerate(self.output_names)
-            }
+            {f"o{ind}": self.output_names[ind] for ind, name in enumerate(self.output_names)}
         )
         mapping["tools"] = involved_tools
         mapping["consumables"] = involved_cons
@@ -708,8 +700,7 @@ class CraftingRecipe(CraftingRecipeBase):
         for itag, tag in enumerate(cls.tool_tags):
             tools.append(
                 create_object(
-                    key=tool_key
-                    or (cls.tool_names[itag] if cls.tool_names else tag.capitalize()),
+                    key=tool_key or (cls.tool_names[itag] if cls.tool_names else tag.capitalize()),
                     tags=[(tag, cls.tool_tag_category), *tool_tags],
                     **tool_kwargs,
                 )
@@ -719,11 +710,7 @@ class CraftingRecipe(CraftingRecipeBase):
             consumables.append(
                 create_object(
                     key=cons_key
-                    or (
-                        cls.consumable_names[itag]
-                        if cls.consumable_names
-                        else tag.capitalize()
-                    ),
+                    or (cls.consumable_names[itag] if cls.consumable_names else tag.capitalize()),
                     tags=[(tag, cls.consumable_tag_category), *cons_tags],
                     **consumable_kwargs,
                 )
@@ -793,9 +780,7 @@ class CraftingRecipe(CraftingRecipeBase):
                 # thus this is not an exact match
                 err = self._format_message(
                     error_excess_message,
-                    excess=[
-                        obj.get_display_name(looker=self.crafter) for obj in tagmap
-                    ],
+                    excess=[obj.get_display_name(looker=self.crafter) for obj in tagmap],
                 )
                 self.msg(err)
                 raise CraftingValidationError(err)
@@ -1056,9 +1041,7 @@ class CmdCraft(Command):
         caller = self.caller
 
         if not self.args or not self.recipe:
-            self.caller.msg(
-                "Usage: craft <recipe> from <ingredient>, ... [using <tool>,...]"
-            )
+            self.caller.msg("Usage: craft <recipe> from <ingredient>, ... [using <tool>,...]")
             return
 
         ingredients = []

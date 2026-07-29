@@ -53,9 +53,7 @@ __all__ = (
 CONNECTION_SCREEN_MODULE = settings.CONNECTION_SCREEN_MODULE
 CONNECTION_SCREEN = ""
 try:
-    CONNECTION_SCREEN = ansi.parse_ansi(
-        utils.random_string_from_module(CONNECTION_SCREEN_MODULE)
-    )
+    CONNECTION_SCREEN = ansi.parse_ansi(utils.random_string_from_module(CONNECTION_SCREEN_MODULE))
 except Exception:
     # malformed connection screen or no screen given
     pass
@@ -187,15 +185,11 @@ class CmdUnconnectedCreate(Command):
         try:
             username, email, password = self.accountinfo
         except ValueError:
-            string = (
-                '\n\r Usage (without <>): create "<accountname>" <email> <password>'
-            )
+            string = '\n\r Usage (without <>): create "<accountname>" <email> <password>'
             session.msg(string)
             return
         if not email or not password:
-            session.msg(
-                "\n\r You have to supply an e-mail address followed by a password."
-            )
+            session.msg("\n\r You have to supply an e-mail address followed by a password.")
             return
         if not utils.validate_email_address(email):
             # check so the email at least looks ok.
@@ -217,9 +211,7 @@ class CmdUnconnectedCreate(Command):
             f"'{password}'.\nIs this what you intended? [Y]/N?"
         )
         if answer.lower() in ("n", "no"):
-            session.msg(
-                "Aborted. If your user name contains spaces, surround it by quotes."
-            )
+            session.msg("Aborted. If your user name contains spaces, surround it by quotes.")
             return
 
         # everything's ok. Create the new player account.
@@ -234,11 +226,11 @@ class CmdUnconnectedCreate(Command):
             # tell the caller everything went well.
             string = "A new account '%s' was created. Welcome!"
             if " " in username:
-                string += "\n\nYou can now log in with the command 'connect \"%s\" <your password>'."
-            else:
                 string += (
-                    "\n\nYou can now log with the command 'connect %s <your password>'."
+                    "\n\nYou can now log in with the command 'connect \"%s\" <your password>'."
                 )
+            else:
+                string += "\n\nYou can now log with the command 'connect %s <your password>'."
             session.msg(string % (username, username))
         else:
             session.msg("|R%s|n" % "\n".join(errors))

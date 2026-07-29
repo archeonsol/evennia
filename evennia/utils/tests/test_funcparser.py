@@ -883,9 +883,7 @@ class TestCallableSearch(test_resources.BaseEvenniaTest):
 
     def grant_control(self, target, capability):
         """Grant this test character resource-scoped control of a target."""
-        principal_ref = next(
-            ref for ref in principal_refs(self.char1) if ref.startswith("object:")
-        )
+        principal_ref = next(ref for ref in principal_refs(self.char1) if ref.startswith("object:"))
         grant_capability(
             principal_ref,
             capability,
@@ -912,9 +910,7 @@ class TestCallableSearch(test_resources.BaseEvenniaTest):
         """
         string = "$search(TestAccount, type=account)"
         expected = self.account
-        self.account.policies.set(
-            "control", RequiresCapability("engine.object.control")
-        )
+        self.account.policies.set("control", RequiresCapability("engine.object.control"))
         self.grant_control(self.account, "engine.object.control")
 
         ret = self.parser.parse(string, caller=self.char1, return_str=False, raise_errors=True)

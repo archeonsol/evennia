@@ -89,9 +89,7 @@ class TypeclassSerializerMixin:
         Returns:
             List of TagSerializer data
         """
-        return TagSerializer(
-            obj.tags.get(return_tagobj=True, return_list=True), many=True
-        ).data
+        return TagSerializer(obj.tags.get(return_tagobj=True, return_list=True), many=True).data
 
     @staticmethod
     def get_aliases(obj):
@@ -103,9 +101,7 @@ class TypeclassSerializerMixin:
         Returns:
             List of TagSerializer data
         """
-        return TagSerializer(
-            obj.aliases.get(return_tagobj=True, return_list=True), many=True
-        ).data
+        return TagSerializer(obj.aliases.get(return_tagobj=True, return_list=True), many=True).data
 
     @staticmethod
     def get_capabilities(obj):

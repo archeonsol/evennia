@@ -245,9 +245,7 @@ def reclaim_spooled_writes():
                 payload = json.load(fh)
             app_label, model_name = payload["model"].split(".")
             model = apps.get_model(app_label, model_name)
-            updated = model.objects.filter(pk=payload["pk"]).update(
-                db_attrs=payload["db_attrs"]
-            )
+            updated = model.objects.filter(pk=payload["pk"]).update(db_attrs=payload["db_attrs"])
             if updated == 0:
                 logger.log_warn(
                     "jsonb spool: %s no longer exists; dropping spooled write" % payload["model"]

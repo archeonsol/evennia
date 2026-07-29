@@ -660,9 +660,7 @@ class SubscriptionHandler:
                     try:
                         add_subscriber(self.obj, subscriber)
                     except Exception:
-                        logger.log_trace(
-                            "channel subscriber cache add failed for %s" % subscriber
-                        )
+                        logger.log_trace("channel subscriber cache add failed for %s" % subscriber)
         self._recache()
 
     def remove(self, entity):
@@ -684,8 +682,7 @@ class SubscriptionHandler:
                     self.obj.db_object_subscriptions.remove(subscriber)
         self._recache()
         try:
-            from evennia.comms.channel_subscriber_cache import \
-                remove_subscriber
+            from evennia.comms.channel_subscriber_cache import remove_subscriber
         except Exception:
             remove_subscriber = None
         if remove_subscriber is not None:
@@ -695,9 +692,7 @@ class SubscriptionHandler:
                 try:
                     remove_subscriber(self.obj, subscriber)
                 except Exception:
-                    logger.log_trace(
-                        "channel subscriber cache remove failed for %s" % subscriber
-                    )
+                    logger.log_trace("channel subscriber cache remove failed for %s" % subscriber)
 
     def all(self):
         """
@@ -832,8 +827,7 @@ def _drop_channel_subscriber_cache_on_delete(sender, instance, **kwargs):
         instance, "object_subscription_set"
     ):
         return
-    from evennia.comms.channel_subscriber_cache import \
-        remove_subscriber_from_all_channels
+    from evennia.comms.channel_subscriber_cache import remove_subscriber_from_all_channels
 
     remove_subscriber_from_all_channels(instance)
 

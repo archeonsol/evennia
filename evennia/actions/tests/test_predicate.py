@@ -4,9 +4,17 @@ import unittest
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
-from evennia.actions.predicate import (ALWAYS, NEVER, And, HasCapability,
-                                       Holds, Not, Or, Predicate,
-                                       coerce_predicate)
+from evennia.actions.predicate import (
+    ALWAYS,
+    NEVER,
+    And,
+    HasCapability,
+    Holds,
+    Not,
+    Or,
+    Predicate,
+    coerce_predicate,
+)
 
 
 class _Principal:

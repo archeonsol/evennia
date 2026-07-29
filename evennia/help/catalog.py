@@ -114,9 +114,7 @@ def actor_for_help(caller, session=None):
             session=sess,
             account=caller,
             binding=getattr(sess, "binding", None) if sess else None,
-            character=(
-                sess.get_puppet() if sess and hasattr(sess, "get_puppet") else None
-            ),
+            character=(sess.get_puppet() if sess and hasattr(sess, "get_puppet") else None),
         )
     if hasattr(caller, "account"):
         account = getattr(caller, "account", None)
@@ -203,9 +201,7 @@ def _dummy_action(action_cls):
     return inst
 
 
-def action_help_accessible(
-    action_cls, actor, *, mode="list", staff_reference=False
-) -> bool:
+def action_help_accessible(action_cls, actor, *, mode="list", staff_reference=False) -> bool:
     """True when help should expose this action to ``actor``.
 
     ``staff_reference=True`` includes every permitted verb (staff command index),
@@ -319,9 +315,7 @@ def _iter_action_verbs(action_registry=None):
             if not key or key.startswith("__"):
                 continue
             aliases = [v for v in verbs if v != verb]
-            yield key, ActionHelpTopic(
-                key, action_cls, category, aliases, doc, auto_help
-            )
+            yield key, ActionHelpTopic(key, action_cls, category, aliases, doc, auto_help)
 
 
 def collect_action_help_topics(
@@ -342,16 +336,12 @@ def collect_action_help_topics(
         if key in seen:
             continue
         seen.add(key)
-        if action_help_accessible(
-            topic.action_cls, actor, staff_reference=acl_as_staff_ref
-        ):
+        if action_help_accessible(topic.action_cls, actor, staff_reference=acl_as_staff_ref):
             topics[key] = topic
     return topics
 
 
-def lookup_action_help_topic(
-    key: str, actor, *, include_denied=False, staff_reference=False
-):
+def lookup_action_help_topic(key: str, actor, *, include_denied=False, staff_reference=False):
     """Resolve a help key to ``(topic | None, denied: bool)``.
 
     Action topics are staff-only unless ``HELP_INDEX_ACTIONS`` is enabled.

@@ -35,12 +35,8 @@ class ObjectCreationTest(BaseEvenniaTest):
     def test_default_channel_settings_use_typed_policies(self):
         """Shipped channel definitions must create with their intended access."""
 
-        mudinfo = create_channel(
-            **{**settings.CHANNEL_MUDINFO, "key": "TestMudInfo"}
-        )
-        public = create_channel(
-            **{**settings.DEFAULT_CHANNELS[0], "key": "TestPublic"}
-        )
+        mudinfo = create_channel(**{**settings.CHANNEL_MUDINFO, "key": "TestMudInfo"})
+        public = create_channel(**{**settings.DEFAULT_CHANNELS[0], "key": "TestPublic"})
 
         self.assertTrue(mudinfo.access(self.account, "control"))
         self.assertTrue(mudinfo.access(self.account, "listen"))

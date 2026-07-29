@@ -11,9 +11,7 @@ def _ensure_native(result):
 
     encoded = repr({key: policy.to_data() for key, policy in result.policies.items()})
     if "legacy." in encoded:
-        raise CompilationError(
-            "legacy predicate/permission requires an explicit capability policy"
-        )
+        raise CompilationError("legacy predicate/permission requires an explicit capability policy")
 
 
 def _queryset_for(kind: str):

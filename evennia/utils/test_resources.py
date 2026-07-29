@@ -36,8 +36,7 @@ import evennia
 from evennia import settings_default
 from evennia.accounts.accounts import DefaultAccount
 from evennia.commands.command import InterruptCommand
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.scripts import taskhandler
 from evennia.scripts.scripts import DefaultScript
 from evennia.server.portal import portal as portal_module
@@ -45,8 +44,7 @@ from evennia.server.serversession import ServerSession
 from evennia.typeclasses.attributes import discard_dirty_backends
 from evennia.utils import ansi, clock, create
 from evennia.utils.idmapper.models import flush_cache
-from evennia.utils.utils import (all_from_module, class_from_module,
-                                 inherits_from, to_str)
+from evennia.utils.utils import all_from_module, class_from_module, inherits_from, to_str
 
 _RE_STRIP_EVMENU = re.compile(r"^\+|-+\+|\+-+|--+|\|(?:\s|$)", re.MULTILINE)
 
@@ -74,12 +72,8 @@ def _mock_message_to_text(message):
 DEFAULT_SETTING_RESETS = dict(
     CONNECTION_SCREEN_MODULE="evennia.game_template.server.conf.connection_screens",
     AT_SERVER_STARTSTOP_MODULE="evennia.game_template.server.conf.at_server_startstop",
-    AT_SERVICES_PLUGINS_MODULES=[
-        "evennia.game_template.server.conf.server_services_plugins"
-    ],
-    PORTAL_SERVICES_PLUGIN_MODULES=[
-        "evennia.game_template.server.conf.portal_services_plugins"
-    ],
+    AT_SERVICES_PLUGINS_MODULES=["evennia.game_template.server.conf.server_services_plugins"],
+    PORTAL_SERVICES_PLUGIN_MODULES=["evennia.game_template.server.conf.portal_services_plugins"],
     MSSP_META_MODULE="evennia.game_template.server.conf.mssp",
     WEB_PLUGINS_MODULE="server.conf.web_plugins",
     LOCK_FUNC_MODULES=(
@@ -216,8 +210,7 @@ class EvenniaTestMixin:
             typeclass=self.account_typeclass,
         )
         from evennia.authorization.capabilities import capability_registry
-        from evennia.authorization.storage import (grant_capability,
-                                                   principal_refs)
+        from evennia.authorization.storage import grant_capability, principal_refs
 
         for capability in capability_registry.expand_bundle("runtime_operator"):
             grant_capability(
@@ -235,17 +228,13 @@ class EvenniaTestMixin:
             self.account2.delete()
 
     # Set up fake prototype module for allowing tests to use named prototypes.
-    @override_settings(
-        PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"]
-    )
+    @override_settings(PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"])
     def create_rooms(self):
         self.room1 = create.create_object(self.room_typeclass, key="Room", nohome=True)
         self.room1.db.desc = "room_desc"
         settings.DEFAULT_HOME = f"#{self.room1.id}"
 
-        self.room2 = create.create_object(
-            self.room_typeclass, key="Room2", home=self.room1
-        )
+        self.room2 = create.create_object(self.room_typeclass, key="Room2", home=self.room1)
         self.exit = create.create_object(
             self.exit_typeclass,
             key="out",
@@ -292,9 +281,7 @@ class EvenniaTestMixin:
 
     def setup_session(self):
         dummysession = ServerSession()
-        dummysession.init_session(
-            "telnet", ("localhost", "testmode"), evennia.SESSION_HANDLER
-        )
+        dummysession.init_session("telnet", ("localhost", "testmode"), evennia.SESSION_HANDLER)
         dummysession.sessid = 1
         evennia.SESSION_HANDLER.portal_connect(
             dummysession.get_sync_data()
@@ -329,9 +316,7 @@ class EvenniaTestMixin:
         self.create_script()
         self.setup_session()
 
-    @override_settings(
-        PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"]
-    )
+    @override_settings(PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"])
     def tearDown(self):
         from evennia.authorization.storage import clear_authorization_caches
 
@@ -508,15 +493,12 @@ class EvenniaCommandTestMixin:
         cmdobj.cmdset = cmdset
         cmdobj.session = evennia.SESSION_HANDLER.session_from_sessid(1)
         cmdobj.account = cmd_account
-        cmdobj.raw_string = (
-            raw_string if raw_string is not None else cmdobj.key + " " + input_args
-        )
+        cmdobj.raw_string = raw_string if raw_string is not None else cmdobj.key + " " + input_args
         cmdobj.obj = obj or (caller if caller else self.char1)
         # Mirror cmdhandler's AccountCommand normalisation so test fixtures
         # see the same caller/character/account shape as real dispatch.
         if getattr(cmdobj, "account_command_caller", False):
-            from evennia.commands.cmdhandler import \
-                _normalize_account_command_caller
+            from evennia.commands.cmdhandler import _normalize_account_command_caller
 
             providers = {"account": cmd_account}
             _sess_puppet = (
@@ -610,9 +592,7 @@ class EvenniaCommandTestMixin:
                 # no expected_msg; just build the returned_msgs dict
 
                 returned_msg = "\n".join(str(msg) for msg in stored_msg)
-                returned_msgs[receiver] = ansi.parse_ansi(
-                    returned_msg, strip_ansi=noansi
-                ).strip()
+                returned_msgs[receiver] = ansi.parse_ansi(returned_msg, strip_ansi=noansi).strip()
             else:
                 # compare messages to expected
 
@@ -633,11 +613,7 @@ class EvenniaCommandTestMixin:
                     # regular django assert shows whitespace differences better
                     self.assertEqual(returned_msg, expected_msg)
 
-                if (
-                    expected_msg == ""
-                    and returned_msg
-                    or not returned_msg.startswith(expected_msg)
-                ):
+                if expected_msg == "" and returned_msg or not returned_msg.startswith(expected_msg):
                     # failed the test
                     raise AssertionError(
                         self._ERROR_FORMAT.format(

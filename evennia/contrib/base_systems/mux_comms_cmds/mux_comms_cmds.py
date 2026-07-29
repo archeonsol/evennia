@@ -113,9 +113,7 @@ class CmdAddCom(CmdChannel):
         if alias:
             # create a nick and add it to the caller.
             self.add_alias(channel, alias)
-            self.msg(
-                f" You can now refer to the channel {channel} with the alias '{alias}'."
-            )
+            self.msg(f" You can now refer to the channel {channel} with the alias '{alias}'.")
         else:
             string += " No alias added."
             self.msg(string)
@@ -482,9 +480,7 @@ class CmdClock(CmdChannel):
             self.msg(
                 f"Current policies on {channel.key}\n"
                 + (
-                    "\n".join(
-                        f"{key}: {value.to_data()}" for key, value in policies.items()
-                    )
+                    "\n".join(f"{key}: {value.to_data()}" for key, value in policies.items())
                     or "Class defaults"
                 )
             )

@@ -2,10 +2,8 @@
 
 from django.test import SimpleTestCase
 
-from evennia.authorization.legacy_import.compiler import (CompilationError,
-                                                          compile_lockstring)
-from evennia.authorization.policy import (AllOf, AnyOf, PredicateRequirement,
-                                          RequiresCapability)
+from evennia.authorization.legacy_import.compiler import CompilationError, compile_lockstring
+from evennia.authorization.policy import AllOf, AnyOf, PredicateRequirement, RequiresCapability
 
 
 class CompilerTest(SimpleTestCase):
@@ -14,9 +12,7 @@ class CompilerTest(SimpleTestCase):
     def test_perm_compiles_to_namespaced_capability(self):
         result = compile_lockstring("edit:perm(Builder)")
         self.assertIsInstance(result.policies["edit"], RequiresCapability)
-        self.assertEqual(
-            result.policies["edit"].capability, "legacy.permission.builder"
-        )
+        self.assertEqual(result.policies["edit"].capability, "legacy.permission.builder")
 
     def test_id_compiles_to_resource_grant_not_ownership(self):
         result = compile_lockstring("control:id(123)", resource_ref="object:44")

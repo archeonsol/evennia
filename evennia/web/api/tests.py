@@ -47,9 +47,7 @@ class TestEvenniaRESTApi(BaseEvenniaTest):
                 scope_key="*",
                 provenance="test",
             )
-        self.script.policies.set(
-            "examine", RequiresCapability("engine.script.control")
-        )
+        self.script.policies.set("examine", RequiresCapability("engine.script.control"))
 
     def tearDown(self):
         try:

@@ -42,18 +42,24 @@ import evennia
 from evennia.hooks import hook
 from evennia.server.signals import SIGNAL_TYPED_OBJECT_POST_RENAME
 from evennia.typeclasses import managers
-from evennia.typeclasses.attributes import (AttributeHandler,
-                                            AttributeProperty, DbHolder,
-                                            InMemoryAttributeBackend)
-from evennia.typeclasses.tags import (AliasHandler, PermissionHandler, Tag,
-                                      TagCategoryProperty, TagHandler,
-                                      TagProperty)
+from evennia.typeclasses.attributes import (
+    AttributeHandler,
+    AttributeProperty,
+    DbHolder,
+    InMemoryAttributeBackend,
+)
+from evennia.typeclasses.tags import (
+    AliasHandler,
+    PermissionHandler,
+    Tag,
+    TagCategoryProperty,
+    TagHandler,
+    TagProperty,
+)
 from evennia.typeclasses.typed_attr import apply_schema_migrations
-from evennia.utils.idmapper.models import (SharedMemoryModel,
-                                           SharedMemoryModelBase)
+from evennia.utils.idmapper.models import SharedMemoryModel, SharedMemoryModelBase
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import (class_from_module, inherits_from, is_iter,
-                                 is_veto, lazy_property)
+from evennia.utils.utils import class_from_module, inherits_from, is_iter, is_veto, lazy_property
 
 __all__ = ("TypedObject",)
 
@@ -214,9 +220,7 @@ class TypedObject(SharedMemoryModel):
     )
     # Creation date. This is not changed once the object is created. Note that this is UTC,
     # use the .date_created property to get a localized version.
-    db_date_created = models.DateTimeField(
-        "creation date", editable=False, auto_now_add=True
-    )
+    db_date_created = models.DateTimeField("creation date", editable=False, auto_now_add=True)
     # Lock storage
     db_lock_storage = models.TextField(
         "locks",
@@ -337,9 +341,7 @@ class TypedObject(SharedMemoryModel):
                 {
                     propkey
                     for propkey, prop in vars(base).items()
-                    if isinstance(
-                        prop, (AttributeProperty, TagProperty, TagCategoryProperty)
-                    )
+                    if isinstance(prop, (AttributeProperty, TagProperty, TagCategoryProperty))
                 }
             )
 
@@ -429,9 +431,7 @@ class TypedObject(SharedMemoryModel):
         self.db_key = value
         self.save(update_fields=["db_key"])
         self.at_post_rename(oldname, value)
-        SIGNAL_TYPED_OBJECT_POST_RENAME.send(
-            sender=self, old_key=oldname, new_key=value
-        )
+        SIGNAL_TYPED_OBJECT_POST_RENAME.send(sender=self, old_key=oldname, new_key=value)
 
     @property
     def date_created(self):
@@ -612,8 +612,7 @@ class TypedObject(SharedMemoryModel):
         else:
             # check parent chain
             return any(
-                hasattr(cls, "path") and cls.path in typeclass
-                for cls in self.__class__.mro()
+                hasattr(cls, "path") and cls.path in typeclass for cls in self.__class__.mro()
             )
 
     def swap_typeclass(
@@ -662,9 +661,7 @@ class TypedObject(SharedMemoryModel):
 
         if not callable(new_typeclass):
             # this is an actual class object - build the path
-            new_typeclass = class_from_module(
-                new_typeclass, defaultpaths=settings.TYPECLASS_PATHS
-            )
+            new_typeclass = class_from_module(new_typeclass, defaultpaths=settings.TYPECLASS_PATHS)
 
         # if we get to this point, the class is ok.
 
@@ -824,9 +821,7 @@ class TypedObject(SharedMemoryModel):
         try:
             return self._ndb_holder
         except AttributeError:
-            self._ndb_holder = DbHolder(
-                self, "nattrhandler", manager_name="nattributes"
-            )
+            self._ndb_holder = DbHolder(self, "nattrhandler", manager_name="nattributes")
             return self._ndb_holder
 
     @ndb.setter

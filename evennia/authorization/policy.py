@@ -115,26 +115,20 @@ class PolicyRegistry:
             policy = dict(instance_policies).get(operation)
             if policy is not None:
                 if not isinstance(policy, Policy):
-                    raise TypeError(
-                        "instance authorization policies must be Policy nodes"
-                    )
+                    raise TypeError("instance authorization policies must be Policy nodes")
                 return policy
         explicit_policies = getattr(type(resource), "authorization_policies", None)
         if explicit_policies is not None:
             policy = dict(explicit_policies).get(operation)
             if policy is not None:
                 if not isinstance(policy, Policy):
-                    raise TypeError(
-                        "authorization_policies values must be Policy nodes"
-                    )
+                    raise TypeError("authorization_policies values must be Policy nodes")
                 return policy
         if resource_kind == "command" and operation == "cmd":
             explicit = getattr(type(resource), "authorization_policy", None)
             if explicit is not None:
                 if not isinstance(explicit, Policy):
-                    raise TypeError(
-                        "command authorization_policy must be a Policy node"
-                    )
+                    raise TypeError("command authorization_policy must be a Policy node")
                 return explicit
 
         explicit = getattr(type(resource), "authorization_policy_template", "")

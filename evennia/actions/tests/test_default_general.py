@@ -391,9 +391,7 @@ class TestSetHelp(unittest.TestCase):
             switches=("policy",),
             helper=helper,
         )
-        self.assertEqual(
-            entry.policies.get("read"), RequiresCapability("engine.world.build")
-        )
+        self.assertEqual(entry.policies.get("read"), RequiresCapability("engine.world.build"))
         self.assertTrue(any("engine.world.build" in m for m in char.messages))
 
     def test_clash_warning_abort(self):

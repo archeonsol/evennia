@@ -61,9 +61,9 @@ class MuxAccountLookCommand(AccountCommand):
         playable = self.account.characters
         # store playable property
         if self.args:
-            self.playable = dict(
-                (utils.to_str(char.key.lower()), char) for char in playable
-            ).get(self.args.lower(), None)
+            self.playable = dict((utils.to_str(char.key.lower()), char) for char in playable).get(
+                self.args.lower(), None
+            )
         else:
             self.playable = playable
 
@@ -106,15 +106,9 @@ class CmdOOCLook(MuxAccountLookCommand):
             self.msg("You currently have no ability to look around.")
             return
 
-        if (
-            settings.AUTO_PUPPET_ON_LOGIN
-            and settings.MAX_NR_CHARACTERS == 1
-            and self.playable
-        ):
+        if settings.AUTO_PUPPET_ON_LOGIN and settings.MAX_NR_CHARACTERS == 1 and self.playable:
             # only one exists and is allowed - simplify
-            self.msg(
-                "You are out-of-character (OOC).\nUse |w@ic|n to get back into the game."
-            )
+            self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
             return
 
         # call on-account look helper method
@@ -227,7 +221,9 @@ class CmdCharDelete(COMMAND_DEFAULT_CLASS):
                 self.msg("You do not have permission to delete this character.")
                 return
 
-            prompt = "|rThis will permanently destroy '%s'. This cannot be undone.|n Continue yes/[no]?"
+            prompt = (
+                "|rThis will permanently destroy '%s'. This cannot be undone.|n Continue yes/[no]?"
+            )
             get_input(account, prompt % match.key, _callback)
 
 
@@ -268,9 +264,7 @@ class CmdIC(AccountCommand):
         character_candidates = []
 
         if not self.args:
-            character_candidates = (
-                [account.db._last_puppet] if account.db._last_puppet else []
-            )
+            character_candidates = [account.db._last_puppet] if account.db._last_puppet else []
             if not character_candidates:
                 self.msg("Usage: @ic <character>")
                 return
@@ -338,9 +332,7 @@ class CmdIC(AccountCommand):
         if len(character_candidates) > 1:
             self.msg(
                 "Multiple targets with the same name:\n %s"
-                % ", ".join(
-                    "%s(#%s)" % (obj.key, obj.id) for obj in character_candidates
-                )
+                % ", ".join("%s(#%s)" % (obj.key, obj.id) for obj in character_candidates)
             )
             return
         else:
@@ -402,15 +394,9 @@ class CmdOOC(MuxAccountLookCommand):
             account.unpuppet_object(session)
             self.msg("\n|GYou go OOC.|n\n")
 
-            if (
-                settings.AUTO_PUPPET_ON_LOGIN
-                and settings.MAX_NR_CHARACTERS == 1
-                and self.playable
-            ):
+            if settings.AUTO_PUPPET_ON_LOGIN and settings.MAX_NR_CHARACTERS == 1 and self.playable:
                 # only one character exists and is allowed - simplify
-                self.msg(
-                    "You are out-of-character (OOC).\nUse |w@ic|n to get back into the game."
-                )
+                self.msg("You are out-of-character (OOC).\nUse |w@ic|n to get back into the game.")
                 return
 
             self.msg(account.at_look(target=self.playable, session=session))
@@ -512,15 +498,11 @@ class CmdWho(AccountCommand):
                     utils.crop(session_account.get_display_name(account), width=25),
                     utils.time_format(delta_conn, 0),
                     utils.time_format(delta_cmd, 1),
-                    utils.crop(
-                        puppet.get_display_name(account) if puppet else "None", width=25
-                    ),
+                    utils.crop(puppet.get_display_name(account) if puppet else "None", width=25),
                     utils.crop(location, width=25),
                     session.cmd_total,
                     session.protocol_key,
-                    isinstance(session.address, tuple)
-                    and session.address[0]
-                    or session.address,
+                    isinstance(session.address, tuple) and session.address[0] or session.address,
                 )
         else:
             # unprivileged
@@ -591,9 +573,7 @@ class CmdOption(AccountCommand):
                 self.msg("|gCleared all saved options.")
 
             options = dict(flags)  # make a copy of the flag dict
-            saved_options = dict(
-                self.caller.attributes.get("_saved_protocol_flags", default={})
-            )
+            saved_options = dict(self.caller.attributes.get("_saved_protocol_flags", default={}))
 
             if "SCREENWIDTH" in options:
                 if len(options["SCREENWIDTH"]) == 1:
@@ -620,9 +600,7 @@ class CmdOption(AccountCommand):
                 if saved_options:
                     saved = " |YYes|n" if key in saved_options else ""
                     changed = (
-                        "|y*|n"
-                        if key in saved_options and flags[key] != saved_options[key]
-                        else ""
+                        "|y*|n" if key in saved_options and flags[key] != saved_options[key] else ""
                     )
                     row.append("%s%s" % (saved, changed))
                 table.add_row(*row)
@@ -709,9 +687,7 @@ class CmdOption(AccountCommand):
             # a valid setting
             if "save" in self.switches:
                 # save this option only
-                saved_options = self.account.attributes.get(
-                    "_saved_protocol_flags", default={}
-                )
+                saved_options = self.account.attributes.get("_saved_protocol_flags", default={})
                 saved_options.update(optiondict)
                 self.account.attributes.add("_saved_protocol_flags", saved_options)
                 for key in optiondict:
@@ -719,9 +695,7 @@ class CmdOption(AccountCommand):
             if "clear" in self.switches:
                 # clear this save
                 for key in optiondict:
-                    self.account.attributes.get("_saved_protocol_flags", {}).pop(
-                        key, None
-                    )
+                    self.account.attributes.get("_saved_protocol_flags", {}).pop(key, None)
                     self.msg(f"|gCleared saved {key}.")
             self.session.update_flags(**optiondict)
 
@@ -816,9 +790,7 @@ class CmdQuit(AccountCommand):
                 )
             else:
                 # we are quitting the last available session
-                account.msg(
-                    "|RQuitting|n. Hope to see you again, soon.", session=self.session
-                )
+                account.msg("|RQuitting|n. Hope to see you again, soon.", session=self.session)
             account.disconnect_session_from_account(self.session, reason)
 
 
@@ -878,7 +850,9 @@ class CmdColorTest(AccountCommand):
         if g > 255:
             g = 510 - g
 
-        return f"#{hex(round(r))[2:].zfill(2)}{hex(round(g))[2:].zfill(2)}{hex(round(b))[2:].zfill(2)}"
+        return (
+            f"#{hex(round(r))[2:].zfill(2)}{hex(round(g))[2:].zfill(2)}{hex(round(b))[2:].zfill(2)}"
+        )
 
     def func(self):
         """Show color tables"""
@@ -899,13 +873,11 @@ class CmdColorTest(AccountCommand):
                 for code, _ in ap.ansi_map[self.slice_dark_fg]
             ]
             dark_bg = [
-                "%s%s|n"
-                % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
+                "%s%s|n" % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
                 for code, _ in ap.ansi_map[self.slice_dark_bg]
             ]
             bright_bg = [
-                "%s%s|n"
-                % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
+                "%s%s|n" % (code.replace("\\", ""), code.replace("|", "||").replace("\\", ""))
                 for code, _ in ap.ansi_xterm256_bright_bg_map[self.slice_bright_bg]
             ]
             dark_fg.extend(["" for _ in range(len(bright_fg) - len(dark_fg))])
@@ -927,9 +899,7 @@ class CmdColorTest(AccountCommand):
                 for ig in range(6):
                     for ib in range(6):
                         # foreground table
-                        table[ir].append(
-                            "|%i%i%i%s|n" % (ir, ig, ib, "||%i%i%i" % (ir, ig, ib))
-                        )
+                        table[ir].append("|%i%i%i%s|n" % (ir, ig, ib, "||%i%i%i" % (ir, ig, ib)))
                         # background table
                         table[6 + ir].append(
                             "|%i%i%i|[%i%i%i%s|n"
@@ -955,9 +925,7 @@ class CmdColorTest(AccountCommand):
                     letter = chr(97 + (ibatch * 6 + igray))
                     inverse = chr(122 - (ibatch * 6 + igray))
                     table[0 + igray].append("|=%s%s |n" % (letter, "||=%s" % letter))
-                    table[6 + igray].append(
-                        "|=%s|[=%s%s |n" % (inverse, letter, "||[=%s" % letter)
-                    )
+                    table[6 + igray].append("|=%s|[=%s%s |n" % (inverse, letter, "||[=%s" % letter))
             for igray in range(6):
                 # the last row (y, z) has empty columns
                 if igray < 2:
@@ -983,8 +951,7 @@ class CmdColorTest(AccountCommand):
             display_width = self.client_width()
             num_colors = display_width * 1
             color_block = [
-                f"|[{self.make_hex_color_from_column(i, num_colors)} "
-                for i in range(num_colors)
+                f"|[{self.make_hex_color_from_column(i, num_colors)} " for i in range(num_colors)
             ]
             color_block = [
                 "".join(color_block[iline : iline + display_width])
@@ -1033,13 +1000,11 @@ class CmdQuell(AccountCommand):
         if self.session:
             char = self.session.get_puppet()
             if char:
-                from evennia.authorization.storage import (
-                    bump_principal_generation, principal_refs)
+                from evennia.authorization.storage import bump_principal_generation, principal_refs
 
                 for principal_ref in principal_refs(char):
                     bump_principal_generation(principal_ref)
-        from evennia.authorization.storage import (bump_principal_generation,
-                                                   principal_refs)
+        from evennia.authorization.storage import bump_principal_generation, principal_refs
 
         for principal_ref in principal_refs(account):
             bump_principal_generation(principal_ref)
@@ -1068,9 +1033,7 @@ class CmdQuell(AccountCommand):
                     "Use @unquell to restore account grants."
                 )
             else:
-                self.msg(
-                    "Account capability grants suppressed. Use @unquell to restore them."
-                )
+                self.msg("Account capability grants suppressed. Use @unquell to restore them.")
         if mutated:
             self._invalidate_authority(account)
 

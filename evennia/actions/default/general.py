@@ -31,8 +31,7 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
-from evennia.authorization.policy import (Always, Never, PredicateRequirement,
-                                          RequiresCapability)
+from evennia.authorization.policy import Always, Never, PredicateRequirement, RequiresCapability
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
@@ -175,15 +174,9 @@ class NickRules:
         nicktypes = nicktypes if specified_nicktype else ["inputline"]
 
         nicklist = (
-            utils.make_iter(
-                caller.nicks.get(category="inputline", return_obj=True) or []
-            )
-            + utils.make_iter(
-                caller.nicks.get(category="object", return_obj=True) or []
-            )
-            + utils.make_iter(
-                caller.nicks.get(category="account", return_obj=True) or []
-            )
+            utils.make_iter(caller.nicks.get(category="inputline", return_obj=True) or [])
+            + utils.make_iter(caller.nicks.get(category="object", return_obj=True) or [])
+            + utils.make_iter(caller.nicks.get(category="account", return_obj=True) or [])
         )
 
         if "list" in switches or action.verb == "@nicks":
@@ -228,9 +221,7 @@ class NickRules:
                 if not specified_nicktype:
                     nicktypes = ("object", "account", "inputline")
                 for nicktype in nicktypes:
-                    oldnicks.append(
-                        caller.nicks.get(arg, category=nicktype, return_obj=True)
-                    )
+                    oldnicks.append(caller.nicks.get(arg, category=nicktype, return_obj=True))
 
             oldnicks = [oldnick for oldnick in oldnicks if oldnick]
             if oldnicks:
@@ -262,9 +253,7 @@ class NickRules:
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(action.lhs):
-                        strings.append(
-                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
-                        )
+                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -290,9 +279,7 @@ class NickRules:
             old_nickstring = None
             old_replstring = None
 
-            oldnick = caller.nicks.get(
-                key=nickstring, category=nicktype, return_obj=True
-            )
+            oldnick = caller.nicks.get(key=nickstring, category=nicktype, return_obj=True)
             if oldnick:
                 _, _, old_nickstring, old_replstring = oldnick.value
             if replstring:
@@ -382,8 +369,7 @@ class CharacterGeneralRules(NickRules):
         reply. ``return CLAIM`` ends the flow as for any carry_out rule.
         """
         from evennia.help.catalog import is_action_help_topic
-        from evennia.help.formatters import (HelpCategory, _loadhelp,
-                                             _quithelp, _savehelp)
+        from evennia.help.formatters import HelpCategory, _loadhelp, _quithelp, _savehelp
         from evennia.utils import create
         from evennia.utils.eveditor import EvEditor
         from evennia.utils.utils import inherits_from
@@ -461,10 +447,7 @@ class CharacterGeneralRules(NickRules):
                 if (repl or "").lower() in ("y", "yes"):
                     db_topics = {**db_help_topics}
                     db_categories = list(
-                        set(
-                            HelpCategory(topic.help_category)
-                            for topic in db_topics.values()
-                        )
+                        set(HelpCategory(topic.help_category) for topic in db_topics.values())
                     )
                     db_entries = list(db_topics.values()) + db_categories
                     match, _ = helper.do_search(querystr, db_entries)
@@ -508,9 +491,7 @@ class CharacterGeneralRules(NickRules):
 
         if "append" in switches or "merge" in switches or "extend" in switches:
             if not old_entry:
-                caller.msg(
-                    f"Could not find topic '{topicstr}'. You must give an exact name."
-                )
+                caller.msg(f"Could not find topic '{topicstr}'. You must give an exact name.")
                 return CLAIM
             if not action.rhs:
                 caller.msg("You must supply text to append/merge.")
@@ -532,9 +513,7 @@ class CharacterGeneralRules(NickRules):
                 return CLAIM
             category = action.rhs.lower()
             old_entry.help_category = category
-            caller.msg(
-                f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'."
-            )
+            caller.msg(f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'.")
             return CLAIM
 
         if "policy" in switches:
@@ -560,9 +539,7 @@ class CharacterGeneralRules(NickRules):
                 caller.msg(f"Policy not changed: {err}")
                 return CLAIM
             old_entry.policies.set("read", policy)
-            caller.msg(
-                f"Read policy for '{topicstr}'{aliastxt} changed to: {policy.to_data()}"
-            )
+            caller.msg(f"Read policy for '{topicstr}'{aliastxt} changed to: {policy.to_data()}")
             return CLAIM
 
         if "delete" in switches or "del" in switches:
@@ -602,7 +579,5 @@ class CharacterGeneralRules(NickRules):
             if new_entry:
                 caller.msg(f"Topic '{topicstr}'{aliastxt} was successfully created.")
             else:
-                caller.msg(
-                    f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin."
-                )
+                caller.msg(f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin.")
         return CLAIM

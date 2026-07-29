@@ -171,17 +171,13 @@ class ScriptDBManager(TypedObjectManager):
         # not a dbref; normal search
         obj_restriction = obj and Q(db_obj=obj) or Q()
         typeclass_restriction = typeclass and Q(db_typeclass_path=typeclass) or Q()
-        scripts = self.filter(
-            obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring)
-        )
+        scripts = self.filter(obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring))
         return scripts
 
     # back-compatibility alias
     script_search = search_script
 
-    def copy_script(
-        self, original_script, new_key=None, new_obj=None, new_policies=None
-    ):
+    def copy_script(self, original_script, new_key=None, new_obj=None, new_policies=None):
         """
         Make an identical copy of the original_script.
 
@@ -198,9 +194,7 @@ class ScriptDBManager(TypedObjectManager):
         typeclass = original_script.typeclass_path
         new_key = new_key if new_key is not None else original_script.key
         new_obj = new_obj if new_obj is not None else original_script.obj
-        new_policies = (
-            new_policies if new_policies is not None else original_script.policies.all()
-        )
+        new_policies = new_policies if new_policies is not None else original_script.policies.all()
 
         from evennia.utils import create
 

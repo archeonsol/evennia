@@ -164,24 +164,14 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
 
         caller = self.caller
         switches = self.switches
-        nicktypes = [
-            switch
-            for switch in switches
-            if switch in ("object", "account", "inputline")
-        ]
+        nicktypes = [switch for switch in switches if switch in ("object", "account", "inputline")]
         specified_nicktype = bool(nicktypes)
         nicktypes = nicktypes if specified_nicktype else ["inputline"]
 
         nicklist = (
-            utils.make_iter(
-                caller.nicks.get(category="inputline", return_obj=True) or []
-            )
-            + utils.make_iter(
-                caller.nicks.get(category="object", return_obj=True) or []
-            )
-            + utils.make_iter(
-                caller.nicks.get(category="account", return_obj=True) or []
-            )
+            utils.make_iter(caller.nicks.get(category="inputline", return_obj=True) or [])
+            + utils.make_iter(caller.nicks.get(category="object", return_obj=True) or [])
+            + utils.make_iter(caller.nicks.get(category="account", return_obj=True) or [])
         )
 
         if "list" in switches or self.cmdstring in ("@nicks",):
@@ -227,9 +217,7 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                 if not specified_nicktype:
                     nicktypes = ("object", "account", "inputline")
                 for nicktype in nicktypes:
-                    oldnicks.append(
-                        caller.nicks.get(arg, category=nicktype, return_obj=True)
-                    )
+                    oldnicks.append(caller.nicks.get(arg, category=nicktype, return_obj=True))
 
             oldnicks = [oldnick for oldnick in oldnicks if oldnick]
             if oldnicks:
@@ -261,9 +249,7 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(self.lhs):
-                        strings.append(
-                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
-                        )
+                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -280,15 +266,11 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                     obj = account
                 else:
                     obj = caller
-                nicks = utils.make_iter(
-                    obj.nicks.get(category=nicktype, return_obj=True)
-                )
+                nicks = utils.make_iter(obj.nicks.get(category=nicktype, return_obj=True))
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(self.lhs):
-                        strings.append(
-                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
-                        )
+                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -305,15 +287,11 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
                     obj = account
                 else:
                     obj = caller
-                nicks = utils.make_iter(
-                    obj.nicks.get(category=nicktype, return_obj=True)
-                )
+                nicks = utils.make_iter(obj.nicks.get(category=nicktype, return_obj=True))
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(self.lhs):
-                        strings.append(
-                            f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'"
-                        )
+                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
             if strings:
                 caller.msg("\n".join(strings))
             else:
@@ -341,9 +319,7 @@ class CmdNick(COMMAND_DEFAULT_CLASS):
             old_nickstring = None
             old_replstring = None
 
-            oldnick = caller.nicks.get(
-                key=nickstring, category=nicktype, return_obj=True
-            )
+            oldnick = caller.nicks.get(key=nickstring, category=nicktype, return_obj=True)
             if oldnick:
                 _, _, old_nickstring, old_replstring = oldnick.value
             if replstring:
@@ -399,9 +375,7 @@ class CmdInventory(COMMAND_DEFAULT_CLASS):
             from evennia.utils.ansi import raw as raw_ansi
 
             table = self.styled_table(border="header")
-            for key, desc, _ in utils.group_objects_by_key_and_desc(
-                items, caller=self.caller
-            ):
+            for key, desc, _ in utils.group_objects_by_key_and_desc(items, caller=self.caller):
                 table.add_row(
                     f"|C{key}|n",
                     "{}|n".format(utils.crop(raw_ansi(desc or ""), width=50) or ""),
@@ -507,12 +481,8 @@ class CmdGet(NumberedTargetCommand):
             # none of the objects were successfully moved
             self.msg("That can't be picked up.")
         else:
-            obj_name = moved[0].get_numbered_name(
-                len(moved), caller, return_string=True
-            )
-            caller.location.msg_contents(
-                f"$You() $conj(pick) up {obj_name}.", from_obj=caller
-            )
+            obj_name = moved[0].get_numbered_name(len(moved), caller, return_string=True)
+            caller.location.msg_contents(f"$You() $conj(pick) up {obj_name}.", from_obj=caller)
 
 
 class CmdDrop(NumberedTargetCommand):
@@ -571,12 +541,8 @@ class CmdDrop(NumberedTargetCommand):
             # none of the objects were successfully moved
             self.msg("That can't be dropped.")
         else:
-            obj_name = moved[0].get_numbered_name(
-                len(moved), caller, return_string=True
-            )
-            caller.location.msg_contents(
-                f"$You() $conj(drop) {obj_name}.", from_obj=caller
-            )
+            obj_name = moved[0].get_numbered_name(len(moved), caller, return_string=True)
+            caller.location.msg_contents(f"$You() $conj(drop) {obj_name}.", from_obj=caller)
 
 
 class CmdGive(NumberedTargetCommand):
@@ -623,9 +589,7 @@ class CmdGive(NumberedTargetCommand):
 
         singular, plural = to_give[0].get_numbered_name(len(to_give), caller)
         if target == caller:
-            caller.msg(
-                f"You keep {plural if len(to_give) > 1 else singular} to yourself."
-            )
+            caller.msg(f"You keep {plural if len(to_give) > 1 else singular} to yourself.")
             return
 
         # if any of the objects aren't allowed to be given, cancel the give
@@ -645,9 +609,7 @@ class CmdGive(NumberedTargetCommand):
         if not moved:
             caller.msg(f"You could not give that to {target.get_display_name(caller)}.")
         else:
-            obj_name = to_give[0].get_numbered_name(
-                len(moved), caller, return_string=True
-            )
+            obj_name = to_give[0].get_numbered_name(len(moved), caller, return_string=True)
             caller.msg(f"You give {obj_name} to {target.get_display_name(caller)}.")
             target.msg(f"{caller.get_display_name(target)} gives you {obj_name}.")
 
@@ -815,9 +777,7 @@ class CmdPose(COMMAND_DEFAULT_CLASS):
             self.msg(msg)
         else:
             msg = f"{self.caller.name}{self.args}"
-            self.caller.location.msg_contents(
-                text=(msg, {"type": "pose"}), from_obj=self.caller
-            )
+            self.caller.location.msg_contents(text=(msg, {"type": "pose"}), from_obj=self.caller)
 
 
 class CmdAccess(COMMAND_DEFAULT_CLASS):

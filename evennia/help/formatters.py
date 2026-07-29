@@ -128,9 +128,7 @@ class HelpFormatter:
         title = f"|CHelp for |w{topic}|n" if topic else "|rNo help found|n"
 
         if aliases:
-            aliases = " |C(aliases: {}|C)|n".format(
-                "|C,|n ".join(f"|w{ali}|n" for ali in aliases)
-            )
+            aliases = " |C(aliases: {}|C)|n".format("|C,|n ".join(f"|w{ali}|n" for ali in aliases))
         else:
             aliases = ""
 
@@ -139,8 +137,7 @@ class HelpFormatter:
         if subtopics:
             if click_topics:
                 subtopics = [
-                    f"|lchelp {topic}/{subtop}|lt|w{topic}/{subtop}|n|le"
-                    for subtop in subtopics
+                    f"|lchelp {topic}/{subtop}|lt|w{topic}/{subtop}|n|le" for subtop in subtopics
                 ]
             else:
                 subtopics = [f"|w{topic}/{subtop}|n" for subtop in subtopics]
@@ -321,9 +318,7 @@ class HelpFormatter:
 
         """
         if inherits_from(cmd_or_topic, "evennia.commands.command.Command"):
-            return cmd_or_topic.auto_help and cmd_or_topic.access(
-                caller, "read", default=True
-            )
+            return cmd_or_topic.auto_help and cmd_or_topic.access(caller, "read", default=True)
         from evennia.help.catalog import is_action_help_topic
 
         if is_action_help_topic(cmd_or_topic):
@@ -361,18 +356,12 @@ class HelpFormatter:
         if is_action_help_topic(cmd_or_topic):
             if not cmd_or_topic.auto_help:
                 return False
-            return cmd_or_topic.access(
-                caller, "view", default=True, session=self.session
-            )
+            return cmd_or_topic.access(caller, "view", default=True, session=self.session)
 
         if hasattr(cmd_or_topic, "auto_help") and not cmd_or_topic.auto_help:
             return False
 
-        has_view = (
-            cmd_or_topic.policies.get("view")
-            if hasattr(cmd_or_topic, "policies")
-            else None
-        )
+        has_view = cmd_or_topic.policies.get("view") if hasattr(cmd_or_topic, "policies") else None
         if has_view is not None:
             return cmd_or_topic.access(caller, "view", default=True)
         return cmd_or_topic.access(caller, "read", default=True)
@@ -394,21 +383,17 @@ class HelpFormatter:
 
         """
         from evennia.help.catalog import (
-            actor_for_help, collect_action_help_topics,
-            should_include_action_topics_in_index)
+            actor_for_help,
+            collect_action_help_topics,
+            should_include_action_topics_in_index,
+        )
 
         actor = actor_for_help(caller, self.session)
         cmd_help_topics = {}
         if should_include_action_topics_in_index(actor):
-            cmd_help_topics = collect_action_help_topics(
-                actor, mode=mode, staff_reference=True
-            )
-        file_help_topics = {
-            topic.key.lower().strip(): topic for topic in FILE_HELP_ENTRIES.all()
-        }
-        db_help_topics = {
-            topic.key.lower().strip(): topic for topic in HelpEntry.objects.all()
-        }
+            cmd_help_topics = collect_action_help_topics(actor, mode=mode, staff_reference=True)
+        file_help_topics = {topic.key.lower().strip(): topic for topic in FILE_HELP_ENTRIES.all()}
+        db_help_topics = {topic.key.lower().strip(): topic for topic in HelpEntry.objects.all()}
         if mode == "list":
             db_help_topics = {
                 key: entry
@@ -474,9 +459,7 @@ class HelpFormatter:
                 if not isinstance(m, HelpCategory):
                     # Aliases for help created with 'sethelp' is an AliasHandler
                     aliases += (
-                        list(m.aliases)
-                        if isinstance(m.aliases, (list, tuple))
-                        else m.aliases.all()
+                        list(m.aliases) if isinstance(m.aliases, (list, tuple)) else m.aliases.all()
                     )
                 if query in aliases:
                     matches.remove(m)

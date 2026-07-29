@@ -193,9 +193,7 @@ class CmdUnconnectedCreate(COMMAND_DEFAULT_CLASS):
             "\nIs this what you intended? [Y]/N?"
         )
         if answer.lower() in ("n", "no"):
-            session.msg(
-                "Aborted. If your user name contains spaces, surround it by quotes."
-            )
+            session.msg("Aborted. If your user name contains spaces, surround it by quotes.")
             return
 
         # everything's ok. Create the new player account.
@@ -206,11 +204,11 @@ class CmdUnconnectedCreate(COMMAND_DEFAULT_CLASS):
             # tell the caller everything went well.
             string = "A new account '%s' was created. Welcome!"
             if " " in username:
-                string += "\n\nYou can now log in with the command 'connect \"%s\" <your password>'."
-            else:
                 string += (
-                    "\n\nYou can now log with the command 'connect %s <your password>'."
+                    "\n\nYou can now log in with the command 'connect \"%s\" <your password>'."
                 )
+            else:
+                string += "\n\nYou can now log with the command 'connect %s <your password>'."
             session.msg(string % (username, username))
         else:
             session.msg("|R%s|n" % "\n".join(errors))
@@ -262,13 +260,9 @@ class CmdUnconnectedLook(COMMAND_DEFAULT_CLASS):
         if "connection_screen" in callables:
             connection_screen = callables["connection_screen"]()
         else:
-            connection_screen = utils.random_string_from_module(
-                CONNECTION_SCREEN_MODULE
-            )
+            connection_screen = utils.random_string_from_module(CONNECTION_SCREEN_MODULE)
             if not connection_screen:
-                connection_screen = (
-                    "No connection screen found. Please contact an admin."
-                )
+                connection_screen = "No connection screen found. Please contact an admin."
         self.msg(connection_screen)
 
 
@@ -365,8 +359,7 @@ class CmdUnconnectedEncoding(COMMAND_DEFAULT_CLASS):
             string = ""
             if pencoding:
                 string += (
-                    "Default encoding: |g%s|n (change with |wencoding <encoding>|n)"
-                    % pencoding
+                    "Default encoding: |g%s|n (change with |wencoding <encoding>|n)" % pencoding
                 )
             encodings = settings.ENCODINGS
             if encodings:
@@ -389,12 +382,9 @@ class CmdUnconnectedEncoding(COMMAND_DEFAULT_CLASS):
                 )
             else:
                 self.session.protocol_flags["ENCODING"] = encoding
-                string = (
-                    "Your custom text encoding was changed from '|w%s|n' to '|w%s|n'."
-                    % (
-                        old_encoding,
-                        encoding,
-                    )
+                string = "Your custom text encoding was changed from '|w%s|n' to '|w%s|n'." % (
+                    old_encoding,
+                    encoding,
                 )
                 sync = True
         if sync:

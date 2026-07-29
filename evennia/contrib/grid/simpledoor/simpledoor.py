@@ -111,9 +111,7 @@ class CmdOpen(default_cmds.CmdOpen):
     __doc__ = default_cmds.CmdOpen.__doc__
     # overloading parts of the default CmdOpen command to support doors.
 
-    def create_exit(
-        self, exit_name, location, destination, exit_aliases=None, typeclass=None
-    ):
+    def create_exit(self, exit_name, location, destination, exit_aliases=None, typeclass=None):
         """
         Simple wrapper for the default CmdOpen.create_exit
         """

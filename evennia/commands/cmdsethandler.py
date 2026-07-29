@@ -106,9 +106,7 @@ Error encountered for cmdset at path '{path}'.
 Replacing with fallback '{fallback_path}'.
 """)
 
-_ERROR_CMDSET_NO_FALLBACK = _(
-    """Fallback path '{fallback_path}' failed to generate a cmdset."""
-)
+_ERROR_CMDSET_NO_FALLBACK = _("""Fallback path '{fallback_path}' failed to generate a cmdset.""")
 
 
 class _ErrorCmdSet(CmdSet):
@@ -163,9 +161,7 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
         if "." in path:
             modpath, classname = python_path.rsplit(".", 1)
         else:
-            raise ImportError(
-                f"The path '{path}' is not on the form modulepath.ClassName"
-            )
+            raise ImportError(f"The path '{path}' is not on the form modulepath.ClassName")
 
         try:
             # first try to get from cache
@@ -392,9 +388,7 @@ class CmdSetHandler(object):
                         if cmdset:
                             if cmdset.key == "_CMDSET_ERROR":
                                 # If a cmdset fails to load, check if we have a fallback path to use
-                                fallback_path = settings.CMDSET_FALLBACKS.get(
-                                    path, None
-                                )
+                                fallback_path = settings.CMDSET_FALLBACKS.get(path, None)
                                 if fallback_path:
                                     err = _ERROR_CMDSET_FALLBACK.format(
                                         path=path, fallback_path=fallback_path
@@ -427,9 +421,7 @@ class CmdSetHandler(object):
             self.mergetype_stack.append(new_current.actual_mergetype)
         self.current = new_current
 
-    def add(
-        self, cmdset, emit_to_obj=None, persistent=False, default_cmdset=False, **kwargs
-    ):
+    def add(self, cmdset, emit_to_obj=None, persistent=False, default_cmdset=False, **kwargs):
         """
         Add a cmdset to the handler, on top of the old ones, unless it
         is set as the default one (it will then end up at the bottom of the stack)
@@ -456,9 +448,7 @@ class CmdSetHandler(object):
 
         """
         if "permanent" in kwargs:
-            logger.log_dep(
-                "obj.cmdset.add() kwarg 'permanent' has changed name to 'persistent'."
-            )
+            logger.log_dep("obj.cmdset.add() kwarg 'permanent' has changed name to 'persistent'.")
             persistent = kwargs["permanent"] if persistent is False else persistent
 
         if not (isinstance(cmdset, str) or utils.inherits_from(cmdset, CmdSet)):
@@ -502,9 +492,7 @@ class CmdSetHandler(object):
                 "obj.cmdset.add_default() kwarg 'permanent' has changed name to 'persistent'."
             )
             persistent = kwargs["permanent"] if persistent is None else persistent
-        self.add(
-            cmdset, emit_to_obj=emit_to_obj, persistent=persistent, default_cmdset=True
-        )
+        self.add(cmdset, emit_to_obj=emit_to_obj, persistent=persistent, default_cmdset=True)
 
     def remove(self, cmdset=None, default_cmdset=False):
         """
@@ -549,9 +537,7 @@ class CmdSetHandler(object):
         else:
             # try it as a callable
             if callable(cmdset) and hasattr(cmdset, "path"):
-                delcmdsets = [
-                    cset for cset in self.cmdset_stack[1:] if cset.path == cmdset.path
-                ]
+                delcmdsets = [cset for cset in self.cmdset_stack[1:] if cset.path == cmdset.path]
             else:
                 # try it as a path or key
                 delcmdsets = [
@@ -628,8 +614,7 @@ class CmdSetHandler(object):
     def _notify_cmdset_change(self):
         """Invalidate the location command-set merge generation."""
         try:
-            from evennia.commands.location_cmdset_cache import \
-                bump_cmdset_generation
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
 
             bump_cmdset_generation(self.obj)
         except Exception:
@@ -656,15 +641,12 @@ class CmdSetHandler(object):
             if must_be_default:
                 return self.cmdset_stack and (self.cmdset_stack[0].path == cmdset.path)
             else:
-                return any(
-                    [cset for cset in self.cmdset_stack if cset.path == cmdset.path]
-                )
+                return any([cset for cset in self.cmdset_stack if cset.path == cmdset.path])
         else:
             # try it as a path or key
             if must_be_default:
                 return self.cmdset_stack and (
-                    self.cmdset_stack[0].key == cmdset
-                    or self.cmdset_stack[0].path == cmdset
+                    self.cmdset_stack[0].key == cmdset or self.cmdset_stack[0].path == cmdset
                 )
             else:
                 return any(
