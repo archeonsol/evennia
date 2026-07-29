@@ -7,8 +7,7 @@ from django.test import override_settings
 from mock import MagicMock, Mock, patch
 
 import evennia
-from evennia.accounts.accounts import (AccountSessionHandler, DefaultAccount,
-                                       DefaultGuest)
+from evennia.accounts.accounts import AccountSessionHandler, DefaultAccount, DefaultGuest
 from evennia.accounts.models import ControlBinding
 from evennia.authorization.policy import Always
 from evennia.authorization.storage import grant_capability
@@ -71,9 +70,7 @@ class TestAccountSessionHandler(TestCase):
         evennia.SESSION_HANDLER[s3.uid] = s3
 
         self.assertEqual([s.uid for s in self.handler.get()], [s1.uid])
-        self.assertEqual(
-            [s.uid for s in [self.handler.get(self.account.uid)]], [s1.uid]
-        )
+        self.assertEqual([s.uid for s in [self.handler.get(self.account.uid)]], [s1.uid])
         self.assertEqual([s.uid for s in self.handler.get(self.account.uid + 1)], [])
 
     def test_all(self):
@@ -170,17 +167,13 @@ class TestDefaultAccountAuth(BaseEvenniaTest):
 
         # Try creating a duplicate account
         account2, errors = DefaultAccount.create(username="Ziggy", password="starman11")
-        self.assertFalse(
-            account2, "Duplicate account name should not have been allowed."
-        )
+        self.assertFalse(account2, "Duplicate account name should not have been allowed.")
         account.delete()
 
     def test_throttle(self):
         "Confirm throttle activates on too many failures."
         for x in range(20):
-            obj, errors = DefaultAccount.authenticate(
-                self.account.name, "xyzzy", ip="12.24.36.48"
-            )
+            obj, errors = DefaultAccount.authenticate(self.account.name, "xyzzy", ip="12.24.36.48")
             self.assertFalse(
                 obj,
                 "Authentication was provided a bogus password; this should NOT have returned an account!",
@@ -232,9 +225,7 @@ class TestDefaultAccountAuth(BaseEvenniaTest):
 
         # Should not allow duplicate username
         result, error = DefaultAccount.validate_username(self.account.name)
-        self.assertFalse(
-            result, "Duplicate username should not have passed validation."
-        )
+        self.assertFalse(result, "Duplicate username should not have passed validation.")
 
         # Should not allow username too short
         result, error = DefaultAccount.validate_username("xx")
@@ -322,9 +313,7 @@ class TestDefaultAccount(TestCase):
         obj = Mock()
         self.s1.get_puppet = Mock(return_value=obj)
         account.puppet_object(self.s1, obj)
-        self.assertEqual(
-            _last_data_out_text(self.s1), "You are already puppeting this object."
-        )
+        self.assertEqual(_last_data_out_text(self.s1), "You are already puppeting this object.")
         self.assertIsNone(self.s1.data_out.call_args[1]["options"])
         self.assertIsNone(obj.at_post_puppet.call_args)
 
@@ -383,9 +372,7 @@ class TestDefaultAccount(TestCase):
             for_identity.return_value = MagicMock()
             account.puppet_object(self.s1, obj)
         # works because django.conf.settings.MULTISESSION_MODE is not in (1, 3)
-        self.assertTrue(
-            _last_data_out_text(self.s1).endswith("from another of your sessions.|n")
-        )
+        self.assertTrue(_last_data_out_text(self.s1).endswith("from another of your sessions.|n"))
         self.assertTrue(obj.at_post_puppet.call_args[1] == {})
 
     def test_puppet_object_already_puppeted(self):
@@ -458,9 +445,7 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
         self.account.unpuppet_object(self.session)
         self.account.at_puppet_added.reset_mock()
         self.account.puppet_object(self.session, self.char1)
-        self.account.at_puppet_added.assert_called_once_with(
-            self.char1, session=self.session
-        )
+        self.account.at_puppet_added.assert_called_once_with(self.char1, session=self.session)
 
     def test_added_does_not_fire_on_session_takeover(self):
         # Initial puppet already happened in setup_session. Simulate a second
@@ -494,9 +479,7 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
     def test_removed_fires_on_last_detach(self):
         self.account.at_puppet_removed = MagicMock()
         self.account.unpuppet_object(self.session)
-        self.account.at_puppet_removed.assert_called_once_with(
-            self.char1, session=self.session
-        )
+        self.account.at_puppet_removed.assert_called_once_with(self.char1, session=self.session)
 
 
 class TestAccountFocusPushPop(BaseEvenniaTest):
@@ -550,9 +533,7 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
 
         sess2 = ServerSession()
         # distinct address: ServerSession.__eq__ compares by address.
-        sess2.init_session(
-            "telnet", ("localhost", "testmode2"), evennia.SESSION_HANDLER
-        )
+        sess2.init_session("telnet", ("localhost", "testmode2"), evennia.SESSION_HANDLER)
         sess2.sessid = 43
         sess2.uname = self.account.username
         sess2.logged_in = True
@@ -666,9 +647,7 @@ class TestControllerVsOwnership(BaseEvenniaTest):
     possession is where they diverge."""
 
     def _npc(self, key="NPC"):
-        npc = create.create_object(
-            self.character_typeclass, key=key, location=self.room1
-        )
+        npc = create.create_object(self.character_typeclass, key=key, location=self.room1)
         npc.policies.set("puppet", Always())
         return npc
 
@@ -745,9 +724,7 @@ class TestCapabilitiesFollowDriver(BaseEvenniaTest):
     higher-perm owner must not leak to whoever is driving the body."""
 
     def _body_owned_by(self, owner, key="Body"):
-        body = create.create_object(
-            self.character_typeclass, key=key, location=self.room1
-        )
+        body = create.create_object(self.character_typeclass, key=key, location=self.room1)
         body.account = owner
         body.policies.set("puppet", Always())
         return body
@@ -839,9 +816,7 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.account.msg = MagicMock()
         with self.settings(MULTISESSION_MODE=2):
             self.account.puppet_object(self.session, self.char1)
-            self.account.msg.assert_called_with(
-                "You are already puppeting this object."
-            )
+            self.account.msg.assert_called_with("You are already puppeting this object.")
 
     @patch("evennia.accounts.accounts.time.time", return_value=10000)
     def test_idle_time(self, mock_time):
@@ -850,9 +825,7 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.assertEqual(idle, 10)
 
         # test no sessions
-        with patch(
-            "evennia.SESSION_HANDLER.sessions_from_account", return_value=[]
-        ) as mock_sessh:
+        with patch("evennia.SESSION_HANDLER.sessions_from_account", return_value=[]) as mock_sessh:
             idle = self.account.idle_time
             self.assertEqual(idle, None)
 
@@ -863,9 +836,7 @@ class TestDefaultAccountEv(BaseEvenniaTest):
         self.assertEqual(conn, 10)
 
         # test no sessions
-        with patch(
-            "evennia.SESSION_HANDLER.sessions_from_account", return_value=[]
-        ) as mock_sessh:
+        with patch("evennia.SESSION_HANDLER.sessions_from_account", return_value=[]) as mock_sessh:
             idle = self.account.connection_time
             self.assertEqual(idle, None)
 

@@ -235,7 +235,9 @@ class ObjectAdmin(admin.ModelAdmin):
 
         return str(dbserialize.pack_dbobj(obj))
 
-    serialized_string.help_text = "Copy & paste this string into an Attribute's `value` field to store this object there."
+    serialized_string.help_text = (
+        "Copy & paste this string into an Attribute's `value` field to store this object there."
+    )
 
     def get_fieldsets(self, request, obj=None):
         """
@@ -308,9 +310,11 @@ class ObjectAdmin(admin.ModelAdmin):
             account.db._last_puppet = obj
             account.characters.add(obj)
             if not obj.access(account, "puppet"):
-                from evennia.authorization.storage import (grant_capability,
-                                                           principal_refs,
-                                                           resource_ref)
+                from evennia.authorization.storage import (
+                    grant_capability,
+                    principal_refs,
+                    resource_ref,
+                )
 
                 grant_capability(
                     principal_refs(account)[0],
@@ -337,9 +341,7 @@ class ObjectAdmin(admin.ModelAdmin):
             )
 
         # stay on the same page
-        return HttpResponseRedirect(
-            reverse("admin:objects_objectdb_change", args=[obj.pk])
-        )
+        return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[obj.pk]))
 
     def save_model(self, request, obj, form, change):
         """
@@ -368,6 +370,4 @@ class ObjectAdmin(admin.ModelAdmin):
         from django.http import HttpResponseRedirect
         from django.urls import reverse
 
-        return HttpResponseRedirect(
-            reverse("admin:objects_objectdb_change", args=[obj.id])
-        )
+        return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[obj.id]))

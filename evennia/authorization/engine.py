@@ -6,9 +6,18 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .policy import (AllOf, Always, AnyOf, Never, Not, Policy,
-                     PredicateRequirement, RequiresCapability,
-                     get_predicate_provider, register_predicate_provider)
+from .policy import (
+    AllOf,
+    Always,
+    AnyOf,
+    Never,
+    Not,
+    Policy,
+    PredicateRequirement,
+    RequiresCapability,
+    get_predicate_provider,
+    register_predicate_provider,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,9 +106,9 @@ def _matching_scopes(
             continue
         constraints = dict(constraints)
         required_session = constraints.get("session_id")
-        if required_session is not None and str(
-            getattr(context.session, "sessid", "")
-        ) != str(required_session):
+        if required_session is not None and str(getattr(context.session, "sessid", "")) != str(
+            required_session
+        ):
             continue
         if kind == "world" and key == "*":
             matched.append("world:*")
@@ -178,9 +187,7 @@ def evaluate(
 
     if context.suspended:
         return AuthorizationDecision(False, "principal_suspended")
-    allowed, failures, scopes, capability = _evaluate_node(
-        policy, grants, resource, context
-    )
+    allowed, failures, scopes, capability = _evaluate_node(policy, grants, resource, context)
     return AuthorizationDecision(
         allowed=allowed,
         reason_code="requirements_satisfied" if allowed else "requirements_unmet",
@@ -224,9 +231,7 @@ def _principal_controls_resource(context, params):
         or getattr(principal, "account", None)
         or (principal if "account" in principal.__class__.__module__.lower() else None)
     )
-    resource_account = getattr(resource, "puppeteer", None) or getattr(
-        resource, "account", None
-    )
+    resource_account = getattr(resource, "puppeteer", None) or getattr(resource, "account", None)
     return principal_account is not None and principal_account is resource_account
 
 
@@ -253,12 +258,8 @@ def _principal_is_message_participant(context, params):
         getattr(principal, "account", None),
         getattr(principal, "puppeteer", None),
     }
-    participants = set(getattr(resource, "senders", ())) | set(
-        getattr(resource, "receivers", ())
-    )
+    participants = set(getattr(resource, "senders", ())) | set(getattr(resource, "receivers", ()))
     return bool(candidates & participants)
 
 
-register_predicate_provider(
-    "principal.message_participant", _principal_is_message_participant
-)
+register_predicate_provider("principal.message_participant", _principal_is_message_participant)

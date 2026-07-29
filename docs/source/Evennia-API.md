@@ -2,7 +2,8 @@
 
 [evennia](api/evennia-api.md) - library source tree
 - [evennia.accounts](evennia.accounts) - the out-of-character entities representing players
-- [evennia.commands](evennia.commands) - handle all inputs. Also includes default commands
+- [evennia.actions](evennia.actions) - typed player-input actions, rule dispatch, and engine defaults
+- [evennia.commands](evennia.commands) - legacy command compatibility APIs
 - [evennia.comms](evennia.comms) - in-game channels and messaging
 - [evennia.contrib](evennia.contrib) - game-specific tools and code contributed by the community
 - [evennia.help](evennia.help) - in-game help system
@@ -56,7 +57,10 @@ The flat API is defined in `__init__.py` [viewable here](github:evennia/__init__
 - [evennia.DefaultScript](evennia.scripts.scripts.DefaultScript) - base class for OOC-objects ([docs](Components/Scripts.md))
 - [evennia.DefaultChannel](evennia.comms.comms.DefaultChannel) - base class for in-game channels ([docs](Components/Channels.md))
 
-### Commands
+### Actions and legacy commands
+
+- [evennia.actions](evennia.actions) - native action API and rule engine
+- [evennia.actions.default](evennia.actions.default) - shipped default actions and composable rule providers ([docs](Components/Default-Actions.md))
 
 - [evennia.Command](evennia.commands.command.Command) - base [Command](Components/Commands.md) class. See also `evennia.default_cmds.MuxCommand`
 - [evennia.CmdSet](evennia.commands.cmdset.CmdSet) - base [CmdSet](Components/Command-Sets.md) class

@@ -14,9 +14,12 @@ evennia.narrative
 
    evennia.narrative.delivery
    evennia.narrative.emote
+   evennia.narrative.handles
    evennia.narrative.pipeline
+   evennia.narrative.plan
    evennia.narrative.protocols
    evennia.narrative.render
    evennia.narrative.rendernode
+   evennia.narrative.timeline
 
 ```

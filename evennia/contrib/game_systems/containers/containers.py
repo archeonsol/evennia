@@ -34,17 +34,14 @@ or implement the same policies/hooks in your own typeclasses.
 from django.conf import settings
 
 from evennia import CmdSet, DefaultObject
-from evennia.authorization.policy import (Always, Never, PredicateRequirement,
-                                          RequiresCapability)
+from evennia.authorization.policy import Always, Never, PredicateRequirement, RequiresCapability
 from evennia.commands.default.general import CmdDrop, CmdGet, CmdLook
 from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils import class_from_module
 from evennia.utils.utils import is_veto
 
 # establish the right inheritance for container objects
-_BASE_OBJECT_TYPECLASS = class_from_module(
-    settings.BASE_OBJECT_TYPECLASS, DefaultObject
-)
+_BASE_OBJECT_TYPECLASS = class_from_module(settings.BASE_OBJECT_TYPECLASS, DefaultObject)
 
 
 class ContribContainer(_BASE_OBJECT_TYPECLASS):
@@ -210,9 +207,7 @@ class CmdContainerGet(CmdGet):
             return
 
         # calling possible at_pre_get_from hook on location
-        if hasattr(location, "at_pre_get_from") and is_veto(
-            location.at_pre_get_from(caller, obj)
-        ):
+        if hasattr(location, "at_pre_get_from") and is_veto(location.at_pre_get_from(caller, obj)):
             self.msg("You can't get that.")
             return
 
@@ -223,9 +218,7 @@ class CmdContainerGet(CmdGet):
             singular, _ = obj.get_numbered_name(1, caller)
             if location == caller.location:
                 # we're picking it up from the area
-                caller.location.msg_contents(
-                    f"$You() $conj(pick) up {singular}.", from_obj=caller
-                )
+                caller.location.msg_contents(f"$You() $conj(pick) up {singular}.", from_obj=caller)
             else:
                 # we're getting it from somewhere else
                 container_name, _ = location.get_numbered_name(1, caller)
@@ -289,9 +282,7 @@ class CmdPut(CmdDrop):
             return
 
         # Call the container's possible at_pre_put_in method.
-        if hasattr(container, "at_pre_put_in") and is_veto(
-            container.at_pre_put_in(caller, obj)
-        ):
+        if hasattr(container, "at_pre_put_in") and is_veto(container.at_pre_put_in(caller, obj)):
             self.msg("You can't put that there.")
             return
 

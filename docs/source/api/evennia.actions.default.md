@@ -21,8 +21,16 @@ evennia.actions.default
    evennia.actions.default.movement
    evennia.actions.default.nomatch
    evennia.actions.default.objects
+   evennia.actions.default.python_console
    evennia.actions.default.roleplay
+   evennia.actions.default.script_paging
    evennia.actions.default.system
    evennia.actions.default.unloggedin
+
+
+.. toctree::
+   :maxdepth: 6
+
+   evennia.actions.default.building
 
 ```

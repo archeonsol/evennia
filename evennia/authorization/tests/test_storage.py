@@ -117,9 +117,7 @@ class AuthorizationStorageTest(TestCase):
     def test_generation_cache_keys_are_backend_safe_and_bounded(self):
         resource = UnsafeRefResource()
 
-        with patch(
-            "evennia.authorization.storage.cache.get", return_value=0
-        ) as cache_get:
+        with patch("evennia.authorization.storage.cache.get", return_value=0) as cache_get:
             load_resource(resource)
 
         cache_key = cache_get.call_args.args[0]

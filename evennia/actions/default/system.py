@@ -29,6 +29,7 @@ import datetime
 from dataclasses import dataclass
 
 from django.conf import settings
+
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
@@ -42,6 +43,9 @@ __all__ = [
     "Systems",
     "Tasks",
     "Py",
+    "Objects",
+    "Scripts",
+    "ScriptEvMore",
     "PyRules",
     "CharacterSystemRules",
 ]
@@ -89,6 +93,35 @@ class Py(ArgAction):
         )
 
 
+@action("@objects")
+@dataclass
+class Objects(ArgAction):
+    """Show object totals, typeclass distribution, and recently created objects."""
+
+    __primary_handler__ = DefaultCharacter
+
+
+@action("@scripts", "@script")
+@dataclass
+class Scripts(ArgAction):
+    """List, create, attach, inspect, or delete storage scripts."""
+
+    __primary_handler__ = DefaultCharacter
+
+
+def _show_scripts(caller, scripts, session=None):
+    """Open the lazily imported native storage-script pager."""
+    from .script_paging import ScriptEvMore
+
+    return ScriptEvMore(caller, scripts, session=session)
+
+
+def _has_rows(query):
+    """Check a queryset without materializing it; tolerate list-like test doubles."""
+    exists = getattr(query, "exists", None)
+    return bool(exists()) if callable(exists) else bool(query)
+
+
 def _coll_date_func(task):
     """Normalize a task tuple's completion date and callback memory reference."""
     t_comp_date = str(task[0]).replace("-", "/")
@@ -97,9 +130,7 @@ def _coll_date_func(task):
     return t_comp_date, t_func_mem_ref
 
 
-def _make_task_action(
-    caller, task_id, t_comp_date, t_func_mem_ref, task_action, action_request
-):
+def _make_task_action(caller, task_id, t_comp_date, t_func_mem_ref, task_action, action_request):
     """Build the confirmed-action callback for a single-task ``@tasks`` request.
 
     Closure-based (no state on the shared provider instance): re-verifies the
@@ -141,29 +172,29 @@ class PyRules:
             # StateProvider, so it works on the dispatch path). Reuse the stock
             # module-level load/save/quit funcs - they are picklable, which the
             # persistent editor requires.
-            from evennia.commands.default.system import (_py_code, _py_load,
-                                                         _py_quit)
             from evennia.utils.eveditor import EvEditor
+
+            from .python_console import py_code, py_load, py_quit
 
             caller.db._py_measure_time = "time" in switches
             caller.db._py_clientraw = "clientraw" in switches
             EvEditor(
                 caller,
-                loadfunc=_py_load,
-                savefunc=_py_code,
-                quitfunc=_py_quit,
+                loadfunc=py_load,
+                savefunc=py_code,
+                quitfunc=py_quit,
                 key="Python exec: :w  or :!",
                 persistent=True,
-                codefunc=_py_code,
+                codefunc=py_code,
             )
             return CLAIM
 
         if not pycode:
             return self._py_console(caller, noecho="noecho" in switches)
 
-        from evennia.commands.default.system import _run_code_snippet
+        from .python_console import run_code_snippet
 
-        _run_code_snippet(
+        run_code_snippet(
             caller,
             pycode,
             measure_time="time" in switches,
@@ -180,13 +211,15 @@ class PyRules:
         """
         import sys
 
-        from evennia.commands.default.system import EvenniaPythonConsole
+        from .python_console import EvenniaPythonConsole
 
         console = EvenniaPythonConsole(caller)
-        banner = "|gEvennia Interactive Python mode{echomode}\nPython {version} on {platform}".format(
-            echomode=" (no echoing of prompts)" if noecho else "",
-            version=sys.version,
-            platform=sys.platform,
+        banner = (
+            "|gEvennia Interactive Python mode{echomode}\nPython {version} on {platform}".format(
+                echomode=" (no echoing of prompts)" if noecho else "",
+                version=sys.version,
+                platform=sys.platform,
+            )
         )
         caller.msg(banner)
         line = ""
@@ -213,6 +246,264 @@ class CharacterSystemRules(PyRules):
     def _is_actor(self, actor) -> bool:
         return self is getattr(actor, "character", None)
 
+    # --- @objects ----------------------------------------------------------------
+
+    @rule(
+        Objects,
+        phase="carry_out",
+        requires=HasCapability("engine.system.inspect", principal_scope="account"),
+    )
+    def carry_out_objects(self, action, actor):
+        """Render database object totals and the latest objects."""
+        if not self._is_actor(actor):
+            return SKIP
+        from evennia.objects.models import ObjectDB
+        from evennia.utils.evtable import EvTable
+        from evennia.utils.utils import class_from_module, datetime_format
+
+        caller = self
+        limit = int(action.args) if action.args and action.args.isdigit() else 10
+        total = ObjectDB.objects.count()
+        character = class_from_module(settings.BASE_CHARACTER_TYPECLASS)
+        room = class_from_module(settings.BASE_ROOM_TYPECLASS)
+        exit_type = class_from_module(settings.BASE_EXIT_TYPECLASS)
+        characters = character.objects.all_family().count()
+        rooms = room.objects.all_family().count()
+        exits = exit_type.objects.all_family().count()
+        other = total - characters - rooms - exits
+        denominator = total or 1
+
+        totals = EvTable("|wtype|n", "|wcomment|n", "|wcount|n", "|w%|n", border="table", align="l")
+        for label, comment, count in (
+            ("Characters", "(BASE_CHARACTER_TYPECLASS + children)", characters),
+            ("Rooms", "(BASE_ROOM_TYPECLASS + children)", rooms),
+            ("Exits", "(BASE_EXIT_TYPECLASS + children)", exits),
+            ("Other", "", other),
+        ):
+            totals.add_row(label, comment, count, f"{(float(count) / denominator) * 100:.2f}")
+
+        typeclasses = EvTable("|wtypeclass|n", "|wcount|n", "|w%|n", border="table", align="l")
+        for stat in ObjectDB.objects.get_typeclass_totals():
+            typeclasses.add_row(
+                stat.get("typeclass", "<error>"),
+                stat.get("count", -1),
+                f"{stat.get('percent', -1):.2f}",
+            )
+
+        latest = EvTable(
+            "|wcreated|n", "|wdbref|n", "|wname|n", "|wtypeclass|n", align="l", border="table"
+        )
+        objects = ObjectDB.objects.all().order_by("db_date_created")[max(0, total - limit) :]
+        for obj in objects:
+            latest.add_row(datetime_format(obj.date_created), obj.dbref, obj.key, obj.path)
+        caller.msg(
+            f"\n|wObject subtype totals (out of {total} Objects):|n\n{totals}"
+            f"\n|wObject typeclass distribution:|n\n{typeclasses}"
+            f"\n|wLast {min(total, limit)} Objects created:|n\n{latest}"
+        )
+        return CLAIM
+
+    # --- @scripts ----------------------------------------------------------------
+
+    @staticmethod
+    def _script_parts(action):
+        """Return ``(object, key, typeclass)`` query parts from mux arguments."""
+
+        def separate(part):
+            first, *rest = part.split(":", 1)
+            return (first, rest[0]) if rest else (None, first)
+
+        if action.rhs:
+            key, typeclass = separate(action.rhs)
+            return action.lhs, key, typeclass
+        if action.rhs is not None:
+            return action.lhs, None, None
+        key, typeclass = separate(action.args)
+        return None, key, typeclass
+
+    @staticmethod
+    def _search_scripts(key, typeclass):
+        """Find storage scripts by dbref, exact key/path, path suffix, or range."""
+        from evennia.scripts.models import ScriptDB
+        from evennia.utils.utils import dbref
+
+        hidden = ("evennia.prototypes.prototypes.DbPrototype",)
+        script_id = dbref(typeclass)
+        if script_id:
+            return ScriptDB.objects.get_all_scripts(typeclass).exclude(db_typeclass_path__in=hidden)
+        if key:
+            return ScriptDB.objects.filter(
+                db_key__iexact=key, db_typeclass_path__iendswith=typeclass
+            ).exclude(db_typeclass_path__in=hidden)
+        key_matches = ScriptDB.objects.filter(db_key__iexact=typeclass).exclude(
+            db_typeclass_path__in=hidden
+        )
+        if _has_rows(key_matches):
+            return key_matches.order_by("id")
+        scripts = (
+            ScriptDB.objects.filter(db_typeclass_path__iendswith=typeclass)
+            .exclude(db_typeclass_path__in=hidden)
+            .order_by("id")
+        )
+        if _has_rows(scripts):
+            return scripts
+        if "-" in typeclass:
+            try:
+                start, end = (dbref(part.strip()) for part in typeclass.split("-", 1))
+            except (TypeError, ValueError):
+                start = end = None
+            if start and end:
+                return (
+                    ScriptDB.objects.filter(id__in=range(start, end + 1))
+                    .exclude(db_typeclass_path__in=hidden)
+                    .order_by("id")
+                )
+        return scripts
+
+    def _scripts_flow(self, action, actor):
+        """Generator implementing storage-script lookup and multi-delete confirmation."""
+        from evennia.scripts.models import ScriptDB
+        from evennia.utils import create, logger
+
+        caller = self
+        hidden = ("evennia.prototypes.prototypes.DbPrototype",)
+        session = getattr(actor, "session", None)
+        if not action.args:
+            scripts = ScriptDB.objects.all().exclude(db_typeclass_path__in=hidden)
+            if not _has_rows(scripts):
+                caller.msg("No scripts found.")
+            else:
+                _show_scripts(caller, scripts.order_by("id"), session=session)
+            return CLAIM
+
+        obj_query, key_query, typeclass_query = self._script_parts(action)
+        obj = caller.search(obj_query, global_search=True) if obj_query else None
+        if obj_query and not obj:
+            return CLAIM
+        scripts = self._search_scripts(key_query, typeclass_query) if typeclass_query else None
+
+        if not action.switches:
+            if obj:
+                if action.rhs:
+                    if not (obj.access(caller, "control") or obj.access(caller, "edit")):
+                        caller.msg(f"You don't have permission to edit {obj.key}.")
+                        return CLAIM
+                    created = obj.scripts.add(typeclass_query, key=key_query)
+                    caller.msg(
+                        f"Script |w{action.rhs}|n successfully added to {obj.get_display_name(caller)}."
+                        if created
+                        else f"Script {action.rhs} could not be added to {obj.get_display_name(caller)}."
+                    )
+                else:
+                    attached = ScriptDB.objects.filter(db_obj=obj).exclude(
+                        db_typeclass_path__in=hidden
+                    )
+                    if _has_rows(attached):
+                        _show_scripts(caller, attached.order_by("id"), session=session)
+                    else:
+                        caller.msg(f"No scripts defined on {obj}")
+                return CLAIM
+            if _has_rows(scripts):
+                _show_scripts(caller, scripts.order_by("id"), session=session)
+                return CLAIM
+            from evennia.utils.utils import dbref
+
+            if dbref(typeclass_query):
+                caller.msg(f"No script found with dbref {typeclass_query}")
+                return CLAIM
+            try:
+                created = create.create_script(typeclass=typeclass_query, key=key_query)
+            except ImportError:
+                logger.log_trace()
+                created = None
+            if created:
+                caller.msg(f"Global Script Created - {created.key} ({created.typeclass_path})")
+                _show_scripts(caller, [created], session=session)
+            else:
+                caller.msg(
+                    f"Global Script |rNOT|n Created |r(see log)|n - arguments: {action.args}"
+                )
+            return CLAIM
+
+        if "delete" not in action.switches:
+            caller.msg("Usage: @scripts[/delete] [script or object = script]")
+            return CLAIM
+        if obj:
+            if not (obj.access(caller, "control") or obj.access(caller, "edit")):
+                caller.msg(f"You don't have permission to edit {obj.key}.")
+                return CLAIM
+            from django.db.models import Q
+
+            from evennia.utils.utils import dbref
+
+            scripts = ScriptDB.objects.filter(db_obj=obj).exclude(db_typeclass_path__in=hidden)
+            if key_query:
+                scripts = scripts.filter(
+                    db_key__iexact=key_query,
+                    db_typeclass_path__iendswith=typeclass_query,
+                )
+            elif typeclass_query and dbref(typeclass_query):
+                scripts = scripts.filter(id=dbref(typeclass_query))
+            elif typeclass_query:
+                scripts = scripts.filter(
+                    Q(db_key__iexact=typeclass_query)
+                    | Q(db_typeclass_path__iendswith=typeclass_query)
+                )
+        if not _has_rows(scripts):
+            caller.msg("No scripts found.")
+            return CLAIM
+        count = scripts.count() if hasattr(scripts, "count") else len(scripts)
+        if count > 1:
+            prompt = (
+                f"Multiple scripts found: {scripts}. Are you sure you want to "
+                "operate on all of them? [Y]/N? "
+            )
+            while True:
+                reply = yield prompt
+                normalized = (reply or "").strip().lower()
+                if normalized in ("", "y", "yes"):
+                    break
+                if normalized in ("n", "no", "cancel", "abort"):
+                    caller.msg("Aborted.")
+                    return CLAIM
+                caller.msg("Please answer yes or no.")
+        principal = getattr(actor, "account", None)
+        checker = getattr(principal, "has_capability", None)
+        if not checker or not checker("engine.script.control"):
+            caller.msg("You no longer have permission to control scripts.")
+            return CLAIM
+        if obj and not (obj.access(caller, "control") or obj.access(caller, "edit")):
+            caller.msg(f"You no longer have permission to edit {obj.key}.")
+            return CLAIM
+        messages = []
+        for script in scripts:
+            script_key = script.key
+            typeclass_path = script.typeclass_path
+            script_type = f"Script on {obj}" if obj else "Global Script"
+            try:
+                script.delete()
+            except Exception:  # noqa: BLE001 - preserve batch progress and report
+                logger.log_trace()
+                messages.append(
+                    f"{script_type} |rNOT|n |rDeleted|n |r(see log)|n - "
+                    f"{script_key} ({typeclass_path})|n"
+                )
+            else:
+                messages.append(f"{script_type} |rDeleted|n - {script_key} ({typeclass_path})")
+        caller.msg("\n".join(messages))
+        return CLAIM
+
+    @rule(
+        Scripts,
+        phase="carry_out",
+        requires=HasCapability("engine.script.control", principal_scope="account"),
+    )
+    def carry_out_scripts(self, action, actor):
+        """Run native storage-script management (no timer controls)."""
+        if not self._is_actor(actor):
+            return SKIP
+        return self._scripts_flow(action, actor)
+
     # --- @systems ----------------------------------------------------------------
 
     @rule(Systems, phase="carry_out", requires=HasCapability("engine.system.inspect"))
@@ -236,16 +527,12 @@ class CharacterSystemRules(PyRules):
         page_size = 10
         page_count = (len(registered) + page_size - 1) // page_size
         for page_index in range(page_count):
-            table = EvTable(
-                "system", "cadence", "scope", "last fired", "fires", "in flight"
-            )
+            table = EvTable("system", "cadence", "scope", "last fired", "fires", "in flight")
             start = page_index * page_size
             for system in registered[start : start + page_size]:
                 try:
                     last_fired = (
-                        datetime_format(
-                            datetime.datetime.fromtimestamp(float(system.last_run))
-                        )
+                        datetime_format(datetime.datetime.fromtimestamp(float(system.last_run)))
                         if system.last_run
                         else "-"
                     )
@@ -273,10 +560,7 @@ class CharacterSystemRules(PyRules):
                         "?",
                     )
                 table.add_row(*row)
-            caller.msg(
-                f"|wRegistered systems|n "
-                f"|x({page_index + 1}/{page_count})|n:\n{table}"
-            )
+            caller.msg(f"|wRegistered systems|n |x({page_index + 1}/{page_count})|n:\n{table}")
         return CLAIM
 
     # --- @tasks ------------------------------------------------------------------
@@ -373,12 +657,8 @@ class CharacterSystemRules(PyRules):
                 switch_action = getattr(task, action_request, False)
                 if switch_action:
                     action_return = switch_action()
-                    caller.msg(
-                        f"Task action {action_request} completed on task ID {task_id}."
-                    )
-                    caller.msg(
-                        f"The task function {action_request} returned: {action_return}"
-                    )
+                    caller.msg(f"Task action {action_request} completed on task ID {task_id}.")
+                    caller.msg(f"The task function {action_request} returned: {action_return}")
 
             if not name_match_found:
                 caller.msg(f"No tasks deferring function name {arg_func_name} found.")
@@ -419,9 +699,17 @@ class CharacterSystemRules(PyRules):
             *tasks_header, table=tasks_list, maxwidth=width, border="cells", align="c"
         )
         actions = (
-            f"/{switch}"
-            for switch in ("pause", "unpause", "do_task", "call", "remove", "cancel")
+            f"/{switch}" for switch in ("pause", "unpause", "do_task", "call", "remove", "cancel")
         )
         helptxt = f"\nActions: {iter_to_str(actions)}"
         caller.msg(str(tasks_table) + helptxt)
         return CLAIM
+
+
+def __getattr__(name):
+    """Lazily expose the pager to avoid the EvMore/action import cycle."""
+    if name == "ScriptEvMore":
+        from .script_paging import ScriptEvMore
+
+        return ScriptEvMore
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

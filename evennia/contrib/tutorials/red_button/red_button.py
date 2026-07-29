@@ -65,9 +65,7 @@ class CmdPushLidClosed(Command):
         check if the lid is open or closed.
 
         """
-        self.caller.msg(
-            "You cannot push the button = there is a glass lid covering it."
-        )
+        self.caller.msg("You cannot push the button = there is a glass lid covering it.")
 
 
 class CmdNudge(Command):
@@ -436,16 +434,16 @@ class RedButton(DefaultObject):
     # these are the pre-set descriptions. Setting attributes will override
     # these on the fly.
 
-    desc_closed_lid = "This is a large red button, inviting yet evil-looking. A closed glass lid protects it."
+    desc_closed_lid = (
+        "This is a large red button, inviting yet evil-looking. A closed glass lid protects it."
+    )
     desc_open_lid = (
         "This is a large red button, inviting yet evil-looking. "
         "Its glass cover is open and the button exposed."
     )
     auto_close_msg = "The button's glass lid silently slides back in place."
     lamp_breaks_msg = "The lamp flickers, the button going dark."
-    desc_add_lamp_broken = (
-        "\nThe big red button has stopped blinking for the time being."
-    )
+    desc_add_lamp_broken = "\nThe big red button has stopped blinking for the time being."
     # note that this is a list. A random message will display each time
     blink_msgs = [
         "The red button flashes briefly.",

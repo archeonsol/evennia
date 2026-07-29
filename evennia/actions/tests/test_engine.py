@@ -84,9 +84,7 @@ def _sync(d):
         # dispatch/engine are now `async def`; run the coroutine to a Deferred.
         d = ensureDeferred(d)
     out = {}
-    d.addCallbacks(
-        lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f)
-    )
+    d.addCallbacks(lambda r: out.__setitem__("result", r), lambda f: out.__setitem__("fail", f))
     if "fail" in out:
         out["fail"].raiseException()
     if "result" not in out:
@@ -385,11 +383,7 @@ class TestRequiresGate(unittest.TestCase):
 
     def test_requires_true_runs_body(self):
         fired = []
-        _sync(
-            ENGINE.dispatch(
-                Kick(), _actor(perms=["engine.world.build"]), _ctx(StaffOnly(fired))
-            )
-        )
+        _sync(ENGINE.dispatch(Kick(), _actor(perms=["engine.world.build"]), _ctx(StaffOnly(fired))))
         self.assertEqual(fired, ["staff_work"])
 
     def test_capability_predicate_uses_structured_facade(self):
@@ -424,9 +418,7 @@ class TestDryRunAndExplain(unittest.TestCase):
         self.assertTrue(any(pt.result.is_pass for pt in trace.phases))
 
     def test_dry_run_requires_false_still_skips(self):
-        trace = _sync(
-            ENGINE.dispatch(Kick(), _actor(perms=[]), _ctx(StaffOnly([])), dry_run=True)
-        )
+        trace = _sync(ENGINE.dispatch(Kick(), _actor(perms=[]), _ctx(StaffOnly([])), dry_run=True))
         self.assertTrue(any(pt.result.is_skip for pt in trace.phases))
 
     def test_explain_returns_full_trace_all_phases(self):
@@ -498,9 +490,7 @@ class TestInteractiveRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch.object(
-            engine_mod, "_get_input_future", side_effect=fake_deferred
-        )
+        return mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_deferred)
 
     def test_interactive_resumes_with_input_and_claim_stops_phase(self):
         fired = []
@@ -518,9 +508,7 @@ class TestInteractiveRule(unittest.TestCase):
 
     def test_numeric_yield_pauses_via_sleep(self):
         fired = []
-        with mock.patch.object(
-            engine_mod, "_sleep", return_value=succeed(None)
-        ) as slept:
+        with mock.patch.object(engine_mod, "_sleep", return_value=succeed(None)) as slept:
             _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Waiter(fired))))
         self.assertEqual(fired, ["before_wait", "after_wait"])
         slept.assert_called_once_with(5)
@@ -551,9 +539,7 @@ class TestMenuPromptRule(unittest.TestCase):
             d.callback(answer)
             return d
 
-        return mock.patch.object(
-            engine_mod, "_get_input_future", side_effect=fake_deferred
-        )
+        return mock.patch.object(engine_mod, "_get_input_future", side_effect=fake_deferred)
 
     def test_menu_prompt_resumes_with_numeric_choice(self):
         fired = []

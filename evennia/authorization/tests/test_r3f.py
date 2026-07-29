@@ -3,11 +3,11 @@
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
+
 from evennia.accounts.models import AccountDB
 from evennia.actions import HasCapability
 from evennia.authorization.policy import Always
-from evennia.authorization.storage import (grant_capability,
-                                           issue_recovery_grant)
+from evennia.authorization.storage import grant_capability, issue_recovery_grant
 from evennia.commands.command import Command
 from evennia.objects.models import ObjectDB
 from evennia.server.models import AuthorizationPolicyOverride
@@ -139,9 +139,5 @@ class CapabilityOnlyRuntimeTest(TestCase):
         )
         self.assertNotIn("Builder", principal.permissions.all())
         self.assertTrue(principal.has_capability("engine.world.build"))
-        self.assertFalse(
-            AuthorizationPolicyOverride.objects.filter(pk=checkpoint.pk).exists()
-        )
-        self.assertTrue(
-            AuthorizationPolicyOverride.objects.filter(pk=authored.pk).exists()
-        )
+        self.assertFalse(AuthorizationPolicyOverride.objects.filter(pk=checkpoint.pk).exists())
+        self.assertTrue(AuthorizationPolicyOverride.objects.filter(pk=authored.pk).exists())

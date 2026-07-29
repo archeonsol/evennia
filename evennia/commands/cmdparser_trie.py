@@ -53,9 +53,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from django.conf import settings
 
-from evennia.commands.cmdparser import (create_match,
-                                        try_multimatch_differentiators,
-                                        try_num_differentiators)
+from evennia.commands.cmdparser import (
+    create_match,
+    try_multimatch_differentiators,
+    try_num_differentiators,
+)
 from evennia.utils.logger import log_trace, mask_sensitive_input
 from evennia.utils.multimatch import resolve_multimatch_index
 
@@ -197,8 +199,7 @@ def _try_fast_match_exact(cmd: Any, search_string: str) -> Optional[Tuple[str, s
         if not cmd_key:
             continue
         if search_string == cmd_key or (
-            len(search_string) > len(cmd_key)
-            and search_string.startswith(cmd_key + " ")
+            len(search_string) > len(cmd_key) and search_string.startswith(cmd_key + " ")
         ):
             rest = search_string[len(cmd_key) :]
             if arg_re and not arg_re.match(rest):
@@ -352,8 +353,7 @@ def trie_build_matches(raw_string: str, cmdset) -> List[Tuple]:
             return linear_bm(raw_string, cmdset)
     except Exception:
         log_trace(
-            "cmdparser_trie.trie_build_matches raw_input:%s"
-            % mask_sensitive_input(raw_string)
+            "cmdparser_trie.trie_build_matches raw_input:%s" % mask_sensitive_input(raw_string)
         )
         from evennia.commands.cmdparser import build_matches as linear_bm
 
@@ -390,9 +390,7 @@ def cmdparser(raw_string, cmdset, caller, match_index=None, session=None, **kwar
         if match_selector is not None:
             matches.extend(trie_build_matches(new_raw_string, cmdset))
 
-    matches = [
-        match for match in matches if match[2].access(caller, "cmd", session=session)
-    ]
+    matches = [match for match in matches if match[2].access(caller, "cmd", session=session)]
 
     if len(matches) > 1:
         trimmed = [match for match in matches if raw_string.startswith(match[0])]

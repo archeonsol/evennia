@@ -66,9 +66,7 @@ class TestSpawner(BaseEvenniaTest):
     def test_spawn_from_prot(self):
         obj1 = spawner.spawn(self.prot1)
         # check spawned objects have the right tag
-        self.assertEqual(
-            list(protlib.search_objects_with_prototype("testprototype")), obj1
-        )
+        self.assertEqual(list(protlib.search_objects_with_prototype("testprototype")), obj1)
         self.assertEqual(
             [
                 o.key
@@ -84,9 +82,7 @@ class TestSpawner(BaseEvenniaTest):
     def test_spawn_from_str(self):
         protlib.save_prototype(self.prot1)
         obj1 = spawner.spawn(self.prot1["prototype_key"])
-        self.assertEqual(
-            list(protlib.search_objects_with_prototype("testprototype")), obj1
-        )
+        self.assertEqual(list(protlib.search_objects_with_prototype("testprototype")), obj1)
         self.assertEqual(
             [
                 o.key
@@ -107,9 +103,7 @@ class TestUtils(BaseEvenniaTest):
         self.obj1.tags.add("foo")
         new_prot = spawner.prototype_from_object(self.obj1)
         self.assertEqual(new_prot["attrs"], [("test", "testval", None)])
-        self.assertEqual(
-            new_prot["prototype_policies"], protlib._PROTOTYPE_FALLBACK_POLICIES
-        )
+        self.assertEqual(new_prot["prototype_policies"], protlib._PROTOTYPE_FALLBACK_POLICIES)
         self.assertNotIn("locks", new_prot)
         self.assertNotIn("permissions", new_prot)
 
@@ -177,9 +171,7 @@ class TestProtLib(BaseEvenniaTest):
             "typeclass": "evennia.objects.object.DefaultObject",
         }
         homogenized = protlib.homogenize_prototype(prot_without_policies)
-        self.assertEqual(
-            homogenized["prototype_policies"], protlib._PROTOTYPE_FALLBACK_POLICIES
-        )
+        self.assertEqual(homogenized["prototype_policies"], protlib._PROTOTYPE_FALLBACK_POLICIES)
 
 
 class TestProtFuncs(BaseEvenniaTest):
@@ -188,15 +180,11 @@ class TestProtFuncs(BaseEvenniaTest):
         test_prot = {"key1": "value1", "key2": 2}
 
         self.assertEqual(
-            protlib.protfunc_parser(
-                "$protkey(key1)", testing=True, prototype=test_prot
-            ),
+            protlib.protfunc_parser("$protkey(key1)", testing=True, prototype=test_prot),
             "value1",
         )
         self.assertEqual(
-            protlib.protfunc_parser(
-                "$protkey(key2)", testing=True, prototype=test_prot
-            ),
+            protlib.protfunc_parser("$protkey(key2)", testing=True, prototype=test_prot),
             2,
         )
 
@@ -230,13 +218,11 @@ class TestPrototypeStorage(BaseEvenniaTest):
 
         self.assertEqual(prot1["prototype_desc"], "testdesc1")
 
+        self.assertEqual(prot1["prototype_tags"], [("foo1", _PROTOTYPE_TAG_META_CATEGORY)])
         self.assertEqual(
-            prot1["prototype_tags"], [("foo1", _PROTOTYPE_TAG_META_CATEGORY)]
-        )
-        self.assertEqual(
-            protlib.DbPrototype.objects.get_by_tag(
-                "foo1", _PROTOTYPE_TAG_META_CATEGORY
-            )[0].db.prototype,
+            protlib.DbPrototype.objects.get_by_tag("foo1", _PROTOTYPE_TAG_META_CATEGORY)[
+                0
+            ].db.prototype,
             prot1,
         )
 
@@ -278,12 +264,8 @@ class TestPrototypeStorage(BaseEvenniaTest):
 
         # partial match
         with mock.patch.object(protlib, "_MODULE_PROTOTYPES", {}):
-            self.assertCountEqual(
-                protlib.search_prototype("prot"), [prot1b, prot2, prot3]
-            )
-            self.assertCountEqual(
-                protlib.search_prototype(tags="foo1"), [prot1b, prot2, prot3]
-            )
+            self.assertCountEqual(protlib.search_prototype("prot"), [prot1b, prot2, prot3])
+            self.assertCountEqual(protlib.search_prototype(tags="foo1"), [prot1b, prot2, prot3])
 
         self.assertTrue(str(str(protlib.list_prototypes(self.char1))))
 
@@ -342,9 +324,7 @@ class Test2474(BaseEvenniaTest):
         Test magic is inherited.
 
         """
-        sting = spawner.spawn(
-            self.prototypes["STING"], prototype_parents=self.prototypes
-        )[0]
+        sting = spawner.spawn(self.prototypes["STING"], prototype_parents=self.prototypes)[0]
         self.assertEqual(sting.db.magic, True)
 
     def test_non_magic_spawn(self):
@@ -352,9 +332,7 @@ class Test2474(BaseEvenniaTest):
         Test inverse - no magic.
 
         """
-        sting = spawner.spawn(
-            self.prototypes["WEAPON"], prototype_parents=self.prototypes
-        )[0]
+        sting = spawner.spawn(self.prototypes["WEAPON"], prototype_parents=self.prototypes)[0]
         self.assertEqual(sting.db.magic, False)
 
 

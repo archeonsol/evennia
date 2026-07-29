@@ -25,8 +25,7 @@ class DefaultCharacter(DefaultObject):
     # Tuple of types used for indexing inventory contents. Characters generally wouldn't be in
     # anyone's inventory, but this also governs displays in room contents.
     _content_types = ("character",)
-    from evennia.authorization.policy import (Never, PredicateRequirement,
-                                              RequiresCapability)
+    from evennia.authorization.policy import Never, PredicateRequirement, RequiresCapability
 
     authorization_policies = {
         **DefaultObject.authorization_policies,
@@ -164,9 +163,7 @@ class DefaultCharacter(DefaultObject):
 
         """
         if account and cls.objects.filter_family(db_key__iexact=name):
-            return _("|rA character named '|w{name}|r' already exists.|n").format(
-                name=name
-            )
+            return _("|rA character named '|w{name}|r' already exists.|n").format(name=name)
 
     def basetype_setup(self):
         """
@@ -204,17 +201,13 @@ class DefaultCharacter(DefaultObject):
         if self.location is None:
             # Make sure character's location is never None before being puppeted.
             # Return to last location (or home, which should always exist)
-            location = (
-                self.db.prelogout_location if self.db.prelogout_location else self.home
-            )
+            location = self.db.prelogout_location if self.db.prelogout_location else self.home
             if location:
                 self.location = location
                 self.location.at_post_arrive(self, None)
 
         if self.location:
-            self.db.prelogout_location = (
-                self.location
-            )  # save location again to be sure.
+            self.db.prelogout_location = self.location  # save location again to be sure.
         else:
             account.msg(
                 _("|r{obj} has no location and no home is set.|n").format(obj=self),
@@ -255,9 +248,7 @@ class DefaultCharacter(DefaultObject):
 
         def message(obj, from_obj):
             obj.msg(
-                _("{name} has entered the game.").format(
-                    name=self.get_display_name(obj)
-                ),
+                _("{name} has entered the game.").format(name=self.get_display_name(obj)),
                 from_obj=from_obj,
             )
 

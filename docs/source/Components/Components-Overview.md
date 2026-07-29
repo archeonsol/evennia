@@ -30,13 +30,15 @@ Permissions.md
 Locks.md
 ```
 
-## Commands
+## Player input
 
-Evennia's Command system handle everything sent to the server by the user.
+Evennia's action engine handles player input. Legacy Command and CmdSet pages
+remain during the compatibility retirement.
 
 ```{toctree} 
 :maxdepth: 2
 
+Default-Actions.md
 Commands.md
 Command-Sets.md
 Default-Commands.md

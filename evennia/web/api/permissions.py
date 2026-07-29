@@ -15,17 +15,11 @@ class EvenniaPermission(permissions.BasePermission):
     """
 
     # subclass this to change these permissions
-    LIST_CAPABILITY = settings.REST_FRAMEWORK.get(
-        "LIST_CAPABILITY", "engine.object.examine"
-    )
-    CREATE_CAPABILITY = settings.REST_FRAMEWORK.get(
-        "CREATE_CAPABILITY", "engine.object.create"
-    )
+    LIST_CAPABILITY = settings.REST_FRAMEWORK.get("LIST_CAPABILITY", "engine.object.examine")
+    CREATE_CAPABILITY = settings.REST_FRAMEWORK.get("CREATE_CAPABILITY", "engine.object.create")
     view_operations = settings.REST_FRAMEWORK.get("VIEW_OPERATIONS", ["examine"])
     destroy_operations = settings.REST_FRAMEWORK.get("DESTROY_OPERATIONS", ["delete"])
-    update_operations = settings.REST_FRAMEWORK.get(
-        "UPDATE_OPERATIONS", ["control", "edit"]
-    )
+    update_operations = settings.REST_FRAMEWORK.get("UPDATE_OPERATIONS", ["control", "edit"])
 
     def has_permission(self, request, view):
         """Checks for permissions

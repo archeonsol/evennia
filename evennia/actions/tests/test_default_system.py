@@ -6,19 +6,31 @@ with fakes for the scheduler registry, the task handler, and player input
 (``@py`` console mode drives the engine's generator suspension).
 """
 
+import datetime
 import sys
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from twisted.internet.defer import Deferred
+
+from evennia.actions.default import python_console as python_console_module
 from evennia.actions.default import system as system_module
-from evennia.actions.default.system import (CharacterSystemRules, Py, PyRules,
-                                            Systems, Tasks)
+from evennia.actions.default.system import (
+    CharacterSystemRules,
+    Objects,
+    Py,
+    PyRules,
+    Scripts,
+    Systems,
+    Tasks,
+)
 from evennia.actions.engine import RuleEngine
 from evennia.actions.tests.fakes import FakeChar, dispatch, make_actor
+from evennia.objects import models as object_models
+from evennia.scripts import models as script_models
 from evennia.scripts import taskhandler as taskhandler_module
 from evennia.utils import systems as systems_module
-from twisted.internet.defer import Deferred
 
 # the package re-exports shadow the engine submodule with the singleton; fetch
 # the real module for patching its generator-input seam.
@@ -74,9 +86,7 @@ class TestSystems(unittest.TestCase):
 
     def test_lists_registered_systems(self):
         char, actor = _setup(perms=("Builder",))
-        with mock.patch.object(
-            systems_module, "all_systems", return_value=[_FakeSystem()]
-        ):
+        with mock.patch.object(systems_module, "all_systems", return_value=[_FakeSystem()]):
             self._systems(char, actor)
         out = "\n".join(_texts(char))
         self.assertIn("Registered systems", out)
@@ -179,9 +189,7 @@ class TestTasks(unittest.TestCase):
     def _tasks(self, char, actor, raw="", switches=(), handler=None):
         action = Tasks.parse(raw, actor, switches=switches, verb="@tasks")
         patches = [
-            mock.patch.object(
-                taskhandler_module, "TASK_HANDLER", handler or _FakeTaskHandler()
-            ),
+            mock.patch.object(taskhandler_module, "TASK_HANDLER", handler or _FakeTaskHandler()),
             mock.patch.object(taskhandler_module, "TaskHandlerTask", _FakeTask),
         ]
         with patches[0], patches[1]:
@@ -210,9 +218,7 @@ class TestTasks(unittest.TestCase):
     def test_action_by_unknown_function_name(self):
         char, actor = _setup()
         handler = _FakeTaskHandler({1: _task_entry()})
-        self._tasks(
-            char, actor, raw="bogus_func", switches=("cancel",), handler=handler
-        )
+        self._tasks(char, actor, raw="bogus_func", switches=("cancel",), handler=handler)
         self.assertTrue(any("No tasks deferring" in m for m in _texts(char)))
 
     def test_action_by_id_asks_confirmation(self):
@@ -313,6 +319,16 @@ class TestPy(unittest.TestCase):
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
 
+    def test_editor_save_rechecks_runtime_capability(self):
+        char, _ = _setup()
+        char.db._py_measure_time = False
+        char.db._py_clientraw = False
+        char.permissions.remove("Developer")
+        with mock.patch.object(python_console_module, "run_code_snippet") as run:
+            python_console_module.py_code(char, "dangerous()")
+        run.assert_not_called()
+        self.assertTrue(any("permission" in text for text in _texts(char)))
+
 
 class TestPyAccountScope(unittest.TestCase):
     def test_effective_guard_lets_account_rules_fire(self):
@@ -331,6 +347,215 @@ class TestPyAccountScope(unittest.TestCase):
         action = Py.parse("1+1", actor, verb="@py")
         dispatch(action, actor, [account])
         self.assertTrue(any(m == "2" for m in _texts(account)))
+
+
+class _SystemAccount(FakeChar):
+    """Account principal carrying the new account-scoped system grants."""
+
+    def has_capability(self, capability):
+        return capability in {"engine.system.inspect", "engine.script.control"}
+
+
+def _system_actor():
+    """Build a character provider with an authorized account principal."""
+    char = Wizard()
+    account = _SystemAccount(key="account")
+    char.account = account
+    return char, make_actor(char, account=account)
+
+
+class _Query(list):
+    """Tiny queryset-shaped list for native system tests."""
+
+    def all(self):
+        return self
+
+    def exclude(self, **kwargs):
+        return self
+
+    def filter(self, **kwargs):
+        result = self
+        if "db_obj" in kwargs:
+            result = [script for script in result if script.obj is kwargs["db_obj"]]
+        if "db_key__iexact" in kwargs:
+            result = [
+                script
+                for script in result
+                if script.key.lower() == kwargs["db_key__iexact"].lower()
+            ]
+        if "db_typeclass_path__iendswith" in kwargs:
+            result = [
+                script
+                for script in result
+                if script.typeclass_path.endswith(kwargs["db_typeclass_path__iendswith"])
+            ]
+        return _Query(result)
+
+    def order_by(self, *args):
+        return self
+
+    def count(self):
+        return len(self)
+
+
+class TestObjects(unittest.TestCase):
+    """Native ``@objects`` statistics use the dedicated inspect grant."""
+
+    def test_totals_and_recent_objects(self):
+        char, actor = _system_actor()
+        recent = SimpleNamespace(
+            date_created=datetime.datetime(2026, 1, 1),
+            dbref="#9",
+            key="box",
+            path="game.Box",
+        )
+        manager = mock.Mock()
+        manager.count.return_value = 1
+        manager.get_typeclass_totals.return_value = [
+            {"typeclass": "game.Box", "count": 1, "percent": 100.0}
+        ]
+        manager.all.return_value = _Query([recent])
+        fake_db = SimpleNamespace(objects=manager)
+        family = SimpleNamespace(objects=SimpleNamespace(all_family=lambda: _Query()))
+        with (
+            mock.patch.object(object_models, "ObjectDB", fake_db),
+            mock.patch("evennia.utils.utils.class_from_module", return_value=family),
+        ):
+            dispatch(Objects.parse("5", actor, verb="@objects"), actor, [char])
+        output = "\n".join(_texts(char))
+        self.assertIn("Object subtype totals", output)
+        self.assertIn("game.Box", output)
+        self.assertIn("box", output)
+
+
+class TestScripts(unittest.TestCase):
+    """Native storage-script lookup, creation, attachment, and deletion."""
+
+    def _run(self, raw="", switches=(), scripts=()):
+        char, actor = _system_actor()
+        manager = mock.Mock()
+        query = _Query(scripts)
+        manager.all.return_value = query
+        manager.filter.side_effect = lambda **kwargs: query.filter(**kwargs)
+        manager.get_all_scripts.side_effect = lambda query_: query
+        fake_db = SimpleNamespace(objects=manager)
+        action = Scripts.parse(raw, actor, switches=switches, verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch.object(system_module, "_show_scripts") as pager,
+        ):
+            trace = dispatch(action, actor, [char])
+        return char, actor, trace, pager
+
+    def test_lists_scripts_with_native_pager(self):
+        script = SimpleNamespace(key="store", typeclass_path="game.Store", obj=None)
+        _, _, _, pager = self._run(scripts=[script])
+        pager.assert_called_once()
+
+    def test_creates_global_storage_script(self):
+        char, actor = _system_actor()
+        manager = mock.Mock()
+        manager.filter.return_value = _Query()
+        fake_db = SimpleNamespace(objects=manager)
+        created = SimpleNamespace(key="store", typeclass_path="game.Store")
+        action = Scripts.parse("store:game.Store", actor, verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch("evennia.utils.create.create_script", return_value=created),
+            mock.patch.object(system_module, "_show_scripts"),
+        ):
+            dispatch(action, actor, [char])
+        self.assertTrue(any("Global Script Created" in text for text in _texts(char)))
+
+    def test_multiple_delete_requires_confirmation(self):
+        scripts = [
+            SimpleNamespace(
+                key=f"store-{index}",
+                typeclass_path="game.Store",
+                obj=None,
+                delete=mock.Mock(),
+            )
+            for index in range(2)
+        ]
+        char, actor = _system_actor()
+        query = _Query(scripts)
+        manager = mock.Mock()
+        manager.filter.return_value = query
+        fake_db = SimpleNamespace(objects=manager)
+        answer = Deferred()
+        answer.callback("no")
+        action = Scripts.parse("game.Store", actor, switches=("delete",), verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch.object(engine_mod, "_get_input_future", return_value=answer),
+        ):
+            dispatch(action, actor, [char])
+        self.assertTrue(any("Aborted" in text for text in _texts(char)))
+        for script in scripts:
+            script.delete.assert_not_called()
+
+    def test_missing_object_does_not_fall_through_to_global_create(self):
+        char, actor = _system_actor()
+        manager = mock.Mock()
+        manager.filter.return_value = _Query()
+        fake_db = SimpleNamespace(objects=manager)
+        action = Scripts.parse("missing = store:game.Store", actor, verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch("evennia.utils.create.create_script") as create_script,
+        ):
+            dispatch(action, actor, [char])
+        create_script.assert_not_called()
+
+    def test_lone_key_lookup_finds_existing_script(self):
+        char, actor = _system_actor()
+        script = SimpleNamespace(key="store", typeclass_path="game.Storage", obj=None)
+        query = _Query([script])
+        manager = mock.Mock()
+        manager.filter.side_effect = lambda **kwargs: query.filter(**kwargs)
+        fake_db = SimpleNamespace(objects=manager)
+        action = Scripts.parse("store", actor, verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch.object(system_module, "_show_scripts") as pager,
+            mock.patch("evennia.utils.create.create_script") as create_script,
+        ):
+            dispatch(action, actor, [char])
+        pager.assert_called_once()
+        create_script.assert_not_called()
+
+    def test_invalid_confirmation_reprompts_and_revocation_aborts(self):
+        scripts = [
+            SimpleNamespace(
+                key=f"store-{index}", typeclass_path="game.Store", obj=None, delete=mock.Mock()
+            )
+            for index in range(2)
+        ]
+        char, actor = _system_actor()
+        query = _Query(scripts)
+        manager = mock.Mock()
+        manager.filter.return_value = query
+        fake_db = SimpleNamespace(objects=manager)
+        answers = iter(["maybe", "yes"])
+
+        def input_future(actor_, prompt):
+            deferred = Deferred()
+            answer = next(answers)
+            if answer == "yes":
+                actor_.account.has_capability = lambda capability: False
+            deferred.callback(answer)
+            return deferred
+
+        action = Scripts.parse("game.Store", actor, switches=("delete",), verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch.object(engine_mod, "_get_input_future", side_effect=input_future),
+        ):
+            dispatch(action, actor, [char])
+        self.assertTrue(any("Please answer" in text for text in _texts(char)))
+        self.assertTrue(any("permission" in text for text in _texts(char)))
+        for script in scripts:
+            script.delete.assert_not_called()
 
 
 if __name__ == "__main__":

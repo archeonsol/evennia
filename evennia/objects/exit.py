@@ -243,9 +243,7 @@ class DefaultExit(DefaultObject):
 
         """
 
-        if "force_init" in kwargs or not self.cmdset.has_cmdset(
-            "ExitCmdSet", must_be_default=True
-        ):
+        if "force_init" in kwargs or not self.cmdset.has_cmdset("ExitCmdSet", must_be_default=True):
             # we are resetting, or no exit-cmdset was set. Create one dynamically.
             self.cmdset.add_default(self.create_exit_cmdset(self), persistent=False)
 
@@ -284,9 +282,7 @@ class DefaultExit(DefaultObject):
             self.at_failed_traverse(traversing_object)
             return
         source_location = traversing_object.location
-        if traversing_object.move_to(
-            target_location, move_type="traverse", exit_obj=self
-        ):
+        if traversing_object.move_to(target_location, move_type="traverse", exit_obj=self):
             self.at_post_traverse(traversing_object, source_location)
         else:
             if self.db.err_traverse:
@@ -340,9 +336,7 @@ class DefaultExit(DefaultObject):
             will be a queryset of all matching exits. Otherwise, it will be the first Exit matched.
 
         """
-        query = ObjectDB.objects.filter(
-            db_location=self.destination, db_destination=self.location
-        )
+        query = ObjectDB.objects.filter(db_location=self.destination, db_destination=self.location)
         if return_all:
             return query
         return query.first()

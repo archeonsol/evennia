@@ -355,9 +355,7 @@ class TestFlushRetry(BaseEvenniaTest):
         self.handler.add("x", 1)
         self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
         with patch.object(self.obj1, "save", side_effect=Exception("db down")):
-            with patch(
-                "evennia.typeclasses.jsonb_handler._spool_write", return_value=False
-            ):
+            with patch("evennia.typeclasses.jsonb_handler._spool_write", return_value=False):
                 result = self.backend._do_flush()
         self.assertTrue(self.backend._dirty)
         self.assertFalse(result)

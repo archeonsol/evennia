@@ -56,9 +56,7 @@ class PolicyHandler:
             ).delete()
             if deleted:
                 bump_resource_generation(self.resource)
-                transaction.on_commit(
-                    lambda: bump_resource_generation(self.resource)
-                )
+                transaction.on_commit(lambda: bump_resource_generation(self.resource))
         return bool(deleted)
 
     def clear(self) -> int:
@@ -70,9 +68,7 @@ class PolicyHandler:
             ).delete()
             if deleted:
                 bump_resource_generation(self.resource)
-                transaction.on_commit(
-                    lambda: bump_resource_generation(self.resource)
-                )
+                transaction.on_commit(lambda: bump_resource_generation(self.resource))
         return int(deleted)
 
     def get(self, operation: str) -> Policy | None:

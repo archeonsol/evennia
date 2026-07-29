@@ -263,20 +263,14 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         """
         caller = self.caller
         # first see if this is a personal alias
-        channelname = (
-            caller.nicks.get(key=channelname, category="channel") or channelname
-        )
+        channelname = caller.nicks.get(key=channelname, category="channel") or channelname
 
         # always try the exact match first.
-        channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(
-            channelname, exact=True
-        )
+        channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(channelname, exact=True)
 
         if not channels and not exact:
             # try fuzzy matching as well
-            channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(
-                channelname, exact=exact
-            )
+            channels = CHANNEL_DEFAULT_TYPECLASS.objects.channel_search(channelname, exact=exact)
 
         # check permissions
         channels = [
@@ -343,9 +337,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
         def send_msg(lines):
             return self.msg(
-                "".join(
-                    line.split("[-]", 1)[1] if "[-]" in line else line for line in lines
-                )
+                "".join(line.split("[-]", 1)[1] if "[-]" in line else line for line in lines)
             )
 
         # asynchronously tail the log file
@@ -372,9 +364,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         # this sets up aliases in post_join_channel by default
         result = channel.connect(caller)
 
-        return result, (
-            "" if result else f"Were not allowed to subscribe to channel {channel.key}"
-        )
+        return result, ("" if result else f"Were not allowed to subscribe to channel {channel.key}")
 
     def unsub_from_channel(self, channel, **kwargs):
         """
@@ -398,9 +388,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         # this will also clean aliases
         result = channel.disconnect(caller)
 
-        return result, (
-            "" if result else f"Could not unsubscribe from channel {channel.key}"
-        )
+        return result, ("" if result else f"Could not unsubscribe from channel {channel.key}")
 
     def add_alias(self, channel, alias, **kwargs):
         """
@@ -464,9 +452,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
         """
         chan_key = channel.key.lower()
-        nicktuples = self.caller.nicks.get(
-            category="channel", return_tuple=True, return_list=True
-        )
+        nicktuples = self.caller.nicks.get(category="channel", return_tuple=True, return_list=True)
         if nicktuples:
             return [tup[2] for tup in nicktuples if tup[3].lower() == chan_key]
         return []
@@ -629,13 +615,9 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             nick.delete()
         channel.disconnect(target)
         reason = f" Reason: {reason}" if reason else ""
-        target.msg(
-            f"You were booted from channel {channel.key} by {self.caller.key}.{reason}"
-        )
+        target.msg(f"You were booted from channel {channel.key} by {self.caller.key}.{reason}")
         if not quiet:
-            channel.msg(
-                f"{target.key} was booted from channel by {self.caller.key}.{reason}"
-            )
+            channel.msg(f"{target.key} was booted from channel by {self.caller.key}.{reason}")
 
         logger.log_sec(
             f"Channel Boot: {target} (Channel: {channel}, "
@@ -782,10 +764,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             if chan.access(self.caller, "control"):
                 authored = chan.policies.all()
                 policies = (
-                    "; ".join(
-                        f"{key}={policy.to_data()!r}"
-                        for key, policy in authored.items()
-                    )
+                    "; ".join(f"{key}={policy.to_data()!r}" for key, policy in authored.items())
                     or "class defaults"
                 )
                 chanid = chan.id
@@ -796,11 +775,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
                     chanid,
                     "{key}{aliases}".format(
                         key=chan.key,
-                        aliases=(
-                            ";" + ";".join(chan.aliases.all())
-                            if chan.aliases.all()
-                            else ""
-                        ),
+                        aliases=(";" + ";".join(chan.aliases.all()) if chan.aliases.all() else ""),
                     ),
                     my_aliases,
                     policies,
@@ -880,9 +855,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             subscribed, _ = self.list_channels()
             table = self.display_subbed_channels(subscribed)
 
-            self.msg(
-                f"\n|wChannel subscriptions|n (use |w/all|n to see all available):\n{table}"
-            )
+            self.msg(f"\n|wChannel subscriptions|n (use |w/all|n to see all available):\n{table}")
             return
 
         if not self.switches and not self.args:
@@ -897,17 +870,13 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             config = self.lhs
             if not config:
-                self.msg(
-                    "To create: channel/create name[;aliases][:typeclass] [= description]"
-                )
+                self.msg("To create: channel/create name[;aliases][:typeclass] [= description]")
                 return
             name, *typeclass = config.rsplit(":", 1)
             typeclass = typeclass[0] if typeclass else None
             name, *aliases = name.rsplit(";")
             description = self.rhs or ""
-            chan, err = self.create_channel(
-                name, description, typeclass=typeclass, aliases=aliases
-            )
+            chan, err = self.create_channel(name, description, typeclass=typeclass, aliases=aliases)
             if chan:
                 self.msg(f"Created (and joined) new channel '{chan.key}'.")
             else:
@@ -943,9 +912,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
         for channel_name in channel_names:
             # find a channel by fuzzy-matching. This also checks
             # 'listen/control' perms.
-            found_channels = self.search_channel(
-                channel_name, exact=False, handle_errors=False
-            )
+            found_channels = self.search_channel(channel_name, exact=False, handle_errors=False)
             if not found_channels:
                 errors.append(
                     f"No channel found matching '{channel_name}' "
@@ -1031,9 +998,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             # un-subscribe from a channel
             success, err = self.unsub_from_channel(channel)
             if success:
-                self.msg(
-                    f"You un-subscribed from channel {channel.key}. All aliases were cleared."
-                )
+                self.msg(f"You un-subscribed from channel {channel.key}. All aliases were cleared.")
             else:
                 self.msg(err)
             return
@@ -1130,9 +1095,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             operation = operation.strip()
             declaration = declaration.strip()
             if not operation or not declaration:
-                self.msg(
-                    "Usage: channel/policy channel = operation=public|disabled|capability"
-                )
+                self.msg("Usage: channel/policy channel = operation=public|disabled|capability")
                 return
             self.set_policy(channel, operation, declaration)
             self.msg("Added or updated channel policy.")
@@ -1163,9 +1126,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
                 return
 
             if not self.rhs:
-                self.msg(
-                    "Usage: channel/boot channel[,channel,...] = username [:reason]"
-                )
+                self.msg("Usage: channel/boot channel[,channel,...] = username [:reason]")
                 return
 
             target_str, *reason = self.rhs.rsplit(":", 1)
@@ -1173,9 +1134,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             for chan in channels:
                 if not chan.access(caller, "control"):
-                    self.msg(
-                        f"You need 'control'-access to boot a user from {chan.key}."
-                    )
+                    self.msg(f"You need 'control'-access to boot a user from {chan.key}.")
                     return
 
                 # the target must be a member of all given channels
@@ -1186,21 +1145,15 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             def _boot_user(caller, *args, **kwargs):
                 for chan in channels:
-                    success, err = self.boot_user(
-                        chan, target, quiet=False, reason=reason
-                    )
+                    success, err = self.boot_user(chan, target, quiet=False, reason=reason)
                     if success:
                         self.msg(f"Booted {target.key} from channel {chan.key}.")
                     else:
-                        self.msg(
-                            f"Cannot boot {target.key} from channel {chan.key}: {err}"
-                        )
+                        self.msg(f"Cannot boot {target.key} from channel {chan.key}: {err}")
 
             channames = ", ".join(chan.key for chan in channels)
             reasonwarn = (
-                ". Also note that your reason will be echoed to the channel"
-                if reason
-                else ""
+                ". Also note that your reason will be echoed to the channel" if reason else ""
             )
             ask_yes_no(
                 caller,
@@ -1226,9 +1179,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
                 # view bans for channels
 
                 if not channel.access(caller, "control"):
-                    self.msg(
-                        f"You need 'control'-access to view bans on channel {channel.key}"
-                    )
+                    self.msg(f"You need 'control'-access to view bans on channel {channel.key}")
                     return
 
                 bans = [
@@ -1245,9 +1196,7 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             for chan in channels:
                 # the target must be a member of all given channels
                 if not chan.access(caller, "control"):
-                    self.msg(
-                        f"You don't have access to ban users on channel {chan.key}"
-                    )
+                    self.msg(f"You don't have access to ban users on channel {chan.key}")
                     return
 
                 target = caller.search(target_str, candidates=chan.subscriptions.all())
@@ -1258,21 +1207,15 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
 
             def _ban_user(caller, *args, **kwargs):
                 for chan in channels:
-                    success, err = self.ban_user(
-                        chan, target, quiet=False, reason=reason
-                    )
+                    success, err = self.ban_user(chan, target, quiet=False, reason=reason)
                     if success:
                         self.msg(f"Banned {target.key} from channel {chan.key}.")
                     else:
-                        self.msg(
-                            f"Cannot boot {target.key} from channel {chan.key}: {err}"
-                        )
+                        self.msg(f"Cannot boot {target.key} from channel {chan.key}: {err}")
 
             channames = ", ".join(chan.key for chan in channels)
             reasonwarn = (
-                ". Also note that your reason will be echoed to the channel"
-                if reason
-                else ""
+                ". Also note that your reason will be echoed to the channel" if reason else ""
             )
             ask_yes_no(
                 caller,
@@ -1303,17 +1246,13 @@ class CmdChannel(COMMAND_DEFAULT_CLASS):
             for chan in channels:
                 # the target must be a member of all given channels
                 if not chan.access(caller, "control"):
-                    self.msg(
-                        f"You don't have access to unban users on channel {chan.key}"
-                    )
+                    self.msg(f"You don't have access to unban users on channel {chan.key}")
                     return
                 banlists.extend(chan.banlist)
 
             target = caller.search(target_str, candidates=banlists)
             if not target:
-                self.msg(
-                    f"Could not find a banned user '{target_str}' in given channel(s)."
-                )
+                self.msg(f"Could not find a banned user '{target_str}' in given channel(s).")
                 return
 
             for chan in channels:
@@ -1378,31 +1317,23 @@ class CmdPage(COMMAND_DEFAULT_CLASS):
         caller = self.caller
 
         # get the messages we've sent (not to channels)
-        pages_we_sent = Msg.objects.get_messages_by_sender(caller).order_by(
-            "-db_date_created"
-        )
+        pages_we_sent = Msg.objects.get_messages_by_sender(caller).order_by("-db_date_created")
         # get only messages tagged as pages or not tagged at all (legacy pages)
         pages_we_sent = pages_we_sent.filter(
             Q(db_tags__db_key__iexact="page", db_tags__db_category__iexact="comms")
             | Q(db_tags__isnull=True)
         )
         # we need to default to True to allow for legacy pages
-        pages_we_sent = [
-            msg for msg in pages_we_sent if msg.access(caller, "read", default=True)
-        ]
+        pages_we_sent = [msg for msg in pages_we_sent if msg.access(caller, "read", default=True)]
 
         # get last messages we've got
-        pages_we_got = Msg.objects.get_messages_by_receiver(caller).order_by(
-            "-db_date_created"
-        )
+        pages_we_got = Msg.objects.get_messages_by_receiver(caller).order_by("-db_date_created")
         pages_we_got = pages_we_got.filter(
             Q(db_tags__db_key__iexact="page", db_tags__db_category__iexact="comms")
             | Q(db_tags__isnull=True)
         )
         # we need to default to True to allow for legacy pages
-        pages_we_got = [
-            msg for msg in pages_we_got if msg.access(caller, "read", default=True)
-        ]
+        pages_we_got = [msg for msg in pages_we_got if msg.access(caller, "read", default=True)]
 
         # get only messages tagged as pages or not tagged at all (legacy pages)
         targets, message, number = [], None, None
@@ -1561,10 +1492,7 @@ def _list_bots(cmd):
 
     """
     ircbots = [
-        bot
-        for bot in AccountDB.objects.filter(
-            db_is_bot=True, username__startswith="ircbot-"
-        )
+        bot for bot in AccountDB.objects.filter(db_is_bot=True, username__startswith="ircbot-")
     ]
     if ircbots:
         table = cmd.styled_table(
@@ -1634,9 +1562,7 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
         """Setup the irc-channel mapping"""
 
         if not settings.IRC_ENABLED:
-            string = (
-                """IRC is not enabled. You need to activate it in game/settings.py."""
-            )
+            string = """IRC is not enabled. You need to activate it in game/settings.py."""
             self.msg(string)
             return
 
@@ -1645,11 +1571,7 @@ class CmdIRC2Chan(COMMAND_DEFAULT_CLASS):
             self.msg(_list_bots(self))
             return
 
-        if (
-            "disconnect" in self.switches
-            or "remove" in self.switches
-            or "delete" in self.switches
-        ):
+        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
             botname = f"ircbot-{self.lhs}"
             matches = AccountDB.objects.filter(db_is_bot=True, username=botname)
             dbref = utils.dbref(self.lhs)
@@ -1767,9 +1689,7 @@ class CmdIRCStatus(COMMAND_DEFAULT_CLASS):
         channel = ircbot.db.irc_channel
         network = ircbot.db.irc_network
         port = ircbot.db.irc_port
-        chtext = (
-            f"IRC bot '{ircbot.db.irc_botname}' on channel {channel} ({network}:{port})"
-        )
+        chtext = f"IRC bot '{ircbot.db.irc_botname}' on channel {channel} ({network}:{port})"
         if option == "ping":
             # check connection by sending outself a ping through the server.
             self.msg(f"Pinging through {chtext}.")
@@ -1827,9 +1747,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
 
         # checking we have all we need
         if not settings.RSS_ENABLED:
-            string = (
-                """RSS is not enabled. You need to activate it in game/settings.py."""
-            )
+            string = """RSS is not enabled. You need to activate it in game/settings.py."""
             self.msg(string)
             return
         try:
@@ -1848,9 +1766,7 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
             # show all connections
             rssbots = [
                 bot
-                for bot in AccountDB.objects.filter(
-                    db_is_bot=True, username__startswith="rssbot-"
-                )
+                for bot in AccountDB.objects.filter(db_is_bot=True, username__startswith="rssbot-")
             ]
             if rssbots:
                 table = self.styled_table(
@@ -1873,18 +1789,12 @@ class CmdRSS2Chan(COMMAND_DEFAULT_CLASS):
                 self.msg("No rss bots found.")
             return
 
-        if (
-            "disconnect" in self.switches
-            or "remove" in self.switches
-            or "delete" in self.switches
-        ):
+        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
             botname = f"rssbot-{self.lhs}"
             matches = AccountDB.objects.filter(db_is_bot=True, db_key=botname)
             if not matches:
                 # try dbref match
-                matches = AccountDB.objects.filter(
-                    db_is_bot=True, id=self.args.lstrip("#")
-                )
+                matches = AccountDB.objects.filter(db_is_bot=True, id=self.args.lstrip("#"))
             if matches:
                 matches[0].delete()
                 self.msg("RSS connection destroyed.")
@@ -1967,34 +1877,24 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
                     maxwidth=settings.CLIENT_DEFAULT_WIDTH,
                 )
                 for gwbot in gwbots:
-                    table.add_row(
-                        gwbot.id, gwbot.db.ev_channel, gwbot.db.grapevine_channel
-                    )
+                    table.add_row(gwbot.id, gwbot.db.ev_channel, gwbot.db.grapevine_channel)
                 self.msg(table)
             else:
                 self.msg("No grapevine bots found.")
             return
 
-        if (
-            "disconnect" in self.switches
-            or "remove" in self.switches
-            or "delete" in self.switches
-        ):
+        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
             botname = f"grapevinebot-{self.lhs}"
             matches = AccountDB.objects.filter(db_is_bot=True, db_key=botname)
 
             if not matches:
                 # try dbref match
-                matches = AccountDB.objects.filter(
-                    db_is_bot=True, id=self.args.lstrip("#")
-                )
+                matches = AccountDB.objects.filter(db_is_bot=True, id=self.args.lstrip("#"))
             if matches:
                 matches[0].delete()
                 self.msg("Grapevine connection destroyed.")
             else:
-                self.msg(
-                    "Grapevine connection/bot could not be removed, does it exist?"
-                )
+                self.msg("Grapevine connection/bot could not be removed, does it exist?")
             return
 
         if not self.args or not self.rhs:
@@ -2017,9 +1917,7 @@ class CmdGrapevine2Chan(COMMAND_DEFAULT_CLASS):
                 self.msg(f"Reusing bot '{botname}' ({bot.dbref})")
         else:
             # create a new bot
-            bot = create.create_account(
-                botname, None, None, typeclass=bots.GrapevineBot
-            )
+            bot = create.create_account(botname, None, None, typeclass=bots.GrapevineBot)
 
         bot.start(ev_channel=channel, grapevine_channel=grapevine_channel)
         self.msg(f"Grapevine connection created {channel} <-> {grapevine_channel}.")
@@ -2074,17 +1972,12 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
             return
 
         discord_bot = [
-            bot
-            for bot in AccountDB.objects.filter(db_is_bot=True, username="DiscordBot")
+            bot for bot in AccountDB.objects.filter(db_is_bot=True, username="DiscordBot")
         ]
         if not discord_bot:
             # create a new discord bot
-            bot_class = class_from_module(
-                settings.DISCORD_BOT_CLASS, fallback=bots.DiscordBot
-            )
-            discord_bot = create.create_account(
-                "DiscordBot", None, None, typeclass=bot_class
-            )
+            bot_class = class_from_module(settings.DISCORD_BOT_CLASS, fallback=bots.DiscordBot)
+            discord_bot = create.create_account("DiscordBot", None, None, typeclass=bot_class)
             discord_bot.start()
             self.msg("Created and initialized a new Discord relay bot.")
         else:
@@ -2133,9 +2026,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 # load in the pretty names for the discord channels from cache
                 dc_chan_names = discord_bot.attributes.get("discord_channels", {})
                 for i, (evchan, dcchan) in enumerate(channel_list):
-                    dc_info = dc_chan_names.get(
-                        dcchan, {"name": dcchan, "guild": "unknown"}
-                    )
+                    dc_info = dc_chan_names.get(dcchan, {"name": dcchan, "guild": "unknown"})
                     table.add_row(
                         i,
                         evchan,
@@ -2146,11 +2037,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 self.msg("No Discord connections found.")
             return
 
-        if (
-            "disconnect" in self.switches
-            or "remove" in self.switches
-            or "delete" in self.switches
-        ):
+        if "disconnect" in self.switches or "remove" in self.switches or "delete" in self.switches:
             if channel_list := discord_bot.db.channels:
                 try:
                     lid = int(self.args.strip())
@@ -2160,9 +2047,7 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 if lid < len(channel_list):
                     ev_chan, dc_chan = discord_bot.db.channels.pop(lid)
                     dc_chan_names = discord_bot.attributes.get("discord_channels", {})
-                    dc_info = dc_chan_names.get(
-                        dc_chan, {"name": "unknown", "guild": "unknown"}
-                    )
+                    dc_info = dc_chan_names.get(dc_chan, {"name": "unknown", "guild": "unknown"})
                     self.msg(
                         f"Removed link between {ev_chan} and"
                         f" #{dc_info.get('name', '?')}@{dc_info.get('guild', '?')}"
@@ -2191,19 +2076,13 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
                 results = False
                 for i, (evchan, dcchan) in enumerate(channel_list):
                     if evchan.lower() == ev_channel.lower():
-                        dc_info = dc_chan_names.get(
-                            dcchan, {"name": dcchan, "guild": "unknown"}
-                        )
-                        table.add_row(
-                            i, evchan, f"#{dc_info['name']}@{dc_info['guild']}"
-                        )
+                        dc_info = dc_chan_names.get(dcchan, {"name": dcchan, "guild": "unknown"})
+                        table.add_row(i, evchan, f"#{dc_info['name']}@{dc_info['guild']}")
                         results = True
                 if results:
                     self.msg(table)
                 else:
-                    self.msg(
-                        f"There are no Discord channels connected to {ev_channel}."
-                    )
+                    self.msg(f"There are no Discord channels connected to {ev_channel}.")
             else:
                 self.msg("There are no active connections to Discord.")
             return
@@ -2227,6 +2106,4 @@ class CmdDiscord2Chan(COMMAND_DEFAULT_CLASS):
             dc_channel_name = dc_chans.get(dc_channel, {}).get("name", dc_channel)
         else:
             dc_channel_name = dc_channel
-        self.msg(
-            f"Discord connection created: {channel_obj.name} <-> #{dc_channel_name}."
-        )
+        self.msg(f"Discord connection created: {channel_obj.name} <-> #{dc_channel_name}.")

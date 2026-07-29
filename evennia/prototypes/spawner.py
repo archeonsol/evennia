@@ -134,10 +134,14 @@ from django.utils.translation import gettext as _
 from evennia.authorization.policy import policy_from_data
 from evennia.objects.models import ObjectDB
 from evennia.prototypes import prototypes as protlib
-from evennia.prototypes.prototypes import (PROTOTYPE_TAG_CATEGORY,
-                                           _prototype_policy, init_spawn_value,
-                                           search_prototype, value_to_obj,
-                                           value_to_obj_or_any)
+from evennia.prototypes.prototypes import (
+    PROTOTYPE_TAG_CATEGORY,
+    _prototype_policy,
+    init_spawn_value,
+    search_prototype,
+    value_to_obj,
+    value_to_obj_or_any,
+)
 from evennia.utils import logger
 from evennia.utils.utils import class_from_module, is_iter, make_iter
 
@@ -235,24 +239,18 @@ def _get_prototype(inprot, protparents=None, uninherited=None, _workprot=None):
                         parent_prototype = parent_prototype[0]
 
             # Build the prot dictionary in reverse order, overloading
-            new_prot = _get_prototype(
-                parent_prototype, protparents, _workprot=_workprot
-            )
+            new_prot = _get_prototype(parent_prototype, protparents, _workprot=_workprot)
 
             # attrs, tags have internal structure that should be inherited separately
             new_prot["attrs"] = _inherit_attrs(
                 _workprot.get("attrs", {}), new_prot.get("attrs", [])
             )
-            new_prot["tags"] = _inherit_tags(
-                _workprot.get("tags", []), new_prot.get("tags", [])
-            )
+            new_prot["tags"] = _inherit_tags(_workprot.get("tags", []), new_prot.get("tags", []))
 
             _workprot.update(new_prot)
     # the inprot represents a higher level (a child prot), which should override parents
 
-    inprot["attrs"] = _inherit_attrs(
-        _workprot.get("attrs", []), inprot.get("attrs", [])
-    )
+    inprot["attrs"] = _inherit_attrs(_workprot.get("attrs", []), inprot.get("attrs", []))
     inprot["tags"] = _inherit_tags(_workprot.get("tags", []), inprot.get("tags", []))
     _workprot.update(inprot)
     if uninherited:
@@ -280,9 +278,7 @@ def flatten_prototype(prototype, validate=False, no_db=False):
 
     if prototype:
         prototype = protlib.homogenize_prototype(prototype)
-        protlib.validate_prototype(
-            prototype, is_prototype_base=validate, strict=validate
-        )
+        protlib.validate_prototype(prototype, is_prototype_base=validate, strict=validate)
         return _get_prototype(
             prototype, uninherited={"prototype_key": prototype.get("prototype_key")}
         )
@@ -321,9 +317,7 @@ def prototype_from_object(obj):
     else:
         prot = prot[0].copy()
 
-    prot["key"] = (
-        obj.db_key or hashlib.md5(bytes(str(time.time()), "utf-8")).hexdigest()[:6]
-    )
+    prot["key"] = obj.db_key or hashlib.md5(bytes(str(time.time()), "utf-8")).hexdigest()[:6]
     prot["typeclass"] = obj.db_typeclass_path
 
     location = obj.db_location
@@ -337,17 +331,12 @@ def prototype_from_object(obj):
         prot["destination"] = destination.dbref
     policies = obj.policies.all()
     if policies:
-        prot["policies"] = {
-            operation: policy.to_data() for operation, policy in policies.items()
-        }
+        prot["policies"] = {operation: policy.to_data() for operation, policy in policies.items()}
     aliases = obj.aliases.get(return_list=True)
     if aliases:
         prot["aliases"] = aliases
     tags = sorted(
-        [
-            (tag.db_key, tag.db_category, tag.db_data)
-            for tag in obj.tags.all(return_objs=True)
-        ],
+        [(tag.db_key, tag.db_category, tag.db_data) for tag in obj.tags.all(return_objs=True)],
         key=lambda tup: (str(tup[0]), tup[1] or "", tup[2] or ""),
     )
     if tags:
@@ -362,9 +351,7 @@ def prototype_from_object(obj):
     return prot
 
 
-def prototype_diff(
-    prototype1, prototype2, maxdepth=2, homogenize=False, implicit_keep=False
-):
+def prototype_diff(prototype1, prototype2, maxdepth=2, homogenize=False, implicit_keep=False):
     """
     A 'detailed' diff specifies differences down to individual sub-sections
     of the prototype, like individual attributes, permissions etc. It is used
@@ -407,8 +394,7 @@ def prototype_diff(
                     return {key: (part, None, "REMOVE") for key, part in old.items()}
                 elif depth < maxdepth and is_iter(old):
                     return {
-                        part[0] if is_iter(part) else part: (part, None, "REMOVE")
-                        for part in old
+                        part[0] if is_iter(part) else part: (part, None, "REMOVE") for part in old
                     }
                 if isinstance(new, Unset) and implicit_keep:
                     # the new does not define any change, use implicit-keep
@@ -418,10 +404,7 @@ def prototype_diff(
                 if depth < maxdepth and new_type == dict:
                     return {key: (None, part, "ADD") for key, part in new.items()}
                 elif depth < maxdepth and is_iter(new):
-                    return {
-                        part[0] if is_iter(part) else part: (None, part, "ADD")
-                        for part in new
-                    }
+                    return {part[0] if is_iter(part) else part: (None, part, "ADD") for part in new}
                 return (old, new, "ADD")
             else:
                 # this condition should not occur in a standard diff
@@ -429,9 +412,7 @@ def prototype_diff(
         elif depth < maxdepth and new_type == dict:
             all_keys = set(list(old.keys()) + list(new.keys()))
             return {
-                key: _recursive_diff(
-                    old.get(key, _unset), new.get(key, _unset), depth=depth + 1
-                )
+                key: _recursive_diff(old.get(key, _unset), new.get(key, _unset), depth=depth + 1)
                 for key in all_keys
             }
         elif depth < maxdepth and is_iter(new):
@@ -589,9 +570,7 @@ def format_diff(diff, minimal=True):
             if get_name:
                 return obj[0] if obj[0] else "<unset>"
             if rootname == "attrs":
-                return "{} |w=|n {} |w(category:|n |n{}|w, locks:|n {}|w)|n".format(
-                    *obj
-                )
+                return "{} |w=|n {} |w(category:|n |n{}|w, locks:|n {}|w)|n".format(*obj)
             elif rootname == "tags":
                 return "{} |w(category:|n {}|w)|n".format(obj[0], obj[1])
         return "{}".format(obj)
@@ -603,24 +582,16 @@ def format_diff(diff, minimal=True):
             old, new, instruction = diffpart
             if instruction == "KEEP":
                 if not minimal:
-                    texts.append(
-                        "   |gKEEP|n: {old}".format(old=_visualize(old, rootname))
-                    )
+                    texts.append("   |gKEEP|n: {old}".format(old=_visualize(old, rootname)))
             elif instruction == "ADD":
                 texts.append("   |yADD|n: {new}".format(new=_visualize(new, rootname)))
             elif instruction == "REMOVE" and not new:
-                texts.append(
-                    "   |rREMOVE|n: {old}".format(old=_visualize(old, rootname))
-                )
+                texts.append("   |rREMOVE|n: {old}".format(old=_visualize(old, rootname)))
             else:
                 vold = _visualize(old, rootname)
                 vnew = _visualize(new, rootname)
                 vsep = "" if len(vold) < 78 else "\n"
-                vinst = (
-                    "   |rREMOVE|n"
-                    if instruction == "REMOVE"
-                    else "|y{}|n".format(instruction)
-                )
+                vinst = "   |rREMOVE|n" if instruction == "REMOVE" else "|y{}|n".format(instruction)
                 varrow = "|r->|n" if instruction == "REMOVE" else "|y->|n"
                 texts.append(
                     "   {inst}|W:|n {old} |W{varrow}|n{sep} {new}".format(
@@ -695,9 +666,7 @@ def batch_update_objects_with_prototype(
     prototype_key = new_prototype["prototype_key"]
 
     if not objects:
-        objects = ObjectDB.objects.get_by_tag(
-            prototype_key, category=PROTOTYPE_TAG_CATEGORY
-        )
+        objects = ObjectDB.objects.get_by_tag(prototype_key, category=PROTOTYPE_TAG_CATEGORY)
 
     if not objects:
         return 0
@@ -911,11 +880,7 @@ def spawn(*prototypes, caller=None, **kwargs):
     """
     # search string (=prototype_key) from input
     prototypes = [
-        (
-            protlib.search_prototype(prot, require_single=True)[0]
-            if isinstance(prot, str)
-            else prot
-        )
+        (protlib.search_prototype(prot, require_single=True)[0] if isinstance(prot, str) else prot)
         for prot in prototypes
     ]
 
@@ -960,22 +925,16 @@ def spawn(*prototypes, caller=None, **kwargs):
         # chance this is not unique but it should usually not be a problem.
         val = prot.pop(
             "key",
-            "Spawned-{}".format(
-                hashlib.md5(bytes(str(time.time()), "utf-8")).hexdigest()[:6]
-            ),
+            "Spawned-{}".format(hashlib.md5(bytes(str(time.time()), "utf-8")).hexdigest()[:6]),
         )
         create_kwargs["db_key"] = init_spawn_value(val, str, **init_spawn_kwargs)
 
         val = prot.pop("location", None)
-        create_kwargs["db_location"] = init_spawn_value(
-            val, value_to_obj, **init_spawn_kwargs
-        )
+        create_kwargs["db_location"] = init_spawn_value(val, value_to_obj, **init_spawn_kwargs)
 
         val = prot.pop("home", None)
         if val:
-            create_kwargs["db_home"] = init_spawn_value(
-                val, value_to_obj, **init_spawn_kwargs
-            )
+            create_kwargs["db_home"] = init_spawn_value(val, value_to_obj, **init_spawn_kwargs)
         else:
             try:
                 create_kwargs["db_home"] = init_spawn_value(
@@ -986,9 +945,7 @@ def spawn(*prototypes, caller=None, **kwargs):
                 pass
 
         val = prot.pop("destination", None)
-        create_kwargs["db_destination"] = init_spawn_value(
-            val, value_to_obj, **init_spawn_kwargs
-        )
+        create_kwargs["db_destination"] = init_spawn_value(val, value_to_obj, **init_spawn_kwargs)
 
         # we need the 'true' path to the typeclass (not its alias), so we make sure to load the typeclass
         # and use its path directly
@@ -996,15 +953,12 @@ def spawn(*prototypes, caller=None, **kwargs):
         typeclass = class_from_module(
             init_spawn_value(val, str, **init_spawn_kwargs), settings.TYPECLASS_PATHS
         )
-        create_kwargs["db_typeclass_path"] = (
-            f"{typeclass.__module__}.{typeclass.__name__}"
-        )
+        create_kwargs["db_typeclass_path"] = f"{typeclass.__module__}.{typeclass.__name__}"
 
         # extract calls to handlers
         val = dict(prot.pop("policies", {}) or {})
         policies = {
-            operation: _prototype_policy(declaration)
-            for operation, declaration in val.items()
+            operation: _prototype_policy(declaration) for operation, declaration in val.items()
         }
         val = prot.pop("aliases", [])
         alias_string = init_spawn_value(val, make_iter, **init_spawn_kwargs)
@@ -1059,9 +1013,7 @@ def spawn(*prototypes, caller=None, **kwargs):
                 simple_attributes.append(
                     (
                         key,
-                        init_spawn_value(
-                            value, value_to_obj_or_any, **init_spawn_kwargs
-                        ),
+                        init_spawn_value(value, value_to_obj_or_any, **init_spawn_kwargs),
                         None,
                         None,
                     )

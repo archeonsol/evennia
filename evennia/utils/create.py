@@ -45,9 +45,7 @@ def _get_scriptdb():
 def _get_accountdb():
     from django.contrib.contenttypes.models import ContentType
 
-    return ContentType.objects.get(
-        app_label="accounts", model="accountdb"
-    ).model_class()
+    return ContentType.objects.get(app_label="accounts", model="accountdb").model_class()
 
 
 def _get_msg():

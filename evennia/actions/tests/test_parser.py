@@ -279,9 +279,7 @@ class TestDynamicResolver(unittest.TestCase):
         def resolve(stripped, actor):
             token = stripped.lower()
             if token in ambiguous:
-                raise AmbiguousTarget(
-                    candidates=[_Obj("a"), _Obj("b")], original_raw=stripped
-                )
+                raise AmbiguousTarget(candidates=[_Obj("a"), _Obj("b")], original_raw=stripped)
             if token in known:
                 return Move(direction=token)
             return None

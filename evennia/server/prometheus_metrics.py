@@ -151,9 +151,7 @@ def _init_metrics() -> bool:
     return True
 
 
-def record_attribute_flush(
-    stats: dict, *, duration_seconds: Optional[float] = None
-) -> None:
+def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = None) -> None:
     """
     Update Prometheus counters/gauge/histogram after ``flush_all_dirty``.
     """
@@ -234,18 +232,14 @@ def record_authorization_decision(
     result = "allow" if allowed else "deny"
     reason = str(reason or "unknown")[:48]
     if AUTHORIZATION_DECISIONS_TOTAL is not None:
-        AUTHORIZATION_DECISIONS_TOTAL.labels(
-            resource_kind=kind, result=result, reason=reason
-        ).inc()
+        AUTHORIZATION_DECISIONS_TOTAL.labels(resource_kind=kind, result=result, reason=reason).inc()
     if AUTHORIZATION_DURATION_SECONDS is not None:
         AUTHORIZATION_DURATION_SECONDS.labels(resource_kind=kind).observe(
             max(0.0, float(duration_seconds))
         )
 
 
-def record_runtime_task(
-    task_kind: str, event: str, *, had_connection: bool = False
-) -> None:
+def record_runtime_task(task_kind: str, event: str, *, had_connection: bool = False) -> None:
     """Record one bounded detached-root lifecycle transition."""
 
     if not _init_metrics():

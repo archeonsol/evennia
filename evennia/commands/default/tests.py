@@ -26,14 +26,21 @@ from evennia.authorization.policy import Always, Never
 from evennia.commands import cmdparser
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.command import Command, InterruptCommand
-from evennia.commands.default import account, admin, building, comms, general
+from evennia.commands.default import (
+    account,
+    admin,
+    building,
+    comms,
+    general,
+    syscommands,
+    system,
+    unloggedin,
+)
 from evennia.commands.default import help as help_module
-from evennia.commands.default import syscommands, system, unloggedin
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.narrative.rendernode import RenderNode
 from evennia.objects.models import ObjectDB
-from evennia.objects.objects import (DefaultCharacter, DefaultExit,
-                                     DefaultObject, DefaultRoom)
+from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.prototypes import prototypes as protlib
 from evennia.utils import create, gametime, utils
 from evennia.utils.search import search_object
@@ -106,12 +113,8 @@ class TestGeneral(BaseEvenniaCommandTest):
         self.assertEqual(
             "testaliasedstring2", self.char1.nicks.get("testalias", category="account")
         )
-        self.assertEqual(
-            None, self.char1.account.nicks.get("testalias", category="account")
-        )
-        self.assertEqual(
-            "testaliasedstring3", self.char1.nicks.get("testalias", category="object")
-        )
+        self.assertEqual(None, self.char1.account.nicks.get("testalias", category="account"))
+        self.assertEqual("testaliasedstring3", self.char1.nicks.get("testalias", category="object"))
 
     def test_nick_list(self):
         self.call(general.CmdNick(), "/list", "No nicks defined.")
@@ -169,9 +172,7 @@ class TestGeneral(BaseEvenniaCommandTest):
             "Switches matched: ['test', 'testswitch', 'testswitch2']",
         )
         self.call(CmdTest(), "/test", "Switches matched: ['test']")
-        self.call(
-            CmdTest(), "/test/testswitch", "Switches matched: ['test', 'testswitch']"
-        )
+        self.call(CmdTest(), "/test/testswitch", "Switches matched: ['test', 'testswitch']")
         self.call(
             CmdTest(),
             "/testswitch/testswitch2",
@@ -400,9 +401,7 @@ class TestSystem(BaseEvenniaCommandTest):
         from evennia.utils import systems as systems_mod
 
         systems_mod._clear_registry()
-        self.call(
-            system.CmdSystems(), "", "No systems are registered with the scheduler."
-        )
+        self.call(system.CmdSystems(), "", "No systems are registered with the scheduler.")
         systems_mod.register(
             name="test-system",
             cadence=systems_mod.every(60),
@@ -431,8 +430,7 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         self.timedelay = 5
         global _TASK_HANDLER
         if _TASK_HANDLER is None:
-            from evennia.scripts.taskhandler import \
-                TASK_HANDLER as _TASK_HANDLER
+            from evennia.scripts.taskhandler import TASK_HANDLER as _TASK_HANDLER
         _TASK_HANDLER.clock = task.Clock()
         self.task_handler = _TASK_HANDLER
         self.task_handler.clear()
@@ -560,9 +558,7 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         text = ""
         for _, _, kwargs in self.char1.msg.mock_calls:
             text += kwargs.get("text", "")
-        self.assertEqual(
-            text, "cancel request completed.The task function cancel returned: True"
-        )
+        self.assertEqual(text, "cancel request completed.The task function cancel returned: True")
         self.assertTrue(self.task.exists())
 
     def test_task_complete_waiting_input(self):
@@ -597,7 +593,9 @@ class TestCmdTasks(BaseEvenniaCommandTest):
         self.assertEqual(text, "Task completed while waiting for input.")
 
     def test_misformed_command(self):
-        wanted_msg = "Task command misformed.|Proper format tasks[/switch] [function name or task id]"
+        wanted_msg = (
+            "Task command misformed.|Proper format tasks[/switch] [function name or task id]"
+        )
         self.call(system.CmdTasks(), f"/cancel", wanted_msg)
 
 
@@ -663,9 +661,7 @@ class TestAccount(BaseEvenniaCommandTest):
             (3, False, 2, "Account TestAccount"),
         ]
     )
-    def test_ooc_look(
-        self, multisession_mode, auto_puppet, max_nr_chars, expected_result
-    ):
+    def test_ooc_look(self, multisession_mode, auto_puppet, max_nr_chars, expected_result):
         self.account.characters.add(self.char1)
         self.account.unpuppet_all()
 
@@ -739,9 +735,7 @@ class TestAccount(BaseEvenniaCommandTest):
         )
 
     def test_sessions(self):
-        self.call(
-            account.CmdSessions(), "", "Your current session(s):", caller=self.account
-        )
+        self.call(account.CmdSessions(), "", "Your current session(s):", caller=self.account)
 
     def test_color_test(self):
         self.call(account.CmdColorTest(), "ansi", "ANSI colors:", caller=self.account)
@@ -874,9 +868,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdSetObjAlias(), "Obj2 =", "Cleared aliases from Obj2")
         self.call(building.CmdSetObjAlias(), "Obj2 =", "No aliases to clear.")
 
-        self.call(
-            building.CmdSetObjAlias(), "Obj =", "Cleared aliases from Obj: testobj1b"
-        )
+        self.call(building.CmdSetObjAlias(), "Obj =", "Cleared aliases from Obj: testobj1b")
         self.call(
             building.CmdSetObjAlias(),
             "/category Obj = testobj1b:category1",
@@ -1375,9 +1367,7 @@ class TestBuilding(BaseEvenniaCommandTest):
 
     def test_desc(self):
         oid = self.obj2.id
-        self.call(
-            building.CmdDesc(), "Obj2=TestDesc", "The description was set on Obj2."
-        )
+        self.call(building.CmdDesc(), "Obj2=TestDesc", "The description was set on Obj2.")
         self.call(building.CmdDesc(), "", "Usage: ")
 
         with patch.object(building, "EvEditor") as mock_ed:
@@ -1449,9 +1439,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         )
 
     def test_dig(self):
-        self.call(
-            building.CmdDig(), "TestRoom1=testroom;tr,back;b", "Created room TestRoom1"
-        )
+        self.call(building.CmdDig(), "TestRoom1=testroom;tr,back;b", "Created room TestRoom1")
         self.call(building.CmdDig(), "", "Usage: ")
 
     def test_exit_commands(self):
@@ -1468,9 +1456,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdUnLink(), "", "Usage: ")
         self.call(building.CmdLink(), "NotFound", "Could not find 'NotFound'.")
         self.call(building.CmdLink(), "TestExit", "TestExit1 is an exit to Room.")
-        self.call(
-            building.CmdLink(), "Obj", "Obj is not an exit. Its home location is Room."
-        )
+        self.call(building.CmdLink(), "Obj", "Obj is not an exit. Its home location is Room.")
         self.call(
             building.CmdUnLink(),
             "TestExit1",
@@ -1529,9 +1515,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdSetHome(), "self", "Char's current home is Room")
         self.call(building.CmdSetHome(), "Obj", "Obj's current home is Room2")
         self.obj1.home = None
-        self.call(
-            building.CmdSetHome(), "Obj = Room2", "Home location of Obj was set to Room"
-        )
+        self.call(building.CmdSetHome(), "Obj = Room2", "Home location of Obj was set to Room")
 
     def test_list_cmdsets(self):
         self.call(
@@ -1656,9 +1640,7 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdFind(), "", "Usage: ")
         self.call(building.CmdFind(), "oom2", "One Match")
         self.call(building.CmdFind(), "oom2 = 1-{}".format(rmax), "One Match")
-        self.call(
-            building.CmdFind(), "oom2 = 1 {}".format(rmax), "One Match"
-        )  # space works too
+        self.call(building.CmdFind(), "oom2 = 1 {}".format(rmax), "One Match")  # space works too
         self.call(building.CmdFind(), "Char2", "One Match", cmdstring="locate")
         self.call(
             building.CmdFind(),
@@ -1695,12 +1677,8 @@ class TestBuilding(BaseEvenniaCommandTest):
         self.call(building.CmdFind(), "=", "Usage: ")
 
         # Test bogus dbref range with no search term
-        self.call(
-            building.CmdFind(), "= obj", "Invalid dbref range provided (not a number)."
-        )
-        self.call(
-            building.CmdFind(), "= #1a", "Invalid dbref range provided (not a number)."
-        )
+        self.call(building.CmdFind(), "= obj", "Invalid dbref range provided (not a number).")
+        self.call(building.CmdFind(), "= #1a", "Invalid dbref range provided (not a number).")
 
         # Test valid dbref ranges with no search term
         id1 = self.obj1.id
@@ -1710,21 +1688,11 @@ class TestBuilding(BaseEvenniaCommandTest):
         mdiff = id2 - id1 + 1
 
         self.call(building.CmdFind(), f"=#{id1}", f"{maxdiff} Matches(#{id1}-#{maxid}")
-        self.call(
-            building.CmdFind(), f"={id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
-        )
-        self.call(
-            building.CmdFind(), f"={id1} - {id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
-        )
-        self.call(
-            building.CmdFind(), f"={id1}- #{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
-        )
-        self.call(
-            building.CmdFind(), f"={id1}-#{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
-        )
-        self.call(
-            building.CmdFind(), f"=#{id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):"
-        )
+        self.call(building.CmdFind(), f"={id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
+        self.call(building.CmdFind(), f"={id1} - {id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
+        self.call(building.CmdFind(), f"={id1}- #{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
+        self.call(building.CmdFind(), f"={id1}-#{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
+        self.call(building.CmdFind(), f"=#{id1}-{id2}", f"{mdiff} Matches(#{id1}-#{id2}):")
 
     def test_script(self):
         self.call(building.CmdScripts(), "Obj =", "No scripts defined on Obj")
@@ -1785,18 +1753,14 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Obj = Room2",
             "Obj is leaving Room, heading for Room2.|Teleported Obj -> Room2.",
         )
-        self.call(
-            building.CmdTeleport(), "NotFound = Room", "Could not find 'NotFound'."
-        )
+        self.call(building.CmdTeleport(), "NotFound = Room", "Could not find 'NotFound'.")
         self.call(
             building.CmdTeleport(),
             "Obj = Obj",
             "You can't teleport an object inside of itself!",
         )
 
-        self.call(
-            building.CmdTeleport(), "/tonone Obj2", "Teleported Obj2 -> None-location."
-        )
+        self.call(building.CmdTeleport(), "/tonone Obj2", "Teleported Obj2 -> None-location.")
         self.call(building.CmdTeleport(), "/quiet Room2", "Room2")
         self.call(
             building.CmdTeleport(),
@@ -1852,12 +1816,8 @@ class TestBuilding(BaseEvenniaCommandTest):
             "/search NotFound",
             "No objects found with tag 'NotFound'.",
         )
-        self.call(
-            building.CmdTag(), "/search testtag", "Found 1 object with tag 'testtag':"
-        )
-        self.call(
-            building.CmdTag(), "/search testtag2", "Found 1 object with tag 'testtag2':"
-        )
+        self.call(building.CmdTag(), "/search testtag", "Found 1 object with tag 'testtag':")
+        self.call(building.CmdTag(), "/search testtag2", "Found 1 object with tag 'testtag2':")
         self.call(
             building.CmdTag(),
             "/search testtag2:category1",
@@ -1877,9 +1837,7 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Found 1 object with tag 'None' (category: 'category1'):",
         )
 
-        self.call(
-            building.CmdTag(), "/del Obj = testtag3", "Removed tag 'testtag3' from Obj."
-        )
+        self.call(building.CmdTag(), "/del Obj = testtag3", "Removed tag 'testtag3' from Obj.")
         self.call(
             building.CmdTag(),
             "/del Obj",
@@ -2134,9 +2092,7 @@ class TestCommsChannel(BaseEvenniaCommandTest):
             "/alias testchannel = foo",
             "Added/updated your alias 'foo' for channel testchannel.",
         )
-        self.assertEqual(
-            self.char1.nicks.nickreplace("foo Hello"), "@channel testchannel = Hello"
-        )
+        self.assertEqual(self.char1.nicks.nickreplace("foo Hello"), "@channel testchannel = Hello")
 
         # use alias
         self.channel.msg = Mock()
@@ -2176,9 +2132,7 @@ class TestCommsChannel(BaseEvenniaCommandTest):
             "Are you sure you want to delete channel ",
             inputs=["Yes"],
         )
-        self.channel.msg.assert_called_with(
-            "delete reason", bypass_mute=True, senders=self.char1
-        )
+        self.channel.msg.assert_called_with("delete reason", bypass_mute=True, senders=self.char1)
 
     def test_channel__desc(self):
         self.call(
@@ -2256,9 +2210,7 @@ class TestCommsChannel(BaseEvenniaCommandTest):
         self.assertFalse(self.char2 in self.channel.banlist)
 
     def test_channel__who(self):
-        self.call(
-            self.cmdchannel(), "/who testchannel", "Subscribed to testchannel:\nChar"
-        )
+        self.call(self.cmdchannel(), "/who testchannel", "Subscribed to testchannel:\nChar")
 
 
 from evennia.commands.default import comms  # noqa

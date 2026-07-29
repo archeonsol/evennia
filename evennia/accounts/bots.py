@@ -93,9 +93,7 @@ class Bot(DefaultAccount):
         Evennia -> outgoing protocol
 
         """
-        super().msg(
-            text=text, from_obj=from_obj, session=session, options=options, **kwargs
-        )
+        super().msg(text=text, from_obj=from_obj, session=session, options=options, **kwargs)
 
     def execute_cmd(self, raw_string, session=None):
         """
@@ -301,27 +299,17 @@ class IRCBot(Bot):
         if kwargs["type"] == "nicklist":
             # the return of a nicklist request
             if hasattr(self, "_nicklist_callers") and self._nicklist_callers:
-                chstr = (
-                    f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
-                )
-                nicklist = ", ".join(
-                    sorted(kwargs["nicklist"], key=lambda n: n.lower())
-                )
+                chstr = f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
+                nicklist = ", ".join(sorted(kwargs["nicklist"], key=lambda n: n.lower()))
                 for obj in self._nicklist_callers:
-                    obj.msg(
-                        "Nicks at {chstr}:\n {nicklist}".format(
-                            chstr=chstr, nicklist=nicklist
-                        )
-                    )
+                    obj.msg("Nicks at {chstr}:\n {nicklist}".format(chstr=chstr, nicklist=nicklist))
                 self._nicklist_callers = []
             return
 
         elif kwargs["type"] == "ping":
             # the return of a ping
             if hasattr(self, "_ping_callers") and self._ping_callers:
-                chstr = (
-                    f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
-                )
+                chstr = f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
                 for obj in self._ping_callers:
                     obj.msg(
                         "IRC ping return from {chstr} took {time}s.".format(
@@ -579,9 +567,7 @@ class DiscordBot(Bot):
             for channel_name in list(channel_set):
                 channel = search.search_channel(channel_name)
                 if not channel:
-                    logger.log_err(
-                        f"Evennia Channel {channel_name} not found; skipping."
-                    )
+                    logger.log_err(f"Evennia Channel {channel_name} not found; skipping.")
                     continue
                 channel = channel[0]
                 self.ndb.ev_channels[channel_name] = channel
@@ -607,9 +593,7 @@ class DiscordBot(Bot):
 
         for channel in self.ndb.ev_channels.values():
             if not channel.connect(self):
-                logger.log_warn(
-                    f"{self} could not connect to Evennia channel {channel}."
-                )
+                logger.log_warn(f"{self} could not connect to Evennia channel {channel}.")
             if not channel.access(self, "send"):
                 logger.log_warn(
                     f"{self} doesn't have permission to send messages to Evennia channel {channel}."
@@ -649,9 +633,7 @@ class DiscordBot(Bot):
         if channel_list := self.db.channels:
             # get all the discord channels connected to this evennia channel
             channel_name = channel.name
-            for dc_chan in [
-                dcid for evchan, dcid in channel_list if evchan == channel_name
-            ]:
+            for dc_chan in [dcid for evchan, dcid in channel_list if evchan == channel_name]:
                 # send outputfunc channel(msg, discord channel)
                 super().msg(channel=(strip_ansi(message.strip()), dc_chan))
 
@@ -797,9 +779,7 @@ class DiscordBot(Bot):
         # normal channel message
         if type == "channel":
             channel_id = kwargs.get("channel_id")
-            channel_name = self.db.discord_channels.get(channel_id, {}).get(
-                "name", channel_id
-            )
+            channel_name = self.db.discord_channels.get(channel_id, {}).get("name", channel_id)
             guild_id = kwargs.get("guild_id")
             guild = self.db.guilds.get(guild_id)
 

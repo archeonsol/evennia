@@ -381,9 +381,7 @@ BROADCAST_SERVER_RESTART_MESSAGES = True
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": os.getenv(
-            "TEST_DB_PATH", os.path.join(GAME_DIR, "server", "evennia.db3")
-        ),
+        "NAME": os.getenv("TEST_DB_PATH", os.path.join(GAME_DIR, "server", "evennia.db3")),
         "USER": "",
         "PASSWORD": "",
         "HOST": "",
@@ -1390,9 +1388,7 @@ AUTH_USER_MODEL = "accounts.AccountDB"
 # Password validation plugins
 # https://docs.djangoproject.com/en/4.1/ref/settings/#auth-password-validators
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
         "OPTIONS": {"min_length": 8},
@@ -1495,9 +1491,7 @@ SERVER_SESSION_HANDLER_CLASS = "evennia.server.sessionhandler.ServerSessionHandl
 # the protocol in use. It is responsible for keeping them going and informing
 # the Server Session Handler of the connections and synchronizing them across the
 # AMP connection. You shouldn't ever need to change this. But you can.
-PORTAL_SESSION_HANDLER_CLASS = (
-    "evennia.server.portal.portalsessionhandler.PortalSessionHandler"
-)
+PORTAL_SESSION_HANDLER_CLASS = "evennia.server.portal.portalsessionhandler.PortalSessionHandler"
 
 
 # These are members / properties / attributes kept on both Server and

@@ -188,9 +188,7 @@ class MsgManager(TypedObjectManager):
         """
         obj, typ = identify_object(sender)
         if typ == "account":
-            return self.filter(db_sender_accounts=obj).exclude(
-                db_hide_from_accounts=obj
-            )
+            return self.filter(db_sender_accounts=obj).exclude(db_hide_from_accounts=obj)
         elif typ == "object":
             return self.filter(db_sender_objects=obj).exclude(db_hide_from_objects=obj)
         elif typ == "script":
@@ -214,13 +212,9 @@ class MsgManager(TypedObjectManager):
         """
         obj, typ = identify_object(recipient)
         if typ == "account":
-            return self.filter(db_receivers_accounts=obj).exclude(
-                db_hide_from_accounts=obj
-            )
+            return self.filter(db_receivers_accounts=obj).exclude(db_hide_from_accounts=obj)
         elif typ == "object":
-            return self.filter(db_receivers_objects=obj).exclude(
-                db_hide_from_objects=obj
-            )
+            return self.filter(db_receivers_objects=obj).exclude(db_hide_from_objects=obj)
         elif typ == "script":
             return self.filter(db_receivers_scripts=obj)
         else:
@@ -260,13 +254,9 @@ class MsgManager(TypedObjectManager):
         if sender:
             spk = sender.pk
         if styp == "account":
-            sender_restrict = Q(db_sender_accounts__pk=spk) & ~Q(
-                db_hide_from_accounts__pk=spk
-            )
+            sender_restrict = Q(db_sender_accounts__pk=spk) & ~Q(db_hide_from_accounts__pk=spk)
         elif styp == "object":
-            sender_restrict = Q(db_sender_objects__pk=spk) & ~Q(
-                db_hide_from_objects__pk=spk
-            )
+            sender_restrict = Q(db_sender_objects__pk=spk) & ~Q(db_hide_from_objects__pk=spk)
         elif styp == "script":
             sender_restrict = Q(db_sender_scripts__pk=spk)
         else:
@@ -276,13 +266,9 @@ class MsgManager(TypedObjectManager):
         if receiver:
             rpk = receiver.pk
         if rtyp == "account":
-            receiver_restrict = Q(db_receivers_accounts__pk=rpk) & ~Q(
-                db_hide_from_accounts__pk=rpk
-            )
+            receiver_restrict = Q(db_receivers_accounts__pk=rpk) & ~Q(db_hide_from_accounts__pk=rpk)
         elif rtyp == "object":
-            receiver_restrict = Q(db_receivers_objects__pk=rpk) & ~Q(
-                db_hide_from_objects__pk=rpk
-            )
+            receiver_restrict = Q(db_receivers_objects__pk=rpk) & ~Q(db_hide_from_objects__pk=rpk)
         elif rtyp == "script":
             receiver_restrict = Q(db_receivers_scripts__pk=rpk)
         elif rtyp == "channel":
@@ -294,9 +280,7 @@ class MsgManager(TypedObjectManager):
             receiver_restrict = Q()
         # filter by full text
         if freetext:
-            fulltext_restrict = Q(db_header__icontains=freetext) | Q(
-                db_message__icontains=freetext
-            )
+            fulltext_restrict = Q(db_header__icontains=freetext) | Q(db_message__icontains=freetext)
         else:
             fulltext_restrict = Q()
         # execute the query
@@ -359,9 +343,7 @@ class MsgManager(TypedObjectManager):
             new_message.policies.set(operation, policy)
         from evennia.authorization.storage import grant_capability, principal_refs
 
-        sender_refs = {
-            ref for sender in make_iter(senderobj) for ref in principal_refs(sender)
-        }
+        sender_refs = {ref for sender in make_iter(senderobj) for ref in principal_refs(sender)}
         receiver_refs = {
             ref for receiver in make_iter(receivers) for ref in principal_refs(receiver)
         }
@@ -484,9 +466,7 @@ class ChannelDBManager(TypedObjectManager):
         if exact:
             channels = self.filter(
                 Q(db_key__iexact=ostring)
-                | Q(
-                    db_tags__db_tagtype__iexact="alias", db_tags__db_key__iexact=ostring
-                )
+                | Q(db_tags__db_tagtype__iexact="alias", db_tags__db_key__iexact=ostring)
             ).distinct()
         else:
             channels = self.filter(

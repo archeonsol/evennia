@@ -9,20 +9,32 @@ any object-model (room/exit/``move_to``) dependency.
 """
 
 from .account import DefaultAccountRules, Option, Password, UserPassword
-from .admin import (Access, CharacterAdminRules, Emit, Force, Grant, Policy,
-                    Scope, Wall)
+from .admin import Access, CharacterAdminRules, Emit, Force, Grant, Policy, Scope, Wall
 from .emote_nomatch import DefaultEmoteNoMatchRules
 from .events import Arrived, Departed, Moved
-from .general import (CharacterGeneralRules, Help, Home, Look, Nick, NickRules,
-                      Quit, SetHelp)
-from .movement import (CharacterMovementRules, ExitTraversalRules, Locomotion,
-                       Move, exit_resolver, register_exit_resolver)
+from .general import CharacterGeneralRules, Help, Home, Look, Nick, NickRules, Quit, SetHelp
+from .movement import (
+    CharacterMovementRules,
+    ExitTraversalRules,
+    Locomotion,
+    Move,
+    exit_resolver,
+    register_exit_resolver,
+)
 from .nomatch import DefaultNoMatchRules, nomatch_providers
-from .objects import (CharacterObjectRules, ContainerPutRules, Drop, Enter,
-                      Enterable, EnterableObjectRules, Get, Give, Put)
-from .system import CharacterSystemRules, Py, PyRules, Systems, Tasks
-from .unloggedin import (Connect, Create, Encoding, Info, Screenreader,
-                         SessionLoginRules)
+from .objects import (
+    CharacterObjectRules,
+    ContainerPutRules,
+    Drop,
+    Enter,
+    Enterable,
+    EnterableObjectRules,
+    Get,
+    Give,
+    Put,
+)
+from .system import CharacterSystemRules, Objects, Py, PyRules, Scripts, Systems, Tasks
+from .unloggedin import Connect, Create, Encoding, Info, Screenreader, SessionLoginRules
 
 __all__ = [
     "DefaultNoMatchRules",
@@ -30,7 +42,21 @@ __all__ = [
     "nomatch_providers",
     "Pose",
     "Emote",
+    "Say",
+    "Whisper",
     "DefaultRoleplayRules",
+    "SetAttribute",
+    "Set",
+    "SetObjAlias",
+    "Alias",
+    "Copy",
+    "CpAttr",
+    "Link",
+    "Unlink",
+    "SetHome",
+    "Wipe",
+    "Examine",
+    "CharacterBuildingRules",
     "Moved",
     "Departed",
     "Arrived",
@@ -76,6 +102,8 @@ __all__ = [
     "Systems",
     "Tasks",
     "Py",
+    "Objects",
+    "Scripts",
     "PyRules",
     "CharacterSystemRules",
     # unlogged-in verbs
@@ -90,8 +118,25 @@ __all__ = [
 
 def __getattr__(name):
     """Lazy import roleplay actions so games with custom pose/emote avoid verb conflicts."""
-    if name in ("Pose", "Emote", "DefaultRoleplayRules"):
+    if name in ("Say", "Whisper", "Pose", "Emote", "DefaultRoleplayRules"):
         from . import roleplay
 
         return getattr(roleplay, name)
+    if name in (
+        "SetAttribute",
+        "Set",
+        "SetObjAlias",
+        "Alias",
+        "Copy",
+        "CpAttr",
+        "Link",
+        "Unlink",
+        "SetHome",
+        "Wipe",
+        "Examine",
+        "CharacterBuildingRules",
+    ):
+        from . import building
+
+        return getattr(building, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

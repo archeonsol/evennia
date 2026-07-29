@@ -13,9 +13,15 @@ from django.conf import settings
 from django.urls import reverse
 from django.utils.text import slugify
 
-from evennia.authorization.policy import (AllOf, Always, Never, Not, Policy,
-                                          PredicateRequirement,
-                                          RequiresCapability)
+from evennia.authorization.policy import (
+    AllOf,
+    Always,
+    Never,
+    Not,
+    Policy,
+    PredicateRequirement,
+    RequiresCapability,
+)
 from evennia.utils.ansi import ANSIString
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import is_iter, lazy_property, make_iter
@@ -49,14 +55,10 @@ def _init_command(cls, **kwargs):
     cls.key = cls.key.lower()
     if cls.aliases and not is_iter(cls.aliases):
         try:
-            cls.aliases = [
-                str(alias).strip().lower() for alias in cls.aliases.split(",")
-            ]
+            cls.aliases = [str(alias).strip().lower() for alias in cls.aliases.split(",")]
         except Exception:
             cls.aliases = []
-    cls.aliases = list(
-        set(alias for alias in cls.aliases if alias and alias != cls.key)
-    )
+    cls.aliases = list(set(alias for alias in cls.aliases if alias and alias != cls.key))
 
     # optimization - a set is much faster to match against than a list. This is useful
     # for 'does any match' kind of queries
@@ -78,9 +80,7 @@ def _init_command(cls, **kwargs):
             f"{cls.__module__}.{cls.__qualname__} declares removed command locks; "
             "use authorization='public' or a namespaced capability"
         )
-    declaration = cls.__dict__.get(
-        "authorization", getattr(cls, "authorization", "public")
-    )
+    declaration = cls.__dict__.get("authorization", getattr(cls, "authorization", "public"))
     explicit_policy = cls.__dict__.get("authorization_policy")
     if explicit_policy is not None:
         if not isinstance(explicit_policy, Policy):
@@ -639,14 +639,10 @@ class Command(metaclass=CommandMeta):
             if switches and self.switch_options:
                 valid_switches, unused_switches, extra_switches = [], [], []
                 for element in switches:
-                    option_check = [
-                        opt for opt in self.switch_options if opt == element
-                    ]
+                    option_check = [opt for opt in self.switch_options if opt == element]
                     if not option_check:
                         option_check = [
-                            opt
-                            for opt in self.switch_options
-                            if opt.startswith(element)
+                            opt for opt in self.switch_options if opt.startswith(element)
                         ]
                     match_count = len(option_check)
                     if match_count > 1:
@@ -676,9 +672,7 @@ class Command(metaclass=CommandMeta):
         # check for arg1, arg2, ... = argA, argB, ... constructs
         lhs, rhs = args.strip(), None
         if lhs:
-            if delimiters and hasattr(
-                delimiters, "__iter__"
-            ):  # If delimiter is iterable,
+            if delimiters and hasattr(delimiters, "__iter__"):  # If delimiter is iterable,
                 best_split = delimiters[0]  # (default to first delimiter)
                 for this_split in delimiters:  # try each delimiter
                     if this_split in lhs:  # to find first successful split
@@ -717,9 +711,7 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
 
     {variables}"""
         variables = [
-            " |w{}|n ({}): {}".format(
-                key, type(val), f'"{val}"' if isinstance(val, str) else val
-            )
+            " |w{}|n ({}): {}".format(key, type(val), f'"{val}"' if isinstance(val, str) else val)
             for key, val in (
                 ("self.key", self.key),
                 ("self.cmdname", self.cmdstring),
@@ -735,9 +727,7 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
                 ("self.cmdset", self.cmdset),
             )
         ]
-        output = output_string.format(
-            cmdname=self.key, variables="\n    ".join(variables)
-        )
+        output = output_string.format(cmdname=self.key, variables="\n    ".join(variables))
         self.msg(output)
 
     def func(self):
@@ -958,21 +948,15 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
         if header_text:
             if color_header:
                 header_text = ANSIString(header_text).clean()
-                header_text = ANSIString(
-                    "|n|%s%s|n" % (colors["headertext"], header_text)
-                )
+                header_text = ANSIString("|n|%s%s|n" % (colors["headertext"], header_text))
             if mode == "header":
                 begin_center = ANSIString(
                     "|n|%s<|%s* |n" % (colors["border"], colors["headerstar"])
                 )
-                end_center = ANSIString(
-                    "|n |%s*|%s>|n" % (colors["headerstar"], colors["border"])
-                )
+                end_center = ANSIString("|n |%s*|%s>|n" % (colors["headerstar"], colors["border"]))
                 center_string = ANSIString(begin_center + header_text + end_center)
             else:
-                center_string = ANSIString(
-                    "|n |%s%s |n" % (colors["headertext"], header_text)
-                )
+                center_string = ANSIString("|n |%s%s |n" % (colors["headertext"], header_text))
         else:
             center_string = ""
 
@@ -986,22 +970,14 @@ Command \"{cmdname}\" has no defined `func()` method. Available properties on th
             right_width = math.floor(remain_fill / 2)
             left_width = math.ceil(remain_fill / 2)
 
-        right_fill = ANSIString(
-            "|n|%s%s|n" % (colors["border"], fill_character * int(right_width))
-        )
-        left_fill = ANSIString(
-            "|n|%s%s|n" % (colors["border"], fill_character * int(left_width))
-        )
+        right_fill = ANSIString("|n|%s%s|n" % (colors["border"], fill_character * int(right_width)))
+        left_fill = ANSIString("|n|%s%s|n" % (colors["border"], fill_character * int(left_width)))
 
         if edge_character:
             edge_fill = ANSIString("|n|%s%s|n" % (colors["border"], edge_character))
             main_string = ANSIString(center_string)
             final_send = (
-                ANSIString(edge_fill)
-                + left_fill
-                + main_string
-                + right_fill
-                + ANSIString(edge_fill)
+                ANSIString(edge_fill) + left_fill + main_string + right_fill + ANSIString(edge_fill)
             )
         else:
             final_send = left_fill + ANSIString(center_string) + right_fill

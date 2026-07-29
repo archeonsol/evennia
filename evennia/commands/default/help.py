@@ -11,8 +11,7 @@ outside the game in modules given by ``settings.FILE_HELP_ENTRY_MODULES``.
 from django.conf import settings
 
 from evennia.authorization.policy import Always, RequiresCapability
-from evennia.help.formatters import (HelpCategory, HelpFormatter, _loadhelp,
-                                     _quithelp, _savehelp)
+from evennia.help.formatters import HelpCategory, HelpFormatter, _loadhelp, _quithelp, _savehelp
 from evennia.utils import create, evmore
 from evennia.utils.eveditor import EvEditor
 from evennia.utils.utils import class_from_module, inherits_from
@@ -116,8 +115,7 @@ class CmdHelp(COMMAND_DEFAULT_CLASS, HelpFormatter):
 
         if self.args:
             self.subtopics = [
-                part.strip().lower()
-                for part in self.args.split(self.subtopic_separator_char)
+                part.strip().lower() for part in self.args.split(self.subtopic_separator_char)
             ]
             self.topic = self.subtopics.pop(0)
         else:
@@ -311,10 +309,7 @@ class CmdSetHelp(CmdHelp):
                         # find a db-based help entry if one already exists
                         db_topics = {**db_help_topics}
                         db_categories = list(
-                            set(
-                                HelpCategory(topic.help_category)
-                                for topic in db_topics.values()
-                            )
+                            set(HelpCategory(topic.help_category) for topic in db_topics.values())
                         )
                         entries = list(db_topics.values()) + db_categories
                         match, _ = self.do_search(querystr, entries)
@@ -327,9 +322,7 @@ class CmdSetHelp(CmdHelp):
                     # a db-based help entry - this is OK
                     old_entry = match
                     category = lhslist[1] if nlist > 1 else old_entry.help_category
-                    policy_declaration = (
-                        ",".join(lhslist[2:]) if nlist > 2 else "public"
-                    )
+                    policy_declaration = ",".join(lhslist[2:]) if nlist > 2 else "public"
                     break
 
         category = category.lower()
@@ -365,9 +358,7 @@ class CmdSetHelp(CmdHelp):
         if "append" in switches or "merge" in switches or "extend" in switches:
             # merge/append operations
             if not old_entry:
-                self.msg(
-                    f"Could not find topic '{topicstr}'. You must give an exact name."
-                )
+                self.msg(f"Could not find topic '{topicstr}'. You must give an exact name.")
                 return
             if not self.rhs:
                 self.msg("You must supply text to append/merge.")
@@ -390,9 +381,7 @@ class CmdSetHelp(CmdHelp):
                 return
             category = self.rhs.lower()
             old_entry.help_category = category
-            self.msg(
-                f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'."
-            )
+            self.msg(f"Category for entry '{topicstr}'{aliastxt} changed to '{category}'.")
             return
 
         if "policy" in switches:
@@ -419,9 +408,7 @@ class CmdSetHelp(CmdHelp):
                 self.msg(f"Policy not changed: {err}")
                 return
             old_entry.policies.set("read", policy)
-            self.msg(
-                f"Read policy for '{topicstr}'{aliastxt} changed to: {policy.to_data()}"
-            )
+            self.msg(f"Read policy for '{topicstr}'{aliastxt} changed to: {policy.to_data()}")
             return
 
         if "delete" in switches or "del" in switches:
@@ -476,6 +463,4 @@ class CmdSetHelp(CmdHelp):
                     )
                     return
             else:
-                self.msg(
-                    f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin."
-                )
+                self.msg(f"Error when creating topic '{topicstr}'{aliastxt}! Contact an admin.")

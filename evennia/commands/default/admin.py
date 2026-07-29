@@ -11,8 +11,7 @@ from django.conf import settings
 
 import evennia
 from evennia.authorization.capabilities import capability_registry
-from evennia.authorization.storage import (grant_capability, principal_refs,
-                                           revoke_grant)
+from evennia.authorization.storage import grant_capability, principal_refs, revoke_grant
 from evennia.server.models import AuthorizationGrant, ServerConfig
 from evennia.utils import class_from_module, evtable, logger, search
 
@@ -91,9 +90,7 @@ class CmdBoot(COMMAND_DEFAULT_CLASS):
                 boot_list.append(match)
 
         if not boot_list:
-            caller.msg(
-                "No matching sessions found. The Account does not seem to be online."
-            )
+            caller.msg("No matching sessions found. The Account does not seem to be online.")
             return
 
         # Carry out the booting of the sessions in the boot list.
@@ -193,8 +190,7 @@ class CmdBan(COMMAND_DEFAULT_CLASS):
             banlist = []
 
         if not self.args or (
-            self.switches
-            and not any(switch in ("ip", "name") for switch in self.switches)
+            self.switches and not any(switch in ("ip", "name") for switch in self.switches)
         ):
             self.msg(list_bans(self, banlist))
             return
@@ -469,8 +465,7 @@ class CmdGrant(COMMAND_DEFAULT_CLASS):
                 return
             self.msg(
                 "\n".join(
-                    f"{grant.grant_id} {grant.capability} "
-                    f"[{grant.scope_kind}:{grant.scope_key}]"
+                    f"{grant.grant_id} {grant.capability} [{grant.scope_kind}:{grant.scope_key}]"
                     for grant in grants
                 )
             )

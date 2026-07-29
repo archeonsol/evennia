@@ -157,9 +157,7 @@ class TestLauncher(TwistedTestCase):
     @patch("evennia.server.evennia_launcher.print")
     def test_query_status_run(self, mprint):
         evennia_launcher.query_status()
-        mprint.assert_called_with(
-            "Portal: RUNNING (pid 100)\nServer: RUNNING (pid 100)"
-        )
+        mprint.assert_called_with("Portal: RUNNING (pid 100)\nServer: RUNNING (pid 100)")
 
     @patch.object(evennia_launcher, "send_instruction", _msend_status_err)
     @patch.object(evennia_launcher, "NO_REACTOR_STOP", True)
@@ -184,9 +182,7 @@ class TestLauncher(TwistedTestCase):
         mcall = MagicMock()
         merr = MagicMock()
 
-        def _stub(
-            portal_running, server_running, callback, errback, rate=0.5, retries=None
-        ):
+        def _stub(portal_running, server_running, callback, errback, rate=0.5, retries=None):
             callback((portal_running, server_running, 2, 24, "pinfo", "sinfo"))
 
         with patch.object(evennia_launcher, "_wait_for_status_ipc", side_effect=_stub):
@@ -201,9 +197,7 @@ class TestLauncher(TwistedTestCase):
         mcall = MagicMock()
         merr = MagicMock()
 
-        def _stub(
-            portal_running, server_running, callback, errback, rate=0.5, retries=None
-        ):
+        def _stub(portal_running, server_running, callback, errback, rate=0.5, retries=None):
             errback(portal_running, server_running)
 
         with patch.object(evennia_launcher, "_wait_for_status_ipc", side_effect=_stub):
@@ -252,22 +246,16 @@ class TestLauncher(TwistedTestCase):
         def fake_send(op, args, callback=None, errback=None):
             calls.append(("send", op))
             if op == evennia_launcher.PSTATUS:
-                callback(
-                    {"status": pack_status((True, False, 11, 0, "pinfo", "sinfo"))}
-                )
+                callback({"status": pack_status((True, False, 11, 0, "pinfo", "sinfo"))})
 
-        def fake_wait(
-            portal_running, server_running, callback=None, errback=None, rate=0.5
-        ):
+        def fake_wait(portal_running, server_running, callback=None, errback=None, rate=0.5):
             calls.append(("wait", portal_running, server_running))
 
         with (
             patch.object(evennia_launcher, "send_instruction", side_effect=fake_send),
             patch.object(evennia_launcher, "wait_for_status", side_effect=fake_wait),
             patch.object(evennia_launcher, "maybe_collectstatic"),
-            patch.object(
-                evennia_launcher, "_get_twistd_cmdline", return_value=(["p"], ["s"])
-            ),
+            patch.object(evennia_launcher, "_get_twistd_cmdline", return_value=(["p"], ["s"])),
         ):
             evennia_launcher.start_evennia()
 
@@ -283,13 +271,9 @@ class TestLauncher(TwistedTestCase):
         def fake_send(op, args, callback=None, errback=None):
             calls.append(("send", op))
             if op == evennia_launcher.PSTATUS:
-                callback(
-                    {"status": pack_status((True, True, 11, 22, "pinfo", "sinfo"))}
-                )
+                callback({"status": pack_status((True, True, 11, 22, "pinfo", "sinfo"))})
 
-        def fake_wait(
-            portal_running, server_running, callback=None, errback=None, rate=0.5
-        ):
+        def fake_wait(portal_running, server_running, callback=None, errback=None, rate=0.5):
             calls.append(("wait", portal_running, server_running))
 
         with (
@@ -328,8 +312,7 @@ class TestLauncherIPCConnection(unittest.TestCase):
 
         with patch.object(launcher_ipc, "connect_session", side_effect=_slow_connect):
             threads = [
-                threading.Thread(target=evennia_launcher._ensure_ipc_connection)
-                for _ in range(2)
+                threading.Thread(target=evennia_launcher._ensure_ipc_connection) for _ in range(2)
             ]
             for t in threads:
                 t.start()
@@ -401,17 +384,13 @@ class TestForceKillIdentity(unittest.TestCase):
     def test_our_process_rejects_recycled_pid(self, mock_proc):
         self._write(self.server_pid, 4242)
         mock_proc.return_value.cmdline.return_value = ["/usr/bin/vim", "notes.txt"]
-        self.assertIsNone(
-            evennia_launcher._our_process(self.server_pid, "/lib/server.py")
-        )
+        self.assertIsNone(evennia_launcher._our_process(self.server_pid, "/lib/server.py"))
 
     @patch("evennia.server.evennia_launcher.psutil.Process")
     def test_our_process_missing(self, mock_proc):
         self._write(self.server_pid, 4242)
         mock_proc.side_effect = psutil.NoSuchProcess(4242)
-        self.assertIsNone(
-            evennia_launcher._our_process(self.server_pid, "/lib/server.py")
-        )
+        self.assertIsNone(evennia_launcher._our_process(self.server_pid, "/lib/server.py"))
 
     @patch("evennia.server.evennia_launcher.wait_for_portal_ipc_down", create=True)
     @patch("evennia.server.evennia_launcher.psutil.Process")

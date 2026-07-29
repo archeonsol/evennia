@@ -13,6 +13,7 @@ evennia.server
    :maxdepth: 6
 
    evennia.server.amp_serde
+   evennia.server.apps
    evennia.server.asgi
    evennia.server.asgi_webserver
    evennia.server.asyncio_bootstrap
@@ -32,6 +33,7 @@ evennia.server
    evennia.server.models
    evennia.server.prometheus_metrics
    evennia.server.redis_bus
+   evennia.server.runtime_db
    evennia.server.server
    evennia.server.serversession
    evennia.server.service
@@ -49,6 +51,7 @@ evennia.server
    :maxdepth: 6
 
    evennia.server.game_index_client
+   evennia.server.management
    evennia.server.portal
    evennia.server.profiling
    evennia.server.protocol

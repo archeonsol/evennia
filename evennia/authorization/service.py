@@ -10,8 +10,7 @@ from evennia.utils import logger
 
 from .engine import AuthorizationContext, AuthorizationDecision, evaluate
 from .policy import RequiresCapability, validate_policy
-from .storage import (load_grants, load_policy, load_resource,
-                      principal_is_suspended, resource_ref)
+from .storage import load_grants, load_policy, load_resource, principal_is_suspended, resource_ref
 
 
 def authorize(
@@ -36,8 +35,7 @@ def authorize(
         """Record low-cardinality timing and return the decision."""
 
         try:
-            from evennia.server.prometheus_metrics import \
-                record_authorization_decision
+            from evennia.server.prometheus_metrics import record_authorization_decision
 
             record_authorization_decision(
                 resource_snapshot.resource_kind,
@@ -108,9 +106,7 @@ def authorize(
     except (TypeError, ValueError):
         logger.log_trace("authorization policy contains an unresolved reference")
         return finish(AuthorizationDecision(False, "policy_invalid"))
-    auth_context = context or AuthorizationContext(
-        principal=principal, resource=resource
-    )
+    auth_context = context or AuthorizationContext(principal=principal, resource=resource)
     auth_context.suspended = suspended
     return finish(evaluate(policy, grants, resource_snapshot, auth_context))
 
@@ -125,9 +121,7 @@ def access_check(
 ) -> tuple[bool, AuthorizationDecision]:
     """Evaluate the capability authority behind stable ``access()`` facades."""
 
-    decision = authorize(
-        principal, resource, access_type, context=context, default=default
-    )
+    decision = authorize(principal, resource, access_type, context=context, default=default)
     return decision.allowed, decision
 
 

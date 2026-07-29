@@ -211,9 +211,7 @@ class FileHelpStorageHandler:
         """
         Initialize the storage.
         """
-        self.help_file_modules = [
-            str(part).strip() for part in make_iter(help_file_modules)
-        ]
+        self.help_file_modules = [str(part).strip() for part in make_iter(help_file_modules)]
         self.help_entries = []
         self.help_entries_dict = {}
         self.load()
@@ -226,21 +224,15 @@ class FileHelpStorageHandler:
         loaded_help_dicts = []
 
         for module_or_path in self.help_file_modules:
-            help_dict_list = variable_from_module(
-                module_or_path, variable="HELP_ENTRY_DICTS"
-            )
+            help_dict_list = variable_from_module(module_or_path, variable="HELP_ENTRY_DICTS")
             if not help_dict_list:
                 help_dict_list = [
-                    dct
-                    for dct in all_from_module(module_or_path).values()
-                    if isinstance(dct, dict)
+                    dct for dct in all_from_module(module_or_path).values() if isinstance(dct, dict)
                 ]
             if help_dict_list:
                 loaded_help_dicts.extend(help_dict_list)
             else:
-                logger.log_err(
-                    f"Could not find file-help module {module_or_path} (skipping)."
-                )
+                logger.log_err(f"Could not find file-help module {module_or_path} (skipping).")
 
         # validate and parse dicts into FileEntryHelp objects and make sure they are unique-by-key
         # by letting latter added ones override earlier ones.
@@ -254,9 +246,7 @@ class FileHelpStorageHandler:
                 )
             raw_key = dct.get("key")
             key = raw_key.lower().strip() if raw_key else ""
-            category = (
-                dct.get("category", settings.DEFAULT_HELP_CATEGORY).lower().strip()
-            )
+            category = dct.get("category", settings.DEFAULT_HELP_CATEGORY).lower().strip()
             aliases = list(dct.get("aliases", []))
             entrytext = dct.get("text", "")
             declaration = dct.get("capability")
@@ -264,9 +254,7 @@ class FileHelpStorageHandler:
             validate_policy(policy)
 
             if not key or not entrytext:
-                logger.error(
-                    f"Cannot load file-help-entry (missing key or text): {dct}"
-                )
+                logger.error(f"Cannot load file-help-entry (missing key or text): {dct}")
                 continue
 
             unique_help_entries[key] = FileHelpEntry(

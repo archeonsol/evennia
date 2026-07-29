@@ -276,9 +276,7 @@ class DefaultScript(ScriptBase):
             obj = create.create_script(**kwargs)
         except Exception:
             logger.log_trace()
-            errors.append(
-                "The script '%s' encountered errors and could not be created." % key
-            )
+            errors.append("The script '%s' encountered errors and could not be created." % key)
 
         return obj, errors
 

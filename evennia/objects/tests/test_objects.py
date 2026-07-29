@@ -262,9 +262,7 @@ class DefaultObjectTest(BaseEvenniaTest):
 
     def test_default_character_authorization_policies(self):
         policies = DefaultCharacter.authorization_policies
-        self.assertEqual(
-            policies["puppet"], PredicateRequirement("principal.controls_resource")
-        )
+        self.assertEqual(policies["puppet"], PredicateRequirement("principal.controls_resource"))
         self.assertEqual(policies["delete"], RequiresCapability("engine.object.delete"))
         self.assertEqual(policies["edit"], RequiresCapability("engine.object.edit"))
         self.assertEqual(policies["get"], Never())

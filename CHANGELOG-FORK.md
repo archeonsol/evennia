@@ -25,6 +25,82 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.179 — Native default roleplay and building actions
+
+### Action engine
+
+[`roleplay.py`](evennia/actions/default/roleplay.py) now provides native
+`Say` and `Whisper` actions alongside `Pose` and `Emote`. Speech preserves the
+`at_pre_say`, `resolve_transform`, and `at_say` hook sequence; whispers parse
+and deduplicate local receivers, expose every receiver through `Action.targets`,
+and retain self-whisper delivery. Roleplay checks now block empty input and
+missing locations through pure action results, without sending messages from
+the check phase.
+
+[`evennia.actions.default.building`](evennia/actions/default/building/) adds
+native `@set`, `@alias`/`setobjalias`, `@copy`, `@cpattr`, `@link`, `@unlink`,
+`@sethome`, `@wipe`, and `@examine`/`@exam`/`@ex`. The port retains typed
+object/account/script/channel lookup, nested and categorized attributes,
+`$dbref`/`$search` values, object control/edit/examine policy, alias and link
+semantics, and the interactive `EvEditor` path. Non-string attribute editing
+does not convert the stored value until a confirmed editor session is actually
+saved. Native examine intentionally omits stored and merged CmdSet sections.
+
+[`system.py`](evennia/actions/default/system.py) adds native `@objects` totals
+and recent-object reporting plus storage-only `@scripts`/`@script` list,
+lookup, create, attach, and delete operations. Script paging and multi-match
+confirmation are implemented in the action package without legacy command
+imports; timer controls are intentionally not restored. The native Python
+console helper is likewise independent of `evennia.commands.default`.
+
+Collision-prone roleplay and building symbols are exposed lazily from
+[`evennia.actions.default`](evennia/actions/default/__init__.py) and the flat
+[`evennia.actions`](evennia/actions/__init__.py) API, so importing action core
+does not register those defaults as a side effect.
+
+### Authorization and integrity
+
+Building mutations require account-scoped `engine.world.build`; examine uses
+account-scoped `engine.object.examine`; object statistics use account-scoped
+`engine.system.inspect`; and storage-script control uses account-scoped
+`engine.script.control`. Body-only grants and quelled account grants do not
+authorize these actions, and object-level policy remains authoritative.
+
+Interactive saves and script confirmations recheck authority immediately
+before mutation. Script lookup fails closed when an object qualifier is
+missing, confirmation accepts only explicit yes/no forms, hidden prototype
+scripts remain excluded, and queryset existence checks do not materialize full
+result sets. `@cpattr/move` now snapshots source values and removes them only
+after all authorized targets have been written.
+
+### Migration
+
+Games retiring legacy default commands should compose
+`DefaultRoleplayRules`, `CharacterBuildingRules`, and `CharacterSystemRules`
+into their `DefaultCharacter` provider. The public action classes and exact
+verb/capability map are documented in
+[`Default-Actions.md`](docs/source/Components/Default-Actions.md). Do not add a
+native `@cmdsets` provider: CmdSets are being retired, and this release ports
+only the prerequisite user-facing defaults rather than deleting the broader
+CmdSet substrate.
+
+Storage scripts are deliberately storage-only. Downstream games needing timer
+controls should provide a game-owned action rather than depending on the
+retired legacy command implementation.
+
+### Tests and documentation
+
+Focused action tests cover every new action family, important switches,
+interactive save/confirmation paths, account capability success, body-only and
+quell denial, object-policy denial, lazy exports, and the ban on imports from
+`evennia.commands.default`. The bounded `evennia.actions.tests` suite passes
+407 tests.
+
+The API tree and default-action guide document the new packages and provider
+composition. The CmdSet retirement prompt now records these prerequisite ports
+and the intentional retirement of `@cmdsets` instead of claiming all default
+verbs were already native.
+
 ## 6.0.0+underspire.178 — Persistent Azaban capabilities
 
 ### Engine

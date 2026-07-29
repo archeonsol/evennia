@@ -10,10 +10,19 @@ from django.db.models import Q
 from django.db.models.fields import exceptions
 
 from evennia.server import signals
-from evennia.typeclasses.managers import (TypeclassManager, TypedObjectManager,
-                                          _flush_attr_writes, _jsonb_match_pks)
-from evennia.utils.utils import (class_from_module, dbid_to_obj, is_iter,
-                                 make_iter, string_partial_matching)
+from evennia.typeclasses.managers import (
+    TypeclassManager,
+    TypedObjectManager,
+    _flush_attr_writes,
+    _jsonb_match_pks,
+)
+from evennia.utils.utils import (
+    class_from_module,
+    dbid_to_obj,
+    is_iter,
+    make_iter,
+    string_partial_matching,
+)
 
 __all__ = ("ObjectManager", "ObjectDBManager")
 _GA = object.__getattribute__
@@ -22,7 +31,10 @@ _GA = object.__getattribute__
 _ATTR = None
 
 from evennia.utils.multimatch import (  # noqa: E402
-    _get_multimatch_input_handler, _multimatch_regex, resolve_multimatch_index)
+    _get_multimatch_input_handler,
+    _multimatch_regex,
+    resolve_multimatch_index,
+)
 
 _ATTR_SEARCH_FORCE_MSG = (
     "{method}() runs an attribute search, which forces a process-wide "
@@ -94,9 +106,7 @@ class ObjectDBManager(TypedObjectManager):
         if not words:
             return r".*"
         word_boundary = r"\m" if connection.vendor == "postgresql" else r"\b"
-        return (
-            r".* ".join(f"{word_boundary}{re.escape(word)}" for word in words) + r".*"
-        )
+        return r".* ".join(f"{word_boundary}{re.escape(word)}" for word in words) + r".*"
 
     def get_object_with_account(self, ostring, exact=True, candidates=None):
         """
@@ -131,9 +141,9 @@ class ObjectDBManager(TypedObjectManager):
             or Q()
         )
         if exact:
-            return self.filter(
-                cand_restriction & Q(db_account__username__iexact=ostring)
-            ).order_by("id")
+            return self.filter(cand_restriction & Q(db_account__username__iexact=ostring)).order_by(
+                "id"
+            )
         else:  # fuzzy matching
             obj_cands = self.select_related().filter(
                 cand_restriction & Q(db_account__username__istartswith=ostring)
@@ -165,8 +175,7 @@ class ObjectDBManager(TypedObjectManager):
             or Q()
         )
         return self.filter(
-            cand_restriction
-            & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
+            cand_restriction & Q(db_key__iexact=oname, db_typeclass_path__exact=otypeclass_path)
         ).order_by("id")
 
     def get_objs_with_attr_value(
@@ -190,17 +199,13 @@ class ObjectDBManager(TypedObjectManager):
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
             or Q()
         )
-        type_restriction = (
-            typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
-        )
+        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
         _flush_attr_writes()
         qs = self.filter(cand_restriction & type_restriction)
         if connection.vendor == "postgresql":
             from evennia.typeclasses.jsonb_util import to_jsonb
 
-            return qs.filter(
-                db_attrs__contains={"~": {"_d": {attr_name: to_jsonb(value)}}}
-            )
+            return qs.filter(db_attrs__contains={"~": {"_d": {attr_name: to_jsonb(value)}}})
         return qs.filter(pk__in=_jsonb_match_pks(qs, attr_name, None, value))
 
     def get_objs_with_db_property(self, property_name, candidates=None):
@@ -223,9 +228,7 @@ class ObjectDBManager(TypedObjectManager):
         )
         querykwargs = {property_name: None}
         try:
-            return list(
-                self.filter(cand_restriction).exclude(Q(**querykwargs)).order_by("id")
-            )
+            return list(self.filter(cand_restriction).exclude(Q(**querykwargs)).order_by("id"))
         except exceptions.FieldError:
             return []
 
@@ -254,13 +257,11 @@ class ObjectDBManager(TypedObjectManager):
             and Q(pk__in=[_GA(obj, "id") for obj in make_iter(candidates) if obj])
             or Q()
         )
-        type_restriction = (
-            typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
-        )
+        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
         try:
-            return self.filter(
-                cand_restriction & type_restriction & Q(**querykwargs)
-            ).order_by("id")
+            return self.filter(cand_restriction & type_restriction & Q(**querykwargs)).order_by(
+                "id"
+            )
         except exceptions.FieldError:
             return self.none()
         except ValueError:
@@ -286,19 +287,11 @@ class ObjectDBManager(TypedObjectManager):
 
         """
         exclude_restriction = (
-            Q(pk__in=[_GA(obj, "id") for obj in make_iter(excludeobj)])
-            if excludeobj
-            else Q()
+            Q(pk__in=[_GA(obj, "id") for obj in make_iter(excludeobj)]) if excludeobj else Q()
         )
-        return (
-            self.filter(db_location=location)
-            .exclude(exclude_restriction)
-            .order_by("id")
-        )
+        return self.filter(db_location=location).exclude(exclude_restriction).order_by("id")
 
-    def get_objs_with_key_or_alias(
-        self, ostring, exact=True, candidates=None, typeclasses=None
-    ):
+    def get_objs_with_key_or_alias(self, ostring, exact=True, candidates=None, typeclasses=None):
         """
         Args:
             ostring (str): A search criterion.
@@ -324,9 +317,7 @@ class ObjectDBManager(TypedObjectManager):
         # build query objects
         candidates_id = [_GA(obj, "id") for obj in make_iter(candidates) if obj]
         cand_restriction = candidates is not None and Q(pk__in=candidates_id) or Q()
-        type_restriction = (
-            typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
-        )
+        type_restriction = typeclasses and Q(db_typeclass_path__in=make_iter(typeclasses)) or Q()
         if exact:
             # exact matches only
             return (
@@ -503,9 +494,7 @@ class ObjectDBManager(TypedObjectManager):
             parse_input = _get_multimatch_input_handler()
             match_selector, stripped_searchdata = parse_input(str(searchdata))
             if match_selector is not None:
-                matches = _searcher(
-                    stripped_searchdata, candidates, typeclass, exact=True
-                )
+                matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
             else:
                 match_data = _multimatch_regex().match(str(searchdata))
                 if match_data:
@@ -513,9 +502,7 @@ class ObjectDBManager(TypedObjectManager):
                     stripped_searchdata = match_data.group("name") + (
                         match_data.group("args") or ""
                     )
-                    matches = _searcher(
-                        stripped_searchdata, candidates, typeclass, exact=True
-                    )
+                    matches = _searcher(stripped_searchdata, candidates, typeclass, exact=True)
 
         # at this point, if there are no matches, we give it a chance to find fuzzy matches
         if not exact and not matches:
@@ -621,8 +608,7 @@ class ObjectDBManager(TypedObjectManager):
 
         # copy over all tags, if any
         tags = (
-            (t.db_key, t.db_category, t.db_data)
-            for t in original_object.tags.all(return_objs=True)
+            (t.db_key, t.db_category, t.db_data) for t in original_object.tags.all(return_objs=True)
         )
         new_object.tags.batch_add(*tags)
 

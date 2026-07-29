@@ -183,9 +183,7 @@ class TagProperty:
         TagProperty is also removed in code!
 
         """
-        getattr(instance, self.taghandler_name).remove(
-            key=self._key, category=self._category
-        )
+        getattr(instance, self.taghandler_name).remove(key=self._key, category=self._category)
 
 
 class TagCategoryProperty:
@@ -285,9 +283,7 @@ class TagCategoryProperty:
         use `del` on this property and re-access the property with the changed default list.
 
         """
-        getattr(instance, self.taghandler_name).batch_add(
-            *[(tag, self._category) for tag in args]
-        )
+        getattr(instance, self.taghandler_name).batch_add(*[(tag, self._category) for tag in args])
 
     def __delete__(self, instance):
         """
@@ -453,9 +449,7 @@ class TagHandler(object):
             self._cache_from_prefetch()
         if key:
             cachekey = "%s-%s" % (key, category)
-            tag = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(
-                cachekey, None
-            )
+            tag = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache.get(cachekey, None)
             if tag and (not hasattr(tag, "pk") or tag.pk is None):
                 # clear out Tags deleted from elsewhere. We must search this anew.
                 tag = None
@@ -981,8 +975,7 @@ class PermissionHandler(TagHandler):
         """Invalidate the transitional permission-to-capability bridge."""
 
         try:
-            from evennia.authorization.storage import (
-                bump_principal_generation, principal_refs)
+            from evennia.authorization.storage import bump_principal_generation, principal_refs
 
             for ref in principal_refs(self.obj):
                 bump_principal_generation(ref)
