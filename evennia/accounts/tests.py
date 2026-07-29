@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from copy import copy
 from random import randint
 from unittest import TestCase
 
@@ -480,6 +481,26 @@ class TestAccountPuppetSetHooks(BaseEvenniaTest):
         self.account.at_puppet_removed = MagicMock()
         self.account.unpuppet_object(self.session)
         self.account.at_puppet_removed.assert_called_once_with(self.char1, session=self.session)
+
+
+class TestFreshSessionPuppetAuthorization(BaseEvenniaTest):
+    """Fresh sessions authorize against durable character ownership."""
+
+    def test_equal_account_instance_can_freshly_puppet_owned_character(self):
+        self.account.unpuppet_object(self.session)
+        separately_materialized_account = copy(self.account)
+        self.assertIsNot(separately_materialized_account, self.char1.account)
+        self.assertEqual(separately_materialized_account, self.char1.account)
+
+        self.assertTrue(self.char1.access(separately_materialized_account, "puppet"))
+        separately_materialized_account.puppet_object(self.session, self.char1)
+
+        self.assertEqual(self.session.get_puppet(), self.char1)
+
+    def test_foreign_account_cannot_freshly_puppet_owned_character(self):
+        self.account.unpuppet_object(self.session)
+
+        self.assertFalse(self.char1.access(self.account2, "puppet"))
 
 
 class TestAccountFocusPushPop(BaseEvenniaTest):

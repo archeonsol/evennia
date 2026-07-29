@@ -19,6 +19,21 @@ class FakePrincipal:
     """Minimal principal for pure evaluator tests."""
 
     id: int = 7
+    account: object = None
+
+
+@dataclass
+class FakeAccount:
+    """Account wrapper whose durable identity is its database primary key."""
+
+    pk: int
+
+
+@dataclass
+class FakeControlledResource:
+    """Minimal resource with one durable owning account."""
+
+    account: FakeAccount
 
 
 class EvaluatorTest(SimpleTestCase):
@@ -86,3 +101,49 @@ class EvaluatorTest(SimpleTestCase):
             )
         self.assertTrue(decision.allowed)
         self.assertEqual(len(calls), 1)
+
+    def test_controls_resource_compares_durable_account_identity(self):
+        principal_account = FakeAccount(pk=7)
+        resource_account = FakeAccount(pk=7)
+        self.assertIsNot(principal_account, resource_account)
+        decision = evaluate(
+            PredicateRequirement("principal.controls_resource"),
+            GrantSnapshot("account:7", {}, 1),
+            ResourceSnapshot("object:42", "object", frozenset(), 1),
+            AuthorizationContext(
+                principal=FakePrincipal(account=principal_account),
+                resource=FakeControlledResource(account=resource_account),
+            ),
+        )
+        self.assertTrue(decision.allowed)
+
+    def test_controls_resource_denies_foreign_account(self):
+        decision = evaluate(
+            PredicateRequirement("principal.controls_resource"),
+            GrantSnapshot("account:8", {}, 1),
+            ResourceSnapshot("object:42", "object", frozenset(), 1),
+            AuthorizationContext(
+                principal=FakePrincipal(account=FakeAccount(pk=8)),
+                resource=FakeControlledResource(account=FakeAccount(pk=7)),
+            ),
+        )
+        self.assertFalse(decision.allowed)
+
+    def test_controls_resource_does_not_bypass_additional_capability(self):
+        account = FakeAccount(pk=7)
+        decision = evaluate(
+            AllOf(
+                (
+                    PredicateRequirement("principal.controls_resource"),
+                    RequiresCapability("game.staff.puppet"),
+                )
+            ),
+            GrantSnapshot("account:7", {}, 1),
+            ResourceSnapshot("object:42", "object", frozenset(), 1),
+            AuthorizationContext(
+                principal=FakePrincipal(account=account),
+                resource=FakeControlledResource(account=FakeAccount(pk=7)),
+            ),
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.failed_requirements, ("missing:game.staff.puppet",))

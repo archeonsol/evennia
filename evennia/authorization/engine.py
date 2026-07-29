@@ -232,7 +232,13 @@ def _principal_controls_resource(context, params):
         or (principal if "account" in principal.__class__.__module__.lower() else None)
     )
     resource_account = getattr(resource, "puppeteer", None) or getattr(resource, "account", None)
-    return principal_account is not None and principal_account is resource_account
+    if principal_account is None or resource_account is None:
+        return False
+    principal_account_pk = getattr(principal_account, "pk", None)
+    resource_account_pk = getattr(resource_account, "pk", None)
+    if principal_account_pk is not None and resource_account_pk is not None:
+        return principal_account_pk == resource_account_pk
+    return principal_account is resource_account
 
 
 register_predicate_provider("principal.controls_resource", _principal_controls_resource)
