@@ -21,6 +21,7 @@ evennia
 
    evennia.accounts
    evennia.actions
+   evennia.authorization
    evennia.commands
    evennia.comms
    evennia.contrib
@@ -28,7 +29,6 @@ evennia
    evennia.help
    evennia.hooks
    evennia.jobs
-   evennia.authorization
    evennia.narrative
    evennia.objects
    evennia.prototypes

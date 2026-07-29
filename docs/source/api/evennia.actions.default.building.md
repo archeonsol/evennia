@@ -1,11 +1,12 @@
 ```{eval-rst}
 evennia.actions.default.building
-================================
+========================================
 
 .. automodule:: evennia.actions.default.building
    :members:
    :show-inheritance:
    :undoc-members:
+
 
 
 .. toctree::
