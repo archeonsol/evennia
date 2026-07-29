@@ -177,6 +177,14 @@ class TestBuildingAuthorization(unittest.TestCase):
         self.assertFalse(obj.attributes.has("count"))
         self.assertIn("permission", "\n".join(map(str, char.messages)))
 
+    def test_attribute_read_requires_object_examine_or_control(self):
+        char, _, actor = setup_builder()
+        obj = FakeObj("box", access={"examine": False, "control": False})
+        obj.attributes = CategoryAttributes({("secret", None): "hidden"})
+        char.search_map["box"] = obj
+        self._set(char, actor, "box/secret")
+        self.assertNotIn("hidden", "\n".join(map(str, char.messages)))
+
 
 class TestSetAndAlias(unittest.TestCase):
     """Important typed, nested, category, alias, and editor paths."""
@@ -248,6 +256,15 @@ class TestSetAndAlias(unittest.TestCase):
         save(self.char, "changed")
         self.assertEqual(self.obj.attributes.get("count"), "changed")
 
+    def test_editor_save_rechecks_account_and_object_authority(self):
+        self.obj.attributes.add("note", "old")
+        with mock.patch.object(rules_module, "EvEditor") as editor:
+            self._set("box/note", switches=("edit",))
+        save = editor.call_args.kwargs["savefunc"]
+        self.char.account.quelled = True
+        save(self.char, "new")
+        self.assertEqual(self.obj.attributes.get("note"), "old")
+
 
 class TestLinkAndExamine(unittest.TestCase):
     """Link resource checks and cmdset-free examine output."""
@@ -261,6 +278,53 @@ class TestLinkAndExamine(unittest.TestCase):
         char.search_map.update({"door": exit_obj, "room": room})
         dispatch(Link.parse("door = room", actor, verb="@link"), actor, [char])
         self.assertIs(exit_obj.destination, room)
+
+    def test_sethome_requires_authority_over_destination(self):
+        char, _, actor = setup_builder()
+        obj = FakeObj("box")
+        room = FakeObj("vault", access={"control": False, "edit": False})
+        char.search_map.update({"box": obj, "vault": room})
+        dispatch(SetHome.parse("box = vault", actor, verb="@sethome"), actor, [char])
+        self.assertIsNone(obj.home)
+
+
+class TestCpAttrMove(unittest.TestCase):
+    """Moving attributes snapshots values and removes sources only after writes."""
+
+    def test_move_to_multiple_targets_preserves_value_for_each(self):
+        char, _, actor = setup_builder()
+        source = FakeObj("source")
+        first = FakeObj("first")
+        second = FakeObj("second")
+        source.attributes = CategoryAttributes({("value", None): 7})
+        first.attributes = CategoryAttributes()
+        second.attributes = CategoryAttributes()
+        char.search_map.update({"source": source, "first": first, "second": second})
+        action = CpAttr.parse(
+            "source/value = first/value, second/value",
+            actor,
+            switches=("move",),
+            verb="@cpattr",
+        )
+        dispatch(action, actor, [char])
+        self.assertEqual(first.attributes.get("value"), 7)
+        self.assertEqual(second.attributes.get("value"), 7)
+        self.assertFalse(source.attributes.has("value"))
+
+    def test_move_between_categories_removes_source_category(self):
+        char, _, actor = setup_builder()
+        obj = FakeObj("box")
+        obj.attributes = CategoryAttributes({("value", "old"): 7})
+        char.search_map["box"] = obj
+        action = CpAttr.parse(
+            "box/value:old = box/value:new",
+            actor,
+            switches=("move",),
+            verb="@cpattr",
+        )
+        dispatch(action, actor, [char])
+        self.assertFalse(obj.attributes.has("value", "old"))
+        self.assertEqual(obj.attributes.get("value", category="new"), 7)
 
     def test_examine_requires_account_capability_and_has_no_cmdsets(self):
         char, account, actor = setup_builder(account_caps=("engine.object.examine",))

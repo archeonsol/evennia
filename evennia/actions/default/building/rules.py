@@ -23,6 +23,18 @@ def _can_edit(caller, obj):
     return bool(obj and (obj.access(caller, "control") or obj.access(caller, "edit")))
 
 
+def _can_examine(caller, obj):
+    """Require the target's examine policy or direct control."""
+    return bool(obj and (obj.access(caller, "examine") or obj.access(caller, "control")))
+
+
+def _account_has(caller, capability):
+    """Recheck an account-scoped capability at a suspended-flow mutation point."""
+    account = getattr(caller, "account", None)
+    checker = getattr(account, "has_capability", None)
+    return bool(checker and checker(capability))
+
+
 class CharacterBuildingRules(AttributeOperations):
     """Composable character-side rules for the native default building verbs."""
 
@@ -185,6 +197,10 @@ class CharacterBuildingRules(AttributeOperations):
                     f"{f'[{source_category}]' if source_category else ''}."
                 )
                 return CLAIM
+        source_values = {
+            attr: source.attributes.get(attr, category=source_category) for attr in source_attrs
+        }
+        remove_sources = set()
         output = []
         for target_def in action.rhs_objattr:
             target = caller.search(target_def["name"])
@@ -198,12 +214,17 @@ class CharacterBuildingRules(AttributeOperations):
             target_category = target_def["category"]
             for index, source_attr in enumerate(source_attrs):
                 target_attr = target_attrs[index] if index < len(target_attrs) else source_attr
-                value = source.attributes.get(source_attr, category=source_category)
+                value = source_values[source_attr]
                 target.attributes.add(target_attr, value, category=target_category)
                 source_suffix = f"[{source_category}]" if source_category else ""
                 target_suffix = f"[{target_category}]" if target_category else ""
-                if moving and not (source is target and source_attr == target_attr):
-                    source.attributes.remove(source_attr, category=source_category)
+                same_slot = (
+                    source is target
+                    and source_attr == target_attr
+                    and source_category == target_category
+                )
+                if moving and not same_slot:
+                    remove_sources.add(source_attr)
                     verb = "Moved"
                 else:
                     verb = "Copied"
@@ -211,6 +232,8 @@ class CharacterBuildingRules(AttributeOperations):
                     f"\n{verb} {source.name}.{source_attr}{source_suffix} -> "
                     f"{target.name}.{target_attr}{target_suffix}. (value: {value!r})"
                 )
+        for source_attr in remove_sources:
+            source.attributes.remove(source_attr, category=source_category)
         caller.msg("".join(output))
         return CLAIM
 
@@ -258,14 +281,23 @@ class CharacterBuildingRules(AttributeOperations):
                     return ""
 
             def save(editor_caller, buffer):
+                if not _account_has(editor_caller, "engine.world.build") or not _can_edit(
+                    editor_caller, obj
+                ):
+                    editor_caller.msg("You no longer have permission to edit this attribute.")
+                    return False
                 obj.attributes.add(attr, buffer, category=category)
                 editor_caller.msg(f"Saved Attribute {attr}.")
+                return True
 
             EvEditor(caller, loadfunc=load, savefunc=save, key=f"{obj}/{attr}")
             return CLAIM
         result = []
         if not action.rhs:
             if action.rhs is None:
+                if not _can_examine(caller, obj):
+                    caller.msg(f"You don't have permission to examine {obj.key}.")
+                    return CLAIM
                 if not attrs:
                     attrs = [
                         attr.key
@@ -425,6 +457,9 @@ class CharacterBuildingRules(AttributeOperations):
             return CLAIM
         new_home = caller.search(action.rhs, global_search=True)
         if not new_home:
+            return CLAIM
+        if not _can_edit(caller, new_home):
+            caller.msg(f"You don't have permission to use {new_home.key} as a home.")
             return CLAIM
         old_home = getattr(obj, "home", None)
         obj.home = new_home

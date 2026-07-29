@@ -43,6 +43,9 @@ def py_load(caller):
 
 def py_code(caller, buffer):
     """Execute a saved editor buffer."""
+    if not caller.has_capability("engine.runtime.manage"):
+        caller.msg("You no longer have permission to execute Python code.")
+        return False
     measure_time = caller.db._py_measure_time
     client_raw = caller.db._py_clientraw
     caller.msg("Executing code%s ..." % (" (measure timing)" if measure_time else ""))
@@ -164,7 +167,8 @@ class EvenniaPythonConsole(code.InteractiveConsole):
             """Minimal console output forwarding stream."""
 
             def write(inner_self, string):
-                self.caller.msg(string.split("\n", 1)[0])
+                for line in string.splitlines():
+                    self.caller.msg(line)
 
             def flush(inner_self):
                 """Satisfy the file-like stream protocol."""

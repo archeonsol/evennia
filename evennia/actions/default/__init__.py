@@ -9,20 +9,32 @@ any object-model (room/exit/``move_to``) dependency.
 """
 
 from .account import DefaultAccountRules, Option, Password, UserPassword
-from .admin import (Access, CharacterAdminRules, Emit, Force, Grant, Policy,
-                    Scope, Wall)
+from .admin import Access, CharacterAdminRules, Emit, Force, Grant, Policy, Scope, Wall
 from .emote_nomatch import DefaultEmoteNoMatchRules
 from .events import Arrived, Departed, Moved
-from .general import (CharacterGeneralRules, Help, Home, Look, Nick, NickRules,
-                      Quit, SetHelp)
-from .movement import (CharacterMovementRules, ExitTraversalRules, Locomotion,
-                       Move, exit_resolver, register_exit_resolver)
+from .general import CharacterGeneralRules, Help, Home, Look, Nick, NickRules, Quit, SetHelp
+from .movement import (
+    CharacterMovementRules,
+    ExitTraversalRules,
+    Locomotion,
+    Move,
+    exit_resolver,
+    register_exit_resolver,
+)
 from .nomatch import DefaultNoMatchRules, nomatch_providers
-from .objects import (CharacterObjectRules, ContainerPutRules, Drop, Enter,
-                      Enterable, EnterableObjectRules, Get, Give, Put)
+from .objects import (
+    CharacterObjectRules,
+    ContainerPutRules,
+    Drop,
+    Enter,
+    Enterable,
+    EnterableObjectRules,
+    Get,
+    Give,
+    Put,
+)
 from .system import CharacterSystemRules, Objects, Py, PyRules, Scripts, Systems, Tasks
-from .unloggedin import (Connect, Create, Encoding, Info, Screenreader,
-                         SessionLoginRules)
+from .unloggedin import Connect, Create, Encoding, Info, Screenreader, SessionLoginRules
 
 __all__ = [
     "DefaultNoMatchRules",
@@ -111,8 +123,18 @@ def __getattr__(name):
 
         return getattr(roleplay, name)
     if name in (
-        "SetAttribute", "Set", "SetObjAlias", "Alias", "Copy", "CpAttr",
-        "Link", "Unlink", "SetHome", "Wipe", "Examine", "CharacterBuildingRules",
+        "SetAttribute",
+        "Set",
+        "SetObjAlias",
+        "Alias",
+        "Copy",
+        "CpAttr",
+        "Link",
+        "Unlink",
+        "SetHome",
+        "Wipe",
+        "Examine",
+        "CharacterBuildingRules",
     ):
         from . import building
 

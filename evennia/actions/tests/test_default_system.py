@@ -14,6 +14,7 @@ from unittest import mock
 
 from twisted.internet.defer import Deferred
 
+from evennia.actions.default import python_console as python_console_module
 from evennia.actions.default import system as system_module
 from evennia.actions.default.system import (
     CharacterSystemRules,
@@ -318,6 +319,16 @@ class TestPy(unittest.TestCase):
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
 
+    def test_editor_save_rechecks_runtime_capability(self):
+        char, _ = _setup()
+        char.db._py_measure_time = False
+        char.db._py_clientraw = False
+        char.permissions.remove("Developer")
+        with mock.patch.object(python_console_module, "run_code_snippet") as run:
+            python_console_module.py_code(char, "dangerous()")
+        run.assert_not_called()
+        self.assertTrue(any("permission" in text for text in _texts(char)))
+
 
 class TestPyAccountScope(unittest.TestCase):
     def test_effective_guard_lets_account_rules_fire(self):
@@ -480,6 +491,69 @@ class TestScripts(unittest.TestCase):
         ):
             dispatch(action, actor, [char])
         self.assertTrue(any("Aborted" in text for text in _texts(char)))
+        for script in scripts:
+            script.delete.assert_not_called()
+
+    def test_missing_object_does_not_fall_through_to_global_create(self):
+        char, actor = _system_actor()
+        manager = mock.Mock()
+        manager.filter.return_value = _Query()
+        fake_db = SimpleNamespace(objects=manager)
+        action = Scripts.parse("missing = store:game.Store", actor, verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch("evennia.utils.create.create_script") as create_script,
+        ):
+            dispatch(action, actor, [char])
+        create_script.assert_not_called()
+
+    def test_lone_key_lookup_finds_existing_script(self):
+        char, actor = _system_actor()
+        script = SimpleNamespace(key="store", typeclass_path="game.Storage", obj=None)
+        query = _Query([script])
+        manager = mock.Mock()
+        manager.filter.side_effect = lambda **kwargs: query.filter(**kwargs)
+        fake_db = SimpleNamespace(objects=manager)
+        action = Scripts.parse("store", actor, verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch.object(system_module, "_show_scripts") as pager,
+            mock.patch("evennia.utils.create.create_script") as create_script,
+        ):
+            dispatch(action, actor, [char])
+        pager.assert_called_once()
+        create_script.assert_not_called()
+
+    def test_invalid_confirmation_reprompts_and_revocation_aborts(self):
+        scripts = [
+            SimpleNamespace(
+                key=f"store-{index}", typeclass_path="game.Store", obj=None, delete=mock.Mock()
+            )
+            for index in range(2)
+        ]
+        char, actor = _system_actor()
+        query = _Query(scripts)
+        manager = mock.Mock()
+        manager.filter.return_value = query
+        fake_db = SimpleNamespace(objects=manager)
+        answers = iter(["maybe", "yes"])
+
+        def input_future(actor_, prompt):
+            deferred = Deferred()
+            answer = next(answers)
+            if answer == "yes":
+                actor_.account.has_capability = lambda capability: False
+            deferred.callback(answer)
+            return deferred
+
+        action = Scripts.parse("game.Store", actor, switches=("delete",), verb="@scripts")
+        with (
+            mock.patch.object(script_models, "ScriptDB", fake_db),
+            mock.patch.object(engine_mod, "_get_input_future", side_effect=input_future),
+        ):
+            dispatch(action, actor, [char])
+        self.assertTrue(any("Please answer" in text for text in _texts(char)))
+        self.assertTrue(any("permission" in text for text in _texts(char)))
         for script in scripts:
             script.delete.assert_not_called()
 

@@ -116,6 +116,12 @@ def _show_scripts(caller, scripts, session=None):
     return ScriptEvMore(caller, scripts, session=session)
 
 
+def _has_rows(query):
+    """Check a queryset without materializing it; tolerate list-like test doubles."""
+    exists = getattr(query, "exists", None)
+    return bool(exists()) if callable(exists) else bool(query)
+
+
 def _coll_date_func(task):
     """Normalize a task tuple's completion date and callback memory reference."""
     t_comp_date = str(task[0]).replace("-", "/")
@@ -324,17 +330,22 @@ class CharacterSystemRules(PyRules):
         hidden = ("evennia.prototypes.prototypes.DbPrototype",)
         script_id = dbref(typeclass)
         if script_id:
-            return ScriptDB.objects.get_all_scripts(typeclass)
+            return ScriptDB.objects.get_all_scripts(typeclass).exclude(db_typeclass_path__in=hidden)
         if key:
             return ScriptDB.objects.filter(
                 db_key__iexact=key, db_typeclass_path__iendswith=typeclass
             ).exclude(db_typeclass_path__in=hidden)
+        key_matches = ScriptDB.objects.filter(db_key__iexact=typeclass).exclude(
+            db_typeclass_path__in=hidden
+        )
+        if _has_rows(key_matches):
+            return key_matches.order_by("id")
         scripts = (
             ScriptDB.objects.filter(db_typeclass_path__iendswith=typeclass)
             .exclude(db_typeclass_path__in=hidden)
             .order_by("id")
         )
-        if scripts:
+        if _has_rows(scripts):
             return scripts
         if "-" in typeclass:
             try:
@@ -359,7 +370,7 @@ class CharacterSystemRules(PyRules):
         session = getattr(actor, "session", None)
         if not action.args:
             scripts = ScriptDB.objects.all().exclude(db_typeclass_path__in=hidden)
-            if not scripts:
+            if not _has_rows(scripts):
                 caller.msg("No scripts found.")
             else:
                 _show_scripts(caller, scripts.order_by("id"), session=session)
@@ -367,6 +378,8 @@ class CharacterSystemRules(PyRules):
 
         obj_query, key_query, typeclass_query = self._script_parts(action)
         obj = caller.search(obj_query, global_search=True) if obj_query else None
+        if obj_query and not obj:
+            return CLAIM
         scripts = self._search_scripts(key_query, typeclass_query) if typeclass_query else None
 
         if not action.switches:
@@ -385,12 +398,12 @@ class CharacterSystemRules(PyRules):
                     attached = ScriptDB.objects.filter(db_obj=obj).exclude(
                         db_typeclass_path__in=hidden
                     )
-                    if attached:
+                    if _has_rows(attached):
                         _show_scripts(caller, attached.order_by("id"), session=session)
                     else:
                         caller.msg(f"No scripts defined on {obj}")
                 return CLAIM
-            if scripts:
+            if _has_rows(scripts):
                 _show_scripts(caller, scripts.order_by("id"), session=session)
                 return CLAIM
             from evennia.utils.utils import dbref
@@ -436,17 +449,32 @@ class CharacterSystemRules(PyRules):
                     Q(db_key__iexact=typeclass_query)
                     | Q(db_typeclass_path__iendswith=typeclass_query)
                 )
-        if not scripts:
+        if not _has_rows(scripts):
             caller.msg("No scripts found.")
             return CLAIM
         count = scripts.count() if hasattr(scripts, "count") else len(scripts)
         if count > 1:
-            reply = yield (
-                f"Multiple scripts found: {scripts}. Are you sure you want to operate on all of them? [Y]/N? "
+            prompt = (
+                f"Multiple scripts found: {scripts}. Are you sure you want to "
+                "operate on all of them? [Y]/N? "
             )
-            if (reply or "").lower() in ("n", "no"):
-                caller.msg("Aborted.")
-                return CLAIM
+            while True:
+                reply = yield prompt
+                normalized = (reply or "").strip().lower()
+                if normalized in ("", "y", "yes"):
+                    break
+                if normalized in ("n", "no", "cancel", "abort"):
+                    caller.msg("Aborted.")
+                    return CLAIM
+                caller.msg("Please answer yes or no.")
+        principal = getattr(actor, "account", None)
+        checker = getattr(principal, "has_capability", None)
+        if not checker or not checker("engine.script.control"):
+            caller.msg("You no longer have permission to control scripts.")
+            return CLAIM
+        if obj and not (obj.access(caller, "control") or obj.access(caller, "edit")):
+            caller.msg(f"You no longer have permission to edit {obj.key}.")
+            return CLAIM
         messages = []
         for script in scripts:
             script_key = script.key
