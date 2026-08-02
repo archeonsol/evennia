@@ -6,24 +6,18 @@ and carrying **structured R1 RenderNodes** instead of pre-baked HTML. The name i
 engine-generic (the platform brand, not game-specific); the downstream game is
 just its first consumer. It slots into the existing subprotocol seam at
 `evennia/server/portal/wire_formats/` (RFC-6455 negotiation, a clean `WireFormat`
-base) and coexists with the MUD-standard and telnet formats. A stub `AzabanFormat`
+base) and coexists with the MUD-standard and telnet formats. `AzabanFormat`
 lives at `evennia/server/portal/wire_formats/azaban.py`.
 
-## Landscape
+The runtime half — handshake ordering, resume, frame encoding, batching, inbound
+limits, the OOB event catalog — is
+[`webclient-protocol-runtime.md`](webclient-protocol-runtime.md).
 
-Formats today, alongside which `azaban.v1` is additive:
+## Landscape, and why a *new* format
 
-- `evennia_v1.py`: JSON arrays `[cmd, args, kwargs]`; text is **HTML**. Legacy,
-  the un-baked-ANSI path R1 moves past. *(The current shell speaks this.)*
-- `json_standard.py`: binary ANSI + JSON envelope, OOB as GMCP-in-JSON. For
-  **third-party standard WS clients**.
-- `gmcp_standard.py`, `terminal.py`: telnet/Mudlet (raw ANSI + GMCP/MSDP).
-
-R1 already has `RenderNode` + span serialization (`RenderNode.payload()` in
-`evennia/narrative/render.py`), and `deliver_node` ships a `narrative` OOB to
-capable sessions.
-
-## Why a *new* format (not reuse the MUD standard)
+`azaban.v1` is additive alongside `evennia_v1.py` (legacy JSON arrays, HTML text
+— the un-baked-ANSI path R1 moves past), `json_standard.py` (third-party
+standard WS clients), and `gmcp_standard.py` / `terminal.py` (telnet/Mudlet).
 
 The MUD-standard format is for **interop**: `data` is a stringified blob and OOB
 is GMCP-wrapped, lossy for rich structured payloads. Our shell is **ours, both
@@ -47,7 +41,12 @@ if that encoding is negotiated in `hello`.
 ## Message types
 
 **Server → client**
-- `hello`: `{ server, session, caps }`. Sent on open; announces capabilities.
+- `hello`: `{ protocol, resumed }`. Sent in reply to the client's `hello`, after
+  any replayed frames, and **stamped last** so its `s` sits above them. The
+  client *assigns* its resume cursor from that `s` rather than taking a maximum:
+  when the server could not resume the session it restarts its counter at zero,
+  and a cursor that only ever climbs would sit permanently above anything the
+  new connection will send, so replay would silently never fire again.
 - `text`: `{ html, kind? }`. HTML log line for anything not yet a structured node.
 - `prompt`: `{ html }`.
 - `render`: `{ nodes: RenderNode[] }`. Structured R1 narrative (blocks + inline
@@ -96,6 +95,7 @@ follow as a BINARY frame or a fetchable `url`.
 Protocol types live in three mirrored places kept in sync by **shared round-trip
 test vectors**: this doc, `protocol.ts` in the shell, and
 `evennia/server/portal/wire_formats/azaban.py`. No codegen; revisit if it drifts.
+The OOB *event catalog* is separate and is codegen — see the runtime doc.
 
 ## Coexistence, the telnet invariant, and open decisions
 
@@ -111,10 +111,9 @@ now (WebTransport/HTTP/3 reserved, the format is transport-agnostic); JSON defau
 with msgpack a negotiated `caps.encoding` only if profiling shows parse cost.
 
 ## Build phases
-1. **Azaban core:** `hello`/`text`/`prompt`/`cmd`/typed `oob`; portal
-   `AzabanFormat` + shell negotiation (`render` reserved).
-2. **`render` (done):** `caps.rendersNodes` selects immutable `render.v1` nodes;
-   all capable sessions receive them and remaining text normalizes at Azaban.
-3. **Scene model + `patch` (done):** room snapshots and occupant deltas use opaque
-   viewer handles; raw database identity is rejected at the wire boundary.
-4. **Asset channel:** `asset` + binary/URL media.
+
+Phases 1-3 **done**: Azaban core (`hello`/`text`/`prompt`/`cmd`/typed `oob` +
+`AzabanFormat` and shell negotiation), `render` (`caps.rendersNodes` selects
+immutable `render.v1` nodes), scene model + `patch` (room snapshots and occupant
+deltas over opaque viewer handles, raw identity rejected at the wire boundary).
+Phase 4, the **asset channel**, is not built — `caps.assets` is still `false`.

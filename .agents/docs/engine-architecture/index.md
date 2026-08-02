@@ -33,6 +33,10 @@ which drifted stale as the work shipped (a roadmap rots; a decisions log doesn't
   wire protocol for the Svelte shell: typed envelope carrying structured R1
   RenderNodes + a per-viewer scene model, additive on the subprotocol seam.
   Design.
+- **[webclient-protocol-runtime.md](webclient-protocol-runtime.md)** — Azaban's
+  runtime contract: handshake ordering, resume (per-tab token, uid binding,
+  stash cap), frame encoding, batching, inbound limits, and the codegen'd OOB
+  event catalog. The invariants, each wrong under the obvious implementation.
 
 If an item moves from speculative to scoped, it graduates from `horizon.md` up to
 `committed.md`, and to `decisions.md` once shipped.

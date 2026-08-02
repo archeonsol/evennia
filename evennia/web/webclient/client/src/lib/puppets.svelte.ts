@@ -82,6 +82,13 @@ export class PuppetScenes {
     this.requestResync?.(npcId, current?.revision ?? 0);
   }
 
+  /** A resync request never landed: drop the in-flight flag so it can retry. */
+  resyncFailed(npcId: number): void {
+    const key = String(npcId);
+    const current = this.feeds.get(key);
+    if (current?.resyncing) this.feeds.set(key, { ...current, resyncing: false });
+  }
+
   /** Wipe one NPC terminal's scrollback (the structured scene is untouched). */
   clearFeed(npcId: number): void {
     const key = String(npcId);

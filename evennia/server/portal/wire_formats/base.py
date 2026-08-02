@@ -34,11 +34,25 @@ class WireFormat:
             Sec-WebSocket-Protocol negotiation.
         supports_oob (bool): Whether this format supports out-of-band
             data (structured commands beyond plain text).
+        supports_resume (bool): Whether frames from this format are JSON
+            envelopes that may be sequence-stamped and buffered for
+            replay after a reconnect. Formats that emit raw ANSI text
+            leave this ``False`` so the transport does not attempt to
+            parse every outgoing line as JSON.
+
+    Note:
+        A format with ``supports_resume`` may return the envelope **dict**
+        itself as the data element of the ``(data, is_binary)`` tuple instead
+        of encoded bytes. The transport has to stamp a sequence number onto
+        every such frame anyway, so handing it the object lets it serialize
+        once rather than parse-stamp-reserialize what the format just dumped.
+        Returning bytes stays valid — the transport parses those back.
 
     """
 
     name = None
     supports_oob = True
+    supports_resume = False
 
     @staticmethod
     def _extract_text_and_flags(args, kwargs, protocol_flags):

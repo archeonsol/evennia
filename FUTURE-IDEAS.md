@@ -196,3 +196,78 @@ Cross-refs: H1 in
 [`decisions.md`](.agents/docs/engine-architecture/decisions.md);
 appearance-mixin §2.10 and §3.3 in
 [`Typeclass-Hooks.md`](docs/source/Components/Typeclass-Hooks.md).
+
+---
+
+## Live scene fields (ticking readouts over `patch`)
+
+**Goal:** let a viewer's scene carry values that change on their own —
+a countdown, an ETA, a dose, a progress bar — so the shell shows a live
+instrument instead of a snapshot that lies until the player looks again.
+This is the one thing structured clients can do that telnet genuinely
+cannot, so it is a real reason to prefer the shell rather than a
+cosmetic one.
+
+**What already works.** The whole `patch` path is live end to end and
+needs no engine change:
+
+- game emits `viewer.msg(patch=((), {"target": "scene", "ops": ops}),
+  session=capable)` (see the occupant deltas in the game's
+  `typeclasses/rooms/base.py` and `world/multipuppet/perception.py`)
+- `wire_formats/azaban.py` frames it as `{"t": "patch", target, ops,
+  meta}` behind the identity scrub and structural limits
+- `web/webclient/client/src/main.ts` routes `patch` to
+  `scene.apply(target, ops)`
+- `client/src/lib/scene.svelte.ts` holds the reactive model and the room
+  panel renders it off the log
+- `@sync_context` forces a resync
+
+**What is missing** is narrow and in three places:
+
+1. **No slot for it in the scene model.** `Scene` carries `room`,
+   `occupants`, `exits`. A timed readout has nowhere to live. Wants a
+   generic bag (`fields`, or `panels` keyed by name) rather than a
+   bespoke `status` — the second consumer of this will not be a lift.
+2. **`scene.apply` handles three op shapes.** Whole-scene `set` on `/`,
+   `add` on `/occupants/-`, `del` on `/occupants`. Its own comment says
+   "granular sub-path deltas to follow"; a `set` on `/fields/<key>` is
+   that follow-up.
+3. **Nothing emits on a timer.** Every patch today is event-driven —
+   somebody moved. A ticking value is the first *periodic, per-viewer*
+   send in the system, and that is the part that needs design rather
+   than code.
+
+**Why deferred:** the load shape, not the difficulty. One patch per
+second per watching viewer is a new profile for a system whose every
+other send is event-driven, and getting it wrong is a broadcast storm
+wearing a nice UI. It also has no forcing function yet: the first real
+consumer (a moving venue's departure countdown) reads fine as static
+text, and telnet keeps that text either way.
+
+**Constraints if picked up:**
+
+- Emit only while a value is actually changing, only to viewers with the
+  field on screen, coalesced to at most 1/s, and stop the moment they
+  leave or the countdown ends. Prefer a single system tick walking the
+  live set over N independent timers.
+- Send the *value*, not a re-rendered string. The shell formats it;
+  otherwise every format change is a server deploy.
+- Fields are viewer-scoped like everything else on this path: no raw
+  identity, capability-gated per session, and the same structural limits
+  the wire format already enforces.
+- Parity is not optional. Every live field needs a static text form that
+  stands alone, because that is what every non-shell client gets.
+
+**Sequence:** generic `fields` bag in the scene model and the matching
+`set` op in `scene.apply`, with one hand-emitted field to prove the
+round trip. Then the periodic emitter, bounded as above, against one
+real consumer. Only generalise to a helper after the second consumer
+exists and the load profile has been watched under real sessions.
+
+**Engine or game?** Game, by the test in this file — the emitter API
+(`msg(patch=...)`) and the wire format both already exist, so a second
+consumer could re-implement the ticking part from scratch. What lives
+here is the *scene-model contract*: the `fields` shape and the op
+vocabulary are shared between the shell in this repo and whatever
+emits them, so they get versioned alongside `render.v1` rather than
+invented downstream.

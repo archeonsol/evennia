@@ -24,21 +24,32 @@ const RECONNECT_MAX_MS = 30000;
 // `asset` land, flip these on to opt into structured delivery for this session.
 const CLIENT_CAPS = {
   rendersNodes: true, // shell renders `render` node payloads (identity anchors)
+  // Shell parses node bodies itself (lib/markup.ts, parity-tested against the
+  // server's parse_html), so the server omits the duplicate parsed `html`.
+  rendersMarkup: true,
   patches: true, // shell holds a reactive scene model fed by `patch` deltas
+  batching: true, // shell unwraps `{t:"batch", frames:[...]}` bursts
   assets: false, // TODO: true once the asset channel exists
   images: true,
   theme: true,
 };
 
+// The resume token identifies *one connection's* replay buffer, so it belongs to
+// the tab, not the browser. In localStorage every tab presents the same token:
+// they overwrite each other's stash on close and a reconnecting tab replays
+// another tab's frames into its own log. sessionStorage is per-tab and survives
+// a reload, which is exactly the lifetime resume covers.
 function loadClientToken(): string {
+  const newToken = () =>
+    (crypto as any).randomUUID?.() ?? String(Date.now()) + Math.random().toString(36).slice(2);
   try {
-    const existing = localStorage.getItem("underspire.client.token");
+    const existing = sessionStorage.getItem("underspire.client.token");
     if (existing) return existing;
-    const t = (crypto as any).randomUUID?.() ?? String(Date.now()) + Math.random().toString(36).slice(2);
-    localStorage.setItem("underspire.client.token", t);
+    const t = newToken();
+    sessionStorage.setItem("underspire.client.token", t);
     return t;
   } catch {
-    return String(Date.now());
+    return newToken();
   }
 }
 
@@ -54,6 +65,8 @@ class AzabanConnection {
   state = $state<ConnState>("connecting");
   loggedOut = $state(false); // server sent a `logout` (e.g. @quit): show the quit menu
   logoutReason = $state("");
+  /** Whether the last handshake replayed a buffer rather than starting fresh. */
+  resumed = $state(false);
 
   private ws: WebSocket | null = null;
   private handlers = new Map<string, EnvHandler>();
@@ -235,8 +248,27 @@ class AzabanConnection {
   }
 
   private dispatch(env: Record<string, any>): void {
-    // Track the highest server seq we've applied, for resume-on-reconnect.
-    if (typeof env.s === "number" && env.s > this.lastSeq) this.lastSeq = env.s;
+    // The server's `hello` closes the handshake, after any replay, and re-bases
+    // our cursor: assign, never max. The server restarts its counter whenever it
+    // could not resume us, so a cursor that only ever climbs would sit above
+    // everything the new connection will ever send and permanently ask to resume
+    // from a seq that no longer exists.
+    if (env.t === "hello") {
+      this.lastSeq = typeof env.s === "number" ? env.s : 0;
+      this.resumed = env.resumed === true;
+    } else if (typeof env.s === "number" && env.s > this.lastSeq) {
+      // Track the highest server seq we've applied, for resume-on-reconnect.
+      this.lastSeq = env.s;
+    }
+    // A batch is a burst coalesced into one frame; unwrap in order. The seq
+    // belongs to the batch, so members are dispatched without one.
+    if (env.t === "batch") {
+      const frames = Array.isArray(env.frames) ? env.frames : [];
+      for (const frame of frames) {
+        if (frame && typeof frame === "object") this.dispatch(frame);
+      }
+      return;
+    }
     // RPC responses resolve their pending promise.
     if (env.t === "res" && typeof env.re === "number") {
       const p = this.pending.get(env.re);
@@ -255,15 +287,24 @@ class AzabanConnection {
         console.error("azaban: handler for", env.t, "failed", e);
       }
     }
+    // `hello` is handled above at the transport level; nothing else need subscribe.
+    else if (import.meta.env?.DEV && env.t !== "hello") {
+      // Ignored for forward compatibility, but silence hides a typo'd `t`
+      // server-side, so make it visible while developing.
+      console.warn("azaban: no handler for frame type", env.t, env);
+    }
     // Unhandled types are ignored (forward-compatible).
   }
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer || this.manualClose) return;
-    const delay = Math.min(
+    // Jitter matters exactly when things are already going wrong: without it,
+    // every client reconnects on the same millisecond after a server restart.
+    const backoff = Math.min(
       RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_MS,
     );
+    const delay = Math.round(backoff * (0.75 + Math.random() * 0.5));
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;

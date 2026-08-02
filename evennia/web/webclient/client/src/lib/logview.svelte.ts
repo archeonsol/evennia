@@ -1,28 +1,12 @@
-// Log lens + scrollback search state. The game log carries a msgType per line;
-// here we categorise it, toggle categories on/off, and hold the search query.
-// GameLog reads this to filter + highlight.
+// Log lens + scrollback search state: which categories are on, and the current
+// search query. GameLog reads this to filter + highlight. The category
+// vocabulary itself lives in the rune-free `logcats.ts` and is re-exported here
+// so existing importers keep working.
 
-export type LogCat = "speech" | "pose" | "combat" | "comms" | "look" | "system";
+import { CATS, categorize, type LogCat } from "./logcats";
 
-export const CATS: { id: LogCat; label: string }[] = [
-  { id: "speech", label: "Speech" },
-  { id: "pose", label: "Pose" },
-  { id: "combat", label: "Combat" },
-  { id: "comms", label: "Comms" },
-  { id: "look", label: "Look" },
-  { id: "system", label: "System" },
-];
-
-export function categorize(type: string): LogCat {
-  const t = (type || "").toLowerCase();
-  if (t === "say" || t === "whisper" || t === "speech") return "speech";
-  if (t === "pose" || t === "emote") return "pose";
-  if (t.includes("combat") || t.includes("damage")) return "combat";
-  if (["channel", "comms", "page", "tell", "network", "sm"].some((x) => t.includes(x)))
-    return "comms";
-  if (t === "look" || t === "room") return "look";
-  return "system";
-}
+export { CATS, categorize };
+export type { LogCat };
 
 class LogView {
   filters = $state<Record<LogCat, boolean>>({

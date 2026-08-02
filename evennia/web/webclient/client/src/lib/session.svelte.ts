@@ -2,16 +2,22 @@
 
 import { triggers } from "./triggers.svelte";
 import { routing } from "./routing.svelte";
+import { categorize, type LogCat } from "./logcats";
 
 export interface LogLine {
   id: number;
   html: string;
   text: string; // tag-stripped, for search
   type: string;
+  cat: LogCat; // lens category, resolved once at append (see below)
   ts: number; // epoch ms, for the timestamp gutter
 }
 
 const MAX_LINES = 5000;
+//: Drop this many lines at once when the cap is hit. Splicing one line per
+//: append re-indexes the whole reactive array on every single message; doing it
+//: in blocks amortises that to roughly nothing.
+const TRIM_BLOCK = 500;
 let nextId = 0;
 
 function stripTags(html: string): string {
@@ -38,9 +44,12 @@ class GameSession {
       html,
       text,
       type,
+      // Resolved here, not in the log's filter: the filter re-runs over the
+      // whole scrollback on every append, and categorize() is string work.
+      cat: categorize(type),
       ts: Date.now(),
     });
-    if (this.lines.length > MAX_LINES) {
+    if (this.lines.length > MAX_LINES + TRIM_BLOCK) {
       this.lines.splice(0, this.lines.length - MAX_LINES);
     }
   }

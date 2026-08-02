@@ -34,6 +34,17 @@ function compile(pattern: string): RegExp | null {
   }
 }
 
+// `highlight()` interpolates the colour into a style attribute, so anything that
+// is not recognisably a colour would be free to close the attribute and open its
+// own. The rules are the player's own, but they ride in localStorage and travel
+// with an exported/imported settings blob, so treat the value as untrusted.
+const COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|var\(--[a-z0-9-]+\)|rgba?\([\d\s.,%]+\))$/i;
+
+function safeColor(color: string): string {
+  const c = (color || "").trim();
+  return COLOR_RE.test(c) ? c : "var(--gold)";
+}
+
 class Triggers {
   highlights = $state<Highlight[]>([]);
   gags = $state<Gag[]>([]);
@@ -63,7 +74,7 @@ class Triggers {
     this.cHL = [];
     for (const h of this.highlights) {
       const re = compile(h.pattern);
-      if (re) this.cHL.push({ re, color: h.color || "var(--gold)" });
+      if (re) this.cHL.push({ re, color: safeColor(h.color) });
     }
     this.cGag = [];
     for (const g of this.gags) {

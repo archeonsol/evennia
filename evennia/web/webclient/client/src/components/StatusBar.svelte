@@ -28,6 +28,15 @@
     dock.openIframe("view:site", "Web", location.origin);
     viewsOpen = false;
   }
+  // The notes page is a per-character tokenised URL the server puts in the
+  // scene fields; it is only offered when the character actually has one.
+  const notesUrl = $derived(
+    typeof scene.fields.notes_url === "string" ? scene.fields.notes_url : "",
+  );
+  function openNotes() {
+    if (notesUrl) dock.openIframe("view:notes", "Notes", notesUrl);
+    viewsOpen = false;
+  }
   function reset() {
     viewsOpen = false;
     dock.resetLayout();
@@ -129,6 +138,9 @@
             </button>
           {/each}
           <button class="mi" role="menuitem" onclick={openSite}>Web page</button>
+          {#if notesUrl}
+            <button class="mi" role="menuitem" onclick={openNotes}>Notes</button>
+          {/if}
           <div class="sep"></div>
           {#each presets as name}
             <button class="mi preset" role="menuitem" onclick={() => loadPreset(name)}>

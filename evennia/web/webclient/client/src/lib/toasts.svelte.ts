@@ -2,6 +2,8 @@
 // announcements) delivered as Azaban `oob`. Diegetic "vox" pings rather than
 // generic browser notifications.
 
+import type { CommunityKudosPayload, CommunityMilestonePayload } from "./oob-events";
+
 export interface Toast {
   id: number;
   kind: string;
@@ -26,15 +28,18 @@ class Toasts {
   }
 
   /** Map a community_* oob event to a toast (defensive about field names). */
+  // Field names come from the generated catalog (lib/oob-events.ts), not from
+  // guesswork: this used to read `from`/`to`/`reason` off a payload that ships
+  // `giver`/`receiver`/`message`, so every kudos toast rendered "Someone → ".
   fromCommunity(event: string, kwargs: Record<string, any>): void {
     const k = kwargs ?? {};
     if (event === "community_kudos") {
-      const line = `${k.from ?? k.sender ?? "Someone"} → ${k.to ?? k.target ?? ""}`;
-      this.push("kudos", "Kudos", k.reason ? `${line}: ${k.reason}` : line);
+      const p = k as CommunityKudosPayload;
+      const giver = p.anonymous ? "Someone" : (p.giver ?? "Someone");
+      const line = `${giver} → ${p.receiver ?? ""}`;
+      this.push("kudos", "Kudos", p.message ? `${line}: ${p.message}` : line);
     } else if (event === "community_milestone") {
-      this.push("milestone", "Milestone", k.text ?? k.title ?? k.message ?? "");
-    } else if (event === "community_announcement") {
-      this.push("announce", "Announcement", k.text ?? k.message ?? k.body ?? "");
+      this.push("milestone", "Milestone", (k as CommunityMilestonePayload).label ?? "");
     } else {
       this.push("info", event.replace(/^community_/, ""), k.text ?? k.message ?? "");
     }

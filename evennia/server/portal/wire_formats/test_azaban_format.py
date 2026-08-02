@@ -16,7 +16,10 @@ class TestAzabanFormat(unittest.TestCase):
         self.assertIsNotNone(result)
         data, is_binary = result
         self.assertFalse(is_binary)  # Azaban is TEXT frames only
-        return json.loads(data)
+        # Azaban hands the transport the envelope object (it has to stamp a
+        # resume seq onto it anyway); tolerate bytes so the helper still works
+        # if a frame is ever pre-encoded.
+        return data if isinstance(data, dict) else json.loads(data)
 
     # -- outgoing ----------------------------------------------------------
 
@@ -195,6 +198,52 @@ class TestAzabanFormat(unittest.TestCase):
         self.assertIsNone(
             self.fmt.decode_incoming(b'{"t":"oob","action":"react","args":"notalist"}', False)
         )
+
+    # -- caps-negotiated server-side HTML ----------------------------------
+
+    def test_text_omits_html_when_client_renders_markup(self):
+        flags = {"AZABAN_CAPS": {"rendersMarkup": True}}
+        env = self._env(self.fmt.encode_text("|rhi|n", protocol_flags=flags))
+        node = env["nodes"][0]
+        self.assertNotIn("html", node)
+        # The parity anchor still carries the text.
+        self.assertIn("hi", node["body"])
+
+    def test_text_keeps_html_without_the_cap(self):
+        for flags in ({}, {"AZABAN_CAPS": {}}, {"AZABAN_CAPS": {"rendersMarkup": False}}, None):
+            with self.subTest(flags=flags):
+                env = self._env(self.fmt.encode_text("|rhi|n", protocol_flags=flags))
+                self.assertIn("html", env["nodes"][0])
+
+    def test_text_keeps_html_when_caps_are_malformed(self):
+        env = self._env(self.fmt.encode_text("hi", protocol_flags={"AZABAN_CAPS": "nonsense"}))
+        self.assertIn("html", env["nodes"][0])
+
+    def test_narrative_omits_html_when_client_renders_markup(self):
+        flags = {"AZABAN_CAPS": {"rendersMarkup": True}}
+        env = self._env(
+            self.fmt.encode_default("narrative", [{"body": "|rhi|n"}], protocol_flags=flags)
+        )
+        self.assertNotIn("html", env["nodes"][0])
+
+    def test_narrative_keeps_html_without_the_cap(self):
+        env = self._env(self.fmt.encode_default("narrative", [{"body": "|rhi|n"}]))
+        self.assertIn("html", env["nodes"][0])
+
+    # -- resume ------------------------------------------------------------
+
+    def test_format_opts_into_resume_stamping(self):
+        # Frames are JSON envelopes, so the transport may stamp and buffer them.
+        self.assertTrue(self.fmt.supports_resume)
+
+    # -- patch meta --------------------------------------------------------
+
+    def test_patch_meta_is_passed_through_unrestricted(self):
+        # The multipuppet relay routes on its own keys; an allowlist here would
+        # silently break it. The identity and structure guards are the contract.
+        meta = {"npc_id": 71, "slot": 2, "revision": 4, "kind": "speech"}
+        env = self._env(self.fmt.encode_default("patch", target="scene", ops=[], meta=meta))
+        self.assertEqual(env["meta"], meta)
 
 
 if __name__ == "__main__":

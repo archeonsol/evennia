@@ -1,7 +1,12 @@
-"""Engine-shipped OOB events: session lifecycle, media, and the UI primitive.
+"""Engine-shipped OOB events: session lifecycle, media, editor, and the UI primitive.
 
 Games register their own events in a module listed in
 settings.PROTOCOL_EVENT_MODULES. This is the engine's baseline, always loaded.
+
+Every event the engine sends to a shell belongs here. An unregistered event
+still reaches the client — the wire format passes anything through — but it is
+absent from the generated ``oob-events.ts``, so the client routes it on an
+unchecked string literal and nothing catches a rename.
 """
 
 from evennia.server.protocol import register_event
@@ -14,6 +19,28 @@ register_event("image", carrier="args", fields={"_": "str"}, doc="args[0] = imag
 register_event("audio", carrier="args", fields={"_": "str"}, doc="args[0] = audio URL.")
 register_event("video", carrier="args", fields={"_": "str"}, doc="args[0] = video URL.")
 register_event("youtube", carrier="args", fields={"_": "str"}, doc="args[0] = YouTube URL.")
+
+# -- editor overlay (evennia.utils.eveditor) ------------------------------
+# A rich client that answered `editor_client` drives EvEditor through these
+# instead of the terminal line editor.
+register_event(
+    "editor_open",
+    carrier="args",
+    fields={"_": "list"},
+    doc="args = [session_id, buffer, meta]; open the editor overlay.",
+)
+register_event(
+    "editor_close",
+    carrier="args",
+    fields={"_": "str"},
+    doc="args[0] = session_id; the server closed the editor.",
+)
+register_event(
+    "editor_status",
+    carrier="args",
+    fields={"_": "str"},
+    doc="args[0] = 'saved' | 'unsaved'.",
+)
 
 # -- server-driven UI primitive (evennia.server.ui) -----------------------
 register_event(

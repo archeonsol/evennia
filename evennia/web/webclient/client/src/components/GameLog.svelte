@@ -1,6 +1,6 @@
 <script lang="ts">
   import { session } from "../lib/session.svelte";
-  import { logview, categorize, CATS } from "../lib/logview.svelte";
+  import { logview, CATS } from "../lib/logview.svelte";
   import { keybinds } from "../lib/keybinds.svelte";
   import { typewriter, markBacklog } from "../lib/typewriter";
   import { settings } from "../lib/settings.svelte";
@@ -24,13 +24,20 @@
     settings.reduceMotion || settings.screenreader ? 0 : settings.typewriterMs,
   );
 
+  // Every filter on is the default and the common case, and it means "no
+  // filtering" — so hand back the array itself rather than rebuilding a copy of
+  // the whole scrollback on every appended line.
+  const allCats = $derived(CATS.every((c) => logview.filters[c.id]));
   const filtered = $derived(
-    session.lines.filter((l) => logview.filters[categorize(l.type)]),
+    allCats ? session.lines : session.lines.filter((l) => logview.filters[l.cat]),
   );
   const query = $derived(logview.search.trim().toLowerCase());
   const matchIds = $derived(
     query ? filtered.filter((l) => l.text.toLowerCase().includes(query)).map((l) => l.id) : [],
   );
+  // Membership is tested once per rendered line; a linear scan per line makes
+  // marking hits quadratic in the scrollback.
+  const matchSet = $derived(new Set(matchIds));
 
   function pad(n: number) {
     return String(n).padStart(2, "0");
@@ -148,9 +155,9 @@
     {#each filtered as line (line.id)}
       <div
         class="log-line"
-        data-cat={categorize(line.type)}
+        data-cat={line.cat}
         data-lid={line.id}
-        class:hit={matchIds.includes(line.id)}
+        class:hit={matchSet.has(line.id)}
         class:active={matchIds[matchPos] === line.id}
       >
         {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span class="body" use:typewriter={{ id: line.id, durationMs: twDuration, onstep: keepPinned }}>{@html line.html}</span>

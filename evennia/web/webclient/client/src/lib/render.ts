@@ -1,3 +1,5 @@
+import { pipeToHtml } from "./markup";
+
 // Render an R1 RenderNode payload to HTML for the log.
 //
 // A render.v1 payload contains a parity HTML/body plus optional semantic blocks
@@ -54,31 +56,29 @@ function wrapName(html: string, name: string, handle: string | undefined): strin
   });
 }
 
-function escapeText(s: string): string {
-  const el = document.createElement("div");
-  el.textContent = s;
-  return el.innerHTML;
-}
+// Node bodies and block text carry Evennia markup, so they go through
+// pipeToHtml (which escapes as it parses) rather than being escaped flat —
+// escaping alone would put literal |r codes in front of the player.
 
 function blockHtml(block: RenderBlock): string {
   const cls = escapeAttr(block.style ?? "");
   if (block.type === "section") {
-    const title = block.title ? `<h3>${escapeText(block.title)}</h3>` : "";
+    const title = block.title ? `<h3>${pipeToHtml(block.title)}</h3>` : "";
     return `<section data-key="${escapeAttr(block.key ?? "")}" class="${cls}">${title}${(block.children ?? []).map(blockHtml).join("")}</section>`;
   }
   if (block.type === "list") {
     const tag = block.ordered ? "ol" : "ul";
-    return `<${tag} class="${cls}">${(block.items ?? []).map((item) => `<li>${escapeText(item)}</li>`).join("")}</${tag}>`;
+    return `<${tag} class="${cls}">${(block.items ?? []).map((item) => `<li>${pipeToHtml(item)}</li>`).join("")}</${tag}>`;
   }
-  if (block.type === "paragraph") return `<p class="${cls}">${escapeText(block.text ?? "")}</p>`;
-  if (block.type === "system") return `<div class="system ${escapeAttr(block.level ?? "info")} ${cls}">${escapeText(block.text ?? "")}</div>`;
-  return `<div class="line ${cls}">${escapeText(block.text ?? "")}</div>`;
+  if (block.type === "paragraph") return `<p class="${cls}">${pipeToHtml(block.text ?? "")}</p>`;
+  if (block.type === "system") return `<div class="system ${escapeAttr(block.level ?? "info")} ${cls}">${pipeToHtml(block.text ?? "")}</div>`;
+  return `<div class="line ${cls}">${pipeToHtml(block.text ?? "")}</div>`;
 }
 
 export function renderNodeHtml(node: NodePayload): string {
   // Server HTML is the byte-parity/color anchor while surfaces migrate. A node
   // without it can still render natively from semantic blocks.
-  let html = String(node.html ?? ((node.blocks?.length ?? 0) > 0 ? node.blocks!.map(blockHtml).join("") : escapeText(node.body ?? "")));
+  let html = String(node.html ?? ((node.blocks?.length ?? 0) > 0 ? node.blocks!.map(blockHtml).join("") : pipeToHtml(node.body ?? "")));
   // Longest names first so a longer sdesc isn't clobbered by a shorter substring.
   const refs = [...(node.refs ?? [])]
     .filter((r) => r && (r.label || r.name))

@@ -12,8 +12,21 @@ RenderNodes** for narrative content so the shell renders nodes rather than
 un-baking HTML. Plain system text still ships as HTML (there is no node behind
 it); the `narrative` outputfunc carries the node tree.
 
-Server -> client types: hello, text, prompt, render, oob, res.
+Server -> client types: hello, text, prompt, render, patch, batch, oob, res.
 Client -> server types: hello, cmd, req, oob, websocket_close.
+
+Outgoing frames are stamped with a monotonic ``s`` by the transport and buffered
+for replay across a reconnect (see ``supports_resume`` and
+``WebSocketClient._stamp_and_buffer``).
+
+Client capabilities arrive in the ``hello`` envelope and are stashed on the
+session by the ``azaban_hello`` inputfunc:
+
+    rendersNodes    the shell renders RenderNode trees (sets CLIENT_NARRATIVE)
+    rendersMarkup   the shell parses Evennia markup itself, so the server omits
+                    the parsed ``html`` alongside each node body
+    batching        the shell understands ``{"t": "batch", "frames": [...]}``,
+                    letting the transport coalesce a burst into one frame
 
 See ``evennia/.agents/docs/engine-architecture/webclient-protocol.md``.
 """
@@ -55,6 +68,28 @@ _ALWAYS_DENIED = frozenset(
 # Warn-once flag so a permissive (unconfigured) deployment is visible in the log
 # without flooding it on every frame.
 _warned_no_allowlist = False
+
+
+def _wants_server_html(protocol_flags):
+    """
+    Whether the server should attach parsed HTML alongside node text.
+
+    A shell that renders Evennia markup itself declares ``caps.rendersMarkup``
+    in its ``hello`` and gets the node body only, which halves the payload on the
+    narrative hot path and skips a ``parse_html`` per message per session.
+    Clients that do not declare it keep the previous behaviour.
+
+    Args:
+        protocol_flags (dict or None): session protocol flags, carrying
+            ``AZABAN_CAPS`` as stashed by the ``azaban_hello`` inputfunc.
+
+    Returns:
+        bool: True if the ``html`` field should be attached.
+    """
+    caps = (protocol_flags or {}).get("AZABAN_CAPS") or {}
+    if not isinstance(caps, dict):
+        return True
+    return not caps.get("rendersMarkup")
 
 
 def _within_limits(obj, depth=0):
@@ -117,8 +152,13 @@ def _action_allowed(action, ns):
 
 
 def _frame(obj):
-    """Encode an envelope dict as a (bytes, is_binary=False) TEXT frame."""
-    return (json.dumps(obj).encode("utf-8"), False)
+    """Hand an envelope dict to the transport as a (data, is_binary=False) TEXT frame.
+
+    The dict travels unserialized: the transport stamps a resume sequence onto
+    every Azaban frame, so serializing here would only force it to parse the
+    result straight back. See ``WireFormat.supports_resume``.
+    """
+    return (obj, False)
 
 
 class AzabanFormat(WireFormat):
@@ -139,6 +179,9 @@ class AzabanFormat(WireFormat):
 
     name = "azaban.v1"
     supports_oob = True
+    #: Frames are JSON envelopes, so the transport may stamp ``s`` on them and
+    #: buffer them for replay after a reconnect.
+    supports_resume = True
 
     # -- outgoing (server -> client) ---------------------------------------
 
@@ -171,7 +214,8 @@ class AzabanFormat(WireFormat):
         from evennia.narrative.rendernode import text_node
 
         node = text_node(str(args[0]), msg_type=str(kind or "text")).payload()
-        node["html"] = html
+        if _wants_server_html(protocol_flags):
+            node["html"] = html
         return _frame({"t": "render", "nodes": [node]})
 
     def encode_prompt(self, *args, protocol_flags=None, **kwargs):
@@ -223,10 +267,11 @@ class AzabanFormat(WireFormat):
             if _contains_raw_identity(nodes) or not _within_limits(nodes):
                 logger.log_warn("azaban: rejected unsafe narrative payload")
                 return None
+            attach_html = _wants_server_html(protocol_flags)
             safe_nodes = []
             for original in nodes:
                 node = dict(original)
-                if node.get("body") and "html" not in node:
+                if attach_html and node.get("body") and "html" not in node:
                     try:
                         node["html"] = parse_html(node["body"])
                     except Exception:
@@ -235,6 +280,14 @@ class AzabanFormat(WireFormat):
             return _frame({"t": "render", "nodes": safe_nodes})
         if cmdname == "patch":
             # Scene-model delta: {target, ops, meta} carried in kwargs.
+            #
+            # ``meta`` is an open dict, not a fixed schema: the multipuppet relay
+            # ships routing/provenance there (``npc_id``, ``slot``, ``revision``,
+            # ``action_id``, ``kind``, ``relay_mode``, plus the event's own meta)
+            # and the shell routes on it. It is deliberately not allowlisted —
+            # doing so would break that relay — so the guards below are what keep
+            # it honest: no raw database identity, and bounded structure. Anything
+            # new added here must be viewer-scoped and safe to put on the wire.
             ops = kwargs.get("ops", [])
             meta = kwargs.get("meta", {})
             if (
