@@ -25,6 +25,80 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.182 — Azaban resume correctness, and the shell becomes the default client
+
+**Downstream note:** a game adopting this must move its `EVENNIA_REF` pin to
+`underspire.182`. `/webclient/` now serves the shell (see *Web client routing*),
+the built bundle moved to `static/webclient/shell/`, and the template gains an
+`asset_version` context variable.
+
+This release also carries the previously-untagged Azaban frame-batching and
+scene-model (`scene-ops.ts`, granular `/fields` and `/exits` patch ops) work that
+had accumulated on `underspire` without a version of its own.
+
+### Engine — Portal / Azaban
+
+- **Server now answers the client `hello`.** The protocol documented a
+  server→client `hello` that was never implemented. It is sent after any
+  replayed frames and stamped last, carrying `{protocol, resumed}`. The client
+  assigns its resume cursor from that frame's `s`.
+
+  This fixes a silent, permanent failure: when a stash had expired the server
+  restarted `out_seq` at 0 while the client's cursor stayed where it was, so
+  every later reconnect asked to resume from a sequence the new connection would
+  never reach and **replay stopped working for that browser entirely**.
+
+- **Resume stashes are bound to the authenticated uid** and verified on claim.
+  The key is a client-chosen token, so without this, presenting someone's token
+  was enough to be handed the tail of their session.
+
+- **Resume stash count is capped** (`RESUME_STASH_MAX`), not only time-limited.
+  Each stash holds up to `RESUME_BUFFER_MAX` frames for the grace window, so an
+  open/close loop with fresh tokens was a memory-growth lever.
+
+- **Resume-capable wire formats may return envelope dicts** from `encode_*`
+  instead of encoded bytes (`WireFormat.supports_resume`). The transport has to
+  stamp `s` onto every frame anyway; handing over the object drops a
+  parse/reserialize per frame, and two of them on the batching path.
+
+### Engine — OOB event catalog
+
+- Registered the editor events (`editor_open`, `editor_close`, `editor_status`)
+  that the engine sends but the catalog did not describe.
+- The default web client now routes OOB events through `OobEvent`-typed
+  literals, so an unregistered or renamed event fails the client build instead
+  of silently matching nothing.
+
+### Engine — Web client routing
+
+- **The shell is the default client.** `/webclient/` serves it; the `webclient2`
+  view is gone and `/webclient/client2/` is a redirect kept for one release.
+  Build output moved from `static/webclient/client2/` to `static/webclient/shell/`.
+  Games override the `webclient.html` template to load the bundle; the engine's
+  own stock Golden Layout template remains as the fallback for games that have
+  not built a shell.
+
+### Engine — Web client shell
+
+- Resume token moved from `localStorage` to `sessionStorage`. Per-browser, every
+  tab presented the same token: they overwrote each other's stash on close, and
+  a reconnecting tab replayed another tab's frames into its own log.
+- Cache-busting for the built bundle is derived from the assets' mtime
+  (`webclient.views._asset_version`) instead of a hand-edited `?v=` date.
+- Game log: line category resolved once at append rather than on every filter
+  pass, no array copy when no filter is active, set-based search-hit lookup, and
+  block trimming at the scrollback cap.
+- Trigger highlight colours are validated before being interpolated into a
+  `style` attribute.
+- Community toasts read the catalogued payload fields; they previously read
+  `from`/`to`/`reason` off a payload shipping `giver`/`receiver`/`message`, so
+  every kudos toast rendered "Someone → ".
+- Compose pad gained modes (Pose/Emote/Say/LOOC/Look), the debounced
+  `@preview_rp` live preview, and draft persistence. The vanilla client
+  documented modes but shipped one: its `setComposeMode` discarded its argument
+  and hard-coded pose, and `composeToCommand` always emitted the pose shorthand.
+  The server has supported all five throughout.
+
 ## 6.0.0+underspire.181 — Physical placement categories & per-viewer DROP_DELIVERY
 
 ### Engine — Objects
