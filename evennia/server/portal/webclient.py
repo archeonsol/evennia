@@ -52,15 +52,41 @@ _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 # grace window; when the client reconnects and presents the token + its last seen
 # seq in `hello`, we replay the frames it missed, so a brief blip doesn't drop
 # lines. State events are idempotent, so the parallel fresh-login pushes are safe.
+#
+# The stash is keyed on a token the *client* chooses, so it is bound to the
+# authenticated uid at stash time and only replayed to a connection carrying the
+# same uid. Without that, holding someone's token would be enough to read the
+# tail of their session.
 RESUME_BUFFER_MAX = 400  # frames kept per connection
 RESUME_GRACE_SECONDS = 90  # how long a stash survives a disconnect
-_RESUME_STASH = {}  # token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float}
+#: Hard cap on stashed connections. Each stash costs up to RESUME_BUFFER_MAX
+#: frames for RESUME_GRACE_SECONDS, so an open/close loop with fresh tokens is a
+#: memory-growth lever unless the total is bounded.
+RESUME_STASH_MAX = 512
+# token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float, "uid": int|None}
+_RESUME_STASH = {}
+
+# --- Frame batching ---
+# One outputfunc is one frame is one WebSocket send, so a single room look costs
+# several sends and several client re-renders. A client that declares
+# ``caps.batching`` gets a burst coalesced into one ``{"t": "batch", "frames":
+# [...]}`` envelope flushed at the end of the current reactor iteration. Order is
+# preserved, and the batch is stamped as a single seq for resume purposes.
+#: Never hold more than this many frames before forcing a flush.
+BATCH_MAX_FRAMES = 64
 
 
 def _prune_resume_stash():
+    """Drop expired stashes, then enforce the total cap oldest-deadline-first."""
     now = time.time()
     for tok in [t for t, s in _RESUME_STASH.items() if s["deadline"] < now]:
         _RESUME_STASH.pop(tok, None)
+    overflow = len(_RESUME_STASH) - RESUME_STASH_MAX
+    if overflow > 0:
+        for tok, _stash in sorted(_RESUME_STASH.items(), key=lambda kv: kv[1]["deadline"])[
+            :overflow
+        ]:
+            _RESUME_STASH.pop(tok, None)
 
 
 # CLOSE_NORMAL (1000) / GOING_AWAY (1001) are imported from ws_protocol.
@@ -353,16 +379,49 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # 3000-4999 application-specific (in case anyone wants to expose that).
         self.sendClose(CLOSE_NORMAL, reason)
 
+    def _handle_client_hello(self, raw):
+        """Handle the client's ``hello``: resume what we can, then answer.
+
+        The reply is what re-bases the client's sequence counter. Without it a
+        client that reconnects after its stash expired keeps asking to resume
+        from a seq the server's fresh counter will never reach again, and
+        replay silently stops working for that browser forever.
+
+        Args:
+            raw (dict): the decoded client ``hello`` envelope.
+
+        """
+        resumed = self._handle_resume(raw.get("resume") or {})
+        # Stamped last, so its seq is above every frame replayed above it and
+        # the client can assign (not max) its cursor from it.
+        self.sendLine({"t": "hello", "protocol": "azaban.v1", "resumed": resumed})
+
     def _handle_resume(self, resume):
-        """On reconnect: bind the resume token and replay any missed frames."""
+        """On reconnect: bind the resume token and replay any missed frames.
+
+        Args:
+            resume (dict): the ``resume`` block of the client's hello,
+                carrying its ``token`` and the last ``last_seq`` it applied.
+
+        Returns:
+            bool: whether a stash was found, owned by this client, and replayed.
+
+        """
         token = resume.get("token")
         if not token:
-            return
+            return False
         self.resume_token = token
         _prune_resume_stash()
         stash = _RESUME_STASH.pop(token, None)
         if not stash:
-            return
+            return False
+        if stash.get("uid") != getattr(self, "uid", None):
+            # Right token, wrong account: a stash only ever replays to the
+            # session that produced it.
+            from evennia.utils import logger
+
+            logger.log_warn("webclient: resume token presented by a different uid; not replaying")
+            return False
         # Continue the seq counter across the gap and replay what the client
         # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
         self.out_seq = stash["last_seq"]
@@ -374,6 +433,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                     self.sendMessage(frame.encode())
                 except Exception:
                     pass
+        return True
 
     def _stash_for_resume(self):
         token = getattr(self, "resume_token", None)
@@ -383,6 +443,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 "frames": list(buf),
                 "last_seq": getattr(self, "out_seq", 0),
                 "deadline": time.time() + RESUME_GRACE_SECONDS,
+                "uid": getattr(self, "uid", None),
             }
             _prune_resume_stash()
 
@@ -398,6 +459,13 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             reason (str or None): Close reason as sent by the WebSocket peer.
 
         """
+        # Anything still queued for coalescing must reach the buffer before the
+        # stash is taken, or a reconnect replays a hole.
+        if getattr(self, "_batch_pending", None):
+            try:
+                self._flush_batch()
+            except Exception:
+                pass
         self._stash_for_resume()
         if code in (CLOSE_NORMAL, GOING_AWAY):
             # GOING_AWAY (1001) is an ordinary browser tab-close/navigation, so it
@@ -428,7 +496,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 raw = None
             if isinstance(raw, dict) and raw.get("t") == "hello":
-                self._handle_resume(raw.get("resume") or {})
+                self._handle_client_hello(raw)
 
         if self.wire_format:
             kwargs = self.wire_format.decode_incoming(
@@ -445,14 +513,28 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             except (json.JSONDecodeError, UnicodeDecodeError, IndexError):
                 pass
 
-    def _stamp_and_buffer(self, line):
-        """Stamp a monotonic ``s`` seq onto a JSON frame and buffer it for resume."""
-        try:
-            obj = json.loads(line)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return line
+    def _stamp_and_buffer(self, frame):
+        """Stamp a monotonic ``s`` seq onto a JSON frame and buffer it for resume.
+
+        Args:
+            frame (dict or str): the envelope. A dict is stamped as-is — the
+                wire format handed us the object, so there is nothing to parse.
+                A str is decoded first, for formats that serialize their own
+                frames (and for anything already on the wire, like a replay).
+
+        Returns:
+            str: the serialized, stamped frame, or the input unchanged if it was
+                not a JSON object.
+
+        """
+        obj = frame
         if not isinstance(obj, dict):
-            return line
+            try:
+                obj = json.loads(frame)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return frame
+            if not isinstance(obj, dict):
+                return frame
         self.out_seq = getattr(self, "out_seq", 0) + 1
         obj["s"] = self.out_seq
         line = json.dumps(obj)
@@ -467,7 +549,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         Send data to client.
 
         Args:
-            line (str): Text to send.
+            line (str or dict): Text to send. A dict is treated as a JSON
+                envelope and serialized once, after stamping.
 
         """
         line = self._stamp_and_buffer(line)
@@ -480,19 +563,103 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
 
     def sendEncoded(self, data, is_binary=False):
         """
-        Send pre-encoded data to the client.
+        Send encoded data to the client.
 
-        This is used by wire formats that return raw bytes with a
-        binary/text frame indicator.
+        Text frames from a resume-capable wire format are sequence-stamped and
+        buffered here, exactly as ``sendLine`` does for the legacy path. Without
+        this, a subprotocol that encodes its own frames would never populate the
+        resume buffer and reconnects would silently replay nothing.
 
         Args:
-            data (bytes): The encoded data to send.
+            data (bytes or dict): The data to send. A resume-capable format may
+                hand over the envelope dict itself (see
+                ``WireFormat.supports_resume``); it is stamped and serialized
+                exactly once here rather than being parsed back out of bytes.
             is_binary (bool): If True, send as a BINARY frame.
                 If False, send as a TEXT frame.
 
         """
+        if not is_binary and getattr(self.wire_format, "supports_resume", False):
+            frame = data
+            if isinstance(frame, (bytes, bytearray)):
+                try:
+                    frame = frame.decode("utf-8")
+                except UnicodeDecodeError:
+                    frame = None
+            if frame is not None:
+                if self._batching_enabled():
+                    return self._queue_batched(frame)
+                data = self._stamp_and_buffer(frame).encode("utf-8")
+        if isinstance(data, dict):
+            # Not resume-capable, or binary: still has to reach the wire as bytes.
+            data = json.dumps(data).encode("utf-8")
         try:
             return self.sendMessage(data, isBinary=is_binary)
+        except Disconnected:
+            self.disconnect(reason="Browser already closed.")
+
+    def _batching_enabled(self):
+        """
+        Whether this client asked for coalesced frames in its ``hello`` caps.
+
+        Returns:
+            bool: True if bursts should be batched.
+        """
+        caps = (self.protocol_flags or {}).get("AZABAN_CAPS") or {}
+        return isinstance(caps, dict) and bool(caps.get("batching"))
+
+    def _queue_batched(self, frame):
+        """
+        Hold a frame for the current reactor iteration and schedule a flush.
+
+        Args:
+            frame (dict or str): the JSON envelope, unserialized where the wire
+                format handed one over.
+
+        """
+        buf = getattr(self, "_batch_pending", None)
+        if buf is None:
+            buf = self._batch_pending = []
+        buf.append(frame)
+        if len(buf) >= BATCH_MAX_FRAMES:
+            return self._flush_batch()
+        if not getattr(self, "_batch_scheduled", False):
+            self._batch_scheduled = True
+            try:
+                asyncio.get_event_loop().call_soon(self._flush_batch)
+            except RuntimeError:
+                # No running loop (tests, shutdown): send straight through.
+                self._batch_scheduled = False
+                return self._flush_batch()
+
+    def _flush_batch(self):
+        """Send everything queued this iteration as one envelope."""
+        self._batch_scheduled = False
+        buf = getattr(self, "_batch_pending", None)
+        if not buf:
+            return
+        self._batch_pending = []
+        if len(buf) == 1:
+            # A lone frame gains nothing from the wrapper.
+            payload = buf[0]
+        else:
+            try:
+                payload = {
+                    "t": "batch",
+                    "frames": [f if isinstance(f, dict) else json.loads(f) for f in buf],
+                }
+            except (json.JSONDecodeError, TypeError, ValueError):
+                # Malformed member: fall back to sending them individually so a
+                # single bad frame cannot swallow the whole burst.
+                for frame in buf:
+                    try:
+                        self.sendMessage(self._stamp_and_buffer(frame).encode("utf-8"))
+                    except Disconnected:
+                        self.disconnect(reason="Browser already closed.")
+                        return
+                return
+        try:
+            return self.sendMessage(self._stamp_and_buffer(payload).encode("utf-8"))
         except Disconnected:
             self.disconnect(reason="Browser already closed.")
 

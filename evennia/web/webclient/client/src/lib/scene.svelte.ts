@@ -1,51 +1,57 @@
 // Reactive scene model, synced from Azaban `patch` deltas. The server keeps a
-// per-viewer scene (room, occupants, exits, …) and streams patches as it changes;
-// this holds the model and the shell renders it reactively - the room panel/HUD
-// update without spamming the log. Ops are minimal JSON-patch-like; for now we
-// handle a whole-scene `set`, with granular sub-path deltas to follow.
+// per-viewer scene (room, occupants, exits, fields, …) and streams patches as it
+// changes; this holds the model and the shell renders it reactively - the room
+// panel/HUD update without spamming the log.
+//
+// The op vocabulary and its reduction live in `scene-ops.ts`, rune-free so they
+// can be unit tested. This file is only the reactive container.
 
-export interface Occupant {
-  handle: string;
-  name: string;
-}
-export interface SceneRoom {
-  name?: string;
-  desc?: string;
-  atmosphere?: string;
-}
-export interface SceneExit {
-  key: string;
-  name: string;
-}
+import { emptyScene, reduceScene } from "./scene-ops";
+import type { Occupant, SceneExit, SceneRoom, SceneState } from "./scene-ops";
+
+export type { Occupant, SceneExit, SceneRoom, SceneState };
+export { emptyScene, reduceScene };
 
 class Scene {
   room = $state<SceneRoom>({});
   occupants = $state<Occupant[]>([]);
   exits = $state<SceneExit[]>([]);
+  fields = $state<Record<string, unknown>>({});
   present = $state(false); // whether a scene has been received yet
+  rev = $state(0); // server scene revision, when one is supplied in patch meta
 
-  apply(target: string, ops: any[]): void {
-    if (target !== "scene") return;
-    for (const op of ops ?? []) {
-      const path = op.path ?? "/";
-      if (op.op === "set" && (path === "/" || path === "")) {
-        // Full-scene snapshot (on look).
-        const v = op.value ?? {};
-        this.room = v.room ?? {};
-        this.occupants = v.occupants ?? [];
-        this.exits = v.exits ?? [];
-        this.present = true;
-      } else if (op.op === "add" && path === "/occupants/-") {
-        // Someone entered - append if not already present for this perception handle.
-        const val = op.value;
-        if (val && !this.occupants.some((o) => o.handle === val.handle)) {
-          this.occupants = [...this.occupants, val];
-        }
-      } else if (op.op === "del" && path === "/occupants") {
-        // Someone left - drop by opaque viewer-scoped handle.
-        this.occupants = this.occupants.filter((o) => o.handle !== op.handle);
-      }
-    }
+  /** Current model as a plain snapshot. */
+  private snapshot(): SceneState {
+    return {
+      room: this.room,
+      occupants: this.occupants,
+      exits: this.exits,
+      fields: this.fields,
+      present: this.present,
+      rev: this.rev,
+    };
+  }
+
+  apply(target: string, ops: any[], meta?: Record<string, any>): void {
+    const next = reduceScene(this.snapshot(), target, ops, meta);
+    // Reassign rather than mutate so the reactive proxies see the change.
+    this.room = next.room;
+    this.occupants = next.occupants;
+    this.exits = next.exits;
+    this.fields = next.fields;
+    this.present = next.present;
+    this.rev = next.rev;
+  }
+
+  /** Drop everything (used on disconnect/logout). */
+  reset(): void {
+    const blank = emptyScene();
+    this.room = blank.room;
+    this.occupants = blank.occupants;
+    this.exits = blank.exits;
+    this.fields = blank.fields;
+    this.present = blank.present;
+    this.rev = blank.rev;
   }
 }
 

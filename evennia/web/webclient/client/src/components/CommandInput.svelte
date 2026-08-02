@@ -4,6 +4,8 @@
   import { commands, CURATED } from "../lib/commands.svelte";
   import { chat } from "../lib/chat.svelte";
   import { playKey } from "../lib/audio";
+  import { compose } from "../lib/compose.svelte";
+  import { COMPOSE_MODES, composeToCommand, specFor } from "../lib/compose-modes";
 
   let value = $state("");
   // History recall over shared recents (newest-first). -1 = live/typed line.
@@ -22,9 +24,8 @@
     rQuery ? commands.recent.find((c) => c.toLowerCase().includes(rQuery.toLowerCase())) ?? "" : "",
   );
 
-  // Multi-line compose pad.
-  let composing = $state(false);
-  let composeText = $state("");
+  // Multi-line compose pad. State (draft, mode, preview) lives in the compose
+  // store so it survives closing the pad and reloading the page.
   let composeEl = $state<HTMLTextAreaElement | null>(null);
 
   function submit() {
@@ -42,15 +43,15 @@
   }
 
   function openCompose() {
-    composeText = value;
-    composing = true;
+    // Carry a half-typed command line into the pad, but never clobber a saved
+    // draft with an empty input.
+    if (value.trim()) compose.setText(value);
+    compose.show();
     queueMicrotask(() => composeEl?.focus());
   }
   function sendCompose() {
-    const t = composeText.trim();
-    if (t) commands.run(t);
-    composeText = "";
-    composing = false;
+    const text = compose.take();
+    if (text) commands.run(composeToCommand(compose.mode, text));
     value = "";
   }
   function onComposeKey(e: KeyboardEvent) {
@@ -58,7 +59,8 @@
       e.preventDefault();
       sendCompose();
     } else if (e.key === "Escape") {
-      composing = false;
+      // Esc closes; the draft is kept, which is the whole point of persisting it.
+      compose.hide();
     }
   }
 
@@ -144,20 +146,48 @@
   }
 </script>
 
-{#if composing}
+{#if compose.open}
   <div class="compose">
     <div class="c-head">
       <span class="c-tag glow-text">Compose</span>
-      <span class="c-hint">Ctrl-Enter to send, Esc to cancel</span>
-      <button class="c-x" onclick={() => (composing = false)} aria-label="close">×</button>
+      <div class="c-modes" role="group" aria-label="compose mode">
+        {#each COMPOSE_MODES as m (m.id)}
+          <button
+            class="c-mode"
+            class:active={compose.mode === m.id}
+            aria-pressed={compose.mode === m.id}
+            onclick={() => compose.setMode(m.id)}>{m.label}</button
+          >
+        {/each}
+      </div>
+      <span class="c-hint">Ctrl-Enter to send, Esc to close</span>
+      <button class="c-x" onclick={() => compose.hide()} aria-label="close">×</button>
     </div>
     <textarea
       bind:this={composeEl}
-      bind:value={composeText}
+      value={compose.text}
+      oninput={(e) => compose.setText(e.currentTarget.value)}
       onkeydown={onComposeKey}
       placeholder="write a longer pose or message…"
       aria-label="compose"
     ></textarea>
+    <!-- Server-rendered preview of what you and the room will actually see. -->
+    <div class="c-preview" aria-live="polite">
+      {#if compose.preview.error}
+        <div class="c-err">{compose.preview.error}</div>
+      {:else if compose.preview.you || compose.preview.room}
+        {#if compose.preview.you}
+          <div class="c-line {specFor(compose.mode).msgClass}">{@html compose.preview.you}</div>
+        {/if}
+        {#if compose.preview.room}
+          <div class="c-line c-room {specFor(compose.mode).msgClass}">
+            {@html compose.preview.room}
+          </div>
+        {/if}
+      {:else}
+        <div class="c-empty">preview appears as you type</div>
+      {/if}
+    </div>
     <button class="c-send" onclick={sendCompose}>Send</button>
   </div>
 {/if}
@@ -186,7 +216,13 @@
       aria-label="command input"
       placeholder="enter command"
     />
-    <button class="compose-btn" onclick={openCompose} title="compose pad" aria-label="compose pad">⤢</button>
+    <button
+      class="compose-btn"
+      class:has-draft={compose.hasDraft}
+      onclick={openCompose}
+      title={compose.hasDraft ? "compose pad (draft saved)" : "compose pad"}
+      aria-label="compose pad">⤢</button
+    >
   {/if}
 </div>
 
@@ -226,6 +262,8 @@
     letter-spacing: 0.14em;
     text-transform: lowercase;
   }
+  /* A saved draft is invisible once the pad is closed, so mark the button. */
+  .compose-btn.has-draft { color: var(--accent-bright); border-color: var(--accent); }
   .compose-btn {
     flex: 0 0 auto; background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
     font-family: inherit; font-size: 0.85rem; padding: 0 7px; cursor: pointer;
@@ -246,6 +284,22 @@
   .c-hint { color: var(--fg-faint); font-size: 0.66rem; }
   .c-x { margin-left: auto; background: none; border: none; color: var(--fg-dim); font-size: 1.1rem; line-height: 1; cursor: pointer; }
   .c-x:hover { color: var(--accent-bright); }
+  .c-modes { display: flex; gap: 3px; }
+  .c-mode {
+    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
+    font-family: inherit; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em;
+    padding: 1px 6px; cursor: pointer;
+  }
+  .c-mode:hover { color: var(--accent-bright); border-color: var(--accent); }
+  .c-mode.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+  .c-preview {
+    min-height: 2.4em; border-left: 2px solid var(--border-bright);
+    padding: 2px 0 2px 8px; font-size: 0.84rem; line-height: 1.45;
+  }
+  .c-line { color: var(--fg); }
+  .c-room { color: var(--fg-dim); }
+  .c-empty, .c-err { color: var(--fg-faint); font-style: italic; font-size: 0.72rem; }
+  .c-err { color: var(--accent-ember, var(--fg-dim)); }
   .compose textarea {
     background: var(--bg); color: var(--fg); border: 1px solid var(--border-bright);
     font-family: inherit; font-size: 0.9rem; padding: 6px 8px; min-height: 80px; resize: vertical; line-height: 1.5;

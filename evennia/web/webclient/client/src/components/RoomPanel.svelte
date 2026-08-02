@@ -1,5 +1,11 @@
 <script lang="ts">
   import { scene } from "../lib/scene.svelte";
+
+  // Live scene fields are a generic bag, so read defensively: a game that emits
+  // none of them should render the panel exactly as before.
+  const poseLine = $derived(
+    typeof scene.fields.pose_line === "string" ? scene.fields.pose_line : "",
+  );
 </script>
 
 <aside class="room-panel">
@@ -12,6 +18,9 @@
     {/if}
     {#if scene.room.desc}
       <div class="desc">{@html scene.room.desc}</div>
+    {/if}
+    {#if poseLine}
+      <p class="pose-line">{poseLine}</p>
     {/if}
 
     <div class="section-head">
@@ -72,6 +81,14 @@
     color: var(--fg);
     margin-bottom: 0.4rem;
     white-space: pre-wrap;
+  }
+  /* The viewer's own standing pose, set apart from the room's own prose. */
+  .pose-line {
+    color: var(--accent-ember, var(--fg-dim));
+    font-style: italic;
+    margin: 0 0 0.5rem;
+    padding-left: 0.5rem;
+    border-left: 2px solid var(--border-bright);
   }
   ul { list-style: none; margin: 0; padding: 0; }
   li { padding: 0.08rem 0; color: var(--fg); }

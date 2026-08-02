@@ -1,0 +1,470 @@
+[
+  {
+    "src": "",
+    "html": ""
+  },
+  {
+    "src": "plain text",
+    "html": "plain text"
+  },
+  {
+    "src": "pipe || literal",
+    "html": "pipe | literal"
+  },
+  {
+    "src": "amp & lt < gt > quote \"",
+    "html": "amp &amp; lt &lt; gt &gt; quote \""
+  },
+  {
+    "src": "trailing reset|n",
+    "html": "trailing reset"
+  },
+  {
+    "src": "|rred|n then plain",
+    "html": "<span class=\"color-009\">red</span> then plain"
+  },
+  {
+    "src": "|r|gstacked|n",
+    "html": "<span class=\"color-010\">stacked</span>"
+  },
+  {
+    "src": "unterminated |rcolour",
+    "html": "unterminated <span class=\"color-009\">colour</span>"
+  },
+  {
+    "src": "|ntext|n",
+    "html": "<span class=\"\">text</span>"
+  },
+  {
+    "src": "|rtext|n",
+    "html": "<span class=\"color-009\">text</span>"
+  },
+  {
+    "src": "|gtext|n",
+    "html": "<span class=\"color-010\">text</span>"
+  },
+  {
+    "src": "|ytext|n",
+    "html": "<span class=\"color-011\">text</span>"
+  },
+  {
+    "src": "|btext|n",
+    "html": "<span class=\"color-012\">text</span>"
+  },
+  {
+    "src": "|mtext|n",
+    "html": "<span class=\"color-013\">text</span>"
+  },
+  {
+    "src": "|ctext|n",
+    "html": "<span class=\"color-014\">text</span>"
+  },
+  {
+    "src": "|wtext|n",
+    "html": "<span class=\"color-015\">text</span>"
+  },
+  {
+    "src": "|xtext|n",
+    "html": "<span class=\"color-008\">text</span>"
+  },
+  {
+    "src": "|Rtext|n",
+    "html": "<span class=\"color-001\">text</span>"
+  },
+  {
+    "src": "|Gtext|n",
+    "html": "<span class=\"color-002\">text</span>"
+  },
+  {
+    "src": "|Ytext|n",
+    "html": "<span class=\"color-003\">text</span>"
+  },
+  {
+    "src": "|Btext|n",
+    "html": "<span class=\"color-004\">text</span>"
+  },
+  {
+    "src": "|Mtext|n",
+    "html": "<span class=\"color-005\">text</span>"
+  },
+  {
+    "src": "|Ctext|n",
+    "html": "<span class=\"color-006\">text</span>"
+  },
+  {
+    "src": "|Wtext|n",
+    "html": "<span class=\"\">text</span>"
+  },
+  {
+    "src": "|Xtext|n",
+    "html": "<span class=\"color-000\">text</span>"
+  },
+  {
+    "src": "|[rtext|n",
+    "html": "<span class=\"bgcolor-196\">text</span>"
+  },
+  {
+    "src": "|[gtext|n",
+    "html": "<span class=\"bgcolor-046\">text</span>"
+  },
+  {
+    "src": "|[ytext|n",
+    "html": "<span class=\"bgcolor-226\">text</span>"
+  },
+  {
+    "src": "|[btext|n",
+    "html": "<span class=\"bgcolor-021\">text</span>"
+  },
+  {
+    "src": "|[mtext|n",
+    "html": "<span class=\"bgcolor-201\">text</span>"
+  },
+  {
+    "src": "|[ctext|n",
+    "html": "<span class=\"bgcolor-051\">text</span>"
+  },
+  {
+    "src": "|[wtext|n",
+    "html": "<span class=\"bgcolor-231\">text</span>"
+  },
+  {
+    "src": "|[xtext|n",
+    "html": "<span class=\"bgcolor-102\">text</span>"
+  },
+  {
+    "src": "|[Rtext|n",
+    "html": "<span class=\"bgcolor-001\">text</span>"
+  },
+  {
+    "src": "|[Gtext|n",
+    "html": "<span class=\"bgcolor-002\">text</span>"
+  },
+  {
+    "src": "|[Ytext|n",
+    "html": "<span class=\"bgcolor-003\">text</span>"
+  },
+  {
+    "src": "|[Btext|n",
+    "html": "<span class=\"bgcolor-004\">text</span>"
+  },
+  {
+    "src": "|[Mtext|n",
+    "html": "<span class=\"bgcolor-005\">text</span>"
+  },
+  {
+    "src": "|[Ctext|n",
+    "html": "<span class=\"bgcolor-006\">text</span>"
+  },
+  {
+    "src": "|[Wtext|n",
+    "html": "<span class=\"bgcolor-007\">text</span>"
+  },
+  {
+    "src": "|[Xtext|n",
+    "html": "<span class=\"\">text</span>"
+  },
+  {
+    "src": "|000rgb|n",
+    "html": "<span class=\"color-016\">rgb</span>"
+  },
+  {
+    "src": "|[000rgb|n",
+    "html": "<span class=\"bgcolor-016\">rgb</span>"
+  },
+  {
+    "src": "|005rgb|n",
+    "html": "<span class=\"color-021\">rgb</span>"
+  },
+  {
+    "src": "|[005rgb|n",
+    "html": "<span class=\"bgcolor-021\">rgb</span>"
+  },
+  {
+    "src": "|050rgb|n",
+    "html": "<span class=\"color-046\">rgb</span>"
+  },
+  {
+    "src": "|[050rgb|n",
+    "html": "<span class=\"bgcolor-046\">rgb</span>"
+  },
+  {
+    "src": "|055rgb|n",
+    "html": "<span class=\"color-051\">rgb</span>"
+  },
+  {
+    "src": "|[055rgb|n",
+    "html": "<span class=\"bgcolor-051\">rgb</span>"
+  },
+  {
+    "src": "|500rgb|n",
+    "html": "<span class=\"color-196\">rgb</span>"
+  },
+  {
+    "src": "|[500rgb|n",
+    "html": "<span class=\"bgcolor-196\">rgb</span>"
+  },
+  {
+    "src": "|505rgb|n",
+    "html": "<span class=\"color-201\">rgb</span>"
+  },
+  {
+    "src": "|[505rgb|n",
+    "html": "<span class=\"bgcolor-201\">rgb</span>"
+  },
+  {
+    "src": "|550rgb|n",
+    "html": "<span class=\"color-226\">rgb</span>"
+  },
+  {
+    "src": "|[550rgb|n",
+    "html": "<span class=\"bgcolor-226\">rgb</span>"
+  },
+  {
+    "src": "|555rgb|n",
+    "html": "<span class=\"color-231\">rgb</span>"
+  },
+  {
+    "src": "|[555rgb|n",
+    "html": "<span class=\"bgcolor-231\">rgb</span>"
+  },
+  {
+    "src": "|101mid|n",
+    "html": "<span class=\"color-053\">mid</span>"
+  },
+  {
+    "src": "|202mid|n",
+    "html": "<span class=\"color-090\">mid</span>"
+  },
+  {
+    "src": "|303mid|n",
+    "html": "<span class=\"color-127\">mid</span>"
+  },
+  {
+    "src": "|404mid|n",
+    "html": "<span class=\"color-164\">mid</span>"
+  },
+  {
+    "src": "|=agrey|n",
+    "html": "<span class=\"color-016\">grey</span>"
+  },
+  {
+    "src": "|=bgrey|n",
+    "html": "<span class=\"color-232\">grey</span>"
+  },
+  {
+    "src": "|=cgrey|n",
+    "html": "<span class=\"color-233\">grey</span>"
+  },
+  {
+    "src": "|=dgrey|n",
+    "html": "<span class=\"color-234\">grey</span>"
+  },
+  {
+    "src": "|=egrey|n",
+    "html": "<span class=\"color-235\">grey</span>"
+  },
+  {
+    "src": "|=fgrey|n",
+    "html": "<span class=\"color-236\">grey</span>"
+  },
+  {
+    "src": "|=ggrey|n",
+    "html": "<span class=\"color-237\">grey</span>"
+  },
+  {
+    "src": "|=hgrey|n",
+    "html": "<span class=\"color-238\">grey</span>"
+  },
+  {
+    "src": "|=igrey|n",
+    "html": "<span class=\"color-239\">grey</span>"
+  },
+  {
+    "src": "|=jgrey|n",
+    "html": "<span class=\"color-240\">grey</span>"
+  },
+  {
+    "src": "|=kgrey|n",
+    "html": "<span class=\"color-241\">grey</span>"
+  },
+  {
+    "src": "|=lgrey|n",
+    "html": "<span class=\"color-242\">grey</span>"
+  },
+  {
+    "src": "|=mgrey|n",
+    "html": "<span class=\"color-243\">grey</span>"
+  },
+  {
+    "src": "|=ngrey|n",
+    "html": "<span class=\"color-244\">grey</span>"
+  },
+  {
+    "src": "|=ogrey|n",
+    "html": "<span class=\"color-245\">grey</span>"
+  },
+  {
+    "src": "|=pgrey|n",
+    "html": "<span class=\"color-246\">grey</span>"
+  },
+  {
+    "src": "|=qgrey|n",
+    "html": "<span class=\"color-247\">grey</span>"
+  },
+  {
+    "src": "|=rgrey|n",
+    "html": "<span class=\"color-248\">grey</span>"
+  },
+  {
+    "src": "|=sgrey|n",
+    "html": "<span class=\"color-249\">grey</span>"
+  },
+  {
+    "src": "|=tgrey|n",
+    "html": "<span class=\"color-250\">grey</span>"
+  },
+  {
+    "src": "|=ugrey|n",
+    "html": "<span class=\"color-251\">grey</span>"
+  },
+  {
+    "src": "|=vgrey|n",
+    "html": "<span class=\"color-252\">grey</span>"
+  },
+  {
+    "src": "|=wgrey|n",
+    "html": "<span class=\"color-253\">grey</span>"
+  },
+  {
+    "src": "|=xgrey|n",
+    "html": "<span class=\"color-254\">grey</span>"
+  },
+  {
+    "src": "|=ygrey|n",
+    "html": "<span class=\"color-255\">grey</span>"
+  },
+  {
+    "src": "|=zgrey|n",
+    "html": "<span class=\"color-231\">grey</span>"
+  },
+  {
+    "src": "|[=agrey|n",
+    "html": "<span class=\"bgcolor-016\">grey</span>"
+  },
+  {
+    "src": "|[=bgrey|n",
+    "html": "<span class=\"bgcolor-232\">grey</span>"
+  },
+  {
+    "src": "|[=cgrey|n",
+    "html": "<span class=\"bgcolor-233\">grey</span>"
+  },
+  {
+    "src": "|[=dgrey|n",
+    "html": "<span class=\"bgcolor-234\">grey</span>"
+  },
+  {
+    "src": "|[=egrey|n",
+    "html": "<span class=\"bgcolor-235\">grey</span>"
+  },
+  {
+    "src": "|[=fgrey|n",
+    "html": "<span class=\"bgcolor-236\">grey</span>"
+  },
+  {
+    "src": "|[=ggrey|n",
+    "html": "<span class=\"bgcolor-237\">grey</span>"
+  },
+  {
+    "src": "|[=hgrey|n",
+    "html": "<span class=\"bgcolor-238\">grey</span>"
+  },
+  {
+    "src": "|[=igrey|n",
+    "html": "<span class=\"bgcolor-239\">grey</span>"
+  },
+  {
+    "src": "|[=jgrey|n",
+    "html": "<span class=\"bgcolor-240\">grey</span>"
+  },
+  {
+    "src": "|[=kgrey|n",
+    "html": "<span class=\"bgcolor-241\">grey</span>"
+  },
+  {
+    "src": "|[=lgrey|n",
+    "html": "<span class=\"bgcolor-242\">grey</span>"
+  },
+  {
+    "src": "|[=mgrey|n",
+    "html": "<span class=\"bgcolor-243\">grey</span>"
+  },
+  {
+    "src": "|[=ngrey|n",
+    "html": "<span class=\"bgcolor-244\">grey</span>"
+  },
+  {
+    "src": "|[=ogrey|n",
+    "html": "<span class=\"bgcolor-245\">grey</span>"
+  },
+  {
+    "src": "|[=pgrey|n",
+    "html": "<span class=\"bgcolor-246\">grey</span>"
+  },
+  {
+    "src": "|[=qgrey|n",
+    "html": "<span class=\"bgcolor-247\">grey</span>"
+  },
+  {
+    "src": "|[=rgrey|n",
+    "html": "<span class=\"bgcolor-248\">grey</span>"
+  },
+  {
+    "src": "|[=sgrey|n",
+    "html": "<span class=\"bgcolor-249\">grey</span>"
+  },
+  {
+    "src": "|[=tgrey|n",
+    "html": "<span class=\"bgcolor-250\">grey</span>"
+  },
+  {
+    "src": "|[=ugrey|n",
+    "html": "<span class=\"bgcolor-251\">grey</span>"
+  },
+  {
+    "src": "|[=vgrey|n",
+    "html": "<span class=\"bgcolor-252\">grey</span>"
+  },
+  {
+    "src": "|[=wgrey|n",
+    "html": "<span class=\"bgcolor-253\">grey</span>"
+  },
+  {
+    "src": "|[=xgrey|n",
+    "html": "<span class=\"bgcolor-254\">grey</span>"
+  },
+  {
+    "src": "|[=ygrey|n",
+    "html": "<span class=\"bgcolor-255\">grey</span>"
+  },
+  {
+    "src": "|[=zgrey|n",
+    "html": "<span class=\"bgcolor-231\">grey</span>"
+  },
+  {
+    "src": "|uunder|n",
+    "html": "<span class=\"underline\">under</span>"
+  },
+  {
+    "src": "|u|rboth|n",
+    "html": "<span class=\"underline color-009\">both</span>"
+  },
+  {
+    "src": "line|/break",
+    "html": "line<br>break"
+  },
+  {
+    "src": "a|/|/b",
+    "html": "a<br><br>b"
+  }
+]

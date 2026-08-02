@@ -22,6 +22,8 @@ import { media } from "./lib/media.svelte";
 import { ui } from "./lib/ui.svelte";
 import { dock } from "./lib/dock.svelte";
 import { createLegacyEmitter } from "./lib/legacy-emitter";
+import { compose } from "./lib/compose.svelte";
+import type { OobEvent } from "./lib/oob-events";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -61,6 +63,10 @@ keybinds.init();
 panelPrefs.init();
 routing.init();
 notify.init();
+compose.init();
+// The preview is a real (silent) command, so it goes out on the command line
+// rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
+compose.setPreviewSender((line) => connection.sendCommand(line));
 
 // Direct-message-ish kinds that deserve an attention ping when unfocused.
 const TELL_KINDS = new Set(["tell", "whisper", "page", "say_to"]);
@@ -91,12 +97,18 @@ connection.on("render", (env) => {
 
 // Scene-model deltas keep the room panel in sync (reactive, off the log).
 connection.on("patch", (env) => {
-  scene.apply(env.target, env.ops ?? []);
+  scene.apply(env.target, env.ops ?? [], env.meta ?? {});
   puppets.apply(env);
 });
 
-puppets.setResyncRequester((npcId, revision) => {
-  connection.sendCommand(`@sync_puppet_scene ${npcId} ${revision}`);
+// The typed endpoint, not `@sync_puppet_scene`: a command line goes through the
+// parser and the shared command-rate budget to reach the same code. A failed
+// request has to clear the feed's in-flight flag, or a throttled or refused
+// resync leaves that terminal showing a spinner forever.
+puppets.setResyncRequester((npcId) => {
+  connection
+    .request("puppets", "puppet_resync", { npc_id: npcId })
+    .catch(() => puppets.resyncFailed(npcId));
 });
 
 function refreshPuppetManifest() {
@@ -108,10 +120,18 @@ function refreshPuppetManifest() {
     });
 }
 
+// Scene, room BGM and RP fields are re-pushed server-side from the `hello`
+// handshake (see the game's azaban_hello), so connecting costs no extra round
+// trip here — the manifest is the one thing only the client knows it wants.
 connection.on("connection_open", () => {
-  connection.sendCommand("@sync_context");
   refreshPuppetManifest();
 });
+
+// Every name this file routes on must exist in the server's event catalog.
+// `is` narrows the literal to OobEvent, so a typo or a server-side rename fails
+// the build here instead of silently routing nothing at runtime. Regenerate the
+// catalog with `python -m evennia.server.protocol.gen_ts` after adding an event.
+const is = (event: string, name: OobEvent) => event === name;
 
 // Typed OOB events - routed by name. Channel/chat events feed the chat store;
 // other events can register here as consumers land.
@@ -119,19 +139,19 @@ connection.on("oob", (env) => {
   const event = String(env.event ?? "");
   if (
     event.startsWith("channel_") ||
-    event === "channels_list" ||
-    event === "assist_inbox" ||
-    event === "assist_thread" ||
+    is(event, "channels_list") ||
+    is(event, "assist_inbox") ||
+    is(event, "assist_thread") ||
     event.startsWith("ticket_")
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
-  } else if (event === "ui_component") {
+  } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);
-  } else if (event === "ui_remove") {
+  } else if (is(event, "ui_remove")) {
     const id = (Array.isArray(env.args) ? env.args[0] : env.args)?.id;
     if (id) ui.remove(String(id));
-  } else if (event === "web_panel") {
+  } else if (is(event, "web_panel")) {
     // Fold a magic-link page into the shell: open its URL in a floating iframe.
     // The iframe carries the shared Django session, so no token is required.
     const spec = (Array.isArray(env.args) ? env.args[0] : env.args) ?? env.kwargs ?? {};
@@ -140,45 +160,47 @@ connection.on("oob", (env) => {
       const id = String(spec.id ?? url);
       dock.openIframe(id, String(spec.title ?? "Web"), url);
     }
-  } else if (event === "logout") {
+  } else if (is(event, "logout")) {
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
     connection.markLoggedOut(String(reason ?? "quit"));
-  } else if (event === "player_mention") {
+  } else if (is(event, "player_mention")) {
     chat.onMention(env.kwargs ?? {});
-  } else if (event === "image" || event === "audio" || event === "video" || event === "youtube") {
+  } else if (is(event, "compose_preview")) {
+    compose.applyPreview(env.kwargs ?? (Array.isArray(env.args) ? env.args[0] : env.args));
+  } else if (is(event, "image") || is(event, "audio") || is(event, "video") || is(event, "youtube")) {
     const url = Array.isArray(env.args) ? env.args[0] : env.args;
     const kw = env.kwargs ?? {};
     if (!url) return;
     // Room BGM / @music use play_yt; skip youtube URL OOB for playback (avoids dual-OOB races).
-    if (event === "youtube") return;
+    if (is(event, "youtube")) return;
     media.add(event, String(url), { loop: !!(kw.loop ?? kw.looping) });
-  } else if (event === "play_yt") {
+  } else if (is(event, "play_yt")) {
     const args = Array.isArray(env.args) ? env.args : [];
     const rawId = args[0];
     oobTrace("play_yt", args);
     if (rawId != null) {
       media.playYoutube(String(rawId), parseFloat(String(args[1] ?? 0)), !!(args[2] === 1 || args[2] === true));
     }
-  } else if (event === "stop_music") {
+  } else if (is(event, "stop_music")) {
     oobTrace("stop_music", env.kwargs ?? {});
     const kw = env.kwargs ?? {};
     const fadeMs = kw.fade_out != null ? Number(kw.fade_out) * 1000 : undefined;
     media.stop(fadeMs);
-  } else if (event === "stop_music_now") {
+  } else if (is(event, "stop_music_now")) {
     oobTrace("stop_music_now");
     media.stopNow();
-  } else if (event === "STOP_AUDIO") {
+  } else if (is(event, "STOP_AUDIO")) {
     const kw = env.kwargs ?? {};
     const fadeMs = kw.fade_out != null ? Number(kw.fade_out) * 1000 : undefined;
     media.stop(fadeMs);
-  } else if (event === "yt_set_loop") {
+  } else if (is(event, "yt_set_loop")) {
     const args = Array.isArray(env.args) ? env.args : [];
     media.setYtLoop(!!(args[0] === 1 || args[0] === true));
-  } else if (event === "play_music") {
+  } else if (is(event, "play_music")) {
     const url = Array.isArray(env.args) ? env.args[0] : env.args;
     if (url) media.playMusic(String(url));
-  } else if (event === "PLAY_AUDIO") {
+  } else if (is(event, "PLAY_AUDIO")) {
     const kw = env.kwargs ?? {};
     const url = kw.url ?? (Array.isArray(env.args) ? env.args[0] : env.args);
     if (url) {
@@ -188,12 +210,12 @@ connection.on("oob", (env) => {
         fadeIn: kw.fade_in != null ? Number(kw.fade_in) : undefined,
       });
     }
-  } else if (event === "SET_AUDIO_VOLUME") {
+  } else if (is(event, "SET_AUDIO_VOLUME")) {
     const kw = env.kwargs ?? {};
     if (kw.volume != null) {
       media.setAudioVolume(Number(kw.volume), kw.fade != null ? Number(kw.fade) : 1);
     }
-  } else if (event === "editor_open" || event === "editor_close" || event === "editor_status") {
+  } else if (is(event, "editor_open") || is(event, "editor_close") || is(event, "editor_status")) {
     legacyEmitter.emit(event, env.args ?? [], env.kwargs ?? {});
   } else if (event.startsWith("community_")) {
     toasts.fromCommunity(event, env.kwargs ?? {});
