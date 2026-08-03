@@ -6,6 +6,7 @@
   import { playKey } from "../lib/audio";
   import { compose } from "../lib/compose.svelte";
   import { COMPOSE_MODES, composeToCommand, specFor } from "../lib/compose-modes";
+  import { focusOnMount } from "../lib/focus";
 
   let value = $state("");
   // History recall over shared recents (newest-first). -1 = live/typed line.
@@ -198,12 +199,10 @@
   {/if}
   {#if rSearch}
     <span class="rs-tag" aria-hidden="true">r-search</span>
-    <!-- svelte-ignore a11y_autofocus -->
-    <input class="rs-input" bind:value={rQuery} onkeydown={onRKey} autofocus placeholder="search history…" aria-label="reverse history search" />
+    <input class="rs-input" bind:value={rQuery} onkeydown={onRKey} use:focusOnMount placeholder="search history…" aria-label="reverse history search" />
     <span class="rs-match">{rMatch || "(no match)"}</span>
   {:else}
     <span class="chevron glow-text" aria-hidden="true">❯</span>
-    <!-- svelte-ignore a11y_autofocus -->
     <input
       class="command-input"
       bind:value
@@ -212,7 +211,7 @@
       autocomplete="off"
       autocapitalize="off"
       spellcheck="false"
-      autofocus
+      use:focusOnMount
       aria-label="command input"
       placeholder="enter command"
     />

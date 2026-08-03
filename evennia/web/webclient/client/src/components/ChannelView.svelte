@@ -3,6 +3,7 @@
   import { dock } from "../lib/dock.svelte";
   import { renderBody, renderSender } from "../lib/markup";
 
+  import { focusOnMount } from "../lib/focus";
   let { channelKey = "" }: { channelKey?: string } = $props();
 
   let draft = $state("");
@@ -97,8 +98,7 @@
     {#if searching}
       <div class="csearch">
         <span class="s-glyph" aria-hidden="true">⌕</span>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input bind:value={search} placeholder="search {name}…" aria-label="search channel" autofocus />
+        <input bind:value={search} placeholder="search {name}…" aria-label="search channel" use:focusOnMount />
         <span class="cnt">{shown.length}</span>
       </div>
     {/if}

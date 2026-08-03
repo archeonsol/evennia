@@ -3,6 +3,7 @@
   import { looksLikeHtml, pipeToHtml } from "../lib/markup";
   import { puppets } from "../lib/puppets.svelte";
 
+  import { focusOnMount } from "../lib/focus";
   const toHtml = (body: string) => (looksLikeHtml(body) ? body : pipeToHtml(body));
 
   let input = $state("");
@@ -90,13 +91,12 @@
 
     <form class="term-input" onsubmit={send}>
       <span class="prompt">P{active.slot}&gt;</span>
-      <!-- svelte-ignore a11y_autofocus -->
       <input
         type="text"
         bind:value={input}
         placeholder="act as {active.name}…"
         autocomplete="off"
-        autofocus
+        use:focusOnMount
       />
     </form>
   {:else if puppets.list.length}

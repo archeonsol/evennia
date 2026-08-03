@@ -190,7 +190,19 @@ class YoutubeBgmController {
       new window.YT.Player(this.hostId, {
         height: "1",
         width: "1",
-        playerVars: { autoplay: 1, controls: 0, modestbranding: 1, playsinline: 1 },
+        // `origin` (with `enablejsapi`) is required for the iframe API's
+        // postMessage handshake to name a target it can verify. Without it the
+        // widget API posts to "https://www.youtube.com" against a frame whose
+        // origin is ours, and the browser rejects the message — harmless to
+        // playback, but it logs an error on every track change.
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          modestbranding: 1,
+          playsinline: 1,
+          enablejsapi: 1,
+          origin: window.location.origin,
+        },
         events: {
           onReady: (ev) => {
             this.player = ev.target;
