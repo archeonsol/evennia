@@ -25,6 +25,39 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.183 — Web client console fixes
+
+Follows `.182` immediately; a game on `.182` should move its `EVENNIA_REF` here.
+No API or settings change, no migration.
+
+### Engine — Web client shell
+
+- **`autofocus` never fired anywhere in the shell.** The HTML attribute only
+  applies while the document is loading, and every input in the shell mounts
+  after that: the command line when the boot sequence ends, the search and
+  filter fields when their `{#if}` flips. All four were rejected with
+  "Autofocus processing was blocked because a document already has a focused
+  element", so **the command line was not focused on load** — players had to
+  click before typing. Replaced with a `use:focusOnMount` action
+  ([`lib/focus.ts`](evennia/web/webclient/client/src/lib/focus.ts)) that focuses
+  on the next animation frame, since dockview and Svelte both still reparent
+  nodes during the mount tick and focus does not survive a reparent.
+
+- **dockview's "do not use dockview-core directly" notice reached players.**
+  `dockview-core` is the correct dependency for this shell — `dockview` is the
+  React binding and `dockview-vue` is Vue's, so core is the supported path for
+  every other framework. The warning exists to catch apps reaching into
+  internals by accident, and `markDockviewPackageLoaded()` is the public API for
+  identifying as a binding, so
+  [`lib/dockAdapter.ts`](evennia/web/webclient/client/src/lib/dockAdapter.ts)
+  now calls it. dockview's own `NODE_ENV === "production"` suppression never
+  fired here: the shell is an IIFE browser bundle with no `process` shim.
+
+- **YouTube player created without an `origin`.** The widget API posted to
+  `https://www.youtube.com` against a frame whose origin is the game's, and the
+  browser rejected the message — harmless to playback, but logged on every track
+  change. Pass `origin` and `enablejsapi` in `playerVars`.
+
 ## 6.0.0+underspire.182 — Azaban resume correctness, and the shell becomes the default client
 
 **Downstream note:** a game adopting this must move its `EVENNIA_REF` pin to
