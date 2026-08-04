@@ -25,6 +25,46 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.184 — Curated help and exact action lookup
+
+Follows `.183` immediately. Downstream games that want manual-only ordinary
+help should set both `HELP_INDEX_ACTIONS = False` and
+`HELP_INDEX_ACTIONS_FOR_STAFF = False`. No database migration is required.
+
+### Engine — Help catalog
+
+- [`evennia/help/renderer.py`](evennia/help/renderer.py) now resolves exact
+  manually authored file/database keys and aliases before full-text search.
+  File keys win same-key collisions, any exact key wins an alias, and file
+  aliases win database aliases. The special `help commands` action catalog is
+  only built when action topics are enabled, so a downstream game can reserve
+  `commands` for ordinary manual prose and fully remove generated actions from
+  normal help.
+
+- [`evennia/help/catalog.py`](evennia/help/catalog.py) adds a direct exact action
+  lookup path backed by the verb registry. It does not enumerate every action,
+  strip a leading `@`, or accept prefixes; aliases superseded by a later
+  registration are not leaked. Carry-out requirement discovery now asks the
+  rule registry's MRO-aware cache once, avoiding duplicate inherited rules and
+  respecting undecorated method overrides.
+
+### Performance
+
+- On the newmoo game checkout, the same warm synthetic renderer benchmark took
+  `163–167 ms` for `help tokens` before this change and `0.55 ms` after it;
+  `help commands` fell from `105–110 ms` to `2.77 ms` when action topics were
+  disabled. Direct exact action lookup measured `4.3 µs`, while a deliberate
+  one-pass inventory of the live registry measured `2.55 ms`. In production,
+  exact manual topics and exact staff lookups no longer scale with the number of
+  registered actions; a requested full inventory still scales linearly once.
+
+### Tests
+
+- Added focused coverage for manual key/alias precedence, exact-search bypass,
+  disabled `help commands`, literal `@` matching, stale overridden aliases,
+  inherited-rule deduplication, concrete/catch-all priority, and undecorated
+  rule shadowing.
+
 ## 6.0.0+underspire.183 — Web client console fixes
 
 Follows `.182` immediately; a game on `.182` should move its `EVENNIA_REF` here.
