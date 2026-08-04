@@ -76,6 +76,29 @@ function esc(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Width `|-`, `|>` and a literal tab all expand to, matching `tabstop`. */
+const TABSTOP = 4;
+
+/**
+ * The server's text pass: escape HTML metacharacters, expand tabs, and turn
+ * newlines into `<br>` — all before links or spans are considered.
+ *
+ * The newline rule is not cosmetic. A body carrying real newlines rendered as
+ * one run-on line in the shell, because `\n` collapses to whitespace in HTML,
+ * and it also changed what the URL pass saw: `https://x.com.\n` links the
+ * trailing dot once the newline is a tag, and does not while it is still a
+ * space.
+ */
+function subText(text: string): string {
+  return text.replace(/[<&>]|\t+|\r\n|\r|\n/g, (match) => {
+    if (match === "<") return "&lt;";
+    if (match === "&") return "&amp;";
+    if (match === ">") return "&gt;";
+    if (match[0] === "\t") return " ".repeat(TABSTOP).repeat(match.length);
+    return "<br>";
+  });
+}
+
 function escAttr(text: string): string {
   return esc(text).replace(/"/g, "&quot;");
 }
@@ -204,7 +227,7 @@ function tokenize(text: string): Token[] {
 // A style change in the intermediate string is a NUL-delimited index into the
 // token list. NUL cannot survive as content (it is stripped on the way in), so
 // the link regex can run across the intermediate without a delimiter collision.
-const NUL = " ";
+const NUL = "\u0000";
 
 /** Escape a group captured by the link regex, as the server does before interpolating. */
 function escLinkGroup(group: string): string {
@@ -235,17 +258,54 @@ function substituteLinks(intermediate: string): string {
   return out;
 }
 
+// Bare-URL auto-linking, upstream's final pass. Deliberately faithful to two
+// quirks: it uses `search`, so only the *first* URL in a string is linked and
+// any others stay plain text; and a bare host that fails validation makes it
+// bail on the whole string rather than just that match.
+//
+// The upstream pattern opens with a `(?<!=")` lookbehind to avoid re-linking an
+// href it already emitted. That is checked by hand here instead — lookbehind is
+// a syntax error in older Safari, and an unsupported regex literal would fail to
+// parse and take the whole bundle down rather than degrade.
+const RE_URL =
+  /\b(?:ftp|www|https?)\W+(?:(?!\.(?:\s|$)|&\w+;)[^"',;$*^\\(){}<>[\]\s])+(\.(?:\s|$)|&\w+;|)/g;
+const RE_PROTOCOL = /^(?:ftp|https?):\/\//;
+const RE_VALID_NO_PROTOCOL =
+  /^(?:www|ftp)\.[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}\b[-a-zA-Z0-9@:%_+.~#?&//=]*/;
+
+function convertUrls(text: string): string {
+  RE_URL.lastIndex = 0;
+  for (let m = RE_URL.exec(text); m; m = RE_URL.exec(text)) {
+    // Stand-in for the lookbehind: skip a match that is already an href value.
+    if (text.slice(m.index - 2, m.index) === '="') continue;
+    const rest = m[1] ?? "";
+    // Group 1 is the trailing punctuation, which sits outside the anchor.
+    const label = m[0].slice(0, m[0].length - rest.length);
+    let href = label;
+    if (!RE_PROTOCOL.test(href)) {
+      if (!RE_VALID_NO_PROTOCOL.test(href)) return text;
+      href = "http://" + href;
+    }
+    return (
+      text.slice(0, m.index) +
+      `<a href="${href}" target="_blank">${label}</a>${rest}` +
+      text.slice(m.index + m[0].length)
+    );
+  }
+  return text;
+}
+
 /** Convert an Evennia pipe-coded string to HTML, matching the server parser. */
 export function pipeToHtml(text: string): string {
   // NUL delimits style markers in the intermediate; it has no rendering of its
   // own, so dropping it costs nothing and keeps the markers unambiguous.
-  const tokens = tokenize((text ?? "").replace(/ /g, ""));
+  const tokens = tokenize((text ?? "").replace(/\u0000/g, ""));
 
   // Phase 1: escaped text, literal MXP markers, and style changes as markers.
   let intermediate = "";
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (token.kind === "text") intermediate += esc(token.value);
+    if (token.kind === "text") intermediate += subText(token.value);
     else if (token.kind === "raw") intermediate += token.value;
     else if (token.kind === "marker") intermediate += token.value;
     else intermediate += `${NUL}${i}${NUL}`;
@@ -363,7 +423,9 @@ export function pipeToHtml(text: string): string {
     }
   }
   close();
-  return html;
+  // Phase 4: bare-URL auto-linking, which upstream also runs last — over the
+  // finished HTML, spans and anchors included.
+  return convertUrls(html);
 }
 
 /** True when the string already looks like server-parsed HTML. */

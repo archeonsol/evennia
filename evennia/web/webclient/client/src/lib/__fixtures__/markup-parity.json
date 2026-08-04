@@ -468,6 +468,42 @@
     "html": "a<br><br>b"
   },
   {
+    "src": "line one\nline two",
+    "html": "line one<br>line two"
+  },
+  {
+    "src": "a\tb",
+    "html": "a    b"
+  },
+  {
+    "src": "a\t\tb",
+    "html": "a        b"
+  },
+  {
+    "src": "crlf\r\nend",
+    "html": "crlf<br>end"
+  },
+  {
+    "src": "cr\rend",
+    "html": "cr<br>end"
+  },
+  {
+    "src": "trailing\n",
+    "html": "trailing<br>"
+  },
+  {
+    "src": "|rred\nstill red|n",
+    "html": "<span class=\"color-009\">red<br>still red</span>"
+  },
+  {
+    "src": "|rred|n\nplain",
+    "html": "<span class=\"color-009\">red</span><br>plain"
+  },
+  {
+    "src": "\n\nleading blanks",
+    "html": "<br><br>leading blanks"
+  },
+  {
     "src": "|lc@xp attrs|lt|w[Attributes]|n|n|le",
     "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;@xp attrs&quot;],{});return false;\"><span class=\"color-015\">[Attributes]</span><span class=\"\"></a></span>"
   },
@@ -530,6 +566,102 @@
   {
     "src": "|luhttps://example.com/a?b=1&c=2|ltquery|le",
     "html": "<a id=\"mxplink\" href=\"https://example.com/a?b=1&amp;c=2\" target=\"_blank\">query</a>"
+  },
+  {
+    "src": "visit https://example.com now",
+    "html": "visit <a href=\"https://example.com\" target=\"_blank\">https://example.com</a> now"
+  },
+  {
+    "src": "https://example.com",
+    "html": "<a href=\"https://example.com\" target=\"_blank\">https://example.com</a>"
+  },
+  {
+    "src": "http://example.com/a?b=1&c=2",
+    "html": "<a href=\"http://example.com/a?b=1\" target=\"_blank\">http://example.com/a?b=1</a>&amp;c=2"
+  },
+  {
+    "src": "www.example.com",
+    "html": "<a href=\"http://www.example.com\" target=\"_blank\">www.example.com</a>"
+  },
+  {
+    "src": "ftp.example.com/pub",
+    "html": "<a href=\"http://ftp.example.com/pub\" target=\"_blank\">ftp.example.com/pub</a>"
+  },
+  {
+    "src": "https://one.example.com and https://two.example.com",
+    "html": "<a href=\"https://one.example.com\" target=\"_blank\">https://one.example.com</a> and https://two.example.com"
+  },
+  {
+    "src": "see https://example.com.",
+    "html": "see <a href=\"https://example.com\" target=\"_blank\">https://example.com</a>."
+  },
+  {
+    "src": "see https://example.com. and more",
+    "html": "see <a href=\"https://example.com\" target=\"_blank\">https://example.com</a>. and more"
+  },
+  {
+    "src": "www.x",
+    "html": "www.x"
+  },
+  {
+    "src": "https://",
+    "html": "<a href=\"https://\" target=\"_blank\">https://</a>"
+  },
+  {
+    "src": "|luhttps://example.com|ltsite|le",
+    "html": "<a id=\"mxplink\" href=\"https://example.com\" target=\"_blank\">site</a>"
+  },
+  {
+    "src": "|lchttps://example.com|ltcmd|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;<a href=\"https://example.com\" target=\"_blank\">https://example.com</a>&quot;],{});return false;\">cmd</a>"
+  },
+  {
+    "src": "|rhttps://example.com|n",
+    "html": "<span class=\"color-009\"><a href=\"https://example.com\" target=\"_blank\">https://example.com</a></span>"
+  },
+  {
+    "src": "before |ghttps://example.com|n after",
+    "html": "before <span class=\"color-010\"><a href=\"https://example.com\" target=\"_blank\">https://example.com</a></span> after"
+  },
+  {
+    "src": "https://example.com&amp; trailing",
+    "html": "<a href=\"https://example.com\" target=\"_blank\">https://example.com</a>&amp;amp; trailing"
+  },
+  {
+    "src": "a <b> https://example.com",
+    "html": "a &lt;b&gt; <a href=\"https://example.com\" target=\"_blank\">https://example.com</a>"
+  },
+  {
+    "src": "https://example.com\n",
+    "html": "<a href=\"https://example.com\" target=\"_blank\">https://example.com</a><br>"
+  },
+  {
+    "src": "https://example.com.\n",
+    "html": "<a href=\"https://example.com.\" target=\"_blank\">https://example.com.</a><br>"
+  },
+  {
+    "src": "line one\nhttps://example.com",
+    "html": "line one<br><a href=\"https://example.com\" target=\"_blank\">https://example.com</a>"
+  },
+  {
+    "src": "https://example.com|/after",
+    "html": "<a href=\"https://example.com\" target=\"_blank\">https://example.com</a><br>after"
+  },
+  {
+    "src": "HTTPS://EXAMPLE.COM",
+    "html": "HTTPS://EXAMPLE.COM"
+  },
+  {
+    "src": "https://example.com/a_b~c",
+    "html": "<a href=\"https://example.com/a_b~c\" target=\"_blank\">https://example.com/a_b~c</a>"
+  },
+  {
+    "src": "(https://example.com)",
+    "html": "(<a href=\"https://example.com\" target=\"_blank\">https://example.com</a>)"
+  },
+  {
+    "src": "https://example.com, next",
+    "html": "<a href=\"https://example.com\" target=\"_blank\">https://example.com</a>, next"
   },
   {
     "src": "|!x",
