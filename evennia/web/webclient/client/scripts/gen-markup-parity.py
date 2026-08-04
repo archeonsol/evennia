@@ -58,6 +58,44 @@ def cases() -> list[str]:
     out += [f"|[={ch}grey|n" for ch in string.ascii_lowercase]
     # Formatting and whitespace codes.
     out += ["|uunder|n", "|u|rboth|n", "line|/break", "a|/|/b"]
+    # MXP links. The whole family was missing from this corpus, so the parity
+    # suite stayed green while the shell rendered `|lc@xp attrs|lt[X]|le` as the
+    # literal "c@xp attrst[X]e" -- it read `|lc` as the unknown colour code `|l`
+    # and let the orphaned letter fall through as text.
+    out += [
+        # The shape the game actually emits (see world/rpg/xp_shell.py).
+        "|lc@xp attrs|lt|w[Attributes]|n|n|le",
+        "|lclook|ltlook here|le",
+        "plain then |lclook|ltclick|le then plain",
+        # Colour spanning across a link, and colour only inside one.
+        "|r|lclook|ltred link|le|n",
+        "|lclook|lt|gcoloured|n|le",
+        # Quotes and HTML metacharacters in both halves: the server escapes the
+        # groups in its text pass and then turns `"` into a backslashed entity,
+        # which is not what it does to `"` in ordinary text.
+        '|lcsay "hi"|ltquoted|le',
+        "|lcsay <b>|lt<b>bold</b>|le",
+        "|lcsay a & b|lta & b|le",
+        # Degenerate: empty halves, and markers that never complete.
+        "|lc|lt|le",
+        "|lc|ltonly text|le",
+        "unclosed |lclook|ltclick",
+        "|lt orphan separator |le",
+        "|le alone",
+        # Two links in one line, the dossier's actual layout.
+        "|lc@xp attrs|lt[A]|le · |lc@xp skills|lt[S]|le",
+        # URL links are the other half of the family.
+        "|luhttps://example.com|ltsite|le",
+        "|luhttps://example.com/a?b=1&c=2|ltquery|le",
+    ]
+    # Every single-character code, known or not. The shell used to drop anything
+    # it did not recognise, while the server leaves an unknown code as literal
+    # text -- so `|lz` came out as "z". Sweeping the whole range makes the
+    # fixture the specification instead of relying on someone listing the codes
+    # that matter, which is how the `|l` family got missed in the first place.
+    printable = [ch for ch in map(chr, range(0x21, 0x7F))]
+    out += [f"|{ch}x" for ch in printable]
+    out += [f"|[{ch}x" for ch in printable]
     return out
 
 

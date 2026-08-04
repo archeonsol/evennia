@@ -466,5 +466,821 @@
   {
     "src": "a|/|/b",
     "html": "a<br><br>b"
+  },
+  {
+    "src": "|lc@xp attrs|lt|w[Attributes]|n|n|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;@xp attrs&quot;],{});return false;\"><span class=\"color-015\">[Attributes]</span><span class=\"\"></a></span>"
+  },
+  {
+    "src": "|lclook|ltlook here|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">look here</a>"
+  },
+  {
+    "src": "plain then |lclook|ltclick|le then plain",
+    "html": "plain then <a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">click</a> then plain"
+  },
+  {
+    "src": "|r|lclook|ltred link|le|n",
+    "html": "<span class=\"color-009\"><a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">red link</a></span>"
+  },
+  {
+    "src": "|lclook|lt|gcoloured|n|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\"><span class=\"color-010\">coloured</span></a>"
+  },
+  {
+    "src": "|lcsay \"hi\"|ltquoted|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say \\&quot;hi\\&quot;&quot;],{});return false;\">quoted</a>"
+  },
+  {
+    "src": "|lcsay <b>|lt<b>bold</b>|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say &lt;b&gt;&quot;],{});return false;\">&lt;b&gt;bold&lt;/b&gt;</a>"
+  },
+  {
+    "src": "|lcsay a & b|lta & b|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say a &amp; b&quot;],{});return false;\">a &amp; b</a>"
+  },
+  {
+    "src": "|lc|lt|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;&quot;],{});return false;\"></a>"
+  },
+  {
+    "src": "|lc|ltonly text|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;&quot;],{});return false;\">only text</a>"
+  },
+  {
+    "src": "unclosed |lclook|ltclick",
+    "html": "unclosed |lclook|ltclick"
+  },
+  {
+    "src": "|lt orphan separator |le",
+    "html": "|lt orphan separator |le"
+  },
+  {
+    "src": "|le alone",
+    "html": "|le alone"
+  },
+  {
+    "src": "|lc@xp attrs|lt[A]|le \u00b7 |lc@xp skills|lt[S]|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;@xp attrs&quot;],{});return false;\">[A]</a> \u00b7 <a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;@xp skills&quot;],{});return false;\">[S]</a>"
+  },
+  {
+    "src": "|luhttps://example.com|ltsite|le",
+    "html": "<a id=\"mxplink\" href=\"https://example.com\" target=\"_blank\">site</a>"
+  },
+  {
+    "src": "|luhttps://example.com/a?b=1&c=2|ltquery|le",
+    "html": "<a id=\"mxplink\" href=\"https://example.com/a?b=1&amp;c=2\" target=\"_blank\">query</a>"
+  },
+  {
+    "src": "|!x",
+    "html": "|!x"
+  },
+  {
+    "src": "|\"x",
+    "html": "|\"x"
+  },
+  {
+    "src": "|#x",
+    "html": "|#x"
+  },
+  {
+    "src": "|$x",
+    "html": "|$x"
+  },
+  {
+    "src": "|%x",
+    "html": "|%x"
+  },
+  {
+    "src": "|&x",
+    "html": "|&amp;x"
+  },
+  {
+    "src": "|'x",
+    "html": "|'x"
+  },
+  {
+    "src": "|(x",
+    "html": "|(x"
+  },
+  {
+    "src": "|)x",
+    "html": "|)x"
+  },
+  {
+    "src": "|*x",
+    "html": "<span class=\"bgcolor-007 color-000\">x</span>"
+  },
+  {
+    "src": "|+x",
+    "html": "|+x"
+  },
+  {
+    "src": "|,x",
+    "html": "|,x"
+  },
+  {
+    "src": "|-x",
+    "html": "    x"
+  },
+  {
+    "src": "|.x",
+    "html": "|.x"
+  },
+  {
+    "src": "|/x",
+    "html": "<br>x"
+  },
+  {
+    "src": "|0x",
+    "html": "|0x"
+  },
+  {
+    "src": "|1x",
+    "html": "|1x"
+  },
+  {
+    "src": "|2x",
+    "html": "|2x"
+  },
+  {
+    "src": "|3x",
+    "html": "|3x"
+  },
+  {
+    "src": "|4x",
+    "html": "|4x"
+  },
+  {
+    "src": "|5x",
+    "html": "|5x"
+  },
+  {
+    "src": "|6x",
+    "html": "|6x"
+  },
+  {
+    "src": "|7x",
+    "html": "|7x"
+  },
+  {
+    "src": "|8x",
+    "html": "|8x"
+  },
+  {
+    "src": "|9x",
+    "html": "|9x"
+  },
+  {
+    "src": "|:x",
+    "html": "|:x"
+  },
+  {
+    "src": "|;x",
+    "html": "|;x"
+  },
+  {
+    "src": "|<x",
+    "html": "|&lt;x"
+  },
+  {
+    "src": "|=x",
+    "html": ""
+  },
+  {
+    "src": "|>x",
+    "html": "    x"
+  },
+  {
+    "src": "|?x",
+    "html": "|?x"
+  },
+  {
+    "src": "|@x",
+    "html": "|@x"
+  },
+  {
+    "src": "|Ax",
+    "html": "|Ax"
+  },
+  {
+    "src": "|Bx",
+    "html": "<span class=\"color-004\">x</span>"
+  },
+  {
+    "src": "|Cx",
+    "html": "<span class=\"color-006\">x</span>"
+  },
+  {
+    "src": "|Dx",
+    "html": "|Dx"
+  },
+  {
+    "src": "|Ex",
+    "html": "|Ex"
+  },
+  {
+    "src": "|Fx",
+    "html": "|Fx"
+  },
+  {
+    "src": "|Gx",
+    "html": "<span class=\"color-002\">x</span>"
+  },
+  {
+    "src": "|Hx",
+    "html": "<span class=\"\">x</span>"
+  },
+  {
+    "src": "|Ix",
+    "html": "\u001b[23mx"
+  },
+  {
+    "src": "|Jx",
+    "html": "|Jx"
+  },
+  {
+    "src": "|Kx",
+    "html": "|Kx"
+  },
+  {
+    "src": "|Lx",
+    "html": "|Lx"
+  },
+  {
+    "src": "|Mx",
+    "html": "<span class=\"color-005\">x</span>"
+  },
+  {
+    "src": "|Nx",
+    "html": "|Nx"
+  },
+  {
+    "src": "|Ox",
+    "html": "|Ox"
+  },
+  {
+    "src": "|Px",
+    "html": "|Px"
+  },
+  {
+    "src": "|Qx",
+    "html": "|Qx"
+  },
+  {
+    "src": "|Rx",
+    "html": "<span class=\"color-001\">x</span>"
+  },
+  {
+    "src": "|Sx",
+    "html": "\u001b[29mx"
+  },
+  {
+    "src": "|Tx",
+    "html": "|Tx"
+  },
+  {
+    "src": "|Ux",
+    "html": "\u001b[24mx"
+  },
+  {
+    "src": "|Vx",
+    "html": "|Vx"
+  },
+  {
+    "src": "|Wx",
+    "html": "<span class=\"\">x</span>"
+  },
+  {
+    "src": "|Xx",
+    "html": "<span class=\"color-000\">x</span>"
+  },
+  {
+    "src": "|Yx",
+    "html": "<span class=\"color-003\">x</span>"
+  },
+  {
+    "src": "|Zx",
+    "html": "|Zx"
+  },
+  {
+    "src": "|[x",
+    "html": ""
+  },
+  {
+    "src": "|\\x",
+    "html": "|\\x"
+  },
+  {
+    "src": "|]x",
+    "html": "|]x"
+  },
+  {
+    "src": "|^x",
+    "html": "<span class=\"blink\">x</span>"
+  },
+  {
+    "src": "|_x",
+    "html": " x"
+  },
+  {
+    "src": "|`x",
+    "html": "|`x"
+  },
+  {
+    "src": "|ax",
+    "html": "|ax"
+  },
+  {
+    "src": "|bx",
+    "html": "<span class=\"color-012\">x</span>"
+  },
+  {
+    "src": "|cx",
+    "html": "<span class=\"color-014\">x</span>"
+  },
+  {
+    "src": "|dx",
+    "html": "|dx"
+  },
+  {
+    "src": "|ex",
+    "html": "|ex"
+  },
+  {
+    "src": "|fx",
+    "html": "|fx"
+  },
+  {
+    "src": "|gx",
+    "html": "<span class=\"color-010\">x</span>"
+  },
+  {
+    "src": "|hx",
+    "html": "<span class=\"color-015\">x</span>"
+  },
+  {
+    "src": "|ix",
+    "html": "\u001b[3mx"
+  },
+  {
+    "src": "|jx",
+    "html": "|jx"
+  },
+  {
+    "src": "|kx",
+    "html": "|kx"
+  },
+  {
+    "src": "|lx",
+    "html": "|lx"
+  },
+  {
+    "src": "|mx",
+    "html": "<span class=\"color-013\">x</span>"
+  },
+  {
+    "src": "|nx",
+    "html": "<span class=\"\">x</span>"
+  },
+  {
+    "src": "|ox",
+    "html": "|ox"
+  },
+  {
+    "src": "|px",
+    "html": "|px"
+  },
+  {
+    "src": "|qx",
+    "html": "|qx"
+  },
+  {
+    "src": "|rx",
+    "html": "<span class=\"color-009\">x</span>"
+  },
+  {
+    "src": "|sx",
+    "html": "\u001b[9mx"
+  },
+  {
+    "src": "|tx",
+    "html": "|tx"
+  },
+  {
+    "src": "|ux",
+    "html": "<span class=\"underline\">x</span>"
+  },
+  {
+    "src": "|vx",
+    "html": "|vx"
+  },
+  {
+    "src": "|wx",
+    "html": "<span class=\"color-015\">x</span>"
+  },
+  {
+    "src": "|xx",
+    "html": "<span class=\"color-008\">x</span>"
+  },
+  {
+    "src": "|yx",
+    "html": "<span class=\"color-011\">x</span>"
+  },
+  {
+    "src": "|zx",
+    "html": "|zx"
+  },
+  {
+    "src": "|{x",
+    "html": "|{x"
+  },
+  {
+    "src": "||x",
+    "html": "|x"
+  },
+  {
+    "src": "|}x",
+    "html": "|}x"
+  },
+  {
+    "src": "|~x",
+    "html": "|~x"
+  },
+  {
+    "src": "|[!x",
+    "html": "|[!x"
+  },
+  {
+    "src": "|[\"x",
+    "html": "|[\"x"
+  },
+  {
+    "src": "|[#x",
+    "html": "|[#x"
+  },
+  {
+    "src": "|[$x",
+    "html": "|[$x"
+  },
+  {
+    "src": "|[%x",
+    "html": "|[%x"
+  },
+  {
+    "src": "|[&x",
+    "html": "|[&amp;x"
+  },
+  {
+    "src": "|['x",
+    "html": "|['x"
+  },
+  {
+    "src": "|[(x",
+    "html": "|[(x"
+  },
+  {
+    "src": "|[)x",
+    "html": "|[)x"
+  },
+  {
+    "src": "|[*x",
+    "html": "|[*x"
+  },
+  {
+    "src": "|[+x",
+    "html": "|[+x"
+  },
+  {
+    "src": "|[,x",
+    "html": "|[,x"
+  },
+  {
+    "src": "|[-x",
+    "html": "|[-x"
+  },
+  {
+    "src": "|[.x",
+    "html": "|[.x"
+  },
+  {
+    "src": "|[/x",
+    "html": "|[/x"
+  },
+  {
+    "src": "|[0x",
+    "html": "|[0x"
+  },
+  {
+    "src": "|[1x",
+    "html": "|[1x"
+  },
+  {
+    "src": "|[2x",
+    "html": "|[2x"
+  },
+  {
+    "src": "|[3x",
+    "html": "|[3x"
+  },
+  {
+    "src": "|[4x",
+    "html": "|[4x"
+  },
+  {
+    "src": "|[5x",
+    "html": "|[5x"
+  },
+  {
+    "src": "|[6x",
+    "html": "|[6x"
+  },
+  {
+    "src": "|[7x",
+    "html": "|[7x"
+  },
+  {
+    "src": "|[8x",
+    "html": "|[8x"
+  },
+  {
+    "src": "|[9x",
+    "html": "|[9x"
+  },
+  {
+    "src": "|[:x",
+    "html": "|[:x"
+  },
+  {
+    "src": "|[;x",
+    "html": "|[;x"
+  },
+  {
+    "src": "|[<x",
+    "html": "|[&lt;x"
+  },
+  {
+    "src": "|[=x",
+    "html": ""
+  },
+  {
+    "src": "|[>x",
+    "html": "|[&gt;x"
+  },
+  {
+    "src": "|[?x",
+    "html": "|[?x"
+  },
+  {
+    "src": "|[@x",
+    "html": "|[@x"
+  },
+  {
+    "src": "|[Ax",
+    "html": "|[Ax"
+  },
+  {
+    "src": "|[Bx",
+    "html": "<span class=\"bgcolor-004\">x</span>"
+  },
+  {
+    "src": "|[Cx",
+    "html": "<span class=\"bgcolor-006\">x</span>"
+  },
+  {
+    "src": "|[Dx",
+    "html": "|[Dx"
+  },
+  {
+    "src": "|[Ex",
+    "html": "|[Ex"
+  },
+  {
+    "src": "|[Fx",
+    "html": "|[Fx"
+  },
+  {
+    "src": "|[Gx",
+    "html": "<span class=\"bgcolor-002\">x</span>"
+  },
+  {
+    "src": "|[Hx",
+    "html": "|[Hx"
+  },
+  {
+    "src": "|[Ix",
+    "html": "|[Ix"
+  },
+  {
+    "src": "|[Jx",
+    "html": "|[Jx"
+  },
+  {
+    "src": "|[Kx",
+    "html": "|[Kx"
+  },
+  {
+    "src": "|[Lx",
+    "html": "|[Lx"
+  },
+  {
+    "src": "|[Mx",
+    "html": "<span class=\"bgcolor-005\">x</span>"
+  },
+  {
+    "src": "|[Nx",
+    "html": "|[Nx"
+  },
+  {
+    "src": "|[Ox",
+    "html": "|[Ox"
+  },
+  {
+    "src": "|[Px",
+    "html": "|[Px"
+  },
+  {
+    "src": "|[Qx",
+    "html": "|[Qx"
+  },
+  {
+    "src": "|[Rx",
+    "html": "<span class=\"bgcolor-001\">x</span>"
+  },
+  {
+    "src": "|[Sx",
+    "html": "|[Sx"
+  },
+  {
+    "src": "|[Tx",
+    "html": "|[Tx"
+  },
+  {
+    "src": "|[Ux",
+    "html": "|[Ux"
+  },
+  {
+    "src": "|[Vx",
+    "html": "|[Vx"
+  },
+  {
+    "src": "|[Wx",
+    "html": "<span class=\"bgcolor-007\">x</span>"
+  },
+  {
+    "src": "|[Xx",
+    "html": "<span class=\"\">x</span>"
+  },
+  {
+    "src": "|[Yx",
+    "html": "<span class=\"bgcolor-003\">x</span>"
+  },
+  {
+    "src": "|[Zx",
+    "html": "|[Zx"
+  },
+  {
+    "src": "|[[x",
+    "html": "|[[x"
+  },
+  {
+    "src": "|[\\x",
+    "html": "|[\\x"
+  },
+  {
+    "src": "|[]x",
+    "html": "|[]x"
+  },
+  {
+    "src": "|[^x",
+    "html": "|[^x"
+  },
+  {
+    "src": "|[_x",
+    "html": "|[_x"
+  },
+  {
+    "src": "|[`x",
+    "html": "|[`x"
+  },
+  {
+    "src": "|[ax",
+    "html": "|[ax"
+  },
+  {
+    "src": "|[bx",
+    "html": "<span class=\"bgcolor-021\">x</span>"
+  },
+  {
+    "src": "|[cx",
+    "html": "<span class=\"bgcolor-051\">x</span>"
+  },
+  {
+    "src": "|[dx",
+    "html": "|[dx"
+  },
+  {
+    "src": "|[ex",
+    "html": "|[ex"
+  },
+  {
+    "src": "|[fx",
+    "html": "|[fx"
+  },
+  {
+    "src": "|[gx",
+    "html": "<span class=\"bgcolor-046\">x</span>"
+  },
+  {
+    "src": "|[hx",
+    "html": "|[hx"
+  },
+  {
+    "src": "|[ix",
+    "html": "|[ix"
+  },
+  {
+    "src": "|[jx",
+    "html": "|[jx"
+  },
+  {
+    "src": "|[kx",
+    "html": "|[kx"
+  },
+  {
+    "src": "|[lx",
+    "html": "|[lx"
+  },
+  {
+    "src": "|[mx",
+    "html": "<span class=\"bgcolor-201\">x</span>"
+  },
+  {
+    "src": "|[nx",
+    "html": "|[nx"
+  },
+  {
+    "src": "|[ox",
+    "html": "|[ox"
+  },
+  {
+    "src": "|[px",
+    "html": "|[px"
+  },
+  {
+    "src": "|[qx",
+    "html": "|[qx"
+  },
+  {
+    "src": "|[rx",
+    "html": "<span class=\"bgcolor-196\">x</span>"
+  },
+  {
+    "src": "|[sx",
+    "html": "|[sx"
+  },
+  {
+    "src": "|[tx",
+    "html": "|[tx"
+  },
+  {
+    "src": "|[ux",
+    "html": "|[ux"
+  },
+  {
+    "src": "|[vx",
+    "html": "|[vx"
+  },
+  {
+    "src": "|[wx",
+    "html": "<span class=\"bgcolor-231\">x</span>"
+  },
+  {
+    "src": "|[xx",
+    "html": "<span class=\"bgcolor-102\">x</span>"
+  },
+  {
+    "src": "|[yx",
+    "html": "<span class=\"bgcolor-226\">x</span>"
+  },
+  {
+    "src": "|[zx",
+    "html": "|[zx"
+  },
+  {
+    "src": "|[{x",
+    "html": "|[{x"
+  },
+  {
+    "src": "|[|x",
+    "html": "|["
+  },
+  {
+    "src": "|[}x",
+    "html": "|[}x"
+  },
+  {
+    "src": "|[~x",
+    "html": "|[~x"
   }
 ]
