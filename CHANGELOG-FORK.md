@@ -25,6 +25,47 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.184 — Clickable links, and markup parity for real
+
+Fixes a **player-visible break**: every clickable link in the game rendered as
+mangled text. A game on `.183` should move its `EVENNIA_REF` here.
+
+### Engine — Web client markup
+
+- **MXP links were not implemented in the shell's parser.** `markup.ts` matched
+  `|` plus one letter, so `|lc` was read as the unknown colour code `|l` with an
+  orphaned `c` falling through as text. `@xp`'s
+  `|lc@xp attrs|lt|w[Attributes]|n|n|le` rendered as the literal
+  `c@xp attrst[Attributes]e`, and nothing in the game was clickable. Both
+  `|lc…|lt…|le` and `|lu…|lt…|le` now produce byte-identical anchors.
+
+  This required mirroring `parse_html`'s **phase order**, not just adding a
+  token. Upstream escapes, then substitutes links, then wraps ANSI runs in
+  spans — so a span opened inside a link closes outside it, and
+  `|lc…|lt|w[A]|n|n|le` genuinely yields `…<span class="color-015">[A]</span>`
+  `<span class=""></a></span>`, with `</a>` inside a later span. Emitting
+  anchors inline while walking tokens gives well-formed nesting and therefore
+  does *not* match, so links are now substituted against an intermediate string
+  exactly as upstream does.
+
+- **Unrecognised codes were being swallowed.** The server leaves any code it
+  does not know as literal text; the shell dropped it and kept the following
+  character. That is the same root cause as the link bug and cost a character of
+  real output every time.
+
+- **Implemented the missing code families**: `|*` (inverse, a render-time swap
+  rather than a state change), `|^` (blink), `|h`/`|H` (hilite brightens the
+  *current* foreground, so `|R|h` is bright red), `|-`/`|>`/`|_` (whitespace),
+  and `|i`/`|I`/`|s`/`|S`/`|U`, which upstream emits as literal ANSI escapes —
+  reproduced rather than corrected, since parity is the contract.
+
+### Engine — Tests
+
+The parity fixture now sweeps **every** single-character code, known or not
+(325 cases, up from 121). The old corpus listed only the codes someone thought
+to include, so it stayed green while an entire markup family was unimplemented —
+the fixture blessed the parser instead of specifying it.
+
 ## 6.0.0+underspire.183 — Web client console fixes
 
 Follows `.182` immediately; a game on `.182` should move its `EVENNIA_REF` here.
