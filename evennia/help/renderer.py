@@ -10,6 +10,35 @@ from evennia.utils.utils import inherits_from
 __all__ = ["render_help"]
 
 
+def _entry_aliases(entry) -> list[str]:
+    """Return normalized aliases from file or database help entries."""
+
+    aliases = entry.aliases
+    if not isinstance(aliases, list):
+        try:
+            aliases = list(aliases.all())
+        except AttributeError:
+            aliases = list(aliases or [])
+    return [str(alias).strip().lower() for alias in aliases]
+
+
+def _exact_manual_topic(query, db_help_topics, file_help_topics):
+    """Resolve one exact manual key or alias with deterministic precedence."""
+
+    key = (query or "").strip().lower()
+    if not key:
+        return None
+    by_key = {**db_help_topics, **file_help_topics}
+    match = by_key.get(key)
+    if match is not None:
+        return match
+    for entries in (file_help_topics.values(), db_help_topics.values()):
+        for entry in entries:
+            if key in _entry_aliases(entry):
+                return entry
+    return None
+
+
 def _topic_in_file_db(file_db_help_topics, query: str) -> bool:
     """True when ``query`` matches a file/DB help key or alias."""
     key = (query or "").strip().lower()
@@ -56,6 +85,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
         is_action_help_topic,
         is_help_commands_topic,
         lookup_action_help_topic,
+        should_include_action_topics_in_index,
     )
     from evennia.help.formatters import HelpCategory, HelpFormatter
 
@@ -78,8 +108,9 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
     helper.msg_help = msg_help
     actor = actor_for_help(caller, session)
     query = helper.topic
+    action_topics_enabled = should_include_action_topics_in_index(actor)
 
-    if is_help_commands_topic(query):
+    if action_topics_enabled and is_help_commands_topic(query):
         if not actor_is_staff_for_help(actor):
             msg_help(
                 helper.format_help_entry(
@@ -118,7 +149,9 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
     file_db_help_topics = {**db_help_topics, **file_help_topics}
 
     cmd_help_topics = {}
-    if actor_is_staff_for_help(actor):
+    match = _exact_manual_topic(query, db_help_topics, file_help_topics)
+    suggestions = []
+    if match is None and action_topics_enabled and actor_is_staff_for_help(actor):
         cmd_help_topics = collect_action_help_topics(actor, mode="query", staff_reference=True)
         denied_topic, was_denied = lookup_action_help_topic(
             query, actor, include_denied=True, staff_reference=True
@@ -144,9 +177,10 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
 
     # Staff-authored file/DB prose wins over action-registry stubs on key clash.
     all_topics = {**cmd_help_topics, **file_db_help_topics}
-    all_categories = list({HelpCategory(t.help_category) for t in all_topics.values()})
-    entries = list(all_topics.values()) + all_categories
-    match, suggestions = helper.do_search(query, entries)
+    if match is None:
+        all_categories = list({HelpCategory(t.help_category) for t in all_topics.values()})
+        entries = list(all_topics.values()) + all_categories
+        match, suggestions = helper.do_search(query, entries)
 
     if not match:
         help_text = f"There is no help topic matching '{query}'."

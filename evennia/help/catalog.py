@@ -146,38 +146,35 @@ def _provider_types(actor, action_cls) -> tuple[type, ...]:
     account = getattr(actor, "account", None)
     character = getattr(actor, "character", None) or getattr(actor, "effective", None)
     types: list[type] = []
+
+    def add_provider_type(provider_type):
+        if _is_rule_provider_type(provider_type) and not any(
+            provider_type is existing for existing in types
+        ):
+            types.append(provider_type)
+
     if handler is not None:
         if account is not None:
             try:
                 if isinstance(account, handler):
-                    ptype = type(account)
-                    if _is_rule_provider_type(ptype):
-                        types.append(ptype)
+                    add_provider_type(type(account))
             except TypeError:
                 pass
         if character is not None:
             try:
                 if isinstance(character, handler):
-                    ptype = type(character)
-                    if _is_rule_provider_type(ptype):
-                        types.append(ptype)
+                    add_provider_type(type(character))
             except TypeError:
                 pass
     else:
         if character is not None:
-            ptype = type(character)
-            if _is_rule_provider_type(ptype):
-                types.append(ptype)
+            add_provider_type(type(character))
         if account is not None:
-            ptype = type(account)
-            if _is_rule_provider_type(ptype) and ptype not in types:
-                types.append(ptype)
+            add_provider_type(type(account))
     if not types:
         eff = getattr(actor, "effective", None)
         if eff is not None:
-            ptype = type(eff)
-            if _is_rule_provider_type(ptype):
-                types.append(ptype)
+            add_provider_type(type(eff))
     return tuple(types)
 
 
@@ -185,12 +182,7 @@ def carry_out_specs_for(provider_type, action_cls):
     """All ``carry_out`` rule specs for ``action_cls`` on ``provider_type``'s MRO."""
     from evennia.actions.registry import rule_registry
 
-    specs = []
-    for cls in provider_type.__mro__:
-        if cls is object:
-            break
-        specs.extend(rule_registry.rules_for(cls, action_cls, "carry_out"))
-    return specs
+    return list(rule_registry.rules_for(provider_type, action_cls, "carry_out"))
 
 
 def _dummy_action(action_cls):
@@ -351,17 +343,30 @@ def lookup_action_help_topic(key: str, actor, *, include_denied=False, staff_ref
     ):
         return None, False
     key = (key or "").strip().lower()
-    if not key:
+    if not key or key.startswith("__"):
         return None, False
     from evennia.actions import action_registry
 
-    for topic_key, topic in _iter_action_verbs(action_registry):
-        if topic_key == key or key in [a.lower() for a in topic.aliases]:
-            if action_help_accessible(topic.action_cls, actor, staff_reference=True):
-                return topic, False
-            if include_denied:
-                return topic, True
-            return None, False
+    action_cls = action_registry.get(key)
+    if action_cls is None:
+        return None, False
+    aliases = []
+    for verb in getattr(action_cls, "__action_verbs__", ()) or ():
+        alias = str(verb).strip().lower()
+        if alias and alias != key and action_registry.get(alias) is action_cls:
+            aliases.append(alias)
+    topic = ActionHelpTopic(
+        key,
+        action_cls,
+        resolve_help_category(action_cls),
+        aliases,
+        (action_cls.__doc__ or "").strip(),
+        _action_auto_help_enabled(action_cls),
+    )
+    if action_help_accessible(action_cls, actor, staff_reference=True):
+        return topic, False
+    if include_denied:
+        return topic, True
     return None, False
 
 
