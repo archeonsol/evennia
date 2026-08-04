@@ -25,6 +25,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.185 — URL auto-linking and newlines in the shell parser
+
+Closes the last two markup divergences. A game on `.184` should move its
+`EVENNIA_REF` here.
+
+### Engine — Web client markup
+
+- **Newlines were not converted to `<br>`.** The server's text pass rewrites
+  `\r\n`/`\r`/`\n` before anything else runs, and the shell left them alone — so
+  any body carrying real newlines rendered as **one run-on line**, since `\n` is
+  just whitespace to HTML. Literal tabs were likewise not expanded to the
+  4-space tabstop. This was independent of the `|/` and `|-` codes, which were
+  already handled, and is why it went unnoticed.
+
+- **Bare URLs are now auto-linked**, matching upstream's final pass including
+  the parts that look like bugs and are therefore load-bearing for parity:
+  it uses `search` rather than `sub`, so only the *first* URL in a string
+  becomes a link and later ones stay plain text; and a protocol-less host that
+  fails validation (`www.x`) makes it bail on the whole string rather than skip
+  that one match.
+
+  Upstream guards against re-linking its own output with a `(?<!=")` lookbehind.
+  That is checked in code here instead — lookbehind is a syntax error in older
+  Safari, and an unsupported regex *literal* fails to parse, which would take
+  the entire bundle down rather than degrade.
+
+  The two passes interact: `https://example.com.\n` links the trailing dot,
+  because by the time the URL pass runs the newline is already a `<br>` and no
+  longer the whitespace that would have ended the match.
+
+### Engine — Tests
+
+The parity corpus grew to 358 cases with URL, newline and tab coverage. Both
+fixes were found by widening the corpus *before* changing the parser, so the
+fixture proved them rather than being regenerated to agree with whatever the
+shell happened to emit.
+
 ## 6.0.0+underspire.184 — Clickable links, and markup parity for real
 
 Fixes a **player-visible break**: every clickable link in the game rendered as
