@@ -115,6 +115,7 @@ _EngineOwnedAction.__action_verbs__ = ("catalog-engine", "catalog-rebound")
 _GameOverrideAction.__module__ = "world.actions.test_catalog"
 _GameOverrideAction.__action_verbs__ = ("catalog-rebound",)
 action_registry.register(_EngineOwnedAction, _EngineOwnedAction.__action_verbs__)
+action_registry.register(_EngineOwnedAction, ("catalog-supplemental",))
 action_registry.register(_GameOverrideAction, _GameOverrideAction.__action_verbs__)
 
 
@@ -202,6 +203,7 @@ class TestHelpCatalog(TestCase):
         self.assertTrue(denied)
         self.assertIs(topic.action_cls, _EngineOwnedAction)
         self.assertNotIn("catalog-rebound", topic.aliases)
+        self.assertIn("catalog-supplemental", topic.aliases)
 
     def test_player_cannot_lookup_action_topics(self):
         actor = self._actor()

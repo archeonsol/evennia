@@ -146,6 +146,7 @@ class ActionRegistry:
 
     def __init__(self):
         self._by_verb = {}
+        self._verbs_by_action = {}
         self._actions = []
         self._trie = None  # lazily built; invalidated on register
         self._symbol_verbs = None  # lazily built; invalidated on register
@@ -178,6 +179,9 @@ class ActionRegistry:
                         f"cannot also bind to {action_cls.__name__}"
                     )
             self._by_verb[key] = action_cls
+            action_verbs = self._verbs_by_action.setdefault(action_cls, [])
+            if key not in action_verbs:
+                action_verbs.append(key)
         if action_cls not in self._actions:
             self._actions.append(action_cls)
         self._trie = None
@@ -193,6 +197,14 @@ class ActionRegistry:
 
     def verbs(self):
         return dict(self._by_verb)
+
+    def verbs_for(self, action_cls):
+        """Currently owned verbs for one action, in registration order."""
+        return tuple(
+            verb
+            for verb in self._verbs_by_action.get(action_cls, ())
+            if self._by_verb.get(verb) is action_cls
+        )
 
     @property
     def trie(self) -> "VerbTrie":

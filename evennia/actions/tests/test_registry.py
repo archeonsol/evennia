@@ -44,6 +44,24 @@ class TestActionRegistry(unittest.TestCase):
         self.assertEqual(reg.get("boot"), _Kick)
         self.assertEqual(len(reg.all_actions()), 1)
 
+    def test_verbs_for_includes_supplemental_and_omits_override(self):
+        reg = ActionRegistry()
+
+        class EngineAction(Action):
+            pass
+
+        class GameAction(Action):
+            pass
+
+        EngineAction.__module__ = "evennia.actions.default.test_registry"
+        GameAction.__module__ = "world.actions.test_registry"
+        reg.register(EngineAction, ("engine-primary",))
+        reg.register(EngineAction, ("engine-extra",))
+        reg.register(GameAction, ("engine-primary",))
+
+        self.assertEqual(reg.verbs_for(EngineAction), ("engine-extra",))
+        self.assertEqual(reg.verbs_for(GameAction), ("engine-primary",))
+
     def test_match_tokens_longest_phrase(self):
         reg = ActionRegistry()
 

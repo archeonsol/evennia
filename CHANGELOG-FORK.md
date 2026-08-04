@@ -44,9 +44,11 @@ help should set both `HELP_INDEX_ACTIONS = False` and
 - [`evennia/help/catalog.py`](evennia/help/catalog.py) adds a direct exact action
   lookup path backed by the verb registry. It does not enumerate every action,
   strip a leading `@`, or accept prefixes; aliases superseded by a later
-  registration are not leaked. Carry-out requirement discovery now asks the
-  rule registry's MRO-aware cache once, avoiding duplicate inherited rules and
-  respecting undecorated method overrides.
+  registration are not leaked, while supplemental same-class registrations are
+  included through the registry's constant-time reverse ownership map.
+  Carry-out requirement discovery now asks the rule registry's MRO-aware cache
+  once, avoiding duplicate inherited rules and respecting undecorated method
+  overrides.
 
 ### Performance
 

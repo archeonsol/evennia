@@ -350,11 +350,11 @@ def lookup_action_help_topic(key: str, actor, *, include_denied=False, staff_ref
     action_cls = action_registry.get(key)
     if action_cls is None:
         return None, False
-    aliases = []
-    for verb in getattr(action_cls, "__action_verbs__", ()) or ():
-        alias = str(verb).strip().lower()
-        if alias and alias != key and action_registry.get(alias) is action_cls:
-            aliases.append(alias)
+    aliases = [
+        alias
+        for alias in action_registry.verbs_for(action_cls)
+        if alias != key and not alias.startswith("__")
+    ]
     topic = ActionHelpTopic(
         key,
         action_cls,
