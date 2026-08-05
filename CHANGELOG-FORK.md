@@ -25,6 +25,23 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.187 — Help colors in structured clients
+
+Follows `.186` immediately. Games using the structured webclient should move
+their `EVENNIA_REF` here. No API, settings, or database migration is required.
+
+### Engine — Help formatting
+
+- [`evennia/help/formatters.py`](evennia/help/formatters.py) keeps help indexes
+  in Evennia `|` markup through message delivery instead of materializing raw
+  terminal escape bytes inside `ANSIString`. Both ordinary and staff help now
+  render correctly in structured clients while retaining ANSI-aware grid width.
+
+### Tests
+
+- The existing engine help suite passes all 27 tests. Live downstream renders
+  of both `help` and `@staffhelp` contain Evennia markup and no raw ESC bytes.
+
 ## 6.0.0+underspire.186 — Curated help and exact action lookup
 
 Follows `.185` immediately. Downstream games that want manual-only ordinary
@@ -40,11 +57,6 @@ help should set both `HELP_INDEX_ACTIONS = False` and
   only built when action topics are enabled, so a downstream game can reserve
   `commands` for ordinary manual prose and fully remove generated actions from
   normal help.
-
-- [`evennia/help/formatters.py`](evennia/help/formatters.py) keeps help indexes
-  in Evennia `|` markup through message delivery instead of materializing raw
-  terminal escape bytes inside `ANSIString`. Both ordinary and staff help now
-  render correctly in structured clients while retaining ANSI-aware grid width.
 
 - [`evennia/help/catalog.py`](evennia/help/catalog.py) adds a direct exact action
   lookup path backed by the verb registry. It does not enumerate every action,
