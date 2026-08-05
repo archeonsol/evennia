@@ -16,7 +16,6 @@ from django.conf import settings
 from evennia.help.filehelp import FILE_HELP_ENTRIES
 from evennia.help.models import HelpEntry
 from evennia.help.utils import help_search_with_index
-from evennia.utils.ansi import ANSIString
 from evennia.utils.utils import dedent, format_grid, inherits_from, pad
 
 HELP_CLICKABLE_TOPICS = settings.HELP_CLICKABLE_TOPICS
@@ -228,14 +227,7 @@ class HelpFormatter:
                 # list the categories
                 for category in sorted(set(list(help_dict.keys()))):
                     category_str = f"-- {category.title()} "
-                    grid.append(
-                        ANSIString(
-                            self.index_category_clr
-                            + category_str
-                            + "-" * (width - len(category_str))
-                            + self.index_topic_clr
-                        )
-                    )
+                    grid.append(category_str + "-" * (width - len(category_str)))
                     verbatim_elements.append(len(grid) - 1)
 
                     # gather and sort the entries from the help dictionary
@@ -249,6 +241,16 @@ class HelpFormatter:
                     grid.extend(entries)
 
             return grid, verbatim_elements
+
+        def _style_grid_rows(rows):
+            return [
+                (
+                    self.index_category_clr + row + self.index_topic_clr
+                    if row.startswith("-- ")
+                    else self.index_topic_clr + row
+                )
+                for row in rows
+            ]
 
         help_index = ""
         width = self.client_width()
@@ -269,9 +271,9 @@ class HelpFormatter:
                 width,
                 sep="  ",
                 verbatim_elements=verbatim_elements,
-                line_prefix=self.index_topic_clr,
             )
-            cmd_grid = ANSIString("\n").join(gridrows) if gridrows else ""
+            gridrows = _style_grid_rows(gridrows)
+            cmd_grid = "\n".join(gridrows) if gridrows else ""
 
         if any(db_help_dict.values()):
             # get db-based help entries by-category
@@ -286,9 +288,9 @@ class HelpFormatter:
                 width,
                 sep="  ",
                 verbatim_elements=verbatim_elements,
-                line_prefix=self.index_topic_clr,
             )
-            db_grid = ANSIString("\n").join(gridrows) if gridrows else ""
+            gridrows = _style_grid_rows(gridrows)
+            db_grid = "\n".join(gridrows) if gridrows else ""
 
         # only show the main separators if there are actually both cmd and db-based help
         if cmd_grid and db_grid:

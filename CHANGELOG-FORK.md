@@ -41,6 +41,11 @@ help should set both `HELP_INDEX_ACTIONS = False` and
   `commands` for ordinary manual prose and fully remove generated actions from
   normal help.
 
+- [`evennia/help/formatters.py`](evennia/help/formatters.py) keeps help indexes
+  in Evennia `|` markup through message delivery instead of materializing raw
+  terminal escape bytes inside `ANSIString`. Both ordinary and staff help now
+  render correctly in structured clients while retaining ANSI-aware grid width.
+
 - [`evennia/help/catalog.py`](evennia/help/catalog.py) adds a direct exact action
   lookup path backed by the verb registry. It does not enumerate every action,
   strip a leading `@`, or accept prefixes; aliases superseded by a later
