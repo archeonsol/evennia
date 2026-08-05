@@ -25,9 +25,9 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.184 — Curated help and exact action lookup
+## 6.0.0+underspire.186 — Curated help and exact action lookup
 
-Follows `.183` immediately. Downstream games that want manual-only ordinary
+Follows `.185` immediately. Downstream games that want manual-only ordinary
 help should set both `HELP_INDEX_ACTIONS = False` and
 `HELP_INDEX_ACTIONS_FOR_STAFF = False`. No database migration is required.
 
@@ -67,6 +67,83 @@ help should set both `HELP_INDEX_ACTIONS = False` and
   inherited-rule deduplication, concrete/catch-all priority, and undecorated
   rule shadowing.
 
+## 6.0.0+underspire.185 — URL auto-linking and newlines in the shell parser
+
+Closes the last two markup divergences. A game on `.184` should move its
+`EVENNIA_REF` here.
+
+### Engine — Web client markup
+
+- **Newlines were not converted to `<br>`.** The server's text pass rewrites
+  `\r\n`/`\r`/`\n` before anything else runs, and the shell left them alone — so
+  any body carrying real newlines rendered as **one run-on line**, since `\n` is
+  just whitespace to HTML. Literal tabs were likewise not expanded to the
+  4-space tabstop. This was independent of the `|/` and `|-` codes, which were
+  already handled, and is why it went unnoticed.
+
+- **Bare URLs are now auto-linked**, matching upstream's final pass including
+  the parts that look like bugs and are therefore load-bearing for parity:
+  it uses `search` rather than `sub`, so only the *first* URL in a string
+  becomes a link and later ones stay plain text; and a protocol-less host that
+  fails validation (`www.x`) makes it bail on the whole string rather than skip
+  that one match.
+
+  Upstream guards against re-linking its own output with a `(?<!=")` lookbehind.
+  That is checked in code here instead — lookbehind is a syntax error in older
+  Safari, and an unsupported regex *literal* fails to parse, which would take
+  the entire bundle down rather than degrade.
+
+  The two passes interact: `https://example.com.\n` links the trailing dot,
+  because by the time the URL pass runs the newline is already a `<br>` and no
+  longer the whitespace that would have ended the match.
+
+### Engine — Tests
+
+The parity corpus grew to 358 cases with URL, newline and tab coverage. Both
+fixes were found by widening the corpus *before* changing the parser, so the
+fixture proved them rather than being regenerated to agree with whatever the
+shell happened to emit.
+
+## 6.0.0+underspire.184 — Clickable links, and markup parity for real
+
+Fixes a **player-visible break**: every clickable link in the game rendered as
+mangled text. A game on `.183` should move its `EVENNIA_REF` here.
+
+### Engine — Web client markup
+
+- **MXP links were not implemented in the shell's parser.** `markup.ts` matched
+  `|` plus one letter, so `|lc` was read as the unknown colour code `|l` with an
+  orphaned `c` falling through as text. `@xp`'s
+  `|lc@xp attrs|lt|w[Attributes]|n|n|le` rendered as the literal
+  `c@xp attrst[Attributes]e`, and nothing in the game was clickable. Both
+  `|lc…|lt…|le` and `|lu…|lt…|le` now produce byte-identical anchors.
+
+  This required mirroring `parse_html`'s **phase order**, not just adding a
+  token. Upstream escapes, then substitutes links, then wraps ANSI runs in
+  spans — so a span opened inside a link closes outside it, and
+  `|lc…|lt|w[A]|n|n|le` genuinely yields `…<span class="color-015">[A]</span>`
+  `<span class=""></a></span>`, with `</a>` inside a later span. Emitting
+  anchors inline while walking tokens gives well-formed nesting and therefore
+  does *not* match, so links are now substituted against an intermediate string
+  exactly as upstream does.
+
+- **Unrecognised codes were being swallowed.** The server leaves any code it
+  does not know as literal text; the shell dropped it and kept the following
+  character. That is the same root cause as the link bug and cost a character of
+  real output every time.
+
+- **Implemented the missing code families**: `|*` (inverse, a render-time swap
+  rather than a state change), `|^` (blink), `|h`/`|H` (hilite brightens the
+  *current* foreground, so `|R|h` is bright red), `|-`/`|>`/`|_` (whitespace),
+  and `|i`/`|I`/`|s`/`|S`/`|U`, which upstream emits as literal ANSI escapes —
+  reproduced rather than corrected, since parity is the contract.
+
+### Engine — Tests
+
+The parity fixture now sweeps **every** single-character code, known or not
+(325 cases, up from 121). The old corpus listed only the codes someone thought
+to include, so it stayed green while an entire markup family was unimplemented —
+the fixture blessed the parser instead of specifying it.
 ## 6.0.0+underspire.183 — Web client console fixes
 
 Follows `.182` immediately; a game on `.182` should move its `EVENNIA_REF` here.

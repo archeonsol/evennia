@@ -58,6 +58,97 @@ def cases() -> list[str]:
     out += [f"|[={ch}grey|n" for ch in string.ascii_lowercase]
     # Formatting and whitespace codes.
     out += ["|uunder|n", "|u|rboth|n", "line|/break", "a|/|/b"]
+    # Real newlines and tabs in the body, as opposed to the |/ and |- codes.
+    # The shell used to leave these alone, so a multi-line body rendered as one
+    # run-on line -- `\n` is just whitespace to HTML.
+    out += [
+        "line one\nline two",
+        "a\tb",
+        "a\t\tb",
+        "crlf\r\nend",
+        "cr\rend",
+        "trailing\n",
+        "|rred\nstill red|n",
+        "|rred|n\nplain",
+        "\n\nleading blanks",
+    ]
+    # MXP links. The whole family was missing from this corpus, so the parity
+    # suite stayed green while the shell rendered `|lc@xp attrs|lt[X]|le` as the
+    # literal "c@xp attrst[X]e" -- it read `|lc` as the unknown colour code `|l`
+    # and let the orphaned letter fall through as text.
+    out += [
+        # The shape the game actually emits (see world/rpg/xp_shell.py).
+        "|lc@xp attrs|lt|w[Attributes]|n|n|le",
+        "|lclook|ltlook here|le",
+        "plain then |lclook|ltclick|le then plain",
+        # Colour spanning across a link, and colour only inside one.
+        "|r|lclook|ltred link|le|n",
+        "|lclook|lt|gcoloured|n|le",
+        # Quotes and HTML metacharacters in both halves: the server escapes the
+        # groups in its text pass and then turns `"` into a backslashed entity,
+        # which is not what it does to `"` in ordinary text.
+        '|lcsay "hi"|ltquoted|le',
+        "|lcsay <b>|lt<b>bold</b>|le",
+        "|lcsay a & b|lta & b|le",
+        # Degenerate: empty halves, and markers that never complete.
+        "|lc|lt|le",
+        "|lc|ltonly text|le",
+        "unclosed |lclook|ltclick",
+        "|lt orphan separator |le",
+        "|le alone",
+        # Two links in one line, the dossier's actual layout.
+        "|lc@xp attrs|lt[A]|le · |lc@xp skills|lt[S]|le",
+        # URL links are the other half of the family.
+        "|luhttps://example.com|ltsite|le",
+        "|luhttps://example.com/a?b=1&c=2|ltquery|le",
+    ]
+    # Bare URLs. Upstream auto-links them in a final pass, and does it with
+    # `search` rather than `sub` -- so only the *first* URL in a string becomes a
+    # link and any others stay text. Reproduced, not corrected.
+    out += [
+        "visit https://example.com now",
+        "https://example.com",
+        "http://example.com/a?b=1&c=2",
+        "www.example.com",
+        "ftp.example.com/pub",
+        # Only the first is linked, which is the quirk worth pinning.
+        "https://one.example.com and https://two.example.com",
+        # Trailing punctuation is handed back outside the anchor.
+        "see https://example.com.",
+        "see https://example.com. and more",
+        # No protocol and not a valid bare host: upstream bails on the whole
+        # string, linking nothing at all.
+        "www.x",
+        "https://",
+        # Already inside an anchor: the lookbehind must stop a second pass.
+        "|luhttps://example.com|ltsite|le",
+        "|lchttps://example.com|ltcmd|le",
+        # Colour around and inside a URL.
+        "|rhttps://example.com|n",
+        "before |ghttps://example.com|n after",
+        # Escaped entities adjacent to a URL.
+        "https://example.com&amp; trailing",
+        "a <b> https://example.com",
+        # `$` in the upstream pattern is Python's, which also matches before a
+        # final newline; JavaScript's does not. Pin the difference either way.
+        "https://example.com\n",
+        "https://example.com.\n",
+        "line one\nhttps://example.com",
+        "https://example.com|/after",
+        # Punctuation and case handling around the host.
+        "HTTPS://EXAMPLE.COM",
+        "https://example.com/a_b~c",
+        "(https://example.com)",
+        "https://example.com, next",
+    ]
+    # Every single-character code, known or not. The shell used to drop anything
+    # it did not recognise, while the server leaves an unknown code as literal
+    # text -- so `|lz` came out as "z". Sweeping the whole range makes the
+    # fixture the specification instead of relying on someone listing the codes
+    # that matter, which is how the `|l` family got missed in the first place.
+    printable = [ch for ch in map(chr, range(0x21, 0x7F))]
+    out += [f"|{ch}x" for ch in printable]
+    out += [f"|[{ch}x" for ch in printable]
     return out
 
 
