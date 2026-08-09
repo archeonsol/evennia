@@ -15,6 +15,7 @@ Covers:
 """
 
 import tempfile
+from copy import deepcopy
 from unittest.mock import patch
 
 from django.test import override_settings
@@ -22,6 +23,8 @@ from django.test import override_settings
 from evennia.typeclasses.jsonb_handler import (
     FlushResult,
     JsonbAttributeBackend,
+    JsonbWriteConflict,
+    _three_way_merge,
     force_flush,
     reclaim_spooled_writes,
     spool_pending_count,
@@ -375,6 +378,47 @@ class TestFlushRetry(BaseEvenniaTest):
                 self.obj1.refresh_from_db()
                 self.assertEqual(self.obj1.db_attrs["~"]["_d"]["x"], 42)
 
+    def test_reclaim_merges_nonconflicting_newer_database_write(self):
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                self.handler.add("x", 42)
+                self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
+                with patch.object(self.obj1, "save", side_effect=Exception("db down")):
+                    self.backend._do_flush()
+                remote = deepcopy(self.obj1.db_attrs or {})
+                remote.setdefault("~", {}).setdefault("_d", {})["y"] = 7
+                type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
+
+                self.assertEqual(reclaim_spooled_writes(), 1)
+                document = (
+                    type(self.obj1)
+                    .objects.filter(pk=self.obj1.pk)
+                    .values_list("db_attrs", flat=True)
+                    .get()
+                )
+                self.assertEqual(document["~"]["_d"], {"x": 42, "y": 7})
+
+    def test_reclaim_leaves_conflicting_spool_for_recovery(self):
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                self.handler.add("x", 42)
+                self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
+                with patch.object(self.obj1, "save", side_effect=Exception("db down")):
+                    self.backend._do_flush()
+                remote = deepcopy(self.obj1.db_attrs or {})
+                remote.setdefault("~", {}).setdefault("_d", {})["x"] = 99
+                type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
+
+                self.assertEqual(reclaim_spooled_writes(), 0)
+                self.assertEqual(spool_pending_count(), 1)
+                document = (
+                    type(self.obj1)
+                    .objects.filter(pk=self.obj1.pk)
+                    .values_list("db_attrs", flat=True)
+                    .get()
+                )
+                self.assertEqual(document["~"]["_d"]["x"], 99)
+
     def test_success_resets_failure_counter(self):
         self.handler.add("x", 1)
         self.backend._flush_failures = 3
@@ -390,6 +434,17 @@ class TestFlushRetry(BaseEvenniaTest):
         self.assertTrue(result)
         # nothing dirty now -> still a durable no-op result
         self.assertTrue(force_flush(self.obj1))
+
+
+class TestThreeWayMerge(BaseEvenniaTest):
+    def test_local_and_remote_deletions_preserve_missing_keys(self):
+        baseline = {"a": 1, "b": 2}
+        self.assertEqual(_three_way_merge(baseline, {"b": 2}, baseline), {"b": 2})
+        self.assertEqual(_three_way_merge(baseline, baseline, {"a": 1}), {"a": 1})
+
+    def test_conflicting_delete_refuses(self):
+        with self.assertRaises(JsonbWriteConflict):
+            _three_way_merge({"a": 1}, {}, {"a": 2})
 
 
 # ---------------------------------------------------------------------------

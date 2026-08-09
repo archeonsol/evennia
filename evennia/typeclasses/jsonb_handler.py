@@ -48,20 +48,20 @@ import os
 import tempfile
 import time
 import weakref
+from collections.abc import Mapping
+from copy import deepcopy
 
 from django.conf import settings
+from django.db import transaction
 
-from evennia.typeclasses.attributes import (
-    _DIRTY_BACKENDS,
-    IAttributeBackend,
-    InMemoryAttribute,
-)
+from evennia.typeclasses.attributes import _DIRTY_BACKENDS, IAttributeBackend, InMemoryAttribute
 from evennia.typeclasses.jsonb_util import from_jsonb, to_jsonb
 
 __all__ = (
     "JsonbAttributeBackend",
     "FlushResult",
     "force_flush",
+    "has_spooled_write",
     "reclaim_spooled_writes",
     "spool_pending_count",
 )
@@ -117,6 +117,47 @@ class FlushResult:
         return f"<FlushResult ok={self.ok} spooled={self.spooled}>"
 
 
+class JsonbWriteConflict(RuntimeError):
+    """A stale write-behind edit conflicts with a newer database edit."""
+
+
+_MISSING = object()
+
+
+def _same(left, right):
+    if left is _MISSING or right is _MISSING:
+        return left is right
+    return left == right
+
+
+def _clone(value):
+    return _MISSING if value is _MISSING else deepcopy(value)
+
+
+def _three_way_merge(baseline, local, remote):
+    """Merge non-overlapping document edits and reject exact-path conflicts."""
+    if _same(local, baseline):
+        return _clone(remote)
+    if _same(remote, baseline) or _same(remote, local):
+        return _clone(local)
+    if baseline is _MISSING and isinstance(local, Mapping) and isinstance(remote, Mapping):
+        baseline = {}
+    if all(isinstance(value, Mapping) for value in (baseline, local, remote)):
+        merged = {}
+        for key in set(baseline) | set(local) | set(remote):
+            value = _three_way_merge(
+                baseline.get(key, _MISSING),
+                local.get(key, _MISSING),
+                remote.get(key, _MISSING),
+            )
+            if value is not _MISSING:
+                merged[key] = value
+        return merged
+    if local is _MISSING and remote is _MISSING:
+        return _MISSING
+    raise JsonbWriteConflict("Attribute document changed concurrently at the same path.")
+
+
 def _spool_dir():
     """
     Directory holding diverted (undurable) attribute documents.
@@ -131,7 +172,7 @@ def _spool_dir():
     return os.path.join(log_dir, "jsonb_spool")
 
 
-def _spool_write(obj, document):
+def _spool_write(obj, document, baseline=None):
     """
     Atomically persist ``document`` for ``obj`` to the on-disk spool.
 
@@ -157,6 +198,9 @@ def _spool_write(obj, document):
             "db_attrs": document,
             "ts": time.time(),
         }
+        if baseline is not None:
+            payload["v"] = 2
+            payload["baseline"] = baseline
         # write to a temp file in the same dir then atomically rename
         fd, tmp = tempfile.mkstemp(dir=spool, prefix=f"{model_label}.{pk}.", suffix=".tmp")
         try:
@@ -177,6 +221,18 @@ def _spool_write(obj, document):
         return False
 
 
+def has_spooled_write(obj):
+    """Return whether a deferred whole-document write exists for one object."""
+    pk = getattr(obj, "pk", None)
+    if pk is None:
+        return False
+    try:
+        model_label = obj._meta.label
+    except Exception:
+        model_label = type(obj).__name__
+    return os.path.isfile(os.path.join(_spool_dir(), f"{model_label}.{pk}.json"))
+
+
 def spool_remaining_dirty():
     """
     Last-resort: divert every still-dirty attribute document to the durable
@@ -193,7 +249,7 @@ def spool_remaining_dirty():
     for backend in list(_DIRTY_BACKENDS):
         if not isinstance(backend, JsonbAttributeBackend) or not backend._dirty:
             continue
-        if _spool_write(backend.obj, backend._l1):
+        if _spool_write(backend.obj, backend._l1, backend._baseline):
             backend._mark_clean()
             spooled += 1
         else:
@@ -245,7 +301,30 @@ def reclaim_spooled_writes():
                 payload = json.load(fh)
             app_label, model_name = payload["model"].split(".")
             model = apps.get_model(app_label, model_name)
-            updated = model.objects.filter(pk=payload["pk"]).update(db_attrs=payload["db_attrs"])
+            if payload.get("v") == 2 and "baseline" in payload:
+                with transaction.atomic():
+                    row = (
+                        model.objects.select_for_update()
+                        .filter(pk=payload["pk"])
+                        .values("db_attrs")
+                        .first()
+                    )
+                    if row is None:
+                        updated = 0
+                    else:
+                        merged = _three_way_merge(
+                            payload["baseline"],
+                            payload["db_attrs"],
+                            row["db_attrs"] or {},
+                        )
+                        updated = model.objects.filter(pk=payload["pk"]).update(db_attrs=merged)
+            else:
+                logger.log_warn(
+                    "jsonb spool: replaying legacy payload without conflict baseline: %s" % name
+                )
+                updated = model.objects.filter(pk=payload["pk"]).update(
+                    db_attrs=payload["db_attrs"]
+                )
             if updated == 0:
                 logger.log_warn(
                     "jsonb spool: %s no longer exists; dropping spooled write" % payload["model"]
@@ -358,6 +437,10 @@ class JsonbAttributeBackend(IAttributeBackend):
         self._dirty_since = None
         self._pk_counter = 0
         self._l1 = self._load_document()
+        # Preserve the exact database document that this write-behind view was
+        # loaded from. Transactional consumers can use it for a lock-first
+        # three-way merge instead of blindly flushing a stale whole document.
+        self._baseline = deepcopy(self._l1)
 
     # ------------------------------------------------------------------
     # Document helpers
@@ -608,6 +691,35 @@ class JsonbAttributeBackend(IAttributeBackend):
         self._flush_failures = 0
         _DIRTY_BACKENDS.discard(self)
 
+    def mark_database_document(self, document):
+        """Adopt one document known to have committed to the database."""
+        self._l1 = deepcopy(document)
+        self._baseline = deepcopy(document)
+        self.obj.db_attrs = deepcopy(document)
+        self._mark_clean()
+        super().reset_cache()
+
+    def merge_to_database(self):
+        """Lock, three-way merge, and commit this backend without spool fallback."""
+        if not self._dirty:
+            return deepcopy(self._l1)
+        baseline = deepcopy(self._baseline)
+        local = deepcopy(self._l1)
+        model = type(self.obj)
+        with transaction.atomic():
+            remote = (
+                model.objects.select_for_update()
+                .filter(pk=self.obj.pk)
+                .values_list("db_attrs", flat=True)
+                .get()
+                or {}
+            )
+            document = _three_way_merge(baseline, local, remote)
+            self.obj.db_attrs = document
+            self.obj.save(update_fields=["db_attrs"])
+            self.mark_database_document(document)
+        return document
+
     def flush_dirty(self):
         """Write the L1 dict to ``db_attrs`` and save.  Called by the tick.
 
@@ -634,10 +746,15 @@ class JsonbAttributeBackend(IAttributeBackend):
         from evennia.utils import logger
 
         try:
-            self.obj.db_attrs = self._l1
-            self.obj.save(update_fields=["db_attrs"])
-            self._mark_clean()
+            self.merge_to_database()
             return FlushResult(ok=True)
+        except JsonbWriteConflict as err:
+            _DIRTY_BACKENDS.add(self)
+            logger.log_warn(
+                "JsonbAttributeBackend: refusing stale conflicting write for pk=%s."
+                % getattr(self.obj, "pk", "?")
+            )
+            return FlushResult(ok=False, error=err)
         except Exception as err:
             self._flush_failures += 1
             _DIRTY_BACKENDS.add(self)
@@ -651,7 +768,7 @@ class JsonbAttributeBackend(IAttributeBackend):
                 # Last resort: divert to the durable spool so the write is not
                 # lost, and only then clear dirty. If spooling also fails, keep
                 # the backend dirty — never mark clean without durability.
-                if _spool_write(self.obj, self._l1):
+                if _spool_write(self.obj, self._l1, self._baseline):
                     logger.log_err(
                         "JsonbAttributeBackend: DB write for pk=%s failed %d times; "
                         "diverted to durable spool (will reclaim on next boot)."
@@ -669,6 +786,7 @@ class JsonbAttributeBackend(IAttributeBackend):
     def reset_cache(self):
         """Reload L1 from DB and reset the upper-layer cache."""
         self._l1 = self._load_document()
+        self._baseline = deepcopy(self._l1)
         super().reset_cache()
 
 
