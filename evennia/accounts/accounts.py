@@ -1563,6 +1563,9 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 deleted.
 
         """
+        from evennia.utils.idmapper.models import _preflight_model_delete
+
+        _preflight_model_delete(self, using=kwargs.get("using"), positional=args)
         for session in self.sessions.all():
             # unpuppeting all objects and disconnecting the user, if any
             # sessions remain (should usually be handled from the

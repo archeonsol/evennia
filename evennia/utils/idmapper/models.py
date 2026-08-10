@@ -13,11 +13,13 @@ import threading
 import time
 from weakref import WeakValueDictionary
 
-from django.core.exceptions import FieldError, ObjectDoesNotExist
+from django.conf import settings
+from django.core.exceptions import FieldDoesNotExist, FieldError, ObjectDoesNotExist
+from django.db import connections, router, transaction
 from django.db.models.base import Model, ModelBase
 from django.db.models.signals import post_migrate, post_save, pre_delete
-from django.db.transaction import atomic
 from django.db.utils import DatabaseError
+from django.utils.module_loading import import_string
 from twisted.internet.reactor import callFromThread
 
 from evennia.utils import logger
@@ -44,6 +46,74 @@ _SELF_PID = os.getpid()
 _SERVER_PID, _PORTAL_PID = get_evennia_pids()
 _IS_SUBPROCESS = (_SERVER_PID and _PORTAL_PID) and _SELF_PID not in (_SERVER_PID, _PORTAL_PID)
 _IS_MAIN_THREAD = threading.current_thread().name == "MainThread"
+
+_JSONB_ATTRIBUTE_BACKEND = "evennia.typeclasses.jsonb_handler.JsonbAttributeBackend"
+
+
+def _jsonb_attribute_backend_active():
+    """Return whether model ``db_attrs`` fields are coordinator-owned."""
+    backend = getattr(settings, "ATTRIBUTE_BACKEND_CLASS", _JSONB_ATTRIBUTE_BACKEND)
+    if isinstance(backend, str):
+        backend = import_string(backend)
+    from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
+
+    return isinstance(backend, type) and issubclass(backend, JsonbAttributeBackend)
+
+
+def _coordinator_safe_save_kwargs(instance, kwargs):
+    """Exclude coordinator-owned ``db_attrs`` from an existing-row model save."""
+    save_kwargs = dict(kwargs)
+    if instance._state.adding or not _jsonb_attribute_backend_active():
+        return save_kwargs
+    try:
+        instance._meta.get_field("db_attrs")
+    except FieldDoesNotExist:
+        return save_kwargs
+    requested_alias = save_kwargs.get("using")
+    if requested_alias is not None and instance._state.db not in (None, requested_alias):
+        from evennia.typeclasses.jsonb_handler import AttributeUpdateUsageError
+
+        raise AttributeUpdateUsageError(
+            "JSONB-owned model saves cannot override the instance database alias."
+        )
+    requested = save_kwargs.get("update_fields")
+    if requested is not None:
+        if "db_attrs" in requested:
+            from evennia.typeclasses.jsonb_handler import AttributeUpdateUsageError
+
+            raise AttributeUpdateUsageError(
+                "db_attrs is owned by the JSONB Attribute coordinator; use Attribute APIs."
+            )
+        return save_kwargs
+    deferred = instance.get_deferred_fields()
+    save_kwargs["update_fields"] = tuple(
+        field.name
+        for field in instance._meta.concrete_fields
+        if not field.primary_key
+        and field.name != "db_attrs"
+        and field.name not in deferred
+        and field.attname not in deferred
+    )
+    return save_kwargs
+
+
+def _preflight_model_delete(instance, using=None, positional=()):
+    """Validate JSONB row deletion before public lifecycle side effects."""
+    if instance.pk is None or not _jsonb_attribute_backend_active():
+        return
+    try:
+        instance._meta.get_field("db_attrs")
+    except FieldDoesNotExist:
+        return
+    if positional:
+        from evennia.typeclasses.jsonb_handler import AttributeUpdateUsageError
+
+        raise AttributeUpdateUsageError(
+            "JSONB-owned model deletion requires keyword persistence arguments."
+        )
+    from evennia.typeclasses.jsonb_handler import _preflight_row_delete
+
+    _preflight_row_delete(instance, using=using)
 
 
 class SharedMemoryModelBase(ModelBase):
@@ -420,9 +490,33 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         Delete the object, clearing cache.
 
         """
-        self.flush_from_cache()
-        self._is_deleted = True
+        from evennia.typeclasses.jsonb_handler import (
+            _coordinate_row_delete,
+            _retire_row_state_after_delete,
+        )
+
+        try:
+            self._meta.get_field("db_attrs")
+        except FieldDoesNotExist:
+            jsonb_owned = False
+        else:
+            jsonb_owned = _jsonb_attribute_backend_active()
+        if jsonb_owned:
+            if args:
+                from evennia.typeclasses.jsonb_handler import AttributeUpdateUsageError
+
+                raise AttributeUpdateUsageError(
+                    "JSONB-owned model deletion requires keyword persistence arguments."
+                )
+            with _coordinate_row_delete(self, using=kwargs.get("using")) as jsonb_row_state:
+                self.flush_from_cache(force=True)
+                super().delete(*args, **kwargs)
+                self._is_deleted = True
+                _retire_row_state_after_delete(jsonb_row_state)
+            return
+        self.flush_from_cache(force=True)
         super().delete(*args, **kwargs)
+        self._is_deleted = True
 
     def save(self, *args, **kwargs):
         """
@@ -436,6 +530,46 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
 
         """
         global _MONITOR_HANDLER
+        from evennia.typeclasses.attribute_context import model_save_context
+        from evennia.typeclasses.jsonb_handler import (
+            AttributeUpdateUsageError,
+            _has_user_transaction,
+            protected_mutation_active,
+        )
+
+        if protected_mutation_active():
+            raise AttributeUpdateUsageError(
+                "Model saves may not run inside a blocking_update callback."
+            )
+
+        if args and not self._state.adding and _jsonb_attribute_backend_active():
+            try:
+                self._meta.get_field("db_attrs")
+            except FieldDoesNotExist:
+                pass
+            else:
+                raise AttributeUpdateUsageError(
+                    "JSONB-owned model saves require keyword persistence arguments."
+                )
+
+        save_kwargs = _coordinator_safe_save_kwargs(self, kwargs)
+
+        def operation_alias(call_kwargs):
+            """Resolve the database owning this save and its outcome callbacks."""
+            return (
+                call_kwargs.get("using")
+                or self._state.db
+                or router.db_for_write(self._meta.concrete_model, instance=self)
+            )
+
+        def finish_model_save(scope, call_kwargs):
+            """Bind hook-local Attribute intent to the real transaction outcome."""
+            alias = operation_alias(call_kwargs)
+            if _has_user_transaction(connections[alias]):
+                transaction.on_commit(scope.commit, using=alias)
+            else:
+                scope.commit()
+
         if not _MONITOR_HANDLER:
             from evennia.scripts.monitorhandler import MONITOR_HANDLER as _MONITOR_HANDLER
 
@@ -449,23 +583,32 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         if _IS_MAIN_THREAD:
             # in main thread - normal operation
             try:
-                with atomic():
-                    super().save(*args, **kwargs)
+                with model_save_context() as scope:
+                    with transaction.atomic(using=operation_alias(save_kwargs)):
+                        super().save(*args, **save_kwargs)
+                finish_model_save(scope, save_kwargs)
             except DatabaseError:
                 # we handle the 'update_fields did not update any rows' error that
                 # may happen due to timing issues with attributes
-                ufields_removed = kwargs.pop("update_fields", None)
+                retry_kwargs = dict(kwargs)
+                ufields_removed = retry_kwargs.pop("update_fields", None)
                 if ufields_removed:
-                    with atomic():
-                        super().save(*args, **kwargs)
+                    retry_kwargs = _coordinator_safe_save_kwargs(self, retry_kwargs)
+                    with model_save_context() as scope:
+                        with transaction.atomic(using=operation_alias(retry_kwargs)):
+                            super().save(*args, **retry_kwargs)
+                    finish_model_save(scope, retry_kwargs)
                 else:
                     raise
         else:
             # in another thread; make sure to save in reactor thread
             def _save_callback(cls, *args, **kwargs):
-                super().save(*args, **kwargs)
+                with model_save_context() as scope:
+                    with transaction.atomic(using=operation_alias(kwargs)):
+                        super(SharedMemoryModel, cls).save(*args, **kwargs)
+                finish_model_save(scope, kwargs)
 
-            callFromThread(_save_callback, self, *args, **kwargs)
+            callFromThread(_save_callback, self, *args, **save_kwargs)
 
         if not self.pk:
             # this can happen if some of the startup methods immediately
@@ -483,14 +626,16 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
             # meta.fields are already field objects; get them all
             new = True
             update_fields = self._meta.fields
-        for field in update_fields:
-            fieldname = field.name
-            # trigger eventual monitors
-            _MONITOR_HANDLER.at_update(self, fieldname)
-            # if a hook is defined it must be named exactly on this form
-            hookname = "at_%s_postsave" % fieldname
-            if hasattr(self, hookname) and callable(_GA(self, hookname)):
-                _GA(self, hookname)(new)
+        with model_save_context() as hook_scope:
+            for field in update_fields:
+                fieldname = field.name
+                # trigger eventual monitors
+                _MONITOR_HANDLER.at_update(self, fieldname)
+                # if a hook is defined it must be named exactly on this form
+                hookname = "at_%s_postsave" % fieldname
+                if hasattr(self, hookname) and callable(_GA(self, hookname)):
+                    _GA(self, hookname)(new)
+        finish_model_save(hook_scope, save_kwargs)
 
         #            # if a trackerhandler is set on this object, update it with the
         #            # fieldname and the new value

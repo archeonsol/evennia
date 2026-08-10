@@ -19,8 +19,8 @@ Three-phase pattern for every tick that mutates scalar attributes on many object
     Phase 3  [event loop thread]   BulkTickContext.apply()
         Writes per-row results back to L1 dicts and marks backends dirty.
         The normal write-behind flush (maintenance tick) persists to Postgres.
-        For uncached objects, writes directly to db_attrs via ORM (safe because
-        there is no in-process L1 that could overwrite the DB write).
+        For uncached objects, writes directly under the same spool-first,
+        row-second coordinator used by protected Attribute persistence.
         Must run on the reactor.
 
         Writes are compare-and-set: Phase 1 records each object's default-
@@ -36,18 +36,35 @@ Why not bypass write-behind with direct SQL for cached objects?
     next full-document flush from a stale L1.  Patching L1 directly keeps the
     two caches coherent and lets write-behind do its normal job.
 
-    For *uncached* objects there is no conflicting L1, so direct DB writes are
-    safe.  _apply_uncached reads all uncached rows in one query and writes back
-    with a single CASE/WHEN UPDATE — one round-trip regardless of batch size.
-    All uncached access goes through values_list/update, never model instances:
-    partial instantiation of idmapper models is unsupported.
+    For *uncached* objects there is no same-process L1, but other processes and
+    protected updates still exist. ``_apply_uncached`` therefore locks and
+    compare-and-sets each row without instantiating partial idmapper models.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
-from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
+from django.db import connections, router, transaction
+from django.db.models import F
+
+from evennia.typeclasses.jsonb_handler import (
+    AttributeUpdateError,
+    AttributeUpdateUnavailable,
+    AttributeUpdateUsageError,
+    JsonbAttributeBackend,
+    _existing_row_state,
+    _has_user_transaction,
+    _list_row_entries,
+    _quarantine_cache_sync,
+    _regular_backend_for_state,
+    _require_io_thread,
+    _spool_row_lock,
+    _sync_live_backends,
+    protected_mutation_active,
+)
+from evennia.typeclasses.jsonb_util import to_jsonb
 
 _NULL_CAT = "~"  # db_attrs key for the default (category=None) section
 _MISSING = object()  # sentinel: attribute key absent from a section
@@ -55,9 +72,7 @@ _MISSING = object()  # sentinel: attribute key absent from a section
 
 def _assert_io_thread(where: str) -> None:
     """Fail fast if not on the process event-loop thread (idmapper/L1 are not thread-safe)."""
-    from evennia.utils import clock
-
-    assert clock.is_io_thread(), f"{where} must run on the event loop thread"
+    _require_io_thread(where)
 
 
 class BulkTickContext:
@@ -93,6 +108,9 @@ class BulkTickContext:
         # equals this, so a combat/player write landing between gather and
         # apply is detected and skipped rather than blindly overwritten.
         self._baseline: dict[int, dict[str, Any]] = {}
+        # id → {attr_key: (global epoch, path epoch)} for cached-path ABA
+        # detection. Uncached rows start at epoch zero if they become cached.
+        self._epochs: dict[int, dict[str, tuple[int, int]]] = {}
         # Count of (object, key) writes skipped because the source changed
         # under us since gather. Readable by the caller after apply().
         self.conflicts: int = 0
@@ -121,38 +139,59 @@ class BulkTickContext:
         Returns self for chaining.
         """
         _assert_io_thread("gather_objectdb")
+        if protected_mutation_active():
+            raise AttributeUpdateUsageError(
+                "BulkTickContext.gather_objectdb may not run inside blocking_update."
+            )
 
         from evennia.objects.models import ObjectDB
 
+        alias = router.db_for_read(ObjectDB) or "default"
+        if _has_user_transaction(connections[alias]):
+            raise AttributeUpdateUsageError("BulkTickContext.gather_objectdb requires autocommit.")
+
         uncached_ids = []
         for obj_id in obj_ids:
-            obj = ObjectDB.get_cached_instance(obj_id)
-            if obj is None:
-                uncached_ids.append(obj_id)
-                continue
-            try:
-                if "db_attrs" not in obj.__dict__:
-                    # Cached instances may have db_attrs deferred; touching the
-                    # descriptor triggers refresh_from_db and can KeyError during
-                    # partial loads. Seed __dict__ directly from SQL instead.
-                    row = (
-                        ObjectDB.objects.filter(pk=obj_id)
-                        .values_list("db_attrs", flat=True)
-                        .first()
-                    )
-                    obj.__dict__["db_attrs"] = row if isinstance(row, dict) else {}
-                backend = obj.attributes.backend
-            except AttributeError:
-                continue
+            key = (alias, ObjectDB._meta.label_lower, obj_id)
+            state = _existing_row_state(key)
+            backend = _regular_backend_for_state(state)
+            if state is not None and backend is None:
+                raise AttributeUpdateUnavailable(
+                    f"ObjectDB#{obj_id} has live JSONB state without a usable handler."
+                )
+            if state is None:
+                obj = ObjectDB.get_cached_instance(obj_id)
+                if obj is None:
+                    uncached_ids.append(obj_id)
+                    continue
+                try:
+                    if "db_attrs" not in obj.__dict__:
+                        # Cached instances may have db_attrs deferred; touching the
+                        # descriptor triggers refresh_from_db and can KeyError during
+                        # partial loads. Seed __dict__ directly from SQL instead.
+                        row = (
+                            ObjectDB.objects.filter(pk=obj_id)
+                            .values_list("db_attrs", flat=True)
+                            .first()
+                        )
+                        obj.__dict__["db_attrs"] = row if isinstance(row, dict) else {}
+                    backend = obj.attributes.backend
+                except AttributeError:
+                    continue
             if not isinstance(backend, JsonbAttributeBackend):
                 continue
 
+            backend._assert_readable()
             self._backends[obj_id] = backend
             # CAS baseline: a shallow copy of the default-category data dict as
             # it stands now. Values here are scalars replaced by reference on
             # write, so a concurrent mutation shows up as an inequality.
             self._baseline[obj_id] = dict(backend._l1.get(_NULL_CAT, {}).get("_d", {}))
-            self.rows.append(snapshot_fn(obj_id, backend._l1))
+            snapshot = snapshot_fn(obj_id, backend._l1)
+            self._epochs[obj_id] = {
+                key: backend._path_generation(key, None) for key in snapshot if key != "id"
+            }
+            self.rows.append(snapshot)
 
         # Phase 1b — SQL read for objects not in idmapper
         if uncached_ids:
@@ -170,7 +209,9 @@ class BulkTickContext:
             attrs = attrs if isinstance(attrs, dict) else {}
             self._uncached_ids.add(obj_id)
             self._baseline[obj_id] = dict(attrs.get(_NULL_CAT, {}).get("_d", {}))
-            self.rows.append(snapshot_fn(obj_id, attrs))
+            snapshot = snapshot_fn(obj_id, attrs)
+            self._epochs[obj_id] = {key: (0, 0) for key in snapshot if key != "id"}
+            self.rows.append(snapshot)
 
     # ------------------------------------------------------------------
     # Phase 3
@@ -191,6 +232,15 @@ class BulkTickContext:
         Returns the number of objects whose L1 / DB was actually mutated.
         """
         _assert_io_thread("apply")
+        if protected_mutation_active():
+            raise AttributeUpdateUsageError(
+                "BulkTickContext.apply may not run inside blocking_update."
+            )
+        from evennia.objects.models import ObjectDB
+
+        alias = router.db_for_write(ObjectDB) or "default"
+        if _has_user_transaction(connections[alias]):
+            raise AttributeUpdateUsageError("BulkTickContext.apply requires autocommit.")
 
         patched = 0
         sql_batch: dict[int, dict[str, Any]] = {}
@@ -203,36 +253,57 @@ class BulkTickContext:
             # idmapper between Phase 1 and Phase 3.  Reroute to the L1 path
             # so the in-process cache stays coherent with what we write.
             if backend is None and obj_id in self._uncached_ids:
-                from evennia.objects.models import ObjectDB
-
-                obj = ObjectDB.get_cached_instance(obj_id)
-                if obj is not None:
+                alias = router.db_for_write(ObjectDB) or "default"
+                state = _existing_row_state((alias, ObjectDB._meta.label_lower, obj_id))
+                if state is not None:
+                    backend = _regular_backend_for_state(state)
+                    if backend is None:
+                        self.conflicts += 1
+                        continue
+                else:
+                    obj = ObjectDB.get_cached_instance(obj_id)
+                    if obj is None:
+                        obj = None
                     try:
-                        candidate = obj.attributes.backend
-                        if isinstance(candidate, JsonbAttributeBackend):
-                            backend = candidate
+                        if obj is not None:
+                            candidate = obj.attributes.backend
+                            if isinstance(candidate, JsonbAttributeBackend):
+                                backend = candidate
                     except AttributeError:
                         pass
 
             if backend is not None:
                 # cached path: write to L1 under compare-and-set
-                section = backend._l1.setdefault(_NULL_CAT, {}).setdefault("_d", {})
+                backend._assert_mutation_allowed()
+                section = backend._l1.get(_NULL_CAT, {}).get("_d", {})
                 baseline = self._baseline.get(obj_id, {})
-                dirty = False
+                epochs = self._epochs.get(obj_id, {})
+                applicable = {}
                 for key, val in row.items():
                     if key == "id":
                         continue
                     # CAS: only write if the stored value is still what we
                     # gathered. A mismatch means combat/player action changed
                     # it since gather — skip so the newer state is not erased.
-                    if section.get(key, _MISSING) != baseline.get(key, _MISSING):
+                    if section.get(key, _MISSING) != baseline.get(
+                        key, _MISSING
+                    ) or backend._path_generation(key, None) != epochs.get(key, (0, 0)):
                         self.conflicts += 1
                         continue
-                    section[key] = val
-                    dirty = True
+                    applicable[key] = to_jsonb(val)
 
-                if dirty:
-                    backend._mark_dirty()
+                if applicable:
+                    backend._l1.setdefault(_NULL_CAT, {}).setdefault("_d", {}).update(applicable)
+                    backend._row_state.mark_dirty()
+                    for key in applicable:
+                        backend._bump_path_generation(key, None)
+                    try:
+                        _sync_live_backends(backend._row_state, invalidate=False)
+                    except Exception as err:
+                        _quarantine_cache_sync(backend._row_state)
+                        raise AttributeUpdateUnavailable(
+                            "BulkTick could not reconcile live JSONB handlers."
+                        ) from err
                     patched += 1
             elif obj_id in self._uncached_ids:
                 # uncached path: accumulate for SQL write-back
@@ -247,51 +318,49 @@ class BulkTickContext:
         """
         Write back to db_attrs for objects not in the idmapper cache.
 
-        Safe because there is no in-process L1 to conflict with these writes.
-        Reads all rows in one values_list query, merges in Python, then writes
-        back with a single CASE/WHEN UPDATE (the same SQL bulk_update emits) —
-        one round-trip regardless of batch size. Never instantiates ObjectDB
-        from partial rows: partial instantiation of idmapper models is
-        unsupported (construction reads deferred fields, and idmapper cannot
-        refresh a deferred field).
+        Each row acquires the durable spool lock before its database row lock,
+        checks the gather baseline, and updates once. This deliberately gives
+        up the former CASE/WHEN bulk write so uncached ticks cannot overwrite a
+        protected update between their read and write. Partial ObjectDB model
+        instances are never constructed.
         """
-        from django.db.models import Case, Value, When
-
         from evennia.objects.models import ObjectDB
 
-        docs: dict[int, dict] = {}
-        for obj_id, attrs in ObjectDB.objects.filter(id__in=batch.keys()).values_list(
-            "id", "db_attrs"
-        ):
-            updates = batch.get(obj_id)
-            if not updates:
-                continue
-            doc = dict(attrs) if isinstance(attrs, dict) else {}
-            baseline = self._baseline.get(obj_id, {})
-            current = doc.get(_NULL_CAT, {}).get("_d", {})
-            section = doc.setdefault(_NULL_CAT, {}).setdefault("_d", {})
-            applied = False
-            for key, val in updates.items():
-                # CAS against the freshly re-read DB value: a write that landed
-                # since gather (its stored value differs from our baseline) is
-                # left untouched rather than clobbered by this stale result.
-                if current.get(key, _MISSING) != baseline.get(key, _MISSING):
-                    self.conflicts += 1
-                    continue
-                section[key] = val
-                applied = True
-            if applied:
-                docs[obj_id] = doc
-
-        if docs:
-            field = ObjectDB._meta.get_field("db_attrs")
-            ObjectDB.objects.filter(pk__in=docs).update(
-                db_attrs=Case(
-                    *(
-                        When(pk=obj_id, then=Value(doc, output_field=field))
-                        for obj_id, doc in docs.items()
-                    )
-                )
-            )
-
-        return len(docs)
+        alias = router.db_for_write(ObjectDB) or "default"
+        connection = connections[alias]
+        manager = ObjectDB._base_manager.using(alias)
+        written = 0
+        for obj_id in sorted(batch):
+            updates = batch[obj_id]
+            key = (alias, ObjectDB._meta.label_lower, int(obj_id))
+            try:
+                with _spool_row_lock(key):
+                    if _list_row_entries(key):
+                        self.conflicts += len(updates)
+                        continue
+                    with transaction.atomic(using=alias):
+                        if connection.vendor == "sqlite":
+                            manager.filter(pk=obj_id).update(db_attrs=F("db_attrs"))
+                        row = (
+                            manager.select_for_update().filter(pk=obj_id).values("db_attrs").first()
+                        )
+                        if row is None:
+                            continue
+                        document = deepcopy(row["db_attrs"] or {})
+                        current = document.get(_NULL_CAT, {}).get("_d", {})
+                        baseline = self._baseline.get(obj_id, {})
+                        applicable = {}
+                        for attr_key, value in updates.items():
+                            if current.get(attr_key, _MISSING) != baseline.get(attr_key, _MISSING):
+                                self.conflicts += 1
+                                continue
+                            applicable[attr_key] = to_jsonb(value)
+                        if not applicable:
+                            continue
+                        document.setdefault(_NULL_CAT, {}).setdefault("_d", {}).update(applicable)
+                        if manager.filter(pk=obj_id).update(db_attrs=document) != 1:
+                            continue
+                    written += 1
+            except AttributeUpdateError:
+                self.conflicts += len(updates)
+        return written
