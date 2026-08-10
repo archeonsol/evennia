@@ -520,10 +520,25 @@ class TypedObject(SharedMemoryModel):
 
         """
         if self.nattributes.all():
+            if self.pk is None:
+                return True
+            from evennia.typeclasses.jsonb_handler import _AttributeRowMissing
+
             # we can't flush this object if we have non-persistent
             # attributes stored - those would get lost! Nevertheless
             # we try to flush as many references as we can.
-            self.attributes.reset_cache()
+            attribute_handler = self.attributes
+            try:
+                attribute_handler.reset_cache()
+            except _AttributeRowMissing:
+                # An out-of-band database delete makes preserving this cached
+                # object's NAttributes unsafe. Retire the object; its JSONB
+                # state has already been tombstoned by reset_cache().
+                return True
+            if getattr(
+                getattr(attribute_handler.backend, "_row_state", None), "row_missing", False
+            ):
+                return True
             self.tags.reset_cache()
             # flush caches for all related fields
             for field in self._meta.fields:
@@ -757,6 +772,9 @@ class TypedObject(SharedMemoryModel):
         Cleaning up handlers on the typeclass level
 
         """
+        from evennia.utils.idmapper.models import _preflight_model_delete
+
+        _preflight_model_delete(self)
         self.permissions.clear()
         self.attributes.clear()
         self.aliases.clear()

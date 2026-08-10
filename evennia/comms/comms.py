@@ -544,6 +544,9 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
                 will be disconnected.
 
         """
+        from evennia.utils.idmapper.models import _preflight_model_delete
+
+        _preflight_model_delete(self)
         self.attributes.clear()
         self.aliases.clear()
         for subscriber in self.subscriptions.all():

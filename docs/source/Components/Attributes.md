@@ -124,6 +124,130 @@ obj.attributes.remove("foo")
 all_clothes = obj.attributes.all(category="clothes")
 ```
 
+### Protected JSONB updates
+
+Normal `.db` and `.attributes` writes are deliberately write-behind: they
+update the process-local document immediately and flush later. The JSONB
+backend protects those flushes from stale whole-document overwrites, but that
+does not define game-specific ordering. A system enforcing authority,
+revisions, one-use grants, or lifecycle transitions should validate and mutate
+the current committed document with `blocking_update`:
+
+```python
+def advance(attrs):
+    state = attrs.get("managed_state", raise_exception=True)
+    if state["revision"] != expected_revision:
+        raise StaleRequest
+
+    state["revision"] += 1
+    attrs.after_commit(write_audit_log, state["revision"])
+    return state["revision"]
+
+revision = obj.attributes.blocking_update(
+    advance,
+    locked_fields=("db_location_id",),
+)
+```
+
+The callback receives an isolated view supporting `has`, `get`, `add`,
+`batch_add`, `remove`, `clear`, `entries`, and `after_commit`. Repeated `get`
+calls for the same normalized key and category return the same working value.
+Mutable working values capture in-place changes automatically. Once the
+callback exits, escaped values remain ordinary usable Python values but are
+detached from persistence. Mutating a missing-key `default` never creates an
+Attribute. `add`, `remove`, and `clear` replace or detach an earlier working
+value predictably; fetch it again from the view after one of those operations.
+
+The engine performs spool, conflict, row-existence, and transaction checks
+before calling the mutator. The mutator runs at most once; it is never retried.
+It must be synchronous and must not perform messaging, filesystem/network I/O,
+unrelated database reads or writes, or Attribute-backed query barriers. A
+database operation or query barrier inside the callback raises
+`AttributeUpdateUsageError` before it can execute. Queue best-effort external work with
+`after_commit`, which runs only after the commit is known and local Attribute
+caches have synchronized. These callbacks are also synchronous, run FIFO, and
+all get a chance to run. If one fails, an `AttributePostCommitError` reports
+`committed=True`, so callers must not retry the state transition.
+
+The callback is a transaction boundary, not a Python sandbox. Evennia rejects
+SQL plus its core model-save, deletion, and Attribute persistence paths before
+they act, but cannot mechanically prevent arbitrary Python code from touching
+the filesystem, network, sessions, third-party models' pre-save signals, or
+custom hooks. Such effects cannot be rolled back. Mutators must therefore be
+small, pure state-transition functions; move every external action to
+`after_commit` or to the caller after successful return.
+
+`locked_fields` accepts concrete raw storage names such as `db_location_id` and
+exposes their committed values read-only as `attrs.row`. Model fields cannot be
+written through this API. Evennia model saves have field-specific hooks,
+signals, monitors, and caches that cannot be generically rolled back. A domain
+that must atomically update both `db_attrs` and another model field needs a
+field-specific transaction primitive rather than a captured-object `save()`.
+
+Protected updates require the regular `obj.attributes` handler, the server IO
+thread, autocommit, and the JSONB backend. They reject outer transactions,
+nesting, pending durable spool state, and direct writes through captured `.db`,
+`.attributes`, or `.nicks` handlers, including handlers for other rows.
+Captured JSONB handler reads are also rejected: the mutation view and
+`attrs.row` are the callback's only authoritative state inputs. Captured model
+fields are not refreshed automatically and may be stale; declare every needed
+raw field through `locked_fields`.
+An old mutable value held across a protected adoption raises
+`StaleAttributeValueError` when changed; fetch the Attribute again. A database
+commit failure whose outcome cannot be proven raises
+`AttributeUpdateIndeterminate` and leaves a non-replayable recovery witness for
+operator resolution. A deferred model-save state that conflicts during its
+first committed-state reconciliation is quarantined for the rest of the
+process lifetime; restart after resolving the underlying writer or spool
+state rather than retrying through the stale handler.
+
+Failure handling is explicit. `AttributeUpdateConflict`,
+`AttributeUpdateUnavailable`, `AttributeUpdateUsageError`, and exceptions from
+the mutator mean its transition did not commit. `AttributeUpdateIndeterminate`
+means the commit result is unknown and the retained witness needs operator
+resolution; do not retry. `AttributePostCommitError.committed` is true: the
+database transition committed but cache adoption, witness cleanup, or an
+`after_commit` action failed, so retrying the transition is unsafe.
+
+This API prevents storage-level lost updates. The callback still owns semantic
+business ordering: it must check the revision, authority, generation, or other
+domain invariant under the lock.
+
+Low-level backend adoption and merge hooks are intentionally not part of this
+contract. Code that called `mark_database_document()` or
+`merge_to_database()` must move its pure Attribute transition into
+`blocking_update`; operations that also move objects, lock other rows, or
+write model fields require a domain-specific transaction primitive.
+In particular, a managed-fixture workflow that resolves principals, inspects
+locations or contents, or locks multiple domain rows is not a mechanical
+`blocking_update` migration. Split out only its pure single-row Attribute
+transition; preserve the broader checks in a dedicated multi-row primitive
+with explicit lock ordering and field adapters.
+
+While the JSONB backend is active, `db_attrs` is coordinator-owned on existing
+rows. A normal full model `save()` excludes that field, and an explicit
+`save(update_fields=("db_attrs",))` is rejected. Initial row creation may seed
+`db_attrs`; later changes must use Attribute APIs or a domain primitive.
+Supported instance deletion also owns its transaction, requires autocommit,
+and rejects any pending DELTA or protected-commit witness before removing the
+row. Use a domain-specific coordinator for deletion inside a wider transaction.
+
+Deployment boundaries are explicit:
+
+- Live cache coherence is process-local. Exactly one authoritative Server
+  process may own and mutate a given ObjectDB row; multiple independent game
+  workers need an external ownership/routing design.
+- Every process that can persist these Attributes must see the same
+  `JSONB_WRITE_SPOOL_DIR` on one host or a shared filesystem whose advisory
+  locks and atomic rename/fsync semantics are reliable.
+- Two Django database aliases must not point at the same physical database.
+  The alias is part of the lock identity, so aliases cannot coordinate with
+  one another.
+- PostgreSQL and MySQL use row locks. SQLite has no row-level equivalent, so
+  the coordinator takes a database-wide write lock with a no-op `db_attrs`
+  UPDATE before reading. That UPDATE may fire database UPDATE triggers even
+  when the Attribute document is unchanged.
+
 ### Using AttributeProperty
 
 The third way to set up an Attribute is to use an `AttributeProperty`. This is done on the _class level_ of your typeclass and allows you to treat Attributes a bit like Django database Fields. Unlike using `.db` and `.attributes`, an `AttributeProperty` can't be created on the fly, you must assign it in the class code. 

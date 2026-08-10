@@ -149,6 +149,9 @@ class LifecycleMixin:
             bool: Whether or not the delete completed successfully or not.
 
         """
+        from evennia.utils.idmapper.models import _preflight_model_delete
+
+        _preflight_model_delete(self)
         global _ScriptDB
         if not _ScriptDB:
             from evennia.scripts.models import ScriptDB as _ScriptDB

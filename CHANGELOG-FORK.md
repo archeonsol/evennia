@@ -25,6 +25,108 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.188 — Protected JSONB Attribute transitions
+
+Replaces the unpublished earlier `.188` candidate and incorporates its
+baseline-aware ordinary-write protection. Games using only ordinary `.db` and
+`.attributes` operations remain compatible. Systems that coordinate authority,
+revisions, one-use grants, or recovery state should migrate their pure
+single-row transitions to the new protected API described below.
+
+### Engine — Protected mutation API
+
+- [`evennia/typeclasses/attributes.py`](evennia/typeclasses/attributes.py) and
+  [`evennia/typeclasses/jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)
+  add `obj.attributes.blocking_update(mutator, locked_fields=())`. It owns one
+  transaction, takes spool-first and database-row coordination, reads the
+  current committed Attribute document, invokes the synchronous mutator once,
+  commits once, and adopts the result across every live cache only after the
+  transaction outcome is known.
+
+- Mutators receive a curated, expiring handler-like view with `has`, `get`,
+  `add`, `batch_add`, `remove`, `clear`, `entries`, and `after_commit`.
+  Returned values are detached plain Python data; `locked_fields` exposes
+  recursively read-only raw field snapshots through `attrs.row`. Captured
+  Attribute handlers, SQL, model persistence, nested protected calls, lazy or
+  asynchronous results, outer transactions, and non-IO-thread use fail closed.
+
+- Ordinary write-behind operations keep their existing API. Their JSONB
+  flushes now share a canonical per-row state and perform baseline-aware
+  three-way merges, preserving disjoint committed changes while rejecting
+  exact-path conflicts. Saver proxies carry path epochs so stale or ABA values
+  cannot overwrite a protected adoption.
+
+- [`evennia/utils/bulk_tick.py`](evennia/utils/bulk_tick.py) participates in
+  the same ownership rules. Cached updates use exact-path epochs; uncached
+  updates coordinate with the spool and database row, recheck canonical state
+  after idmapper eviction, and cannot overwrite protected or dirty intent.
+
+### Durability and lifecycle
+
+- Replayable ordinary DELTAs and non-replayable protected PREPARED witnesses
+  use versioned, fsynced spool records keyed by database alias, concrete model,
+  and primary key. Startup reclaims safe DELTAs before game hooks; ambiguous
+  protected commits retain a witness for operator resolution rather than
+  guessing or replaying semantic work.
+
+- Existing-row model saves exclude coordinator-owned `db_attrs`; explicit
+  writes, alias changes, and positional persistence arguments are rejected.
+  Django signals and Evennia `at_<field>_postsave` hooks bind Attribute edits to
+  the real outer transaction outcome, so rollback restores caches and dirty
+  intent. Confirmed row deletion tombstones handlers without confusing
+  transient coordinator failures with deletion.
+
+- Engine public Object, Account, Script, Channel, and typeclass deletion paths
+  preflight IO-thread, transaction, pending-spool, and quarantine state before
+  lifecycle effects. The actual row delete retains spool-first/database
+  coordination and deliberately retires local volatile intent after success.
+
+### Migration
+
+- The public contract and deployment boundaries are documented in
+  [`docs/source/Components/Attributes.md`](docs/source/Components/Attributes.md).
+  Cache coherence requires one authoritative synchronous Server/IO owner per
+  row; every persistence process must share a lock-capable spool filesystem;
+  aliases targeting the same physical database are unsupported. SQLite uses a
+  database-wide no-op update for serialization, which may fire UPDATE triggers.
+
+- Code calling low-level `mark_database_document()` or `merge_to_database()`
+  should move only its pure single-row Attribute transition into
+  `blocking_update`. Workflows that also move objects, inspect contents, update
+  model fields, or lock multiple rows need a domain-specific coordinator with
+  explicit lock ordering and field adapters. This release intentionally makes
+  no downstream newmoo managed-fixture changes.
+
+- A mutator is a transaction boundary, not a Python sandbox. Engine SQL,
+  Attribute persistence, saves, and deletion are mechanically rejected, but
+  arbitrary filesystem, network, session, third-party signal, or custom-hook
+  effects remain caller-disciplined. Put external work in `after_commit` or run
+  it after successful return. `AttributePostCommitError.committed` is true and
+  must not be retried; `AttributeUpdateIndeterminate` requires operator
+  resolution.
+
+### Performance
+
+- On SQLite with 100 dirty rows over five iterations, a synthetic raw one-query
+  bulk update had a `6.726 ms` median and coordinated write-behind flushes had a
+  `69.237 ms` median (`10.3x` overhead for spool/merge/lock/cache safety).
+  Protected single-row updates measured `1.123 ms` median across 25 samples.
+  Real cost scales with dirty rows; protected updates are intended for semantic
+  transitions, while ordinary gameplay writes remain write-behind.
+
+### Tests
+
+- Added adversarial coverage for disjoint and conflicting concurrent writes,
+  deletion, stale and ABA Saver proxies, outer rollback, cache-adoption
+  failures, pending and ambiguous spool state, alias misuse, nested calls,
+  callback barriers, idmapper eviction, public lifecycle preflight, and
+  PostgreSQL/MySQL/SQLite lock behavior.
+
+- A stateful server lifecycle test forces the final database flush to fail,
+  verifies a durable spool record survives process-local state loss, confirms
+  reads fail closed before recovery, and proves startup persists the exact value
+  before invoking game hooks. The consolidated relevant gate passes 426 tests.
+
 ## 6.0.0+underspire.187 — Help colors in structured clients
 
 Follows `.186` immediately. Games using the structured webclient should move

@@ -37,6 +37,12 @@ def discard_dirty_backends():
     drop genuinely pending writes.
     """
     _DIRTY_BACKENDS.clear()
+    try:
+        from evennia.typeclasses.jsonb_handler import discard_jsonb_row_states
+
+        discard_jsonb_row_states()
+    except ImportError:
+        pass
 
 
 def count_pending_dirty():
@@ -54,6 +60,14 @@ def count_pending_dirty():
         age_fn = getattr(backend, "dirty_age", None)
         if age_fn is not None:
             oldest_age = max(oldest_age, age_fn())
+    try:
+        from evennia.typeclasses.jsonb_handler import dirty_jsonb_row_states
+
+        states = dirty_jsonb_row_states()
+        backends += len(states)
+        oldest_age = max([oldest_age, *(state.dirty_age() for state in states)])
+    except ImportError:
+        pass
     return {"backends": backends, "pending": backends, "oldest_age": oldest_age}
 
 
@@ -71,6 +85,13 @@ def has_undurable_writes():
     for backend in list(_DIRTY_BACKENDS):
         if getattr(backend, "_flush_failures", 0) > 0:
             return True
+    try:
+        from evennia.typeclasses.jsonb_handler import dirty_jsonb_row_states
+
+        if any(state.flush_failures > 0 for state in dirty_jsonb_row_states()):
+            return True
+    except ImportError:
+        pass
     return False
 
 
@@ -80,11 +101,10 @@ def flush_all_dirty():
     from read-your-writes query barriers, and once at shutdown.
 
     This is a full drain (every dirty backend), which the query barriers rely
-    on for correctness. The per-tick latency cliff of "one ORM save per dirty
-    object" is removed by persisting each concrete model's dirty documents in
-    a single ``bulk_update``; a batched write that raises falls back to
-    per-backend flush so each object still gets retry-counting and the
-    durable-spool fallback.
+    on for correctness. JSONB handlers share one row-owned state and persist
+    row-by-row under database serialization, merging the committed baseline
+    before one update. Legacy backends retain their own ``flush_dirty``
+    behavior. A failed JSONB row gets retry counting and durable-spool fallback.
 
     Returns:
         dict: ``backends``, ``total``, ``pending`` (pre-flush backlog),
@@ -92,14 +112,24 @@ def flush_all_dirty():
         (neither persisted nor spooled), ``oldest_age``.
     """
     import time
-    from collections import defaultdict
 
-    from evennia.typeclasses.jsonb_handler import JsonbAttributeBackend
+    from evennia.typeclasses.jsonb_handler import (
+        AttributeUpdateUsageError,
+        _persist_row_state,
+        dirty_jsonb_row_states,
+        protected_mutation_active,
+    )
 
     pending_stats = count_pending_dirty()
     t0 = time.perf_counter()
 
+    if protected_mutation_active():
+        raise AttributeUpdateUsageError(
+            "Attribute query barriers may not run inside blocking_update callbacks."
+        )
+
     dirty = [b for b in list(_DIRTY_BACKENDS) if b.pending_count()]
+    jsonb_states = dirty_jsonb_row_states()
     # capture pre-flush row counts so "total" stays a row count (a JSONB
     # backend is one document == 1; a test/legacy backend may report more)
     pre = {b: b.pending_count() for b in dirty}
@@ -116,34 +146,19 @@ def flush_all_dirty():
         else:
             failed += n
 
-    # Group JSONB backends by concrete model for one bulk_update each.
-    jsonb_by_model = defaultdict(list)
-    others = []
-    for backend in dirty:
-        if isinstance(backend, JsonbAttributeBackend):
-            jsonb_by_model[backend.obj._meta.concrete_model].append(backend)
+    # JSONB correctness is row-owned: each row locks, merges its committed
+    # baseline, and writes once regardless of how many Attribute/Nick handlers
+    # reference it. Legacy backends retain their historical flush contract.
+    for state in sorted(jsonb_states, key=lambda item: item.key):
+        result = _persist_row_state(state, allow_spool=True)
+        if result.ok:
+            flushed += 1
+        elif result.spooled:
+            spooled += 1
         else:
-            others.append(backend)
+            failed += 1
 
-    for model, backends in jsonb_by_model.items():
-        objs = []
-        for backend in backends:
-            backend.obj.db_attrs = backend._l1
-            objs.append(backend.obj)
-        try:
-            if objs:
-                model._base_manager.bulk_update(objs, ["db_attrs"])
-        except Exception:
-            # Batched write failed — fall back to per-object flush so each
-            # gets retry counting and the durable-spool fallback.
-            for backend in backends:
-                _tally(backend, backend.flush_dirty())
-            continue
-        for backend in backends:
-            flushed += pre.get(backend, 1)
-            backend._mark_clean()
-
-    for backend in others:
+    for backend in dirty:
         _tally(backend, backend.flush_dirty())
 
     duration = time.perf_counter() - t0
@@ -1368,6 +1383,42 @@ class AttributeHandler:
 
     def reset_cache(self):
         self.backend.reset_cache()
+
+    def blocking_update(self, mutator, *, locked_fields=()):
+        """Serialize one protected JSONB Attribute mutation against committed state.
+
+        Args:
+            mutator (callable): Synchronous callable receiving an isolated
+                handler-like Attribute view.
+            locked_fields (iterable[str]): Optional concrete model storage
+                attnames exposed read-only from the locked row.
+
+        Returns:
+            object: The mutator's return value, after commit.
+
+        Raises:
+            AttributeUpdateConflict: If committed or durably pending state
+                conflicts with this transition. The callback was not committed.
+            AttributeUpdateUnavailable: If the backend cannot safely provide
+                the protected JSONB contract. The callback was not committed.
+            AttributeUpdateUsageError: If the caller violates the synchronous,
+                isolated callback contract. The callback was not committed.
+            AttributeUpdateIndeterminate: If commit acknowledgement is lost;
+                the outcome is unknown and requires operator resolution.
+            AttributePostCommitError: If cache adoption, witness cleanup, or an
+                ``after_commit`` action fails after commit. Do not retry.
+            Exception: Any exception raised by ``mutator`` is propagated after
+                rollback and is not committed.
+        """
+        from evennia.typeclasses.jsonb_handler import (
+            AttributeUpdateUnavailable,
+            JsonbAttributeBackend,
+            blocking_update,
+        )
+
+        if not isinstance(self.backend, JsonbAttributeBackend):
+            raise AttributeUpdateUnavailable("blocking_update requires JsonbAttributeBackend.")
+        return blocking_update(self.backend, mutator, locked_fields=locked_fields)
 
 
 # DbHolders for .db and .ndb properties on Typeclasses.

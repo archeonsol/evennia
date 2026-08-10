@@ -129,6 +129,9 @@ class ScriptBase(ScriptDB, metaclass=TypeclassBase):
                 False.
 
         """
+        from evennia.utils.idmapper.models import _preflight_model_delete
+
+        _preflight_model_delete(self)
         if not self.pk or not self.at_pre_delete():
             return False
 
