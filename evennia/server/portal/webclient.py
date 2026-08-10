@@ -358,6 +358,12 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             reason (str or None): Motivation for the disconnection.
 
         """
+        # The batch drain below can itself discover a dead link and call back in
+        # here; one close is enough.
+        if getattr(self, "_disconnecting", False):
+            return
+        self._disconnecting = True
+
         csession = self.get_client_session()
 
         # Portal-wide shutdown (deploy reboot) must not wipe the Django session
@@ -375,6 +381,11 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             self.logged_in = False
 
         self.sessionhandler.disconnect(self)
+        # Batched frames are flushed on the next loop iteration, so a burst
+        # queued in this same iteration (e.g. the `logout` OOB that precedes a
+        # server-side quit) would be written after the close and lost. Drain it
+        # first.
+        self._flush_batch()
         # RFC 6455 close codes: 1000 normal, 1001 browser window closed,
         # 3000-4999 application-specific (in case anyone wants to expose that).
         self.sendClose(CLOSE_NORMAL, reason)

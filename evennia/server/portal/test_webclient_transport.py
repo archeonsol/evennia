@@ -37,6 +37,32 @@ class _Transport(WebSocketClient):
         raise AssertionError("disconnect should not be called")
 
 
+class _Closing(_Transport):
+    """A transport that runs the real ``disconnect``.
+
+    Records sends and the close in one ordered log, so a test can assert that
+    queued frames reach the wire *before* the close frame.
+    """
+
+    disconnect = WebSocketClient.disconnect
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.events = []
+        self.nonce = 0
+        self.logged_in = True
+        self.sessionhandler = Mock(_disconnect_all=False)
+        self.sendMessage = Mock(side_effect=self._record_send)
+        self.sendClose = Mock(side_effect=lambda *a, **kw: self.events.append("close"))
+
+    def _record_send(self, data, isBinary=False):
+        self.sent.append(data)
+        self.events.append("send")
+
+    def get_client_session(self):
+        return None
+
+
 def _frames(transport):
     """Decode everything the transport put on the wire."""
     return [json.loads(raw.decode("utf-8")) for raw in transport.sent]
@@ -208,6 +234,22 @@ class TestBatching(TestCase):
             t.sendEncoded(json.dumps({"t": "render", "n": i}).encode("utf-8"))
         self.assertEqual(len(t.sent), 1)
         self.assertEqual(len(_frames(t)[0]["frames"]), BATCH_MAX_FRAMES)
+
+    def test_disconnect_drains_the_queue_before_closing(self):
+        # The `logout` OOB behind a server-side quit is queued in the same loop
+        # iteration as the disconnect; without the drain it would be written
+        # after the close frame and lost, and the shell would just reconnect.
+        t = _Closing(caps={"batching": True})
+        t.sendEncoded(json.dumps({"t": "oob", "event": "logout"}).encode("utf-8"))
+        t.disconnect()
+        self.assertEqual(t.events, ["send", "close"])
+        self.assertEqual(_frames(t)[0]["event"], "logout")
+
+    def test_disconnect_is_not_reentered(self):
+        t = _Closing(caps={"batching": True})
+        t.disconnect()
+        t.disconnect()
+        self.assertEqual(t.sendClose.call_count, 1)
 
     def test_malformed_member_falls_back_to_individual_sends(self):
         # One bad frame must not swallow the whole burst.
