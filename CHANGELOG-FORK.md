@@ -25,6 +25,42 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.190 — An inapplicable verb reads as an unknown one
+
+### Engine
+
+[`evennia/actions/dispatch.py`](evennia/actions/dispatch.py) fail-closed feedback
+already made a fully *gated* verb indistinguishable from a nonexistent one. A verb
+with no responding rules got a distinct `"You can't do that."`, on the grounds
+that it "is not a secret, just inapplicable".
+
+That is the ordinary shape of a **context-gated** verb. Verbs are registered
+globally at import time but *provided* narrowly — by a room, a body, a state — so
+"nothing here answers this" is what a verb looks like wherever it does not apply.
+Answering it distinctly confirms the verb exists to anyone who guesses the words,
+which is exactly the leak the gated branch already avoids: the difference between
+two responses is itself the oracle.
+
+Both branches now return the same suggestion-free `NoMatchAction`. Only the gated
+branch is security-logged — an inapplicable verb is not an attempt at anything.
+
+### Migration
+
+`"You can't do that."` is no longer emitted for a verb whose rules all abstained;
+the actor gets the unknown-verb response instead. Games relying on that string
+(tests, or a rule that deliberately returned `SKIP` to produce it) should either
+block with a message or accept the new response.
+
+Downstream can now drop bespoke "not available here" refusals in favour of
+returning `SKIP`. Keep blocks for obstacles the actor can *see* — the distinction
+is whether the verb applies at all, not whether it succeeds.
+
+### Tests
+
+`TestFailClosedFeedback` in
+[`evennia/actions/tests/test_dispatch.py`](evennia/actions/tests/test_dispatch.py)
+covers the new branch and asserts an inapplicable verb is not security-logged.
+
 ## 6.0.0+underspire.189 — Output delivery on session teardown
 
 Output sent in the same reactor iteration as a session disconnect was

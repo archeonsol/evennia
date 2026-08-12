@@ -256,8 +256,13 @@ def _fail_closed_fallback(action, actor, trace, raw_string):
     all. Gates are the security boundary, so a fully-gated verb must look like
     a verb that does not exist: the attempt goes to the security log and the
     line is re-dispatched as a suggestion-free :class:`NoMatchAction` (returned
-    here for the caller to dispatch). A verb with no responding rules at all
-    is not a secret, just inapplicable — message it directly.
+    here for the caller to dispatch). A verb with no responding rules at all is
+    treated the same way, for the same reason: verbs are registered globally at
+    import time but *provided* narrowly — by a room, a body, a state — so
+    "nothing here answers this" is the ordinary shape of a context-gated verb
+    that does not apply. Answering it distinctly ("You can't do that.") would
+    confirm the verb exists to anyone who guesses the words, which is the leak
+    the gated branch already avoids.
 
     System actions (no-match, no-input, login-start) ship their own default
     providers, and an ``_unresolved`` action's target miss was already
@@ -287,10 +292,10 @@ def _fail_closed_fallback(action, actor, trace, raw_string):
             f"by {trace.actor_key}: input {logger.mask_sensitive_input(raw_string)!r}, "
             f"{trace.carry_out_gated} gated carry_out path(s)."
         )
-        # No suggestions: computing them would offer the hidden verb back.
-        return NoMatchAction(raw_string=raw_string)
-    actor.msg(_("You can't do that."))
-    return None
+    # No suggestions in either case: computing them would offer the hidden or
+    # unavailable verb back. Only the gated branch is security-logged — an
+    # inapplicable verb is not an attempt at anything.
+    return NoMatchAction(raw_string=raw_string)
 
 
 async def _resolve_disambiguation(

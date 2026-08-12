@@ -237,10 +237,26 @@ class TestFailClosedFeedback(unittest.TestCase):
         self.assertNotIn("hunter2secret", logged)
         self.assertIn("*", logged)
 
-    def test_verb_with_no_rules_sends_default_feedback(self):
+    def test_verb_with_no_rules_is_also_indistinguishable_from_unknown(self):
+        # A verb nothing answers is a context-gated verb that does not apply here.
+        # Saying so distinctly would confirm it exists; it gets the unknown-verb
+        # answer, like the gated branch above.
         trace = _dispatch(self.actor, "void", self.parser)
-        self.assertIn("You can't do that.", self.char.messages)
+        joined = " ".join(str(m) for m in self.char.messages)
+        self.assertIn("Huh?", joined)
+        self.assertNotIn("can't do that", joined)
+        self.assertNotIn("void", joined.lower())
         self.assertEqual(trace.outcome, "no_rules")
+
+    def test_inapplicable_verb_is_not_security_logged(self):
+        # Only a *gated* attempt is an attempt at something.
+        from unittest import mock
+
+        from evennia.utils import logger as ev_logger
+
+        with mock.patch.object(ev_logger, "log_sec") as log_sec:
+            _dispatch(self.actor, "void", self.parser)
+        log_sec.assert_not_called()
 
     def test_successful_carry_out_adds_no_feedback(self):
         goblin = RuleTarget("goblin")
