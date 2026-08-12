@@ -25,6 +25,59 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.189 — Output delivery on session teardown
+
+Output sent in the same reactor iteration as a session disconnect was
+discarded rather than delivered. Both the Server-side AMP batcher and the
+Portal-side webclient frame batcher dropped it, at different layers. Any game
+that messages a session and then disconnects it — the usual shape of a `quit`
+verb — was losing those messages. No API change; games need no migration.
+
+### Engine — Server session handler
+
+- [`evennia/server/sessionhandler.py`](evennia/server/sessionhandler.py):
+  `ServerSessionHandler.data_out` buffers per session and defers the AMP send
+  to the next reactor iteration via `clock.call_later(0, ...)`. `disconnect`
+  popped that buffer and threw it away before signalling `SDISCONN` to the
+  Portal, so a caller that sent and then disconnected within one iteration lost
+  every queued frame. It now flushes the buffer instead. The session is still
+  registered at that point, so `_flush_outbuf` resolves it normally; the
+  already-scheduled `call_later` finds an empty buffer and returns.
+
+### Engine — Portal webclient protocol
+
+- [`evennia/server/portal/webclient.py`](evennia/server/portal/webclient.py):
+  clients announcing the `batching` capability have their frames queued by
+  `_queue_batched` and flushed on an `asyncio.call_soon`. `disconnect` called
+  `sendClose` without draining that queue, so a burst queued in the same
+  iteration as the disconnect was written after the close frame and lost. It
+  now drains via `_flush_batch` first.
+
+- `WebSocketClient.disconnect` is guarded against reentry. The new drain can
+  raise `Disconnected`, whose handler calls `disconnect` again; without the
+  guard that path closed the connection twice.
+
+### Behavior delta
+
+- A server-side quit that does `session.msg(logout=(reason,))` immediately
+  followed by `SESSION_HANDLER.disconnect(session)` now actually delivers the
+  `logout` OOB. Previously the webclient saw only a socket close, could not
+  distinguish it from a network drop, and silently auto-reconnected — the quit
+  overlay never appeared. Farewell text sent alongside was lost the same way.
+
+### Tests
+
+- New [`evennia/server/tests/test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py):
+  pending output is flushed on disconnect, an empty buffer skips the flush, and
+  the buffer reaches the Portal bus and is drained.
+
+- [`evennia/server/portal/test_webclient_transport.py`](evennia/server/portal/test_webclient_transport.py)
+  gains a `_Closing` transport that runs the real `disconnect` against stubbed
+  I/O, recording sends and the close in one ordered log. Covers send-before-close
+  ordering and the reentry guard.
+
+---
+
 ## 6.0.0+underspire.188 — Protected JSONB Attribute transitions
 
 Replaces the unpublished earlier `.188` candidate and incorporates its
