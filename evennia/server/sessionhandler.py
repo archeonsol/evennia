@@ -613,7 +613,15 @@ class ServerSessionHandler(SessionHandler):
         session.at_disconnect(reason)
         SIGNAL_ACCOUNT_POST_LOGOUT.send(sender=session.account, session=session)
         sessid = session.sessid
-        self._outbuf.pop(sessid, None)
+        # Flush rather than discard: `data_out` defers its AMP send to the next
+        # reactor iteration, so anything the caller sent immediately before
+        # disconnecting (the `logout` OOB behind `quit`, farewell text) is still
+        # sitting in the buffer here. Dropping it loses those frames entirely --
+        # the webclient then sees a bare socket close and silently reconnects
+        # instead of raising its quit menu. The session is still registered at
+        # this point, so the flush finds it.
+        if sessid in self._outbuf:
+            self._flush_outbuf(sessid)
         if sessid in self and not hasattr(self, "_disconnect_all"):
             del self[sessid]
         if sync_portal:
