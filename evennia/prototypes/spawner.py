@@ -622,6 +622,39 @@ def format_diff(diff, minimal=True):
     return "\n ".join(line for line in texts if line)
 
 
+def _run_spawn_hook(obj, spawn_hook, **hook_kwargs):
+    """Run a prototype spawn hook inside a model-save scope.
+
+    ``at_prototype_spawn`` reads back the Attributes the prototype just applied
+    (that is the point of the hook — ``creature_template`` and friends are only
+    visible once prototype attrs have landed) and usually writes more. Called
+    bare, those touch deferred Attribute state, which raises
+    ``AttributeUpdateUsageError`` inside a caller-owned transaction: a spawn
+    during a game transaction could not read its own prototype's attrs.
+
+    Running the hook in a model-save scope bound to the transaction outcome
+    gives it the same standing as ``at_object_creation`` — reads and writes are
+    permitted, and they commit or roll back with the enclosing transaction.
+
+    Args:
+        obj (ObjectDB): The freshly spawned object.
+        spawn_hook (callable): The object's ``at_prototype_spawn``.
+        **hook_kwargs: Passed through to the hook.
+    """
+    from django.db import connections, transaction
+
+    from evennia.typeclasses.attribute_context import model_save_context
+    from evennia.typeclasses.jsonb_handler import _has_user_transaction
+
+    alias = obj._state.db or "default"
+    with model_save_context() as scope:
+        spawn_hook(**hook_kwargs)
+    if _has_user_transaction(connections[alias]):
+        transaction.on_commit(scope.commit, using=alias)
+    else:
+        scope.commit()
+
+
 def batch_update_objects_with_prototype(
     prototype,
     diff=None,
@@ -652,6 +685,17 @@ def batch_update_objects_with_prototype(
             This is highly recommended.
     Returns:
         changed (int): The number of objects that had changes applied to them.
+
+    Notes:
+        Unlike spawning, updating is not transaction-safe for every object.
+        The diff is applied straight through ``obj.attributes`` before the save,
+        outside any model-save scope, so inside a caller-owned
+        ``transaction.atomic()`` it succeeds only for objects whose Attribute
+        row state is already warm. An object that is cold (first touch after a
+        reload) or that was created earlier in the same transaction raises
+        ``AttributeUpdateUsageError``. Only the ``at_prototype_spawn`` hook is
+        scoped (see :func:`_run_spawn_hook`); the diff application is not.
+        Update prototypes outside a game transaction, or warm the objects first.
 
     """
     prototype = protlib.homogenize_prototype(prototype)
@@ -787,7 +831,7 @@ def batch_update_objects_with_prototype(
             changed += 1
             obj.save()
             if spawn_hook := getattr(obj, "at_prototype_spawn", None):
-                spawn_hook(prototype=new_prototype)
+                _run_spawn_hook(obj, spawn_hook, prototype=new_prototype)
 
     return changed
 
@@ -841,7 +885,7 @@ def batch_create_object(*objparams):
         obj.save()
         # run the spawned hook
         if spawn_hook := getattr(obj, "at_prototype_spawn", None):
-            spawn_hook()
+            _run_spawn_hook(obj, spawn_hook)
         objs.append(obj)
     return objs
 
