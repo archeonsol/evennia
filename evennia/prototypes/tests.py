@@ -9,10 +9,13 @@ from time import time
 
 import mock
 from anything import Something
+from django.db import transaction
+
 from django.test.utils import override_settings
 
 from evennia.commands.default import building
 from evennia.objects.models import ObjectDB
+from evennia.objects.objects import DefaultObject
 from evennia.prototypes import protfuncs as protofuncs
 from evennia.prototypes import prototypes as protlib
 from evennia.prototypes import spawner
@@ -445,3 +448,107 @@ class TestIssue3101(EvenniaCommandTest):
         obj2 = ObjectDB.objects.get(db_key="second thing")
 
         self.assertEqual(obj1.typeclass_path, obj2.typeclass_path)
+
+
+class SpawnHookProbeObject(DefaultObject):
+    """Typeclass whose spawn hook reads back a prototype attr and writes another.
+
+    This is the shape real games use: the hook exists precisely so it can see
+    Attributes the prototype applied, which ``at_object_creation`` cannot.
+    """
+
+    def at_prototype_spawn(self, prototype=None, **kwargs):
+        template = self.db.spawn_template
+        if template:
+            self.db.spawn_applied = f"applied:{template}"
+
+
+class TestSpawnHookInTransaction(BaseEvenniaTest):
+    """A spawn inside a caller-owned transaction must still run its hook.
+
+    The hook touches deferred Attribute state. Unless it runs in a model-save
+    scope bound to the transaction outcome, it raises inside any game-owned
+    ``transaction.atomic()`` block.
+
+    These deliberately avoid ``TransactionTestCase``: truncating tables between
+    tests disturbs neighbouring suites. Instead the deferred scope commits are
+    executed explicitly, which is what the real outermost commit does.
+    """
+
+    def _prototype(self):
+        return {
+            "prototype_key": "spawn_hook_probe",
+            "typeclass": "evennia.prototypes.tests.SpawnHookProbeObject",
+            "key": "probe",
+            "attrs": [("spawn_template", "grunt")],
+        }
+
+    def test_hook_runs_and_commits_inside_transaction(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                spawned = spawner.spawn(self._prototype())
+        obj = spawned[0]
+        self.assertEqual(obj.db.spawn_template, "grunt")
+        self.assertEqual(obj.db.spawn_applied, "applied:grunt")
+
+    def test_hook_runs_without_a_transaction(self):
+        spawned = spawner.spawn(self._prototype())
+        obj = spawned[0]
+        self.assertEqual(obj.db.spawn_applied, "applied:grunt")
+
+    def test_hook_writes_roll_back_with_the_transaction(self):
+        captured = {}
+
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                spawned = spawner.spawn(self._prototype())
+                captured["obj"] = spawned[0]
+                captured["id"] = spawned[0].id
+                raise RuntimeError("force rollback")
+
+        self.assertIn("id", captured)
+        self.assertFalse(ObjectDB.objects.filter(id=captured["id"]).exists())
+
+    def test_rolled_back_hook_leaves_no_dirty_row_state(self):
+        """The row is gone; the scope and its cached state must go with it.
+
+        A rolled-back spawn that left a dirty ``_RowState`` pinned in the
+        coordinator registries would leak the discarded hook writes into the
+        next reader of that pk.
+        """
+        from evennia.typeclasses import jsonb_handler
+
+        captured = {}
+
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                spawned = spawner.spawn(self._prototype())
+                obj = spawned[0]
+                captured["obj"] = obj
+                captured["key"] = jsonb_handler._row_key(obj)
+                raise RuntimeError("force rollback")
+
+        key = captured["key"]
+        state = jsonb_handler._ROW_STATES.get(key)
+        if state is None:
+            return  # state already evicted; nothing can leak
+
+        # Reconciliation is lazy: the scope stays pending until the next access
+        # resolves it. Drive that resolution, then assert it discarded the
+        # rolled-back hook writes rather than adopting them.
+        jsonb_handler._resolve_model_save_outcomes(state)
+
+        self.assertFalse(
+            [
+                scope
+                for scope, _snapshot in state.model_save_snapshots
+                if scope.status == "pending"
+            ],
+            "rolled-back spawn left an unresolved model-save scope",
+        )
+        self.assertNotIn(
+            "spawn_applied",
+            state.visible_document.get("attrs", {}).get("data", {}),
+            "rolled-back hook write survived reconciliation",
+        )
+        self.assertFalse(state.dirty, "rolled-back spawn left dirty Attribute state pinned")
