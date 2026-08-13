@@ -25,6 +25,26 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.191 — A spawn inside a transaction runs its own hook
+
+### Engine
+
+- `at_prototype_spawn` now runs inside a model-save scope bound to the
+  enclosing transaction's outcome. The hook exists so it can read back the
+  Attributes the prototype just applied, and it usually writes more; called
+  bare, those touch deferred Attribute state, so any `spawn()` inside a
+  caller-owned `transaction.atomic()` raised `AttributeUpdateUsageError`. A
+  game could not spawn during its own transaction.
+- Hook order is unchanged. It still runs after the full creation chain, so the
+  attrs it reads are present. Its writes commit or roll back with the
+  transaction.
+- Prototype *updating* is not covered: the diff is applied through
+  `obj.attributes` before the save, outside any scope, so inside a transaction
+  it succeeds only for objects whose Attribute row state is already warm. This
+  limitation is documented on `batch_update_objects_with_prototype`.
+
+---
+
 ## 6.0.0+underspire.190 — An inapplicable verb reads as an unknown one
 
 ### Engine
