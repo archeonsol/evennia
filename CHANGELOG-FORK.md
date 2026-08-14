@@ -25,6 +25,36 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.192 — A held row lock waits instead of raising
+
+### Engine
+
+- [`_spool_row_lock`](evennia/typeclasses/jsonb_handler.py) blocks on Windows
+  when another process holds the row. `msvcrt.locking` with `LK_LOCK` makes ten
+  one-second attempts and then raises, so ordinary contention surfaced as an
+  `OSError` rather than a wait, while the POSIX branch blocked in `flock` as
+  intended. Acquisition now retries until a 60 second deadline, restoring the
+  same semantics on both platforms. Past the deadline it still raises.
+- Seeding byte 0 of the lock file no longer reads the byte back. Windows locks
+  are mandatory, so that read raises `PermissionError` exactly when another
+  process holds the range, which is when the lock matters. `os.fstat` reports
+  the file size without touching the locked range. Losing the seeding race is
+  harmless: the winner wrote the same byte.
+
+### Tests
+
+- `TestSpoolRowLockContention` in
+  [`test_jsonb.py`](evennia/typeclasses/tests/test_jsonb.py) holds the lock from
+  a real subprocess, so the contended path is exercised across process
+  boundaries rather than between threads. The child uses the raw OS primitives
+  and needs no Django setup.
+
+### Migration
+
+None. No API or settings surface changed.
+
+---
+
 ## 6.0.0+underspire.191 — A spawn inside a transaction runs its own hook
 
 ### Engine
