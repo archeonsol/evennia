@@ -15,13 +15,17 @@ Covers:
 """
 
 import gc
+import os
+import subprocess
+import sys
 import tempfile
 import threading
+import time
 from copy import deepcopy
 from unittest.mock import patch
 
 from django.db import close_old_connections, transaction
-from django.test import TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TransactionTestCase, override_settings
 from twisted.internet.defer import Deferred
 
 from evennia.typeclasses import jsonb_handler
@@ -1836,3 +1840,74 @@ class TestPkCounter(BaseEvenniaTest):
         attrs = self.backend.query_all()
         pks = [a.pk for a in attrs]
         self.assertEqual(len(pks), len(set(pks)))
+
+
+# Held by a foreign process so the parent has to contend for the row lock. Uses
+# the raw OS primitives rather than importing Evennia, so no Django setup is
+# needed in the child.
+_FOREIGN_LOCK_HOLDER = """
+import os, sys, time
+
+path, ready_path, hold_seconds = sys.argv[1], sys.argv[2], float(sys.argv[3])
+with open(path, "a+b") as fh:
+    fh.seek(0)
+    if not fh.read(1):
+        fh.write(b"0")
+        fh.flush()
+    fh.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    with open(ready_path, "w") as marker:
+        marker.write("locked")
+    time.sleep(hold_seconds)
+"""
+
+
+class TestSpoolRowLockContention(SimpleTestCase):
+    """The row lock is a cross-process lock; a held lock must block, not raise."""
+
+    def test_acquire_waits_for_lock_held_by_another_process(self):
+        key = ("default", "objects.objectdb", 1)
+        hold_seconds = 2.0
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                lock_dir = os.path.join(spool, ".locks")
+                os.makedirs(lock_dir, exist_ok=True)
+                digest = jsonb_handler.hashlib.sha256(repr(key).encode()).hexdigest()
+                lock_path = os.path.join(lock_dir, f"{digest}.lock")
+                ready_path = os.path.join(spool, "holder-ready")
+
+                holder = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        _FOREIGN_LOCK_HOLDER,
+                        lock_path,
+                        ready_path,
+                        str(hold_seconds),
+                    ]
+                )
+                try:
+                    deadline = time.monotonic() + 30
+                    while not os.path.exists(ready_path):
+                        if time.monotonic() > deadline:
+                            self.fail("lock holder subprocess never acquired the lock")
+                        time.sleep(0.05)
+
+                    start = time.monotonic()
+                    with jsonb_handler._spool_row_lock(key):
+                        waited = time.monotonic() - start
+                finally:
+                    holder.wait(timeout=30)
+
+                self.assertGreater(
+                    waited,
+                    0.5,
+                    "acquire returned without waiting for the foreign lock to release",
+                )
