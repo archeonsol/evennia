@@ -682,6 +682,63 @@ def _legacy_spool_candidates(key):
     return candidates
 
 
+_LOCK_ACQUIRE_TIMEOUT = 60.0
+
+
+def _seed_lock_byte(lockfile):
+    """Make sure byte 0 exists, since Windows cannot lock an empty range.
+
+    Args:
+        lockfile (file): Lock file open in append+binary mode.
+
+    Notes:
+        The byte is never read back to test for it. Windows locks are
+        mandatory, so a range held by another process raises PermissionError on
+        read - the check would fail exactly when another process is contending,
+        which is when the lock matters. `fstat` reports the size without
+        touching the locked range. Losing the race to seed is harmless: the
+        winner wrote the same byte, and the failed write raises rather than
+        corrupting it.
+
+    """
+    if os.fstat(lockfile.fileno()).st_size:
+        return
+    try:
+        lockfile.write(b"0")
+        lockfile.flush()
+    except OSError:
+        pass
+
+
+def _lock_byte_blocking(lockfile):
+    """Block until byte 0 of `lockfile` is held exclusively by this process.
+
+    Args:
+        lockfile (file): Lock file positioned at byte 0.
+
+    Raises:
+        OSError: If the lock is still unavailable after
+            `_LOCK_ACQUIRE_TIMEOUT` seconds.
+
+    Notes:
+        `msvcrt.locking` with `LK_LOCK` gives up after ten one-second attempts
+        and raises, so ordinary contention would surface as an error. Retrying
+        until the timeout restores the blocking semantics `flock` has on POSIX.
+
+    """
+    import msvcrt
+
+    deadline = time.monotonic() + _LOCK_ACQUIRE_TIMEOUT
+    while True:
+        try:
+            msvcrt.locking(lockfile.fileno(), msvcrt.LK_LOCK, 1)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            lockfile.seek(0)
+
+
 @contextmanager
 def _spool_row_lock(key):
     """Acquire the stable cross-process filesystem lock for one row."""
@@ -695,12 +752,9 @@ def _spool_row_lock(key):
         if os.name == "nt":
             import msvcrt
 
+            _seed_lock_byte(lockfile)
             lockfile.seek(0)
-            if not lockfile.read(1):
-                lockfile.write(b"0")
-                lockfile.flush()
-            lockfile.seek(0)
-            msvcrt.locking(lockfile.fileno(), msvcrt.LK_LOCK, 1)
+            _lock_byte_blocking(lockfile)
             try:
                 yield
             finally:
