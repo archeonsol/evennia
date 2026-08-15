@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.201 — Restore safe character mixin compatibility
+
+### Engine
+
+- `CharacterMixin.get_queryset()` once again supports downstream mixin-only
+  `ListView` subclasses. It resolves the requesting account and roster on the
+  bound IO thread, then returns frozen character-row DTOs instead of live
+  typeclasses or a worker-owned queryset.
+- Owned rows retain the historical exact configured-typeclass filter. Foreign
+  characters and owned objects of another typeclass cannot enter the result.
+
+### Security
+
+- Restores the ownership boundary removed during the stock web IO refactor in
+  `underspire.199`. Without an explicit `get_queryset()` override, downstream
+  character list views could fall through to Django's generic queryset and
+  expose matching characters owned by other accounts.
+
+### Tests
+
+- Added a real bound-loop ASGI regression using an otherwise-unmodified
+  `CharacterMixin`/`ListView` subclass. It covers owned matching, owned
+  different-typeclass, and foreign matching objects; recursive DTO plainness;
+  and exactly one worker-to-IO bridge call.
+
+### Migration
+
+- No database migration is required. The compatibility method now returns a
+  tuple of frozen `CharacterListWebDTO` rows rather than a live `QuerySet`.
+  Custom downstream workflows needing additional fields must use a dedicated
+  IO service.
+
 ## 6.0.0+underspire.200 — Complete stock character web IO ownership
 
 ### Engine
