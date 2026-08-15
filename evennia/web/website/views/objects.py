@@ -3,18 +3,55 @@ Views for managing a specific object)
 
 """
 
-from collections import OrderedDict
-
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseBadRequest, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
 from django.utils.text import slugify
 
 from evennia.utils import class_from_module
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    run_on_io_thread,
+)
 
+from .io import (
+    WebObjectNotFound,
+    WebObjectPermissionDenied,
+    WebObjectSlugMismatch,
+    load_object_detail,
+    typeclass_path,
+    update_object_attributes,
+)
 from .mixins import EvenniaCreateView, EvenniaDeleteView, EvenniaDetailView, EvenniaUpdateView
+
+
+def _account_id(request):
+    """Return the authenticated account ID without crossing a live model."""
+    user = request.user
+    return int(user.pk) if getattr(user, "is_authenticated", False) else None
+
+
+def _read_timeout_response():
+    """Return the stock response for a timed-out read."""
+    return HttpResponse("Game state did not answer in time.", status=504)
+
+
+def _mutation_timeout_response(*, indeterminate):
+    """Return a response that distinguishes cancelled and unknown mutations."""
+    if indeterminate:
+        return HttpResponse(
+            "The update may have completed. Do not retry this request.",
+            status=202,
+            headers={"X-Evennia-Retryable": "false"},
+        )
+    return HttpResponse(
+        "The update did not start. This request may be retried.",
+        status=503,
+        headers={"Retry-After": "1"},
+    )
 
 
 class ObjectDetailView(EvenniaDetailView):
@@ -54,6 +91,31 @@ class ObjectDetailView(EvenniaDetailView):
     # The order you specify here will be followed.
     attributes = ["name", "desc"]
 
+    def _load_dto(self):
+        """Load and authorize this request through the IO-owned service."""
+        return run_on_io_thread(
+            load_object_detail,
+            typeclass_path(self.typeclass),
+            self.kwargs.get("pk"),
+            self.kwargs.get(self.slug_url_kwarg),
+            _account_id(self.request),
+            self.access_type,
+            tuple(self.attributes),
+        )
+
+    def get(self, request, *args, **kwargs):
+        """Render a DTO without exposing a live typeclass to the template."""
+        try:
+            self.object = self._load_dto()
+        except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return _read_timeout_response()
+        context = self.get_context_data(object=self.object)
+        return self.render_to_response(context)
+
     def get_context_data(self, **kwargs):
         """
         Adds an 'attributes' list to the request context consisting of the
@@ -66,29 +128,9 @@ class ObjectDetailView(EvenniaDetailView):
             context (dict): Django context object
 
         """
-        # Get the base Django context object
         context = super().get_context_data(**kwargs)
-
-        # Get the object in question
-        obj = self.get_object()
-
-        # Create an ordered dictionary to contain the attribute map
-        attribute_list = OrderedDict()
-
-        for attribute in self.attributes:
-            # Check if the attribute is a core fieldname (name, desc)
-            if attribute in self.typeclass._meta._property_names:
-                attribute_list[attribute.title()] = getattr(obj, attribute, "")
-
-            # Check if the attribute is a db attribute (char1.db.favorite_color)
-            else:
-                attribute_list[attribute.title()] = getattr(obj.db, attribute, "")
-
-        # Add our attribute map to the Django request context, so it gets
-        # displayed on the template
-        context["attribute_list"] = attribute_list
-
-        # Return the comprehensive context object
+        obj = context.get("object")
+        context["attribute_list"] = dict(getattr(obj, "attributes", ()))
         return context
 
     def get_object(self, queryset=None):
@@ -200,6 +242,8 @@ class ObjectUpdateView(LoginRequiredMixin, ObjectDetailView, EvenniaUpdateView):
         """
         if self.success_url:
             return self.success_url
+        if hasattr(self.object, "detail_url"):
+            return self.object.detail_url
         return self.object.web_get_detail_url()
 
     def get_initial(self):
@@ -213,16 +257,40 @@ class ObjectUpdateView(LoginRequiredMixin, ObjectDetailView, EvenniaUpdateView):
                 data.
 
         """
-        # Get the object we want to update
-        obj = self.get_object()
-
-        # Get attributes
-        data = {k: getattr(obj.db, k, "") for k in self.form_class.base_fields}
-
-        # Get model fields
-        data.update({k: getattr(obj, k, "") for k in self.form_class.Meta.fields})
-
+        obj = self.object
+        values = dict(obj.attributes)
+        data = {key: values.get(key.title(), "") for key in self.form_class.base_fields}
+        if "db_key" in data:
+            data["db_key"] = obj.key
         return data
+
+    def get(self, request, *args, **kwargs):
+        """Render a scalar form initialized from an IO-built DTO."""
+        try:
+            self.object = self._load_dto()
+        except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return _read_timeout_response()
+        form = self.form_class(initial=self.get_initial())
+        return self.render_to_response(self.get_context_data(object=self.object, form=form))
+
+    def post(self, request, *args, **kwargs):
+        """Validate scalar input, then authorize and mutate in one IO call."""
+        form = self.form_class(request.POST)
+        if not form.is_valid():
+            try:
+                self.object = self._load_dto()
+            except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+                raise Http404(str(err)) from err
+            except WebObjectPermissionDenied as err:
+                raise PermissionDenied(str(err)) from err
+            except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+                return _read_timeout_response()
+            return self.render_to_response(self.get_context_data(object=self.object, form=form))
+        return self.form_valid(form)
 
     def form_valid(self, form):
         """
@@ -239,14 +307,27 @@ class ObjectUpdateView(LoginRequiredMixin, ObjectDetailView, EvenniaUpdateView):
         validated and sanitized.
 
         """
-        # Get the attributes after they've been cleaned and validated
-        data = {k: v for k, v in form.cleaned_data.items() if k not in self.form_class.Meta.fields}
-
-        # Update the object attributes
-        for key, value in data.items():
-            self.object.attributes.add(key, value)
-            messages.success(self.request, "Successfully updated '%s' for %s." % (key, self.object))
-
-        # Do not return super().form_valid; we don't want to update the model
-        # instance, just its attributes.
+        model_fields = tuple(getattr(getattr(self.form_class, "Meta", None), "fields", ()))
+        data = {key: value for key, value in form.cleaned_data.items() if key not in model_fields}
+        try:
+            self.object, result_messages = run_on_io_thread(
+                update_object_attributes,
+                typeclass_path(self.typeclass),
+                self.kwargs.get("pk"),
+                self.kwargs.get(self.slug_url_kwarg),
+                _account_id(self.request),
+                self.access_type,
+                data,
+                tuple(self.attributes),
+            )
+        except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except IOThreadCallIndeterminate:
+            return _mutation_timeout_response(indeterminate=True)
+        except IOThreadCallTimeout:
+            return _mutation_timeout_response(indeterminate=False)
+        for result_message in result_messages:
+            messages.success(self.request, result_message)
         return HttpResponseRedirect(self.get_success_url())

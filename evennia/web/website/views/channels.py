@@ -4,16 +4,23 @@ Views for managing channels.
 """
 
 from django.conf import settings
-from django.db.models.functions import Lower
-from django.http import HttpResponseBadRequest
-from django.utils.text import slugify
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse
 from django.views.generic import ListView
 
 from evennia.utils import class_from_module
 from evennia.utils.logger import tail_log_file
+from evennia.web.utils.io import IOThreadCallIndeterminate, IOThreadCallTimeout, run_on_io_thread
 
+from .io import (
+    WebObjectNotFound,
+    WebObjectPermissionDenied,
+    load_channel_detail,
+    load_channel_list,
+    typeclass_path,
+)
 from .mixins import TypeclassMixin
-from .objects import ObjectDetailView
+from .objects import ObjectDetailView, _account_id
 
 
 class ChannelMixin(TypeclassMixin):
@@ -46,18 +53,11 @@ class ChannelMixin(TypeclassMixin):
             queryset (QuerySet): List of Channels available to the user.
 
         """
-        account = self.request.user
-
-        # Get list of all Channels
-        channels = self.typeclass.objects.all().iterator()
-
-        # Now figure out which ones the current user is allowed to see
-        bucket = [channel.id for channel in channels if channel.access(account, "listen")]
-
-        # Re-query and set a sorted list
-        filtered = self.typeclass.objects.filter(id__in=bucket).order_by(Lower("db_key"))
-
-        return filtered
+        return run_on_io_thread(
+            load_channel_list,
+            typeclass_path(self.typeclass),
+            _account_id(self.request),
+        )
 
 
 class ChannelListView(ChannelMixin, ListView):
@@ -76,6 +76,13 @@ class ChannelListView(ChannelMixin, ListView):
 
     max_popular = 10
 
+    def get(self, request, *args, **kwargs):
+        """Render serialized channel rows or a bounded timeout response."""
+        try:
+            return super().get(request, *args, **kwargs)
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return HttpResponse("Game state did not answer in time.", status=504)
+
     def get_context_data(self, **kwargs):
         """
         Django hook; we override it to calculate the most popular channels.
@@ -88,8 +95,8 @@ class ChannelListView(ChannelMixin, ListView):
 
         # Calculate which channels are most popular
         context["most_popular"] = sorted(
-            list(self.get_queryset()),
-            key=lambda channel: len(channel.subscriptions.all()),
+            list(context["object_list"]),
+            key=lambda channel: channel.subscription_count,
             reverse=True,
         )[: self.max_popular]
 
@@ -114,6 +121,24 @@ class ChannelDetailView(ChannelMixin, ObjectDetailView):
     # How many log entries to read and display.
     max_num_lines = 10000
 
+    def get(self, request, *args, **kwargs):
+        """Authorize and serialize the channel before reading its log on the worker."""
+        try:
+            self.object = run_on_io_thread(
+                load_channel_detail,
+                typeclass_path(self.typeclass),
+                self.kwargs.get("slug", ""),
+                _account_id(request),
+            )
+        except WebObjectNotFound as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return HttpResponse("Game state did not answer in time.", status=504)
+        context = self.get_context_data(object=self.object)
+        return self.render_to_response(context)
+
     def get_context_data(self, **kwargs):
         """
         Django hook; before we can display the channel logs, we need to recall
@@ -126,9 +151,7 @@ class ChannelDetailView(ChannelMixin, ObjectDetailView):
         # Get the parent context object, necessary first step
         context = super().get_context_data(**kwargs)
         channel = self.object
-
-        # Get the filename this Channel is recording to
-        filename = channel.get_log_filename()
+        filename = channel.log_filename
 
         # Split log entries so we can filter by time
         bucket = []
@@ -151,29 +174,3 @@ class ChannelDetailView(ChannelMixin, ObjectDetailView):
         context["object_filters"] = sorted(set([x["key"] for x in bucket]))
 
         return context
-
-    def get_object(self, queryset=None):
-        """
-        Override of Django hook that retrieves an object by slugified channel
-        name.
-
-        Returns:
-            channel (Channel): Channel requested in the URL.
-
-        """
-        # Get the queryset for the help entries the user can access
-        if not queryset:
-            queryset = self.get_queryset()
-
-        # Find the object in the queryset
-        channel = slugify(self.kwargs.get("slug", ""))
-        obj = next((x for x in queryset if slugify(x.db_key) == channel), None)
-
-        # Check if this object was requested in a valid manner
-        if not obj:
-            raise HttpResponseBadRequest(
-                "No %(verbose_name)s found matching the query"
-                % {"verbose_name": queryset.model._meta.verbose_name}
-            )
-
-        return obj

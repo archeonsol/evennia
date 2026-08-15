@@ -35,9 +35,9 @@
                   <tbody>
                     {% for object in object_list %}
                     <tr>
-                      <td><a href="{{ object.web_get_detail_url }}">{{ object.name }}</a></td>
-                      <td>{{ object.db.desc }}</td>
-                      <td>{{ object.subscriptions.all|length }}</td>
+                      <td><a href="{{ object.detail_url }}">{{ object.name }}</a></td>
+                      <td>{{ object.description }}</td>
+                      <td>{{ object.subscription_count }}</td>
                     </tr>
                     {% empty %}
                     <tr>
@@ -66,7 +66,7 @@
               
               <ul class="list-group list-group-flush">
                 {% for top in most_popular %}
-                <a href="{{ top.web_get_detail_url }}" class="list-group-item">{{ top }} <span class="badge badge-light float-right">{{ top.subscriptions.all|length }}</span></a>
+                <a href="{{ top.detail_url }}" class="list-group-item">{{ top }} <span class="badge badge-light float-right">{{ top.subscription_count }}</span></a>
                 {% endfor %}
               </ul>
               

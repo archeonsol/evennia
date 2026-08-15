@@ -7,16 +7,68 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.utils import flatten_fieldsets
 from django.contrib.admin.widgets import ForeignKeyRawIdWidget
-from django.http import HttpResponseRedirect
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext as _
 
 from evennia.accounts.models import AccountDB
 from evennia.objects.models import ObjectDB
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    run_on_io_thread,
+)
 
 from . import utils as adminutils
 from .tags import TagInline
+
+
+def _link_object_to_account(object_id, actor_id):
+    """Link an object and account entirely inside the IO-owned DB scope."""
+    try:
+        actor = AccountDB.objects.get(pk=int(actor_id))
+    except (AccountDB.DoesNotExist, TypeError, ValueError) as err:
+        raise PermissionError("Admin account was not found") from err
+    if not actor.is_active or not actor.is_staff:
+        raise PermissionError("Admin access was revoked")
+    try:
+        obj = ObjectDB.objects.get(pk=int(object_id))
+    except (ObjectDB.DoesNotExist, TypeError, ValueError) as err:
+        raise LookupError("Object was not found") from err
+    account = obj.db_account
+    if not account:
+        return {
+            "linked": False,
+            "message": (
+                "Account must be connected for this action "
+                "(set Puppeting Account and save this page first)."
+            ),
+        }
+    account.db._last_puppet = obj
+    account.characters.add(obj)
+    if not obj.access(account, "puppet"):
+        from evennia.authorization.storage import grant_capability, principal_refs, resource_ref
+
+        grant_capability(
+            principal_refs(account)[0],
+            "engine.character.puppet",
+            scope_kind="resource",
+            scope_key=resource_ref(obj),
+            provenance="django_admin",
+            actor_ref=f"django:{int(actor_id)}",
+            reason="link object to account",
+        )
+    return {
+        "linked": True,
+        "message": (
+            "Did the following (where possible): "
+            f"Set Account.db._last_puppet = {obj}, "
+            f"Added {obj} to Account.characters list, "
+            f"Granted resource-scoped puppet authority for {obj}."
+        ),
+    }
 
 
 class ObjectTagInline(TagInline):
@@ -303,45 +355,32 @@ class ObjectAdmin(admin.ModelAdmin):
         - Grant account-scoped puppeting authority for this object
 
         """
-        obj = self.get_object(request, object_id)
-        account = obj.db_account
-
-        if account:
-            account.db._last_puppet = obj
-            account.characters.add(obj)
-            if not obj.access(account, "puppet"):
-                from evennia.authorization.storage import (
-                    grant_capability,
-                    principal_refs,
-                    resource_ref,
-                )
-
-                grant_capability(
-                    principal_refs(account)[0],
-                    "engine.character.puppet",
-                    scope_kind="resource",
-                    scope_key=resource_ref(obj),
-                    provenance="django_admin",
-                    actor_ref=f"django:{request.user.pk}",
-                    reason="link object to account",
-                )
-            self.message_user(
-                request,
-                "Did the following (where possible): "
-                f"Set Account.db._last_puppet = {obj}, "
-                f"Added {obj} to Account.characters list, "
-                f"Granted resource-scoped puppet authority for {obj}.",
+        try:
+            result = run_on_io_thread(_link_object_to_account, object_id, request.user.pk)
+        except PermissionError as err:
+            raise PermissionDenied(str(err)) from err
+        except LookupError as err:
+            raise Http404(str(err)) from err
+        except IOThreadCallIndeterminate:
+            return HttpResponse(
+                "The link may have completed. Do not retry this request.",
+                status=202,
+                headers={"X-Evennia-Retryable": "false"},
             )
-        else:
-            self.message_user(
-                request,
-                "Account must be connected for this action "
-                "(set Puppeting Account and save this page first).",
-                level=messages.ERROR,
+        except IOThreadCallTimeout:
+            return HttpResponse(
+                "The link did not start. This request may be retried.",
+                status=503,
+                headers={"Retry-After": "1"},
             )
+        self.message_user(
+            request,
+            result["message"],
+            level=messages.SUCCESS if result["linked"] else messages.ERROR,
+        )
 
         # stay on the same page
-        return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[obj.pk]))
+        return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[object_id]))
 
     def save_model(self, request, obj, form, change):
         """
