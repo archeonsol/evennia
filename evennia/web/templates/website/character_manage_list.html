@@ -16,13 +16,13 @@
 
           {% for object in object_list %}
           <div class="media mb-4">
-            <a href="{{ object.web_get_detail_url }}"><img class="d-flex mr-3" src="http://placehold.jp/50x50.png" alt="" /></a>
+            <a href="{{ object.detail_url }}"><img class="d-flex mr-3" src="http://placehold.jp/50x50.png" alt="" /></a>
             <div class="media-body">
-              <p class="float-right ml-2">{{ object.db_date_created }}
-              <br /><a href="{{ object.web_get_delete_url }}">Delete</a>
-              <br /><a href="{{ object.web_get_update_url }}">Edit</a></p>
-              <h5 class="mt-0"><a href="{{ object.web_get_detail_url }}">{{ object }}</a> {% if object.subtitle %}<small class="text-muted" style="white-space:nowrap;">{{ object.subtitle }}</small>{% endif %}</h5>
-              <p>{{ object.db.desc }}</p>
+              <p class="float-right ml-2">{{ object.date_created }}
+              <br /><a href="{{ object.delete_url }}">Delete</a>
+              <br /><a href="{{ object.update_url }}">Edit</a></p>
+              <h5 class="mt-0"><a href="{{ object.detail_url }}">{{ object.key }}</a> {% if object.subtitle %}<small class="text-muted" style="white-space:nowrap;">{{ object.subtitle }}</small>{% endif %}</h5>
+              <p>{{ object.description }}</p>
             </div>
           </div>
           {% endfor %}
@@ -32,5 +32,4 @@
   </div>
 </div>
 {% endblock %}
-
 

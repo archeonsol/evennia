@@ -12,6 +12,8 @@ import os
 from django.conf import settings
 
 from evennia.utils.utils import get_evennia_version
+from evennia.web.utils.io import IOThreadCallIndeterminate, IOThreadCallTimeout, run_on_io_thread
+from evennia.web.website.views.io import CharacterMenuContextDTO, load_character_menu
 
 # Setup lists of the most relevant apps so
 # the adminsite becomes more readable.
@@ -107,14 +109,24 @@ def general_context(request):
     if request.user.is_authenticated:
         account = request.user
 
-    puppet = None
-    if account and request.session.get("puppet"):
-        pk = int(request.session.get("puppet"))
-        puppet = next((x for x in account.characters if x.pk == pk), None)
+    menu = CharacterMenuContextDTO((), None)
+    if account:
+        menu = getattr(request, "evennia_character_menu", None)
+        if menu is None:
+            try:
+                menu = run_on_io_thread(
+                    load_character_menu,
+                    int(account.pk),
+                    request.session.get("puppet"),
+                )
+            except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+                menu = CharacterMenuContextDTO((), None)
 
     return {
         "account": account,
-        "puppet": puppet,
+        "puppet": menu.puppet_name,
+        "puppet_name": menu.puppet_name,
+        "menu_characters": menu.characters,
         "game_name": GAME_NAME,
         "game_slogan": GAME_SLOGAN,
         "server_hostname": SERVER_HOSTNAME,

@@ -36,7 +36,11 @@ def _account_id(request):
 
 def _read_timeout_response():
     """Return the stock response for a timed-out read."""
-    return HttpResponse("Game state did not answer in time.", status=504)
+    return HttpResponse(
+        "Game state did not answer in time.",
+        status=504,
+        headers={"X-Evennia-Retryable": "true"},
+    )
 
 
 def _mutation_timeout_response(*, indeterminate):
@@ -50,7 +54,7 @@ def _mutation_timeout_response(*, indeterminate):
     return HttpResponse(
         "The update did not start. This request may be retried.",
         status=503,
-        headers={"Retry-After": "1"},
+        headers={"Retry-After": "1", "X-Evennia-Retryable": "true"},
     )
 
 

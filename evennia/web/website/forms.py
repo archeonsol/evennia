@@ -101,7 +101,7 @@ class ObjectForm(EvenniaForm, ModelForm):
         labels = {"db_key": "Name"}
 
 
-class CharacterForm(ObjectForm):
+class CharacterForm(EvenniaForm):
     """
     This is a Django form for Evennia Character objects.
 
@@ -137,23 +137,7 @@ class CharacterForm(ObjectForm):
 
     """
 
-    class Meta:
-        """
-        This is a Django construct that provides additional configuration to
-        the form.
-
-        """
-
-        # Get the correct object model
-        model = class_from_module(
-            settings.BASE_CHARACTER_TYPECLASS, fallback=settings.FALLBACK_CHARACTER_TYPECLASS
-        )
-
-        # Allow entry of the 'key' field
-        fields = ("db_key",)
-
-        # Rename 'key' to something more intelligible
-        labels = {"db_key": "Name"}
+    db_key = forms.CharField(label="Name", max_length=255)
 
     # Fields pertaining to configurable attributes on the Character object.
     desc = forms.CharField(

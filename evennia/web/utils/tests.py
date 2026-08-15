@@ -2,6 +2,8 @@ from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, SimpleTestCase
 from mock import MagicMock, patch
 
+from evennia.web.website.views.io import CharacterMenuContextDTO, CharacterMenuDTO
+
 from . import general_context
 
 
@@ -32,6 +34,8 @@ class TestGeneralContext(SimpleTestCase):
             {
                 "account": None,
                 "puppet": None,
+                "puppet_name": None,
+                "menu_characters": (),
                 "game_name": "test_name",
                 "game_slogan": "test_game_slogan",
                 "evennia_userapps": ["Accounts"],
@@ -54,3 +58,35 @@ class TestGeneralContext(SimpleTestCase):
                 "telnet_ssl_ports": [4003],
             },
         )
+
+    def test_authenticated_menu_uses_plain_io_context(self):
+        request = RequestFactory().get("/")
+        request.user = MagicMock(is_authenticated=True, pk=7)
+        request.session = {"puppet": 9}
+        menu = CharacterMenuContextDTO(
+            characters=(CharacterMenuDTO(9, "Web Character", "/characters/puppet/web/9/"),),
+            puppet_name="Web Character",
+        )
+
+        with patch.object(general_context, "run_on_io_thread", return_value=menu) as bridge:
+            response = general_context.general_context(request)
+
+        bridge.assert_called_once_with(general_context.load_character_menu, 7, 9)
+        self.assertEqual(response["menu_characters"], menu.characters)
+        self.assertEqual(response["puppet"], "Web Character")
+        self.assertEqual(response["puppet_name"], "Web Character")
+
+    def test_menu_timeout_fails_soft_without_live_characters(self):
+        request = RequestFactory().get("/")
+        request.user = MagicMock(is_authenticated=True, pk=7)
+        request.session = {"puppet": 9}
+
+        with patch.object(
+            general_context,
+            "run_on_io_thread",
+            side_effect=general_context.IOThreadCallIndeterminate(),
+        ):
+            response = general_context.general_context(request)
+
+        self.assertEqual(response["menu_characters"], ())
+        self.assertIsNone(response["puppet"])

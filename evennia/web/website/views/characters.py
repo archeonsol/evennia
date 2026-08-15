@@ -7,19 +7,43 @@ puppeting).
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models.functions import Lower
-from django.http import HttpResponseRedirect
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponseRedirect
 from django.urls import reverse_lazy
 from django.utils.encoding import iri_to_uri
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.generic import ListView
-from django.views.generic.base import RedirectView
+from django.views.generic import ListView, View
 
 from evennia.utils import class_from_module
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    run_on_io_thread,
+)
 from evennia.web.website import forms
 
+from .io import (
+    WebObjectNotFound,
+    WebObjectPermissionDenied,
+    WebObjectSlugMismatch,
+    authorize_character_puppet,
+    create_character,
+    delete_character,
+    load_character_page,
+    load_owned_character_detail,
+    typeclass_path,
+    update_owned_character_attributes,
+)
 from .mixins import TypeclassMixin
-from .objects import ObjectCreateView, ObjectDeleteView, ObjectDetailView, ObjectUpdateView
+from .objects import (
+    ObjectCreateView,
+    ObjectDeleteView,
+    ObjectDetailView,
+    ObjectUpdateView,
+    _account_id,
+    _mutation_timeout_response,
+    _read_timeout_response,
+)
 
 
 class CharacterMixin(TypeclassMixin):
@@ -37,23 +61,6 @@ class CharacterMixin(TypeclassMixin):
     )
     form_class = forms.CharacterForm
     success_url = reverse_lazy("character-manage")
-
-    def get_queryset(self):
-        """
-        This method will override the Django get_queryset method to only
-        return a list of characters associated with the current authenticated
-        user.
-
-        Returns:
-            queryset (QuerySet): Django queryset for use in the given view.
-
-        """
-        # Get IDs of characters owned by account
-        account = self.request.user
-        ids = [getattr(x, "id") for x in account.characters if x]
-
-        # Return a queryset consisting of those characters
-        return self.typeclass.objects.filter(id__in=ids).order_by(Lower("db_key"))
 
 
 class CharacterListView(LoginRequiredMixin, CharacterMixin, ListView):
@@ -75,27 +82,27 @@ class CharacterListView(LoginRequiredMixin, CharacterMixin, ListView):
     access_type = "view"
 
     def get_queryset(self):
-        """
-        This method will override the Django get_queryset method to return a
-        list of all characters (filtered/sorted) instead of just those limited
-        to the account.
+        """Return frozen visible-character rows from one IO-owned service."""
+        page = run_on_io_thread(
+            load_character_page,
+            typeclass_path(self.typeclass),
+            _account_id(self.request),
+            self.access_type,
+            False,
+            self.request.session.get("puppet"),
+        )
+        self.request.evennia_character_menu = page.menu
+        return page.rows
 
-        Returns:
-            queryset (QuerySet): Django queryset for use in the given view.
-
-        """
-        account = self.request.user
-
-        # Return a queryset consisting of characters the user is allowed to
-        # see.
-        ids = [
-            obj.id for obj in self.typeclass.objects.all() if obj.access(account, self.access_type)
-        ]
-
-        return self.typeclass.objects.filter(id__in=ids).order_by(Lower("db_key"))
+    def get(self, request, *args, **kwargs):
+        """Map character collection timeouts to a retryable gateway timeout."""
+        try:
+            return super().get(request, *args, **kwargs)
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return _read_timeout_response()
 
 
-class CharacterPuppetView(LoginRequiredMixin, CharacterMixin, RedirectView, ObjectDetailView):
+class CharacterPuppetView(LoginRequiredMixin, CharacterMixin, View):
     """
     This view provides a mechanism by which a logged-in player can "puppet" one
     of their characters within the context of the website.
@@ -105,7 +112,7 @@ class CharacterPuppetView(LoginRequiredMixin, CharacterMixin, RedirectView, Obje
 
     """
 
-    def get_redirect_url(self, *args, **kwargs):
+    def post(self, request, *args, **kwargs):
         """
         Django hook.
 
@@ -116,33 +123,37 @@ class CharacterPuppetView(LoginRequiredMixin, CharacterMixin, RedirectView, Obje
             url (str): Path to post-puppet destination.
 
         """
-        # Get the requested character, if it belongs to the authenticated user
-        char = self.get_object()
+        try:
+            character = run_on_io_thread(
+                authorize_character_puppet,
+                typeclass_path(self.typeclass),
+                self.kwargs.get("pk"),
+                self.kwargs.get("slug"),
+                _account_id(request),
+            )
+        except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return _read_timeout_response()
 
         # Get the page the user came from
-        next_page = self.request.GET.get("next", self.success_url)
+        next_page = request.POST.get("next", self.success_url)
 
         # since next_page is untrusted input from the user, we need to check it's safe to
         next_page = iri_to_uri(next_page)
         if not url_has_allowed_host_and_scheme(
             url=next_page,
-            allowed_hosts={self.request.get_host()},
-            require_https=self.request.is_secure(),
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
         ):
             next_page = self.success_url
 
-        if char:
-            # If the account owns the char, store the ID of the char in the
-            # Django request's session (different from Evennia session!).
-            # We do this because characters don't serialize well.
-            self.request.session["puppet"] = int(char.pk)
-            messages.success(self.request, "You become '%s'!" % char)
-        else:
-            # If the puppeting failed, clear out the cached puppet value
-            self.request.session["puppet"] = None
-            messages.error(self.request, "You cannot become '%s'." % char)
+        request.session["puppet"] = character.id
+        messages.success(request, "You become '%s'!" % character.key)
 
-        return next_page
+        return HttpResponseRedirect(next_page)
 
 
 class CharacterManageView(LoginRequiredMixin, CharacterMixin, ListView):
@@ -159,6 +170,26 @@ class CharacterManageView(LoginRequiredMixin, CharacterMixin, ListView):
     # -- Evennia constructs --
     page_title = "Manage Characters"
 
+    def get_queryset(self):
+        """Return frozen owned-character rows and cache their menu DTO."""
+        page = run_on_io_thread(
+            load_character_page,
+            typeclass_path(self.typeclass),
+            _account_id(self.request),
+            "view",
+            True,
+            self.request.session.get("puppet"),
+        )
+        self.request.evennia_character_menu = page.menu
+        return page.rows
+
+    def get(self, request, *args, **kwargs):
+        """Map character collection timeouts to a retryable gateway timeout."""
+        try:
+            return super().get(request, *args, **kwargs)
+        except (IOThreadCallTimeout, IOThreadCallIndeterminate):
+            return _read_timeout_response()
+
 
 class CharacterUpdateView(CharacterMixin, ObjectUpdateView):
     """
@@ -170,6 +201,45 @@ class CharacterUpdateView(CharacterMixin, ObjectUpdateView):
     # -- Django constructs --
     form_class = forms.CharacterUpdateForm
     template_name = "website/character_form.html"
+
+    def _load_dto(self):
+        """Load an owned character rather than relying only on its access rule."""
+        return run_on_io_thread(
+            load_owned_character_detail,
+            typeclass_path(self.typeclass),
+            self.kwargs.get("pk"),
+            self.kwargs.get(self.slug_url_kwarg),
+            _account_id(self.request),
+            self.access_type,
+            tuple(self.attributes),
+        )
+
+    def form_valid(self, form):
+        """Repeat ownership and access checks in the IO-owned update call."""
+        model_fields = tuple(getattr(getattr(self.form_class, "Meta", None), "fields", ()))
+        data = {key: value for key, value in form.cleaned_data.items() if key not in model_fields}
+        try:
+            self.object, result_messages = run_on_io_thread(
+                update_owned_character_attributes,
+                typeclass_path(self.typeclass),
+                self.kwargs.get("pk"),
+                self.kwargs.get(self.slug_url_kwarg),
+                _account_id(self.request),
+                self.access_type,
+                data,
+                tuple(self.attributes),
+            )
+        except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except IOThreadCallIndeterminate:
+            return _mutation_timeout_response(indeterminate=True)
+        except IOThreadCallTimeout:
+            return _mutation_timeout_response(indeterminate=False)
+        for result_message in result_messages:
+            messages.success(self.request, result_message)
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class CharacterDetailView(CharacterMixin, ObjectDetailView):
@@ -187,25 +257,6 @@ class CharacterDetailView(CharacterMixin, ObjectDetailView):
     attributes = ["name", "desc"]
     access_type = "view"
 
-    def get_queryset(self):
-        """
-        This method will override the Django get_queryset method to return a
-        list of all characters the user may access.
-
-        Returns:
-            queryset (QuerySet): Django queryset for use in the given view.
-
-        """
-        account = self.request.user
-
-        # Return a queryset consisting of characters the user is allowed to
-        # see.
-        ids = [
-            obj.id for obj in self.typeclass.objects.all() if obj.access(account, self.access_type)
-        ]
-
-        return self.typeclass.objects.filter(id__in=ids).order_by(Lower("db_key"))
-
 
 class CharacterDeleteView(CharacterMixin, ObjectDeleteView):
     """
@@ -216,6 +267,40 @@ class CharacterDeleteView(CharacterMixin, ObjectDeleteView):
 
     # using the character form fails there
     form_class = forms.EvenniaForm
+
+    def _load_dto(self):
+        """Load an owned deletion target through the IO service."""
+        return run_on_io_thread(
+            load_owned_character_detail,
+            typeclass_path(self.typeclass),
+            self.kwargs.get("pk"),
+            self.kwargs.get(self.slug_url_kwarg),
+            _account_id(self.request),
+            self.access_type,
+            tuple(self.attributes),
+        )
+
+    def post(self, request, *args, **kwargs):
+        """Authorize ownership and delete without invoking Django's live-model path."""
+        try:
+            key = run_on_io_thread(
+                delete_character,
+                typeclass_path(self.typeclass),
+                self.kwargs.get("pk"),
+                self.kwargs.get(self.slug_url_kwarg),
+                _account_id(request),
+                self.access_type,
+            )
+        except (WebObjectNotFound, WebObjectSlugMismatch) as err:
+            raise Http404(str(err)) from err
+        except WebObjectPermissionDenied as err:
+            raise PermissionDenied(str(err)) from err
+        except IOThreadCallIndeterminate:
+            return _mutation_timeout_response(indeterminate=True)
+        except IOThreadCallTimeout:
+            return _mutation_timeout_response(indeterminate=False)
+        messages.success(request, "Successfully deleted '%s'." % key)
+        return HttpResponseRedirect(self.success_url)
 
 
 class CharacterCreateView(CharacterMixin, ObjectCreateView):
@@ -228,6 +313,12 @@ class CharacterCreateView(CharacterMixin, ObjectCreateView):
     # -- Django constructs --
     template_name = "website/character_form.html"
 
+    def get_form_kwargs(self):
+        """Do not pass ModelForm-only state into the scalar create form."""
+        kwargs = super().get_form_kwargs()
+        kwargs.pop("instance", None)
+        return kwargs
+
     def form_valid(self, form):
         """
         Django hook, modified for Evennia.
@@ -238,31 +329,22 @@ class CharacterCreateView(CharacterMixin, ObjectCreateView):
         proceeds with creating the Character object.
 
         """
-        # Get account object creating the character
-        account = self.request.user
-        character = None
-
-        # Get attributes from the form
-        self.attributes = {k: form.cleaned_data[k] for k in form.cleaned_data.keys()}
-        charname = self.attributes.pop("db_key")
-        description = self.attributes.pop("desc")
-        # Create a character
-        character, errors = self.typeclass.create(charname, account, description=description)
-
-        if errors:
-            # Echo error messages to the user
-            [messages.error(self.request, x) for x in errors]
-
-        if character:
-            # Assign attributes from form
-            for key, value in self.attributes.items():
-                setattr(character.db, key, value)
-
-            # Return the user to the character management page, unless overridden
-            messages.success(self.request, "Your character '%s' was created!" % character.name)
+        attributes = {key: value for key, value in form.cleaned_data.items()}
+        try:
+            result = run_on_io_thread(
+                create_character,
+                typeclass_path(self.typeclass),
+                _account_id(self.request),
+                attributes,
+            )
+        except IOThreadCallIndeterminate:
+            return _mutation_timeout_response(indeterminate=True)
+        except IOThreadCallTimeout:
+            return _mutation_timeout_response(indeterminate=False)
+        for error in result.errors:
+            messages.error(self.request, error)
+        if result.created:
+            messages.success(self.request, "Your character '%s' was created!" % result.key)
             return HttpResponseRedirect(self.success_url)
-
-        else:
-            # Call the Django "form failed" hook
-            messages.error(self.request, "Your character could not be created.")
-            return self.form_invalid(form)
+        messages.error(self.request, "Your character could not be created.")
+        return self.form_invalid(form)

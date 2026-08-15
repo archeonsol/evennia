@@ -290,6 +290,7 @@ class CharacterCreateView(EvenniaWebTest):
 class CharacterPuppetView(EvenniaWebTest):
     url_name = "character-puppet"
     unauthenticated_response = 302
+    authenticated_response = 405
 
     def get_kwargs(self):
         return {"pk": self.char1.pk, "slug": slugify(self.char1.name)}
@@ -301,7 +302,7 @@ class CharacterPuppetView(EvenniaWebTest):
 
         # Try to access puppet page for char2
         kwargs = {"pk": self.char2.pk, "slug": slugify(self.char2.name)}
-        response = self.client.get(reverse(self.url_name, kwargs=kwargs), follow=True)
+        response = self.client.post(reverse(self.url_name, kwargs=kwargs), follow=True)
         self.assertTrue(
             response.status_code >= 400,
             "Invalid access should return a 4xx code-- either obj not found or permission denied!"
