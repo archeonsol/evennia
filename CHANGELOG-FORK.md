@@ -25,6 +25,23 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.196 — Expose get_all() on AttributeHandler for appearance prefetch
+
+### Engine
+
+- [`AttributeHandler.get_all`](evennia/typeclasses/attributes.py) now delegates
+  directly to `self.backend.get_all_attributes()`. This aligns `AttributeHandler`
+  with `DbHolder.get_all` and resolves an `AttributeError` during appearance
+  node attribute prefetching (`appearance.py:620`).
+
+### Tests
+
+- AttributeHandler get_all delegates cleanly to backend attribute retrieval.
+
+### Migration
+
+- No downstream migration required.
+
 ## 6.0.0+underspire.195 — Async compatibility uses one suspension bridge
 
 ### Engine

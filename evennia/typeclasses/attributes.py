@@ -1086,6 +1086,18 @@ class AttributeHandler:
         self.obj = obj
         self.backend = backend_class(self, self._attrtype)
 
+    def get_all(self):
+        """Return all Attributes on this object (delegates to the backend).
+
+        This is used by the appearance prefetch system to warm the cache
+        before rendering.
+
+        Returns:
+            list of IAttribute: Every attribute on this object, sorted by id.
+
+        """
+        return self.backend.get_all_attributes()
+
     def has(self, key=None, category=None):
         """
         Checks if the given Attribute (or list of Attributes) exists on
