@@ -25,6 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.194 — Interactive actions wait across coroutine drivers
+
+### Engine
+
+- [`RuleEngine`](evennia/actions/engine.py) adapts asyncio futures and Twisted
+  Deferreds at suspension boundaries according to the active coroutine driver.
+  Interactive prompts and menus now wait for player input instead of failing
+  with `RuntimeError: await wasn't used with future` when command dispatch is
+  driven through Twisted compatibility code.
+- The same boundary preserves Deferred-returning rules when dispatch runs as a
+  native asyncio task. Synchronous rules and provider dispatch are unchanged.
+
+### Tests
+
+- Action-engine coverage exercises a pending asyncio input future under a
+  Twisted coroutine driver and a pending Deferred under a native asyncio task.
+- The downstream handset and interaction suites pass against this release.
+
+### Migration
+
+No migration is required.
+
+---
+
 ## 6.0.0+underspire.193 — Games define equipped action providers
 
 ### Engine
