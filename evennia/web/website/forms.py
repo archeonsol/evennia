@@ -165,7 +165,7 @@ class CharacterForm(ObjectForm):
     )
 
 
-class CharacterUpdateForm(CharacterForm):
+class CharacterUpdateForm(EvenniaForm):
     """
     This is a Django form for updating Evennia Character objects.
 
@@ -176,4 +176,16 @@ class CharacterUpdateForm(CharacterForm):
 
     """
 
-    pass
+    db_key = forms.CharField(label="Name", max_length=255)
+    desc = forms.CharField(
+        label="Description",
+        max_length=2048,
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="A brief description of your character.",
+    )
+
+    class Meta:
+        """Identify core fields that the Attribute-only update view ignores."""
+
+        fields = ("db_key",)

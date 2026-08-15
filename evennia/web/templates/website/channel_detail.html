@@ -16,7 +16,7 @@
         
         <ol class="breadcrumb">
           <li class="breadcrumb-item"><a href="{% url 'channels' %}">Channels</a></li>
-          <li class="breadcrumb-item active" aria-current="page">{{ object.db_key|title }}</li>
+          <li class="breadcrumb-item active" aria-current="page">{{ object.key|title }}</li>
         </ol>
         <hr />
 
@@ -28,7 +28,7 @@
             <!-- heading -->
             <div class="card border-light">
               <div class="card-body">
-                {% if object.db.desc and object.db.desc != None %}{{ object.db.desc }}{% else %}No description provided.{% endif %}
+                {% if object.description %}{{ object.description }}{% else %}No description provided.{% endif %}
               </div>
             </div>
             <hr />
@@ -48,7 +48,7 @@
             
             {% if request.user.is_staff %}
             <!-- admin button -->
-            <a class="btn btn-info btn-block mb-3" href="{{ object.web_get_admin_url }}">Admin</a>
+            <a class="btn btn-info btn-block mb-3" href="{{ object.admin_url }}">Admin</a>
             <!-- end admin button -->
             <hr />
             {% endif %}
@@ -63,7 +63,7 @@
                 </dl>
                 <dl>
                   <dt>Subscriptions</dt>
-                  <dd>{{ object.subscriptions.all|length }}</dd>
+                  <dd>{{ object.subscription_count }}</dd>
                 </dl>
               </div>
             </div>

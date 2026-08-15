@@ -18,6 +18,7 @@ evennia.web.website.views
    evennia.web.website.views.errors
    evennia.web.website.views.help
    evennia.web.website.views.index
+   evennia.web.website.views.io
    evennia.web.website.views.mixins
    evennia.web.website.views.objects
 
