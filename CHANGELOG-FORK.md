@@ -25,6 +25,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.202 — Add bounded canonical Attribute snapshots
+
+### Engine
+
+- Added `read_attribute_snapshots()` for aggregate services that need the same
+  normal Attributes from a bounded set of model rows. It reconciles canonical
+  JSONB row state, durable spool intent, post-save outcomes, dirty values,
+  conflicts, and tombstones instead of bypassing the handler through raw
+  `db_attrs` reads.
+- The public API accepts only concrete model classes, known database aliases,
+  at most 100 concrete row IDs, and at most 32 normalized keys. It returns only
+  recursively plain values and fails the complete read closed when state or
+  serialization is unsafe.
+- Aggregate results are capped at 32 levels, 10,000 decoded values, and 1 MiB
+  of UTF-8 text, including repeated output keys.
+
+### Performance
+
+- Real post-save lifecycle tests issue one JSONB document query for both one
+  row and 100 rows. Aggregate web readers no longer need one reconciliation
+  query per object; the remaining spool coordination is explicitly bounded by
+  the 100-row input cap.
+
+### Tests
+
+- Added lifecycle coverage for dirty handler parity, same-path conflicts,
+  durable spool witnesses, deletion tombstones, deterministic multi-row lock
+  order, handler key/category normalization, malformed and lazy inputs, and
+  aggregate depth, node, and UTF-8 byte limits.
+
+### Migration
+
+- No database migration is required. Aggregate IO services should pass scalar
+  IDs in concrete lists or tuples and consume the returned plain mapping.
+  Reading `db_attrs` directly or inspecting private JSONB row state remains
+  unsupported.
+
 ## 6.0.0+underspire.201 — Restore safe character mixin compatibility
 
 ### Engine
