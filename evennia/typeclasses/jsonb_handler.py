@@ -312,6 +312,7 @@ class JsonbRowState:
 
 _ROW_STATES = WeakValueDictionary()
 _STRONG_ROW_STATES = {}
+_MISSING_ROW_MARKER = "_jsonb_row_missing"
 
 
 def _existing_row_state(key):
@@ -330,6 +331,12 @@ def _get_row_state(obj):
     _require_io_thread("JSONB Attribute state creation")
     key = _row_key(obj)
     state = _ROW_STATES.get(key)
+    if obj.__dict__.get(_MISSING_ROW_MARKER) == key:
+        if state is not None and state.row_missing:
+            return state
+        state = JsonbRowState(obj)
+        _mark_row_missing(state, register=False)
+        return state
     if state is not None:
         return state
     if protected_mutation_active():
@@ -371,15 +378,44 @@ def discard_jsonb_row_states():
     _ROW_STATES.clear()
 
 
-def _mark_row_missing(state):
+def _mark_row_missing(state, *, register=True):
     """Quarantine live handlers after their backing row disappears."""
+    obj = state.obj_ref()
+    if obj is not None:
+        obj.__dict__[_MISSING_ROW_MARKER] = state.key
+    state.pending_checked = True
     state.pending_blocked = True
     state.row_missing = True
     state.generation += 1
-    _ROW_STATES[state.key] = state
-    _STRONG_ROW_STATES[state.key] = state
+    if register:
+        _ROW_STATES[state.key] = state
+        _STRONG_ROW_STATES[state.key] = state
     for backend in list(state.backends):
         IAttributeBackend.reset_cache(backend)
+
+
+def _tombstone_idmapper_row(obj):
+    """Install a strong missing-row state without materializing an Attribute handler."""
+    _require_io_thread("idmapper missing-row tombstone")
+    key = _row_key(obj)
+    state = _existing_row_state(key)
+    if state is None:
+        state = JsonbRowState(obj)
+        _ROW_STATES[key] = state
+    _mark_row_missing(state)
+
+
+def _retire_recreated_row_tombstone(obj):
+    """Give a newly inserted row fresh state without reviving stale objects."""
+    _require_io_thread("JSONB recreated-row initialization")
+    key = _row_key(obj)
+    state = _existing_row_state(key)
+    if state is not None and state.row_missing:
+        if _ROW_STATES.get(key) is state:
+            _ROW_STATES.pop(key, None)
+        if _STRONG_ROW_STATES.get(key) is state:
+            _STRONG_ROW_STATES.pop(key, None)
+    obj.__dict__.pop(_MISSING_ROW_MARKER, None)
 
 
 def _delete_row_key(obj, using=None):
@@ -1276,6 +1312,7 @@ class JsonbAttributeBackend(IAttributeBackend):
 
     def _assert_readable(self):
         """Refuse to expose a row whose durable logical head is unresolved."""
+        _require_io_thread("JSONB Attribute read")
         active = _ACTIVE_MUTATION.get()
         if active is not None and active.phase != "POSTCOMMIT":
             raise AttributeUpdateUsageError(
@@ -1671,6 +1708,12 @@ class JsonbAttributeBackend(IAttributeBackend):
                 raise AttributeUpdateUnavailable(
                     "JSONB Attribute cache reset could not reconcile live handlers."
                 ) from err
+
+    def idmapper_trim_cache(self):
+        """Drop derived handler caches without reconciling durable row state."""
+        _require_io_thread("JSONB idmapper cache trim")
+        for backend in list(self._row_state.backends):
+            IAttributeBackend.reset_cache(backend)
 
 
 def _sync_live_backends(state, *, invalidate):

@@ -33,6 +33,11 @@ RUNTIME_TASKS_ACTIVE = None
 RUNTIME_TASKS_TOTAL = None
 RUNTIME_DB_SCOPE_CLOSES_TOTAL = None
 RUNTIME_DB_UNMANAGED_TOTAL = None
+IDMAPPER_FLUSH_DURATION_SECONDS = None
+IDMAPPER_FLUSH_BATCHES_TOTAL = None
+IDMAPPER_FLUSH_OBJECTS_TOTAL = None
+IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = None
+IDMAPPER_FLUSH_FAILURES_TOTAL = None
 
 _METRICS_READY = False
 
@@ -53,6 +58,9 @@ def _init_metrics() -> bool:
     global AUTHORIZATION_DECISIONS_TOTAL, AUTHORIZATION_DURATION_SECONDS
     global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
     global RUNTIME_DB_UNMANAGED_TOTAL
+    global IDMAPPER_FLUSH_DURATION_SECONDS, IDMAPPER_FLUSH_BATCHES_TOTAL
+    global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
+    global IDMAPPER_FLUSH_FAILURES_TOTAL
 
     if _METRICS_READY:
         return ATTR_FLUSH_TOTAL is not None
@@ -148,6 +156,28 @@ def _init_metrics() -> bool:
         "evennia_runtime_db_unmanaged_total",
         "Django connections opened by unmanaged asyncio contexts",
     )
+    IDMAPPER_FLUSH_DURATION_SECONDS = Histogram(
+        "evennia_idmapper_flush_duration_seconds",
+        "Wall time spent completing one automatic idmapper pressure sweep",
+        buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
+    )
+    IDMAPPER_FLUSH_BATCHES_TOTAL = Counter(
+        "evennia_idmapper_flush_batches_total",
+        "Bounded reactor turns used by automatic idmapper pressure sweeps",
+    )
+    IDMAPPER_FLUSH_OBJECTS_TOTAL = Counter(
+        "evennia_idmapper_flush_objects_total",
+        "Idmapper objects processed by automatic pressure sweeps",
+        ("outcome",),
+    )
+    IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = Counter(
+        "evennia_idmapper_flush_row_queries_total",
+        "Bulk backing-row existence queries used by idmapper pressure sweeps",
+    )
+    IDMAPPER_FLUSH_FAILURES_TOTAL = Counter(
+        "evennia_idmapper_flush_failures_total",
+        "Automatic idmapper pressure sweeps aborted by an error",
+    )
     return True
 
 
@@ -171,6 +201,27 @@ def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = N
         ATTR_FLUSH_BACKENDS_TOTAL.inc(backends)
     if duration_seconds is not None and ATTR_FLUSH_DURATION_SECONDS is not None:
         ATTR_FLUSH_DURATION_SECONDS.observe(duration_seconds)
+
+
+def record_idmapper_flush(
+    stats: dict, *, duration_seconds: Optional[float] = None, failed: bool = False
+) -> None:
+    """Record one completed or aborted automatic idmapper pressure sweep."""
+    if not stats or not _init_metrics():
+        return
+    if duration_seconds is not None and IDMAPPER_FLUSH_DURATION_SECONDS is not None:
+        IDMAPPER_FLUSH_DURATION_SECONDS.observe(max(0.0, float(duration_seconds)))
+    if IDMAPPER_FLUSH_BATCHES_TOTAL is not None:
+        IDMAPPER_FLUSH_BATCHES_TOTAL.inc(int(stats.get("batches") or 0))
+    if IDMAPPER_FLUSH_OBJECTS_TOTAL is not None:
+        for outcome in ("retained", "evicted", "stale"):
+            count = int(stats.get(outcome) or 0)
+            if count:
+                IDMAPPER_FLUSH_OBJECTS_TOTAL.labels(outcome=outcome).inc(count)
+    if IDMAPPER_FLUSH_ROW_QUERIES_TOTAL is not None:
+        IDMAPPER_FLUSH_ROW_QUERIES_TOTAL.inc(int(stats.get("row_queries") or 0))
+    if failed and IDMAPPER_FLUSH_FAILURES_TOTAL is not None:
+        IDMAPPER_FLUSH_FAILURES_TOTAL.inc()
 
 
 def record_location_cmdset_cache_hit() -> None:

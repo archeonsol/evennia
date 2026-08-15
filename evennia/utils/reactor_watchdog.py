@@ -80,6 +80,9 @@ class ReactorStallWatchdog:
         self._running = False
         self._sampler_thread = None
         self._target_thread_id = None
+        self._state_lock = threading.Lock()
+        self._heartbeat_episode = 0
+        self._sample_episode = None
         self._last_sample_log_time = 0.0
 
     @property
@@ -92,11 +95,14 @@ class ReactorStallWatchdog:
         if not self.enabled or self._loop.running:
             return
         self._last = None
-        self._last_heartbeat = self._now()
+        with self._state_lock:
+            self._last_heartbeat = self._now()
+            self._heartbeat_episode += 1
+            self._sample_episode = None
+            self._last_sample_log_time = 0.0
         self._running = True
-        self._target_thread_id = (
-            clock.get_loop_thread_id()
-            or (threading.main_thread().ident if threading.main_thread() else None)
+        self._target_thread_id = clock.get_loop_thread_id() or (
+            threading.main_thread().ident if threading.main_thread() else None
         )
         self._loop.start(self.interval, now=False)
         self._start_sampler_thread()
@@ -121,37 +127,63 @@ class ReactorStallWatchdog:
     def _sampler_loop(self) -> None:
         """Background thread that sleeps and checks if the reactor thread is frozen."""
         sample_interval = max(0.1, min(0.5, self.sample_threshold_ms / 3000.0))
-        sample_threshold_s = self.sample_threshold_ms / 1000.0
         while self._running:
             time.sleep(sample_interval)
             if not self._running:
                 break
+            self._sample_stall(self._now())
+
+    def _stall_candidate(self, now):
+        """Return ``(elapsed, episode)`` for a current qualifying stall."""
+        with self._state_lock:
             last = self._last_heartbeat
-            if last is None:
-                continue
-            now = self._now()
-            elapsed_s = now - last
-            if elapsed_s >= sample_threshold_s:
-                # Stall detected in progress!
-                # Rate-limit stack logging to once every 5 seconds per stall episode
-                if now - self._last_sample_log_time >= 5.0:
-                    self._last_sample_log_time = now
-                    target_id = self._target_thread_id or (
-                        clock.get_loop_thread_id()
-                        or (threading.main_thread().ident if threading.main_thread() else None)
-                    )
-                    frame = sys._current_frames().get(target_id) if target_id else None
-                    if frame:
-                        stack_str = "".join(traceback.format_stack(frame))
-                        logger.log_warn(
-                            f"Live reactor stall in progress (~{elapsed_s * 1000.0:.0f}ms blocked)! "
-                            f"Live IO thread execution stack:\n{stack_str}"
-                        )
+            episode = self._heartbeat_episode
+        if last is None:
+            return None
+        elapsed_s = now - last
+        if elapsed_s < self.sample_threshold_ms / 1000.0:
+            return None
+        return elapsed_s, episode
+
+    def _reserve_sample(self, episode, now):
+        """Atomically reserve a rate-limited sample for one current episode."""
+        with self._state_lock:
+            if episode != self._heartbeat_episode:
+                return False
+            if self._sample_episode == episode and now - self._last_sample_log_time < 5.0:
+                return False
+            self._sample_episode = episode
+            self._last_sample_log_time = now
+            return True
+
+    def _sample_stall(self, now):
+        """Capture one live stack if a current episode is eligible."""
+        candidate = self._stall_candidate(now)
+        if candidate is None:
+            return False
+        elapsed_s, episode = candidate
+        if not self._reserve_sample(episode, now):
+            return False
+        target_id = self._target_thread_id or (
+            clock.get_loop_thread_id()
+            or (threading.main_thread().ident if threading.main_thread() else None)
+        )
+        frame = sys._current_frames().get(target_id) if target_id else None
+        if frame:
+            stack_str = "".join(traceback.format_stack(frame))
+            logger.log_warn(
+                f"Live reactor stall in progress (~{elapsed_s * 1000.0:.0f}ms blocked)! "
+                f"Live IO thread execution stack:\n{stack_str}"
+            )
+            return True
+        return False
 
     def _tick(self) -> None:
         """Measure the gap since the last tick; warn if it exceeds threshold."""
         now = self._now()
-        self._last_heartbeat = now
+        with self._state_lock:
+            self._last_heartbeat = now
+            self._heartbeat_episode += 1
         if self._last is not None:
             stall_ms = (now - self._last - self.interval) * 1000.0
             if stall_ms > self.threshold_ms:
