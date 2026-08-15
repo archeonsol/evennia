@@ -25,6 +25,73 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.198 — Bound JSONB-aware idmapper pressure maintenance
+
+### Engine
+
+- [`idmapper.models`](evennia/utils/idmapper/models.py): Automatic memory-pressure
+  cache cleanup now advances through bounded reactor turns instead of rebuilding
+  every concrete cache synchronously. Backing-row existence probes run in the
+  database-hygienic worker pool and return primitive results to an isolated IO-thread
+  callback, which revalidates the active sweep epoch and captured cache identity.
+- [`TypedObject.at_idmapper_flush`](evennia/typeclasses/models.py) and
+  [`JsonbAttributeBackend.idmapper_trim_cache`](evennia/typeclasses/jsonb_handler.py):
+  NAttribute-pinned objects now trim only derived Attribute materialization. The
+  automatic path does not scan the durable spool, take a row lock, open a transaction,
+  or reconcile canonical row documents.
+- Missing backing rows receive strong process-local tombstones before eviction.
+  Tombstones mark every stale instance, including handlerless duplicate identities,
+  while explicit primary-key recreation gives the inserted row fresh state without
+  reviving old references.
+- JSONB reads now enforce the same Server IO-thread ownership as mutations. The
+  default post-save cache hook applies tombstone ownership only to models with a
+  coordinator-owned `db_attrs` field.
+- Automatic sweep continuations are epoch-cancelled on explicit flush and shutdown.
+  Constant-size per-object epoch markers detect cache mutation without an aggregate
+  collection to destroy on completion, failure, or cancellation. Explicit flushes
+  remain synchronous, with existence queries chunked to backend parameter limits.
+- [`ReactorStallWatchdog`](evennia/utils/reactor_watchdog.py) now rate-limits live
+  stack samples per synchronized heartbeat episode, so recovery cannot suppress the
+  first sample of a later stall.
+
+### Settings and observability
+
+- Added `IDMAPPER_FLUSH_BATCH_SIZE` (default 100 objects) and
+  `IDMAPPER_FLUSH_BATCH_BUDGET_MS` (default 10ms of IO-thread object work per turn).
+- Added `evennia_idmapper_flush_*` metrics for total duration, reactor batches,
+  retained/evicted/stale outcomes, worker row queries, and aborted sweeps.
+
+### Performance
+
+- Before this release, one pressure-triggered maintenance callback walked the full
+  cache and could perform one spool reconciliation plus one locking transaction and
+  commit per retained JSONB row. A production trace captured that callback blocked in
+  `JsonbAttributeBackend.reset_cache()` for more than 66 seconds.
+- The deterministic regression baseline processes five retained objects in three
+  two-object turns; the default production bound is at most 100 captured objects and
+  10ms of local hook work per reactor turn. Database waits occur in the worker pool,
+  and no per-retained-row spool or transaction I/O remains on the reactor.
+
+### Tests
+
+- Added bounded-sweep coverage for batch rotation, elapsed-time yielding, worker query
+  handoff/resume, query failure, cache removal/replacement, explicit-query chunking,
+  scheduling failure, shutdown cancellation, and constant-size epoch bookkeeping.
+- Added JSONB coverage for prewarmed worker reads, zero-I/O trim invariants, external
+  deletion with and without a materialized handler, duplicate stale identities, and
+  primary-key recreation.
+- Added watchdog episode/cooldown interleaving coverage. The final focused suite ran
+  167 tests; the combined JSONB, idmapper, clock/defer, typeclass, server lifecycle,
+  and runtime database suite ran 274 tests.
+
+### Migration
+
+- No database migration is required. Web/ASGI code must dispatch complete JSONB
+  Attribute operations to the Server IO thread and return plain values rather than
+  live handlers or mutable Attribute proxies.
+
+---
+
 ## 6.0.0+underspire.197 — Active live-stack sampler thread for reactor stall diagnosis
 
 ### Engine
