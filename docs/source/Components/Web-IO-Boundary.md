@@ -48,12 +48,22 @@ rejection but cannot authorize the mutation.
 
 ## Stock website behavior
 
-The stock character detail/update and channel list/detail views use IO services
-and frozen DTOs. Character update validation is scalar-only on the worker; the
-service reloads the character, repeats slug and access checks, writes Attributes,
-and serializes the result in one callback. Channel services serialize access,
-description, subscription count, and URLs. They return the log filename as a
-string so logfile reads remain on the worker instead of blocking the IO loop.
+The stock character list, management, detail, create, update, delete, and puppet
+routes use IO services and frozen DTOs. Character forms validate scalar input on
+the worker. Services reload the account and character, repeat slug, ownership,
+and access checks, perform any mutation, and serialize the result in one
+callback. Puppet selection is a POST-only, CSRF-protected mutation.
+
+The character page service coalesces its rows and navigation menu into one IO
+call. Other authenticated pages load the navigation menu through one fail-soft
+IO call; a timeout leaves the menu empty rather than failing the page. Stock
+templates consume `detail_url`, `update_url`, `delete_url`, `puppet_url`,
+`location_key`, and other scalar DTO fields. They must not dereference `.db`,
+relations, or live object methods.
+
+Channel services serialize access, description, subscription count, and URLs.
+They return the log filename as a string so logfile reads remain on the worker
+instead of blocking the IO loop.
 
 The object-admin account-link action likewise passes only object and actor IDs,
 then resolves and performs the complete account/object/capability mutation in
