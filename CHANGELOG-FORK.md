@@ -25,6 +25,52 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.199 — Own game-state access in stock web views
+
+### Engine
+
+- [`evennia.web.utils.io`](evennia/web/utils/io.py) is the canonical synchronous
+  bridge from Django workers to Evennia's bound IO loop. It rejects awaitable
+  callbacks and distinguishes a callback cancelled before execution from one
+  whose outcome is unknown because it already started.
+- Stock character detail/update and channel list/detail views now resolve,
+  authorize, read or mutate, and serialize game state inside one IO callback.
+  Frozen DTOs replace live typeclasses, handlers, subscription managers, and
+  lazy query objects in template contexts.
+- Character-update validation is scalar-only on the worker. The IO service
+  reloads the target and account, repeats slug and access checks, writes the
+  requested Attributes, and serializes the result without returning a live
+  object.
+- Channel services serialize descriptions, subscription counts, and URLs. Only
+  the logfile path crosses back, so log tailing remains worker-side and cannot
+  block the server loop.
+- The object-admin account-link operation now reloads and updates the object,
+  account roster, `_last_puppet`, and puppet capability in one IO-owned call.
+
+### Web contract
+
+- Read timeouts return HTTP 504. A mutation cancelled before it starts returns
+  retryable HTTP 503; a mutation that already started returns non-retryable HTTP
+  202 and never follows the normal redirect/success path.
+- See [Web IO Boundary](docs/source/Components/Web-IO-Boundary.md) for the worker
+  ownership, DTO, and timeout contracts. Downstream template overrides must use
+  the DTO fields documented there rather than `.db` or live handler methods.
+
+### Tests
+
+- Added bridge scheduling, cancellation, unknown-outcome, and awaitable-rejection
+  coverage; DTO and template non-escape checks; character and channel route
+  coverage; admin mutation timeout tests; and a real Django ASGI request proving
+  that a synchronous view returns to the bound IO loop.
+
+### Migration
+
+- No database migration is required. Downstream games should import
+  `run_on_io_thread` and its timeout exceptions from `evennia.web.utils.io`.
+  Character and channel template overrides must consume the frozen DTO fields.
+
+---
+
 ## 6.0.0+underspire.198 — Bound JSONB-aware idmapper pressure maintenance
 
 ### Engine
