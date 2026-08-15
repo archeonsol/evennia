@@ -92,8 +92,11 @@ adding a `get_display_<slot>` plus referencing it from
 **`get_<other>`**: state queries or configuration providers.
 Examples: `get_numbered_name` (pluralization), `get_search_candidates`
 (search-pipeline stage), `get_default_lockstring` (per-class lock
-defaults), `get_cmdset_providers` (cmdset-handler plumbing).
-Heterogeneous by return type; see §3 reference table.
+defaults), `get_cmdset_providers` (cmdset-handler plumbing), and
+`get_equipped_rule_providers` (game-defined action-rule equipment).
+Heterogeneous by return type; see §3 reference table. Query hooks return
+content and do not mutate the queried object; callers define whether `None`
+has distinct meaning from an empty value.
 
 **`return_*`**: a composite renderer that joins `get_display_*`
 slots. Today only `return_appearance` uses this prefix; treat the
@@ -1191,5 +1194,4 @@ _None: every `at_pre_*` / `at_post_*` / `at_failed_*` name matches its declared 
 | `DefaultAccount.at_msg_send` | Misshapen veto: at_<event> name. Falsy-not-None aborts the send. |
 | `TypedObject.at_idmapper_flush` | Misshapen: at_<event> name with veto contract. Return False keeps the object cached. |
 <!-- hooks-gen:end -->
-
 

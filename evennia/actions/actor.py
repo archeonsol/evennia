@@ -142,10 +142,24 @@ class Actor:
 
     @property
     def equipped_items(self):
-        """Items whose rules intercept this actor's actions (worn / wielded)."""
+        """Items whose rules intercept this actor's actions (worn / wielded).
+
+        A focus body may define ``get_equipped_rule_providers()`` to supply its
+        game-specific equipment view. An implemented hook is authoritative:
+        ``None`` and an empty iterable both mean no equipped providers. Bodies
+        without the hook retain the legacy ``ndb.equipped_for_rules`` behavior.
+
+        Returns:
+            list: Equipped rule providers in game-defined precedence order.
+
+        """
         body = self.focus
         if body is None:
             return []
+        provider_hook = getattr(body, "get_equipped_rule_providers", None)
+        if callable(provider_hook):
+            providers = provider_hook()
+            return list(providers) if providers is not None else []
         ndb = getattr(body, "ndb", None)
         return list(getattr(ndb, "equipped_for_rules", None) or []) if ndb else []
 

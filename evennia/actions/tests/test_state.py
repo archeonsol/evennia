@@ -128,6 +128,67 @@ class TestActor(unittest.TestCase):
         actor = Actor(character=None, account=FakeObj("acct"))
         self.assertIsNone(actor.location)
 
+    def test_equipped_items_falls_back_to_legacy_ndb(self):
+        char = FakeChar()
+        item = FakeObj("sword")
+        char.ndb.equipped_for_rules = [item]
+
+        self.assertEqual(Actor(character=char).equipped_items, [item])
+
+    def test_equipped_items_uses_hook_and_materializes_once(self):
+        char = FakeChar()
+        first = FakeObj("first")
+        second = FakeObj("second")
+        calls = {"hook": 0, "yield": 0}
+
+        def providers():
+            calls["hook"] += 1
+
+            def generate():
+                for item in (first, second):
+                    calls["yield"] += 1
+                    yield item
+
+            return generate()
+
+        char.get_equipped_rule_providers = providers
+
+        self.assertEqual(Actor(character=char).equipped_items, [first, second])
+        self.assertEqual(calls, {"hook": 1, "yield": 2})
+
+    def test_equipped_items_hook_empty_is_authoritative(self):
+        legacy = FakeObj("legacy")
+        for result in (None, []):
+            with self.subTest(result=result):
+                char = FakeChar()
+                char.ndb.equipped_for_rules = [legacy]
+                char.get_equipped_rule_providers = lambda result=result: result
+
+                self.assertEqual(Actor(character=char).equipped_items, [])
+
+    def test_equipped_items_propagates_hook_invocation_error(self):
+        char = FakeChar()
+
+        def providers():
+            raise RuntimeError("hook failed")
+
+        char.get_equipped_rule_providers = providers
+
+        with self.assertRaisesRegex(RuntimeError, "hook failed"):
+            Actor(character=char).equipped_items
+
+    def test_equipped_items_propagates_hook_iteration_error(self):
+        char = FakeChar()
+
+        def providers():
+            yield FakeObj("first")
+            raise RuntimeError("iteration failed")
+
+        char.get_equipped_rule_providers = providers
+
+        with self.assertRaisesRegex(RuntimeError, "iteration failed"):
+            Actor(character=char).equipped_items
+
 
 # --- state functions --------------------------------------------------------
 class TestStateLifecycle(unittest.TestCase):
@@ -163,18 +224,22 @@ class TestContextBuilder(unittest.TestCase):
         room = FakeObj("room")
         char = FakeChar(location=room)
         item = FakeObj("sword")
+        legacy = FakeObj("legacy")
         other = FakeObj("npc")
         target = FakeObj("ball")
-        room.contents = [char, other, target]
-        char.ndb.equipped_for_rules = [item]
+        room.contents = [char, item, other, target]
+        char.ndb.equipped_for_rules = [legacy]
+        char.get_equipped_rule_providers = lambda: [item, item]
         state = TestFlatlined()
         char.ndb.active_states = [state]
 
         actor = Actor(character=char)
         ctx = ActionContextBuilder().build(actor, "kick ball", targets=[target])
 
-        # states → effective → equipped → location → targets → other contents,
-        # with char + target de-duped out of room.contents.
+        # states → effective → equipped hook → location → targets → other
+        # contents, with duplicate equipped, char, item, and target de-duped at
+        # their first (highest-priority) occurrence. The populated legacy ndb
+        # list is ignored because the hook is authoritative.
         self.assertEqual(ctx.providers, [state, char, item, room, target, other])
         self.assertEqual(ctx.raw_string, "kick ball")
         self.assertIs(ctx.actor, actor)

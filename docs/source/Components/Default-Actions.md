@@ -52,3 +52,31 @@ Importing action-core modules alone does not register the roleplay or building
 verbs. A game should import the action families it installs and compose
 `DefaultRoleplayRules`, `CharacterBuildingRules`, and `CharacterSystemRules`
 into its Character provider.
+
+## Rule-provider context
+
+For each action, the context builder considers rule providers in this order:
+
+1. actor states;
+2. the actor/account;
+3. equipped objects;
+4. the room and its nested providers;
+5. explicit action targets;
+6. room contents.
+
+The context removes identity duplicates at their first occurrence, so an
+equipped object that is also a target keeps its equipment precedence. When an
+action type is known, providers whose classes have no matching rule are removed
+before rule evaluation.
+
+Games define the equipped slot by overriding the public query hook
+`DefaultObject.get_equipped_rule_providers()`. The hook returns an iterable in
+game-defined precedence order; `None` and an empty iterable both mean that the
+body has no equipped providers. The engine does not interpret inventory, worn,
+or wielded state and does not scan a body's contents. The default implementation
+preserves the legacy `ndb.equipped_for_rules` list.
+
+An override should compute a small equipment view from the game's existing
+state. It owns eligibility, ordering, and any game-level deduplication. Hook
+invocation and iteration errors propagate as programming errors rather than
+silently falling back to a different provider set.

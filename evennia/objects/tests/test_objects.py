@@ -46,6 +46,16 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertEqual(obj.placement, "portable")
         self.assertFalse(obj.is_fixture)
 
+    def test_equipped_rule_providers_default_to_legacy_ndb(self):
+        first = DefaultObject.create("first", location=self.char1)[0]
+        second = DefaultObject.create("second", location=self.char1)[0]
+        self.char1.ndb.equipped_for_rules = [first, second]
+
+        self.assertEqual(self.char1.get_equipped_rule_providers(), [first, second])
+
+    def test_equipped_rule_providers_default_to_empty(self):
+        self.assertEqual(self.char1.get_equipped_rule_providers(), [])
+
     def test_fixture_placement_blocks_pickup_and_ordinary_movement(self):
         obj, errors = DefaultObject.create("console", location=self.room1)
         self.assertTrue(obj, errors)
