@@ -287,6 +287,11 @@ MXP_OUTGOING_ONLY = True
 # be necessary (use @server to see how many objects are in the idmapper
 # cache at any time). Setting this to None disables the cache cap.
 IDMAPPER_CACHE_MAXSIZE = 400  # (MB)
+# Automatic pressure sweeps yield between bounded object batches so cache
+# maintenance cannot monopolize one reactor turn. Explicit/admin flushes retain
+# their synchronous contract.
+IDMAPPER_FLUSH_BATCH_SIZE = 100
+IDMAPPER_FLUSH_BATCH_BUDGET_MS = 10.0
 # This determines how many connections per second the Portal should
 # accept, as a DoS countermeasure. If the rate exceeds this number, incoming
 # connections will be queued to this rate, so none will be lost.

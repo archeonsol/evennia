@@ -886,6 +886,23 @@ class TestBlockingUpdate(BaseEvenniaTest):
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], AttributeUpdateUnavailable)
 
+    def test_prewarmed_handler_read_off_io_thread_is_rejected(self):
+        self.assertEqual(self.handler.get("state")["revision"], 1)
+        errors = []
+
+        def run():
+            try:
+                self.handler.get("state")
+            except Exception as err:
+                errors.append(err)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join()
+
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], AttributeUpdateUnavailable)
+
     def test_cache_reset_off_io_thread_is_rejected(self):
         errors = []
 
@@ -977,15 +994,184 @@ class TestBlockingUpdate(BaseEvenniaTest):
         self.assertEqual(called, [])
 
     def test_idmapper_flush_retires_cached_object_after_external_row_delete(self):
+        from evennia.objects.models import ObjectDB
+
         self.obj1.nattributes.add("keep-cached", True)
         self.obj1.attributes
         object_id = self.obj1.pk
-        type(self.obj1).objects.filter(pk=self.obj1.pk).delete()
+        ObjectDB._base_manager.filter(pk=object_id).delete()
         self.obj1.pk = object_id
+        ObjectDB.cache_instance(self.obj1)
 
-        self.assertTrue(self.obj1.at_idmapper_flush())
+        ObjectDB.flush_instance_cache()
+
+        self.assertIsNone(ObjectDB.get_cached_instance(object_id))
         with self.assertRaises(AttributeUpdateUnavailable):
             self.handler.get("state")
+
+    def test_idmapper_trim_is_zero_io_and_preserves_row_state(self):
+        self.obj1.nattributes.add("keep-cached", True)
+        proxy = self.handler.get("state")
+        proxy["revision"] = 2
+        state = self.handler.backend._row_state
+        key = state.key
+        before = {
+            "documents": (
+                deepcopy(state.committed_document),
+                deepcopy(state.durable_document),
+                deepcopy(state.visible_document),
+                deepcopy(state.volatile_baseline),
+            ),
+            "flags": (
+                state.dirty,
+                state.pending_checked,
+                state.pending_blocked,
+                state.row_missing,
+                state.sync_failed,
+            ),
+            "generations": (state.generation, deepcopy(state.path_generations)),
+        }
+
+        with (
+            patch.object(
+                jsonb_handler,
+                "_spool_row_lock",
+                side_effect=AssertionError("idmapper trim touched the spool lock"),
+            ),
+            patch.object(
+                jsonb_handler,
+                "_list_row_entries",
+                side_effect=AssertionError("idmapper trim scanned the spool"),
+            ),
+            patch.object(
+                jsonb_handler,
+                "_locked_row_query",
+                side_effect=AssertionError("idmapper trim locked the database row"),
+            ),
+            patch.object(
+                jsonb_handler.transaction,
+                "atomic",
+                side_effect=AssertionError("idmapper trim opened a transaction"),
+            ),
+        ):
+            self.assertFalse(self.obj1.at_idmapper_flush())
+
+        self.assertEqual(
+            (
+                state.committed_document,
+                state.durable_document,
+                state.visible_document,
+                state.volatile_baseline,
+            ),
+            before["documents"],
+        )
+        self.assertEqual(
+            (
+                state.dirty,
+                state.pending_checked,
+                state.pending_blocked,
+                state.row_missing,
+                state.sync_failed,
+            ),
+            before["flags"],
+        )
+        self.assertEqual(
+            (state.generation, state.path_generations),
+            before["generations"],
+        )
+        self.assertIs(jsonb_handler._STRONG_ROW_STATES[key], state)
+        proxy["revision"] = 3
+        self.assertEqual(self.handler.get("state")["revision"], 3)
+
+    def test_idmapper_missing_row_without_handler_installs_tombstone(self):
+        from evennia.objects.models import ObjectDB
+
+        other = ObjectDB._base_manager.create(
+            db_key="missing-without-handler",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={"~": {"_d": {"stale": 1}}},
+        )
+        other.nattributes.add("keep-cached", True)
+        key = jsonb_handler._row_key(other)
+        other.__dict__.pop("attributes", None)
+        jsonb_handler._ROW_STATES.pop(key, None)
+        jsonb_handler._STRONG_ROW_STATES.pop(key, None)
+        self.assertNotIn("attributes", other.__dict__)
+        object_id = other.pk
+        ObjectDB._base_manager.filter(pk=object_id).delete()
+        other.pk = object_id
+        ObjectDB.cache_instance(other)
+
+        ObjectDB.flush_instance_cache()
+
+        self.assertIsNone(ObjectDB.get_cached_instance(object_id))
+        with self.assertRaises(AttributeUpdateUnavailable):
+            other.attributes.get("stale")
+
+    def test_recreated_primary_key_gets_fresh_state_without_reviving_old_object(self):
+        from evennia.objects.models import ObjectDB
+
+        old = ObjectDB._base_manager.create(
+            db_key="old-row",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={"~": {"_d": {"stale": 1}}},
+        )
+        old.nattributes.add("keep-cached", True)
+        object_id = old.pk
+        old.__dict__.pop("attributes", None)
+        key = jsonb_handler._row_key(old)
+        jsonb_handler._ROW_STATES.pop(key, None)
+        jsonb_handler._STRONG_ROW_STATES.pop(key, None)
+        ObjectDB._base_manager.filter(pk=object_id).delete()
+        old.pk = object_id
+        ObjectDB.__instance_cache__[object_id] = old
+        ObjectDB.flush_instance_cache()
+
+        replacement = ObjectDB(
+            db_key="replacement-row",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={"~": {"_d": {"fresh": 2}}},
+        )
+        replacement.pk = object_id
+        replacement.save(force_insert=True)
+
+        self.assertEqual(replacement.attributes.get("fresh"), 2)
+        with self.assertRaises(AttributeUpdateUnavailable):
+            old.attributes.get("stale")
+
+    def test_tombstone_marks_handlerless_instance_when_another_owns_state(self):
+        from evennia.objects.models import ObjectDB
+
+        owner = ObjectDB._base_manager.create(
+            db_key="state-owner",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={},
+        )
+        owner_handler = AttributeHandler(owner, JsonbAttributeBackend)
+        key = jsonb_handler._row_key(owner)
+        other = ObjectDB(
+            db_key="same-identity",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={},
+        )
+        other.pk = owner.pk
+        other._state.db = owner._state.db
+        self.assertNotIn("attributes", other.__dict__)
+
+        jsonb_handler._tombstone_idmapper_row(other)
+        replacement = ObjectDB(
+            db_key="replacement",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={},
+        )
+        replacement.pk = owner.pk
+        replacement._state.db = owner._state.db
+        jsonb_handler._retire_recreated_row_tombstone(replacement)
+
+        self.assertTrue(owner_handler.backend._row_state.row_missing)
+        self.assertEqual(other.__dict__[jsonb_handler._MISSING_ROW_MARKER], key)
+        with self.assertRaises(AttributeUpdateUnavailable):
+            other.attributes.get("anything")
 
     def test_idmapper_flush_preserves_nattributes_on_nonmissing_unavailability(self):
         self.obj1.nattributes.add("keep-cached", True)
@@ -993,7 +1179,7 @@ class TestBlockingUpdate(BaseEvenniaTest):
 
         with patch.object(
             public_handler,
-            "reset_cache",
+            "idmapper_trim_cache",
             side_effect=AttributeUpdateUnavailable("temporary coordinator failure"),
         ):
             with self.assertRaises(AttributeUpdateUnavailable):

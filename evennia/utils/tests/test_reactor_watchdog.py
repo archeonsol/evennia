@@ -64,6 +64,82 @@ class TestStallDetection(SimpleTestCase):
         mock_warn.assert_not_called()
 
 
+class TestLiveSampling(SimpleTestCase):
+    """Live stacks are throttled within, never across, stall episodes."""
+
+    def _make(self, clock):
+        wd = ReactorStallWatchdog(
+            threshold_ms=200,
+            interval=0.05,
+            sample_threshold_ms=1000,
+            _now=clock,
+        )
+        wd._target_thread_id = 123
+        wd._last_heartbeat = 0.0
+        return wd
+
+    def _sampling_patches(self):
+        return (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: object()}),
+            patch.object(reactor_watchdog.traceback, "format_stack", return_value=["stack"]),
+            patch.object(reactor_watchdog.logger, "log_warn"),
+        )
+
+    def test_first_episode_samples_immediately_before_global_cooldown_age(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        clock.advance(2.0)
+
+        frames, formatted, warning = self._sampling_patches()
+        with frames, formatted, warning as mock_warn:
+            self.assertTrue(wd._sample_stall(clock()))
+
+        mock_warn.assert_called_once()
+
+    def test_recovery_allows_second_episode_inside_five_seconds(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        frames, formatted, warning = self._sampling_patches()
+
+        with frames, formatted, warning as mock_warn:
+            clock.advance(2.0)
+            self.assertTrue(wd._sample_stall(clock()))
+            wd._tick()
+            clock.advance(1.1)
+            self.assertTrue(wd._sample_stall(clock()))
+
+        self.assertEqual(mock_warn.call_count, 2)
+
+    def test_continuing_episode_remains_rate_limited(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        frames, formatted, warning = self._sampling_patches()
+
+        with frames, formatted, warning as mock_warn:
+            clock.advance(2.0)
+            self.assertTrue(wd._sample_stall(clock()))
+            clock.advance(1.0)
+            self.assertFalse(wd._sample_stall(clock()))
+            clock.advance(4.1)
+            self.assertTrue(wd._sample_stall(clock()))
+
+        self.assertEqual(mock_warn.call_count, 2)
+
+    def test_stale_episode_cannot_reserve_after_recovery(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        clock.advance(2.0)
+        old_candidate = wd._stall_candidate(clock())
+
+        wd._tick()
+
+        self.assertFalse(wd._reserve_sample(old_candidate[1], clock()))
+        clock.advance(1.1)
+        new_candidate = wd._stall_candidate(clock())
+        self.assertNotEqual(old_candidate[1], new_candidate[1])
+        self.assertTrue(wd._reserve_sample(new_candidate[1], clock()))
+
+
 class TestLifecycle(SimpleTestCase):
     def test_disabled_when_threshold_zero(self):
         wd = ReactorStallWatchdog(threshold_ms=0)

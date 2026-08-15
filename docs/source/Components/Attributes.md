@@ -228,6 +228,36 @@ While the JSONB backend is active, `db_attrs` is coordinator-owned on existing
 rows. A normal full model `save()` excludes that field, and an explicit
 `save(update_fields=("db_attrs",))` is rejected. Initial row creation may seed
 `db_attrs`; later changes must use Attribute APIs or a domain primitive.
+
+### Runtime ownership and idmapper maintenance
+
+JSONB handler reads and writes belong to the Server IO thread. This includes a
+read from a handler that was previously warmed on that thread: the shared row
+state remains process-local mutable state, so a worker must dispatch the whole
+lookup/authorization/serialization operation to the IO thread and return plain
+data. A Python value already returned by an Attribute read is not retroactively
+thread-synchronized; do not use mutable Attribute proxies across threads.
+
+Automatic idmapper pressure maintenance is cooperative. It examines a bounded
+number of cached objects per reactor turn and also observes a monotonic time
+budget. Objects retained for NAttributes trim only derived handler caches; that
+path never scans the durable spool, opens a transaction, or reloads a JSONB
+row. Canonical row documents, dirty/pending/quarantine state, generations, and
+live proxies remain intact. Backing-row deletion is still checked in bounded
+bulk queries on a database-hygienic worker; only primitive missing-row results
+return to the IO thread, where the sweep epoch and cache-object identity are
+revalidated. A confirmed missing row receives a strong tombstone before the
+cached object is evicted. An existence-query failure aborts the sweep and
+retains unknown objects. A constant-size epoch marker on each processed object
+detects cache mutation without building an aggregate bookkeeping collection to
+destroy on completion or cancellation.
+
+Explicit `flush_cache()` and post-migration cleanup remain synchronous, but
+their row-existence queries are chunked to the database backend's parameter
+limit. Tune automatic work with `IDMAPPER_FLUSH_BATCH_SIZE` and
+`IDMAPPER_FLUSH_BATCH_BUDGET_MS`; monitor the
+`evennia_idmapper_flush_*` metrics for duration, batches, outcomes, row queries,
+and failures.
 Supported instance deletion also owns its transaction, requires autocommit,
 and rejects any pending DELTA or protected-commit witness before removing the
 row. Use a domain-specific coordinator for deletion inside a wider transaction.

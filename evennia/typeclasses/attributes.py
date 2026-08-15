@@ -742,6 +742,10 @@ class IAttributeBackend:
         self._cache = {}
         self._catcache = {}
 
+    def idmapper_trim_cache(self):
+        """Discard disposable handler materialization during idmapper retention."""
+        self.reset_cache()
+
     def do_create_attribute(self, key, category, lockstring, value, strvalue):
         """
         Does the hard work of actually creating Attributes, whatever is needed.
@@ -1395,6 +1399,10 @@ class AttributeHandler:
 
     def reset_cache(self):
         self.backend.reset_cache()
+
+    def idmapper_trim_cache(self):
+        """Discard only backend state safe to trim while retaining the owning object."""
+        self.backend.idmapper_trim_cache()
 
     def blocking_update(self, mutator, *, locked_fields=()):
         """Serialize one protected JSONB Attribute mutation against committed state.

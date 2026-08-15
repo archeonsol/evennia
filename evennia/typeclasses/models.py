@@ -522,24 +522,23 @@ class TypedObject(SharedMemoryModel):
         if self.nattributes.all():
             if self.pk is None:
                 return True
-            from evennia.typeclasses.jsonb_handler import _AttributeRowMissing
 
             # we can't flush this object if we have non-persistent
             # attributes stored - those would get lost! Nevertheless
             # we try to flush as many references as we can.
-            attribute_handler = self.attributes
-            try:
-                attribute_handler.reset_cache()
-            except _AttributeRowMissing:
-                # An out-of-band database delete makes preserving this cached
-                # object's NAttributes unsafe. Retire the object; its JSONB
-                # state has already been tombstoned by reset_cache().
-                return True
-            if getattr(
-                getattr(attribute_handler.backend, "_row_state", None), "row_missing", False
-            ):
-                return True
-            self.tags.reset_cache()
+            from evennia.utils.idmapper.models import _jsonb_attribute_backend_active
+
+            if _jsonb_attribute_backend_active():
+                for handler_name in ("attributes", "nicks"):
+                    attribute_handler = self.__dict__.get(handler_name)
+                    if attribute_handler is not None:
+                        attribute_handler.idmapper_trim_cache()
+                        break
+            else:
+                self.attributes.reset_cache()
+            tag_handler = self.__dict__.get("tags")
+            if tag_handler is not None:
+                tag_handler.reset_cache()
             # flush caches for all related fields
             for field in self._meta.fields:
                 name = "_%s_cache" % field.name
@@ -549,6 +548,22 @@ class TypedObject(SharedMemoryModel):
             return False
         # a normal flush
         return True
+
+    def _idmapper_row_check_required(self):
+        """Return whether retention needs a bulk backing-row existence check."""
+        from evennia.utils.idmapper.models import _jsonb_attribute_backend_active
+
+        return (
+            self.pk is not None
+            and _jsonb_attribute_backend_active()
+            and bool(self.nattributes.all())
+        )
+
+    def _idmapper_mark_row_missing(self):
+        """Quarantine a confirmed missing JSONB row before idmapper eviction."""
+        from evennia.typeclasses.jsonb_handler import _tombstone_idmapper_row
+
+        _tombstone_idmapper_row(self)
 
     #
     # Object manipulation methods
