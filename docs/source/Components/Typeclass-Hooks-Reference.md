@@ -168,6 +168,7 @@ pre/post pattern.
 |---|---|---|---|---|
 | `get_cmdsets` | `LifecycleMixin` / `DefaultAccount` / `ServerSession` | various | `(current, cmdsets)` tuple | Cross-ref `command-system.md`. |
 | `get_cmdset_providers` | `DefaultObject` / `DefaultAccount` / `ServerSession` | objects/object.py:467; accounts.py:353; serversession.py:72 | `dict[str, CmdSetProvider]` | Cross-ref `command-system.md`. |
+| `get_equipped_rule_providers` | `DefaultObject` | objects/object.py | iterable or `None` | Equipped action-rule providers in game-defined precedence order; cross-ref `Default-Actions.md`. |
 | `get_search_query_replacement` | `SearchMixin` | mixins/search.py:19 | `str` | Pipeline stage 1. |
 | `get_search_direct_match` | `SearchMixin` | mixins/search.py:38 | `Object` or `None` | Short-circuits the pipeline on non-None. |
 | `get_search_candidates` | `SearchMixin` | mixins/search.py:64 | iterable | Pipeline stage 3. |
@@ -257,6 +258,7 @@ the authoritative roster.
 | `get_log_filename` | `DefaultChannel` | self | Returns the log filename used for channel history. |
 | `get_return_exit` | `DefaultExit` | self | Returns the return-exit (or queryset if return_all). |
 | `get_cmdset_providers` | `DefaultObject` | self | Duck-typed by cmdhandler. Returns dict[str, CmdSetProvider]. See command-system.md. |
+| `get_equipped_rule_providers` | `DefaultObject` | self | Queried by Actor.equipped_items. Games override this to define worn and wielded action-rule providers and their precedence. |
 | `get_nicklist` | `IRCBot` | self | IRCBot-specific: returns the nicklist of the connected channel. |
 | `get_cmdsets` | `LifecycleMixin` | self | Returns the per-class cmdset stack as (current, cmdsets). See command-system.md. |
 | `get_message_recipients` | `MessagingMixin` | self | Resolves the recipient set for a msg_contents broadcast. |

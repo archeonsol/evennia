@@ -234,6 +234,20 @@ class PilotIntegrationTest(EvenniaTestCase):
         self.assertEqual(spec.returns, "veto")
         self.assertIn("DefaultAccount.puppet_object", spec.fires_from)
 
+    def test_default_object_equipped_rule_providers_registered(self):
+        from evennia.objects.object import DefaultObject
+
+        spec = describe(DefaultObject.get_equipped_rule_providers)
+
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.event, "action_rule_providers")
+        self.assertEqual(spec.phase, "composite")
+        self.assertEqual(spec.actor, "self")
+        self.assertEqual(spec.returns, "content")
+        self.assertEqual(spec.discipline, "public")
+        self.assertEqual(spec.fires_from, ())
+        self.assertIn("Actor.equipped_items", spec.notes)
+
     def test_live_registry_survives_isolation_resets(self):
         # Sibling test classes save+restore _REGISTRY. The real
         # LifecycleMixin entry must still be reachable via for_event.

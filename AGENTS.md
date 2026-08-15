@@ -29,7 +29,7 @@ Vendor-agnostic skills live in `.agents/skills/`. Vendor directories (`.claude/s
 ## Docs
 
 - [Core Beliefs](.agents/docs/core-beliefs.md) — design principles that guide tradeoffs (toolkit not game, think in Python not SQL, hooks not patches, compose don't branch)
-- [Architecture](.agents/docs/architecture.md) — two-process model, typeclass system, command system, subsystems, flat API, settings; [Command System Contracts](.agents/docs/command-system.md) for hook order, AccountCommand, signals, session-proxy, matching, trie parser; [Typeclass Hooks Contracts](docs/source/Components/Typeclass-Hooks.md) + [reference tables](docs/source/Components/Typeclass-Hooks-Reference.md) for typeclass hook taxonomy, calling order, return contracts, override discipline, state-at-firing, and misshapen-hook list
+- [Architecture](.agents/docs/architecture.md) — two-process model, typeclass system, command system, subsystems, flat API, settings; [Command System Contracts](.agents/docs/command-system.md) for hook order, AccountCommand, signals, session-proxy, matching, trie parser; [Default Actions](docs/source/Components/Default-Actions.md) for shipped rule providers and dispatch context; [Typeclass Hooks Contracts](docs/source/Components/Typeclass-Hooks.md) + [reference tables](docs/source/Components/Typeclass-Hooks-Reference.md) for typeclass hook taxonomy, calling order, return contracts, override discipline, state-at-firing, and misshapen-hook list
 - [Testing](.agents/docs/testing.md) — running tests, test base classes, DB setup, CI matrix
 - [Code Style](.agents/docs/code-style.md) — docstring conventions, command docstring format
 - [Development Commands](.agents/docs/commands.md) — install, game lifecycle, test/format commands, PR conventions

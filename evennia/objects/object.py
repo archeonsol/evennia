@@ -575,6 +575,35 @@ class DefaultObject(
             out["account"] = driver
         return out
 
+    @hook(
+        event="action_rule_providers",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes=(
+            "Queried by Actor.equipped_items. Games override this to define worn and wielded "
+            "action-rule providers and their precedence."
+        ),
+    )
+    def get_equipped_rule_providers(self):
+        """Return equipped objects whose rules may intercept this body's actions.
+
+        Games define what counts as equipped and the precedence of the returned
+        objects. The default preserves the legacy transient provider list.
+        Returning ``None`` or an empty iterable is authoritative and means that
+        the body has no equipped rule providers.
+
+        Returns:
+            iterable: Equipped rule providers in dispatch precedence order.
+
+        """
+        ndb = getattr(self, "ndb", None)
+        if ndb is None:
+            return []
+        return getattr(ndb, "equipped_for_rules", None) or []
+
     @property
     def is_superuser(self):
         """True if a superuser account is *currently driving* this object.
