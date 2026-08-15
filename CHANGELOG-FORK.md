@@ -25,6 +25,36 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.193 — Games define equipped action providers
+
+### Engine
+
+- [`DefaultObject.get_equipped_rule_providers`](evennia/objects/object.py) is a
+  registered public query hook for the action engine's existing equipped-provider
+  slot. Games define what worn or wielded means and return providers in their
+  desired precedence order; the engine does not scan inventory.
+- [`Actor.equipped_items`](evennia/actions/actor.py) materializes the hook result
+  once. `None` and an empty iterable authoritatively mean no equipped providers.
+  Hook invocation and lazy-iteration errors propagate as programming errors.
+- The default hook returns the legacy `ndb.equipped_for_rules` view. Lightweight
+  focus bodies without the hook retain the same direct ndb fallback, so existing
+  games do not need to migrate.
+
+### Tests
+
+- Actor, context-builder, hook-registry, and DefaultObject coverage fixes the
+  hook contract, legacy compatibility, precedence, identity deduplication,
+  authoritative empty results, one-time materialization, and exception behavior.
+
+### Migration
+
+No migration is required. Games that want engine-managed equipment providers
+should override `get_equipped_rule_providers()` on their acting body typeclass.
+Compute and return only the small ordered equipment view intended to participate
+in every action dispatch; do not return arbitrary carried inventory.
+
+---
+
 ## 6.0.0+underspire.192 — A held row lock waits instead of raising
 
 ### Engine
