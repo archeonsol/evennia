@@ -61,6 +61,19 @@ matching the view's configured typeclass. Its result is a tuple of frozen
 Custom workflows that need fields or behavior beyond that DTO must define a
 dedicated IO service instead of dereferencing game state in the web worker.
 
+Aggregate IO services that need the same normal Attributes from many objects
+should use `evennia.typeclasses.jsonb_handler.read_attribute_snapshots()`. The
+bounded API accepts at most 100 row IDs and 32 keys, reconciles deferred
+post-save and durable-spool state under the same fail-closed rules as handler
+reads, preserves dirty process-local values, and bulk-fetches committed JSONB
+documents in one query. It returns recursively plain snapshots; unsupported
+live or serialized object values are rejected rather than crossing into a web
+worker. Inputs must be concrete lists or tuples so validation work itself stays
+bounded. A complete result is limited to 32 levels, 10,000 decoded values, and
+1 MiB of UTF-8 text; exceeding any bound fails the whole snapshot closed.
+Reading `db_attrs` directly or inspecting private JSONB row state is not a safe
+substitute.
+
 The character page service coalesces its rows and navigation menu into one IO
 call. Other authenticated pages load the navigation menu through one fail-soft
 IO call; a timeout leaves the menu empty rather than failing the page. Stock

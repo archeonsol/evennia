@@ -24,8 +24,9 @@ import time
 from copy import deepcopy
 from unittest.mock import patch
 
-from django.db import close_old_connections, transaction
+from django.db import close_old_connections, connection, transaction
 from django.test import SimpleTestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from twisted.internet.defer import Deferred
 
 from evennia.typeclasses import jsonb_handler
@@ -47,6 +48,7 @@ from evennia.typeclasses.jsonb_handler import (
     _three_way_merge,
     force_flush,
     has_spooled_write,
+    read_attribute_snapshots,
     reclaim_spooled_writes,
     spool_pending_count,
 )
@@ -231,6 +233,235 @@ class TestJsonbBackendCRUD(BaseEvenniaTest):
 # ---------------------------------------------------------------------------
 # _Saver* write-back
 # ---------------------------------------------------------------------------
+
+
+class TestBatchAttributeSnapshots(BaseEvenniaTest):
+    """Bounded web snapshots preserve canonical JSONB state with one row query."""
+
+    def _row(self, key, value):
+        from evennia.objects.models import ObjectDB
+
+        return ObjectDB._base_manager.create(
+            db_key=key,
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={"~": {"_d": {"flag": to_jsonb(value)}}},
+        )
+
+    def _state(self, obj):
+        state = jsonb_handler._existing_row_state(jsonb_handler._row_key(obj))
+        self.assertIsNotNone(state)
+        return state
+
+    def test_one_query_for_one_or_one_hundred_fresh_pending_rows(self):
+        from evennia.objects.models import ObjectDB
+
+        one = self._row("snapshot-0", 0)
+        states = [self._state(one)]
+        self.assertFalse(states[0].pending_checked)
+        with CaptureQueriesContext(connection) as one_queries:
+            first = read_attribute_snapshots(ObjectDB, [one.id], ["flag"])
+
+        rows = [one]
+        for index in range(1, 100):
+            row = self._row(f"snapshot-{index}", index)
+            rows.append(row)
+            states.append(self._state(row))
+        self.assertTrue(all(not state.pending_checked for state in states[1:]))
+        with CaptureQueriesContext(connection) as hundred_queries:
+            many = read_attribute_snapshots(
+                ObjectDB,
+                [row.id for row in rows],
+                ["flag"],
+            )
+
+        self.assertEqual(len(one_queries), 1)
+        self.assertEqual(len(hundred_queries), 1)
+        self.assertEqual(first[one.id]["flag"], 0)
+        self.assertEqual(many[rows[-1].id]["flag"], 99)
+        self.assertTrue(all(state.pending_checked for state in states))
+
+    def test_dirty_visible_value_matches_handler_read(self):
+        from evennia.objects.models import ObjectDB
+
+        obj = self._row("snapshot-dirty", 1)
+        handler = AttributeHandler(obj, JsonbAttributeBackend)
+        handler.add("flag", 7)
+
+        result = read_attribute_snapshots(ObjectDB, [obj.id], ["flag"])
+
+        self.assertEqual(result[obj.id]["flag"], 7)
+        self.assertEqual(result[obj.id]["flag"], handler.get("flag"))
+
+    def test_real_spool_missing_and_nonplain_values_fail_closed(self):
+        import datetime
+
+        from evennia.objects.models import ObjectDB
+
+        blocked = self._row("snapshot-blocked", 1)
+        key = jsonb_handler._row_key(blocked)
+        jsonb_handler._ROW_STATES.pop(key, None)
+        jsonb_handler._STRONG_ROW_STATES.pop(key, None)
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                with jsonb_handler._spool_row_lock(key):
+                    jsonb_handler._write_spool_payload(
+                        key, "PREPARED_BLOCKING", {}, {"protected": True}
+                    )
+                with self.assertRaises(AttributeUpdateUnavailable):
+                    read_attribute_snapshots(ObjectDB, [blocked.id], ["flag"])
+
+        missing = self._row("snapshot-missing", 1)
+        state = self._state(missing)
+        missing_id = missing.id
+        ObjectDB._base_manager.filter(pk=missing_id).delete()
+        with self.assertRaises(AttributeUpdateUnavailable):
+            read_attribute_snapshots(ObjectDB, [missing_id], ["flag"])
+        self.assertTrue(state.row_missing)
+
+        nonplain = self._row("snapshot-nonplain", datetime.date(2026, 8, 15))
+        with self.assertRaises(AttributeUpdateUnavailable):
+            read_attribute_snapshots(ObjectDB, [nonplain.id], ["flag"])
+
+    def test_same_path_remote_conflict_fails_closed(self):
+        from evennia.objects.models import ObjectDB
+        from evennia.typeclasses.attribute_context import model_save_context
+
+        baseline = {"~": {"_d": {"flag": to_jsonb(1)}}}
+        with transaction.atomic():
+            obj = ObjectDB._base_manager.create(
+                db_key="snapshot-conflict",
+                db_typeclass_path="evennia.objects.objects.DefaultObject",
+                db_attrs=baseline,
+            )
+            with model_save_context() as scope:
+                obj.attributes.add("flag", 2)
+            scope.commit()
+            ObjectDB._base_manager.filter(pk=obj.pk).update(
+                db_attrs={"~": {"_d": {"flag": to_jsonb(3)}}}
+            )
+
+        with self.assertRaises(AttributeUpdateConflict):
+            read_attribute_snapshots(ObjectDB, [obj.id], ["flag"])
+
+    def test_supported_delete_tombstone_fails_closed(self):
+        from evennia.objects.models import ObjectDB
+        from evennia.utils.idmapper.models import SharedMemoryModel
+
+        obj = self._row("snapshot-deleted", 1)
+        object_id = obj.id
+        state = self._state(obj)
+        SharedMemoryModel.delete(obj)
+
+        with CaptureQueriesContext(connection) as queries:
+            with self.assertRaises(AttributeUpdateUnavailable):
+                read_attribute_snapshots(ObjectDB, [object_id], ["flag"])
+        self.assertLessEqual(len(queries), 1)
+        self.assertTrue(state.row_missing)
+
+    def test_multirow_spool_locks_are_sorted(self):
+        from evennia.objects.models import ObjectDB
+
+        rows = [self._row(f"snapshot-lock-{index}", index) for index in range(3)]
+        for row in rows:
+            key = jsonb_handler._row_key(row)
+            jsonb_handler._ROW_STATES.pop(key, None)
+            jsonb_handler._STRONG_ROW_STATES.pop(key, None)
+        acquired = []
+        real_lock = jsonb_handler._spool_row_lock
+
+        def record_lock(key):
+            acquired.append(key)
+            return real_lock(key)
+
+        with patch.object(jsonb_handler, "_spool_row_lock", side_effect=record_lock):
+            read_attribute_snapshots(ObjectDB, [row.id for row in reversed(rows)], ["flag"])
+
+        self.assertEqual(acquired, sorted(acquired))
+
+    def test_handler_normalization_parity(self):
+        from evennia.objects.models import ObjectDB
+
+        obj = self._row("snapshot-normalized", 0)
+        handler = AttributeHandler(obj, JsonbAttributeBackend)
+        handler.add(" Flag ", 7, category=" Category ")
+
+        result = read_attribute_snapshots(ObjectDB, [obj.id], [" FLAG "], category=" CATEGORY ")
+
+        self.assertEqual(
+            result[obj.id][" FLAG "],
+            handler.get(" flag ", category=" category "),
+        )
+
+    def test_input_bounds_reject_lazy_and_duplicate_work_before_query(self):
+        from evennia.objects.models import ObjectDB
+
+        invalid_ids = (
+            range(1, 2),
+            (value for value in [1]),
+            ObjectDB._base_manager.all(),
+            [self.obj1],
+            [1] * 101,
+        )
+        with CaptureQueriesContext(connection) as queries:
+            for values in invalid_ids:
+                with self.assertRaises(AttributeUpdateUsageError):
+                    read_attribute_snapshots(ObjectDB, values, ["flag"])
+            with self.assertRaises(AttributeUpdateUsageError):
+                read_attribute_snapshots(self.obj1, [self.obj1.id], ["flag"])
+            for alias in ("", "missing", 7, "x" * 256):
+                with self.assertRaises(AttributeUpdateUsageError):
+                    read_attribute_snapshots(ObjectDB, [self.obj1.id], ["flag"], using=alias)
+        self.assertEqual(len(queries), 0)
+
+    def test_repeated_output_keys_share_the_aggregate_byte_budget(self):
+        from evennia.objects.models import ObjectDB
+
+        keys = [f"{index:02d}" + ("💣" * 253) for index in range(32)]
+        with (
+            CaptureQueriesContext(connection) as queries,
+            self.assertRaises(AttributeUpdateUnavailable),
+        ):
+            read_attribute_snapshots(ObjectDB, list(range(1, 101)), keys)
+        self.assertEqual(len(queries), 0)
+
+    def test_output_depth_nodes_bytes_and_live_values_are_bounded(self):
+        from django.utils.functional import SimpleLazyObject
+
+        from evennia.objects.models import ObjectDB
+
+        depth_value = 1
+        for _index in range(jsonb_handler._SNAPSHOT_MAX_DEPTH + 1):
+            depth_value = [depth_value]
+        oversized = "x" * (jsonb_handler._SNAPSHOT_MAX_UTF8_BYTES + 1)
+        too_many = [0] * (jsonb_handler._SNAPSHOT_MAX_NODES + 1)
+        rows = [
+            self._row("snapshot-depth", depth_value),
+            self._row("snapshot-bytes", oversized),
+            self._row("snapshot-nodes", too_many),
+        ]
+        for row in rows:
+            with self.assertRaises(AttributeUpdateUnavailable):
+                read_attribute_snapshots(ObjectDB, [row.id], ["flag"])
+
+        aggregate_rows = [
+            self._row(f"snapshot-aggregate-{index}", "x" * 600_000) for index in range(2)
+        ]
+        with self.assertRaises(AttributeUpdateUnavailable):
+            read_attribute_snapshots(ObjectDB, [row.id for row in aggregate_rows], ["flag"])
+
+        cycle = []
+        cycle.append(cycle)
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("saver", [1])
+        unsupported = (
+            cycle,
+            handler.get("saver"),
+            SimpleLazyObject(lambda: "lazy"),
+            self.obj1,
+        )
+        for value in unsupported:
+            with self.assertRaises(AttributeUpdateUnavailable):
+                jsonb_handler._plain_attribute_snapshot(value, {"nodes": 0, "bytes": 0})
 
 
 class TestJsonbWriteBack(BaseEvenniaTest):
@@ -526,7 +757,9 @@ class TestBlockingUpdate(BaseEvenniaTest):
                 self.handler.add("queued", True)
                 self.handler.backend._flush_failures = self.handler.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     self.handler.backend._do_flush()
                 called = []
@@ -923,7 +1156,10 @@ class TestBlockingUpdate(BaseEvenniaTest):
         errors = []
 
         def run():
-            for operation in (lambda: has_spooled_write(self.obj1), lambda: force_flush(self.obj1)):
+            for operation in (
+                lambda: has_spooled_write(self.obj1),
+                lambda: force_flush(self.obj1),
+            ):
                 try:
                     operation()
                 except Exception as err:
@@ -1462,7 +1698,9 @@ class TestBlockingUpdate(BaseEvenniaTest):
         with tempfile.TemporaryDirectory() as spool:
             with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
                 with patch.object(
-                    jsonb_handler, "_sync_live_backends", side_effect=RuntimeError("cache sync")
+                    jsonb_handler,
+                    "_sync_live_backends",
+                    side_effect=RuntimeError("cache sync"),
                 ):
                     with self.assertRaises(AttributePostCommitError) as caught:
                         self.handler.blocking_update(
@@ -1673,7 +1911,9 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                 self.handler.add("queued", 4)
                 self.handler.backend._flush_failures = self.handler.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     self.handler.backend._do_flush()
                 jsonb_handler.discard_jsonb_row_states()
@@ -1693,7 +1933,9 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                 self.handler.add("first", 1)
                 self.handler.backend._flush_failures = self.handler.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     first = force_flush(self.obj1)
                 self.assertTrue(first.spooled)
@@ -1746,7 +1988,9 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                 self.handler.add("queued", 4)
                 self.handler.backend._flush_failures = self.handler.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     self.handler.backend._do_flush()
 
@@ -1802,7 +2046,9 @@ class TestFlushRetry(BaseEvenniaTest):
                 self.handler.add("x", 1)
                 self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     result = self.backend._do_flush()
                 # dirty cleared (durable now), and the write is on disk
@@ -1819,7 +2065,9 @@ class TestFlushRetry(BaseEvenniaTest):
             jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
         ):
             with patch.object(
-                jsonb_handler, "_write_spool_payload", side_effect=Exception("disk down")
+                jsonb_handler,
+                "_write_spool_payload",
+                side_effect=Exception("disk down"),
             ):
                 result = self.backend._do_flush()
         self.assertTrue(self.backend._dirty)
@@ -1831,7 +2079,9 @@ class TestFlushRetry(BaseEvenniaTest):
                 self.handler.add("x", 42)
                 self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     self.backend._do_flush()
                 self.assertEqual(spool_pending_count(), 1)
@@ -1848,7 +2098,9 @@ class TestFlushRetry(BaseEvenniaTest):
                 self.handler.add("x", 42)
                 self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     self.backend._do_flush()
                 remote = deepcopy(self.obj1.db_attrs or {})
@@ -1870,7 +2122,9 @@ class TestFlushRetry(BaseEvenniaTest):
                 self.handler.add("x", 42)
                 self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
                 with patch.object(
-                    jsonb_handler, "_write_locked_document", side_effect=Exception("db down")
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
                 ):
                     self.backend._do_flush()
                 remote = deepcopy(self.obj1.db_attrs or {})
