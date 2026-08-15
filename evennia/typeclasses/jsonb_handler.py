@@ -93,10 +93,13 @@ from weakref import WeakValueDictionary
 
 from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
-from django.db.models import F, QuerySet
+from django.db.models import F, Model, QuerySet
 from twisted.internet.defer import Deferred
 
-from evennia.typeclasses.attribute_context import current_model_save_scope, model_save_active
+from evennia.typeclasses.attribute_context import (
+    current_model_save_scope,
+    model_save_active,
+)
 from evennia.typeclasses.attributes import IAttributeBackend, InMemoryAttribute
 from evennia.typeclasses.jsonb_util import from_jsonb, to_jsonb
 
@@ -113,6 +116,7 @@ __all__ = (
     "force_flush",
     "has_spooled_write",
     "reclaim_spooled_writes",
+    "read_attribute_snapshots",
     "spool_pending_count",
 )
 
@@ -233,7 +237,11 @@ def _database_alias(obj):
 
 def _row_key(obj):
     """Return the canonical process-local identity for an Attribute row."""
-    return (_database_alias(obj), obj._meta.concrete_model._meta.label_lower, int(obj.pk))
+    return (
+        _database_alias(obj),
+        obj._meta.concrete_model._meta.label_lower,
+        int(obj.pk),
+    )
 
 
 class JsonbRowState:
@@ -313,6 +321,10 @@ class JsonbRowState:
 _ROW_STATES = WeakValueDictionary()
 _STRONG_ROW_STATES = {}
 _MISSING_ROW_MARKER = "_jsonb_row_missing"
+_MISSING_REMOTE_ROW = object()
+_SNAPSHOT_MAX_DEPTH = 32
+_SNAPSHOT_MAX_NODES = 10_000
+_SNAPSHOT_MAX_UTF8_BYTES = 1_048_576
 
 
 def _existing_row_state(key):
@@ -526,45 +538,245 @@ def _ensure_pending_checked(state):
             .values("db_attrs")
             .first()
         )
-        if row is None:
+        remote = _MISSING_REMOTE_ROW if row is None else row["db_attrs"] or {}
+        _reconcile_pending_remote(state, remote)
+
+
+def _reconcile_pending_remote(state, remote):
+    """Apply one locked remote document using normal deferred-read semantics."""
+    if remote is _MISSING_REMOTE_ROW:
+        state.pending_checked = True
+        _mark_row_missing(state)
+        return
+    if state.dirty:
+        try:
+            visible = _three_way_merge(
+                state.volatile_baseline,
+                state.visible_document,
+                remote,
+            )
+        except JsonbWriteConflict as err:
             state.pending_checked = True
-            _mark_row_missing(state)
-            return
-        remote = row["db_attrs"] or {}
-        if state.dirty:
-            try:
-                visible = _three_way_merge(
-                    state.volatile_baseline,
-                    state.visible_document,
-                    remote,
-                )
-            except JsonbWriteConflict as err:
+            state.pending_blocked = True
+            _STRONG_ROW_STATES[state.key] = state
+            raise AttributeUpdateConflict(
+                "Deferred model-save Attribute state conflicts with committed data."
+            ) from err
+        state.committed_document = deepcopy(remote)
+        state.durable_document = deepcopy(remote)
+        state.visible_document = deepcopy(visible)
+        state.volatile_baseline = deepcopy(remote)
+        if visible == remote:
+            state.mark_clean()
+    else:
+        state.committed_document = deepcopy(remote)
+        state.durable_document = deepcopy(remote)
+        state.visible_document = deepcopy(remote)
+        state.volatile_baseline = deepcopy(remote)
+        state.mark_clean()
+    state.pending_checked = True
+    try:
+        _sync_live_backends(state, invalidate=True)
+    except Exception as err:
+        _quarantine_cache_sync(state)
+        raise AttributeUpdateUnavailable(
+            "Deferred JSONB Attribute state could not reconcile live handlers."
+        ) from err
+
+
+def _plain_attribute_snapshot(value, budget, *, depth=0, seen=None):
+    """Copy a decoded Attribute value while refusing live or cyclic objects."""
+    if depth > _SNAPSHOT_MAX_DEPTH:
+        raise AttributeUpdateUnavailable("Attribute snapshot is nested too deeply.")
+    budget["nodes"] += 1
+    if budget["nodes"] > _SNAPSHOT_MAX_NODES:
+        raise AttributeUpdateUnavailable("Attribute snapshot contains too many values.")
+    value_type = type(value)
+    if value_type is str:
+        budget["bytes"] += len(value.encode("utf-8"))
+        if budget["bytes"] > _SNAPSHOT_MAX_UTF8_BYTES:
+            raise AttributeUpdateUnavailable("Attribute snapshot text is too large.")
+        return value
+    if value is None or value_type in (bool, int, float):
+        return value
+    seen = seen if seen is not None else set()
+    marker = id(value)
+    if marker in seen:
+        raise AttributeUpdateUnavailable("Attribute snapshot contains a cycle.")
+    seen.add(marker)
+    try:
+        if value_type is list:
+            return [
+                _plain_attribute_snapshot(item, budget, depth=depth + 1, seen=seen)
+                for item in value
+            ]
+        if value_type is tuple:
+            return tuple(
+                _plain_attribute_snapshot(item, budget, depth=depth + 1, seen=seen)
+                for item in value
+            )
+        if value_type is dict:
+            if not all(type(key) is str for key in value):
+                raise AttributeUpdateUnavailable("Attribute snapshot mappings require string keys.")
+            budget["bytes"] += sum(len(key.encode("utf-8")) for key in value)
+            if budget["bytes"] > _SNAPSHOT_MAX_UTF8_BYTES:
+                raise AttributeUpdateUnavailable("Attribute snapshot text is too large.")
+            return {
+                key: _plain_attribute_snapshot(item, budget, depth=depth + 1, seen=seen)
+                for key, item in value.items()
+            }
+    finally:
+        seen.discard(marker)
+    raise AttributeUpdateUnavailable(
+        f"Attribute snapshot cannot expose {value_type.__name__} values."
+    )
+
+
+def read_attribute_snapshots(model, object_ids, attribute_keys, *, category=None, using=None):
+    """Read bounded, canonical, recursively plain Attributes with one row query.
+
+    This is the aggregate-read counterpart to an object's Attribute handler.
+    It reconciles deferred post-save row states, checks durable spool intent and
+    tombstones, preserves dirty process-local values, and bulk-fetches the
+    committed JSONB documents once. No live objects, handlers, or mutable Saver
+    proxies are returned.
+
+    Args:
+        model: A concrete TypedObject model or typeclass proxy.
+        object_ids: At most 100 integer row IDs.
+        attribute_keys: At most 32 normal-Attribute keys.
+        category: Optional normal-Attribute category.
+        using: Optional Django database alias.
+
+    Returns:
+        dict: ``{object_id: {requested_key: plain_value_or_none}}``.
+
+    Raises:
+        AttributeUpdateUsageError: Inputs are malformed or exceed the bounds.
+        AttributeUpdateUnavailable: Any row or value cannot be read safely.
+        AttributeUpdateConflict: Deferred local and committed edits conflict.
+    """
+    _require_io_thread("batch Attribute snapshot")
+    if not isinstance(model, type):
+        raise AttributeUpdateUsageError("Snapshot model must be a model class.")
+    try:
+        concrete_model = getattr(model, "__dbclass__", model)._meta.concrete_model
+        if not issubclass(concrete_model, Model):
+            raise TypeError
+        concrete_model._meta.get_field("db_attrs")
+    except (AttributeError, LookupError, TypeError) as err:
+        raise AttributeUpdateUsageError("Snapshot model must own db_attrs.") from err
+    if using is not None and (
+        type(using) is not str or not using or len(using) > 255 or using not in connections
+    ):
+        raise AttributeUpdateUsageError("Snapshot database alias is invalid.")
+
+    if type(object_ids) not in (list, tuple) or len(object_ids) > 100:
+        raise AttributeUpdateUsageError("Snapshot IDs must be a list or tuple of at most 100 rows.")
+    ids = []
+    for value in object_ids:
+        if type(value) is not int:
+            raise AttributeUpdateUsageError("Snapshot IDs must be integers.")
+        object_id = value
+        if object_id <= 0:
+            raise AttributeUpdateUsageError("Snapshot IDs must be positive.")
+        if object_id not in ids:
+            ids.append(object_id)
+
+    if type(attribute_keys) not in (list, tuple) or len(attribute_keys) > 32:
+        raise AttributeUpdateUsageError("Snapshot keys must be a list or tuple of at most 32 keys.")
+    keys = []
+    for value in attribute_keys:
+        if type(value) is not str or not value or len(value) > 255:
+            raise AttributeUpdateUsageError("Snapshot keys must be bounded strings.")
+        normalized = value.strip().lower()
+        if not normalized:
+            raise AttributeUpdateUsageError("Snapshot keys must not be blank.")
+        if all(existing[1] != normalized for existing in keys):
+            keys.append((str(value), normalized))
+    if category is not None and (type(category) is not str or len(category) > 255):
+        raise AttributeUpdateUsageError("Snapshot category must be a bounded string.")
+    normalized_category = None if category is None else category.strip().lower()
+    if category is not None and not normalized_category:
+        raise AttributeUpdateUsageError("Snapshot category must not be blank.")
+    if not ids:
+        return {}
+    output_key_bytes = len(ids) * sum(
+        len(original.encode("utf-8")) for original, _normalized in keys
+    )
+    if output_key_bytes > _SNAPSHOT_MAX_UTF8_BYTES:
+        raise AttributeUpdateUnavailable("Attribute snapshot text is too large.")
+
+    alias = using or router.db_for_write(concrete_model) or DEFAULT_DB_ALIAS
+    if _has_user_transaction(connections[alias]) or model_save_active():
+        raise AttributeUpdateUsageError("Attribute snapshots require autocommit.")
+    label = concrete_model._meta.label_lower
+    states = {}
+    lock_keys = []
+    for object_id in ids:
+        key = (alias, label, object_id)
+        state = _existing_row_state(key)
+        states[object_id] = state
+        if state is not None:
+            _resolve_model_save_outcomes(state)
+            if state.row_missing or state.pending_blocked:
+                raise AttributeUpdateUnavailable(f"Attribute row #{object_id} is unavailable.")
+            if not state.pending_checked:
+                lock_keys.append(key)
+        else:
+            lock_keys.append(key)
+
+    with ExitStack() as stack:
+        for key in sorted(lock_keys):
+            stack.enter_context(_spool_row_lock(key))
+        for key in lock_keys:
+            entries = _list_row_entries(key)
+            if not entries:
+                continue
+            state = states[key[2]]
+            if state is not None:
                 state.pending_checked = True
                 state.pending_blocked = True
                 _STRONG_ROW_STATES[state.key] = state
-                raise AttributeUpdateConflict(
-                    "Deferred model-save Attribute state conflicts with committed data."
-                ) from err
-            state.committed_document = deepcopy(remote)
-            state.durable_document = deepcopy(remote)
-            state.visible_document = deepcopy(visible)
-            state.volatile_baseline = deepcopy(remote)
-            if visible == remote:
-                state.mark_clean()
-        else:
-            state.committed_document = deepcopy(remote)
-            state.durable_document = deepcopy(remote)
-            state.visible_document = deepcopy(remote)
-            state.volatile_baseline = deepcopy(remote)
-            state.mark_clean()
-        state.pending_checked = True
-        try:
-            _sync_live_backends(state, invalidate=True)
-        except Exception as err:
-            _quarantine_cache_sync(state)
             raise AttributeUpdateUnavailable(
-                "Deferred JSONB Attribute state could not reconcile live handlers."
-            ) from err
+                f"Durable pending intent blocks Attribute row #{key[2]}."
+            )
+
+        rows = {
+            int(row["pk"]): row["db_attrs"] or {}
+            for row in concrete_model._base_manager.using(alias)
+            .filter(pk__in=ids)
+            .values("pk", "db_attrs")
+        }
+        for object_id in ids:
+            remote = rows.get(object_id, _MISSING_REMOTE_ROW)
+            state = states[object_id]
+            if state is not None and not state.pending_checked:
+                _reconcile_pending_remote(state, remote)
+            elif remote is _MISSING_REMOTE_ROW:
+                if state is not None:
+                    _mark_row_missing(state)
+                raise AttributeUpdateUnavailable(f"Attribute row #{object_id} no longer exists.")
+
+    category_key = _NULL_CATEGORY if category is None else normalized_category
+    budget = {"nodes": 0, "bytes": output_key_bytes}
+    result = {}
+    for object_id in ids:
+        state = states[object_id]
+        if state is not None:
+            if state.row_missing or state.pending_blocked:
+                raise AttributeUpdateUnavailable(f"Attribute row #{object_id} is unavailable.")
+            document = state.visible_document
+        else:
+            document = rows[object_id]
+        section = document.get(category_key, {}) if isinstance(document, dict) else {}
+        data = section.get(_DATA, {}) if isinstance(section, dict) else {}
+        snapshot = {}
+        for original, normalized in keys:
+            encoded = data.get(normalized) if isinstance(data, dict) else None
+            snapshot[original] = _plain_attribute_snapshot(from_jsonb(encoded), budget)
+        result[object_id] = snapshot
+    return result
 
 
 def _capture_model_save_mutation(state):
