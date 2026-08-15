@@ -487,15 +487,6 @@ class EvenniaServerService(MultiService):
         self.system_driver = systems.SystemDriver()
         self.system_driver.start()
 
-        # start the reactor-stall watchdog (no-op if REACTOR_STALL_WARNING_MS is 0).
-        # Stop-and-replace so a repeat init (tests) never orphans a watchdog.
-        from evennia.utils.reactor_watchdog import ReactorStallWatchdog
-
-        if self.stall_watchdog is not None:
-            self.stall_watchdog.stop()
-        self.stall_watchdog = ReactorStallWatchdog()
-        self.stall_watchdog.start()
-
         # update eventual changed defaults
         self.update_defaults()
 
@@ -527,6 +518,16 @@ class EvenniaServerService(MultiService):
 
         # initialize and start global scripts
         evennia.GLOBAL_SCRIPTS.start()
+
+        # start the reactor-stall watchdog after initial start/migrations finish
+        # (no-op if REACTOR_STALL_WARNING_MS is 0). Stop-and-replace so a repeat
+        # init (tests) never orphans a watchdog.
+        from evennia.utils.reactor_watchdog import ReactorStallWatchdog
+
+        if self.stall_watchdog is not None:
+            self.stall_watchdog.stop()
+        self.stall_watchdog = ReactorStallWatchdog()
+        self.stall_watchdog.start()
 
     async def _await_hooks(self, instances, hook_name, *args, **kwargs):
         """Run ``hook_name`` on each instance and await any returned awaitables."""

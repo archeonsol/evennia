@@ -79,6 +79,11 @@ def is_io_thread() -> bool:
     return threading.get_ident() == _loop_thread_id
 
 
+def get_loop_thread_id() -> int | None:
+    """Return the thread id running the bound event loop, or None."""
+    return _loop_thread_id
+
+
 def register_shutdown_hook(fn, *args, **kwargs):
     """Register a callable to run during graceful process shutdown."""
     _shutdown_hooks.append((fn, args, kwargs))

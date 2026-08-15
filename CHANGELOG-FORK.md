@@ -25,6 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.197 — Active live-stack sampler thread for reactor stall diagnosis
+
+### Engine
+
+- [`ReactorStallWatchdog`](evennia/utils/reactor_watchdog.py): Added an active
+  background daemon thread (`ReactorStallSampler`) that monitors the reactor
+  heartbeat. When a single reactor turn blocks beyond `REACTOR_STALL_SAMPLE_MS`
+  (default: 1500ms), the sampler thread captures and formats the live execution
+  stack frame of the IO thread using `sys._current_frames()`, logging the exact
+  traceback directly to `server.log` to pinpoint blocking sites in real time.
+- [`clock.get_loop_thread_id`](evennia/utils/clock.py): Exposed the thread
+  identifier of the bound event loop for live thread inspection.
+- [`EvenniaServerService`](evennia/server/service.py): Moved `stall_watchdog.start()`
+  to the end of `start_service()` (after `at_server_start()` and global scripts)
+  so synchronous initial database migrations and bootup tasks are not flagged
+  as reactor turn stalls.
+
+### Tests
+
+- [`evennia/utils/tests/test_reactor_watchdog.py`](evennia/utils/tests/test_reactor_watchdog.py):
+  All watchdog lifecycle and stall detection tests pass.
+
+---
+
 ## 6.0.0+underspire.196 — Expose get_all() on AttributeHandler for appearance prefetch
 
 ### Engine
