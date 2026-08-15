@@ -25,6 +25,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.195 — Async compatibility uses one suspension bridge
+
+### Engine
+
+- [`clock.maybe_await`](evennia/utils/clock.py) now adapts pending asyncio
+  Futures and Twisted Deferreds according to the active coroutine driver. Bare
+  coroutines reached through Twisted compatibility code run on the asyncio loop,
+  so native Futures inside their bodies are supported too.
+- [`RuleEngine`](evennia/actions/engine.py) uses the shared bridge instead of its
+  private action-only adapter. [`Activity`](evennia/actions/process.py) uses the
+  same boundary for yielded awaitables and timed pauses, restoring its documented
+  Deferred support without changing synchronous-prefix or cancellation behavior.
+- The no-running-loop test driver identifies itself explicitly, preserving its
+  inline ORM semantics while accepting both native awaitables and Deferreds.
+
+### Performance
+
+- No cache, model, migration, database query, or persistent write was added. In
+  a 500,000-call Python 3.14 microbenchmark, plain values changed from 0.344 to
+  0.352 microseconds per call; an already-resolved Future changed from 0.428 to
+  0.781 microseconds. The approximately 0.35-microsecond bridge check occurs only
+  at an existing awaitable boundary and is negligible beside real I/O, delays,
+  or player input.
+
+### Tests
+
+- Clock coverage uses genuinely pending Futures and Deferreds under Twisted,
+  asyncio, and the synchronous test harness, including a nested coroutine.
+- Action and Activity coverage verifies pending cross-driver resumption, phase
+  ordering, completion, and Deferred cancellation.
+
+### Migration
+
+No migration is required.
+
+---
+
 ## 6.0.0+underspire.194 — Interactive actions wait across coroutine drivers
 
 ### Engine

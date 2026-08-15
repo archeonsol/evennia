@@ -595,15 +595,27 @@ class TestFormatMenuPrompt(unittest.TestCase):
 
 
 class TestDeferredRule(unittest.TestCase):
-    def test_native_asyncio_task_waits_on_deferred(self):
+    def test_native_asyncio_dispatch_waits_on_pending_deferred_rule(self):
         loop = asyncio.new_event_loop()
         deferred = Deferred()
+        fired = []
+
+        async def drive():
+            dispatch = asyncio.create_task(
+                ENGINE.dispatch(Kick(), _actor(), _ctx(Deferring(fired, deferred)))
+            )
+            await asyncio.sleep(0)
+            self.assertFalse(dispatch.done())
+            self.assertEqual(fired, ["work"])
+            deferred.callback(PASS)
+            return await dispatch
+
         try:
-            loop.call_soon(deferred.callback, "done")
-            result = loop.run_until_complete(engine_mod._await_suspension(deferred))
+            trace = loop.run_until_complete(drive())
         finally:
             loop.close()
-        self.assertEqual(result, "done")
+        self.assertEqual(fired, ["work", "after_work"])
+        self.assertEqual(trace.outcome, "succeeded")
 
     def test_phase_serializes_until_deferred_fires(self):
         d = Deferred()

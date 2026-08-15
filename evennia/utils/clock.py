@@ -27,6 +27,9 @@ _loop_thread_id: int | None = None
 _runtime_task_kind: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "evennia_runtime_task_kind", default=None
 )
+_sync_inline_driver: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "evennia_sync_inline_driver", default=False
+)
 
 _RUNTIME_TASK_KINDS = frozenset(
     {"action", "activity", "command", "job", "service", "system", "warmup", "generic", "test"}
@@ -354,6 +357,7 @@ class _SyncCoroutineResult:
         so :meth:`_drain` can find and cancel them afterwards.
         """
         sent, throw = None, None
+        token = _sync_inline_driver.set(True)
         try:
             while True:
                 if throw is not None:
@@ -380,6 +384,8 @@ class _SyncCoroutineResult:
                 )
         except StopIteration as stop:
             return getattr(stop, "value", None)
+        finally:
+            _sync_inline_driver.reset(token)
 
     @staticmethod
     def _drain(loop):
@@ -467,7 +473,7 @@ def when_running(fn, *args, **kwargs):
 
 
 async def maybe_await(result):
-    """Await ``result`` if it is awaitable, else return it unchanged.
+    """Await a native or Twisted value under either coroutine driver.
 
     The async equivalent of Twisted ``inlineCallbacks``' lenient ``yield``: that
     idiom waits on a Deferred but passes a plain value straight through. When a
@@ -475,10 +481,37 @@ async def maybe_await(result):
     merge + command dispatch code does) is converted to ``async``/``await``,
     replace ``x = yield expr`` with ``x = await maybe_await(expr)`` so both cases
     keep working without per-yield analysis.
+
+    Evennia still has compatibility callers driven by Twisted ``ensureDeferred``.
+    A Twisted driver cannot consume a pending asyncio Future, while a native
+    asyncio Task cannot consume a Deferred. Bridge the value in either direction
+    at this shared boundary. Non-Deferred awaitables under a Twisted driver run as
+    native asyncio Tasks, so Futures awaited inside their coroutine bodies are
+    bridged too.
     """
-    if inspect.isawaitable(result):
-        return await result
-    return result
+    if not inspect.isawaitable(result):
+        return result
+
+    from twisted.internet.defer import Deferred
+
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+
+    if task is None and _sync_inline_driver.get():
+        if isinstance(result, Deferred):
+            result = result.asFuture(_get_loop())
+    elif task is None and not isinstance(result, Deferred):
+        future = (
+            result
+            if isinstance(result, asyncio.Future)
+            else asyncio.ensure_future(result, loop=_get_loop())
+        )
+        result = Deferred.fromFuture(future)
+    elif task is not None and isinstance(result, Deferred):
+        result = result.asFuture(asyncio.get_running_loop())
+    return await result
 
 
 def _normalize_task_kind(value: str) -> str:
