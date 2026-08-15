@@ -335,10 +335,10 @@ async def _drive_activity(activity, gen, kind, value):
             try:
                 if kind == "await":
                     activity._pending = value
-                    to_send = await value
+                    to_send = await clock.maybe_await(value)
                 else:  # "sleep"
                     activity._pending = clock.defer_later(max(0.0, float(value)))
-                    await activity._pending
+                    await clock.maybe_await(activity._pending)
                     to_send = None
             except (CancelledError, asyncio.CancelledError):
                 # asyncio.CancelledError (a BaseException) arrives when a

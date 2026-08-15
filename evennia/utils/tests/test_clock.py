@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from django.db import connections
 from django.test import SimpleTestCase
+from twisted.internet.defer import Deferred, ensureDeferred
 
 from evennia.utils import clock
 
@@ -34,6 +35,59 @@ class _AsyncioLoopMixin:
 
 def _distinctively_named_boom():
     raise ValueError("kaboom")
+
+
+class TestMaybeAwaitCompatibility(_AsyncioLoopMixin, SimpleTestCase):
+    """``maybe_await`` bridges pending values across both coroutine drivers."""
+
+    def test_native_asyncio_task_waits_on_pending_deferred(self):
+        deferred = Deferred()
+
+        async def drive():
+            self._loop.call_soon(deferred.callback, "done")
+            return await clock.maybe_await(deferred)
+
+        self.assertEqual(self._loop.run_until_complete(drive()), "done")
+
+    def test_twisted_driver_waits_on_pending_asyncio_future(self):
+        future = self._loop.create_future()
+        deferred = ensureDeferred(clock.maybe_await(future))
+
+        self.assertFalse(deferred.called)
+        self._loop.call_soon(future.set_result, "done")
+        result = self._loop.run_until_complete(deferred.asFuture(self._loop))
+
+        self.assertEqual(result, "done")
+
+    def test_twisted_driver_runs_nested_coroutine_on_asyncio_loop(self):
+        future = self._loop.create_future()
+
+        async def nested():
+            return await future
+
+        deferred = ensureDeferred(clock.maybe_await(nested()))
+        self.assertFalse(deferred.called)
+        self._loop.call_soon(future.set_result, "done")
+        result = self._loop.run_until_complete(deferred.asFuture(self._loop))
+
+        self.assertEqual(result, "done")
+
+
+class TestMaybeAwaitSyncHarness(SimpleTestCase):
+    """The no-loop test driver remains compatible with bridged values."""
+
+    def test_sync_harness_waits_on_pending_deferred(self):
+        async def drive():
+            deferred = Deferred()
+            asyncio.get_event_loop().call_soon(deferred.callback, "done")
+            return await clock.maybe_await(deferred)
+
+        self.assertEqual(clock.run_coroutine(drive()).result(), "done")
+
+    def test_sync_harness_waits_on_native_coroutine(self):
+        result = clock.run_coroutine(clock.maybe_await(asyncio.sleep(0, result="done")))
+
+        self.assertEqual(result.result(), "done")
 
 
 class TestRunCoroutineBackstop(_AsyncioLoopMixin, SimpleTestCase):

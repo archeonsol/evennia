@@ -14,6 +14,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from twisted.internet.defer import Deferred
+
 from evennia.actions import process
 from evennia.actions.process import Activity
 from evennia.utils import logger
@@ -167,9 +169,39 @@ class TestActivitySuspend(_LoopActivityTest):
 
         self._run(scenario())
 
+    def test_pending_deferred_resumes_under_native_asyncio_driver(self):
+        holder, log = _holder(), []
+
+        async def scenario():
+            gate = Deferred()
+            process.start_activity(holder, Waiter(log, "legacy", gate))
+            await self._tick()
+            self.assertEqual(log, ["start:legacy"])
+            gate.callback("TRACE")
+            await self._tick()
+
+        self._run(scenario())
+        self.assertEqual(log, ["start:legacy", "resume:legacy:TRACE", "complete:legacy"])
+        self.assertEqual(process.get_activities(holder), [])
+
 
 # --- cancellation -----------------------------------------------------------
 class TestActivityCancel(_LoopActivityTest):
+    def test_cancel_while_suspended_on_deferred(self):
+        holder, log = _holder(), []
+
+        async def scenario():
+            gate = Deferred()
+            process.start_activity(holder, Waiter(log, "legacy", gate))
+            await self._tick()
+            process.cancel_activity(holder, "waiter", reason="stop")
+            await self._tick()
+            self.assertTrue(gate.called)
+            self.assertEqual(log, ["start:legacy", "cancel:legacy:stop"])
+            self.assertFalse(process.is_active(holder, "waiter"))
+
+        self._run(scenario())
+
     def test_cancel_while_suspended_runs_on_cancel(self):
         holder, log = _holder(), []
 
