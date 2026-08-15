@@ -25,6 +25,44 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.200 — Complete stock character web IO ownership
+
+### Engine
+
+- Stock character list, management, detail, create, update, delete, puppet, and
+  navigation-menu paths now resolve game state entirely on the bound IO thread.
+  Frozen DTOs carry only scalar display values and URLs back to Django workers.
+- Character page rows and their navigation menu share one IO callback. Other
+  authenticated pages use one fail-soft menu callback, so an IO timeout suppresses
+  the menu without failing unrelated content.
+- Character mutations reload the account and target, then repeat ownership,
+  access, and slug checks in the same callback as the write. Puppet selection is
+  POST-only and CSRF protected.
+- `CharacterForm` is now a scalar `EvenniaForm`; worker-side validation no longer
+  constructs or exposes a live typeclass instance.
+
+### Web contract
+
+- Read timeouts return retryable HTTP 504 responses. Mutations preserve the
+  pre-start HTTP 503 versus indeterminate HTTP 202 ownership distinction.
+- Stock character templates consume frozen DTO fields such as `detail_url`,
+  `update_url`, `delete_url`, `puppet_url`, and `location_key` rather than live
+  object methods, relations, or `.db` Attributes.
+
+### Tests
+
+- Added route and service coverage for DTO plainness, ownership and access
+  rechecks, one-bridge page rendering, POST-only puppet selection, mutation
+  timeout semantics, fail-soft menus, and authenticated ASGI reads and writes
+  returning to the exact bound IO loop.
+
+### Migration
+
+- No database migration is required. Downstream `CharacterForm` subclasses must
+  use scalar form fields instead of `ModelForm` instance behavior. Character
+  template overrides must use the documented DTO fields, and puppet links must
+  become CSRF-protected POST forms.
+
 ## 6.0.0+underspire.199 — Own game-state access in stock web views
 
 ### Engine
