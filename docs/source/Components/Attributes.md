@@ -244,12 +244,17 @@ budget. Objects retained for NAttributes trim only derived handler caches; that
 path never scans the durable spool, opens a transaction, or reloads a JSONB
 row. Canonical row documents, dirty/pending/quarantine state, generations, and
 live proxies remain intact. Backing-row deletion is still checked in bounded
-bulk queries, and a confirmed missing row receives a strong tombstone before
-the cached object is evicted. An existence-query failure aborts the sweep and
-retains unknown objects.
+bulk queries on a database-hygienic worker; only primitive missing-row results
+return to the IO thread, where the sweep epoch and cache-object identity are
+revalidated. A confirmed missing row receives a strong tombstone before the
+cached object is evicted. An existence-query failure aborts the sweep and
+retains unknown objects. A constant-size epoch marker on each processed object
+detects cache mutation without building an aggregate bookkeeping collection to
+destroy on completion or cancellation.
 
-Explicit `flush_cache()` and post-migration cleanup remain synchronous. Tune
-automatic work with `IDMAPPER_FLUSH_BATCH_SIZE` and
+Explicit `flush_cache()` and post-migration cleanup remain synchronous, but
+their row-existence queries are chunked to the database backend's parameter
+limit. Tune automatic work with `IDMAPPER_FLUSH_BATCH_SIZE` and
 `IDMAPPER_FLUSH_BATCH_BUDGET_MS`; monitor the
 `evennia_idmapper_flush_*` metrics for duration, batches, outcomes, row queries,
 and failures.

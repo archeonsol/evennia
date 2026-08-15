@@ -398,6 +398,7 @@ def _tombstone_idmapper_row(obj):
     """Install a strong missing-row state without materializing an Attribute handler."""
     _require_io_thread("idmapper missing-row tombstone")
     key = _row_key(obj)
+    obj.__dict__[_MISSING_ROW_MARKER] = key
     state = _existing_row_state(key)
     if state is None:
         state = JsonbRowState(obj)

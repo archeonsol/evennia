@@ -672,6 +672,7 @@ class WeakSharedMemoryModel(SharedMemoryModel, metaclass=WeakSharedMemoryModelBa
 
 
 _ACTIVE_FLUSH_SWEEP = None
+_IDMAPPER_SWEEP_EPOCH_ATTR = "_idmapper_flush_epoch"
 
 
 def _leaf_cache_models():
@@ -686,6 +687,40 @@ def _leaf_cache_models():
                 yield cls.__dbclass__
 
     return list(walk([SharedMemoryModel]))
+
+
+def _row_check_groups(entries):
+    """Reduce retained-object row checks to worker-safe query specifications."""
+    grouped = defaultdict(list)
+    for _cache, key, obj in entries:
+        required = getattr(obj, "_idmapper_row_check_required", None)
+        if required is None or not required():
+            continue
+        alias = getattr(getattr(obj, "_state", None), "db", None) or router.db_for_read(
+            obj._meta.concrete_model, instance=obj
+        )
+        grouped[(obj._meta.concrete_model, alias)].append((key, id(obj)))
+    return dict(grouped)
+
+
+def _query_missing_row_ids(grouped):
+    """Execute bounded backing-row queries and return missing object identities."""
+    missing = set()
+    query_count = 0
+    for (model, alias), candidates in grouped.items():
+        backend_limit = connections[alias].features.max_query_params
+        chunk_size = max(1, int(backend_limit or 1000))
+        for offset in range(0, len(candidates), chunk_size):
+            chunk = candidates[offset : offset + chunk_size]
+            primary_keys = [key for key, _obj_id in chunk]
+            existing = set(
+                model._base_manager.using(alias)
+                .filter(pk__in=primary_keys)
+                .values_list("pk", flat=True)
+            )
+            query_count += 1
+            missing.update(obj_id for key, obj_id in chunk if key not in existing)
+    return missing, query_count
 
 
 def _missing_row_entry_ids(entries):
@@ -704,28 +739,7 @@ def _missing_row_entry_ids(entries):
             all unknown objects rather than treating the failure as deletion.
 
     """
-    grouped = defaultdict(list)
-    for _cache, key, obj in entries:
-        required = getattr(obj, "_idmapper_row_check_required", None)
-        if required is None or not required():
-            continue
-        alias = getattr(getattr(obj, "_state", None), "db", None) or router.db_for_read(
-            obj._meta.concrete_model, instance=obj
-        )
-        grouped[(obj._meta.concrete_model, alias)].append((key, obj))
-
-    missing = set()
-    query_count = 0
-    for (model, alias), candidates in grouped.items():
-        primary_keys = [key for key, _obj in candidates]
-        existing = set(
-            model._base_manager.using(alias)
-            .filter(pk__in=primary_keys)
-            .values_list("pk", flat=True)
-        )
-        query_count += 1
-        missing.update(id(obj) for key, obj in candidates if key not in existing)
-    return missing, query_count
+    return _query_missing_row_ids(_row_check_groups(entries))
 
 
 class _CacheFlushSweep:
@@ -748,9 +762,10 @@ class _CacheFlushSweep:
         self.automatic = automatic
         self.model_index = 0
         self.remaining = None
-        self.processed_tokens = set()
+        self.epoch = object()
         self.cancelled = False
         self.handle = None
+        self.query_future = None
         self.started_at = time.monotonic()
         self.stats = {
             "batches": 0,
@@ -772,7 +787,6 @@ class _CacheFlushSweep:
                 return cache
             self.model_index += 1
             self.remaining = None
-            self.processed_tokens.clear()
         return None
 
     def _capture_entries(self, cache):
@@ -782,26 +796,27 @@ class _CacheFlushSweep:
             limit = min(limit, self.batch_size)
         return [(cache, key, obj) for key, obj in islice(cache.items(), limit)]
 
-    def run_turn(self):
-        """Process one bounded turn and return whether work remains."""
+    def _next_entries(self):
+        """Return the next captured entry batch, or ``None`` for cleanup/done."""
         if self.cancelled:
-            return False
+            return None
         cache = self._current_cache()
         if cache is None:
-            return False
+            return None
         entries = self._capture_entries(cache)
         if not entries:
             self.remaining = 0
-            return self._current_cache() is not None
+            return None
+        return entries
 
+    def _apply_entries(self, entries, missing_ids, query_count):
+        """Apply one queried entry batch on the owning IO thread."""
         turn_started = time.monotonic()
-        missing_ids, query_count = _missing_row_entry_ids(entries)
         self.stats["row_queries"] += query_count
         processed = 0
         self.stats["batches"] += 1
         for entry_cache, key, obj in entries:
-            token = (key, id(obj))
-            if token in self.processed_tokens:
+            if obj.__dict__.get(_IDMAPPER_SWEEP_EPOCH_ATTR) is self.epoch:
                 self.remaining = 0
                 break
             if (
@@ -810,7 +825,7 @@ class _CacheFlushSweep:
                 and time.monotonic() - turn_started >= self.budget_seconds
             ):
                 break
-            self.processed_tokens.add(token)
+            obj.__dict__[_IDMAPPER_SWEEP_EPOCH_ATTR] = self.epoch
             processed += 1
             self.remaining -= 1
             self.stats["objects"] += 1
@@ -834,6 +849,16 @@ class _CacheFlushSweep:
 
         return self._current_cache() is not None
 
+    def run_turn(self):
+        """Process one synchronous bounded turn and return whether work remains."""
+        if self.cancelled:
+            return False
+        entries = self._next_entries()
+        if entries is None:
+            return self._current_cache() is not None
+        missing_ids, query_count = _missing_row_entry_ids(entries)
+        return self._apply_entries(entries, missing_ids, query_count)
+
     def run_to_completion(self):
         """Run every remaining turn synchronously."""
         while self.run_turn():
@@ -846,18 +871,63 @@ class _CacheFlushSweep:
         self.handle = clock.call_later(0, self._run_scheduled_turn)
 
     def _run_scheduled_turn(self):
-        """Run one automatic turn, always releasing global active state on failure."""
+        """Start one automatic turn without blocking the reactor on row I/O."""
         global _ACTIVE_FLUSH_SWEEP
         if self.cancelled or _ACTIVE_FLUSH_SWEEP is not self:
             return
+        self.handle = None
         try:
-            if self.run_turn():
-                self.schedule()
-            else:
-                self._finish()
+            entries = self._next_entries()
+            if entries is None:
+                has_work = self._current_cache() is not None
+                if has_work:
+                    self.schedule()
+                else:
+                    self._finish()
+                return
+            grouped = _row_check_groups(entries)
+            if not grouped:
+                self._continue_after_entries(entries, set(), 0)
+                return
+            from evennia.utils import defer
+
+            self.query_future = defer.in_thread(_query_missing_row_ids, grouped)
+            self.query_future.add_done_callback(
+                lambda future: self._schedule_query_result(entries, future)
+            )
         except Exception:
             logger.log_trace("idmapper: incremental cache flush failed")
             self._finish(failed=True)
+
+    def _schedule_query_result(self, entries, future):
+        """Schedule worker-query completion through an isolated reactor callback."""
+        if self.cancelled or _ACTIVE_FLUSH_SWEEP is not self:
+            return
+        try:
+            self.handle = clock.call_later(0, self._resume_query_result, entries, future)
+        except Exception:
+            logger.log_trace("idmapper: could not schedule row-query completion")
+            self._finish(failed=True)
+
+    def _resume_query_result(self, entries, future):
+        """Apply primitive worker results after epoch and identity revalidation."""
+        if self.cancelled or _ACTIVE_FLUSH_SWEEP is not self:
+            return
+        self.handle = None
+        self.query_future = None
+        try:
+            missing_ids, query_count = future.result()
+            self._continue_after_entries(entries, missing_ids, query_count)
+        except Exception:
+            logger.log_trace("idmapper: backing-row query failed")
+            self._finish(failed=True)
+
+    def _continue_after_entries(self, entries, missing_ids, query_count):
+        """Apply a completed batch and arrange the next bounded turn."""
+        if self._apply_entries(entries, missing_ids, query_count):
+            self.schedule()
+        else:
+            self._finish()
 
     def _finish(self, *, failed=False):
         """Record bounded-sweep metrics and release the active epoch."""
@@ -872,6 +942,7 @@ class _CacheFlushSweep:
                 logger.log_trace("idmapper: could not record cache-flush metrics")
         finally:
             self.handle = None
+            self.query_future = None
             if _ACTIVE_FLUSH_SWEEP is self:
                 _ACTIVE_FLUSH_SWEEP = None
 
@@ -882,6 +953,9 @@ class _CacheFlushSweep:
         handle, self.handle = self.handle, None
         if handle is not None:
             handle.cancel()
+        query_future, self.query_future = self.query_future, None
+        if query_future is not None:
+            query_future.cancel()
         if _ACTIVE_FLUSH_SWEEP is self:
             _ACTIVE_FLUSH_SWEEP = None
 
@@ -976,9 +1050,14 @@ def update_cached_instance(sender, instance, **kwargs):
     if not hasattr(instance, "cache_instance"):
         return
     if kwargs.get("created") and _jsonb_attribute_backend_active():
-        from evennia.typeclasses.jsonb_handler import _retire_recreated_row_tombstone
+        try:
+            instance._meta.get_field("db_attrs")
+        except FieldDoesNotExist:
+            pass
+        else:
+            from evennia.typeclasses.jsonb_handler import _retire_recreated_row_tombstone
 
-        _retire_recreated_row_tombstone(instance)
+            _retire_recreated_row_tombstone(instance)
     sender.cache_instance(instance)
 
 
@@ -1099,7 +1178,7 @@ def cache_size(mb=True):
         for submodel in submodels:
             subclasses = submodel.__subclasses__()
             if not subclasses:
-                num = len(submodel.get_all_cached_instances())
+                num = len(submodel.__dbclass__.__instance_cache__)
                 numtotal[0] += num
                 classdict[submodel.__dbclass__.__name__] = num
             else:

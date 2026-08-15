@@ -1139,6 +1139,40 @@ class TestBlockingUpdate(BaseEvenniaTest):
         with self.assertRaises(AttributeUpdateUnavailable):
             old.attributes.get("stale")
 
+    def test_tombstone_marks_handlerless_instance_when_another_owns_state(self):
+        from evennia.objects.models import ObjectDB
+
+        owner = ObjectDB._base_manager.create(
+            db_key="state-owner",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={},
+        )
+        owner_handler = AttributeHandler(owner, JsonbAttributeBackend)
+        key = jsonb_handler._row_key(owner)
+        other = ObjectDB(
+            db_key="same-identity",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={},
+        )
+        other.pk = owner.pk
+        other._state.db = owner._state.db
+        self.assertNotIn("attributes", other.__dict__)
+
+        jsonb_handler._tombstone_idmapper_row(other)
+        replacement = ObjectDB(
+            db_key="replacement",
+            db_typeclass_path="evennia.objects.objects.DefaultObject",
+            db_attrs={},
+        )
+        replacement.pk = owner.pk
+        replacement._state.db = owner._state.db
+        jsonb_handler._retire_recreated_row_tombstone(replacement)
+
+        self.assertTrue(owner_handler.backend._row_state.row_missing)
+        self.assertEqual(other.__dict__[jsonb_handler._MISSING_ROW_MARKER], key)
+        with self.assertRaises(AttributeUpdateUnavailable):
+            other.attributes.get("anything")
+
     def test_idmapper_flush_preserves_nattributes_on_nonmissing_unavailability(self):
         self.obj1.nattributes.add("keep-cached", True)
         public_handler = self.obj1.attributes
