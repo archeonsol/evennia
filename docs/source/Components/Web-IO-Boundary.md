@@ -54,6 +54,13 @@ the worker. Services reload the account and character, repeat slug, ownership,
 and access checks, perform any mutation, and serialize the result in one
 callback. Puppet selection is a POST-only, CSRF-protected mutation.
 
+`CharacterMixin.get_queryset()` preserves the historical downstream `ListView`
+contract by returning only characters owned by the requesting account and
+matching the view's configured typeclass. Its result is a tuple of frozen
+`CharacterListWebDTO` rows, not a Django `QuerySet` or live character objects.
+Custom workflows that need fields or behavior beyond that DTO must define a
+dedicated IO service instead of dereferencing game state in the web worker.
+
 The character page service coalesces its rows and navigation menu into one IO
 call. Other authenticated pages load the navigation menu through one fail-soft
 IO call; a timeout leaves the menu empty rather than failing the page. Stock

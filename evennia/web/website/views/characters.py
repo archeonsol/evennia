@@ -57,10 +57,24 @@ class CharacterMixin(TypeclassMixin):
 
     # -- Django constructs --
     model = class_from_module(
-        settings.BASE_CHARACTER_TYPECLASS, fallback=settings.FALLBACK_CHARACTER_TYPECLASS
+        settings.BASE_CHARACTER_TYPECLASS,
+        fallback=settings.FALLBACK_CHARACTER_TYPECLASS,
     )
     form_class = forms.CharacterForm
     success_url = reverse_lazy("character-manage")
+
+    def get_queryset(self):
+        """Return frozen rows for owned characters of the configured typeclass."""
+        page = run_on_io_thread(
+            load_character_page,
+            typeclass_path(self.typeclass),
+            _account_id(self.request),
+            getattr(self, "access_type", "view"),
+            True,
+            self.request.session.get("puppet"),
+        )
+        self.request.evennia_character_menu = page.menu
+        return page.rows
 
 
 class CharacterListView(LoginRequiredMixin, CharacterMixin, ListView):
@@ -216,8 +230,14 @@ class CharacterUpdateView(CharacterMixin, ObjectUpdateView):
 
     def form_valid(self, form):
         """Repeat ownership and access checks in the IO-owned update call."""
-        model_fields = tuple(getattr(getattr(self.form_class, "Meta", None), "fields", ()))
-        data = {key: value for key, value in form.cleaned_data.items() if key not in model_fields}
+        model_fields = tuple(
+            getattr(getattr(self.form_class, "Meta", None), "fields", ())
+        )
+        data = {
+            key: value
+            for key, value in form.cleaned_data.items()
+            if key not in model_fields
+        }
         try:
             self.object, result_messages = run_on_io_thread(
                 update_owned_character_attributes,
@@ -344,7 +364,9 @@ class CharacterCreateView(CharacterMixin, ObjectCreateView):
         for error in result.errors:
             messages.error(self.request, error)
         if result.created:
-            messages.success(self.request, "Your character '%s' was created!" % result.key)
+            messages.success(
+                self.request, "Your character '%s' was created!" % result.key
+            )
             return HttpResponseRedirect(self.success_url)
         messages.error(self.request, "Your character could not be created.")
         return self.form_invalid(form)
