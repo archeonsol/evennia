@@ -174,7 +174,9 @@ def _object_dto(obj, attribute_names):
             value = getattr(obj, attribute, "")
         else:
             value = getattr(obj.db, attribute, "")
-        attributes[attribute.title()] = json.loads(json.dumps(value, cls=DjangoJSONEncoder))
+        attributes[attribute.title()] = json.loads(
+            json.dumps(value, cls=DjangoJSONEncoder)
+        )
     description = str(getattr(obj.db, "desc", "") or "")
     location = getattr(obj, "location", None)
     return ObjectWebDTO(
@@ -226,7 +228,9 @@ def _owned_character(typeclass_path_value, object_id, slug, account_id, access_t
     obj = _object(typeclass_path_value, object_id)
     account = _account(account_id)
     _check_object_request(obj, account, slug, access_type)
-    if not any(character and character.pk == obj.pk for character in account.characters):
+    if not any(
+        character and character.pk == obj.pk for character in account.characters
+    ):
         raise WebObjectPermissionDenied("Character is not owned by this account")
     return obj, account
 
@@ -295,7 +299,11 @@ def load_character_page(
     typeclass = class_from_module(typeclass_path_value)
     account = _account(account_id)
     if owned_only:
-        characters = _owned_characters(account)
+        characters = tuple(
+            character
+            for character in _owned_characters(account)
+            if character.db_typeclass_path == typeclass.path
+        )
     else:
         characters = tuple(
             character
