@@ -7,6 +7,7 @@ auto-answering ``get_input`` / ``_sleep`` (so dispatch still completes inline) o
 by holding a rule's ``Deferred`` unfired to assert phase serialization.
 """
 
+import asyncio
 import sys
 import unittest
 from dataclasses import dataclass
@@ -553,6 +554,20 @@ class TestMenuPromptRule(unittest.TestCase):
             _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(MenuPicker(fired))))
         self.assertEqual(fired, ["choice:None"])
 
+    def test_twisted_driver_waits_on_pending_asyncio_input_future(self):
+        loop = asyncio.new_event_loop()
+        future = loop.create_future()
+        fired = []
+        try:
+            with mock.patch.object(engine_mod, "_get_input_future", return_value=future):
+                dispatch = _dispatch(Kick(), _actor(), _ctx(MenuPicker(fired)))
+            self.assertFalse(dispatch.called)
+            loop.call_soon(future.set_result, "1")
+            loop.run_until_complete(dispatch.asFuture(loop))
+        finally:
+            loop.close()
+        self.assertEqual(fired, ["choice:a"])
+
 
 class TestFormatMenuPrompt(unittest.TestCase):
     def test_shows_option_keys_not_renumbered(self):
@@ -580,6 +595,16 @@ class TestFormatMenuPrompt(unittest.TestCase):
 
 
 class TestDeferredRule(unittest.TestCase):
+    def test_native_asyncio_task_waits_on_deferred(self):
+        loop = asyncio.new_event_loop()
+        deferred = Deferred()
+        try:
+            loop.call_soon(deferred.callback, "done")
+            result = loop.run_until_complete(engine_mod._await_suspension(deferred))
+        finally:
+            loop.close()
+        self.assertEqual(result, "done")
+
     def test_phase_serializes_until_deferred_fires(self):
         d = Deferred()
         fired = []

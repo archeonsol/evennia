@@ -91,6 +91,29 @@ def _is_deferred(raw) -> bool:
     return inspect.isawaitable(raw)
 
 
+async def _await_suspension(value):
+    """Await asyncio or Twisted values under either coroutine driver.
+
+    Args:
+        value: Awaitable returned by an interactive input, delay, or rule.
+
+    Returns:
+        The awaitable's resolved value.
+    """
+    from twisted.internet.defer import Deferred
+
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+
+    if task is None and isinstance(value, asyncio.Future):
+        value = Deferred.fromFuture(value)
+    elif task is not None and isinstance(value, Deferred):
+        value = value.asFuture(asyncio.get_running_loop())
+    return await value
+
+
 def _sleep(seconds):
     """An awaitable that fires after ``seconds`` on the loop (patchable in tests)."""
     return clock.defer_later(seconds)
@@ -147,11 +170,11 @@ async def _drive_generator(gen, actor):
             return getattr(stop, "value", None)
         to_send = None
         if _is_deferred(value):
-            to_send = await value
+            to_send = await _await_suspension(value)
         elif isinstance(value, MenuPrompt):
             while True:
                 caller.msg(format_menu_prompt(value))
-                raw = await _get_input_future(actor, "")
+                raw = await _await_suspension(_get_input_future(actor, ""))
                 choice = parse_menu_choice(raw, value)
                 if choice == "__look__":
                     continue
@@ -161,9 +184,9 @@ async def _drive_generator(gen, actor):
                 to_send = choice
                 break
         elif isinstance(value, str):
-            to_send = await _get_input_future(actor, value)
+            to_send = await _await_suspension(_get_input_future(actor, value))
         elif isinstance(value, (int, float)):
-            await _sleep(value)
+            await _await_suspension(_sleep(value))
         # else: unknown yield value — resume with None
 
 
@@ -490,7 +513,7 @@ class RuleEngine:
                 result = self._coerce_final(final)
             elif _is_deferred(raw):
                 suspended = True
-                final = await raw
+                final = await _await_suspension(raw)
                 result = self._coerce_final(final)
             else:
                 result = self._coerce_final(raw)
