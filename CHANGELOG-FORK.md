@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.203 — Preserve shutdown Attribute recovery
+
+### Engine
+
+- Separated the final `flush_all_dirty()` and forced
+  `spool_remaining_dirty()` exception boundaries during server shutdown. An
+  exceptional database flush can no longer skip the durable disk-spool
+  fallback, and a spool failure is logged independently.
+
+### Tests
+
+- The shutdown recovery test now forces `flush_all_dirty()` itself to raise,
+  verifies the dirty Attribute document reaches the durable spool, and confirms
+  startup reclaims it before game hooks run.
+- Shutdown executes on the engine-bound IO loop in the recovery test instead of
+  a distinct `asyncio.run()` loop, matching the JSONB Attribute ownership
+  contract.
+
+### Migration
+
+- No database migration or downstream code change is required.
+
 ## 6.0.0+underspire.202 — Add bounded canonical Attribute snapshots
 
 ### Engine
