@@ -85,7 +85,7 @@ class ServerAttributeRecoveryTest(BaseEvenniaTest):
     ):
         """A failed final flush survives restart and precedes game hooks."""
         from evennia.server.service_registry import IMMEDIATE_RESULT
-        from evennia.typeclasses import jsonb_handler
+        from evennia.typeclasses import attributes
         from evennia.typeclasses.attributes import (
             AttributeHandler,
             discard_dirty_backends,
@@ -108,14 +108,35 @@ class ServerAttributeRecoveryTest(BaseEvenniaTest):
         service.at_server_reload_stop = MagicMock()
         service.at_server_stop = MagicMock()
         mock_clock.maybe_await = real_clock.maybe_await
+        io_loop = real_clock.get_bound_loop()
+        if io_loop is None:
+            saved_runtime = (
+                real_clock._main_loop,
+                real_clock._loop_thread_id,
+                real_clock._default_executor,
+            )
+            real_clock._default_executor = None
+            io_loop = asyncio.new_event_loop()
+            real_clock.bind_loop(io_loop)
+
+            def restore_runtime():
+                io_loop.close()
+                real_clock.shutdown_default_executor()
+                (
+                    real_clock._main_loop,
+                    real_clock._loop_thread_id,
+                    real_clock._default_executor,
+                ) = saved_runtime
+
+            self.addCleanup(restore_runtime)
 
         with tempfile.TemporaryDirectory() as spool:
             with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
                 with (
                     patch("evennia.server.service.evennia") as mock_evennia,
                     patch.object(
-                        jsonb_handler,
-                        "_write_locked_document",
+                        attributes,
+                        "flush_all_dirty",
                         side_effect=RuntimeError("database unavailable"),
                     ),
                 ):
@@ -128,7 +149,7 @@ class ServerAttributeRecoveryTest(BaseEvenniaTest):
                         IMMEDIATE_RESULT
                     )
 
-                    asyncio.run(service.shutdown(mode="reload"))
+                    io_loop.run_until_complete(service.shutdown(mode="reload"))
 
                 self.assertEqual(spool_pending_count(), 1)
                 discard_dirty_backends()

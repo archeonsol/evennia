@@ -649,14 +649,19 @@ class EvenniaServerService(MultiService):
                 logger.log_trace("shutdown: system driver quiesce failed")
         try:
             from evennia.typeclasses.attributes import flush_all_dirty
-            from evennia.typeclasses.jsonb_handler import spool_remaining_dirty
 
             flush_all_dirty()
-            # Anything the DB refused on the way out is diverted to the durable
-            # spool rather than lost; it is replayed on the next boot.
-            spool_remaining_dirty()
         except Exception:
             logger.log_trace("final attribute flush at shutdown")
+        try:
+            from evennia.typeclasses.jsonb_handler import spool_remaining_dirty
+
+            # Anything the DB refused on the way out, including an exceptional
+            # final flush, is diverted to the durable spool rather than lost.
+            # It is replayed on the next boot.
+            spool_remaining_dirty()
+        except Exception:
+            logger.log_trace("forced attribute spool at shutdown")
 
         # on-demand handler state should always be saved.
         from evennia.scripts.ondemandhandler import ON_DEMAND_HANDLER
