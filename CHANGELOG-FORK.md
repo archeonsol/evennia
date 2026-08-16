@@ -25,6 +25,39 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.204 — Expose exact account-creation provenance
+
+### Engine
+
+- Added the opt-in
+  [`DefaultAccount.create_with_provenance()`](evennia/accounts/accounts.py),
+  which preserves stock account creation while returning a structured outcome
+  with the exact Account and Object instances constructed by one attempt.
+- Account and Object managers register new instances before their first save.
+  IO-owned signup services can therefore freshly verify or compensate exact
+  candidate rows after partial save, hook, ownership, or signal failures.
+- Kept [`DefaultAccount.create()`](evennia/accounts/accounts.py) compatible with
+  its historical `(account, errors)` result and custom character-creation
+  overrides. Duplicate manager rejection remains a `ValueError` subclass while
+  giving the structured API a stable machine-readable disposition.
+
+### Web IO
+
+- Documented that provenance outcomes are IO-local because they deliberately
+  retain live models. Web services must verify durable scalar state, perform
+  exact public cleanup on the IO thread, and return their own plain DTOs.
+
+### Tests
+
+- Added failure coverage for Account and Object save paths, ownership
+  attachment, character errors, final signals, duplicate rejection, bounded
+  issues, legacy override compatibility, and throttle/signal ordering.
+
+### Migration
+
+- No database migration is required. Existing callers remain compatible;
+  definite-creation services may opt into the new API.
+
 ## 6.0.0+underspire.203 — Preserve shutdown Attribute recovery
 
 ### Engine
