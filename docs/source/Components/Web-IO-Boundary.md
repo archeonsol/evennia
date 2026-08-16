@@ -48,6 +48,32 @@ rejection but cannot authorize the mutation.
 
 ## Stock website behavior
 
+### Definite account creation
+
+`DefaultAccount.create_with_provenance()` is the opt-in account-creation API for
+IO services that must prove or compensate a complete Account and automatic
+Character attempt. It preserves the stock validation, throttling, channels,
+hooks, signals, and character-slot flow while returning an
+`AccountCreationOutcome` with structured issues and the exact Account/Object
+instances constructed by that call. Managers register each instance before its
+first save, so the outcome retains a candidate primary key even when a later
+save hook fails. Ordinary exceptions anywhere in the opted-in creation core are
+frozen into a fault outcome; the legacy API keeps its historical exception
+boundary.
+
+The outcome is IO-local and deliberately contains live models. It must never be
+returned through a web-worker bridge. The IO service must freshly verify which
+candidate rows are durable, validate its complete domain postcondition, and use
+public coordinated deletion for exact failed-attempt rows. Candidate IDs are
+provenance, not proof that a transaction committed. A caller must not infer
+ownership from username, time ranges, or database sequence ranges.
+
+`DefaultAccount.create()` remains the compatibility API and returns its
+historical `(account, errors)` tuple. It does not pass the private recorder into
+custom character-creation overrides. Services needing definite completion must
+explicitly opt into the provenance API and keep the whole verification and
+compensation operation on the IO thread.
+
 The stock character list, management, detail, create, update, delete, and puppet
 routes use IO services and frozen DTOs. Character forms validate scalar input on
 the worker. Services reload the account and character, repeat slug, ownership,

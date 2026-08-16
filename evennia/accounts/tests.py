@@ -12,6 +12,7 @@ from evennia.accounts.accounts import AccountSessionHandler, DefaultAccount, Def
 from evennia.accounts.models import ControlBinding
 from evennia.authorization.policy import Always
 from evennia.authorization.storage import grant_capability
+from evennia.objects.models import ObjectDB
 from evennia.utils import create
 from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.utils.utils import uses_database
@@ -268,6 +269,259 @@ class TestDefaultAccountAuth(BaseEvenniaTest):
         # Try setting a better password (test for False; returns None on success)
         self.assertFalse(account.set_password("Mxyzptlk"))
         account.delete()
+
+
+@override_settings(DEFAULT_CHANNELS=[])
+class TestAccountCreationProvenance(BaseEvenniaTest):
+    """Check the opt-in account creation outcome without changing legacy callers."""
+
+    def _create(self, username="ProvenanceApplicant", **kwargs):
+        """Create one account through the provenance API."""
+        return DefaultAccount.create_with_provenance(
+            username=username,
+            password="sufficiently-long-password-42",
+            **kwargs,
+        )
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=True)
+    def test_success_records_exact_account_and_character(self):
+        """Successful auto-creation records the one durable pair."""
+        outcome = self._create()
+
+        self.assertEqual(outcome.disposition, "created")
+        self.assertEqual(outcome.account_ids, (outcome.account.id,))
+        self.assertEqual(outcome.object_ids, (outcome.character.id,))
+        self.assertEqual(outcome.character.account, outcome.account)
+        self.assertFalse(outcome.issues)
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_account_post_save_failure_retains_candidate_id(self):
+        """A post-save failure retains the exact ID while model save rolls back."""
+        with patch.object(
+            DefaultAccount,
+            "at_account_post_creation",
+            side_effect=RuntimeError("forced account post-save failure"),
+        ):
+            outcome = self._create()
+
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertEqual(len(outcome.account_ids), 1)
+        self.assertFalse(DefaultAccount.objects.filter(pk=outcome.account_ids[0]).exists())
+        self.assertEqual(outcome.issues[-1].stage, "account_create")
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=True)
+    def test_object_post_create_signal_failure_retains_ownerless_id(self):
+        """A signal failure after Object save retains the inserted Character ID."""
+        from evennia.objects import manager as object_manager
+
+        with patch.object(
+            object_manager.signals.SIGNAL_OBJECT_POST_CREATE,
+            "send",
+            side_effect=RuntimeError("forced object signal failure"),
+        ):
+            outcome = self._create()
+
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertEqual(len(outcome.account_ids), 1)
+        self.assertEqual(len(outcome.object_ids), 1)
+        self.assertTrue(ObjectDB.objects.filter(pk=outcome.object_ids[0]).exists())
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=True)
+    def test_ownership_failure_retains_character_id(self):
+        """A failure attaching ownership still exposes the exact Character ID."""
+        with patch(
+            "evennia.accounts.accounts.CharactersHandler.add",
+            side_effect=RuntimeError("forced ownership failure"),
+        ):
+            outcome = self._create()
+
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertEqual(len(outcome.object_ids), 1)
+        self.assertTrue(ObjectDB.objects.filter(pk=outcome.object_ids[0]).exists())
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_final_signal_failure_is_captured_only_by_opt_in_api(self):
+        """The new API captures the final signal while legacy creation still raises."""
+        from evennia.accounts import accounts as account_module
+
+        with patch.object(
+            account_module.SIGNAL_ACCOUNT_POST_CREATE,
+            "send",
+            side_effect=RuntimeError("forced final signal failure"),
+        ):
+            outcome = self._create(username="ProvenanceSignal")
+            with self.assertRaisesRegex(RuntimeError, "forced final signal failure"):
+                DefaultAccount.create(
+                    username="LegacySignal",
+                    password="sufficiently-long-password-42",
+                )
+
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertEqual(outcome.issues[-1].stage, "account_post_create_signal")
+        self.assertEqual(len(outcome.account_ids), 1)
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=True)
+    def test_truthy_account_with_character_errors_is_a_fault(self):
+        """Character errors cannot turn a durable Account into success."""
+        with patch.object(
+            DefaultAccount,
+            "create_character",
+            return_value=(None, ["forced character failure"]),
+        ):
+            outcome = self._create()
+
+        self.assertIsNotNone(outcome.account)
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertEqual(outcome.issues[-1].stage, "character_create")
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_rejection_has_structured_field_and_no_durable_identity(self):
+        """Validation rejection is machine-readable and owns no database row."""
+        outcome = self._create(username="xx")
+
+        self.assertEqual(outcome.disposition, "rejected")
+        self.assertFalse(outcome.account_ids)
+        self.assertFalse(outcome.object_ids)
+        self.assertTrue(outcome.issues)
+        self.assertTrue(all(issue.field == "username" for issue in outcome.issues))
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_structured_issues_have_a_fixed_cardinality_bound(self):
+        """Custom validators cannot grow the structured outcome without limit."""
+        messages = [f"validation failure {number}" for number in range(40)]
+        with patch.object(DefaultAccount, "validate_username", return_value=(False, messages)):
+            outcome = self._create()
+
+        self.assertEqual(outcome.disposition, "rejected")
+        self.assertEqual(len(outcome.issues), 20)
+        self.assertEqual(outcome.errors, tuple(messages))
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_duplicate_rejection_does_not_claim_existing_account(self):
+        """A duplicate attempt records no identity belonging to the existing row."""
+        outcome = self._create(username=self.account.username)
+
+        self.assertEqual(outcome.disposition, "rejected")
+        self.assertFalse(outcome.account_ids)
+        self.assertEqual(DefaultAccount.objects.get(pk=self.account.pk), self.account)
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=True)
+    def test_legacy_create_does_not_inject_provenance_keyword(self):
+        """Legacy creation remains compatible with strict character overrides."""
+
+        def strict_create_character(account, *, typeclass):
+            return None, ["strict override"]
+
+        with patch.object(DefaultAccount, "create_character", strict_create_character):
+            account, errors = DefaultAccount.create(
+                username="StrictLegacy",
+                password="sufficiently-long-password-42",
+            )
+
+        self.assertIsNotNone(account)
+        self.assertEqual(errors, ["strict override"])
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_throttle_update_precedes_final_signal(self):
+        """The opt-in refactor preserves throttle-before-signal ordering."""
+        from evennia.accounts import accounts as account_module
+
+        events = []
+        with (
+            patch.object(account_module.CREATION_THROTTLE, "check", return_value=False),
+            patch.object(
+                account_module.CREATION_THROTTLE,
+                "update",
+                side_effect=lambda *args, **kwargs: events.append("throttle"),
+            ),
+            patch.object(
+                account_module.SIGNAL_ACCOUNT_POST_CREATE,
+                "send",
+                side_effect=lambda *args, **kwargs: events.append("signal"),
+            ),
+        ):
+            outcome = self._create(username="OrderedSignals", ip="203.0.113.8")
+
+        self.assertEqual(outcome.disposition, "created")
+        self.assertEqual(events, ["throttle", "signal"])
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=True)
+    def test_throttle_update_failure_returns_exact_fault_outcome(self):
+        """A post-durability cache failure cannot discard creation provenance."""
+        from evennia.accounts import accounts as account_module
+
+        with (
+            patch.object(account_module.CREATION_THROTTLE, "check", return_value=False),
+            patch.object(
+                account_module.CREATION_THROTTLE,
+                "update",
+                side_effect=RuntimeError("forced throttle cache failure"),
+            ),
+            patch.object(account_module.SIGNAL_ACCOUNT_POST_CREATE, "send") as signal,
+        ):
+            outcome = self._create(username="ThrottleFault", ip="203.0.113.9")
+
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertEqual(outcome.account_ids, (outcome.account.id,))
+        self.assertEqual(outcome.object_ids, (outcome.character.id,))
+        self.assertEqual(outcome.issues[-1].stage, "throttle_update")
+        signal.assert_not_called()
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_legacy_throttle_update_failure_still_propagates(self):
+        """The opt-in capture does not change the legacy failure boundary."""
+        from evennia.accounts import accounts as account_module
+
+        with (
+            patch.object(account_module.CREATION_THROTTLE, "check", return_value=False),
+            patch.object(
+                account_module.CREATION_THROTTLE,
+                "update",
+                side_effect=RuntimeError("forced legacy throttle failure"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "forced legacy throttle failure"),
+        ):
+            DefaultAccount.create(
+                username="LegacyThrottleFault",
+                password="sufficiently-long-password-42",
+                ip="203.0.113.10",
+            )
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_opt_in_backstop_freezes_unhandled_core_exception(self):
+        """Every ordinary opt-in core exception becomes a structured outcome."""
+        from evennia.accounts import accounts as account_module
+
+        with patch.object(
+            account_module.CREATION_THROTTLE,
+            "check",
+            side_effect=RuntimeError("forced throttle check failure"),
+        ):
+            outcome = self._create(username="ThrottleCheckFault", ip="203.0.113.11")
+
+        self.assertEqual(outcome.disposition, "fault")
+        self.assertFalse(outcome.account_ids)
+        self.assertFalse(outcome.object_ids)
+        self.assertEqual(outcome.issues[-1].stage, "creation_core")
+
+    @override_settings(AUTO_CREATE_CHARACTER_WITH_ACCOUNT=False)
+    def test_legacy_core_exception_still_propagates(self):
+        """The opt-in backstop leaves legacy exception ownership unchanged."""
+        from evennia.accounts import accounts as account_module
+
+        with (
+            patch.object(
+                account_module.CREATION_THROTTLE,
+                "check",
+                side_effect=RuntimeError("forced legacy check failure"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "forced legacy check failure"),
+        ):
+            DefaultAccount.create(
+                username="LegacyCheckFault",
+                password="sufficiently-long-password-42",
+                ip="203.0.113.12",
+            )
 
 
 class TestDefaultAccount(TestCase):

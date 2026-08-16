@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib.auth.models import UserManager
 from django.utils import timezone
 
+from evennia.accounts.creation import AccountAlreadyExists
 from evennia.server import signals
 from evennia.typeclasses.managers import TypeclassManager, TypedObjectManager
 from evennia.utils.utils import class_from_module, dbid_to_obj, make_iter
@@ -200,6 +201,8 @@ class AccountDBManager(TypedObjectManager, UserManager):
         tags=None,
         attributes=None,
         report_to=None,
+        *,
+        _creation_recorder=None,
     ):
         """
         This creates a new account.
@@ -246,7 +249,7 @@ class AccountDBManager(TypedObjectManager, UserManager):
         if not email:
             email = None
         if self.model.objects.filter(username__iexact=key):
-            raise ValueError("An Account with the name '%s' already exists." % key)
+            raise AccountAlreadyExists("An Account with the name '%s' already exists." % key)
 
         # this handles a given dbref-relocate to an account.
         report_to = dbid_to_obj(report_to, self.model)
@@ -263,6 +266,8 @@ class AccountDBManager(TypedObjectManager, UserManager):
             last_login=now,
             date_joined=now,
         )
+        if _creation_recorder is not None:
+            _creation_recorder.record_account(new_account)
         if password is not None:
             # the password may be None for 'fake' accounts, like bots
             valid, error = new_account.validate_password(password, new_account)

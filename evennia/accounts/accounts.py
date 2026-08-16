@@ -24,6 +24,11 @@ from django.utils.module_loading import import_string
 from django.utils.translation import gettext as _
 
 import evennia
+from evennia.accounts.creation import (
+    AccountAlreadyExists,
+    _AccountCreationRecorder,
+    account_creation_issue,
+)
 from evennia.accounts.manager import AccountManager
 from evennia.accounts.models import AccountDB
 from evennia.commands.cmdsethandler import CmdSetHandler
@@ -58,6 +63,7 @@ _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 
 _MUDINFO_CHANNEL = None
 _CONNECT_CHANNEL = None
 _CMDHANDLER = None
+_MAX_CREATION_ISSUES = 20
 
 
 # Create throttles for too many account-creations and login attempts
@@ -1410,6 +1416,202 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         )
 
     @classmethod
+    def _create_account(
+        cls,
+        *args,
+        _creation_recorder=None,
+        _capture_final_signal=False,
+        **kwargs,
+    ):
+        """Run the shared legacy and provenance-aware Account creation core."""
+        account = None
+        character = None
+        errors = []
+        issues = []
+
+        username = kwargs.get("username", "")
+        password = kwargs.get("password", "")
+        email = kwargs.get("email", "").strip()
+        guest = kwargs.get("guest", False)
+
+        kwargs.pop("permissions", None)
+        typeclass = kwargs.get("typeclass", cls)
+
+        ip = kwargs.get("ip", "")
+        if isinstance(ip, (tuple, list)):
+            ip = ip[0]
+
+        def add_issue(stage, code, field, message):
+            """Append one structured issue without changing legacy error strings."""
+            if len(issues) < _MAX_CREATION_ISSUES:
+                issues.append(account_creation_issue(stage, code, field, message))
+
+        def result(disposition):
+            """Return the internal creation result consumed by both public APIs."""
+            return account, character, errors, issues, disposition
+
+        if ip and CREATION_THROTTLE.check(ip):
+            message = _("You are creating too many accounts. Please log into an existing account.")
+            errors.append(message)
+            add_issue("throttle", "rate_limited", "form", message)
+            return result("rejected")
+
+        username = cls.normalize_username(username)
+
+        if not guest:
+            valid, validation_errors = cls.validate_username(username)
+            if not valid:
+                errors.extend(validation_errors)
+                for message in validation_errors:
+                    add_issue("username_validation", "invalid_username", "username", message)
+                return result("rejected")
+
+        valid, validation_errors = cls.validate_password(password, account=cls(username=username))
+        if not valid:
+            errors.extend(validation_errors)
+            for message in validation_errors:
+                add_issue("password_validation", "invalid_password", "password", message)
+            return result("rejected")
+
+        if cls.is_banned(username=username, ip=ip):
+            message = _(
+                "|rYou have been banned and cannot continue from here."
+                "\nIf you feel this ban is in error, please email an admin.|x"
+            )
+            errors.append(message)
+            add_issue("ban_check", "banned", "form", message)
+            return result("rejected")
+
+        create_kwargs = {}
+        if _creation_recorder is not None:
+            create_kwargs["_creation_recorder"] = _creation_recorder
+        try:
+            account = create.create_account(
+                username,
+                email,
+                password,
+                typeclass=typeclass,
+                **create_kwargs,
+            )
+            logger.log_sec(f"Account Created: {account} (IP: {ip}).")
+        except Exception as err:
+            message = _(
+                "There was an error creating the Account. "
+                "If this problem persists, contact an admin."
+            )
+            errors.append(message)
+            if isinstance(err, AccountAlreadyExists):
+                add_issue("account_create", "duplicate_username", "username", message)
+                disposition = "rejected"
+            else:
+                add_issue("account_create", "internal_error", "form", message)
+                disposition = "fault"
+            logger.log_trace()
+            return result(disposition)
+
+        stage = "account_initialize"
+        try:
+            account.db.FIRST_LOGIN = True
+
+            if ip:
+                account.db.creator_ip = ip
+
+            stage = "default_channels"
+            for chan_info in settings.DEFAULT_CHANNELS:
+                if chankey := chan_info.get("key"):
+                    channel = ChannelDB.objects.get_channel(chankey)
+                    if not channel or not (
+                        channel.access(account, "listen") and channel.connect(account)
+                    ):
+                        logger.log_err(
+                            f"New account '{account.key}' could not connect to default channel"
+                            f" '{chankey}'!"
+                        )
+                else:
+                    logger.log_err(f"Default channel '{chan_info}' is missing a 'key' field!")
+
+            if account and settings.AUTO_CREATE_CHARACTER_WITH_ACCOUNT:
+                stage = "character_create"
+                character_kwargs = {
+                    "typeclass": kwargs.get(
+                        "character_typeclass", account.default_character_typeclass
+                    )
+                }
+                if _creation_recorder is not None:
+                    character_kwargs["_creation_recorder"] = _creation_recorder
+                character, character_errors = account.create_character(**character_kwargs)
+                if character_errors:
+                    errors.extend(character_errors)
+                    for message in character_errors:
+                        add_issue("character_create", "character_error", "form", message)
+
+        except Exception:
+            message = _("An error occurred. Please e-mail an admin if the problem persists.")
+            errors.append(message)
+            add_issue(stage, "internal_error", "form", message)
+            logger.log_trace()
+
+        if ip and not guest:
+            try:
+                CREATION_THROTTLE.update(ip, "Too many accounts being created.")
+            except Exception:
+                if not _capture_final_signal:
+                    raise
+                message = _("An error occurred. Please e-mail an admin if the problem persists.")
+                errors.append(message)
+                add_issue("throttle_update", "internal_error", "form", message)
+                logger.log_trace()
+                return result("fault")
+
+        if _capture_final_signal:
+            try:
+                SIGNAL_ACCOUNT_POST_CREATE.send(sender=account, ip=ip)
+            except Exception:
+                message = _("An error occurred. Please e-mail an admin if the problem persists.")
+                errors.append(message)
+                add_issue("account_post_create_signal", "internal_error", "form", message)
+                logger.log_trace()
+        else:
+            SIGNAL_ACCOUNT_POST_CREATE.send(sender=account, ip=ip)
+
+        return result("created" if not issues else "fault")
+
+    @classmethod
+    def create_with_provenance(cls, *args, **kwargs):
+        """Create an Account while retaining exact partial-row provenance.
+
+        Returns:
+            AccountCreationOutcome: An IO-local outcome containing live model
+            instances and durable IDs. It must not cross a web-worker boundary.
+
+        """
+        recorder = _AccountCreationRecorder()
+        try:
+            account, character, errors, issues, disposition = cls._create_account(
+                *args,
+                _creation_recorder=recorder,
+                _capture_final_signal=True,
+                **kwargs,
+            )
+        except Exception:
+            message = _("An error occurred. Please e-mail an admin if the problem persists.")
+            logger.log_trace()
+            return recorder.outcome(
+                "fault",
+                None,
+                None,
+                (account_creation_issue("creation_core", "internal_error", "form", message),),
+                (message,),
+            )
+        return recorder.outcome(
+            disposition,
+            account,
+            character,
+            issues,
+            errors,
+        )
+
+    @classmethod
     def create(cls, *args, **kwargs):
         """
         Creates an Account (or Account/Character pair for MULTISESSION_MODE<2)
@@ -1434,118 +1636,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
         """
 
-        account = None
-        errors = []
-
-        username = kwargs.get("username", "")
-        password = kwargs.get("password", "")
-        email = kwargs.get("email", "").strip()
-        guest = kwargs.get("guest", False)
-
-        kwargs.pop("permissions", None)
-        typeclass = kwargs.get("typeclass", cls)
-
-        ip = kwargs.get("ip", "")
-        if isinstance(ip, (tuple, list)):
-            ip = ip[0]
-
-        if ip and CREATION_THROTTLE.check(ip):
-            errors.append(
-                _("You are creating too many accounts. Please log into an existing account.")
-            )
-            return None, errors
-
-        # Normalize username
-        username = cls.normalize_username(username)
-
-        # Validate username
-        if not guest:
-            valid, errs = cls.validate_username(username)
-            if not valid:
-                # this echoes the restrictions made by django's auth
-                # module (except not allowing spaces, for convenience of
-                # logging in).
-                errors.extend(errs)
-                return None, errors
-
-        # Validate password
-        # Have to create a dummy Account object to check username similarity
-        valid, errs = cls.validate_password(password, account=cls(username=username))
-        if not valid:
-            errors.extend(errs)
-            return None, errors
-
-        # Check IP and/or name bans
-        banned = cls.is_banned(username=username, ip=ip)
-        if banned:
-            # this is a banned IP or name!
-            string = _(
-                "|rYou have been banned and cannot continue from here."
-                "\nIf you feel this ban is in error, please email an admin.|x"
-            )
-            errors.append(string)
-            return None, errors
-
-        # everything's ok. Create the new account.
-        try:
-            try:
-                account = create.create_account(username, email, password, typeclass=typeclass)
-                logger.log_sec(f"Account Created: {account} (IP: {ip}).")
-
-            except Exception:
-                errors.append(
-                    _(
-                        "There was an error creating the Account. "
-                        "If this problem persists, contact an admin."
-                    )
-                )
-                logger.log_trace()
-                return None, errors
-
-            # This needs to be set so the engine knows this account is
-            # logging in for the first time. (so it knows to call the right
-            # hooks during login later)
-            account.db.FIRST_LOGIN = True
-
-            # Record IP address of creation, if available
-            if ip:
-                account.db.creator_ip = ip
-
-            # join the new account to the public channels
-            for chan_info in settings.DEFAULT_CHANNELS:
-                if chankey := chan_info.get("key"):
-                    channel = ChannelDB.objects.get_channel(chankey)
-                    if not channel or not (
-                        channel.access(account, "listen") and channel.connect(account)
-                    ):
-                        string = (
-                            f"New account '{account.key}' could not connect to default channel"
-                            f" '{chankey}'!"
-                        )
-                        logger.log_err(string)
-                else:
-                    logger.log_err(f"Default channel '{chan_info}' is missing a 'key' field!")
-
-            if account and settings.AUTO_CREATE_CHARACTER_WITH_ACCOUNT:
-                # Auto-create a character to go with this account
-
-                character, errs = account.create_character(
-                    typeclass=kwargs.get("character_typeclass", account.default_character_typeclass)
-                )
-                if errs:
-                    errors.extend(errs)
-
-        except Exception:
-            # We are in the middle between logged in and -not, so we have
-            # to handle tracebacks ourselves at this point. If we don't,
-            # we won't see any errors at all.
-            errors.append(_("An error occurred. Please e-mail an admin if the problem persists."))
-            logger.log_trace()
-
-        # Update the throttle to indicate a new account was created from this IP
-        if ip and not guest:
-            CREATION_THROTTLE.update(ip, "Too many accounts being created.")
-        SIGNAL_ACCOUNT_POST_CREATE.send(sender=account, ip=ip)
+        account, _character, errors, _issues, _disposition = cls._create_account(*args, **kwargs)
         return account, errors
 
     def delete(self, *args, **kwargs):

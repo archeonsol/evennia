@@ -636,6 +636,8 @@ class ObjectDBManager(TypedObjectManager):
         nohome=False,
         attributes=None,
         nattributes=None,
+        *,
+        _creation_recorder=None,
     ):
         """
 
@@ -719,6 +721,8 @@ class ObjectDBManager(TypedObjectManager):
             db_home=home,
             db_typeclass_path=typeclass.path,
         )
+        if _creation_recorder is not None:
+            _creation_recorder.record_object(new_object)
         # store the call signature for the signal
         new_object._createdict = dict(
             key=key,
