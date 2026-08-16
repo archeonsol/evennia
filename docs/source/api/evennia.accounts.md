@@ -14,6 +14,7 @@ evennia.accounts
 
    evennia.accounts.accounts
    evennia.accounts.bots
+   evennia.accounts.creation
    evennia.accounts.manager
    evennia.accounts.models
 
