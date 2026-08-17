@@ -144,6 +144,7 @@ class _SignalShutdownCoordinator:
         except Exception:
             from evennia.utils import logger
 
+            self.forced = True
             logger.log_trace("could not start signal shutdown task")
             clock.stop_loop()
             return

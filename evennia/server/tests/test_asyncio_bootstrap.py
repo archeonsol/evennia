@@ -267,6 +267,45 @@ class BootstrapRunTest(SimpleTestCase):
         self.assertTrue(coordinator.forced)
         service.stopService.assert_called_once()
 
+    def test_latched_request_failure_skips_main_loop(self):
+        """A cold signal remains terminal when shutdown task creation fails."""
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        service = MagicMock()
+        service.running = True
+        coordinator = None
+
+        def install(value):
+            nonlocal coordinator
+            coordinator = value
+
+        def cold_start():
+            coordinator.handle_signal(15)
+
+        service.privilegedStartService.side_effect = cold_start
+        service.shutdown.side_effect = RuntimeError("cannot create shutdown task")
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers", side_effect=install),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia.server.asyncio_bootstrap.clock.stop_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.run_shutdown_hooks"),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertTrue(coordinator.forced)
+        loop.run_forever.assert_not_called()
+        service.stopService.assert_called_once()
+
     def test_pending_runtime_root_is_settled_before_loop_close(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
         from evennia.utils import clock
