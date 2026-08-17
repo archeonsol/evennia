@@ -1,10 +1,18 @@
-// Client-side Evennia pipe-code → HTML.
+// Client-side Evennia markup → HTML.
 //
 // The server normally ships pre-parsed `html` alongside each node body, but it
 // will omit it for a client declaring `caps.rendersMarkup` — and several panels
 // already fall back here whenever `html` is absent. Either way the output must
 // match `evennia.utils.text2html.parse_html` exactly, so this mirrors that
 // parser's rules rather than approximating them:
+//
+// Pipe codes are not the only input. `parse_html` runs `parse_ansi` first, so
+// raw ANSI escapes already in the body are styled exactly like the codes that
+// produce them — and plenty of body text arrives that way, because anything
+// built through `ANSIString` (EvTable, EvForm, EvMenu) has already had its pipe
+// codes resolved to escapes by the time `str()` is called on it. Those escapes
+// are tokenized here alongside the pipe codes; an escape the server does not
+// recognise stays literal text, as it does there.
 //
 //   - a style run becomes one <span class="…">, opened lazily so a code with no
 //     text after it emits nothing
@@ -135,23 +143,114 @@ type Token =
   | { kind: "marker"; value: string }
   | { kind: "break" }
   | { kind: "reset" }
+  /** A recognised code that changes no state. It still arms a new run: the
+   *  server erases the escape from the output, and an erased escape is what
+   *  tells it the next text belongs to a fresh span. */
+  | { kind: "restyle" }
   | { kind: "underline" }
-  /** `|h` — brightens the *current* foreground (`|R|h` is bright red). */
+  /** `|h` — turns the hilite flag on, brightening the current base colour. */
   | { kind: "hilite" }
   /** `|H` — the inverse of `|h`, dimming a bright foreground back down. */
   | { kind: "unhilite" }
   /** `|*` — a flag that swaps foreground and background at render time. */
   | { kind: "inverse" }
   | { kind: "blink" }
-  | { kind: "fg"; index: number }
-  | { kind: "bg"; index: number };
+  /**
+   * A foreground colour. `base` is 0-7 for one of the eight ANSI colours, which
+   * the hilite flag brightens to 8-15, or 16-255 for an xterm index, which
+   * hilite never touches.
+   *
+   * The split matters: the server keeps `fg` and `hilight` as separate state and
+   * combines them only when it emits a span, so `\x1b[1m\x1b[37m` — the header
+   * cell every EvTable emits — is bright white, not the default grey a single
+   * collapsed index would give.
+   */
+  | { kind: "fg"; base: number }
+  | { kind: "bg"; index: number }
+  /** A truecolor channel, as the `#rrggbb` the server's inline style would use. */
+  | { kind: "tcfg"; hex: string }
+  | { kind: "tcbg"; hex: string };
+
+/**
+ * Non-colour ANSI escapes the server's `re_style` knows, and the state changes
+ * each makes. The combined forms are single codes on the wire — `\x1b[1;5;7m`
+ * is one alternative in that pattern, not three separate escapes.
+ */
+const ANSI_STYLE: Record<string, Token[]> = {
+  "\u001b[0m": [{ kind: "reset" }],
+  "\u001b[4m": [{ kind: "underline" }],
+  "\u001b[1m": [{ kind: "hilite" }],
+  "\u001b[22m": [{ kind: "unhilite" }],
+  "\u001b[5m": [{ kind: "blink" }],
+  "\u001b[7m": [{ kind: "inverse" }],
+  "\u001b[1;7m": [{ kind: "hilite" }, { kind: "inverse" }],
+  // Not a typo, and not symmetric with the others. format_styles tests
+  // membership against three hand-written tuples, and the combined codes are
+  // not all in the tuples their name implies: BLINK_HILITE is missing from
+  // the hilite tuple, and INV_BLINK from both the inverse and the blink one.
+  // So `\x1b[1;5m` blinks without brightening and `\x1b[7;5m` does neither --
+  // it only counts as a style change. Reproduced, not corrected.
+  "\u001b[1;5m": [{ kind: "blink" }],
+  "\u001b[7;5m": [{ kind: "restyle" }],
+  "\u001b[1;5;7m": [{ kind: "hilite" }, { kind: "blink" }, { kind: "inverse" }],
+};
+
+const RE_ANSI_NAMED = /^\u001b\[([34])([0-7])m$/;
+const RE_ANSI_XTERM = /^\u001b\[([34])8;5;([0-9]{1,3})m$/;
+const RE_ANSI_TRUECOLOR = /^\u001b\[([34])8;2;([0-9]{1,3});([0-9]{1,3});([0-9]{1,3})m$/;
+/** The server's truecolor byte pattern: up to three digits, first of them 0-2. */
+const RE_ANSI_BYTE = /^[0-2]?[0-9]?[0-9]$/;
+
+function hexByte(value: string): string {
+  return Number(value).toString(16).padStart(2, "0");
+}
+
+/**
+ * Tokens for one raw ANSI escape, or `null` when the server would not recognise
+ * it. `null` is not "ignore": an unrecognised escape is ordinary text to
+ * `format_styles`, so it survives into the output and counts as content.
+ */
+function ansiTokens(code: string): Token[] | null {
+  const style = ANSI_STYLE[code];
+  if (style) return style;
+
+  const named = RE_ANSI_NAMED.exec(code);
+  if (named) {
+    const index = Number(named[2]);
+    return named[1] === "3" ? [{ kind: "fg", base: index }] : [{ kind: "bg", index }];
+  }
+
+  const xterm = RE_ANSI_XTERM.exec(code);
+  if (xterm) {
+    // The server's tables hold 16-255 only, so `\x1b[38;5;7m` is not a code it
+    // knows and stays literal even though it is valid SGR.
+    const index = Number(xterm[2]);
+    if (index < 16 || index > 255) return null;
+    return xterm[1] === "3" ? [{ kind: "fg", base: index }] : [{ kind: "bg", index }];
+  }
+
+  const truecolor = RE_ANSI_TRUECOLOR.exec(code);
+  if (truecolor) {
+    const [, channel, r, g, b] = truecolor;
+    if (!RE_ANSI_BYTE.test(r) || !RE_ANSI_BYTE.test(g) || !RE_ANSI_BYTE.test(b)) return null;
+    const hex = `#${hexByte(r)}${hexByte(g)}${hexByte(b)}`;
+    return [channel === "3" ? { kind: "tcfg", hex } : { kind: "tcbg", hex }];
+  }
+
+  return null;
+}
 
 // Order matters: longer/more specific sequences first. `\|l[cute]` must precede
 // the generic `\|[a-zA-Z]`, or `|lc` is read as the unknown colour code `|l` and
 // the orphaned `c` falls through as literal text — which is exactly how every
 // clickable link in the game came to render as "c@xp attrst[Attributes]e".
+//
+// The escape alternatives lead, and are deliberately looser than the server's
+// tables (any 1-3 digit parameter); `ansiTokens` does the exact range check and
+// hands back a literal for anything out of range. Matching loosely and rejecting
+// late is the same output as never matching, and keeps the ranges in one place.
 const TOKEN =
-  /\|\||\|\/|\|l[cute]|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
+  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
 
 function tokenize(text: string): Token[] {
   const out: Token[] = [];
@@ -181,6 +280,13 @@ function tokenize(text: string): Token[] {
     }
     flush();
 
+    if (code.charCodeAt(0) === 27) {
+      const ansi = ansiTokens(code);
+      if (ansi) out.push(...ansi);
+      else out.push({ kind: "text", value: code });
+      continue;
+    }
+
     if (code === "|/") {
       out.push({ kind: "break" });
     } else if (code.length === 3 && code[1] === "l") {
@@ -204,11 +310,11 @@ function tokenize(text: string): Token[] {
     } else if (code.startsWith("|[=")) {
       out.push({ kind: "bg", index: greyIndex(code[3]) });
     } else if (code.startsWith("|=")) {
-      out.push({ kind: "fg", index: greyIndex(code[2]) });
+      out.push({ kind: "fg", base: greyIndex(code[2]) });
     } else if (/^\|\[[0-5]{3}$/.test(code)) {
       out.push({ kind: "bg", index: cubeIndex(code.slice(2)) });
     } else if (/^\|[0-5]{3}$/.test(code)) {
-      out.push({ kind: "fg", index: cubeIndex(code.slice(1)) });
+      out.push({ kind: "fg", base: cubeIndex(code.slice(1)) });
       // An unrecognised code is *text*, not nothing. The server only rewrites
       // codes it knows and leaves the rest in place, so dropping them silently
       // ate a character of real output every time (`|lz` rendered as "z").
@@ -217,7 +323,16 @@ function tokenize(text: string): Token[] {
       out.push(index === undefined ? { kind: "text", value: code } : { kind: "bg", index });
     } else {
       const index = FG_INDEX[code[1]];
-      out.push(index === undefined ? { kind: "text", value: code } : { kind: "fg", index });
+      if (index === undefined) {
+        out.push({ kind: "text", value: code });
+      } else {
+        // A named code carries both channels — `|r` is HILITE+RED on the wire
+        // and `|R` is UNHILITE+RED — so emit the two state changes the server
+        // sees rather than one collapsed index. Folding them together loses the
+        // hilite flag, and a later `|h` or bare colour code then reads wrong.
+        out.push({ kind: index >= 8 ? "hilite" : "unhilite" });
+        out.push({ kind: "fg", base: index & 7 });
+      }
     }
   }
   flush();
@@ -295,11 +410,35 @@ function convertUrls(text: string): string {
   return text;
 }
 
-/** Convert an Evennia pipe-coded string to HTML, matching the server parser. */
+/**
+ * Upstream `remove_backspaces`, run over the finished HTML exactly as it is
+ * there: a backspace eats the character before it, and `ESC[K` is dropped.
+ *
+ * The loop is not a global replace. Upstream substitutes one match at a time
+ * and starts over, so `ab\b\b` collapses all the way instead of leaving the
+ * first backspace stranded. `.` there excludes a newline, hence the class.
+ */
+function removeBackspaces(text: string): string {
+  const pattern = /[^\n]\u0008|\u001b\[K/;
+  let out = text;
+  for (let m = pattern.exec(out); m; m = pattern.exec(out)) {
+    out = out.slice(0, m.index) + out.slice(m.index + m[0].length);
+  }
+  return out;
+}
+
+/**
+ * Convert an Evennia-marked-up string to HTML, matching the server parser.
+ *
+ * Accepts pipe codes, raw ANSI escapes, or both in the same string — the server
+ * resolves the former to the latter before it styles anything.
+ */
 export function pipeToHtml(text: string): string {
   // NUL delimits style markers in the intermediate; it has no rendering of its
   // own, so dropping it costs nothing and keeps the markers unambiguous.
-  const tokens = tokenize((text ?? "").replace(/\u0000/g, ""));
+  // BEL goes with it: `remove_bells` drops it before styling, so it never
+  // counts as the content that opens a span.
+  const tokens = tokenize((text ?? "").replace(/[\u0000\u0007]/g, ""));
 
   // Phase 1: escaped text, literal MXP markers, and style changes as markers.
   let intermediate = "";
@@ -317,25 +456,55 @@ export function pipeToHtml(text: string): string {
   // Phase 3: style markers become spans, with the anchor markup now ordinary
   // content that runs are free to open and close across.
   let html = "";
-  let fg: number | null = null;
+  let fgBase: number | null = null;
   let bg: number | null = null;
+  let hilite = false;
   let underline = false;
   let blink = false;
   let inverse = false;
+  let tcFg: string | null = null;
+  let tcBg: string | null = null;
   let open = false; // a <span> is currently emitted
   let pending = false; // a style run is armed but has no content yet
 
-  const classList = (): string => {
+  /** The current foreground as one index, hilite folded in at emit time. */
+  const fgIndex = (): number => {
+    // Absent a colour the server's default is unhilited white, so `|h` on its
+    // own is bright white rather than nothing.
+    const base = fgBase ?? DEFAULT_FG;
+    // Only the eight ANSI colours brighten; an xterm index is already absolute.
+    return base < 8 && hilite ? base + 8 : base;
+  };
+
+  const openTag = (): string => {
     const classes: string[] = [];
     if (underline) classes.push("underline");
     if (blink) classes.push("blink");
     // `|*` swaps the two channels at render time rather than when it is seen,
     // so a colour set on either side of it lands on the opposite channel.
-    const outFg = inverse ? (bg ?? DEFAULT_BG) : fg;
-    const outBg = inverse ? (fg ?? DEFAULT_FG) : bg;
+    const outFg = inverse ? (bg ?? DEFAULT_BG) : fgIndex();
+    const outBg = inverse ? fgIndex() : bg;
     if (outBg !== null && outBg !== DEFAULT_BG) classes.push("bgcolor-" + zfill(String(outBg), 3));
-    if (outFg !== null && outFg !== DEFAULT_FG) classes.push("color-" + zfill(String(outFg), 3));
-    return classes.join(" ");
+    if (outFg !== DEFAULT_FG) classes.push("color-" + zfill(String(outFg), 3));
+    const cls = escAttr(classes.join(" "));
+
+    // Truecolor rides as an inline style *alongside* the classes, which the
+    // server also keeps emitting — `blink` and `underline` have no truecolor
+    // equivalent, and it computes the colour classes before it knows whether a
+    // style is needed.
+    //
+    // Divergence, deliberate: the server's inverse+truecolor branches leave
+    // `bg_class`/`color_class` unassigned and reuse whatever the previous span
+    // left in those locals, and they mutate the truecolor state permanently.
+    // That is not a behaviour worth reproducing, so the channels are swapped
+    // here and the classes come from the ordinary inverse path.
+    const styleFg = inverse ? tcBg : tcFg;
+    const styleBg = inverse ? tcFg : tcBg;
+    if (styleFg === null && styleBg === null) return `<span class="${cls}">`;
+    let style = "";
+    if (styleFg !== null) style += `color: ${styleFg};`;
+    if (styleBg !== null) style += `background-color: ${styleBg};`;
+    return `<span class="${cls}" style="${style}">`;
   };
 
   const close = () => {
@@ -354,7 +523,7 @@ export function pipeToHtml(text: string): string {
       if (!segment) continue;
       if (pending) {
         close();
-        html += `<span class="${escAttr(classList())}">`;
+        html += openTag();
         open = true;
         pending = false;
       }
@@ -371,7 +540,7 @@ export function pipeToHtml(text: string): string {
         // A newline is emitted inside the current run, as the server does.
         if (pending) {
           close();
-          html += `<span class="${escAttr(classList())}">`;
+          html += openTag();
           open = true;
           pending = false;
         }
@@ -382,14 +551,20 @@ export function pipeToHtml(text: string): string {
         // open instead arms an empty run, which is why `|ntext|n` wraps.
         const wasOpen = open;
         close();
-        fg = null;
+        fgBase = null;
         bg = null;
+        hilite = false;
         underline = false;
         blink = false;
         inverse = false;
+        tcFg = null;
+        tcBg = null;
         pending = !wasOpen;
         break;
       }
+      case "restyle":
+        pending = true;
+        break;
       case "underline":
         underline = true;
         pending = true;
@@ -404,28 +579,37 @@ export function pipeToHtml(text: string): string {
         pending = true;
         break;
       case "hilite":
-        // Brightens the base 8 colours only; an xterm-256 index is untouched.
-        fg = fg === null ? 15 : fg < 8 ? fg + 8 : fg;
+        // A flag, not a colour: it brightens whichever base colour is current
+        // when the span is emitted, including one set after this point.
+        hilite = true;
         pending = true;
         break;
       case "unhilite":
-        fg = fg === null ? DEFAULT_FG : fg >= 8 && fg < 16 ? fg - 8 : fg;
+        hilite = false;
         pending = true;
         break;
       case "fg":
-        fg = token.index;
+        fgBase = token.base;
         pending = true;
         break;
       case "bg":
         bg = token.index;
         pending = true;
         break;
+      case "tcfg":
+        tcFg = token.hex;
+        pending = true;
+        break;
+      case "tcbg":
+        tcBg = token.hex;
+        pending = true;
+        break;
     }
   }
   close();
-  // Phase 4: bare-URL auto-linking, which upstream also runs last — over the
-  // finished HTML, spans and anchors included.
-  return convertUrls(html);
+  // Phase 4: backspaces, then bare-URL auto-linking. Upstream runs both over
+  // the finished HTML, spans and anchors included, and in this order.
+  return convertUrls(removeBackspaces(html));
 }
 
 /** True when the string already looks like server-parsed HTML. */

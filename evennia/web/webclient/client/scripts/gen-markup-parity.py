@@ -141,6 +141,65 @@ def cases() -> list[str]:
         "(https://example.com)",
         "https://example.com, next",
     ]
+    # Raw ANSI escapes. Anything built through ANSIString -- EvTable, EvForm,
+    # EvMenu -- has already resolved its pipe codes to escapes by the time a
+    # command calls str() on it, so this is what a table body actually looks
+    # like on the wire. parse_html runs parse_ansi first and styles them; the
+    # shell had no escape handling at all and printed them as literal text,
+    # which is why every @spawn table came out full of "[0m".
+    esc = ""
+    out += [
+        f"{esc}[1m{esc}[37mbright white{esc}[0m",
+        f"{esc}[0mplain{esc}[0m",
+        # The header row every EvTable emits, verbatim.
+        f"|{esc}[0m {esc}[1m{esc}[37mcategory{esc}[0m {esc}[0m|",
+        f"{esc}[1m{esc}[31mbright red{esc}[0m",
+        f"{esc}[22m{esc}[31mdark red{esc}[0m",
+        # hilite is a flag, not a colour, so it also applies to a colour set
+        # after it -- the case a single collapsed index cannot represent.
+        f"{esc}[31m{esc}[1mhilite last{esc}[0m",
+        "|h|Rhilite then named|n",
+        "|R|hnamed then hilite|n",
+    ]
+    out += [f"{esc}[3{n}mfg{esc}[0m" for n in range(8)]
+    out += [f"{esc}[4{n}mbg{esc}[0m" for n in range(8)]
+    out += [f"{esc}[{code}mstyle{esc}[0m" for code in ("4", "5", "7", "1;7", "1;5", "7;5", "1;5;7")]
+    # xterm256, including the indices below 16 that the code tables do not
+    # carry and therefore leave literal.
+    out += [f"{esc}[38;5;{n}mx{esc}[0m" for n in (0, 7, 15, 16, 100, 255)]
+    out += [f"{esc}[48;5;{n}mx{esc}[0m" for n in (0, 15, 16, 231, 255)]
+    out += [f"{esc}[38;5;256mx", f"{esc}[38;5;300mx"]
+    # Truecolor, which becomes an inline style rather than a class. Never
+    # combined with inverse here: those branches in format_styles read locals
+    # they never assigned on that path, so there is no behaviour to pin.
+    out += [
+        f"{esc}[38;2;255;0;0mred{esc}[0m",
+        f"{esc}[48;2;0;0;255mblue bg{esc}[0m",
+        f"{esc}[38;2;255;0;0m{esc}[48;2;0;255;0mboth{esc}[0m",
+        f"{esc}[38;2;1;2;3mlow{esc}[0m",
+        f"{esc}[38;2;300;0;0mout of range",
+    ]
+    # Escapes format_styles does not know, which survive into the output as
+    # text -- and count as content, so they open a pending span.
+    out += [f"{esc}[{code}mx" for code in ("2", "3", "8", "9", "23", "24", "29")]
+    out += [f"|r{esc}[3mitalic in colour|n"]
+    # Control characters upstream strips: BEL before styling, backspace and
+    # ESC[K afterwards, over the finished HTML.
+    out += [
+        "bellhere",
+        "|rbellin colour|n",
+        "backspace abc",
+        "cascade abc",
+        f"erase {esc}[Kline",
+        f"|rerase {esc}[Kin colour|n",
+    ]
+    # Pipe codes and escapes in one body, which is what a table plus a caption
+    # looks like after the command has sent both.
+    out += [
+        f"|rpipe{esc}[0m escape",
+        f"{esc}[1m{esc}[37mheader|n tail",
+        f"{esc}[31m|glayered|n",
+    ]
     # Every single-character code, known or not. The shell used to drop anything
     # it did not recognise, while the server leaves an unknown code as literal
     # text -- so `|lz` came out as "z". Sweeping the whole range makes the
