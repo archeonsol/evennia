@@ -73,15 +73,112 @@ def _setup_process_logging(portal_mode, nodaemon):
         logger.prune_rotated_logs(force=True)
 
 
-def _install_signal_handlers(portal_mode):
-    """SIGINT/SIGTERM → graceful shutdown hooks, then stop the loop."""
+class _SignalShutdownCoordinator:
+    """Latch process signals and activate one service-owned shutdown task."""
+
+    def __init__(self, loop, *, portal_mode):
+        self.loop = loop
+        self.portal_mode = portal_mode
+        self.state = "starting"
+        self.service = None
+        self.requested = False
+        self.signal_count = 0
+        self.task = None
+        self.emergency_handle = None
+        self.forced = False
+
+    def post_signal(self, signum):
+        """Post raw signal input onto the process loop without mutating state."""
+
+        try:
+            self.loop.call_soon_threadsafe(self.handle_signal, signum)
+        except RuntimeError:
+            pass
+
+    def handle_signal(self, signum):
+        """Handle one signal on the owner loop."""
+
+        self.signal_count += 1
+        if self.signal_count > 1:
+            from evennia.utils import logger
+
+            self.forced = True
+            logger.log_warn("Second interrupt received; stopping immediately.")
+            clock.stop_loop()
+            return
+
+        self.requested = True
+        if self.state == "ready":
+            self._activate()
+
+    def mark_ready(self, service):
+        """Publish a fully started service and activate any latched signal."""
+
+        if self.state == "failed":
+            return
+        self.service = service
+        self.state = "ready"
+        if self.requested and not self.forced:
+            self._activate()
+
+    def mark_failed(self):
+        """Prevent a startup-time signal from fabricating graceful completion."""
+
+        self.state = "failed"
+        self.service = None
+
+    def _activate(self):
+        """Request the exact service task and arm its emergency backstop."""
+
+        if self.task is not None or self.service is None:
+            return
+        try:
+            if self.portal_mode:
+                self.task = self.service.shutdown(
+                    _reactor_stopping=True,
+                    _stop_server=True,
+                    _stop_loop=True,
+                )
+            else:
+                self.task = self.service.request_shutdown(mode="reload", _reactor_stopping=True)
+        except Exception:
+            from evennia.utils import logger
+
+            self.forced = True
+            logger.log_trace("could not start signal shutdown task")
+            clock.stop_loop()
+            return
+
+        from django.conf import settings
+
+        emergency = float(getattr(settings, "SERVER_SHUTDOWN_EMERGENCY_TIMEOUT", 30.0))
+        self.emergency_handle = clock.call_later(emergency, self._emergency_stop)
+        self.task.add_done_callback(self._task_settled)
+
+    def _task_settled(self, _task):
+        """Disarm the emergency deadline after normal task settlement."""
+
+        if self.emergency_handle is not None:
+            self.emergency_handle.cancel()
+            self.emergency_handle = None
+
+    def _emergency_stop(self):
+        """Force loop termination when graceful work exceeds its deadline."""
+
+        from evennia.utils import logger
+
+        self.forced = True
+        logger.log_warn("Graceful shutdown timed out; stopping immediately.")
+        clock.stop_loop()
+
+
+def _install_signal_handlers(coordinator):
+    """Route raw SIGINT/SIGTERM callbacks onto the owner loop."""
 
     def _handle_signal(signum, _frame):
-        clock.run_shutdown_hooks(shutdown_executor=False)
-        clock.call_later(0.1, clock.stop_loop)
+        coordinator.post_signal(signum)
 
-    if portal_mode:
-        signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _handle_signal)
 
@@ -128,11 +225,12 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     clock.bind_loop(loop)
+    coordinator = _SignalShutdownCoordinator(loop, portal_mode=portal_mode)
+    _install_signal_handlers(coordinator)
     service = None
     start_attempted = False
+    startup_complete = False
     try:
-        _install_signal_handlers(portal_mode)
-
         import evennia
 
         if not getattr(evennia, "_LOADED", False):
@@ -150,7 +248,14 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
         start_attempted = True
         service.privilegedStartService()
         service.startService()
-        loop.run_forever()
+        startup_complete = True
+        coordinator.mark_ready(service)
+        if not coordinator.forced:
+            loop.run_forever()
+    except BaseException:
+        if not startup_complete:
+            coordinator.mark_failed()
+        raise
     finally:
         from evennia.utils import logger
 
@@ -158,6 +263,16 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
             clock.run_shutdown_hooks(shutdown_executor=False)
         except Exception:
             logger.log_trace("error running shutdown hooks")
+        shutdown_task = getattr(service, "_shutdown_task", None)
+        if (
+            isinstance(shutdown_task, asyncio.Task)
+            and not shutdown_task.done()
+            and not coordinator.forced
+        ):
+            try:
+                loop.run_until_complete(asyncio.gather(shutdown_task, return_exceptions=True))
+            except Exception:
+                logger.log_trace("error settling service shutdown task")
         try:
             if service is not None and (start_attempted or service.running):
                 service.stopService()

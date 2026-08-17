@@ -42,6 +42,74 @@ class BootstrapCmdlineTest(SimpleTestCase):
         self.assertNotIn("twistd", pcmd[0])
 
 
+class SignalShutdownCoordinatorTest(SimpleTestCase):
+    """Process signals latch through startup and activate only after readiness."""
+
+    def setUp(self):
+        super().setUp()
+        self.loop = asyncio.new_event_loop()
+
+    def tearDown(self):
+        self.loop.close()
+        super().tearDown()
+
+    def test_signal_during_cold_nested_loop_waits_for_ready(self):
+        from evennia.server.asyncio_bootstrap import _SignalShutdownCoordinator
+
+        coordinator = _SignalShutdownCoordinator(self.loop, portal_mode=False)
+        service = MagicMock()
+
+        async def finish():
+            return None
+
+        service.request_shutdown.side_effect = lambda **_kwargs: self.loop.create_task(finish())
+        self.loop.call_soon(coordinator.handle_signal, 15)
+        self.loop.run_until_complete(asyncio.sleep(0))
+        service.request_shutdown.assert_not_called()
+
+        with patch("evennia.server.asyncio_bootstrap.clock.call_later") as emergency:
+            coordinator.mark_ready(service)
+            self.loop.run_until_complete(asyncio.sleep(0))
+
+        service.request_shutdown.assert_called_once_with(mode="reload", _reactor_stopping=True)
+        emergency.assert_called_once()
+
+    def test_startup_failure_discards_latched_graceful_request(self):
+        from evennia.server.asyncio_bootstrap import _SignalShutdownCoordinator
+
+        coordinator = _SignalShutdownCoordinator(self.loop, portal_mode=False)
+        service = MagicMock()
+        coordinator.handle_signal(15)
+        coordinator.mark_failed()
+        coordinator.mark_ready(service)
+        service.request_shutdown.assert_not_called()
+
+    @patch("evennia.server.asyncio_bootstrap.clock.stop_loop")
+    def test_second_signal_forces_stop_without_duplicate_task(self, stop_loop):
+        from evennia.server.asyncio_bootstrap import _SignalShutdownCoordinator
+
+        coordinator = _SignalShutdownCoordinator(self.loop, portal_mode=False)
+        coordinator.handle_signal(2)
+        coordinator.handle_signal(15)
+
+        self.assertTrue(coordinator.forced)
+        stop_loop.assert_called_once()
+
+    @patch("evennia.server.asyncio_bootstrap.signal.signal")
+    def test_raw_handlers_only_post_both_signals(self, signal_install):
+        from evennia.server import asyncio_bootstrap
+
+        coordinator = MagicMock()
+        asyncio_bootstrap._install_signal_handlers(coordinator)
+        handlers = {call.args[0]: call.args[1] for call in signal_install.call_args_list}
+
+        handlers[asyncio_bootstrap.signal.SIGINT](asyncio_bootstrap.signal.SIGINT, None)
+        coordinator.post_signal.assert_called_once_with(asyncio_bootstrap.signal.SIGINT)
+        if hasattr(asyncio_bootstrap.signal, "SIGTERM"):
+            handlers[asyncio_bootstrap.signal.SIGTERM](asyncio_bootstrap.signal.SIGTERM, None)
+            coordinator.post_signal.assert_called_with(asyncio_bootstrap.signal.SIGTERM)
+
+
 class BootstrapRunTest(SimpleTestCase):
     def setUp(self):
         """Preserve loop globals changed by the process bootstrap."""
@@ -148,6 +216,96 @@ class BootstrapRunTest(SimpleTestCase):
             ],
         )
 
+    def test_forced_signal_during_nested_start_skips_main_loop(self):
+        """A swallowed cold-start stop cannot be lost before run_forever."""
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = asyncio.new_event_loop()
+        service = MagicMock()
+        service.running = True
+        coordinator = None
+        run_forever_calls = 0
+        original_run_forever = loop.run_forever
+
+        def install(value):
+            nonlocal coordinator
+            coordinator = value
+
+        def counted_run_forever():
+            nonlocal run_forever_calls
+            run_forever_calls += 1
+            return original_run_forever()
+
+        def cold_start():
+            async def bind_listener():
+                loop.call_soon(coordinator.handle_signal, 2)
+                loop.call_soon(coordinator.handle_signal, 15)
+                await asyncio.Event().wait()
+
+            task = loop.create_task(bind_listener())
+            with self.assertRaisesRegex(RuntimeError, "Event loop stopped"):
+                loop.run_until_complete(task)
+            task.cancel()
+            loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
+
+        service.privilegedStartService.side_effect = cold_start
+        loop.run_forever = counted_run_forever
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers", side_effect=install),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia.server.asyncio_bootstrap.clock.run_shutdown_hooks"),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertEqual(run_forever_calls, 2)
+        self.assertTrue(coordinator.forced)
+        service.stopService.assert_called_once()
+
+    def test_latched_request_failure_skips_main_loop(self):
+        """A cold signal remains terminal when shutdown task creation fails."""
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        service = MagicMock()
+        service.running = True
+        coordinator = None
+
+        def install(value):
+            nonlocal coordinator
+            coordinator = value
+
+        def cold_start():
+            coordinator.handle_signal(15)
+
+        service.privilegedStartService.side_effect = cold_start
+        service.shutdown.side_effect = RuntimeError("cannot create shutdown task")
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers", side_effect=install),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia.server.asyncio_bootstrap.clock.stop_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.run_shutdown_hooks"),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertTrue(coordinator.forced)
+        loop.run_forever.assert_not_called()
+        service.stopService.assert_called_once()
+
     def test_pending_runtime_root_is_settled_before_loop_close(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
         from evennia.utils import clock
@@ -239,6 +397,40 @@ class BootstrapRunTest(SimpleTestCase):
         mock_executor.assert_called_once()
         mock_remove.assert_called_once()
         loop.close.assert_called_once()
+
+    def test_startup_failure_settles_portal_hook_task_before_stopservice(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        order = []
+        loop = asyncio.new_event_loop()
+        service = MagicMock()
+        service.running = True
+        service.startService.side_effect = RuntimeError("children failed")
+        service.stopService.side_effect = lambda: order.append("stop")
+
+        async def cleanup():
+            order.append("cleanup")
+
+        def hooks(**_kwargs):
+            service._shutdown_task = loop.create_task(cleanup())
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.run_shutdown_hooks",
+                side_effect=hooks,
+            ),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "children failed"):
+                run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertEqual(order[:2], ["cleanup", "stop"])
 
     def test_initialization_failure_preserves_error_and_cleans_up(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
