@@ -664,6 +664,270 @@
     "html": "<a href=\"https://example.com\" target=\"_blank\">https://example.com</a>, next"
   },
   {
+    "src": "\u001b[1m\u001b[37mbright white\u001b[0m",
+    "html": "<span class=\"color-015\">bright white</span>"
+  },
+  {
+    "src": "\u001b[0mplain\u001b[0m",
+    "html": "<span class=\"\">plain</span>"
+  },
+  {
+    "src": "|\u001b[0m \u001b[1m\u001b[37mcategory\u001b[0m \u001b[0m|",
+    "html": "|<span class=\"\"> </span><span class=\"color-015\">category</span> <span class=\"\">|</span>"
+  },
+  {
+    "src": "\u001b[1m\u001b[31mbright red\u001b[0m",
+    "html": "<span class=\"color-009\">bright red</span>"
+  },
+  {
+    "src": "\u001b[22m\u001b[31mdark red\u001b[0m",
+    "html": "<span class=\"color-001\">dark red</span>"
+  },
+  {
+    "src": "\u001b[31m\u001b[1mhilite last\u001b[0m",
+    "html": "<span class=\"color-009\">hilite last</span>"
+  },
+  {
+    "src": "|h|Rhilite then named|n",
+    "html": "<span class=\"color-001\">hilite then named</span>"
+  },
+  {
+    "src": "|R|hnamed then hilite|n",
+    "html": "<span class=\"color-009\">named then hilite</span>"
+  },
+  {
+    "src": "\u001b[30mfg\u001b[0m",
+    "html": "<span class=\"color-000\">fg</span>"
+  },
+  {
+    "src": "\u001b[31mfg\u001b[0m",
+    "html": "<span class=\"color-001\">fg</span>"
+  },
+  {
+    "src": "\u001b[32mfg\u001b[0m",
+    "html": "<span class=\"color-002\">fg</span>"
+  },
+  {
+    "src": "\u001b[33mfg\u001b[0m",
+    "html": "<span class=\"color-003\">fg</span>"
+  },
+  {
+    "src": "\u001b[34mfg\u001b[0m",
+    "html": "<span class=\"color-004\">fg</span>"
+  },
+  {
+    "src": "\u001b[35mfg\u001b[0m",
+    "html": "<span class=\"color-005\">fg</span>"
+  },
+  {
+    "src": "\u001b[36mfg\u001b[0m",
+    "html": "<span class=\"color-006\">fg</span>"
+  },
+  {
+    "src": "\u001b[37mfg\u001b[0m",
+    "html": "<span class=\"\">fg</span>"
+  },
+  {
+    "src": "\u001b[40mbg\u001b[0m",
+    "html": "<span class=\"\">bg</span>"
+  },
+  {
+    "src": "\u001b[41mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-001\">bg</span>"
+  },
+  {
+    "src": "\u001b[42mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-002\">bg</span>"
+  },
+  {
+    "src": "\u001b[43mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-003\">bg</span>"
+  },
+  {
+    "src": "\u001b[44mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-004\">bg</span>"
+  },
+  {
+    "src": "\u001b[45mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-005\">bg</span>"
+  },
+  {
+    "src": "\u001b[46mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-006\">bg</span>"
+  },
+  {
+    "src": "\u001b[47mbg\u001b[0m",
+    "html": "<span class=\"bgcolor-007\">bg</span>"
+  },
+  {
+    "src": "\u001b[4mstyle\u001b[0m",
+    "html": "<span class=\"underline\">style</span>"
+  },
+  {
+    "src": "\u001b[5mstyle\u001b[0m",
+    "html": "<span class=\"blink\">style</span>"
+  },
+  {
+    "src": "\u001b[7mstyle\u001b[0m",
+    "html": "<span class=\"bgcolor-007 color-000\">style</span>"
+  },
+  {
+    "src": "\u001b[1;7mstyle\u001b[0m",
+    "html": "<span class=\"bgcolor-015 color-000\">style</span>"
+  },
+  {
+    "src": "\u001b[1;5mstyle\u001b[0m",
+    "html": "<span class=\"blink\">style</span>"
+  },
+  {
+    "src": "\u001b[7;5mstyle\u001b[0m",
+    "html": "<span class=\"\">style</span>"
+  },
+  {
+    "src": "\u001b[1;5;7mstyle\u001b[0m",
+    "html": "<span class=\"blink bgcolor-015 color-000\">style</span>"
+  },
+  {
+    "src": "\u001b[38;5;0mx\u001b[0m",
+    "html": "\u001b[38;5;0mx"
+  },
+  {
+    "src": "\u001b[38;5;7mx\u001b[0m",
+    "html": "\u001b[38;5;7mx"
+  },
+  {
+    "src": "\u001b[38;5;15mx\u001b[0m",
+    "html": "\u001b[38;5;15mx"
+  },
+  {
+    "src": "\u001b[38;5;16mx\u001b[0m",
+    "html": "<span class=\"color-016\">x</span>"
+  },
+  {
+    "src": "\u001b[38;5;100mx\u001b[0m",
+    "html": "<span class=\"color-100\">x</span>"
+  },
+  {
+    "src": "\u001b[38;5;255mx\u001b[0m",
+    "html": "<span class=\"color-255\">x</span>"
+  },
+  {
+    "src": "\u001b[48;5;0mx\u001b[0m",
+    "html": "\u001b[48;5;0mx"
+  },
+  {
+    "src": "\u001b[48;5;15mx\u001b[0m",
+    "html": "\u001b[48;5;15mx"
+  },
+  {
+    "src": "\u001b[48;5;16mx\u001b[0m",
+    "html": "<span class=\"bgcolor-016\">x</span>"
+  },
+  {
+    "src": "\u001b[48;5;231mx\u001b[0m",
+    "html": "<span class=\"bgcolor-231\">x</span>"
+  },
+  {
+    "src": "\u001b[48;5;255mx\u001b[0m",
+    "html": "<span class=\"bgcolor-255\">x</span>"
+  },
+  {
+    "src": "\u001b[38;5;256mx",
+    "html": "\u001b[38;5;256mx"
+  },
+  {
+    "src": "\u001b[38;5;300mx",
+    "html": "\u001b[38;5;300mx"
+  },
+  {
+    "src": "\u001b[38;2;255;0;0mred\u001b[0m",
+    "html": "<span class=\"\" style=\"color: #ff0000;\">red</span>"
+  },
+  {
+    "src": "\u001b[48;2;0;0;255mblue bg\u001b[0m",
+    "html": "<span class=\"\" style=\"background-color: #0000ff;\">blue bg</span>"
+  },
+  {
+    "src": "\u001b[38;2;255;0;0m\u001b[48;2;0;255;0mboth\u001b[0m",
+    "html": "<span class=\"\" style=\"color: #ff0000;background-color: #00ff00;\">both</span>"
+  },
+  {
+    "src": "\u001b[38;2;1;2;3mlow\u001b[0m",
+    "html": "<span class=\"\" style=\"color: #010203;\">low</span>"
+  },
+  {
+    "src": "\u001b[38;2;300;0;0mout of range",
+    "html": "\u001b[38;2;300;0;0mout of range"
+  },
+  {
+    "src": "\u001b[2mx",
+    "html": "\u001b[2mx"
+  },
+  {
+    "src": "\u001b[3mx",
+    "html": "\u001b[3mx"
+  },
+  {
+    "src": "\u001b[8mx",
+    "html": "\u001b[8mx"
+  },
+  {
+    "src": "\u001b[9mx",
+    "html": "\u001b[9mx"
+  },
+  {
+    "src": "\u001b[23mx",
+    "html": "\u001b[23mx"
+  },
+  {
+    "src": "\u001b[24mx",
+    "html": "\u001b[24mx"
+  },
+  {
+    "src": "\u001b[29mx",
+    "html": "\u001b[29mx"
+  },
+  {
+    "src": "|r\u001b[3mitalic in colour|n",
+    "html": "<span class=\"color-009\">\u001b[3mitalic in colour</span>"
+  },
+  {
+    "src": "bell\u0007here",
+    "html": "bellhere"
+  },
+  {
+    "src": "|rbell\u0007in colour|n",
+    "html": "<span class=\"color-009\">bellin colour</span>"
+  },
+  {
+    "src": "backspace ab\bc",
+    "html": "backspace ac"
+  },
+  {
+    "src": "cascade ab\b\bc",
+    "html": "cascade c"
+  },
+  {
+    "src": "erase \u001b[Kline",
+    "html": "erase line"
+  },
+  {
+    "src": "|rerase \u001b[Kin colour|n",
+    "html": "<span class=\"color-009\">erase in colour</span>"
+  },
+  {
+    "src": "|rpipe\u001b[0m escape",
+    "html": "<span class=\"color-009\">pipe</span> escape"
+  },
+  {
+    "src": "\u001b[1m\u001b[37mheader|n tail",
+    "html": "<span class=\"color-015\">header</span> tail"
+  },
+  {
+    "src": "\u001b[31m|glayered|n",
+    "html": "<span class=\"color-010\">layered</span>"
+  },
+  {
     "src": "|!x",
     "html": "|!x"
   },
