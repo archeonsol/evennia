@@ -14,9 +14,8 @@ from unittest.mock import MagicMock, patch
 
 from django.db import connections
 from django.test import SimpleTestCase
-from twisted.internet.defer import Deferred, ensureDeferred
-
 from evennia.utils import clock
+from twisted.internet.defer import Deferred, ensureDeferred
 
 
 class _AsyncioLoopMixin:
@@ -24,11 +23,16 @@ class _AsyncioLoopMixin:
 
     def setUp(self):
         super().setUp()
+        self._saved_bound_loop = clock._main_loop
+        self._saved_bound_thread = clock._loop_thread_id
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        clock.bind_loop(self._loop)
 
     def tearDown(self):
         self._loop.close()
+        clock._main_loop = self._saved_bound_loop
+        clock._loop_thread_id = self._saved_bound_thread
         asyncio.set_event_loop(None)
         super().tearDown()
 
@@ -146,7 +150,9 @@ class TestLoopHandleBackstop(_AsyncioLoopMixin, SimpleTestCase):
             await asyncio.sleep(0.02)
             handle.stop()
 
-        with patch("evennia.utils.logger.log_trace", lambda *a, **k: captured.append(a)):
+        with patch(
+            "evennia.utils.logger.log_trace", lambda *a, **k: captured.append(a)
+        ):
             self._loop.run_until_complete(drive())
 
         self.assertTrue(captured, "loop body error was swallowed silently")
@@ -230,6 +236,20 @@ class TestDefaultExecutorLifecycle(SimpleTestCase):
         finally:
             loop.close()
 
+    def test_run_shutdown_hooks_can_defer_executor_shutdown(self):
+        loop = asyncio.new_event_loop()
+        try:
+            clock.bind_loop(loop)
+            executor = clock._default_executor
+
+            clock.run_shutdown_hooks(shutdown_executor=False)
+
+            self.assertIs(clock._default_executor, executor)
+            self.assertEqual(executor.submit(lambda: 7).result(), 7)
+        finally:
+            clock.shutdown_default_executor()
+            loop.close()
+
 
 class TestClockLoopBinding(SimpleTestCase):
     """bind_loop is the sole authority for the bound loop + its owning thread."""
@@ -281,6 +301,40 @@ class TestClockLoopBinding(SimpleTestCase):
         finally:
             loop.close()
 
+    def test_is_io_owner_allows_only_actual_main_before_binding(self):
+        clock._main_loop = None
+        clock._loop_thread_id = None
+        self.assertTrue(clock.is_io_owner())
+        result = {}
+
+        def worker():
+            result["owner"] = clock.is_io_owner()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(timeout=1)
+        self.assertFalse(result["owner"])
+
+
+class TestPendingTaskSettlement(_AsyncioLoopMixin, SimpleTestCase):
+    """Terminal cancellation drives runtime-root cleanup in its own Context."""
+
+    def test_cancel_pending_runtime_root_settles_wrapper(self):
+        started = []
+
+        async def pending():
+            started.append(True)
+            await asyncio.Event().wait()
+
+        task = clock._create_runtime_task(self._loop, pending(), "test")
+        self._loop.run_until_complete(asyncio.sleep(0))
+
+        settled = clock.cancel_pending_tasks(self._loop)
+
+        self.assertEqual(started, [True])
+        self.assertIn(task, settled)
+        self.assertTrue(task.cancelled())
+
 
 class TestFixedRateSchedule(SimpleTestCase):
     """LoopHandle cadence is fixed-rate (anchored), not fixed-delay."""
@@ -319,6 +373,49 @@ class TestSyncCoroutineResultDrain(SimpleTestCase):
         task = captured["task"]
         self.assertTrue(task.done())
         self.assertTrue(task.cancelled())
+
+    def test_worker_cannot_claim_ownership_through_sync_harness(self):
+        saved = (clock._main_loop, clock._loop_thread_id)
+        bound_loop = asyncio.new_event_loop()
+        clock.bind_loop(bound_loop)
+        observed = {}
+
+        async def probe():
+            observed["inside_owner"] = clock.is_io_owner()
+
+        coro = probe()
+
+        def worker():
+            observed["before_owner"] = clock.is_io_owner()
+            try:
+                clock.run_coroutine(coro)
+            except RuntimeError as err:
+                observed["error"] = str(err)
+            observed["after_owner"] = clock.is_io_owner()
+
+        try:
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=1)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(
+                observed,
+                {
+                    "before_owner": False,
+                    "error": (
+                        "run_coroutine() without a running loop is available only to the "
+                        "IO owner"
+                    ),
+                    "after_owner": False,
+                },
+            )
+            self.assertIsNone(coro.cr_frame)
+            self.assertTrue(clock.is_io_owner())
+            self.assertIs(clock.get_bound_loop(), bound_loop)
+        finally:
+            bound_loop.close()
+            clock._main_loop, clock._loop_thread_id = saved
 
 
 class TestCallFromThread(_AsyncioLoopMixin, SimpleTestCase):

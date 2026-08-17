@@ -19,12 +19,12 @@ import random
 import re
 import sys
 import textwrap
-import threading
 import traceback
 import types
 from ast import literal_eval
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable
+from functools import partial
 from inspect import getmembers, getmodule, getmro, ismodule, trace
 from os.path import join as osjoin
 from string import punctuation
@@ -47,7 +47,6 @@ from evennia.utils import logger
 
 _EVENNIA_DIR = settings.EVENNIA_DIR
 _GAME_DIR = settings.GAME_DIR
-_IS_MAIN_THREAD = threading.current_thread().name == "MainThread"
 
 ENCODINGS = settings.ENCODINGS
 
@@ -2836,33 +2835,24 @@ def copy_word_case(base_word, new_word):
 
 
 def run_in_main_thread(function_or_method, *args, **kwargs):
-    """
-    Force a callable to execute in the main Evennia thread. This is only relevant when
-    calling code from e.g. web views, which run in a separate threadpool. Use this
-    to avoid race conditions.
+    """Execute a callable on Evennia's IO owner thread.
+
+    This compatibility wrapper delegates to
+    :func:`evennia.web.utils.io.run_on_io_thread`. The IO owner is commonly the
+    process main thread, but may instead be a background standalone thread.
 
     Args:
         function_or_method (callable): A function or method to fire.
         *args: Will be passed into the callable.
         **kwargs: Will be passed into the callable.
 
+    Returns:
+        Any: The callable's return value.
+
     """
-    if _IS_MAIN_THREAD:
-        return function_or_method(*args, **kwargs)
-    from concurrent.futures import Future
+    from evennia.web.utils.io import run_on_io_thread
 
-    from evennia.utils import clock
-
-    future = Future()
-
-    def _runner():
-        try:
-            future.set_result(function_or_method(*args, **kwargs))
-        except Exception as exc:
-            future.set_exception(exc)
-
-    clock.call_from_thread(_runner)
-    return future.result()
+    return run_on_io_thread(partial(function_or_method, *args, **kwargs))
 
 
 _INT2STR_MAP_NOUN = {

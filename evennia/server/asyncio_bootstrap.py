@@ -77,7 +77,7 @@ def _install_signal_handlers(portal_mode):
     """SIGINT/SIGTERM → graceful shutdown hooks, then stop the loop."""
 
     def _handle_signal(signum, _frame):
-        clock.run_shutdown_hooks()
+        clock.run_shutdown_hooks(shutdown_executor=False)
         clock.call_later(0.1, clock.stop_loop)
 
     if portal_mode:
@@ -128,37 +128,51 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     clock.bind_loop(loop)
-    _install_signal_handlers(portal_mode)
-
-    import evennia
-
-    if not getattr(evennia, "_LOADED", False):
-        evennia._init(portal_mode=portal_mode)
-
-    if portal_mode:
-        service = evennia.EVENNIA_PORTAL_SERVICE
-    else:
-        service = evennia.EVENNIA_SERVER_SERVICE
-
-    if "test" not in sys.argv:
-        _setup_process_logging(portal_mode, args.nodaemon)
-
-    # privilegedStartService registers listeners; startService starts child services.
-    service.privilegedStartService()
-    service.startService()
-
+    service = None
+    start_attempted = False
     try:
+        _install_signal_handlers(portal_mode)
+
+        import evennia
+
+        if not getattr(evennia, "_LOADED", False):
+            evennia._init(portal_mode=portal_mode)
+
+        if portal_mode:
+            service = evennia.EVENNIA_PORTAL_SERVICE
+        else:
+            service = evennia.EVENNIA_SERVER_SERVICE
+
+        if "test" not in sys.argv:
+            _setup_process_logging(portal_mode, args.nodaemon)
+
+        # privilegedStartService registers listeners; startService starts children.
+        start_attempted = True
+        service.privilegedStartService()
+        service.startService()
         loop.run_forever()
     finally:
         from evennia.utils import logger
 
         try:
-            if service.running:
+            clock.run_shutdown_hooks(shutdown_executor=False)
+        except Exception:
+            logger.log_trace("error running shutdown hooks")
+        try:
+            if service is not None and (start_attempted or service.running):
                 service.stopService()
         except Exception:
             # log rather than swallow, but keep going: sibling teardown
             # (pidfile removal, loop close) must still run
             logger.log_trace("error during service.stopService() on shutdown")
+        try:
+            clock.cancel_pending_tasks(loop)
+        except Exception:
+            logger.log_trace("error settling pending tasks on shutdown")
+        try:
+            clock.shutdown_default_executor()
+        except Exception:
+            logger.log_trace("error shutting down the worker executor")
         _remove_pidfile(args.pidfile)
         try:
             if not loop.is_closed():

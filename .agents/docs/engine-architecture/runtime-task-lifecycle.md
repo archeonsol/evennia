@@ -53,3 +53,15 @@ rather than starting against partial state.
 
 The required production invariant is a stable pooler client count proportional
 to active root work, never monotonically increasing with completed tasks.
+
+## Terminal loop teardown
+
+Bootstrap and standalone shutdown run synchronous hooks while scheduling is
+still available, stop the service tree, then take one snapshot of unfinished
+loop tasks. They cancel every task in that snapshot and drive one
+`gather(..., return_exceptions=True)` to completion. This lets each
+`_run_runtime_root()` unwind and reset its ContextVars inside the Context that
+created them, avoiding destroyed-pending-task and cross-Context reset errors.
+The custom worker executor is destroyed only after settlement, followed by
+pidfile removal and loop close. Initialization and partial service-start
+failures use the same finalizer and preserve their original exception.

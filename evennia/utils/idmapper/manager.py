@@ -2,10 +2,40 @@
 IDmapper extension to the default manager.
 """
 
+from django.db.models import QuerySet
 from django.db.models.manager import Manager
 
+from evennia.utils import clock
 
-class SharedMemoryManager(Manager):
+
+class SharedMemoryOwnershipError(RuntimeError):
+    """A caller attempted to mutate canonical model state off its owner."""
+
+
+class SharedMemoryQuerySet(QuerySet):
+    """QuerySet whose persistence operations respect runtime ownership."""
+
+    @staticmethod
+    def _require_owner(operation):
+        if not clock.is_io_owner():
+            raise SharedMemoryOwnershipError(
+                f"SharedMemory QuerySet.{operation}() requires the Evennia IO owner"
+            )
+
+    def delete(self):
+        self._require_owner("delete")
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._require_owner("bulk_create")
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._require_owner("bulk_update")
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+class SharedMemoryManager(Manager.from_queryset(SharedMemoryQuerySet)):
     # TODO: improve on this implementation
     # We need a way to handle reverse lookups so that this model can
     # still use the singleton cache, but the active model isn't required

@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
@@ -68,6 +69,22 @@ class ChannelSubscriptionTests(BaseEvenniaTest):
             self.char1.nicks.nickreplace("catlovers I love cats!"),
             "catlovers I love cats!",
         )
+
+    def test_string_conversion_is_worker_safe_and_concrete(self):
+        result = []
+        thread = threading.Thread(target=lambda: result.append(str(self.default_channel)))
+        thread.start()
+        thread.join(timeout=1)
+
+        self.assertEqual(result, ["Channel 'catlovers'"])
+
+    def test_admin_subscription_columns_do_not_use_live_handler(self):
+        from evennia.comms.models import SubscriptionHandler
+        from evennia.web.admin.comms import ChannelAdmin
+
+        with patch.object(SubscriptionHandler, "all", side_effect=AssertionError("live handler")):
+            self.assertEqual(ChannelAdmin.no_of_subscribers(None, self.default_channel), 1)
+            self.assertIn("Obj", ChannelAdmin.subscriptions(None, self.default_channel))
 
 
 class ChannelWholistTests(BaseEvenniaTest):

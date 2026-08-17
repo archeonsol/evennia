@@ -30,9 +30,22 @@ _runtime_task_kind: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _sync_inline_driver: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "evennia_sync_inline_driver", default=False
 )
+_sync_driver_loop: contextvars.ContextVar[asyncio.AbstractEventLoop | None] = (
+    contextvars.ContextVar("evennia_sync_driver_loop", default=None)
+)
 
 _RUNTIME_TASK_KINDS = frozenset(
-    {"action", "activity", "command", "job", "service", "system", "warmup", "generic", "test"}
+    {
+        "action",
+        "activity",
+        "command",
+        "job",
+        "service",
+        "system",
+        "warmup",
+        "generic",
+        "test",
+    }
 )
 
 
@@ -79,6 +92,18 @@ def is_io_thread() -> bool:
     return threading.get_ident() == _loop_thread_id
 
 
+def is_io_owner() -> bool:
+    """Return whether this thread owns live Evennia runtime state.
+
+    Before bootstrap, the actual main thread is the only supported inline
+    owner. Once a loop is bound, its recorded thread is authoritative even
+    while the loop is stopped for owner-side teardown.
+    """
+    if get_bound_loop() is None:
+        return threading.current_thread() is threading.main_thread()
+    return is_io_thread()
+
+
 def get_loop_thread_id() -> int | None:
     """Return the thread id running the bound event loop, or None."""
     return _loop_thread_id
@@ -89,7 +114,7 @@ def register_shutdown_hook(fn, *args, **kwargs):
     _shutdown_hooks.append((fn, args, kwargs))
 
 
-def run_shutdown_hooks():
+def run_shutdown_hooks(*, shutdown_executor=True):
     """Fire shutdown hooks registered via :func:`register_shutdown_hook`."""
     hooks = _shutdown_hooks[:]
     _shutdown_hooks.clear()
@@ -103,7 +128,23 @@ def run_shutdown_hooks():
     # Tear the worker pool down last, after user hooks: a hook may still hand
     # blocking work to defer_to_thread, and its non-daemon threads would
     # otherwise outlive loop teardown and pile up across in-process reloads.
-    shutdown_default_executor()
+    if shutdown_executor:
+        shutdown_default_executor()
+
+
+def cancel_pending_tasks(loop, *, exclude=()):
+    """Cancel and settle every unfinished task owned by ``loop`` once."""
+    excluded = set(exclude)
+    tasks = [
+        task
+        for task in asyncio.all_tasks(loop)
+        if not task.done() and task not in excluded
+    ]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+    return tasks
 
 
 def stop_loop():
@@ -128,6 +169,9 @@ def _get_loop() -> asyncio.AbstractEventLoop:
         return asyncio.get_running_loop()
     except RuntimeError:
         pass
+    sync_driver_loop = _sync_driver_loop.get()
+    if sync_driver_loop is not None and not sync_driver_loop.is_closed():
+        return sync_driver_loop
     if _main_loop is not None and not _main_loop.is_closed():
         return _main_loop
     try:
@@ -210,7 +254,9 @@ def _log_task_exception(task: asyncio.Task) -> None:
     if exc is not None:
         from evennia.utils.logger import log_err
 
-        log_err(f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}")
+        log_err(
+            f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}"
+        )
 
 
 def _next_fire_time(target: float, interval: float, now: float) -> float:
@@ -318,6 +364,7 @@ class _SyncCoroutineResult:
             prev_loop = None
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        driver_token = _sync_driver_loop.set(loop)
         try:
             self._result = self._drive_inline(coro, loop)
             self._exception = None
@@ -332,6 +379,7 @@ class _SyncCoroutineResult:
             try:
                 self._drain(loop)
             finally:
+                _sync_driver_loop.reset(driver_token)
                 loop.close()
                 asyncio.set_event_loop(prev_loop)
 
@@ -564,7 +612,9 @@ def _isolated_database_context() -> contextvars.Context:
             # Tiny utility consumers may use the clock without Django.
             return
         except Exception as err:
-            raise RuntimeError("could not isolate Django state for runtime root") from err
+            raise RuntimeError(
+                "could not isolate Django state for runtime root"
+            ) from err
 
     context.run(detach)
     return context
@@ -588,7 +638,8 @@ def _close_database_connections() -> bool:
         from django.db import connections
 
         had_connection = any(
-            wrapper.connection is not None for wrapper in connections.all(initialized_only=True)
+            wrapper.connection is not None
+            for wrapper in connections.all(initialized_only=True)
         )
         connections.close_all()
         return had_connection
@@ -657,7 +708,9 @@ def _create_runtime_task(loop, coro, task_kind: str) -> asyncio.Task:
 
     context = _isolated_database_context()
     started = [False]
-    task = loop.create_task(_run_runtime_root(coro, task_kind, started), context=context)
+    task = loop.create_task(
+        _run_runtime_root(coro, task_kind, started), context=context
+    )
 
     def completed(done_task):
         # If cancellation wins before the wrapper's first bytecode executes,
@@ -686,6 +739,12 @@ def run_coroutine(coro, *, task_kind="generic"):
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        if not is_io_owner():
+            if inspect.iscoroutine(coro):
+                coro.close()
+            raise RuntimeError(
+                "run_coroutine() without a running loop is available only to the IO owner"
+            )
         return _SyncCoroutineResult(coro)
     return _create_runtime_task(loop, coro, task_kind)
 

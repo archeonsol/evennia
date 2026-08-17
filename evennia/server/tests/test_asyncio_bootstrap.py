@@ -1,5 +1,6 @@
 """Tests for the asyncio Portal/Server bootstrap (T3 S8/S9)."""
 
+import asyncio
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -42,6 +43,27 @@ class BootstrapCmdlineTest(SimpleTestCase):
 
 
 class BootstrapRunTest(SimpleTestCase):
+    def setUp(self):
+        """Preserve loop globals changed by the process bootstrap."""
+        super().setUp()
+        from evennia.utils import clock
+
+        self._saved_bound_loop = clock._main_loop
+        self._saved_bound_thread = clock._loop_thread_id
+        try:
+            self._saved_event_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._saved_event_loop = None
+
+    def tearDown(self):
+        """Restore the runner's loop after bootstrap closes its own loop."""
+        from evennia.utils import clock
+
+        clock._main_loop = self._saved_bound_loop
+        clock._loop_thread_id = self._saved_bound_thread
+        asyncio.set_event_loop(self._saved_event_loop)
+        super().tearDown()
+
     def test_run_bootstrap_starts_and_stops_application(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
 
@@ -96,12 +118,155 @@ class BootstrapRunTest(SimpleTestCase):
             patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
             patch("evennia.server.asyncio_bootstrap._write_pidfile"),
             patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.run_shutdown_hooks",
+                side_effect=lambda **kwargs: order.append(("hooks", kwargs)),
+            ),
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.cancel_pending_tasks",
+                side_effect=lambda _loop: order.append("cancel"),
+            ),
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.shutdown_default_executor",
+                side_effect=lambda: order.append("executor"),
+            ),
             patch("evennia._LOADED", True, create=True),
             patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
         ):
             run_bootstrap(portal_mode=True, argv=[])
 
-        self.assertEqual(order, ["privileged", "start", "run_forever", "stop"])
+        self.assertEqual(
+            order,
+            [
+                "privileged",
+                "start",
+                "run_forever",
+                ("hooks", {"shutdown_executor": False}),
+                "stop",
+                "cancel",
+                "executor",
+            ],
+        )
+
+    def test_pending_runtime_root_is_settled_before_loop_close(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+        from evennia.utils import clock
+
+        loop = asyncio.new_event_loop()
+        service = MagicMock()
+        service.running = True
+
+        async def pending():
+            await asyncio.Event().wait()
+
+        task = clock._create_runtime_task(loop, pending(), "test")
+        loop.call_soon(loop.stop)
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertTrue(task.cancelled())
+        self.assertTrue(loop.is_closed())
+
+    def test_partial_startup_failure_preserves_error_and_cleans_up(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        service = MagicMock()
+        service.privilegedStartService.side_effect = RuntimeError("listener failed")
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile") as mock_remove,
+            patch("evennia.server.asyncio_bootstrap.clock.cancel_pending_tasks") as mock_cancel,
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.shutdown_default_executor"
+            ) as mock_executor,
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "listener failed"):
+                run_bootstrap(portal_mode=True, argv=[])
+
+        service.stopService.assert_called_once()
+        mock_cancel.assert_called_once_with(loop)
+        mock_executor.assert_called_once()
+        mock_remove.assert_called_once()
+        loop.close.assert_called_once()
+
+    def test_startservice_failure_preserves_error_and_cleans_up(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+        service = MagicMock()
+        service.startService.side_effect = RuntimeError("children failed")
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile") as mock_remove,
+            patch("evennia.server.asyncio_bootstrap.clock.cancel_pending_tasks") as mock_cancel,
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.shutdown_default_executor"
+            ) as mock_executor,
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "children failed"):
+                run_bootstrap(portal_mode=True, argv=[])
+
+        service.stopService.assert_called_once()
+        mock_cancel.assert_called_once_with(loop)
+        mock_executor.assert_called_once()
+        mock_remove.assert_called_once()
+        loop.close.assert_called_once()
+
+    def test_initialization_failure_preserves_error_and_cleans_up(self):
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = MagicMock()
+        loop.is_closed.return_value = False
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
+            patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile") as mock_remove,
+            patch("evennia.server.asyncio_bootstrap.clock.cancel_pending_tasks") as mock_cancel,
+            patch(
+                "evennia.server.asyncio_bootstrap.clock.shutdown_default_executor"
+            ) as mock_executor,
+            patch("evennia._LOADED", False, create=True),
+            patch("evennia._init", side_effect=RuntimeError("init failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "init failed"):
+                run_bootstrap(portal_mode=True, argv=[])
+
+        mock_cancel.assert_called_once_with(loop)
+        mock_executor.assert_called_once()
+        mock_remove.assert_called_once()
+        loop.close.assert_called_once()
 
     def test_stopservice_failure_is_logged_and_siblings_still_run(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap

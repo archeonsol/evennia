@@ -249,7 +249,9 @@ class ChannelAdmin(admin.ModelAdmin):
             obj (Channel): The channel to get subs from.
 
         """
-        return ", ".join([str(sub) for sub in obj.subscriptions.all()])
+        account_keys = obj.db_account_subscriptions.values_list("db_key", flat=True)
+        object_keys = obj.db_object_subscriptions.values_list("db_key", flat=True)
+        return ", ".join(str(key) for key in (*account_keys, *object_keys))
 
     def no_of_subscribers(self, obj):
         """
@@ -259,7 +261,7 @@ class ChannelAdmin(admin.ModelAdmin):
             obj (Channel): The channel to get subs from.
 
         """
-        return sum(1 for sub in obj.subscriptions.all())
+        return obj.db_account_subscriptions.count() + obj.db_object_subscriptions.count()
 
     def serialized_string(self, obj):
         """

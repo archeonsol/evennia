@@ -188,7 +188,13 @@ And then in another function you do
 
 The outcome of that last print statement is *undefined*! It could *maybe* randomly work but most likely you will get an `AttributeError` for not finding the `cracked` property. The reason is that `cracked` doesn't represent an actual field in the database. It was just added at run-time and thus Django don't care about it. When you retrieve your shield-match later there is *no* guarantee you will get back the *same Python instance* of the model where you defined `cracked`, even if you search for the same database object.
 
-Evennia relies heavily on on-model handlers and other dynamically created properties. So rather than using the vanilla Django models, Evennia uses `SharedMemoryModel`, which levies something called *idmapper*. The idmapper caches model instances so that we will always get the *same* instance back after the first lookup of a given object. Using idmapper, the above example would work fine and you could retrieve your `cracked` property at any time - until you rebooted when all non-persistent data goes.
+Evennia relies heavily on on-model handlers and other dynamically created properties. So rather than using the vanilla Django models, Evennia uses `SharedMemoryModel`, which levies something called *idmapper*. On the engine's IO-owner thread, the idmapper caches model instances so that we will always get the *same* instance back after the first lookup of a given object. Using idmapper there, the above example would work fine and you could retrieve your `cracked` property at any time - until you rebooted when all non-persistent data goes.
+
+Django web workers are deliberately outside that identity guarantee. They may
+load complete concrete fields, but receive detached instances that do not enter
+the idmapper or run `at_post_load()`. They cannot save, delete, or use public
+cache mutation APIs. Web code needing handlers, runtime state, or mutation must
+use the [Web IO Boundary](../Components/Web-IO-Boundary.md).
 
 Using the idmapper is both more intuitive and more efficient *per object*; it leads to a lot less
 reading from disk. The drawback is that this system tends to be more memory hungry *overall*. So if you know that you'll *never* need to add new properties to running instances or know that you will create new objects all the time yet rarely access them again (like for a log system), you are probably better off making "plain" Django models rather than using `SharedMemoryModel` and its idmapper.

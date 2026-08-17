@@ -39,8 +39,8 @@ and idmapper can never refresh a deferred field (the refresh query returns the
 same cached instance without applying values, then `KeyError`). On a *cached*
 object a partial query returns the cached instance itself, so `from_db` treats
 missing fields as "no information", never "reset" (see `ObjectDB.from_db`).
-**Decision:** engine code reads raw columns via `values()`/`values_list()` and
-writes back via `queryset.update()`; `BulkTickContext` is the reference.
+**Decision:** idmapper identity, hooks, handlers, and persistence are IO-owner scoped. Worker ORM reads construct complete detached rows; mutation crosses the IO bridge.
+Infrastructure uses `values()`/`values_list()` and owner-side `queryset.update()` with explicit cache coherence; `BulkTickContext` is the reference.
 
 ## Typed search result (Q1)
 

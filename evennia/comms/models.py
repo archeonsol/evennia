@@ -807,7 +807,7 @@ class ChannelDB(TypedObject):
 
     def __str__(self):
         "Echoes the text representation of the channel."
-        return "Channel '%s' (%s)" % (self.key, self.db.desc)
+        return "Channel '%s'" % self.db_key
 
     @lazy_property
     def subscriptions(self):

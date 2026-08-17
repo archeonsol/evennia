@@ -16,6 +16,10 @@ class IOThreadCallIndeterminate(IOThreadCallTimeout):
     """An IO-thread call timed out after starting, leaving its outcome unknown."""
 
 
+class IOThreadCallUnavailable(RuntimeError):
+    """No IO owner is available to service a worker-thread call."""
+
+
 def _call_synchronously(callback: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Call a synchronous callback and reject awaitable results."""
     result = callback(*args, **kwargs)
@@ -35,8 +39,8 @@ def run_on_io_thread(
 ) -> Any:
     """Execute a synchronous callback on Evennia's bound IO loop.
 
-    Calls made on the IO thread, or before a loop has been bound during
-    bootstrap, execute inline. Worker calls are scheduled through
+    Calls made by the IO owner, including the actual main thread before loop
+    binding, execute inline. Worker calls are scheduled through
     :mod:`evennia.utils.clock`, whose callback scope isolates Django database
     connections from the worker.
 
@@ -53,16 +57,19 @@ def run_on_io_thread(
         IOThreadCallTimeout: The callback was cancelled before it started.
         IOThreadCallIndeterminate: The callback started but did not finish
             before the timeout, so mutation callers must not retry it.
+        IOThreadCallUnavailable: No bound owner can service a worker call.
         TypeError: The callback returned an awaitable.
 
     """
     from evennia.utils import clock
 
-    if clock.is_io_thread():
+    if clock.is_io_owner():
         return _call_synchronously(callback, *args, **kwargs)
     loop = clock.get_bound_loop()
     if loop is None:
-        return _call_synchronously(callback, *args, **kwargs)
+        raise IOThreadCallUnavailable(
+            "Evennia IO owner is unavailable before loop binding on this worker thread"
+        )
 
     future: concurrent.futures.Future = concurrent.futures.Future()
 
