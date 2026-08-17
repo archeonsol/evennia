@@ -1,6 +1,11 @@
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import UserCreationForm, UsernameField
+from django.contrib.auth.forms import (
+    PasswordChangeForm,
+    SetPasswordForm,
+    UserCreationForm,
+    UsernameField,
+)
 from django.forms import ModelForm
 from django.utils.html import escape
 
@@ -54,7 +59,8 @@ class AccountForm(UserCreationForm):
 
         # The model/typeclass this form creates
         model = class_from_module(
-            settings.BASE_ACCOUNT_TYPECLASS, fallback=settings.FALLBACK_ACCOUNT_TYPECLASS
+            settings.BASE_ACCOUNT_TYPECLASS,
+            fallback=settings.FALLBACK_ACCOUNT_TYPECLASS,
         )
 
         # The fields to display on the form, in the given order
@@ -66,8 +72,26 @@ class AccountForm(UserCreationForm):
     # Username is collected as part of the core UserCreationForm, so we just need
     # to add a field to (optionally) capture email.
     email = forms.EmailField(
-        help_text="A valid email address. Optional; used for password resets.", required=False
+        help_text="A valid email address. Optional; used for password resets.",
+        required=False,
     )
+
+
+class OwnerPasswordChangeForm(PasswordChangeForm):
+    """Validate shape on the worker; repeat old-password auth on the owner."""
+
+    def clean_old_password(self):
+        return self.cleaned_data["old_password"]
+
+    def save(self, commit=True):
+        raise RuntimeError("OwnerPasswordChangeForm must be saved through the IO service")
+
+
+class OwnerSetPasswordForm(SetPasswordForm):
+    """Validate password shape on the worker without detached persistence."""
+
+    def save(self, commit=True):
+        raise RuntimeError("OwnerSetPasswordForm must be saved through the IO service")
 
 
 class ObjectForm(EvenniaForm, ModelForm):

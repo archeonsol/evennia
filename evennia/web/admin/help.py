@@ -7,6 +7,7 @@ from django.contrib import admin
 
 from evennia.help.models import HelpEntry
 
+from .mixins import OwnerSafeModelAdminMixin
 from .tags import TagInline
 
 
@@ -23,7 +24,9 @@ class HelpEntryForm(forms.ModelForm):
         fields = "__all__"
 
     db_help_category = forms.CharField(
-        label="Help category", initial="General", help_text="organizes help entries in lists"
+        label="Help category",
+        initial="General",
+        help_text="organizes help entries in lists",
     )
     db_lock_storage = forms.CharField(
         label="Locks",
@@ -37,11 +40,17 @@ class HelpEntryForm(forms.ModelForm):
 
 
 @admin.register(HelpEntry)
-class HelpEntryAdmin(admin.ModelAdmin):
+class HelpEntryAdmin(OwnerSafeModelAdminMixin, admin.ModelAdmin):
     "Sets up the admin manaager for help entries"
 
     inlines = [HelpTagInline]
-    list_display = ("id", "db_key", "db_help_category", "db_lock_storage", "db_date_created")
+    list_display = (
+        "id",
+        "db_key",
+        "db_help_category",
+        "db_lock_storage",
+        "db_date_created",
+    )
     list_display_links = ("id", "db_key")
     search_fields = ["^db_key", "db_entrytext"]
     ordering = ["db_help_category", "db_key"]

@@ -18,10 +18,13 @@ from evennia.objects.models import ObjectDB
 from evennia.web.utils.io import (
     IOThreadCallIndeterminate,
     IOThreadCallTimeout,
+    IOThreadCallUnavailable,
+    release_worker_db_connections,
     run_on_io_thread,
 )
 
 from . import utils as adminutils
+from .mixins import OwnerSafeModelAdminMixin
 from .tags import TagInline
 
 
@@ -211,7 +214,7 @@ class ObjectEditForm(ObjectCreateForm):
 
 
 @admin.register(ObjectDB)
-class ObjectAdmin(admin.ModelAdmin):
+class ObjectAdmin(OwnerSafeModelAdminMixin, admin.ModelAdmin):
     """
     Describes the admin page for Objects.
 
@@ -356,6 +359,7 @@ class ObjectAdmin(admin.ModelAdmin):
 
         """
         try:
+            release_worker_db_connections()
             result = run_on_io_thread(_link_object_to_account, object_id, request.user.pk)
         except PermissionError as err:
             raise PermissionDenied(str(err)) from err
@@ -367,7 +371,7 @@ class ObjectAdmin(admin.ModelAdmin):
                 status=202,
                 headers={"X-Evennia-Retryable": "false"},
             )
-        except IOThreadCallTimeout:
+        except (IOThreadCallTimeout, IOThreadCallUnavailable):
             return HttpResponse(
                 "The link did not start. This request may be retried.",
                 status=503,
@@ -381,29 +385,6 @@ class ObjectAdmin(admin.ModelAdmin):
 
         # stay on the same page
         return HttpResponseRedirect(reverse("admin:objects_objectdb_change", args=[object_id]))
-
-    def save_model(self, request, obj, form, change):
-        """
-        Model-save hook.
-
-        Args:
-            request (Request): Incoming request.
-            obj (Object): Database object.
-            form (Form): Form instance.
-            change (bool): If this is a change or a new object.
-
-        """
-        if not change:
-            # adding a new object
-            # have to call init with typeclass passed to it
-            obj.set_class_from_typeclass(typeclass_path=obj.db_typeclass_path)
-            obj.save()
-            obj.basetype_setup()
-            obj.basetype_posthook_setup()
-            obj.at_object_creation()
-        else:
-            obj.save()
-            obj.at_post_load()
 
     def response_add(self, request, obj, post_url_continue=None):
         from django.http import HttpResponseRedirect

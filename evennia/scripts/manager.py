@@ -215,6 +215,8 @@ class ScriptDBManager(TypedObjectManager):
         desc=None,
         tags=None,
         attributes=None,
+        *,
+        _creation_recorder=None,
     ):
         """
         Create a new script. All scripts are a combination of a database
@@ -274,6 +276,8 @@ class ScriptDBManager(TypedObjectManager):
 
         # create new instance
         new_script = typeclass(**kwarg)
+        if _creation_recorder is not None:
+            _creation_recorder.record_script(new_script)
 
         # store the call signature for the signal
         new_script._createdict = dict(

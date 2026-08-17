@@ -8,6 +8,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from .views import accounts, channels, characters, errors, index
+from .views import auth as authviews
 from .views import help as helpviews
 
 urlpatterns = [
@@ -17,6 +18,17 @@ urlpatterns = [
     path(r"tbi/", errors.to_be_implemented, name="to_be_implemented"),
     # User Authentication (makes login/logout url names available)
     path("auth/register", accounts.AccountCreateView.as_view(), name="register"),
+    path("auth/login/", authviews.OwnerLoginView.as_view(), name="login"),
+    path(
+        "auth/password_change/",
+        authviews.OwnerPasswordChangeView.as_view(),
+        name="password_change",
+    ),
+    path(
+        "auth/reset/<uidb64>/<token>/",
+        authviews.OwnerPasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
     path("auth/", include("django.contrib.auth.urls")),
     # Help Topics
     path("help/", helpviews.HelpListView.as_view(), name="help"),
@@ -27,11 +39,23 @@ urlpatterns = [
     ),
     # Channels
     path("channels/", channels.ChannelListView.as_view(), name="channels"),
-    path("channels/<str:slug>/", channels.ChannelDetailView.as_view(), name="channel-detail"),
+    path(
+        "channels/<str:slug>/",
+        channels.ChannelDetailView.as_view(),
+        name="channel-detail",
+    ),
     # Character management
     path("characters/", characters.CharacterListView.as_view(), name="characters"),
-    path("characters/create/", characters.CharacterCreateView.as_view(), name="character-create"),
-    path("characters/manage/", characters.CharacterManageView.as_view(), name="character-manage"),
+    path(
+        "characters/create/",
+        characters.CharacterCreateView.as_view(),
+        name="character-create",
+    ),
+    path(
+        "characters/manage/",
+        characters.CharacterManageView.as_view(),
+        name="character-manage",
+    ),
     path(
         "characters/detail/<str:slug>/<int:pk>/",
         characters.CharacterDetailView.as_view(),

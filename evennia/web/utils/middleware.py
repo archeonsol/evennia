@@ -1,7 +1,11 @@
 from django.contrib.auth import authenticate, login
 
-from evennia.accounts.models import AccountDB
 from evennia.utils import ip_from_request, logger
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    IOThreadCallUnavailable,
+)
 
 
 class OriginIpMiddleware:
@@ -67,15 +71,24 @@ class SharedLoginMiddleware(object):
 
         elif webclient_uid:
             # Not logged into website, but logged into webclient
-            if website_uid is None:
-                csession["website_authenticated_uid"] = account.id
-                account = AccountDB.objects.get(id=webclient_uid)
-                try:
-                    # calls our custom authenticate, in web/utils/backend.py
-                    authenticate(autologin=account)
-                    login(request, account)
-                except AttributeError:
-                    logger.log_trace()
+            try:
+                # calls our custom authenticate, in web/utils/backend.py
+                account = authenticate(request=request, autologin_id=int(webclient_uid))
+                if account is None:
+                    raise ValueError("shared Account identity is no longer active")
+                login(request, account)
+                csession["website_authenticated_uid"] = int(account.pk)
+            except (
+                AttributeError,
+                TypeError,
+                ValueError,
+                IOThreadCallTimeout,
+                IOThreadCallIndeterminate,
+                IOThreadCallUnavailable,
+            ) as err:
+                csession.pop("website_authenticated_uid", None)
+                csession.pop("webclient_authenticated_uid", None)
+                logger.log_warn(f"Shared login was rejected or unavailable: {type(err).__name__}")
 
         if csession.get("webclient_authenticated_uid", None):
             # set a nonce to prevent the webclient from erasing the webclient_authenticated_uid value

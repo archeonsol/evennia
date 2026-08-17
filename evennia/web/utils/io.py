@@ -20,6 +20,29 @@ class IOThreadCallUnavailable(RuntimeError):
     """No IO owner is available to service a worker-thread call."""
 
 
+def release_worker_db_connections() -> None:
+    """Release worker reads before an owner-side database call.
+
+    Django reconnects lazily for response and audit work. Calls executing on
+    the IO owner retain its connection.
+    """
+    from django.db import connections
+
+    from evennia.utils import clock
+
+    if not clock.is_io_owner():
+        for connection in connections.all():
+            if connection.in_atomic_block:
+                raise RuntimeError(
+                    "An IO-owner database call cannot start inside a worker transaction"
+                )
+            if connection.vendor == "sqlite" and connection.connection is not None:
+                # Django deliberately refuses to close shared in-memory test
+                # databases. An explicit rollback still releases their read locks.
+                connection.rollback()
+        connections.close_all()
+
+
 def _call_synchronously(callback: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Call a synchronous callback and reject awaitable results."""
     result = callback(*args, **kwargs)

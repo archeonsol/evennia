@@ -1,6 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
 
+from evennia.web.utils.auth import AuthenticationRequest, authenticate_account
+from evennia.web.utils.io import release_worker_db_connections, run_on_io_thread
+
 
 class CaseInsensitiveModelBackend(ModelBackend):
     """
@@ -10,7 +13,14 @@ class CaseInsensitiveModelBackend(ModelBackend):
 
     """
 
-    def authenticate(self, request, username=None, password=None, autologin=None):
+    def authenticate(
+        self,
+        request,
+        username=None,
+        password=None,
+        autologin=None,
+        autologin_id=None,
+    ):
         """
         Custom authenticate with bypass for auto-logins
 
@@ -21,23 +31,23 @@ class CaseInsensitiveModelBackend(ModelBackend):
             autologin (Account, optional): If given, assume this is
               an already authenticated account and bypass authentication.
         """
-        if autologin:
-            # Note: Setting .backend on account is critical in order to
-            # be allowed to call django.auth.login(account) later. This
-            # is necessary for the auto-login feature of the webclient,
-            # but it's important to make sure Django doesn't change this
-            # requirement or the name of the property down the line. /Griatch
-            autologin.backend = "evennia.web.utils.backends.CaseInsensitiveModelBackend"
-            return autologin
-        else:
-            # In this case .backend will be assigned automatically
-            # somewhere along the way.
-            Account = get_user_model()
-            try:
-                account = Account.objects.get(username__iexact=username)
-                if account.check_password(password):
-                    return account
-                else:
-                    return None
-            except Account.DoesNotExist:
-                return None
+        if autologin_id is None and autologin is not None:
+            autologin_id = getattr(autologin, "pk", autologin)
+        release_worker_db_connections()
+        result = run_on_io_thread(
+            authenticate_account,
+            AuthenticationRequest(
+                username=username,
+                password=password,
+                autologin_id=int(autologin_id) if autologin_id is not None else None,
+            ),
+        )
+        if result.status != "authenticated" or result.account_id is None:
+            return None
+        Account = get_user_model()
+        try:
+            account = Account.objects.get(pk=result.account_id)
+        except Account.DoesNotExist:
+            return None
+        account.backend = "evennia.web.utils.backends.CaseInsensitiveModelBackend"
+        return account

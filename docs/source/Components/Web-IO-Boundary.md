@@ -10,6 +10,12 @@ web workers must not read or mutate live game objects directly.
 schedules it through the loop bound by `evennia.utils.clock`. The clock callback
 enters an isolated Django database scope before invoking the callable.
 
+Mutation clients call `release_worker_db_connections()` after validation and
+immediately before dispatch. It rejects an active worker transaction, closes
+ordinary worker connections, and explicitly releases shared in-memory SQLite
+read locks that Django cannot close during tests. The owner connection is never
+closed. Django reconnects lazily for response and auxiliary audit work.
+
 `evennia.utils.clock.is_io_owner()` is the shared ownership predicate. After a
 loop is bound, only its recorded thread is the owner, including while that loop
 is stopped for teardown. Before binding, only the actual process main thread is
@@ -136,3 +142,10 @@ instead of blocking the IO loop.
 The object-admin account-link action likewise passes only object and actor IDs,
 then resolves and performs the complete account/object/capability mutation in
 one IO callback.
+
+The seven stock game-state admins and Account authentication/registration flows
+use the bounded mutation services described in
+[Web Mutation Bridge](Web-Mutation-Bridge.md). Worker forms validate and render;
+the owner repeats mutable authorization, runs lifecycle and relation work, and
+returns frozen outcomes. Domain writes precede separate worker-side admin audit
+rows, so audit failure cannot make a completed mutation retryable.

@@ -297,6 +297,8 @@ class MsgManager(TypedObjectManager):
         policies=None,
         tags=None,
         header=None,
+        *,
+        _creation_recorder=None,
         **kwargs,
     ):
         """
@@ -333,6 +335,8 @@ class MsgManager(TypedObjectManager):
             # we don't allow empty messages.
             return None
         new_message = self.model(db_message=message)
+        if _creation_recorder is not None:
+            _creation_recorder.record_message(new_message)
         new_message.save()
         for sender in make_iter(senderobj):
             new_message.senders = sender
@@ -488,6 +492,8 @@ class ChannelDBManager(TypedObjectManager):
         typeclass=None,
         tags=None,
         attrs=None,
+        *,
+        _creation_recorder=None,
     ):
         """
         Create A communication Channel. A Channel serves as a central hub
@@ -537,6 +543,8 @@ class ChannelDBManager(TypedObjectManager):
 
         # create new instance
         new_channel = typeclass(db_key=key)
+        if _creation_recorder is not None:
+            _creation_recorder.record_channel(new_channel)
 
         # store call signature for the signal
         new_channel._createdict = dict(
