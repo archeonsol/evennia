@@ -3,7 +3,7 @@
 import evennia
 from evennia.server import ipc_schema
 from evennia.server.portal import amp
-from evennia.utils import clock, logger
+from evennia.utils import logger
 
 
 def receive_msgportal2server(packed_data):
@@ -41,20 +41,14 @@ def receive_adminportal2server(packed_data):
 
     elif operation == amp.SRELOAD:
         evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-        clock.run_coroutine(
-            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reload"), task_kind="service"
-        )
+        evennia.EVENNIA_SERVER_SERVICE.request_shutdown(mode="reload")
 
     elif operation == amp.SRESET:
         evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
-        clock.run_coroutine(
-            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="reset"), task_kind="service"
-        )
+        evennia.EVENNIA_SERVER_SERVICE.request_shutdown(mode="reset")
 
     elif operation == amp.SSHUTD:
-        clock.run_coroutine(
-            evennia.EVENNIA_SERVER_SERVICE.shutdown(mode="shutdown"), task_kind="service"
-        )
+        evennia.EVENNIA_SERVER_SERVICE.request_shutdown(mode="shutdown")
 
     else:
         raise Exception("operation %(op)s not recognized." % {"op": operation})

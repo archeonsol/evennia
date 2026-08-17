@@ -14,8 +14,9 @@ from unittest.mock import MagicMock, patch
 
 from django.db import connections
 from django.test import SimpleTestCase
-from evennia.utils import clock
 from twisted.internet.defer import Deferred, ensureDeferred
+
+from evennia.utils import clock
 
 
 class _AsyncioLoopMixin:
@@ -150,9 +151,7 @@ class TestLoopHandleBackstop(_AsyncioLoopMixin, SimpleTestCase):
             await asyncio.sleep(0.02)
             handle.stop()
 
-        with patch(
-            "evennia.utils.logger.log_trace", lambda *a, **k: captured.append(a)
-        ):
+        with patch("evennia.utils.logger.log_trace", lambda *a, **k: captured.append(a)):
             self._loop.run_until_complete(drive())
 
         self.assertTrue(captured, "loop body error was swallowed silently")
@@ -336,6 +335,75 @@ class TestPendingTaskSettlement(_AsyncioLoopMixin, SimpleTestCase):
         self.assertTrue(task.cancelled())
 
 
+class TestBoundRuntimeTask(SimpleTestCase):
+    """Stopped-loop service teardown uses the supervised owner task primitive."""
+
+    def setUp(self):
+        super().setUp()
+        self._saved = (clock._main_loop, clock._loop_thread_id, clock._default_executor)
+        clock._default_executor = None
+
+    def tearDown(self):
+        clock.shutdown_default_executor()
+        clock._main_loop, clock._loop_thread_id, clock._default_executor = self._saved
+        super().tearDown()
+
+    def test_owner_can_create_task_on_stopped_bound_loop(self):
+        loop = asyncio.new_event_loop()
+
+        async def value():
+            return 7
+
+        try:
+            clock.bind_loop(loop)
+            task = clock.create_bound_runtime_task(value(), task_kind="service")
+            self.assertFalse(loop.is_running())
+            self.assertEqual(loop.run_until_complete(task), 7)
+        finally:
+            loop.close()
+
+    def test_unbound_closed_and_off_owner_rejections_close_coroutine(self):
+        async def value():
+            return 7
+
+        clock._main_loop = None
+        clock._loop_thread_id = None
+        unbound = value()
+        with self.assertRaisesRegex(RuntimeError, "bound event loop"):
+            clock.create_bound_runtime_task(unbound)
+        self.assertIsNone(unbound.cr_frame)
+
+        closed_loop = asyncio.new_event_loop()
+        clock.bind_loop(closed_loop)
+        closed_loop.close()
+        closed = value()
+        with self.assertRaisesRegex(RuntimeError, "bound event loop"):
+            clock.create_bound_runtime_task(closed)
+        self.assertIsNone(closed.cr_frame)
+
+        worker_loop = asyncio.new_event_loop()
+        clock.bind_loop(worker_loop)
+        observed = {}
+
+        def worker():
+            coro = value()
+            try:
+                clock.create_bound_runtime_task(coro)
+            except RuntimeError as err:
+                observed["error"] = str(err)
+            observed["closed"] = coro.cr_frame is None
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(timeout=1)
+        try:
+            self.assertFalse(thread.is_alive())
+            self.assertIn("IO owner", observed["error"])
+            self.assertTrue(observed["closed"])
+        finally:
+            worker_loop.close()
+
+
 class TestFixedRateSchedule(SimpleTestCase):
     """LoopHandle cadence is fixed-rate (anchored), not fixed-delay."""
 
@@ -404,8 +472,7 @@ class TestSyncCoroutineResultDrain(SimpleTestCase):
                 {
                     "before_owner": False,
                     "error": (
-                        "run_coroutine() without a running loop is available only to the "
-                        "IO owner"
+                        "run_coroutine() without a running loop is available only to the IO owner"
                     ),
                     "after_owner": False,
                 },

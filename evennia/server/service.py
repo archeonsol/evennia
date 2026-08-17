@@ -4,7 +4,6 @@ Evennia server. It is instantiated by the evennia/server/server.py module.
 """
 
 import importlib
-import signal
 import time
 import traceback
 
@@ -25,34 +24,6 @@ _SA = object.__setattr__
 
 
 class EvenniaServerService(MultiService):
-    def _wrap_sigint_handler(self, *args):
-        # A second signal while a graceful shutdown is running is the operator
-        # asking to stop *now* — that (and only that) triggers immediate
-        # termination.
-        if getattr(self, "_shutdown_in_progress", False):
-            logger.log_warn("Second interrupt received; stopping immediately.")
-            clock.call_later(0, clock.stop_loop)
-            return
-
-        self._shutdown_in_progress = True
-
-        async def _graceful_stop():
-            try:
-                if hasattr(self, "web_root"):
-                    await self.web_root.empty_threadpool()
-                await self.shutdown("reload", _reactor_stopping=True)
-            finally:
-                self._shutdown_in_progress = False
-                clock.stop_loop()
-
-        clock.run_coroutine(_graceful_stop(), task_kind="service")
-        # Emergency fallback only: if the graceful path wedges, stop anyway.
-        # Configurable and comfortably larger than the shutdown drain window so
-        # it does not guillotine a shutdown that is still making progress. A
-        # second signal (above) is the way to stop sooner.
-        emergency = float(getattr(settings, "SERVER_SHUTDOWN_EMERGENCY_TIMEOUT", 30.0))
-        clock.call_later(emergency, clock.stop_loop)
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.maintenance_count = 0
@@ -75,6 +46,8 @@ class EvenniaServerService(MultiService):
         self.system_driver = None
         self._runtime_config_row = None  # cached ServerConfig row for "runtime"
         self._shutdown_deferred = None
+        self._shutdown_task = None
+        self._shutdown_request_mode = None
         self._shutdown_in_progress = False
 
         # Database-specific startup optimizations.
@@ -82,19 +55,51 @@ class EvenniaServerService(MultiService):
 
         self.start_time = 0
 
-        # wrap the SIGINT handler to make sure we empty the threadpool
-        # even when we reload and we have long-running requests in queue.
-        # this is necessary over using Twisted's signal handler.
-        # (see https://github.com/evennia/evennia/issues/1128)
-
-        if getattr(settings, "EVENNIA_ASYNCIO_BOOTSTRAP", True):
-            signal.signal(signal.SIGINT, self._wrap_sigint_handler)
-
         self.start_stop_modules = [
             mod_import(mod)
             for mod in make_iter(settings.AT_SERVER_STARTSTOP_MODULE)
             if isinstance(mod, str)
         ]
+
+    def request_shutdown(self, mode="reload", _reactor_stopping=False):
+        """Request the one process-ending Server shutdown task.
+
+        The first request owns the mode. Later signal or IPC requests receive
+        the same task instead of entering :meth:`shutdown` concurrently.
+
+        Args:
+            mode: One of ``reload``, ``reset``, or ``shutdown``.
+            _reactor_stopping: Compatibility marker for process-signal callers.
+                The request runner owns loop stop regardless; the domain
+                pipeline always runs in its externally coordinated mode.
+
+        Returns:
+            The supervised shutdown task.
+        """
+
+        if self._shutdown_task is not None:
+            return self._shutdown_task
+        self._shutdown_request_mode = mode
+        self._shutdown_task = clock.create_bound_runtime_task(
+            self._run_shutdown_request(mode), task_kind="service"
+        )
+        return self._shutdown_task
+
+    async def _run_shutdown_request(self, mode):
+        """Drain web work and execute one latched domain shutdown."""
+
+        self._shutdown_in_progress = True
+        completed = False
+        try:
+            if hasattr(self, "web_root"):
+                await self.web_root.empty_threadpool()
+            await self.shutdown(mode, _reactor_stopping=True)
+            completed = True
+        finally:
+            if completed:
+                self.shutdown_complete = True
+            self._shutdown_in_progress = False
+            clock.stop_loop()
 
     def server_maintenance(self):
         """

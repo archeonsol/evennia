@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 from os.path import abspath, dirname
@@ -7,6 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 
 import evennia
+from evennia.server.launcher_ipc import stop_launcher_servers
 from evennia.server.service_registry import MultiService
 from evennia.utils import clock, logger
 from evennia.utils.utils import class_from_module, get_evennia_version, make_iter, mod_import
@@ -34,6 +36,12 @@ class EvenniaPortalService(MultiService):
         self._last_server_autorestart = 0.0
         self._asyncio_servers = []
         self._asyncio_proxies = []
+        self._asyncio_start_tasks = set()
+        self._accepting_asyncio_starts = True
+        self._shutdown_task = None
+        self._shutdown_stop_server = False
+        self._shutdown_publish_status = False
+        self._shutdown_stop_loop = False
 
         self.info_dict = {
             "servername": settings.SERVERNAME,
@@ -302,13 +310,16 @@ class EvenniaPortalService(MultiService):
                 )
             else:
                 self.info_dict["amp"] = "amp: %s (asyncio ipc)" % settings.AMP_PORT
-                start_launcher_server(
+                task = start_launcher_server(
                     self,
                     factory,
                     self._launcher_amp_protocol,
                     settings.AMP_INTERFACE,
                     settings.AMP_PORT,
                 )
+                if task is not None:
+                    self._asyncio_start_tasks.add(task)
+                    task.add_done_callback(self._asyncio_start_tasks.discard)
 
     def register_redis_bus(self):
         from evennia.server.redis_bus import RedisPortalBus
@@ -332,7 +343,7 @@ class EvenniaPortalService(MultiService):
     def _start_asyncio_server(self, protocol_factory, interface, port, ssl=None):
         def _go():
             loop = _asyncio_loop()
-            if loop is None:
+            if loop is None or not self._accepting_asyncio_starts:
                 return
 
             async def _create():
@@ -342,7 +353,7 @@ class EvenniaPortalService(MultiService):
                 except Exception:
                     logger.log_trace("asyncio Portal server failed to start")
 
-            loop.create_task(_create())
+            self._track_asyncio_start(_create(), "evennia-portal-listener-start")
 
         clock.when_running(_go)
 
@@ -354,8 +365,11 @@ class EvenniaPortalService(MultiService):
 
         def _go():
             loop = _asyncio_loop()
-            if loop is not None:
-                loop.create_task(proxy.start(interface, proxyport))
+            if loop is not None and self._accepting_asyncio_starts:
+                self._track_asyncio_start(
+                    proxy.start(interface, proxyport),
+                    "evennia-portal-proxy-start",
+                )
 
         clock.when_running(_go)
 
@@ -364,7 +378,7 @@ class EvenniaPortalService(MultiService):
 
         def _go():
             loop = _asyncio_loop()
-            if loop is None:
+            if loop is None or not self._accepting_asyncio_starts:
                 return
 
             async def _create():
@@ -374,23 +388,46 @@ class EvenniaPortalService(MultiService):
                 except Exception:
                     logger.log_trace("asyncio SSH server failed to start")
 
-            loop.create_task(_create())
+            self._track_asyncio_start(_create(), "evennia-portal-ssh-start")
 
         clock.when_running(_go)
 
-    def _stop_asyncio_servers(self):
-        loop = _asyncio_loop()
-        for server in self._asyncio_servers:
+    def _track_asyncio_start(self, coro, name):
+        """Retain one supervised Portal startup task until it settles."""
+
+        task = clock.create_bound_runtime_task(coro, task_kind="service")
+        task.set_name(name)
+        self._asyncio_start_tasks.add(task)
+        task.add_done_callback(self._asyncio_start_tasks.discard)
+        return task
+
+    async def _stop_asyncio_resources(self):
+        """Cancel pending starts and await every Portal-owned listener."""
+
+        self._accepting_asyncio_starts = False
+        starts = list(self._asyncio_start_tasks)
+        for task in starts:
+            if not task.done():
+                task.cancel()
+        if starts:
+            await asyncio.gather(*starts, return_exceptions=True)
+        self._asyncio_start_tasks.difference_update(starts)
+
+        servers = list(self._asyncio_servers)
+        proxies = list(self._asyncio_proxies)
+        waits = []
+        for server in servers:
             try:
                 server.close()
+                waits.append(server.wait_closed())
             except Exception:
-                pass
-        if loop is not None:
-            for proxy in self._asyncio_proxies:
-                try:
-                    loop.create_task(proxy.stop())
-                except Exception:
-                    pass
+                logger.log_trace("asyncio Portal listener close failed")
+        waits.append(stop_launcher_servers())
+        waits.extend(proxy.stop() for proxy in proxies)
+        results = await asyncio.gather(*waits, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.log_err(f"Portal asyncio cleanup failed: {result}")
         self._asyncio_servers = []
         self._asyncio_proxies = []
 
@@ -411,20 +448,53 @@ class EvenniaPortalService(MultiService):
     def get_info_dict(self):
         return self.info_dict
 
-    def shutdown(self, _reactor_stopping=False, _stop_server=False):
-        if _reactor_stopping and hasattr(self, "shutdown_complete"):
-            return
+    def shutdown(self, _reactor_stopping=False, _stop_server=False, _stop_loop=None):
+        """Request the one Portal shutdown task and merge monotonic intent.
 
-        evennia.PORTAL_SESSION_HANDLER.disconnect_all()
-        self._stop_asyncio_servers()
-        if _stop_server:
-            self.server_amp.stop_server(mode="shutdown")
-        if not _reactor_stopping:
-            self.shutdown_complete = True
-            protocol = getattr(self, "_launcher_amp_protocol", None)
-            if protocol is not None:
+        Args:
+            _reactor_stopping: True when terminal bootstrap cleanup requested
+                the shutdown and should not publish launcher status.
+            _stop_server: Promote the request to stop the Server process.
+            _stop_loop: Explicit normal-completion loop-stop intent. Defaults
+                to the inverse of ``_reactor_stopping`` for callback parity.
+
+        Returns:
+            The supervised Portal shutdown task.
+        """
+
+        self._shutdown_stop_server |= bool(_stop_server)
+        self._shutdown_publish_status |= not _reactor_stopping
+        if _stop_loop is None:
+            _stop_loop = not _reactor_stopping
+        self._shutdown_stop_loop |= bool(_stop_loop)
+        if self._shutdown_task is None:
+            self._shutdown_task = clock.create_bound_runtime_task(
+                self._run_shutdown_request(), task_kind="service"
+            )
+        return self._shutdown_task
+
+    async def _run_shutdown_request(self):
+        """Disconnect sessions, settle resources, and honor latched intent."""
+
+        try:
+            try:
+                evennia.PORTAL_SESSION_HANDLER.disconnect_all()
+            except Exception:
+                logger.log_trace("portal session disconnect failed")
+            await self._stop_asyncio_resources()
+            if self._shutdown_stop_server and self.server_amp is not None:
                 try:
-                    protocol.send_Status2Launcher()
+                    self.server_amp.stop_server(mode="shutdown")
                 except Exception:
-                    logger.log_trace("portal shutdown status push failed")
-            clock.call_later(0, clock.stop_loop)
+                    logger.log_trace("portal Server stop request failed")
+            if self._shutdown_publish_status:
+                self.shutdown_complete = True
+                protocol = getattr(self, "_launcher_amp_protocol", None)
+                if protocol is not None:
+                    try:
+                        protocol.send_Status2Launcher()
+                    except Exception:
+                        logger.log_trace("portal shutdown status push failed")
+        finally:
+            if self._shutdown_stop_loop:
+                clock.stop_loop()

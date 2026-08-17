@@ -39,6 +39,7 @@ class ReverseProxy:
         self.upstream_port = upstream_port
         self._client = None
         self._server = None
+        self._stop_lock = asyncio.Lock()
 
     async def start(self, host, port):
         self._client = httpx.AsyncClient(
@@ -49,11 +50,25 @@ class ReverseProxy:
         return self._server
 
     async def stop(self):
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-        if self._client is not None:
-            await self._client.aclose()
+        """Close listener and client once while preserving sibling cleanup."""
+
+        async with self._stop_lock:
+            server, self._server = self._server, None
+            client, self._client = self._client, None
+            errors = []
+            if server is not None:
+                try:
+                    server.close()
+                    await server.wait_closed()
+                except Exception as err:
+                    errors.append(err)
+            if client is not None:
+                try:
+                    await client.aclose()
+                except Exception as err:
+                    errors.append(err)
+            if errors:
+                raise ExceptionGroup("web proxy cleanup failed", errors)
 
     async def handle_connection(self, reader, writer):
         conn = h11.Connection(h11.SERVER)

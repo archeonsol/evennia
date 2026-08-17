@@ -43,6 +43,73 @@ class ServerShutdownDelayTest(SimpleTestCase):
 
         mock_clock.call_later.assert_called_once_with(0, mock_clock.stop_loop)
 
+
+class ServerShutdownRequestTest(SimpleTestCase):
+    """All production shutdown requests converge on one first-mode-wins task."""
+
+    def setUp(self):
+        super().setUp()
+        from evennia.utils import clock
+
+        self.clock = clock
+        self._saved = (clock._main_loop, clock._loop_thread_id, clock._default_executor)
+        clock._default_executor = None
+        self.loop = asyncio.new_event_loop()
+        clock.bind_loop(self.loop)
+
+    def tearDown(self):
+        self.clock.shutdown_default_executor()
+        self.loop.close()
+        (
+            self.clock._main_loop,
+            self.clock._loop_thread_id,
+            self.clock._default_executor,
+        ) = self._saved
+        super().tearDown()
+
+    def _service(self):
+        from evennia.server.service import EvenniaServerService
+
+        with patch.object(EvenniaServerService, "sqlite3_prep"):
+            return EvenniaServerService()
+
+    def test_first_mode_wins_and_web_pool_drains_before_domain_shutdown(self):
+        service = self._service()
+        order = []
+        service.web_root = MagicMock()
+        service.web_root.empty_threadpool = AsyncMock(side_effect=lambda: order.append("web"))
+        service.shutdown = AsyncMock(
+            side_effect=lambda *args, **kwargs: order.append((args, kwargs))
+        )
+
+        with patch("evennia.server.service.clock.stop_loop"):
+            first = service.request_shutdown(mode="reset")
+            second = service.request_shutdown(mode="shutdown")
+            self.assertIs(first, second)
+            self.loop.run_until_complete(first)
+
+        self.assertEqual(order[0], "web")
+        self.assertEqual(order[1], (("reset",), {"_reactor_stopping": True}))
+        service.shutdown.assert_awaited_once()
+
+    def test_ipc_modes_use_the_service_request_layer(self):
+        from evennia.server import ipc_handlers_server
+        from evennia.server.portal import amp
+
+        service = MagicMock()
+        with (
+            patch.object(ipc_handlers_server, "evennia") as evennia,
+            patch.object(
+                ipc_handlers_server.ipc_schema,
+                "parse_admin",
+                return_value=(amp.DUMMYSESSION, amp.SRESET, {}),
+            ),
+        ):
+            evennia.EVENNIA_SERVER_SERVICE = service
+            ipc_handlers_server.receive_adminportal2server(b"ignored")
+
+        service.request_shutdown.assert_called_once_with(mode="reset")
+
     @patch("evennia.scripts.monitorhandler.MONITOR_HANDLER")
     @patch("evennia.server.service.clock")
     def test_shutdown_reload_with_async_portal_sync(self, mock_clock, _monitor):

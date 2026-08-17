@@ -458,7 +458,7 @@ def start_launcher_server(portal, amp_factory, amp_protocol, interface: str, por
     loop = clock.get_bound_loop()
     if loop is None:
         logger.log_err("Launcher IPC requires a bound asyncio loop.")
-        return
+        return None
 
     if loop.is_running():
 
@@ -468,18 +468,31 @@ def start_launcher_server(portal, amp_factory, amp_protocol, interface: str, por
             except Exception:
                 logger.log_trace("launcher IPC server failed to start")
 
-        loop.create_task(_go())
-        return
+        task = clock.create_bound_runtime_task(_go(), task_kind="service")
+        task.set_name("evennia-launcher-ipc-start")
+        return task
 
     try:
         loop.run_until_complete(_start_server(portal, amp_factory, amp_protocol, interface, port))
     except Exception:
         logger.log_trace("launcher IPC server failed to start")
+    return None
 
 
 async def stop_launcher_servers():
+    """Close every launcher listener without one failure hiding its siblings."""
+
     global _servers
-    for server in _servers:
-        server.close()
-        await server.wait_closed()
-    _servers = []
+    servers = list(_servers)
+    waits = []
+    for server in servers:
+        try:
+            server.close()
+            waits.append(server.wait_closed())
+        except Exception:
+            logger.log_trace("launcher IPC listener close failed")
+    results = await asyncio.gather(*waits, return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.log_err(f"launcher IPC listener cleanup failed: {result}")
+    _servers = [server for server in _servers if server not in servers]

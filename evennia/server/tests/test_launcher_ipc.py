@@ -199,3 +199,23 @@ class LauncherSessionWaitTest(SimpleTestCase):
             # here would leave later tests (e.g. utils.tests.test_defer) resolving
             # defer_to_thread onto a loop that never runs their callbacks.
             clock._main_loop, clock._loop_thread_id = saved_loop, saved_tid
+
+    def test_stop_launcher_servers_isolates_failures_and_clears_registry(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from evennia.server import launcher_ipc
+
+        failed = MagicMock()
+        failed.wait_closed = AsyncMock(side_effect=RuntimeError("failed"))
+        sibling = MagicMock()
+        sibling.wait_closed = AsyncMock()
+        launcher_ipc._servers = [failed, sibling]
+
+        with patch.object(launcher_ipc.logger, "log_err") as log_err:
+            asyncio.run(launcher_ipc.stop_launcher_servers())
+
+        failed.close.assert_called_once()
+        sibling.close.assert_called_once()
+        self.assertEqual(launcher_ipc._servers, [])
+        self.assertTrue(log_err.called)

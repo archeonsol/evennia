@@ -135,11 +135,7 @@ def run_shutdown_hooks(*, shutdown_executor=True):
 def cancel_pending_tasks(loop, *, exclude=()):
     """Cancel and settle every unfinished task owned by ``loop`` once."""
     excluded = set(exclude)
-    tasks = [
-        task
-        for task in asyncio.all_tasks(loop)
-        if not task.done() and task not in excluded
-    ]
+    tasks = [task for task in asyncio.all_tasks(loop) if not task.done() and task not in excluded]
     for task in tasks:
         task.cancel()
     if tasks:
@@ -254,9 +250,7 @@ def _log_task_exception(task: asyncio.Task) -> None:
     if exc is not None:
         from evennia.utils.logger import log_err
 
-        log_err(
-            f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}"
-        )
+        log_err(f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}")
 
 
 def _next_fire_time(target: float, interval: float, now: float) -> float:
@@ -612,9 +606,7 @@ def _isolated_database_context() -> contextvars.Context:
             # Tiny utility consumers may use the clock without Django.
             return
         except Exception as err:
-            raise RuntimeError(
-                "could not isolate Django state for runtime root"
-            ) from err
+            raise RuntimeError("could not isolate Django state for runtime root") from err
 
     context.run(detach)
     return context
@@ -638,8 +630,7 @@ def _close_database_connections() -> bool:
         from django.db import connections
 
         had_connection = any(
-            wrapper.connection is not None
-            for wrapper in connections.all(initialized_only=True)
+            wrapper.connection is not None for wrapper in connections.all(initialized_only=True)
         )
         connections.close_all()
         return had_connection
@@ -708,9 +699,7 @@ def _create_runtime_task(loop, coro, task_kind: str) -> asyncio.Task:
 
     context = _isolated_database_context()
     started = [False]
-    task = loop.create_task(
-        _run_runtime_root(coro, task_kind, started), context=context
-    )
+    task = loop.create_task(_run_runtime_root(coro, task_kind, started), context=context)
 
     def completed(done_task):
         # If cancellation wins before the wrapper's first bytecode executes,
@@ -723,6 +712,37 @@ def _create_runtime_task(loop, coro, task_kind: str) -> asyncio.Task:
 
     task.add_done_callback(completed)
     return task
+
+
+def create_bound_runtime_task(coro, *, task_kind="generic") -> asyncio.Task:
+    """Create a supervised task on the bound loop from its owning thread.
+
+    Unlike :func:`run_coroutine`, this always schedules on the process loop,
+    including while that loop is stopped for bootstrap finalization. This is a
+    narrow service-lifecycle primitive; workers and unbound test harnesses must
+    use the normal dispatch APIs instead.
+
+    Args:
+        coro: Coroutine to schedule.
+        task_kind: Bounded runtime-task metric label.
+
+    Returns:
+        The supervised task owned by the bound process loop.
+
+    Raises:
+        RuntimeError: If no open loop is bound or the caller is not its owner.
+    """
+
+    loop = get_bound_loop()
+    if loop is None:
+        if inspect.iscoroutine(coro):
+            coro.close()
+        raise RuntimeError("create_bound_runtime_task() requires an open bound event loop")
+    if not is_io_owner():
+        if inspect.iscoroutine(coro):
+            coro.close()
+        raise RuntimeError("create_bound_runtime_task() is available only to the IO owner")
+    return _create_runtime_task(loop, coro, task_kind)
 
 
 def run_coroutine(coro, *, task_kind="generic"):
