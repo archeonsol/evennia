@@ -159,7 +159,15 @@ class HelpEntryManager(TypedObjectManager):
             return self.filter(db_key__iexact=ostring)
 
     def create_help(
-        self, key, entrytext, category="General", policies=None, aliases=None, tags=None
+        self,
+        key,
+        entrytext,
+        category="General",
+        policies=None,
+        aliases=None,
+        tags=None,
+        *,
+        _creation_recorder=None,
     ):
         """
         Create a static help entry in the help database. Note that Command
@@ -182,6 +190,8 @@ class HelpEntryManager(TypedObjectManager):
         """
         try:
             new_help = self.model()
+            if _creation_recorder is not None:
+                _creation_recorder.record_help_entry(new_help)
             new_help.key = key
             new_help.entrytext = entrytext
             new_help.help_category = category

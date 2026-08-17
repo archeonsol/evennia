@@ -13,8 +13,7 @@ from unittest.mock import patch
 
 from django.db import connections
 from django.test import SimpleTestCase
-
-from evennia.utils import defer
+from evennia.utils import clock, defer
 
 _DRAIN_TIMEOUT = 5.0
 
@@ -24,11 +23,16 @@ class _AsyncioLoopMixin:
 
     def setUp(self):
         super().setUp()
+        self._saved_bound_loop = clock._main_loop
+        self._saved_bound_thread = clock._loop_thread_id
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        clock.bind_loop(self._loop)
 
     def tearDown(self):
         self._loop.close()
+        clock._main_loop = self._saved_bound_loop
+        clock._loop_thread_id = self._saved_bound_thread
         asyncio.set_event_loop(None)
         super().tearDown()
 
@@ -79,10 +83,14 @@ class TestInThread(_AsyncioLoopMixin, SimpleTestCase):
 
         with (
             patch.object(
-                defer, "close_old_connections", lambda: old_calls.append(threading.get_ident())
+                defer,
+                "close_old_connections",
+                lambda: old_calls.append(threading.get_ident()),
             ),
             patch.object(
-                connections, "close_all", lambda: close_calls.append(threading.get_ident())
+                connections,
+                "close_all",
+                lambda: close_calls.append(threading.get_ident()),
             ),
         ):
 

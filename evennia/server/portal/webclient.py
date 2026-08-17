@@ -39,9 +39,9 @@ import time
 from collections import deque
 
 from django.conf import settings
-
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
-from evennia.server.portal.ws_protocol import CLOSE_NORMAL, GOING_AWAY, Disconnected, WSProtocolBase
+from evennia.server.portal.ws_protocol import (CLOSE_NORMAL, GOING_AWAY,
+                                               Disconnected, WSProtocolBase)
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -83,9 +83,9 @@ def _prune_resume_stash():
         _RESUME_STASH.pop(tok, None)
     overflow = len(_RESUME_STASH) - RESUME_STASH_MAX
     if overflow > 0:
-        for tok, _stash in sorted(_RESUME_STASH.items(), key=lambda kv: kv[1]["deadline"])[
-            :overflow
-        ]:
+        for tok, _stash in sorted(
+            _RESUME_STASH.items(), key=lambda kv: kv[1]["deadline"]
+        )[:overflow]:
             _RESUME_STASH.pop(tok, None)
 
 
@@ -160,7 +160,10 @@ def _get_supported_subprotocols():
         logger.log_warn(
             "WEBSOCKET_SUBPROTOCOLS contains unknown protocol name(s): %s. "
             "Known protocols: %s"
-            % (", ".join(repr(n) for n in unknown), ", ".join(repr(n) for n in wire_formats))
+            % (
+                ", ".join(repr(n) for n in unknown),
+                ", ".join(repr(n) for n in wire_formats),
+            )
         )
 
     return protos
@@ -288,8 +291,13 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         peer = self.transport.getPeer()
         client_address = getattr(peer, "host", None)
 
-        if client_address in settings.UPSTREAM_IPS and "x-forwarded-for" in self.http_headers:
-            addresses = [x.strip() for x in self.http_headers["x-forwarded-for"].split(",")]
+        if (
+            client_address in settings.UPSTREAM_IPS
+            and "x-forwarded-for" in self.http_headers
+        ):
+            addresses = [
+                x.strip() for x in self.http_headers["x-forwarded-for"].split(",")
+            ]
             addresses.reverse()
 
             for addr in addresses:
@@ -329,7 +337,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if self.wire_format is None:
             from evennia.utils import logger
 
-            logger.log_err("WebSocketClient: No wire formats available. Closing connection.")
+            logger.log_err(
+                "WebSocketClient: No wire formats available. Closing connection."
+            )
             self.sendClose(CLOSE_NORMAL, "No wire formats available")
             return
 
@@ -431,7 +441,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             # session that produced it.
             from evennia.utils import logger
 
-            logger.log_warn("webclient: resume token presented by a different uid; not replaying")
+            logger.log_warn(
+                "webclient: resume token presented by a different uid; not replaying"
+            )
             return False
         # Continue the seq counter across the gap and replay what the client
         # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
@@ -503,7 +515,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # we can replay missed frames at the portal without involving the server.
         if not isBinary:
             try:
-                raw = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
+                raw = json.loads(
+                    payload.decode("utf-8") if isinstance(payload, bytes) else payload
+                )
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 raw = None
             if isinstance(raw, dict) and raw.get("t") == "hello":
@@ -637,7 +651,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if not getattr(self, "_batch_scheduled", False):
             self._batch_scheduled = True
             try:
-                asyncio.get_event_loop().call_soon(self._flush_batch)
+                asyncio.get_running_loop().call_soon(self._flush_batch)
             except RuntimeError:
                 # No running loop (tests, shutdown): send straight through.
                 self._batch_scheduled = False
@@ -657,7 +671,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             try:
                 payload = {
                     "t": "batch",
-                    "frames": [f if isinstance(f, dict) else json.loads(f) for f in buf],
+                    "frames": [
+                        f if isinstance(f, dict) else json.loads(f) for f in buf
+                    ],
                 }
             except (json.JSONDecodeError, TypeError, ValueError):
                 # Malformed member: fall back to sending them individually so a
@@ -764,7 +780,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         nocolor = options.get("nocolor", flags.get("NOCOLOR", False))
         screenreader = options.get("screenreader", flags.get("SCREENREADER", False))
         prompt = options.get("send_prompt", False)
-        _RE = re.compile(r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE)
+        _RE = re.compile(
+            r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE
+        )
         if screenreader:
             text = parse_ansi(text, strip_ansi=True, xterm256=False, mxp=False)
             text = _RE.sub("", text)

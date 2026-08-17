@@ -9,6 +9,7 @@ from django.contrib import admin
 from evennia.scripts.models import ScriptDB
 
 from . import utils as adminutils
+from .mixins import OwnerSafeModelAdminMixin
 from .tags import TagInline
 
 
@@ -22,7 +23,8 @@ class ScriptForm(forms.ModelForm):
         help_text="This is the Python-path to the class implementing the actual script functionality. "
         "<BR>If your custom class is not found here, it may not be imported into Evennia yet.",
         choices=lambda: adminutils.get_and_load_typeclasses(
-            parent=ScriptDB, excluded_parents=["evennia.prototypes.prototypes.DbPrototype"]
+            parent=ScriptDB,
+            excluded_parents=["evennia.prototypes.prototypes.DbPrototype"],
         ),
     )
 
@@ -52,7 +54,7 @@ class ScriptTagInline(TagInline):
 
 
 @admin.register(ScriptDB)
-class ScriptAdmin(admin.ModelAdmin):
+class ScriptAdmin(OwnerSafeModelAdminMixin, admin.ModelAdmin):
     """
     Displaying the main Script page.
 
@@ -115,20 +117,3 @@ class ScriptAdmin(admin.ModelAdmin):
         help_texts["serialized_string"] = self.serialized_string.help_text
         kwargs["help_texts"] = help_texts
         return super().get_form(request, obj, **kwargs)
-
-    def save_model(self, request, obj, form, change):
-        """
-        Model-save hook.
-
-        Args:
-            request (Request): Incoming request.
-            obj (Object): Database object.
-            form (Form): Form instance.
-            change (bool): If this is a change or a new object.
-
-        """
-        obj.save()
-        if not change:
-            # adding a new object
-            # have to call init with typeclass passed to it
-            obj.set_class_from_typeclass(typeclass_path=obj.db_typeclass_path)

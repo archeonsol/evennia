@@ -9,6 +9,7 @@ from django.contrib import admin
 
 from evennia.comms.models import ChannelDB, Msg
 
+from .mixins import OwnerSafeModelAdminMixin
 from .tags import TagInline
 
 
@@ -51,7 +52,7 @@ class MsgForm(forms.ModelForm):
 
 
 @admin.register(Msg)
-class MsgAdmin(admin.ModelAdmin):
+class MsgAdmin(OwnerSafeModelAdminMixin, admin.ModelAdmin):
     """
     Defines display for Msg objects
 
@@ -202,7 +203,7 @@ class ChannelForm(forms.ModelForm):
 
 
 @admin.register(ChannelDB)
-class ChannelAdmin(admin.ModelAdmin):
+class ChannelAdmin(OwnerSafeModelAdminMixin, admin.ModelAdmin):
     """
     Defines display for Channel objects
 
@@ -249,7 +250,9 @@ class ChannelAdmin(admin.ModelAdmin):
             obj (Channel): The channel to get subs from.
 
         """
-        return ", ".join([str(sub) for sub in obj.subscriptions.all()])
+        account_keys = obj.db_account_subscriptions.values_list("db_key", flat=True)
+        object_keys = obj.db_object_subscriptions.values_list("db_key", flat=True)
+        return ", ".join(str(key) for key in (*account_keys, *object_keys))
 
     def no_of_subscribers(self, obj):
         """
@@ -259,7 +262,7 @@ class ChannelAdmin(admin.ModelAdmin):
             obj (Channel): The channel to get subs from.
 
         """
-        return sum(1 for sub in obj.subscriptions.all())
+        return obj.db_account_subscriptions.count() + obj.db_object_subscriptions.count()
 
     def serialized_string(self, obj):
         """
@@ -283,24 +286,6 @@ class ChannelAdmin(admin.ModelAdmin):
         help_texts["serialized_string"] = self.serialized_string.help_text
         kwargs["help_texts"] = help_texts
         return super().get_form(request, obj, **kwargs)
-
-    def save_model(self, request, obj, form, change):
-        """
-        Model-save hook.
-
-        Args:
-            request (Request): Incoming request.
-            obj (Object): Database object.
-            form (Form): Form instance.
-            change (bool): If this is a change or a new object.
-
-        """
-        obj.save()
-        if not change:
-            # adding a new object
-            # have to call init with typeclass passed to it
-            obj.set_class_from_typeclass(typeclass_path=settings.BASE_CHANNEL_TYPECLASS)
-        obj.at_post_load()
 
     def response_add(self, request, obj, post_url_continue=None):
         from django.http import HttpResponseRedirect

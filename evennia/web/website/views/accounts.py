@@ -5,10 +5,18 @@ Views for managing accounts.
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse_lazy
 
 from evennia.utils import class_from_module
+from evennia.web.utils.auth import RegistrationRequest, register_account
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    IOThreadCallUnavailable,
+    release_worker_db_connections,
+    run_on_io_thread,
+)
 from evennia.web.website import forms
 
 from .mixins import EvenniaCreateView, TypeclassMixin
@@ -55,16 +63,53 @@ class AccountCreateView(AccountMixin, EvenniaCreateView):
         password = form.cleaned_data["password1"]
         email = form.cleaned_data.get("email", "")
 
-        # Create account. This also runs all validations on the username/password.
-        account, errs = self.typeclass.create(username=username, password=password, email=email)
+        try:
+            release_worker_db_connections()
+            result = run_on_io_thread(
+                register_account,
+                RegistrationRequest(
+                    username=username,
+                    email=email,
+                    password=password,
+                    ip=str(getattr(self.request, "origin_ip", ""))[:128],
+                    typeclass_path=f"{self.typeclass.__module__}.{self.typeclass.__name__}",
+                ),
+            )
+        except IOThreadCallIndeterminate:
+            return HttpResponse(
+                "Account creation may have completed. Do not retry this request.",
+                status=202,
+                headers={"X-Evennia-Retryable": "false"},
+            )
+        except (IOThreadCallTimeout, IOThreadCallUnavailable):
+            return HttpResponse(
+                "Account creation did not start. This request may be retried.",
+                status=503,
+                headers={"X-Evennia-Retryable": "true", "Retry-After": "1"},
+            )
 
-        if not account:
-            # password validation happens earlier, only username checks appear here.
-            form.add_error("username", ", ".join(errs))
+        if result.status == "recovery_required":
+            return HttpResponse(
+                "Account creation requires staff recovery. Do not retry this request.",
+                status=202,
+                headers={"X-Evennia-Retryable": "false"},
+            )
+        if result.status == "fault":
+            return HttpResponse(
+                "Account creation failed after internal processing. Do not retry this request.",
+                status=500,
+                headers={"X-Evennia-Retryable": "false"},
+            )
+        if result.status != "created":
+            for field, _code, message in result.issues:
+                form.add_error(field if field in form.fields else None, message)
+            if not result.issues:
+                form.add_error(None, "Account creation requires staff review.")
             return self.form_invalid(form)
         else:
             # Inform user of success
             messages.success(
-                self.request, f"Your account '{account.name}' was successfully created!"
+                self.request,
+                f"Your account '{result.account_name}' was successfully created!",
             )
             return HttpResponseRedirect(self.success_url)

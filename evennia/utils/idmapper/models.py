@@ -9,7 +9,6 @@ Also adds `cache_size()` for monitoring the size of the cache.
 
 import gc
 import os
-import threading
 import time
 from collections import defaultdict
 from itertools import islice
@@ -22,12 +21,11 @@ from django.db.models.base import Model, ModelBase
 from django.db.models.signals import post_migrate, post_save, pre_delete
 from django.db.utils import DatabaseError
 from django.utils.module_loading import import_string
-from twisted.internet.reactor import callFromThread
 
 from evennia.utils import clock, logger
 from evennia.utils.utils import dbref, get_evennia_pids, to_str
 
-from .manager import SharedMemoryManager
+from .manager import SharedMemoryManager, SharedMemoryOwnershipError
 
 AUTO_FLUSH_MIN_INTERVAL = 60.0 * 5  # at least 5 mins between cache flushes
 
@@ -47,8 +45,6 @@ PROC_MODIFIED_OBJS = WeakValueDictionary()
 _SELF_PID = os.getpid()
 _SERVER_PID, _PORTAL_PID = get_evennia_pids()
 _IS_SUBPROCESS = (_SERVER_PID and _PORTAL_PID) and _SELF_PID not in (_SERVER_PID, _PORTAL_PID)
-_IS_MAIN_THREAD = threading.current_thread().name == "MainThread"
-
 _JSONB_ATTRIBUTE_BACKEND = "evennia.typeclasses.jsonb_handler.JsonbAttributeBackend"
 
 
@@ -124,6 +120,14 @@ class SharedMemoryModelBase(ModelBase):
     # clear what was the intended purpose, but skipping ModelBase.__new__
     # broke things; in particular, default manager inheritance.
 
+    @property
+    def _base_manager(cls):
+        """Return the unfiltered owner-aware manager for this model."""
+        manager = cls.__dict__.get("_idmapper_base_manager")
+        if manager is not None:
+            return manager
+        return super()._base_manager
+
     def __call__(cls, *args, **kwargs):
         """
         this method will either create an instance (by calling the default implementation)
@@ -144,7 +148,8 @@ class SharedMemoryModelBase(ModelBase):
         cached_instance = cls.get_cached_instance(instance_key)
         if cached_instance is None:
             cached_instance = new_instance()
-            cls.cache_instance(cached_instance, new=True)
+            if clock.is_io_owner():
+                cls.cache_instance(cached_instance, new=True)
         return cached_instance
 
     def _prepare(cls):
@@ -160,6 +165,11 @@ class SharedMemoryModelBase(ModelBase):
             # we store __instance_cache__ only on the dbmodel base
             dbmodel.__instance_cache__ = {}
         super()._prepare()
+        if not cls._meta.abstract:
+            manager = SharedMemoryManager()
+            manager.model = cls
+            manager.name = "_base_manager"
+            type.__setattr__(cls, "_idmapper_base_manager", manager)
 
     def __new__(cls, name, bases, attrs):
         """
@@ -374,6 +384,8 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         done even when instance caching is disabled.
 
         """
+        if not clock.is_io_owner():
+            return None
         return cls.__dbclass__.__instance_cache__.get(id)
 
     @classmethod
@@ -388,6 +400,7 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
                 db save).
 
         """
+        cls._require_cache_owner("cache_instance")
         pk = instance._get_pk_val()
         if pk is not None:
             new = new or pk not in cls.__dbclass__.__instance_cache__
@@ -407,7 +420,15 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         Return the objects so far cached by idmapper for this class.
 
         """
+        cls._require_cache_owner("get_all_cached_instances")
         return list(cls.__dbclass__.__instance_cache__.values())
+
+    @classmethod
+    def _require_cache_owner(cls, operation):
+        if not clock.is_io_owner():
+            raise SharedMemoryOwnershipError(
+                f"{cls.__name__}.{operation}() requires the Evennia IO owner"
+            )
 
     @classmethod
     def _flush_cached_by_key(cls, key, force=True):
@@ -415,6 +436,7 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         Remove the cached reference.
 
         """
+        cls._require_cache_owner("_flush_cached_by_key")
         try:
             if force or cls.at_idmapper_flush():
                 del cls.__dbclass__.__instance_cache__[key]
@@ -433,6 +455,7 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         dead objects.
 
         """
+        cls._require_cache_owner("flush_cached_instance")
         cls._flush_cached_by_key(instance._get_pk_val(), force=force)
 
     # flush_cached_instance = classmethod(flush_cached_instance)
@@ -444,6 +467,7 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         keyword to remove all objects, safe or not.
 
         """
+        cls._require_cache_owner("flush_instance_cache")
         _cancel_active_cache_flush()
         if force:
             cls.__dbclass__.__instance_cache__ = {}
@@ -485,6 +509,7 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         `force` to override the result of at_idmapper_flush() for the object.
 
         """
+        self.__class__._require_cache_owner("flush_from_cache")
         pk = self._get_pk_val()
         if pk:
             if force or self.at_idmapper_flush():
@@ -495,6 +520,11 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
         Delete the object, clearing cache.
 
         """
+        if not clock.is_io_owner():
+            raise SharedMemoryOwnershipError(
+                f"{self.__class__.__name__}.delete() requires the Evennia IO owner"
+            )
+
         from evennia.typeclasses.jsonb_handler import (
             _coordinate_row_delete,
             _retire_row_state_after_delete,
@@ -534,6 +564,11 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
             self._oob_at_<fieldname>_postsave())
 
         """
+        if not clock.is_io_owner():
+            raise SharedMemoryOwnershipError(
+                f"{self.__class__.__name__}.save() requires the Evennia IO owner"
+            )
+
         global _MONITOR_HANDLER
         from evennia.typeclasses.attribute_context import model_save_context
         from evennia.typeclasses.jsonb_handler import (
@@ -585,35 +620,24 @@ class SharedMemoryModel(Model, metaclass=SharedMemoryModelBase):
             PROC_MODIFIED_COUNT += 1
             PROC_MODIFIED_OBJS[PROC_MODIFIED_COUNT] = self
 
-        if _IS_MAIN_THREAD:
-            # in main thread - normal operation
-            try:
+        try:
+            with model_save_context() as scope:
+                with transaction.atomic(using=operation_alias(save_kwargs)):
+                    super().save(*args, **save_kwargs)
+            finish_model_save(scope, save_kwargs)
+        except DatabaseError:
+            # We handle the 'update_fields did not update any rows' error that
+            # may happen due to timing issues with attributes.
+            retry_kwargs = dict(kwargs)
+            ufields_removed = retry_kwargs.pop("update_fields", None)
+            if ufields_removed:
+                retry_kwargs = _coordinator_safe_save_kwargs(self, retry_kwargs)
                 with model_save_context() as scope:
-                    with transaction.atomic(using=operation_alias(save_kwargs)):
-                        super().save(*args, **save_kwargs)
-                finish_model_save(scope, save_kwargs)
-            except DatabaseError:
-                # we handle the 'update_fields did not update any rows' error that
-                # may happen due to timing issues with attributes
-                retry_kwargs = dict(kwargs)
-                ufields_removed = retry_kwargs.pop("update_fields", None)
-                if ufields_removed:
-                    retry_kwargs = _coordinator_safe_save_kwargs(self, retry_kwargs)
-                    with model_save_context() as scope:
-                        with transaction.atomic(using=operation_alias(retry_kwargs)):
-                            super().save(*args, **retry_kwargs)
-                    finish_model_save(scope, retry_kwargs)
-                else:
-                    raise
-        else:
-            # in another thread; make sure to save in reactor thread
-            def _save_callback(cls, *args, **kwargs):
-                with model_save_context() as scope:
-                    with transaction.atomic(using=operation_alias(kwargs)):
-                        super(SharedMemoryModel, cls).save(*args, **kwargs)
-                finish_model_save(scope, kwargs)
-
-            callFromThread(_save_callback, self, *args, **save_kwargs)
+                    with transaction.atomic(using=operation_alias(retry_kwargs)):
+                        super().save(*args, **retry_kwargs)
+                finish_model_save(scope, retry_kwargs)
+            else:
+                raise
 
         if not self.pk:
             # this can happen if some of the startup methods immediately
@@ -1013,6 +1037,8 @@ def flush_cache(**kwargs):
 
     """
 
+    if not clock.is_io_owner():
+        raise SharedMemoryOwnershipError("flush_cache() requires the Evennia IO owner")
     _cancel_active_cache_flush()
     sweep = _CacheFlushSweep(
         models=_leaf_cache_models(),

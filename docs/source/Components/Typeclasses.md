@@ -248,7 +248,12 @@ Evennia modifies Django's proxy model in various ways to allow them to work with
 
 ### Caveats
 
-Evennia uses the *idmapper* to cache its typeclasses (Django proxy models) in memory. The idmapper allows things like on-object handlers and properties to be stored on typeclass instances and to not get lost as long as the server is running (they will only be cleared on a Server reload). Django does not work like this by default; by default every time you search for an object in the database you'll get a *different* instance of that object back and anything you stored on it that was not in the database would be lost. The bottom line is that Evennia's Typeclass instances subsist in memory a lot longer than vanilla Django model instances do. 
+Evennia uses the *idmapper* to cache its typeclasses (Django proxy models) in memory. On the engine's IO-owner thread, the idmapper allows things like on-object handlers and properties to be stored on typeclass instances and to not get lost as long as the server is running (they will only be cleared on a Server reload). Django does not work like this by default; by default every time you search for an object in the database you'll get a *different* instance of that object back and anything you stored on it that was not in the database would be lost. The bottom line is that owner-side Typeclass instances subsist in memory a lot longer than vanilla Django model instances do.
+
+Web-worker ORM reads are an intentional exception: complete concrete rows are
+detached from the owner cache, do not run `at_post_load()`, and cannot be saved
+or deleted. Use an IO service for handlers, runtime behavior, or mutations; see
+[Web IO Boundary](Web-IO-Boundary.md).
 
 There is one caveat to consider with this, and that relates to [making your own models](New-
 Models): Foreign relationships to typeclasses are cached by Django and that means that if you were to change an object in a foreign relationship via some other means than via that relationship, the object seeing the relationship may not reliably update but will still see its old cached version. Due to typeclasses staying so long in memory, stale caches of such relationships could be more visible than common in Django. See the [closed issue #1098 and its comments](https://github.com/evennia/evennia/issues/1098) for examples and solutions.

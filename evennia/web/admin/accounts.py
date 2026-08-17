@@ -12,7 +12,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.core.exceptions import PermissionDenied
-from django.http import Http404, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.decorators import method_decorator
@@ -24,8 +24,17 @@ from django.views.decorators.debug import sensitive_post_parameters
 from evennia.accounts.models import AccountDB
 from evennia.objects.models import ObjectDB
 from evennia.utils import create
+from evennia.web.utils.auth import PasswordMutationRequest, mutate_password
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    IOThreadCallUnavailable,
+    release_worker_db_connections,
+    run_on_io_thread,
+)
 
 from . import utils as adminutils
+from .mixins import OwnerSafeModelAdminMixin
 from .tags import TagInline
 
 sensitive_post_parameters_m = method_decorator(sensitive_post_parameters())
@@ -207,7 +216,7 @@ class ObjectPuppetInline(admin.StackedInline):
 
 
 @admin.register(AccountDB)
-class AccountAdmin(BaseUserAdmin):
+class AccountAdmin(OwnerSafeModelAdminMixin, BaseUserAdmin):
     """
     This is the main creation screen for Users/accounts
 
@@ -297,7 +306,8 @@ class AccountAdmin(BaseUserAdmin):
         return mark_safe(
             ", ".join(
                 '<a href="{url}">{name}</a>'.format(
-                    url=reverse("admin:objects_objectdb_change", args=[obj.id]), name=obj.db_key
+                    url=reverse("admin:objects_objectdb_change", args=[obj.id]),
+                    name=obj.db_key,
                 )
                 for obj in ObjectDB.objects.filter(db_account=obj)
             )
@@ -343,25 +353,77 @@ class AccountAdmin(BaseUserAdmin):
         if request.method == "POST":
             form = self.change_password_form(user, request.POST)
             if form.is_valid():
-                form.save()
-                change_message = self.construct_change_message(request, form, None)
-                self.log_change(request, user, change_message)
-                msg = "Password changed successfully."
-                messages.success(request, msg)
-                update_session_auth_hash(request, form.user)
-                return HttpResponseRedirect(
-                    reverse(
-                        "%s:%s_%s_change"
-                        % (
-                            self.admin_site.name,
-                            user._meta.app_label,
-                            # the model_name is something we need to hardcode
-                            # since our accountdb is a proxy:
-                            "accountdb",
-                        ),
-                        args=(user.pk,),
-                    )
+                valid_submission = (
+                    form.cleaned_data["set_usable_password"] or "unset-password" in request.POST
                 )
+                if not valid_submission:
+                    messages.error(
+                        request,
+                        _("Conflicting form data submitted. Please try again."),
+                    )
+                    return HttpResponseRedirect(request.get_full_path())
+                mode = (
+                    "admin_set"
+                    if form.cleaned_data.get("set_usable_password", True)
+                    else "admin_unusable"
+                )
+                try:
+                    release_worker_db_connections()
+                    result = run_on_io_thread(
+                        mutate_password,
+                        PasswordMutationRequest(
+                            account_id=int(user.pk),
+                            actor_id=int(request.user.pk),
+                            mode=mode,
+                            new_password=form.cleaned_data.get("password1"),
+                        ),
+                    )
+                except PermissionDenied:
+                    raise
+                except IOThreadCallIndeterminate:
+                    return HttpResponse(
+                        "The password operation may have completed. Do not retry it.",
+                        status=202,
+                        headers={"X-Evennia-Retryable": "false"},
+                    )
+                except (IOThreadCallTimeout, IOThreadCallUnavailable):
+                    return HttpResponse(
+                        "The password operation did not start and may be retried.",
+                        status=503,
+                        headers={"X-Evennia-Retryable": "true", "Retry-After": "1"},
+                    )
+                if result.status != "changed":
+                    form.add_error(None, result.message or "The password was not changed.")
+                else:
+                    form.user.password = result.password_hash
+                    user.password = result.password_hash
+                    change_message = self.construct_change_message(request, form, None)
+                    self.log_change(request, user, change_message)
+                    msg = (
+                        "Password changed successfully."
+                        if mode == "admin_set"
+                        else "Password-based authentication was disabled."
+                    )
+                    messages.success(request, msg)
+                    if getattr(request, "_evennia_admin_audit_warning", False):
+                        messages.warning(
+                            request,
+                            "The password changed, but its admin audit row could not be written.",
+                        )
+                    update_session_auth_hash(request, form.user)
+                    return HttpResponseRedirect(
+                        reverse(
+                            "%s:%s_%s_change"
+                            % (
+                                self.admin_site.name,
+                                user._meta.app_label,
+                                # the model_name is something we need to hardcode
+                                # since our accountdb is a proxy:
+                                "accountdb",
+                            ),
+                            args=(user.pk,),
+                        )
+                    )
         else:
             form = self.change_password_form(user)
 
@@ -393,24 +455,6 @@ class AccountAdmin(BaseUserAdmin):
             self.change_user_password_template or "admin/auth/user/change_password.html",
             context,
         )
-
-    def save_model(self, request, obj, form, change):
-        """
-        Custom save actions.
-
-        Args:
-            request (Request): Incoming request.
-            obj (Object): Object to save.
-            form (Form): Related form instance.
-            change (bool): False if this is a new save and not an update.
-
-        """
-        obj.save()
-        if not change:
-            # calling hooks for new account
-            obj.set_class_from_typeclass(typeclass_path=settings.BASE_ACCOUNT_TYPECLASS)
-            obj.basetype_setup()
-            obj.at_account_creation()
 
     def response_add(self, request, obj, post_url_continue=None):
         from django.http import HttpResponseRedirect

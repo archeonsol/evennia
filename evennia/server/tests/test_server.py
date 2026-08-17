@@ -5,11 +5,10 @@ Test the main server component
 
 from unittest import TestCase
 
-from django.test import override_settings
-from mock import DEFAULT, MagicMock, call, patch
-
 import evennia
+from django.test import override_settings
 from evennia.server import service
+from mock import DEFAULT, MagicMock, call, patch
 
 
 class TestServer(TestCase):
@@ -24,7 +23,7 @@ class TestServer(TestCase):
 
         self.server = evennia.EVENNIA_SERVER_SERVICE
 
-    @override_settings(IDMAPPER_CACHE_MAXSIZE=1000)
+    @override_settings(IDMAPPER_CACHE_MAXSIZE=1000, IDLE_TIMEOUT=0)
     def test__server_maintenance_reset(self):
         with (
             patch.object(self.server, "_flush_cache", new=MagicMock()) as mockflush,
@@ -46,7 +45,7 @@ class TestServer(TestCase):
             # service.server_maintenance), not via conf("runtime", value).
             mockconf.objects.conf.assert_called_with("runtime", default=0.0)
 
-    @override_settings(IDMAPPER_CACHE_MAXSIZE=1000)
+    @override_settings(IDMAPPER_CACHE_MAXSIZE=1000, IDLE_TIMEOUT=0)
     def test__server_maintenance_flush(self):
         with (
             patch.multiple(
@@ -63,7 +62,7 @@ class TestServer(TestCase):
             self.server.server_maintenance()
             self.server._flush_cache.assert_called_with(1000)
 
-    @override_settings(IDMAPPER_CACHE_MAXSIZE=1000)
+    @override_settings(IDMAPPER_CACHE_MAXSIZE=1000, IDLE_TIMEOUT=0)
     def test__server_maintenance_close_connection(self):
         with (
             patch.multiple(
@@ -157,7 +156,9 @@ class TestServer(TestCase):
     def test_initial_setup(self):
         from evennia.utils.create import create_account
 
-        acct = create_account("TestSuperuser", "test@test.com", "testpassword", is_superuser=True)
+        acct = create_account(
+            "TestSuperuser", "test@test.com", "testpassword", is_superuser=True
+        )
 
         with patch.multiple(
             "evennia.server.initial_setup", reset_server=DEFAULT, AccountDB=DEFAULT
@@ -170,7 +171,9 @@ class TestServer(TestCase):
     def test_initial_setup_retry(self):
         from evennia.utils.create import create_account
 
-        acct = create_account("TestSuperuser2", "test@test.com", "testpassword", is_superuser=True)
+        acct = create_account(
+            "TestSuperuser2", "test@test.com", "testpassword", is_superuser=True
+        )
 
         with patch.multiple(
             "evennia.server.initial_setup",
@@ -185,14 +188,16 @@ class TestServer(TestCase):
         acct.delete()
 
     def test_get_info_dict(self):
-        with patch.object(self.server, "get_info_dict", return_value={"test": "foo"}) as mocks:
+        with patch.object(
+            self.server, "get_info_dict", return_value={"test": "foo"}
+        ) as mocks:
             self.assertEqual(self.server.get_info_dict(), {"test": "foo"})
 
 
 class TestInitHooks(TestCase):
     def setUp(self):
         from evennia.server import server
-        from evennia.utils import create
+        from evennia.utils import clock, create
 
         self.server = evennia.EVENNIA_SERVER_SERVICE
 
@@ -203,8 +208,11 @@ class TestInitHooks(TestCase):
         # at_post_load burst still runs inline, which is what this test asserts.
         import asyncio
 
+        self._saved_bound_loop = clock._main_loop
+        self._saved_bound_thread = clock._loop_thread_id
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        clock.bind_loop(self._loop)
 
         self.obj1 = create.object(key="HookTestObj1")
         self.obj2 = create.object(key="HookTestObj2")
@@ -230,11 +238,16 @@ class TestInitHooks(TestCase):
             obj.at_post_load = MagicMock()
 
     def tearDown(self):
+        from evennia.utils import clock
+
         # run_init_hooks starts real repeating loops (maintenance task, stall
         # watchdog, system-scheduler driver); stop them so they don't leak
         # pending timers into the event loop and trip trial's dirty-reactor
         # check when server tests share a process with trial-based tests.
-        if self.server.maintenance_task is not None and self.server.maintenance_task.running:
+        if (
+            self.server.maintenance_task is not None
+            and self.server.maintenance_task.running
+        ):
             self.server.maintenance_task.stop()
         if self.server.stall_watchdog is not None:
             self.server.stall_watchdog.stop()
@@ -246,14 +259,12 @@ class TestInitHooks(TestCase):
 
         import asyncio
 
-        pending = asyncio.all_tasks(self._loop)
-        for task in pending:
-            task.cancel()
-        if pending:
-            self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        clock.cancel_pending_tasks(self._loop)
         self._loop.run_until_complete(self._loop.shutdown_asyncgens())
         asyncio.set_event_loop(None)
         self._loop.close()
+        clock._main_loop = self._saved_bound_loop
+        clock._loop_thread_id = self._saved_bound_thread
 
     @override_settings(TEST_ENVIRONMENT=True)
     def test_run_init_hooks(self):
@@ -274,7 +285,9 @@ class TestInitHooks(TestCase):
                 return_value=self.objects,
             ),
             patch("evennia.utils.clock.call_later", side_effect=_sync_call_later),
-            patch.object(self.server, "at_server_reload_start", new=MagicMock()) as reload,
+            patch.object(
+                self.server, "at_server_reload_start", new=MagicMock()
+            ) as reload,
             patch.object(self.server, "at_server_cold_start", new=MagicMock()) as cold,
         ):
             self.server.run_init_hooks("reload")

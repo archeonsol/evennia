@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from evennia.utils import clock
@@ -28,6 +28,11 @@ class StandaloneContext:
     application: Any
     portal_mode: bool
     thread: threading.Thread | None = None
+    _ready: threading.Event = field(default_factory=threading.Event, repr=False)
+    _finished: threading.Event = field(default_factory=threading.Event, repr=False)
+    _shutdown_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _shutdown_started: bool = field(default=False, repr=False)
+    _startup_error: BaseException | None = field(default=None, repr=False)
 
     def stop(self):
         shutdown_standalone(self)
@@ -64,25 +69,55 @@ def standalone(
     evennia._init(portal_mode=portal_mode)
 
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    clock.bind_loop(loop)
-
     application = evennia.TWISTED_APPLICATION
-    application.startService()
-
     ctx = StandaloneContext(
         loop=loop,
         application=application,
         portal_mode=portal_mode,
     )
 
-    if not start_loop:
+    if background and start_loop:
+
+        def run_background():
+            try:
+                asyncio.set_event_loop(loop)
+                clock.bind_loop(loop)
+                application.startService()
+                loop.call_soon(ctx._ready.set)
+                loop.run_forever()
+            except BaseException as err:
+                ctx._startup_error = err
+                ctx._ready.set()
+            finally:
+                if not ctx._shutdown_started:
+                    _finalize_stopped_standalone(ctx)
+                if not loop.is_closed():
+                    loop.close()
+                ctx._finished.set()
+
+        thread = threading.Thread(
+            target=run_background,
+            name="evennia-standalone",
+            daemon=True,
+        )
+        ctx.thread = thread
+        thread.start()
+        ctx._ready.wait()
+        if ctx._startup_error is not None:
+            ctx._finished.wait(timeout=5)
+            raise ctx._startup_error
         return ctx
 
-    if background:
-        thread = threading.Thread(target=loop.run_forever, name="evennia-standalone", daemon=True)
-        thread.start()
-        ctx.thread = thread
+    asyncio.set_event_loop(loop)
+    clock.bind_loop(loop)
+    try:
+        application.startService()
+    except BaseException:
+        _finalize_stopped_standalone(ctx)
+        loop.close()
+        raise
+
+    if not start_loop:
         return ctx
 
     try:
@@ -90,6 +125,49 @@ def standalone(
     finally:
         shutdown_standalone(ctx)
     return ctx
+
+
+def _stop_application(application):
+    """Stop a fully or partially started application without masking teardown."""
+    if application is None:
+        return
+    try:
+        application.stopService()
+    except Exception:
+        pass
+
+
+def _finalize_stopped_standalone(ctx):
+    """Finalize a stopped loop from its recorded owner thread."""
+    try:
+        clock.run_shutdown_hooks(shutdown_executor=False)
+    except Exception:
+        pass
+    _stop_application(ctx.application)
+    try:
+        clock.cancel_pending_tasks(ctx.loop)
+    except Exception:
+        pass
+    clock.shutdown_default_executor()
+    ctx._shutdown_started = True
+
+
+async def _finalize_running_standalone(ctx):
+    """Settle a background standalone from inside its owner loop."""
+    try:
+        clock.run_shutdown_hooks(shutdown_executor=False)
+    except Exception:
+        pass
+    _stop_application(ctx.application)
+    current = asyncio.current_task()
+    tasks = [
+        task for task in asyncio.all_tasks(ctx.loop) if task is not current and not task.done()
+    ]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    clock.shutdown_default_executor()
 
 
 def shutdown_standalone(ctx: StandaloneContext | None = None):
@@ -106,22 +184,34 @@ def shutdown_standalone(ctx: StandaloneContext | None = None):
         loop = ctx.loop
         application = ctx.application
 
-    clock.run_shutdown_hooks()
-    if application is not None:
-        try:
-            if application.running:
-                application.stopService()
-        except Exception:
-            pass
+    if ctx is None:
+        ctx = StandaloneContext(loop=loop, application=application, portal_mode=False)
+
+    with ctx._shutdown_lock:
+        if ctx._shutdown_started:
+            return
+        ctx._shutdown_started = True
 
     if loop is not None and loop.is_running():
-        clock.stop_loop()
 
-    if ctx is not None and ctx.thread is not None and ctx.thread.is_alive():
-        ctx.thread.join(timeout=5)
+        def schedule_shutdown():
+            task = loop.create_task(_finalize_running_standalone(ctx))
 
+            def completed(done_task):
+                try:
+                    done_task.result()
+                except BaseException:
+                    pass
+                loop.stop()
+
+            task.add_done_callback(completed)
+
+        loop.call_soon_threadsafe(schedule_shutdown)
+        if ctx.thread is not None and threading.current_thread() is not ctx.thread:
+            ctx._finished.wait(timeout=5)
+            ctx.thread.join(timeout=5)
+        return
+
+    _finalize_stopped_standalone(ctx)
     if loop is not None and not loop.is_closed():
-        try:
-            loop.close()
-        except Exception:
-            pass
+        loop.close()

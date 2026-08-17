@@ -9,9 +9,11 @@ from django.contrib import admin
 
 from evennia.server.models import ServerConfig
 
+from .mixins import OwnerSafeModelAdminMixin
+
 
 @admin.register(ServerConfig)
-class ServerConfigAdmin(admin.ModelAdmin):
+class ServerConfigAdmin(OwnerSafeModelAdminMixin, admin.ModelAdmin):
     """
     Custom admin for server configs
 

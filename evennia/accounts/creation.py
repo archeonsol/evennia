@@ -43,6 +43,22 @@ class AccountCreationOutcome:
     errors: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class AccountCompensationOutcome:
+    """Freshly verified result of exact child-first creation cleanup."""
+
+    deleted_account_ids: tuple[int, ...]
+    deleted_object_ids: tuple[int, ...]
+    survivor_account_ids: tuple[int, ...]
+    survivor_object_ids: tuple[int, ...]
+    errors: tuple[str, ...]
+
+    @property
+    def survivor_ids(self):
+        """Return the compatibility projection of all survivor identifiers."""
+        return self.survivor_account_ids + self.survivor_object_ids
+
+
 class _AccountCreationRecorder:
     """Collect exact model instances constructed by one opted-in attempt."""
 
@@ -92,8 +108,67 @@ def account_creation_issue(stage, code, field, message):
     )
 
 
+def compensate_account_creation(outcome):
+    """Delete only exact candidates from one provenance-aware creation attempt."""
+    deleted_accounts = []
+    deleted_objects = []
+    errors = []
+
+    for obj in reversed(outcome.objects):
+        object_id = int(obj.pk) if obj.pk is not None else None
+        if object_id is None:
+            continue
+        try:
+            if obj.__class__.__dbclass__.objects.filter(pk=object_id).exists():
+                obj.delete()
+        except Exception as err:
+            errors.append(f"object:{object_id}:{type(err).__name__}"[:_MAX_ISSUE_TEXT])
+        if not obj.__class__.__dbclass__.objects.filter(pk=object_id).exists():
+            deleted_objects.append(object_id)
+
+    for account in reversed(outcome.accounts):
+        account_id = int(account.pk) if account.pk is not None else None
+        if account_id is None:
+            continue
+        try:
+            if account.__class__.__dbclass__.objects.filter(pk=account_id).exists():
+                account.delete()
+        except Exception as err:
+            errors.append(f"account:{account_id}:{type(err).__name__}"[:_MAX_ISSUE_TEXT])
+        if not account.__class__.__dbclass__.objects.filter(pk=account_id).exists():
+            deleted_accounts.append(account_id)
+
+    account_survivors = (
+        tuple(
+            object_id
+            for object_id in outcome.account_ids
+            if outcome.accounts[0].__class__.__dbclass__.objects.filter(pk=object_id).exists()
+        )
+        if outcome.accounts
+        else ()
+    )
+    object_survivors = (
+        tuple(
+            object_id
+            for object_id in outcome.object_ids
+            if outcome.objects[0].__class__.__dbclass__.objects.filter(pk=object_id).exists()
+        )
+        if outcome.objects
+        else ()
+    )
+    return AccountCompensationOutcome(
+        deleted_account_ids=tuple(deleted_accounts),
+        deleted_object_ids=tuple(deleted_objects),
+        survivor_account_ids=account_survivors,
+        survivor_object_ids=object_survivors,
+        errors=tuple(errors),
+    )
+
+
 __all__ = (
     "AccountAlreadyExists",
+    "AccountCompensationOutcome",
     "AccountCreationIssue",
     "AccountCreationOutcome",
+    "compensate_account_creation",
 )

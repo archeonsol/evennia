@@ -79,7 +79,6 @@ import inspect
 import json
 import os
 import tempfile
-import threading
 import time
 import uuid
 import weakref
@@ -219,9 +218,7 @@ def _require_io_thread(where):
     """Require the process-owned IO thread, with a pre-bootstrap main-thread fallback."""
     from evennia.utils import clock
 
-    if clock.is_io_thread():
-        return
-    if clock.get_bound_loop() is None and threading.current_thread() is threading.main_thread():
+    if clock.is_io_owner():
         return
     raise AttributeUpdateUnavailable(f"{where} must run on the Evennia IO thread")
 

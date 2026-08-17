@@ -179,9 +179,10 @@ Notes:
 
 ### 2.2 Object load / idmapper cache rehydration
 
-Driver: `TypedObject` initialization through the idmapper. `at_post_load`
-fires once per cache-load, both on first DB fetch and after every
-server reload.
+Driver: owner-side `TypedObject` initialization through the idmapper.
+`at_post_load` fires once per canonical cache insertion, both on first DB fetch
+and after every server reload. Web-worker reads construct detached complete
+rows without cache insertion and never fire this hook.
 
 ```
 idmapper.cache_object(instance)
@@ -1194,4 +1195,3 @@ _None: every `at_pre_*` / `at_post_*` / `at_failed_*` name matches its declared 
 | `DefaultAccount.at_msg_send` | Misshapen veto: at_<event> name. Falsy-not-None aborts the send. |
 | `TypedObject.at_idmapper_flush` | Misshapen: at_<event> name with veto contract. Return False keeps the object cached. |
 <!-- hooks-gen:end -->
-

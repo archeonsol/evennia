@@ -25,6 +25,64 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.205 — Enforce runtime and web mutation ownership
+
+### Runtime ownership
+
+- Detached Django workers may render concrete `SharedMemoryModel` rows without
+  receiving or replacing the canonical idmapper instance. Cache insertion,
+  hooks, persistence, bulk mutation, and JSONB handler state remain owned by the
+  bound IO loop.
+- Hardened runtime-root teardown so callbacks, default-executor work, and async
+  generators settle before loop closure. Shutdown no longer destroys the
+  runtime root in a foreign Context or loses its task-kind ContextVar token.
+- Kept server-shutdown webclient delivery on the normal framed transport while
+  making post-close and teardown races explicit and bounded.
+
+### Admin mutation bridge
+
+- Added a closed, bounded IO mutation registry for Account, Object, Channel,
+  Script, HelpEntry, Msg, and ServerConfig admins. Workers validate and render
+  forms but never save detached game models, handlers, relations, or inlines.
+- Bypassed Django's worker transaction wrappers while preserving its existing
+  change-form/UserAdmin orchestration. Worker database reads are released before
+  owner dispatch, including shared in-memory SQLite test locks.
+- Preserved exactly-once creation lifecycle and exact partial-row provenance for
+  Account, Object, Channel, Script, Msg, and HelpEntry. Later relation, handler,
+  helper, or signal faults return verified partial/recovery outcomes; Account
+  failures compensate only exact recorded Account/Character candidates.
+- Recompute actor authority, delete protection, and cascade permission on the
+  owner. Typeclass changes preserve canonical identity for Account, Object,
+  Channel, and Script. Account authority relation changes invalidate Django's
+  permission caches.
+- Single and bulk deletion use public domain delete paths without an outer JSONB
+  transaction. Admin audit rows are written only after definite domain results;
+  audit failure produces a completed-operation warning rather than a retryable
+  failure.
+
+### Authentication and registration
+
+- Moved stock password verification/rehash, shared login, password change,
+  reset-token mutation, admin usable/unusable password operations, `last_login`,
+  and registration onto scalar owner services.
+- Django session rotation, reset URLs/tokens, forms, templates, and current
+  session-hash updates remain compatible. Secret request fields are repr-hidden,
+  and bridge timeout responses do not disclose credentials.
+- Stock registration uses `create_with_provenance()` and returns only frozen
+  IDs, names, issues, and cleanup state. Game-specific registration remains a
+  separate adopting client.
+
+### Tests and migration
+
+- Added real bound-loop ASGI coverage for cold/warm admin reads, Object changes,
+  Account creation/password lifecycle, login, password change, registration,
+  and post-domain audit failure, plus service tests for bounded codecs, fresh
+  authorization, all creation adapters, relations, typeclass identity,
+  password/token races, exact recorder seams, and timeout ownership.
+- No database migration is required. Custom admin/auth routes must adopt a
+  bounded adapter or dedicated IO service; standalone shared Tag editing remains
+  deferred pending a global cache-invalidation design.
+
 ## 6.0.0+underspire.204 — Expose exact account-creation provenance
 
 ### Engine

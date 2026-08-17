@@ -2,10 +2,10 @@
 Custom manager for ServerConfig objects.
 """
 
-from django.db import models
+from evennia.utils.idmapper.manager import SharedMemoryManager
 
 
-class ServerConfigManager(models.Manager):
+class ServerConfigManager(SharedMemoryManager):
     """
     This ServerConfigManager implements methods for searching and
     manipulating ServerConfigs directly from the database.

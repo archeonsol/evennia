@@ -9,6 +9,7 @@ from django.test import SimpleTestCase
 from evennia.web.utils.io import (
     IOThreadCallIndeterminate,
     IOThreadCallTimeout,
+    IOThreadCallUnavailable,
     run_on_io_thread,
 )
 
@@ -20,6 +21,55 @@ class WebIOThreadBridgeTest(SimpleTestCase):
         """Pre-bootstrap calls execute inline."""
         self.assertEqual(run_on_io_thread(lambda: 7), 7)
 
+    def test_unbound_worker_fails_without_running_callback(self):
+        """An unbound worker is not mistaken for a pre-bootstrap owner."""
+        called = []
+        errors = []
+
+        def worker():
+            try:
+                run_on_io_thread(lambda: called.append(True))
+            except Exception as err:
+                errors.append(err)
+
+        with patch("evennia.utils.clock.get_bound_loop", return_value=None):
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=1)
+
+        self.assertEqual(called, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], IOThreadCallUnavailable)
+
+    def test_legacy_main_thread_bridge_preserves_arguments(self):
+        """The compatibility API delegates without losing keyword arguments."""
+        from evennia.utils.utils import run_in_main_thread
+
+        self.assertEqual(
+            run_in_main_thread(lambda left, right=0: left + right, 3, right=4),
+            7,
+        )
+
+    def test_legacy_bridge_rejects_unbound_worker(self):
+        """The compatibility API shares the owner's fail-closed boundary."""
+        from evennia.utils.utils import run_in_main_thread
+
+        errors = []
+
+        def worker():
+            try:
+                run_in_main_thread(lambda: None)
+            except Exception as err:
+                errors.append(err)
+
+        with patch("evennia.utils.clock.get_bound_loop", return_value=None):
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=1)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], IOThreadCallUnavailable)
+
     def test_worker_dispatches_through_clock_scope(self):
         """A worker schedules the callback through the engine clock API."""
         queued = []
@@ -29,7 +79,7 @@ class WebIOThreadBridgeTest(SimpleTestCase):
 
         result = []
         with (
-            patch("evennia.utils.clock.is_io_thread", return_value=False),
+            patch("evennia.utils.clock.is_io_owner", return_value=False),
             patch("evennia.utils.clock.get_bound_loop", return_value=object()),
             patch("evennia.utils.clock.call_from_thread", side_effect=call_from_thread),
         ):
@@ -47,7 +97,7 @@ class WebIOThreadBridgeTest(SimpleTestCase):
         queued = []
         called = []
         with (
-            patch("evennia.utils.clock.is_io_thread", return_value=False),
+            patch("evennia.utils.clock.is_io_owner", return_value=False),
             patch("evennia.utils.clock.get_bound_loop", return_value=object()),
             patch("evennia.utils.clock.call_from_thread", side_effect=queued.append),
         ):
@@ -74,7 +124,7 @@ class WebIOThreadBridgeTest(SimpleTestCase):
                 error.append(err)
 
         with (
-            patch("evennia.utils.clock.is_io_thread", return_value=False),
+            patch("evennia.utils.clock.is_io_owner", return_value=False),
             patch("evennia.utils.clock.get_bound_loop", return_value=object()),
             patch("evennia.utils.clock.call_from_thread", side_effect=queued.append),
         ):

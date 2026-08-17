@@ -38,7 +38,7 @@ The lock system denies access by default. Everything is inaccessible unless expl
 
 ## Objects carry their own state
 
-Mutable game state lives on objects. Handlers (Attributes, Tags, Locks, Scripts, Commands) attach directly to objects so state and behavior travel together. The idmapper cache guarantees instance identity per DB object so on-object state is reliable.
+Mutable game state lives on objects. Handlers (Attributes, Tags, Locks, Scripts, Commands) attach directly to objects so state and behavior travel together. The idmapper cache guarantees instance identity per DB object inside the engine IO-owner context, so on-object state is reliable. Web workers may receive detached concrete-field rows, but never canonical identity or handler/runtime authority.
 
 The fork runs external caches for *derived* state (lock cache, cmd-access cache, display-name cache, location-cmdset cache, trie cache, write-behind attrs, redis attr cache). Caches earn their place with a documented invalidation contract: what fills it, what invalidates it, the upper bound on stale reads. They never hold authoritative state; they accelerate access to authoritative state that still lives on objects.
 
