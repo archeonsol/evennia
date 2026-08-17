@@ -249,7 +249,8 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
         service.startService()
         startup_complete = True
         coordinator.mark_ready(service)
-        loop.run_forever()
+        if not coordinator.forced:
+            loop.run_forever()
     except BaseException:
         if not startup_complete:
             coordinator.mark_failed()

@@ -216,6 +216,57 @@ class BootstrapRunTest(SimpleTestCase):
             ],
         )
 
+    def test_forced_signal_during_nested_start_skips_main_loop(self):
+        """A swallowed cold-start stop cannot be lost before run_forever."""
+        from evennia.server.asyncio_bootstrap import run_bootstrap
+
+        loop = asyncio.new_event_loop()
+        service = MagicMock()
+        service.running = True
+        coordinator = None
+        run_forever_calls = 0
+        original_run_forever = loop.run_forever
+
+        def install(value):
+            nonlocal coordinator
+            coordinator = value
+
+        def counted_run_forever():
+            nonlocal run_forever_calls
+            run_forever_calls += 1
+            return original_run_forever()
+
+        def cold_start():
+            async def bind_listener():
+                loop.call_soon(coordinator.handle_signal, 2)
+                loop.call_soon(coordinator.handle_signal, 15)
+                await asyncio.Event().wait()
+
+            task = loop.create_task(bind_listener())
+            with self.assertRaisesRegex(RuntimeError, "Event loop stopped"):
+                loop.run_until_complete(task)
+            task.cancel()
+            loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
+
+        service.privilegedStartService.side_effect = cold_start
+        loop.run_forever = counted_run_forever
+
+        with (
+            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.server.asyncio_bootstrap._install_signal_handlers", side_effect=install),
+            patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
+            patch("evennia.server.asyncio_bootstrap._write_pidfile"),
+            patch("evennia.server.asyncio_bootstrap._remove_pidfile"),
+            patch("evennia.server.asyncio_bootstrap.clock.run_shutdown_hooks"),
+            patch("evennia._LOADED", True, create=True),
+            patch("evennia.EVENNIA_PORTAL_SERVICE", service, create=True),
+        ):
+            run_bootstrap(portal_mode=True, argv=[])
+
+        self.assertEqual(run_forever_calls, 2)
+        self.assertTrue(coordinator.forced)
+        service.stopService.assert_called_once()
+
     def test_pending_runtime_root_is_settled_before_loop_close(self):
         from evennia.server.asyncio_bootstrap import run_bootstrap
         from evennia.utils import clock
