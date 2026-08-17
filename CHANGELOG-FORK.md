@@ -25,6 +25,58 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.207 — Render raw ANSI escapes in the shell
+
+### Webclient
+
+- [`markup.ts`](evennia/web/webclient/client/src/lib/markup.ts) now tokenizes raw
+  ANSI escapes alongside pipe codes. A shell declaring `caps.rendersMarkup` gets
+  the node body without the server's pre-parsed `html`, and that body is not
+  always pipe-coded: anything built through `ANSIString` — `EvTable`, `EvForm`,
+  `EvMenu` — has already resolved its codes to escapes by the time a command
+  calls `str()` on it. `parse_html` styles those because it runs `parse_ansi`
+  first; the shell printed them as literal text. Every `@spawn` table, and any
+  other table-bearing command, arrived with visible `[0m` and `[1m[37m`
+  through its cell borders and headers.
+- Foreground state splits into a base colour plus a hilite flag, mirroring
+  `format_styles` keeping `fg` and `hilight` separate and combining them only
+  when it emits a span. Collapsing them into one index resolved
+  `\x1b[1m\x1b[37m` — the header cell of every `EvTable` — to index 7, the
+  default, so the class was dropped and the text rendered grey. Named pipe codes
+  emit both state changes as well, so `|R|h` is now bright red rather than dark.
+- Truecolor escapes become an inline style alongside the classes. Inverse
+  combined with truecolor deliberately diverges from the server, whose
+  inverse+truecolor branches read `bg_class`/`color_class` locals they never
+  assigned on that path and mutate the truecolor state permanently.
+- `remove_bells` and `remove_backspaces` were missing from the client's phase
+  order. They only affect bodies carrying control characters, which is the same
+  set of bodies this release fixes.
+- Two upstream quirks are reproduced rather than corrected, since parity with
+  `parse_html` is the module's contract: `\x1b[1;5m` blinks without
+  brightening, and `\x1b[7;5m` sets no flag at all yet still opens a fresh span.
+  `format_styles` tests membership against three hand-written tuples that do not
+  contain every combined code.
+
+### Tests
+
+- The parity corpus in
+  [`gen-markup-parity.py`](evennia/web/webclient/client/scripts/gen-markup-parity.py)
+  gains ~80 raw-escape cases: every named colour and background, the style codes
+  and their combined forms, xterm256 including the sub-16 indices the code tables
+  do not carry, truecolor, escapes `format_styles` does not know, the control
+  characters upstream strips, mixed pipe-and-escape bodies, and an `EvTable`
+  header row verbatim. The fixture is 420 cases, up from 340.
+- Verified end-to-end outside the fixture by putting a real `str(EvTable)`
+  through both parsers: byte-identical output.
+
+### Migration
+
+- No database migration or downstream code change is required. Games serving a
+  collected copy of the shell bundle need `evennia collectstatic` to pick up the
+  rebuilt `web/static/webclient/shell/shell.js`.
+
+---
+
 ## 6.0.0+underspire.206 — Coordinate graceful process shutdown
 
 ### Runtime shutdown
