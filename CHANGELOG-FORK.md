@@ -25,6 +25,48 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.206 — Coordinate graceful process shutdown
+
+### Runtime shutdown
+
+- Routed SIGINT and SIGTERM through one bootstrap-owned coordinator in
+  [`asyncio_bootstrap.py`](evennia/server/asyncio_bootstrap.py). Signals latch
+  safely during cold startup, Server and Portal shutdown each reuse one
+  supervised task, and a second signal or the existing emergency deadline
+  still enters the forced cancel-and-gather path.
+- Unified Server signal and IPC requests behind the complete existing shutdown
+  pipeline in [`service.py`](evennia/server/service.py) and
+  [`ipc_handlers_server.py`](evennia/server/ipc_handlers_server.py). The first
+  reload/reset/shutdown mode wins, worker requests drain before mutable hooks,
+  and concurrent requests cannot double-run flush, spool, or lifecycle work.
+- Added an owner-only bound-loop task constructor in
+  [`clock.py`](evennia/utils/clock.py) for supervised bootstrap and service
+  cleanup on a stopped-but-open process loop.
+
+### Portal resources
+
+- Made Portal shutdown retain and await listener, SSH, proxy, and launcher IPC
+  startup and cleanup tasks in
+  [`portal/service.py`](evennia/server/portal/service.py). Session disconnect,
+  resource settlement, optional Server stop, launcher status, and loop stop now
+  have one deterministic owner.
+- Made listener publication cancellation-safe in
+  [`launcher_ipc.py`](evennia/server/launcher_ipc.py) and Portal startup paths.
+  A socket bound immediately before cancellation is explicitly closed and
+  awaited instead of being lost outside the resource registry.
+- Made [`ReverseProxy.stop()`](evennia/server/portal/web_proxy.py) idempotent and
+  independently close its HTTP client even when listener cleanup fails.
+
+### Tests and migration
+
+- Added cold-start signal-race, duplicate request, owner-task, post-bind
+  cancellation, sibling-cleanup, and idempotent proxy regressions. Focused
+  lifecycle coverage passes under both stopped-loop bootstrap and running-loop
+  service conditions.
+- No database migration or downstream API change is required. Portal/Server IPC
+  operations, reconnect/session behavior, and webclient shutdown messages are
+  unchanged.
+
 ## 6.0.0+underspire.205 — Enforce runtime and web mutation ownership
 
 ### Runtime ownership
