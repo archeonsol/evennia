@@ -90,6 +90,29 @@ class PortalShutdownTest(SimpleTestCase):
         sibling.stop.assert_awaited_once()
         self.assertTrue(log_err.called)
 
+    def test_cancelled_start_closes_post_bind_listener(self):
+        """Cancellation between bind and publication cannot lose the socket."""
+        service = self._service()
+        listener = MagicMock()
+        listener.wait_closed = AsyncMock()
+
+        async def exercise():
+            bound = self.loop.create_future()
+            start = service._track_asyncio_start(
+                service._settle_asyncio_start(bound, service._close_asyncio_listener),
+                "test-listener-start",
+            )
+            await asyncio.sleep(0)
+            bound.set_result(listener)
+            start.cancel()
+            await asyncio.gather(start, return_exceptions=True)
+            self.assertTrue(start.cancelled())
+
+        self.loop.run_until_complete(exercise())
+
+        listener.close.assert_called_once()
+        listener.wait_closed.assert_awaited_once()
+
 
 class ReverseProxyStopTest(SimpleTestCase):
     """Proxy cleanup is repeatable and closes the client after listener failure."""

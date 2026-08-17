@@ -348,8 +348,12 @@ class EvenniaPortalService(MultiService):
 
             async def _create():
                 try:
-                    server = await loop.create_server(protocol_factory, interface, port, ssl=ssl)
-                    self._asyncio_servers.append(server)
+                    server = await self._settle_asyncio_start(
+                        loop.create_server(protocol_factory, interface, port, ssl=ssl),
+                        self._close_asyncio_listener,
+                    )
+                    if server is not None:
+                        self._asyncio_servers.append(server)
                 except Exception:
                     logger.log_trace("asyncio Portal server failed to start")
 
@@ -366,10 +370,17 @@ class EvenniaPortalService(MultiService):
         def _go():
             loop = _asyncio_loop()
             if loop is not None and self._accepting_asyncio_starts:
-                self._track_asyncio_start(
-                    proxy.start(interface, proxyport),
-                    "evennia-portal-proxy-start",
-                )
+
+                async def _start():
+                    async def _stop_proxy(_server):
+                        await proxy.stop()
+
+                    await self._settle_asyncio_start(
+                        proxy.start(interface, proxyport),
+                        _stop_proxy,
+                    )
+
+                self._track_asyncio_start(_start(), "evennia-portal-proxy-start")
 
         clock.when_running(_go)
 
@@ -383,8 +394,12 @@ class EvenniaPortalService(MultiService):
 
             async def _create():
                 try:
-                    server = await start_ssh_server(sessionhandler, interface, port)
-                    self._asyncio_servers.append(server)
+                    server = await self._settle_asyncio_start(
+                        start_ssh_server(sessionhandler, interface, port),
+                        self._close_asyncio_listener,
+                    )
+                    if server is not None:
+                        self._asyncio_servers.append(server)
                 except Exception:
                     logger.log_trace("asyncio SSH server failed to start")
 
@@ -400,6 +415,38 @@ class EvenniaPortalService(MultiService):
         self._asyncio_start_tasks.add(task)
         task.add_done_callback(self._asyncio_start_tasks.discard)
         return task
+
+    @staticmethod
+    async def _close_asyncio_listener(server):
+        """Close and settle one listener returned by a completed bind."""
+
+        server.close()
+        await server.wait_closed()
+
+    async def _settle_asyncio_start(self, awaitable, cleanup):
+        """Publish a completed start or clean it before cancellation settles."""
+
+        start_task = asyncio.ensure_future(awaitable)
+        try:
+            resource = await asyncio.shield(start_task)
+        except asyncio.CancelledError as cancelled:
+            try:
+                resource = await start_task
+            except BaseException:
+                raise cancelled
+            try:
+                await cleanup(resource)
+            except Exception:
+                logger.log_trace("asyncio Portal startup cleanup failed")
+            raise cancelled
+
+        if not self._accepting_asyncio_starts:
+            try:
+                await cleanup(resource)
+            except Exception:
+                logger.log_trace("asyncio Portal startup cleanup failed")
+            return None
+        return resource
 
     async def _stop_asyncio_resources(self):
         """Cancel pending starts and await every Portal-owned listener."""

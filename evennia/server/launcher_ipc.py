@@ -435,7 +435,20 @@ async def _start_server(portal, amp_factory, amp_protocol, interface: str, port:
     def protocol_factory():
         return _LauncherIPCProtocol(portal, amp_factory, amp_protocol)
 
-    server = await loop.create_server(protocol_factory, interface, port)
+    bind_task = asyncio.create_task(loop.create_server(protocol_factory, interface, port))
+    try:
+        server = await asyncio.shield(bind_task)
+    except asyncio.CancelledError as cancelled:
+        try:
+            server = await bind_task
+        except BaseException:
+            raise cancelled
+        try:
+            server.close()
+            await server.wait_closed()
+        except Exception:
+            logger.log_trace("cancelled launcher IPC startup cleanup failed")
+        raise cancelled
     _servers.append(server)
     portal._launcher_ipc_ready = True
     portal.info_dict["amp"] = f"launcher-ipc: {port}"

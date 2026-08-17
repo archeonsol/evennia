@@ -219,3 +219,41 @@ class LauncherSessionWaitTest(SimpleTestCase):
         sibling.close.assert_called_once()
         self.assertEqual(launcher_ipc._servers, [])
         self.assertTrue(log_err.called)
+
+    def test_cancelled_start_closes_post_bind_launcher_listener(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from evennia.server import launcher_ipc
+        from evennia.utils import clock
+
+        listener = MagicMock()
+        listener.wait_closed = AsyncMock()
+        portal = MagicMock()
+        portal.info_dict = {}
+
+        async def exercise():
+            loop = asyncio.get_running_loop()
+            bound = loop.create_future()
+
+            async def create_server(*_args, **_kwargs):
+                return await bound
+
+            with (
+                patch.object(clock, "get_bound_loop", return_value=loop),
+                patch.object(loop, "create_server", side_effect=create_server),
+            ):
+                task = asyncio.create_task(
+                    launcher_ipc._start_server(portal, MagicMock(), MagicMock(), "127.0.0.1", 0)
+                )
+                await asyncio.sleep(0)
+                bound.set_result(listener)
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(task.cancelled())
+
+        asyncio.run(exercise())
+
+        listener.close.assert_called_once()
+        listener.wait_closed.assert_awaited_once()
+        self.assertNotIn(listener, launcher_ipc._servers)
