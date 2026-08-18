@@ -133,14 +133,14 @@ def parse_menu_choice(raw, menu: MenuPrompt):
         return None
     if menu.allow_look and lowered in ("l", "look"):
         return "__look__"
+    for key, _desc in menu.options:
+        if str(key).lower() == lowered:
+            return key
     if token.isdigit():
         idx = int(token)
         if 1 <= idx <= len(menu.options):
             return menu.options[idx - 1][0]
         return "__invalid__"
-    for key, _desc in menu.options:
-        if str(key).lower() == lowered:
-            return key
     return "__invalid__"
 
 

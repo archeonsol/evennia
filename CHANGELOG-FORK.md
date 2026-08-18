@@ -25,6 +25,12 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.208 — Prioritize exact key matches in MenuPrompt choice parsing
+
+### Engine
+
+- [`menus.py`](evennia/actions/menus.py): `parse_menu_choice` now checks for exact option key matches before falling back to positional digit indexing (`options[idx - 1]`). Previously, when a menu contained non-numeric keys alongside numeric keys (such as `[("d", "Delete"), ("3", "View photo 3"), ("b", "Back")]`), entering `"3"` matched the 3rd element in the list (`"b"`) rather than the option explicitly keyed as `"3"`.
+
 ## 6.0.0+underspire.207 — Render raw ANSI escapes in the shell
 
 ### Webclient
