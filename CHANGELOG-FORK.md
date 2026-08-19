@@ -25,6 +25,131 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.209 — Moderation substrate
+
+### Engine
+
+- [`webclient.py`](evennia/server/portal/webclient.py): `onOpen` keeps the raw TCP
+  peer alongside the forwarded address and publishes both as protocol flags
+  (`PEER_IP`, `XFF_APPLIED`, `XFF_PRESENT`). `X-Forwarded-For` is only honoured when
+  the peer appears in `settings.UPSTREAM_IPS`, and when it is not, the proxy's own
+  address was recorded as the player's with nothing downstream able to tell the
+  difference — every address-based moderation signal (bans, rate limits, alt
+  matching) silently pointed at the reverse proxy. The address selection itself is
+  unchanged; only its provenance is now observable.
+- [`telnet.py`](evennia/server/portal/telnet.py): sets the same three flags, with
+  `PEER_IP` equal to the client address and both forwarding flags false, so
+  consumers can read one shape across protocols instead of special-casing telnet.
+- **New `evennia.moderation` package.** `SessionRecord`, `Sanction`, `SanctionHit`
+  and `ModerationFlag` in [`server/models.py`](evennia/server/models.py), with
+  capture, matching, enforcement, portal blocking and a staff-review flag queue on
+  top. Sanctions expire, carry evidence, and match on indexed columns. The
+  `server_bans` tuple did none of that and did not handle IPv6.
+  `import_server_bans` migrates an existing banlist. No code path in the package
+  issues a sanction: detectors write flags for staff review only.
+- **Address intelligence** (`enrich.py`): local GeoLite2 ASN and country lookups,
+  plus hosting-ASN, Tor exit and disposable-domain lists stored in `ServerConfig`
+  and refreshed by a game-side job. No network call on the connection path. A
+  missing database or reader leaves the enrichment columns null.
+- **Device token** (`device.py`): a signed first-party value read off the
+  websocket handshake cookies. Not a credential and never read for authorization.
+- **Registration signals** (`registration.py`): email alias normalization,
+  disposable-domain and MX checks. Flags only; registration is never blocked.
+- **Connection rate limit** (`ratelimit.py`): per-network sliding window in the
+  Portal process. No cache or database call on the connection path. Bounded
+  memory: capped timestamps per network, LRU-capped network map. Loopback and
+  private addresses exempt.
+- **Retention** (`retention.py`): nightly address clearing and batched row
+  deletion, both plain ORM for a worker thread.
+- [`accounts.py`](evennia/accounts/accounts.py): `is_banned` consults sanctions
+  first, then falls through to the legacy `server_bans` list so that a deployment
+  which has not yet imported its banlist is not silently unbanned by the upgrade.
+- Portal connection guard in [`telnet.py`](evennia/server/portal/telnet.py) and
+  [`webclient.py`](evennia/server/portal/webclient.py): a blocking sanction on the
+  address is refused in `connectionMade` / `onOpen`, before the Server learns of
+  the connection. Reads an in-memory snapshot, so a connection flood costs no
+  queries. `MODERATION_FAIL_CLOSED` decides what a lookup failure means.
+- **Negotiation fingerprint.** `TelnetProtocol.note_negotiation` records which
+  telnet options a client answered, in order, with milliseconds from
+  `connectionMade` to each — published as `NEG_ORDER` and `NEG_TIMING_MS`. The
+  option handlers ([`ttype.py`](evennia/server/portal/ttype.py),
+  [`naws.py`](evennia/server/portal/naws.py),
+  [`mccp.py`](evennia/server/portal/mccp.py),
+  [`mxp.py`](evennia/server/portal/mxp.py),
+  [`telnet_oob.py`](evennia/server/portal/telnet_oob.py),
+  [`suppress_ga.py`](evennia/server/portal/suppress_ga.py)) call it if the
+  protocol defines it, so a protocol without the hook is unaffected. Two clients
+  reporting an identical capability set still differ here, and a scripted
+  connection differs from a human one by orders of magnitude in the timings.
+- [`webclient.py`](evennia/server/portal/webclient.py): the browser's handshake
+  headers (`User-Agent`, `Accept-Language`, `Accept-Encoding`, `Sec-CH-UA*`, the
+  websocket extension list) are copied into a `HTTP_FP` protocol flag. They were
+  parsed and discarded before. Cookies and every other header are left alone.
+- New settings: `MODERATION_HASH_SALT`, `MODERATION_SESSION_CAPTURE_ENABLED`,
+  `MODERATION_PORTAL_BLOCK_ENABLED`, `MODERATION_FAIL_CLOSED`,
+  `MODERATION_DETECTION_ENABLED`, `MODERATION_DETECTION_LOOKBACK_DAYS`.
+
+### Event bus rename
+
+- `evennia.events` is now [`evennia.eventbus`](evennia/eventbus/). The old
+  top-level name shadowed [`evennia.actions.events`](evennia/actions/events.py),
+  the unrelated in-process `EventRegistry` that backs `@subscribe` on action
+  handlers — and shadowed it in the worst direction: every `subscribe` call site
+  in the tree resolves to `actions.events`, while the bus's own `subscribe` had
+  no consumers at all. A reader greping for the live system landed in the wrong
+  package every time.
+- [`sanctions.py`](evennia/moderation/sanctions.py): `_audit` imports from the
+  new path.
+- No schema change. The bus is not a Django app; `GameEvent` lives in the
+  `server` app and is untouched. `EVENT_BUS_REDIS_STREAM` keeps its
+  `"evennia:events"` default — it is a stream name, and changing it would orphan
+  the live stream.
+
+**Migration:** replace `from evennia.events import emit` with
+`from evennia.eventbus import emit`. There is one such line in a typical game.
+[`evennia/events/__init__.py`](evennia/events/__init__.py) remains for one
+release as a shim that re-exports `emit`/`subscribe` and raises
+`DeprecationWarning`; it is removed in the next release. **Do not rely on the
+shim silently working**: the idiomatic game-side call site wraps this import in
+`try/except` so an audit trail keeps working when the bus is unavailable, which
+means an unmigrated import stops recording economy, moderation, and permission
+events without raising anything. Migrate the import rather than trusting the
+warning to be noticed.
+
+### Discord
+
+- [`discord.py`](evennia/server/portal/discord.py): `_post_json` now takes the API
+  path unprefixed and builds the full url locally. It previously reassigned `url`
+  to the prefixed form and then passed *that* to its own retry, so every retried
+  request targeted `https://discord.com/api/v10/https://discord.com/api/v10/...`.
+  No 5xx retry has ever reached Discord.
+- Rate limiting. New `RateLimiter` and `bucket_key`: outbound REST calls are
+  keyed by method plus route template (channel/guild/webhook ids kept distinct,
+  every other snowflake folded), and a call whose bucket is still cooling down is
+  deferred rather than sent. 429 is now retryable, honouring `Retry-After` and the
+  `X-RateLimit-*` headers, and a global limit holds every bucket. `should_retry`
+  previously covered 500-504 only, so a rate-limited post was dropped silently.
+  Retries are capped by `MAX_REQUEST_ATTEMPTS`.
+- `post_response` tolerates an empty or non-JSON body. A 204 answers every role
+  write and thread PATCH, and `json.loads(b"")` raised inside the deferred
+  callback on each one. Success is now any 2xx rather than 200/204, so a 201 from
+  a create is no longer mistaken for a failure. Non-retryable failures log the
+  method, path, status and Discord's error body instead of vanishing.
+- `NO_MENTIONS` is applied to every outbound message body (channel posts, thread
+  posts, thread openers, interaction replies, DMs). Relayed player text
+  containing `@everyone` previously pinged the whole guild.
+- `MESSAGE_UPDATE` is dispatched alongside `MESSAGE_CREATE` with an `edited` flag;
+  partial updates carrying no `content` are skipped. `MESSAGE_DELETE` is
+  dispatched with the message id instead of being swallowed by the catch-all
+  `"DELETE" in action_type` branch.
+- Replies carry context: `_reply_context` summarizes `referenced_message` into
+  `reply_to` (author, id, excerpt), which was parsed and discarded before.
+- New `send_presence` outputfunc (gateway OP 3) for publishing bot status.
+- `send_create_thread` and `send_dm` route through the rate limiter, cap their
+  retries, and no longer use a flat 300s backoff. Removed a dead
+  `d.addCallback(cbResponse)` after `send_dm`'s request, referencing an undefined
+  name.
+
 ## 6.0.0+underspire.208 — Prioritize exact key matches in MenuPrompt choice parsing
 
 ### Engine

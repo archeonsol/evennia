@@ -114,6 +114,9 @@ class TelnetOOB:
         # table/array encoding cannot carry a deeply nested payload (an R1
         # render node), GMCP's JSON can. See narrative.rendernode.
         self.protocol().protocol_flags["OOB_MSDP"] = True
+        note = getattr(self.protocol(), "note_negotiation", None)
+        if note:
+            note("MSDP")
         self.protocol().handshake_done()
 
     def no_gmcp(self, option):
@@ -138,6 +141,9 @@ class TelnetOOB:
         self.GMCP = True
         self.protocol().protocol_flags["OOB"] = True
         self.protocol().protocol_flags["OOB_GMCP"] = True
+        note = getattr(self.protocol(), "note_negotiation", None)
+        if note:
+            note("GMCP")
         self.protocol().handshake_done()
 
     # encoders

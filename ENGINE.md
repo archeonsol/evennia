@@ -81,6 +81,30 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 - **Batched `at_init`**: `evennia.server.at_init_scheduler` — `AT_INIT_BATCH_SIZE`, `AT_INIT_DEFER_ON_RELOAD`
 - **GLOBAL_SCRIPTS tiers**: `start_priority: "lazy"` defers non-critical script starts across reactor ticks
 
+### Moderation substrate
+
+- `evennia.moderation` — `SessionRecord` per connection, `Sanction` with expiry and
+  evidence, `SanctionHit` per enforcement, `ModerationFlag` for staff review.
+  Detectors write flags only; sanctioning is always a staff action.
+- Address intelligence: local GeoLite2 ASN/country lookup, hosting-ASN, Tor exit
+  and disposable-domain lists in `ServerConfig`, refreshed by a scheduled job.
+- Device token: signed first-party cookie value, read from the websocket
+  handshake. Identity signal only, never an authorization input.
+- Portal-level refusal for blocking sanctions, from an in-memory snapshot rebuilt
+  on sanction change — `MODERATION_PORTAL_BLOCK_ENABLED`, `MODERATION_FAIL_CLOSED`.
+- `DefaultAccount.is_banned` reads sanctions first, `server_bans` second.
+
+### Session fingerprint
+
+- Websocket and telnet sessions publish `PEER_IP`, `XFF_APPLIED`, `XFF_PRESENT` in
+  `protocol_flags`, so the Server can distinguish a real client address from a
+  reverse-proxy address that `UPSTREAM_IPS` never rewrote. Address *selection* is
+  unchanged — only its provenance is now visible downstream.
+- `NEG_ORDER` / `NEG_TIMING_MS`: which telnet options the client answered, in order,
+  with milliseconds to each. Option handlers call `protocol.note_negotiation` when
+  the protocol defines it.
+- `HTTP_FP`: the browser's identifying handshake headers, previously discarded.
+
 ### Storage / tick
 
 - Write-behind attributes with `flush_all_dirty()` on the global tick

@@ -67,4 +67,7 @@ class SuppressGA:
 
         """
         self.protocol().protocol_flags["NOGOAHEAD"] = True
+        note = getattr(self.protocol(), "note_negotiation", None)
+        if note:
+            note("SUPPRESS_GA")
         self.protocol().handshake_done()

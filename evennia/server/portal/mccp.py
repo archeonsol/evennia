@@ -86,6 +86,9 @@ class Mccp:
 
         """
         self.protocol().protocol_flags["MCCP"] = True
+        note = getattr(self.protocol(), "note_negotiation", None)
+        if note:
+            note("MCCP")
         self.protocol().requestNegotiation(MCCP, b"")
         self.protocol().zlib = zlib.compressobj(9)
         self.protocol().handshake_done()

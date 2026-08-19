@@ -97,6 +97,69 @@ WEBSERVER_INTERFACES = ["0.0.0.0"]
 # like NginX or Varnish. These can be either specific IPv4 or IPv6 addresses,
 # or subnets in CIDR format - like 192.168.0.0/24 or 2001:db8::/32.
 UPSTREAM_IPS = ["127.0.0.1"]
+# Salt for SessionRecord.ip_hash in the moderation substrate. Set this explicitly
+# and never rotate it: the hash is what lets address history survive the
+# retention purge of the raw address, so changing the salt makes every stored
+# hash uncomparable with every new one. Empty falls back to SECRET_KEY, which
+# ties the same problem to SECRET_KEY rotation instead.
+MODERATION_HASH_SALT = ""
+# Record a SessionRecord row per connection. Every other moderation feature
+# reads that history, so disabling this disables the substrate.
+MODERATION_SESSION_CAPTURE_ENABLED = True
+# Refuse connections at the portal for active blocking sanctions, before the
+# session reaches the Server process.
+MODERATION_PORTAL_BLOCK_ENABLED = True
+# What to do when the sanction lookup itself fails (database unreachable, and
+# so on). False lets the connection through: a fault locking out the entire
+# playerbase is a worse outcome than a sanctioned player getting one more
+# session. True is the fail-closed reading and refuses everyone instead.
+MODERATION_FAIL_CLOSED = False
+# Run the session detectors after each session record is written. They only
+# ever write ModerationFlag rows for staff review; nothing here sanctions.
+MODERATION_DETECTION_ENABLED = True
+# How far back detectors look when asking who else used a key. 0 means forever.
+MODERATION_DETECTION_LOOKBACK_DAYS = 90
+# Local MaxMind GeoLite2 databases, read once per process and never over the
+# network: a connect-time lookup against a third-party service would put every
+# player's address in somebody else's log and a login behind somebody else's
+# uptime. Empty disables address enrichment entirely. Requires `maxminddb`.
+MODERATION_GEOIP_ASN_DB = ""
+MODERATION_GEOIP_COUNTRY_DB = ""
+# Where the refresh job fetches the hosting-ASN denylist and the Tor exit list.
+# Both are optional; an empty URL leaves that list alone.
+MODERATION_DATACENTER_ASN_URL = ""
+MODERATION_TOR_EXIT_URL = "https://check.torproject.org/torbulkexitlist"
+MODERATION_DISPOSABLE_DOMAIN_URL = ""
+# Age at which the stored lists are reported stale by the boot advisory.
+MODERATION_NETWORK_LIST_MAX_AGE_DAYS = 45
+# Cookie holding the signed device token. Deliberately readable by scripts: the
+# page mirrors it into localStorage and IndexedDB and restores it from whichever
+# copy survives, which an HttpOnly cookie cannot participate in. The token is
+# not a credential and authorizes nothing.
+MODERATION_DEVICE_COOKIE = "device_id"
+# A signup burst is several accounts created inside one window that all connect
+# from one network. One is ordinary and a household is two or three, so the
+# default names the case worth a person's attention rather than every family.
+# Portal connection rate limit, counted per /24 or /64 in the Portal process.
+# No cache and no database: a round trip per connection would add reactor I/O
+# during exactly the floods this exists to survive. Private and loopback
+# addresses are never limited, so a misconfigured proxy cannot refuse every web
+# session. Set the limit to 0 to disable.
+MODERATION_CONNECT_RATE_ENABLED = True
+MODERATION_CONNECT_RATE_LIMIT = 20
+MODERATION_CONNECT_RATE_WINDOW = 60
+# Networks tracked at once. The least recently seen is dropped past this, which
+# is what keeps the counter map from growing with uptime.
+MODERATION_CONNECT_RATE_MAX_KEYS = 4096
+
+# Retention. Raw addresses are cleared after the first window; ip_hash, cidr and
+# asn survive it, so history stays usable for moderation without the addresses
+# themselves still being held. Whole rows go after the second. 0 disables either.
+MODERATION_IP_RETENTION_DAYS = 90
+MODERATION_SESSION_RETENTION_DAYS = 365
+
+MODERATION_SIGNUP_BURST_HOURS = 24
+MODERATION_SIGNUP_BURST_ACCOUNTS = 3
 # The webserver uses threadpool for handling requests. This will scale
 # with server load. Set the minimum and maximum number of threads it
 # may use as (min, max) (must be > 0)

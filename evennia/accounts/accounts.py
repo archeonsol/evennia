@@ -1040,10 +1040,19 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         ip = kwargs.get("ip", "")
         if isinstance(ip, (tuple, list)):
             ip = ip[0]
-        ip = ip.strip()
+        ip = (ip or "").strip()
         username = kwargs.get("username", "").lower().strip()
 
-        # Check IP and/or name bans
+        # Sanctions are the source of truth: expiring, evidenced, and matched on
+        # an indexed column rather than a regex sweep, which is also what lets
+        # them see IPv6 at all.
+        from evennia.moderation.enforcement import check_login
+
+        if check_login(username=username, ip=ip).blocks:
+            return True
+
+        # Legacy banlist. Retained so a deployment that has not yet run
+        # ``import_server_bans`` is not silently unbanned by the upgrade.
         bans = ServerConfig.objects.conf("server_bans")
         if bans and (
             any(tup[0] == username for tup in bans if username)

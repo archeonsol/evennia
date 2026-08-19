@@ -71,6 +71,9 @@ class Naws:
 
         """
         self.protocol().protocol_flags["AUTORESIZE"] = True
+        note = getattr(self.protocol(), "note_negotiation", None)
+        if note:
+            note("NAWS")
         self.protocol().handshake_done()
 
     def negotiate_sizes(self, options):

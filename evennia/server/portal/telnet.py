@@ -9,6 +9,7 @@ sessions etc.
 
 import asyncio
 import re
+import time
 
 from django.conf import settings
 from twisted.internet import protocol
@@ -126,8 +127,37 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         # when it reaches 0 the portal/server syncs their data
         self.handshakes = 8  # suppress-go-ahead, naws, ttype, mccp, mssp, msdp, gmcp, mxp
 
+        # Sanctioned addresses are dropped here, before the Server ever learns
+        # of the connection.
+        from evennia.moderation.portal_guard import REFUSAL_BYTES, refuses
+        from evennia.moderation.ratelimit import REFUSAL_BYTES as RATE_BYTES, rate_limited
+
+        if refuses(client_address):
+            self.transport.write(REFUSAL_BYTES)
+            self.transport.loseConnection()
+            return
+
+        # Checked after the blocklist so a sanctioned address is never told it
+        # is merely too fast. Counting happens in this process only.
+        if rate_limited(client_address):
+            self.transport.write(RATE_BYTES)
+            self.transport.loseConnection()
+            return
+
         self.init_session(self.protocol_key, client_address, self.factory.sessionhandler)
         self.protocol_flags["ENCODING"] = settings.ENCODINGS[0] if settings.ENCODINGS else "utf-8"
+        # Telnet is never proxied here, so peer and client address are the same. Set
+        # the flag anyway so downstream consumers can treat all protocols alike.
+        self.protocol_flags["PEER_IP"] = client_address
+        self.protocol_flags["XFF_APPLIED"] = False
+        self.protocol_flags["XFF_PRESENT"] = False
+        # Which options this client answered, in the order it answered them, and
+        # how long each took. Clients differ from each other here even when they
+        # report the same capability set, and a scripted connection differs from
+        # a real one by orders of magnitude in the timings.
+        self._negotiation_started = time.time()
+        self.protocol_flags["NEG_ORDER"] = []
+        self.protocol_flags["NEG_TIMING_MS"] = {}
         # add this new connection to sessionhandler so
         # the Server becomes aware of it.
         self.sessionhandler.connect(self)
@@ -191,6 +221,24 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
             self.nop_keep_alive.stop()
         else:
             self.nop_keep_alive = clock.looping(30, self._send_nop_keepalive, now=False)
+
+    def note_negotiation(self, option_name):
+        """Record that a telnet option finished negotiating.
+
+        Args:
+            option_name (str): Short name of the option, e.g. "TTYPE".
+
+        """
+        try:
+            order = self.protocol_flags.setdefault("NEG_ORDER", [])
+            if option_name in order:
+                return
+            order.append(option_name)
+            elapsed = (time.time() - getattr(self, "_negotiation_started", time.time())) * 1000
+            self.protocol_flags.setdefault("NEG_TIMING_MS", {})[option_name] = round(elapsed, 1)
+        except Exception:
+            # Fingerprint detail is never worth breaking a connection over.
+            pass
 
     def handshake_done(self, timeout=False):
         """

@@ -40,8 +40,7 @@ from collections import deque
 
 from django.conf import settings
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
-from evennia.server.portal.ws_protocol import (CLOSE_NORMAL, GOING_AWAY,
-                                               Disconnected, WSProtocolBase)
+from evennia.server.portal.ws_protocol import CLOSE_NORMAL, GOING_AWAY, Disconnected, WSProtocolBase
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -83,9 +82,9 @@ def _prune_resume_stash():
         _RESUME_STASH.pop(tok, None)
     overflow = len(_RESUME_STASH) - RESUME_STASH_MAX
     if overflow > 0:
-        for tok, _stash in sorted(
-            _RESUME_STASH.items(), key=lambda kv: kv[1]["deadline"]
-        )[:overflow]:
+        for tok, _stash in sorted(_RESUME_STASH.items(), key=lambda kv: kv[1]["deadline"])[
+            :overflow
+        ]:
             _RESUME_STASH.pop(tok, None)
 
 
@@ -167,6 +166,19 @@ def _get_supported_subprotocols():
         )
 
     return protos
+
+
+# Handshake headers kept for the browser fingerprint. Anything outside this list
+# is either constant across all browsers or changes on every request.
+_FINGERPRINT_HEADERS = (
+    "user-agent",
+    "accept-language",
+    "accept-encoding",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "sec-websocket-extensions",
+)
 
 
 class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
@@ -283,6 +295,44 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if self.csessid:
             return _CLIENT_SESSIONS(session_key=self.csessid)
 
+    def _device_token(self):
+        """The signed device token this browser presented, or empty.
+
+        Read from the handshake cookies rather than from the websocket URL: a
+        cookie is sent by the browser without the page having to remember to
+        put it there, and it is the copy that survives a page the shell did not
+        render.
+        """
+        try:
+            from evennia.moderation.device import token_from_headers
+
+            return token_from_headers(getattr(self, "http_headers", None))
+        except Exception:
+            return ""
+
+    def _collect_http_fingerprint(self):
+        """
+        Copy the identifying handshake headers into a plain dict.
+
+        Values are truncated -- a header is a client-controlled string and this
+        one ends up in the database.
+
+        Returns:
+            dict: header name to value, missing headers omitted.
+
+        """
+        collected = {}
+        try:
+            headers = getattr(self, "http_headers", None) or {}
+            for name in _FINGERPRINT_HEADERS:
+                value = headers.get(name)
+                if value:
+                    collected[name] = str(value)[:255]
+        except Exception:
+            # Fingerprint detail is never worth breaking a connection over.
+            return {}
+        return collected
+
     def onOpen(self):
         """
         This is called when the WebSocket connection is fully established.
@@ -290,20 +340,41 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         """
         peer = self.transport.getPeer()
         client_address = getattr(peer, "host", None)
+        # Raw TCP peer, kept separate from the forwarded address so that a
+        # misconfigured UPSTREAM_IPS is visible downstream instead of silently
+        # recording the reverse proxy as every web player's address.
+        peer_host = client_address
+        xff_applied = False
 
-        if (
-            client_address in settings.UPSTREAM_IPS
-            and "x-forwarded-for" in self.http_headers
-        ):
-            addresses = [
-                x.strip() for x in self.http_headers["x-forwarded-for"].split(",")
-            ]
+        if client_address in settings.UPSTREAM_IPS and "x-forwarded-for" in self.http_headers:
+            addresses = [x.strip() for x in self.http_headers["x-forwarded-for"].split(",")]
             addresses.reverse()
 
             for addr in addresses:
                 if addr not in settings.UPSTREAM_IPS:
                     client_address = addr
+                    xff_applied = True
                     break
+
+        self._peer_host = peer_host
+        self._xff_applied = xff_applied
+        self._xff_present = "x-forwarded-for" in self.http_headers
+
+        # Sanctioned addresses are dropped here, before the Server ever learns
+        # of the connection.
+        from evennia.moderation.portal_guard import REFUSAL_TEXT, refuses
+        from evennia.moderation.ratelimit import REFUSAL_TEXT as RATE_TEXT, rate_limited
+
+        if refuses(client_address):
+            self.sendClose(CLOSE_NORMAL, REFUSAL_TEXT.strip())
+            return
+
+        # The address here is already forwarded-corrected, so a trusted proxy
+        # does not collapse every browser onto one counter. An untrusted one
+        # leaves the proxy's own address, which the limiter exempts.
+        if rate_limited(client_address):
+            self.sendClose(CLOSE_NORMAL, RATE_TEXT.strip())
+            return
 
         self.init_session("websocket", client_address, self.factory.sessionhandler)
 
@@ -337,9 +408,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if self.wire_format is None:
             from evennia.utils import logger
 
-            logger.log_err(
-                "WebSocketClient: No wire formats available. Closing connection."
-            )
+            logger.log_err("WebSocketClient: No wire formats available. Closing connection.")
             self.sendClose(CLOSE_NORMAL, "No wire formats available")
             return
 
@@ -349,6 +418,19 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             f"Evennia Webclient (websocket{browserstr} [{proto_name}])"
         )
         self.protocol_flags["UTF-8"] = True
+        # Address provenance, synced to the Server so moderation tooling can tell a
+        # real client address from an un-rewritten proxy address.
+        self.protocol_flags["PEER_IP"] = getattr(self, "_peer_host", None)
+        self.protocol_flags["XFF_APPLIED"] = bool(getattr(self, "_xff_applied", False))
+        self.protocol_flags["XFF_PRESENT"] = bool(getattr(self, "_xff_present", False))
+        # Handshake headers the browser sent us. Read once here -- http_headers is
+        # only populated for the lifetime of the connection and nothing else in the
+        # codebase looks at it. Raw values only; hashing happens server-side.
+        self.protocol_flags["HTTP_FP"] = self._collect_http_fingerprint()
+        # page_id is only set when the client sends the three-argument form.
+        self.protocol_flags["BROWSERSTR"] = str(getattr(self, "browserstr", "") or "")
+        self.protocol_flags["PAGE_ID"] = str(getattr(self, "page_id", "") or "")
+        self.protocol_flags["DEVICE_TOKEN"] = self._device_token()
         self.protocol_flags["OOB"] = self.wire_format.supports_oob
         self.protocol_flags["TRUECOLOR"] = True
         self.protocol_flags["XTERM256"] = True
@@ -441,9 +523,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             # session that produced it.
             from evennia.utils import logger
 
-            logger.log_warn(
-                "webclient: resume token presented by a different uid; not replaying"
-            )
+            logger.log_warn("webclient: resume token presented by a different uid; not replaying")
             return False
         # Continue the seq counter across the gap and replay what the client
         # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
@@ -515,9 +595,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # we can replay missed frames at the portal without involving the server.
         if not isBinary:
             try:
-                raw = json.loads(
-                    payload.decode("utf-8") if isinstance(payload, bytes) else payload
-                )
+                raw = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 raw = None
             if isinstance(raw, dict) and raw.get("t") == "hello":
@@ -671,9 +749,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             try:
                 payload = {
                     "t": "batch",
-                    "frames": [
-                        f if isinstance(f, dict) else json.loads(f) for f in buf
-                    ],
+                    "frames": [f if isinstance(f, dict) else json.loads(f) for f in buf],
                 }
             except (json.JSONDecodeError, TypeError, ValueError):
                 # Malformed member: fall back to sending them individually so a
@@ -780,9 +856,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         nocolor = options.get("nocolor", flags.get("NOCOLOR", False))
         screenreader = options.get("screenreader", flags.get("SCREENREADER", False))
         prompt = options.get("send_prompt", False)
-        _RE = re.compile(
-            r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE
-        )
+        _RE = re.compile(r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE)
         if screenreader:
             text = parse_ansi(text, strip_ansi=True, xterm256=False, mxp=False)
             text = _RE.sub("", text)

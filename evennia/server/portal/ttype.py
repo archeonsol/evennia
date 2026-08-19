@@ -194,6 +194,9 @@ class Ttype:
                     self.protocol().protocol_flags[option.upper()] = True
 
             self.protocol().protocol_flags["TTYPE"] = True
+            note = getattr(self.protocol(), "note_negotiation", None)
+            if note:
+                note("TTYPE")
             # we must sync ttype once it'd done
             self.protocol().handshake_done()
         self.ttype_step += 1

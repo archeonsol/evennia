@@ -10,6 +10,7 @@ manager's conf() method.
 """
 
 from django.db import models
+from django.utils import timezone
 
 from evennia.server.manager import ServerConfigManager
 from evennia.utils import logger, picklefield, utils
@@ -313,3 +314,329 @@ class EngineJob(models.Model):
             # the dequeue predicate: eligible rows ordered for claiming
             models.Index(fields=["status", "priority", "created_at"]),
         ]
+
+
+# ------------------------------------------------------------
+#
+# Moderation substrate
+#
+# Connection history, staff-issued sanctions, and the flag queue that
+# automated detection writes into. Like AuthorizationGrant above, these
+# reference accounts by id and name rather than by foreign key: the engine
+# substrate does not depend on the account model, and moderation history has
+# to outlive the account it describes.
+#
+# ------------------------------------------------------------
+
+
+class SessionRecord(models.Model):
+    """One connection, from login to disconnect.
+
+    Written by ``evennia.moderation.capture``. Only hard, directly-observed
+    signals are stored: what the connection reported about itself. Nothing here
+    is inferred or scored, so any conclusion drawn from these rows can be shown
+    to the player it is used against.
+    """
+
+    # --- identity of the row itself -------------------------------------
+    session_uid = models.CharField(max_length=32, unique=True)
+    sessid = models.IntegerField(null=True, blank=True)
+    protocol = models.CharField(max_length=32, default="", db_index=True)
+
+    # --- lifecycle ------------------------------------------------------
+    connected_at = models.DateTimeField(default=timezone.now, db_index=True)
+    login_at = models.DateTimeField(null=True, blank=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+    disconnect_reason = models.CharField(max_length=255, default="", blank=True)
+
+    # --- who ------------------------------------------------------------
+    account_id = models.IntegerField(null=True, blank=True, db_index=True)
+    account_name = models.CharField(max_length=255, default="", blank=True, db_index=True)
+    puppet_name = models.CharField(max_length=255, default="", blank=True)
+
+    # --- network --------------------------------------------------------
+    # ``ip`` is purged on the retention schedule; ``ip_hash`` and ``cidr`` outlive it.
+    ip = models.GenericIPAddressField(null=True, blank=True, db_index=True)
+    ip_hash = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    # /24 for IPv4, /64 for IPv6 -- the unit sanctions are issued against.
+    cidr = models.CharField(max_length=64, default="", blank=True, db_index=True)
+
+    # Address provenance. peer_ip is the raw TCP peer; when it differs from ip an
+    # upstream proxy was correctly unwound. xff_present without xff_applied means
+    # a proxy sent X-Forwarded-For that UPSTREAM_IPS did not trust -- ``ip`` is the
+    # proxy, not the player, and every address-based signal on this row is void.
+    peer_ip = models.GenericIPAddressField(null=True, blank=True)
+    xff_applied = models.BooleanField(default=False)
+    xff_present = models.BooleanField(default=False)
+
+    # Filled by enrichment; null means "not looked up yet", not "clean".
+    asn = models.IntegerField(null=True, blank=True, db_index=True)
+    asn_org = models.CharField(max_length=255, default="", blank=True)
+    country = models.CharField(max_length=8, default="", blank=True)
+    is_datacenter = models.BooleanField(null=True, blank=True)
+    is_tor = models.BooleanField(null=True, blank=True)
+
+    # --- client ---------------------------------------------------------
+    # Hash over the negotiated capability set. Deliberately excludes screen size,
+    # which changes whenever the player resizes their window.
+    client_fp = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    client_name = models.CharField(max_length=255, default="", blank=True)
+    term = models.CharField(max_length=64, default="", blank=True)
+    encoding = models.CharField(max_length=32, default="", blank=True)
+    screen_w = models.IntegerField(null=True, blank=True)
+    screen_h = models.IntegerField(null=True, blank=True)
+    # Negotiation order and per-option timing, for signals not yet promoted to columns.
+    neg_order = models.JSONField(default=list, blank=True)
+    neg_timing_ms = models.JSONField(default=dict, blank=True)
+    # Full sanitized protocol_flags snapshot.
+    flags = models.JSONField(default=dict, blank=True)
+
+    # --- web client -----------------------------------------------------
+    csessid = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    device_token = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    http_fp = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    user_agent = models.CharField(max_length=512, default="", blank=True)
+
+    # --- activity -------------------------------------------------------
+    command_count = models.IntegerField(default=0)
+    last_command_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Session record"
+        ordering = ["-connected_at"]
+        indexes = [
+            models.Index(fields=["account_id", "-connected_at"]),
+            models.Index(fields=["cidr", "-connected_at"]),
+            models.Index(fields=["device_token", "-connected_at"]),
+            models.Index(fields=["client_fp", "cidr"]),
+            models.Index(fields=["ip_hash", "-connected_at"]),
+        ]
+
+    def __str__(self):
+        who = self.account_name or "(anonymous)"
+        return f"SessionRecord(#{self.pk}, {who}, {self.protocol}, {self.ip or '-'})"
+
+    @property
+    def address_is_trustworthy(self) -> bool:
+        """False when a proxy header was sent but not trusted -- see ``xff_present``."""
+        return not (self.xff_present and not self.xff_applied)
+
+
+class SanctionQuerySet(models.QuerySet):
+    def active(self, now=None):
+        """Not revoked and not expired."""
+        now = now or timezone.now()
+        return self.filter(revoked_at__isnull=True).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+        )
+
+
+class Sanction(models.Model):
+    """One moderation decision, always made by a person.
+
+    Nothing in the engine creates a Sanction automatically. Detection writes
+    :class:`ModerationFlag` rows for staff to read; only a staff action turns a
+    flag into a sanction. That separation is the point: a system that can ban on
+    its own is a system that bans the wrong player unattended.
+    """
+
+    SUBJECT_ACCOUNT = "account"
+    SUBJECT_IP = "ip"
+    SUBJECT_CIDR = "cidr"
+    SUBJECT_ASN = "asn"
+    SUBJECT_DEVICE = "device_token"
+    SUBJECT_CLIENT_FP = "client_fp"
+    SUBJECT_CSESSID = "csessid"
+    SUBJECT_EMAIL_DOMAIN = "email_domain"
+    SUBJECT_CHOICES = [
+        (SUBJECT_ACCOUNT, "account name"),
+        (SUBJECT_IP, "single address"),
+        (SUBJECT_CIDR, "network"),
+        (SUBJECT_ASN, "autonomous system"),
+        (SUBJECT_DEVICE, "device token"),
+        (SUBJECT_CLIENT_FP, "client fingerprint"),
+        (SUBJECT_CSESSID, "browser session"),
+        (SUBJECT_EMAIL_DOMAIN, "email domain"),
+    ]
+
+    # Ordered least to most severe; LEVEL_ORDER below depends on this order.
+    LEVEL_WATCH = "watch"
+    LEVEL_FRICTION = "friction"
+    LEVEL_MUTE = "mute"
+    LEVEL_SUSPEND = "suspend"
+    LEVEL_BAN = "ban"
+    LEVEL_CHOICES = [
+        (LEVEL_WATCH, "watch only, no effect"),
+        (LEVEL_FRICTION, "extra verification required"),
+        (LEVEL_MUTE, "cannot speak"),
+        (LEVEL_SUSPEND, "cannot connect, time-limited"),
+        (LEVEL_BAN, "cannot connect"),
+    ]
+    LEVEL_ORDER = [LEVEL_WATCH, LEVEL_FRICTION, LEVEL_MUTE, LEVEL_SUSPEND, LEVEL_BAN]
+    # Levels that refuse a connection outright.
+    BLOCKING_LEVELS = frozenset({LEVEL_SUSPEND, LEVEL_BAN})
+
+    subject_type = models.CharField(max_length=32, choices=SUBJECT_CHOICES, db_index=True)
+    # Normalized at write time: lowercased account names, canonical network text.
+    subject_value = models.CharField(max_length=255, db_index=True)
+
+    level = models.CharField(max_length=16, choices=LEVEL_CHOICES, default=LEVEL_BAN)
+
+    # Shown to the sanctioned player. Must never name the signal that matched.
+    reason = models.TextField(blank=True, default="")
+    # Internal only.
+    staff_note = models.TextField(blank=True, default="")
+
+    actor_id = models.IntegerField(null=True, blank=True, db_index=True)
+    actor_name = models.CharField(max_length=255, default="", blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    # Null means indefinite, which staff tooling requires be chosen deliberately.
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by_id = models.IntegerField(null=True, blank=True)
+    revoked_by_name = models.CharField(max_length=255, default="", blank=True)
+    revoked_reason = models.CharField(max_length=255, default="", blank=True)
+
+    # Flags, sessions, and prior sanctions this decision was based on.
+    evidence = models.JSONField(default=dict, blank=True)
+    # Enforce without telling the target it is a sanction.
+    silent = models.BooleanField(default=False)
+
+    # Append-only hash chain. Tamper-evidence protects staff from accusations as
+    # much as it protects players.
+    prev_hash = models.CharField(max_length=64, default="", blank=True)
+    row_hash = models.CharField(max_length=64, default="", blank=True, db_index=True)
+
+    objects = SanctionQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "Sanction"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["subject_type", "subject_value"]),
+            models.Index(fields=["level", "-created_at"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"Sanction({self.level}, {self.subject_type}={self.subject_value})"
+
+    @property
+    def is_active(self) -> bool:
+        if self.revoked_at is not None:
+            return False
+        return self.expires_at is None or self.expires_at > timezone.now()
+
+    @property
+    def blocks_connection(self) -> bool:
+        return self.is_active and self.level in self.BLOCKING_LEVELS
+
+    def severity(self) -> int:
+        try:
+            return self.LEVEL_ORDER.index(self.level)
+        except ValueError:
+            return 0
+
+
+class SanctionHit(models.Model):
+    """One firing of a sanction, kept so enforcement can be audited afterwards."""
+
+    ACTION_BLOCKED = "blocked"
+    ACTION_FLAGGED = "flagged"
+    ACTION_ALLOWED = "allowed"
+
+    sanction = models.ForeignKey(Sanction, on_delete=models.CASCADE, related_name="hits")
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    action_taken = models.CharField(max_length=16, default=ACTION_BLOCKED)
+    matched_on = models.CharField(max_length=32, default="", blank=True)
+
+    session_uid = models.CharField(max_length=32, default="", blank=True, db_index=True)
+    account_name = models.CharField(max_length=255, default="", blank=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    cidr = models.CharField(max_length=64, default="", blank=True)
+    device_token = models.CharField(max_length=64, default="", blank=True)
+    client_fp = models.CharField(max_length=64, default="", blank=True)
+
+    class Meta:
+        verbose_name = "Sanction hit"
+        ordering = ["-occurred_at"]
+        indexes = [models.Index(fields=["sanction", "-occurred_at"])]
+
+    def __str__(self):
+        return f"SanctionHit(sanction={self.sanction_id}, {self.action_taken})"
+
+
+class ModerationFlag(models.Model):
+    """Something worth a person's attention. Never an enforcement decision.
+
+    Every automated signal in the moderation substrate terminates here. A flag
+    has no effect on the player it names until staff read it and act on it.
+    """
+
+    STATE_OPEN = "open"
+    STATE_ACKNOWLEDGED = "acknowledged"
+    STATE_DISMISSED = "dismissed"
+    STATE_ACTIONED = "actioned"
+    STATE_CHOICES = [
+        (STATE_OPEN, "awaiting review"),
+        (STATE_ACKNOWLEDGED, "seen, still open"),
+        (STATE_DISMISSED, "reviewed, no action"),
+        (STATE_ACTIONED, "sanction issued"),
+    ]
+    OPEN_STATES = frozenset({STATE_OPEN, STATE_ACKNOWLEDGED})
+
+    KIND_SHARED_DEVICE = "shared_device"
+    KIND_SHARED_CSESSID = "shared_csessid"
+    KIND_SHARED_CLIENT_CIDR = "shared_client_cidr"
+    KIND_SANCTIONED_KEY = "sanctioned_key_match"
+    KIND_DATACENTER = "datacenter_address"
+    KIND_TOR = "tor_exit"
+    KIND_SIGNUP_BURST = "signup_burst"
+    KIND_DISPOSABLE_EMAIL = "disposable_email"
+    KIND_EMAIL_ALIAS = "email_alias_reuse"
+    KIND_UNDELIVERABLE_EMAIL = "undeliverable_email"
+
+    kind = models.CharField(max_length=48, db_index=True)
+    severity = models.IntegerField(default=0, db_index=True)
+
+    account_id = models.IntegerField(null=True, blank=True, db_index=True)
+    account_name = models.CharField(max_length=255, default="", blank=True, db_index=True)
+    session_uid = models.CharField(max_length=32, default="", blank=True, db_index=True)
+
+    # One line a staff member can act on without opening the evidence.
+    summary = models.CharField(max_length=512, default="", blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+
+    # Collapses repeats of the same observation into one row with a bumped count.
+    dedupe_key = models.CharField(max_length=128, unique=True)
+    seen_count = models.IntegerField(default=1)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    state = models.CharField(
+        max_length=16, choices=STATE_CHOICES, default=STATE_OPEN, db_index=True
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by_id = models.IntegerField(null=True, blank=True)
+    resolved_by_name = models.CharField(max_length=255, default="", blank=True)
+    resolution_note = models.CharField(max_length=512, default="", blank=True)
+    sanction = models.ForeignKey(
+        Sanction,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="flags",
+    )
+
+    class Meta:
+        verbose_name = "Moderation flag"
+        ordering = ["-last_seen_at"]
+        indexes = [
+            models.Index(fields=["state", "-severity", "-last_seen_at"]),
+            models.Index(fields=["kind", "state"]),
+            models.Index(fields=["account_id", "-last_seen_at"]),
+        ]
+
+    def __str__(self):
+        return f"ModerationFlag({self.kind}, {self.state}, {self.account_name or '-'})"

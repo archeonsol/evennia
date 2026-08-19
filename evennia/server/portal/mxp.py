@@ -102,6 +102,9 @@ class Mxp:
         """
         if settings.MXP_ENABLED:
             self.protocol().protocol_flags["MXP"] = True
+            note = getattr(self.protocol(), "note_negotiation", None)
+            if note:
+                note("MXP")
             self.protocol().requestNegotiation(MXP, b"")
         else:
             self.protocol().wont(MXP)
