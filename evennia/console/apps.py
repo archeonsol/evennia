@@ -20,6 +20,8 @@ class ConsoleConfig(AppConfig):
 
         if not getattr(settings, "CONSOLE_ENABLED", True):
             return
+        from evennia.console.panels import register_builtin_panels
         from evennia.console.registry import panel_registry
 
+        register_builtin_panels(panel_registry)
         panel_registry.load_modules()
