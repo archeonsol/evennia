@@ -28,7 +28,9 @@ const state = {
   current: null,
   degraded: false,
   model: "",
-  page: 1,
+  cursor: "",
+  trail: [],
+  columns: "",
   search: "",
   order: "",
   attrModel: "",
@@ -188,7 +190,6 @@ function cell(value) {
 }
 
 async function drawRecords() {
-  const panel = node("div", { class: "station" });
   const models = await call("panels/records/actions/models/", { body: {} });
   if (!report(models)) {
     el.station.textContent = "";
@@ -198,17 +199,19 @@ async function drawRecords() {
   const list = models.payload.result || [];
   if (!state.model && list.length) state.model = list[0].label;
 
-  const select = node("select", {
+  const picker = node("select", {
     id: "model-select",
     onchange: (event) => {
       state.model = event.target.value;
-      state.page = 1;
+      state.cursor = "";
+      state.trail = [];
       state.order = "";
+      state.columns = "";
       select_render();
     },
   });
   for (const item of list) {
-    select.append(
+    picker.append(
       node("option", {
         value: item.label,
         selected: item.label === state.model,
@@ -220,41 +223,43 @@ async function drawRecords() {
   const search = node("input", {
     type: "search",
     value: state.search,
-    placeholder: "SEARCH TEXT COLUMNS",
-    "aria-label": "Search text columns",
+    placeholder: "SEARCH BY PREFIX",
+    "aria-label": "Search identifying columns by prefix",
     onchange: (event) => {
       state.search = event.target.value;
-      state.page = 1;
+      state.cursor = "";
+      state.trail = [];
       select_render();
     },
   });
 
   const query = new URLSearchParams({
     model: state.model,
-    page: String(state.page),
     search: state.search,
     order: state.order,
+    columns: state.columns,
+    cursor: state.cursor,
   });
-  const rows = await call(`panels/records/rows/?${query}`);
-  const data = rows.payload.rows || {};
+  const result = await call(`panels/records/rows/?${query}`);
+  const data = result.payload.rows || {};
   const body = node("div", { class: "panel-body" });
 
-  if (!rows.ok) {
-    report(rows);
-    body.append(empty("THE ROWS ARE NOT AVAILABLE.", rows.payload.detail || ""));
+  if (!result.ok) {
+    report(result);
+    body.append(empty("THE ROWS ARE NOT AVAILABLE.", result.payload.detail || ""));
   } else if (!data.rows || data.rows.length === 0) {
     body.append(
       empty(
         "NO ROWS.",
         state.search
-          ? "No row matches the search text. Clear the search to show all rows."
+          ? "No row starts with the search text. Search matches the start of a value, not the middle."
           : "This model has no rows.",
       ),
     );
   } else {
     const table = node("table");
     const headRow = node("tr");
-    for (const field of data.fields) {
+    for (const field of data.columns) {
       const next = state.order === field ? `-${field}` : field;
       headRow.append(
         node("th", { scope: "col" }, [
@@ -263,7 +268,8 @@ async function drawRecords() {
             text: field + (state.order === field ? " ↑" : state.order === `-${field}` ? " ↓" : ""),
             onclick: () => {
               state.order = next;
-              state.page = 1;
+              state.cursor = "";
+              state.trail = [];
               select_render();
             },
           }),
@@ -273,42 +279,67 @@ async function drawRecords() {
     table.append(node("thead", {}, [headRow]));
     const tbody = node("tbody");
     for (const row of data.rows) {
-      tbody.append(node("tr", {}, data.fields.map((field) => cell(row[field]))));
+      tbody.append(node("tr", {}, data.columns.map((field) => cell(row[field]))));
     }
     table.append(tbody);
     body.append(table);
   }
 
-  const total = data.total || 0;
-  const size = data.page_size || 50;
-  const pages = Math.max(1, Math.ceil(total / size));
-  const policy = data.writable
-    ? lamp("WRITE ENABLED", "ok")
-    : lamp("DOMAIN OWNED", "attn");
+  /* Paging is by cursor, so there is no page number to show and no total to
+   * count for one. PREVIOUS walks back through the cursors already visited. */
+  const first = node("button", {
+    type: "button",
+    text: "FIRST",
+    disabled: state.trail.length === 0 && !state.cursor,
+    onclick: () => { state.cursor = ""; state.trail = []; select_render(); },
+  });
+  const previous = node("button", {
+    type: "button",
+    text: "PREVIOUS",
+    disabled: state.trail.length === 0,
+    onclick: () => { state.cursor = state.trail.pop() || ""; select_render(); },
+  });
+  const next = node("button", {
+    type: "button",
+    text: "NEXT",
+    disabled: !data.has_more,
+    onclick: () => { state.trail.push(state.cursor); state.cursor = data.next_cursor; select_render(); },
+  });
 
-  panel.append(
-    head("RECORDS", total ? `${total} ROWS` : ""),
+  const total = node("button", {
+    type: "button",
+    text: "COUNT ROWS",
+    onclick: async (event) => {
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = "COUNTING";
+      const counted = await call("panels/records/actions/count/", {
+        body: { model: state.model, search: state.search },
+      });
+      const payload = counted.payload.result || {};
+      button.textContent = payload.exact
+        ? `${payload.rows} ROWS`
+        : `ABOUT ${payload.rows} ROWS`;
+      button.disabled = false;
+      button.title = payload.reason || "";
+    },
+  });
+
+  el.station.textContent = "";
+  el.station.append(
+    head("RECORDS", data.storage ? data.storage.toUpperCase() : ""),
     node("div", { class: "toolbar" }, [
       node("div", { class: "field" }, [
         node("label", { class: "legend", for: "model-select", text: "Model" }),
-        select,
+        picker,
       ]),
       node("div", { class: "field" }, [search]),
       node("span", { class: "spacer" }),
-      policy,
-      node("button", {
-        type: "button",
-        text: "PREVIOUS",
-        disabled: state.page <= 1,
-        onclick: () => { state.page -= 1; select_render(); },
-      }),
-      node("span", { class: "legend", text: `PAGE ${state.page} OF ${pages}` }),
-      node("button", {
-        type: "button",
-        text: "NEXT",
-        disabled: state.page >= pages,
-        onclick: () => { state.page += 1; select_render(); },
-      }),
+      data.writable ? lamp("WRITE ENABLED", "ok") : lamp("DOMAIN OWNED", "attn"),
+      total,
+      first,
+      previous,
+      next,
     ]),
     body,
   );
@@ -321,9 +352,6 @@ async function drawRecords() {
       ]),
     );
   }
-
-  el.station.textContent = "";
-  while (panel.firstChild) el.station.append(panel.firstChild);
 }
 
 async function drawMigrations() {
@@ -563,7 +591,8 @@ async function select_render() {
 function select(key) {
   state.current = key;
   if (key === "records") {
-    state.page = 1;
+    state.cursor = "";
+    state.trail = [];
   }
   drawRail();
   history.replaceState(null, "", `#${key}`);

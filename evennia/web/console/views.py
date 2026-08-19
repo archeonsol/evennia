@@ -24,10 +24,11 @@ retry safety from a status code alone.
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import FieldError
 from django.http import Http404
 from django.views.generic import TemplateView
 from rest_framework import status
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -117,11 +118,21 @@ class ConsoleView(APIView):
     throttle_classes = []
 
     def handle_exception(self, exc):
-        """Map bridge and panel failures before DRF's default handling."""
+        """Map bridge and panel failures before DRF's default handling.
+
+        A panel rejects bad input by raising, and those rejections carry the
+        sentence an operator needs -- which field does not exist, which
+        comparison is unsupported. Letting them reach the default handler
+        would turn a fixable mistake into a 500 with no explanation.
+        """
 
         mapped = _bridge_failure(exc)
         if mapped is not None:
             return mapped
+        if isinstance(exc, FieldError):
+            return self.handle_exception(ValidationError({"detail": str(exc)}))
+        if isinstance(exc, LookupError) and not isinstance(exc, KeyError):
+            return self.handle_exception(NotFound(str(exc)))
         return super().handle_exception(exc)
 
     def _panel(self, key):

@@ -315,3 +315,72 @@ class TestHealthEndpoint(ConsoleAPITestCase):
         response = self.client.get(reverse("console:health"), **HEADERS)
         self.assertEqual(response.status_code, 503)
         self.assertTrue(response.json()["degraded"])
+
+
+class TestInputErrors(ConsoleAPITestCase):
+    """A fixable mistake gets a sentence, not a 500.
+
+    Panels reject bad input by raising, and those exceptions carry the only
+    explanation an operator will see: which field does not exist, which
+    comparison is unsupported.
+    """
+
+    def setUp(self):
+        super().setUp()
+        panel_registry._reset_for_tests()
+        from evennia.console.panels import register_builtin_panels
+
+        register_builtin_panels(panel_registry)
+
+    def test_unknown_filter_field_is_a_400_naming_the_field(self):
+        response = self.client.get(
+            reverse("console:panel-rows", args=["records"])
+            + "?model=console.consoleauditevent&f.nope=1",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nope", str(response.json()))
+
+    def test_unsupported_comparison_is_a_400(self):
+        response = self.client.get(
+            reverse("console:panel-rows", args=["records"])
+            + "?model=console.consoleauditevent&f.panel__regex=x",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_unknown_sort_field_is_a_400(self):
+        response = self.client.get(
+            reverse("console:panel-rows", args=["records"])
+            + "?model=console.consoleauditevent&order=nope",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_unknown_model_is_a_404_naming_the_label(self):
+        response = self.client.get(
+            reverse("console:panel-rows", args=["records"]) + "?model=nope.nothing",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("nope.nothing", str(response.json()))
+
+    def test_missing_row_is_a_404(self):
+        response = self.client.get(
+            reverse("console:panel-detail", args=["records", "999999"])
+            + "?model=console.consoleauditevent",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_no_input_error_becomes_a_500(self):
+        # The regression this guards: an uncaught FieldError reaching the
+        # default handler tells the operator nothing at all.
+        for suffix in ("&f.nope=1", "&order=nope", "&f.panel__regex=x"):
+            response = self.client.get(
+                reverse("console:panel-rows", args=["records"])
+                + "?model=console.consoleauditevent"
+                + suffix,
+                **HEADERS,
+            )
+            self.assertLess(response.status_code, 500, f"{suffix} produced a server error")

@@ -96,21 +96,24 @@ class TestRecordsReads(TestCase):
         result = self.panel.rows(_ctx(model="console.consoleauditevent", page_size=100000))
         self.assertEqual(result["page_size"], MAX_PAGE_SIZE)
 
+    def test_a_page_carries_no_total(self):
+        # Paging is by cursor and never counts; a total is asked for
+        # separately. See test_records_scale for the full contract.
+        result = self.panel.rows(_ctx(model="console.consoleauditevent"))
+        self.assertNotIn("total", result)
+        self.assertIn("has_more", result)
+
     def test_page_size_survives_nonsense(self):
         result = self.panel.rows(_ctx(model="console.consoleauditevent", page_size="banana"))
         self.assertTrue(1 <= result["page_size"] <= MAX_PAGE_SIZE)
-
-    def test_page_is_at_least_one(self):
-        result = self.panel.rows(_ctx(model="console.consoleauditevent", page=-5))
-        self.assertEqual(result["page"], 1)
 
     def test_unknown_ordering_field_is_rejected(self):
         with self.assertRaises(FieldError):
             self.panel.rows(_ctx(model="console.consoleauditevent", order="not_a_field"))
 
     def test_ordering_accepts_descending(self):
-        result = self.panel.rows(_ctx(model="console.consoleauditevent", order="-created_at"))
-        self.assertEqual(result["page"], 1)
+        result = self.panel.rows(_ctx(model="console.consoleauditevent", order="-panel"))
+        self.assertEqual(result["order"], "-panel")
 
     def test_missing_model_is_a_lookup_error(self):
         with self.assertRaises(LookupError):
@@ -118,11 +121,11 @@ class TestRecordsReads(TestCase):
         with self.assertRaises(LookupError):
             self.panel.rows(_ctx(model="nope.nothing"))
 
-    def test_search_matches_text_fields(self):
+    def test_search_matches_by_prefix(self):
         ConsoleAuditEvent.objects.create(event_id="a" * 32, panel="findme", operation="x")
         ConsoleAuditEvent.objects.create(event_id="b" * 32, panel="other", operation="x")
         result = self.panel.rows(_ctx(model="console.consoleauditevent", search="findme"))
-        self.assertEqual(result["total"], 1)
+        self.assertEqual(len(result["rows"]), 1)
 
     def test_detail_returns_one_record(self):
         row = ConsoleAuditEvent.objects.create(event_id="c" * 32, panel="p", operation="o")
