@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from django.apps import apps
+from django.contrib.auth.hashers import check_password as check_password_hash
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
@@ -29,6 +30,7 @@ class AuthenticationResult:
 
     status: str
     account_id: int | None = None
+    needs_rehash: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +77,98 @@ class RegistrationResult:
     recovery_ids: tuple[int, ...] = ()
 
 
+def check_credentials(request: AuthenticationRequest) -> AuthenticationResult:
+    """Verify credentials without the IO owner.
+
+    Authentication needs three plain columns and a hash comparison. It touches
+    no game object, no attribute, and no handler, so nothing about it requires
+    owner-scoped identity -- the only reason the owner was involved is that
+    calling ``account.check_password`` first *materializes* an ``AccountDB``
+    instance, and instance identity is owner-scoped.
+
+    Reading through ``values()`` constructs no instance at all, and
+    ``django.contrib.auth.hashers.check_password`` compares two strings. Same
+    lookup, same active check, same hasher, same verdict.
+
+    This is what makes degraded mode real. The console keeps serving reads when
+    the game server is down, which is worthless if nobody can sign in to reach
+    them, and an operator arriving at an outage is exactly the person who
+    needs to.
+
+    Args:
+        request: The credentials to check.
+
+    Returns:
+        AuthenticationResult: ``authenticated`` with an account id, or
+        ``rejected``. ``needs_rehash`` marks a valid password stored under a
+        superseded hasher.
+    """
+
+    AccountDB = apps.get_model("accounts", "AccountDB")
+    if request.autologin_id is not None:
+        row = (
+            AccountDB.objects.filter(pk=int(request.autologin_id)).values("id", "is_active").first()
+        )
+        if not row or not row["is_active"]:
+            return AuthenticationResult("rejected")
+        return AuthenticationResult("authenticated", int(row["id"]))
+
+    if not request.username or request.password is None:
+        return AuthenticationResult("rejected")
+    row = (
+        AccountDB.objects.filter(username__iexact=request.username)
+        .values("id", "password", "is_active")
+        .first()
+    )
+    if not row or not row["is_active"]:
+        return AuthenticationResult("rejected")
+
+    stale = False
+
+    def _mark_stale(_raw_password):
+        """Record that the stored hash uses a superseded hasher."""
+        nonlocal stale
+        stale = True
+
+    if not check_password_hash(request.password, row["password"], setter=_mark_stale):
+        return AuthenticationResult("rejected")
+    return AuthenticationResult("authenticated", int(row["id"]), needs_rehash=stale)
+
+
+def rehash_password(account_id: int, raw_password: str) -> bool:
+    """Upgrade one stored password to the current hasher, on the owner.
+
+    Deliberately separate from the credential check, and deliberately
+    optional. A valid password under a superseded hasher is a missed
+    optimization, not a security failure, so this must never be the reason
+    somebody cannot sign in.
+
+    Args:
+        account_id: Account whose hash should be upgraded.
+        raw_password: The password just verified.
+
+    Returns:
+        bool: Whether the hash was rewritten.
+    """
+
+    AccountDB = apps.get_model("accounts", "AccountDB")
+    try:
+        account = AccountDB.objects.get(pk=int(account_id))
+    except AccountDB.DoesNotExist:
+        return False
+    if not account.is_active or not account.check_password(raw_password):
+        return False
+    account.set_password(raw_password)
+    account.save(update_fields=["password"])
+    return True
+
+
 def authenticate_account(request: AuthenticationRequest) -> AuthenticationResult:
-    """Check credentials and optional password rehash entirely on the owner."""
+    """Check credentials and optional password rehash entirely on the owner.
+
+    Retained as the owner-side path. :func:`check_credentials` is the one the
+    login backend uses; both must always agree on accept and reject.
+    """
     AccountDB = apps.get_model("accounts", "AccountDB")
     if request.autologin_id is not None:
         account = AccountDB.objects.filter(pk=int(request.autologin_id)).first()
