@@ -34,6 +34,11 @@ urlpatterns = [
     path("favicon.ico", RedirectView.as_view(url="/media/images/favicon.ico", permanent=False)),
 ]
 
+if getattr(settings, "CONSOLE_ENABLED", True):
+    # Engine console API. The console's own page is mounted by the game; the
+    # engine ships the API and the built frontend assets.
+    urlpatterns += [path("api/console/", include("evennia.web.console.urls", namespace="console"))]
+
 if settings.REST_API_ENABLED:
     # Rest API
     urlpatterns += [path("api/", include("evennia.web.api.urls", namespace="api"))]
