@@ -37,6 +37,31 @@ const state = {
   attrSearch: "",
 };
 
+/* Keys carried in the address bar. A view an operator reached by clicking must
+ * be reachable again by pasting, or a bug report cannot contain the thing it
+ * is about. `trail` stays out: it is how you walked here, not where you are. */
+const URL_KEYS = ["model", "cursor", "columns", "search", "order", "attrModel", "attrSearch"];
+
+function readUrl() {
+  const hash = location.hash.replace(/^#/, "");
+  const [panel, query] = hash.split("?");
+  const params = new URLSearchParams(query || "");
+  for (const key of URL_KEYS) {
+    if (params.has(key)) state[key] = params.get(key);
+  }
+  return panel || "";
+}
+
+function writeUrl() {
+  const params = new URLSearchParams();
+  for (const key of URL_KEYS) {
+    if (state[key]) params.set(key, state[key]);
+  }
+  const query = params.toString();
+  const next = `#${state.current || ""}${query ? "?" + query : ""}`;
+  if (next !== location.hash) history.replaceState(null, "", next);
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 function node(tag, attrs = {}, children = []) {
@@ -306,6 +331,22 @@ async function drawRecords() {
     onclick: () => { state.trail.push(state.cursor); state.cursor = data.next_cursor; select_render(); },
   });
 
+  const share = node("button", {
+    type: "button",
+    text: "COPY LINK",
+    title: "Copy a link to this exact view",
+    onclick: async (event) => {
+      const button = event.target;
+      try {
+        await navigator.clipboard.writeText(location.href);
+        button.textContent = "COPIED";
+      } catch {
+        button.textContent = "COPY FAILED";
+      }
+      setTimeout(() => { button.textContent = "COPY LINK"; }, 1500);
+    },
+  });
+
   const total = node("button", {
     type: "button",
     text: "COUNT ROWS",
@@ -336,6 +377,7 @@ async function drawRecords() {
       node("div", { class: "field" }, [search]),
       node("span", { class: "spacer" }),
       data.writable ? lamp("WRITE ENABLED", "ok") : lamp("DOMAIN OWNED", "attn"),
+      share,
       total,
       first,
       previous,
@@ -576,6 +618,7 @@ const RENDERERS = {
 };
 
 async function select_render() {
+  writeUrl();
   const render = RENDERERS[state.current];
   if (!render) {
     el.station.textContent = "";
@@ -589,13 +632,12 @@ async function select_render() {
 }
 
 function select(key) {
-  state.current = key;
-  if (key === "records") {
+  if (state.current !== key && key === "records") {
     state.cursor = "";
     state.trail = [];
   }
+  state.current = key;
   drawRail();
-  history.replaceState(null, "", `#${key}`);
   select_render();
 }
 
@@ -619,7 +661,7 @@ async function boot() {
   state.panels = root.payload.panels || [];
   state.degraded = Boolean(root.payload.degraded);
   drawStrip(root.payload);
-  const wanted = location.hash.replace("#", "");
+  const wanted = readUrl();
   const first = state.panels.find((panel) => panel.key === wanted) || state.panels[0];
   if (!first) {
     drawRail();
@@ -647,6 +689,15 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.key === "Escape") el.notice.hidden = true;
+});
+
+window.addEventListener("hashchange", () => {
+  const wanted = readUrl();
+  if (wanted && wanted !== state.current) {
+    select(wanted);
+  } else {
+    select_render();
+  }
 });
 
 boot();
