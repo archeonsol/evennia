@@ -94,6 +94,10 @@ class ModelSpec:
         model_name: Lowercased model name.
         verbose_name: Human-readable singular name.
         verbose_name_plural: Human-readable plural name.
+        proxy: Whether this is a Django proxy model. Proxies share their
+            concrete model's table, so listing them alongside it shows one
+            table many times and makes navigation worse, not richer.
+        concrete_label: The label of the model that owns the table.
         storage: ``"idmapper"`` for identity-cached typeclass models,
             ``"plain"`` for ordinary Django models. The distinction drives the
             partial-load rule: idmapper models must never be read with
@@ -112,6 +116,8 @@ class ModelSpec:
     verbose_name_plural: str
     storage: str
     writable: bool
+    proxy: bool = False
+    concrete_label: str = ""
     write_via: str = ""
     default_ordering: tuple[str, ...] = ()
     fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
@@ -132,6 +138,8 @@ class ModelSpec:
             "verbose_name": self.verbose_name,
             "verbose_name_plural": self.verbose_name_plural,
             "storage": self.storage,
+            "proxy": self.proxy,
+            "concrete_label": self.concrete_label,
             "writable": self.writable,
             "write_via": self.write_via,
             "default_ordering": list(self.default_ordering),
@@ -209,6 +217,8 @@ def model_spec(model) -> ModelSpec:
         verbose_name_plural=str(meta.verbose_name_plural),
         storage="idmapper" if _is_idmapper(model) else "plain",
         writable=writable,
+        proxy=bool(meta.proxy),
+        concrete_label=meta.concrete_model._meta.label_lower,
         write_via=write_via,
         default_ordering=tuple(str(value) for value in (meta.ordering or ())),
         fields=tuple(_field_spec(item) for item in meta.concrete_fields),

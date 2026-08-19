@@ -71,6 +71,7 @@ class RecordsPanel(Panel):
                 "write_via": item.write_via,
             }
             for item in spec.model_specs()
+            if not item.proxy
         ]
 
     def rows(self, ctx):

@@ -38,7 +38,7 @@ class TestBuiltinRegistration(TestCase):
         register_builtin_panels(registry)
         self.assertEqual(
             [panel.key for panel in registry.panels()],
-            ["health", "migrations", "records", "settings"],
+            ["attributes", "health", "migrations", "records", "settings"],
         )
 
     def test_no_builtin_needs_the_io_owner_to_read(self):

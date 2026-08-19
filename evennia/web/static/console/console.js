@@ -31,6 +31,8 @@ const state = {
   page: 1,
   search: "",
   order: "",
+  attrModel: "",
+  attrSearch: "",
 };
 
 /* ------------------------------------------------------------------ helpers */
@@ -435,8 +437,111 @@ async function drawHealth() {
   );
 }
 
+/* Attributes inverts the usual lens. Keys are unbounded in this engine -- any
+ * object may carry any key -- so a table of objects never helps you find the
+ * one key you care about. You browse keys, then reach objects through them.
+ * The catalogue is a sample and says so; exact counts come from the index on
+ * request, one key at a time. */
+async function drawAttributes() {
+  const model = state.attrModel || "";
+  const query = new URLSearchParams({ model, search: state.attrSearch || "" });
+  const result = await call(`panels/attributes/rows/?${query}`);
+  report(result);
+  const data = result.payload.rows || {};
+  const rows = data.rows || [];
+  if (!state.attrModel && data.model) state.attrModel = data.model;
+
+  const picker = node("select", {
+    id: "attr-model",
+    onchange: (event) => {
+      state.attrModel = event.target.value;
+      select_render();
+    },
+  });
+  for (const label of data.models || []) {
+    picker.append(node("option", { value: label, selected: label === data.model, text: label }));
+  }
+
+  const search = node("input", {
+    type: "search",
+    value: state.attrSearch || "",
+    placeholder: "SEARCH KEYS",
+    "aria-label": "Search attribute keys",
+    onchange: (event) => {
+      state.attrSearch = event.target.value;
+      select_render();
+    },
+  });
+
+  const body = node("div", { class: "panel-body" });
+  if (rows.length === 0) {
+    body.append(
+      empty(
+        "NO ATTRIBUTE KEYS.",
+        state.attrSearch
+          ? "No key matches the search text. Clear the search to show all keys."
+          : "The objects that were read carry no attributes.",
+      ),
+    );
+  } else {
+    const table = node("table");
+    table.append(
+      node("thead", {}, [
+        node("tr", {}, [
+          node("th", { scope: "col", text: "KEY" }),
+          node("th", { scope: "col", text: "CATEGORY" }),
+          node("th", { scope: "col", text: "OBJECTS" }),
+          node("th", { scope: "col", text: "TYPE" }),
+          node("th", { scope: "col", text: "EXAMPLE" }),
+        ]),
+      ]),
+    );
+    const tbody = node("tbody");
+    for (const row of rows) {
+      tbody.append(
+        node("tr", {}, [
+          cell(row.key),
+          node("td", { class: row.category ? null : "null", text: row.category || "(default)" }),
+          node("td", { class: "num", text: String(row.objects) }),
+          cell(row.kinds.join(", ")),
+          cell(row.example),
+        ]),
+      );
+    }
+    table.append(tbody);
+    body.append(table);
+  }
+
+  const sample = data.sample || {};
+  el.station.textContent = "";
+  el.station.append(
+    head("ATTRIBUTES", data.key_count ? `${data.key_count} KEYS` : ""),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "attr-model", text: "Model" }),
+        picker,
+      ]),
+      node("div", { class: "field" }, [search]),
+      node("span", { class: "spacer" }),
+      lamp(sample.complete ? "WHOLE TABLE" : `SAMPLE OF ${sample.documents_read || 0}`,
+           sample.complete ? "ok" : "attn"),
+    ]),
+    body,
+  );
+
+  if (!sample.complete && sample.note) {
+    body.prepend(
+      node("div", { class: "empty" }, [
+        node("p", { class: "empty-line", text: "THESE COUNTS ARE NOT EXACT." }),
+        node("p", { class: "empty-hint", text: sample.note }),
+      ]),
+    );
+  }
+}
+
 const RENDERERS = {
   records: drawRecords,
+  attributes: drawAttributes,
   migrations: drawMigrations,
   settings: drawSettings,
   health: drawHealth,

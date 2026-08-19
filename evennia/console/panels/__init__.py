@@ -6,15 +6,23 @@ accident: the registry refuses a conflicting key rather than silently
 replacing it.
 """
 
+from evennia.console.panels.attributes import AttributesPanel
 from evennia.console.panels.health import HealthPanel
 from evennia.console.panels.migrations import MigrationsPanel
 from evennia.console.panels.records import RecordsPanel
 from evennia.console.panels.settings import SettingsPanel
 
 #: Built-in panels, in the order they should appear in the nav.
-BUILTIN_PANELS = (RecordsPanel, MigrationsPanel, SettingsPanel, HealthPanel)
+BUILTIN_PANELS = (
+    RecordsPanel,
+    AttributesPanel,
+    MigrationsPanel,
+    SettingsPanel,
+    HealthPanel,
+)
 
 __all__ = (
+    "AttributesPanel",
     "BUILTIN_PANELS",
     "HealthPanel",
     "MigrationsPanel",
