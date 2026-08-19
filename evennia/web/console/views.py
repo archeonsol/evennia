@@ -33,6 +33,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from evennia.console import health, spec
+from evennia.console.panels.coerce import CoercionError
 from evennia.console.registry import PanelError, dispatch, panel_registry
 from evennia.web.console.auth import ConsolePermission, worker_context
 from evennia.web.utils.io import (
@@ -129,6 +130,8 @@ class ConsoleView(APIView):
         mapped = _bridge_failure(exc)
         if mapped is not None:
             return mapped
+        if isinstance(exc, CoercionError):
+            return self.handle_exception(ValidationError({"detail": str(exc), "field": exc.field}))
         if isinstance(exc, FieldError):
             return self.handle_exception(ValidationError({"detail": str(exc)}))
         if isinstance(exc, LookupError) and not isinstance(exc, KeyError):

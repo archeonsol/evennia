@@ -35,12 +35,13 @@ const state = {
   order: "",
   attrModel: "",
   attrSearch: "",
+  editing: null,
 };
 
 /* Keys carried in the address bar. A view an operator reached by clicking must
  * be reachable again by pasting, or a bug report cannot contain the thing it
  * is about. `trail` stays out: it is how you walked here, not where you are. */
-const URL_KEYS = ["model", "cursor", "columns", "search", "order", "attrModel", "attrSearch"];
+const URL_KEYS = ["model", "cursor", "columns", "search", "order", "attrModel", "attrSearch", "editing"];
 
 function readUrl() {
   const hash = location.hash.replace(/^#/, "");
@@ -304,7 +305,17 @@ async function drawRecords() {
     table.append(node("thead", {}, [headRow]));
     const tbody = node("tbody");
     for (const row of data.rows) {
-      tbody.append(node("tr", {}, data.columns.map((field) => cell(row[field]))));
+      const id = row[data.columns[0]];
+      tbody.append(
+        node("tr", {
+          title: data.writable ? "Open this row" : "",
+          onclick: () => {
+            if (!data.writable) return;
+            state.editing = String(id);
+            select_render();
+          },
+        }, data.columns.map((field) => cell(row[field]))),
+      );
     }
     table.append(tbody);
     body.append(table);
@@ -366,6 +377,21 @@ async function drawRecords() {
     },
   });
 
+  /* The editor is a region of the station, not a modal. Nothing here needs
+   * protected focus, and an operator comparing a value against the row above
+   * should not have the table hidden behind a sheet. */
+  if (state.editing !== null) {
+    body.prepend(await editor(data));
+  }
+
+  const add = node("button", {
+    type: "button",
+    text: "ADD ROW",
+    disabled: !data.writable,
+    title: data.writable ? "" : `Write it through ${data.write_via}`,
+    onclick: () => { state.editing = "new"; select_render(); },
+  });
+
   el.station.textContent = "";
   el.station.append(
     head("RECORDS", data.storage ? data.storage.toUpperCase() : ""),
@@ -377,6 +403,7 @@ async function drawRecords() {
       node("div", { class: "field" }, [search]),
       node("span", { class: "spacer" }),
       data.writable ? lamp("WRITE ENABLED", "ok") : lamp("DOMAIN OWNED", "attn"),
+      add,
       share,
       total,
       first,
@@ -394,6 +421,91 @@ async function drawRecords() {
       ]),
     );
   }
+}
+
+/* A form built from what the service will actually accept, not from the
+ * model's columns. A field the mutation adapter does not declare cannot be
+ * written, and offering it would produce a rejection after the operator has
+ * already filled it in. */
+async function editor(data) {
+  const shape = await call("panels/records/actions/form/", { body: { model: state.model } });
+  const spec = shape.payload.result || {};
+  const wrap = node("div", { class: "editor" });
+  const creating = state.editing === "new";
+
+  let current = {};
+  if (!creating) {
+    const detail = await call(
+      `panels/records/detail/${encodeURIComponent(state.editing)}/?model=${encodeURIComponent(state.model)}`,
+    );
+    current = (detail.payload.record || {}).record || detail.payload.record || {};
+  }
+
+  const inputs = {};
+  const grid = node("div", { class: "editor-grid" });
+  for (const field of spec.fields || []) {
+    const value = current[field.name];
+    const input = node("input", {
+      type: "text",
+      id: `edit-${field.name}`,
+      value: value === null || value === undefined ? "" : String(value),
+      placeholder: field.types.join(" or "),
+    });
+    inputs[field.name] = input;
+    grid.append(
+      node("div", { class: "editor-field" }, [
+        node("label", { class: "legend", for: `edit-${field.name}`, text: field.name }),
+        input,
+      ]),
+    );
+  }
+
+  const status = node("p", { class: "empty-hint" });
+
+  const save = node("button", {
+    type: "button",
+    text: creating ? "CREATE ROW" : "SAVE CHANGES",
+    onclick: async () => {
+      const values = {};
+      for (const [name, input] of Object.entries(inputs)) {
+        values[name] = input.value;
+      }
+      const result = await call("panels/records/actions/save/", {
+        body: { model: state.model, pk: creating ? null : state.editing, values },
+      });
+      if (!result.ok) {
+        report(result);
+        const detail = result.payload.detail || "THE ROW WAS NOT SAVED.";
+        status.textContent = String(detail);
+        const field = result.payload.field;
+        if (field && inputs[field]) inputs[field].focus();
+        return;
+      }
+      state.editing = null;
+      state.cursor = "";
+      state.trail = [];
+      select_render();
+    },
+  });
+
+  const cancel = node("button", {
+    type: "button",
+    text: "CANCEL",
+    onclick: () => { state.editing = null; select_render(); },
+  });
+
+  wrap.append(
+    node("div", { class: "editor-head" }, [
+      node("span", { class: "legend", text: creating ? "NEW ROW" : `ROW ${state.editing}` }),
+      node("span", { class: "spacer" }),
+      save,
+      cancel,
+    ]),
+    grid,
+    status,
+  );
+  if (spec.note) wrap.append(node("p", { class: "empty-hint", text: spec.note }));
+  return wrap;
 }
 
 async function drawMigrations() {

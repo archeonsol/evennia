@@ -43,8 +43,15 @@ from django.core.exceptions import FieldError, PermissionDenied, ValidationError
 from django.db.models import Q
 
 from evennia.console import audit, spec
+from evennia.console.panels.coerce import CoercionError, coerce_payload
 from evennia.console.registry import Panel, io_action
-from evennia.console.services import AdminDeleteRequest, delete_admin
+from evennia.console.services import (
+    AdminDeleteRequest,
+    AdminMutationRequest,
+    delete_admin,
+    mutate_admin,
+    mutation_field_types,
+)
 
 #: Rows a single page may return.
 MAX_PAGE_SIZE = 200
@@ -284,6 +291,147 @@ class RecordsPanel(Panel):
         }
 
     # -- writes --------------------------------------------------------
+
+    def form(self, ctx, model=None):
+        """Return what a caller may write to one model, and how.
+
+        Only the fields the mutation adapter declares. A field absent here is
+        not writable through this lens, and saying so up front is better than
+        a rejection after the operator has filled it in.
+        """
+
+        model_spec = self._spec(model)
+        if not model_spec.writable:
+            return {
+                "model": model_spec.label,
+                "writable": False,
+                "write_via": model_spec.write_via,
+                "fields": [],
+            }
+        accepted = mutation_field_types(model_spec.label)
+        by_name = {field.name: field for field in model_spec.fields}
+        return {
+            "model": model_spec.label,
+            "writable": True,
+            "write_via": "",
+            "fields": [
+                {
+                    "name": name,
+                    "types": [item.__name__ for item in types],
+                    "nullable": "NoneType" in {item.__name__ for item in types},
+                    "kind": by_name[name].kind if name in by_name else "",
+                    "choices": [list(pair) for pair in by_name[name].choices]
+                    if name in by_name
+                    else [],
+                }
+                for name, types in sorted(accepted.items())
+            ],
+            "unsupported": [
+                "relations",
+                "tags",
+                "password",
+            ],
+            "note": (
+                "Relations, tags, and passwords are not written here. Each has its own "
+                "service with rules a generic form cannot honour."
+            ),
+        }
+
+    @io_action
+    def save(self, ctx, model=None, pk=None, values=None):
+        """Create or change one row through the bounded mutation service.
+
+        Runs on the IO owner: the service reloads the actor, recomputes
+        permission from fresh state, resolves foreign keys, and drives the
+        model's own lifecycle. The worker only coerced JSON into the exact
+        types the service demands.
+
+        Deliberately narrow. Relations, inline tags, and passwords are refused
+        rather than half-supported: a shared Tag row is cached by many owners,
+        account creation has a provenance contract, and a password has its own
+        service. Refusing with a reason beats a form that appears to save them.
+
+        Args:
+            ctx: IO context.
+            model: Model label.
+            pk: Row to change, or ``None`` to create one.
+            values: Field name to submitted value.
+
+        Returns:
+            dict: The service's outcome, including its own status string.
+
+        Raises:
+            PermissionDenied: The model has no generic write path.
+            CoercionError: A submitted value cannot be stored in its field.
+        """
+
+        model_spec = self._spec(model)
+        if not model_spec.writable:
+            raise PermissionDenied(
+                f"{model_spec.label} is not generically writable. "
+                f"Mutate it through {model_spec.write_via or 'its own domain service'}."
+            )
+        submitted = dict(values or {})
+        if "password" in submitted:
+            raise PermissionDenied(
+                "Passwords are not set through the records lens. Use the password service."
+            )
+        concrete = coerce_payload(submitted, mutation_field_types(model_spec.label))
+
+        before = {}
+        target = int(pk) if pk is not None else None
+        if target is not None:
+            existing = (
+                apps.get_model(model_spec.label)
+                ._base_manager.filter(pk=target)
+                .values(*[name for name, _ in concrete])
+                .first()
+            )
+            before = {key: str(value) for key, value in (existing or {}).items()}
+
+        result = mutate_admin(
+            AdminMutationRequest(
+                actor_id=int(ctx.actor_id),
+                model_label=model_spec.label,
+                object_id=target,
+                concrete=concrete,
+                relations=(),
+                tags=(),
+            )
+        )
+        payload = {
+            "status": result.status,
+            "object_id": result.object_id,
+            "object_repr": getattr(result, "object_repr", ""),
+            "message": getattr(result, "message", ""),
+            "retryable": bool(getattr(result, "retryable", False)),
+        }
+        audit.record(
+            panel=self.key,
+            operation="change" if target is not None else "add",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"{model_spec.label}#{result.object_id or target or ''}"[:160],
+            outcome=self._audit_outcome(result.status),
+            before=before,
+            after={key: str(value) for key, value in concrete},
+            message=payload["message"][:500],
+        )
+        return payload
+
+    def _audit_outcome(self, status):
+        """Map a service status onto the audit trail's outcome vocabulary."""
+
+        from evennia.console.models import ConsoleAuditEvent
+
+        return {
+            "created": ConsoleAuditEvent.OUTCOME_SUCCESS,
+            "changed": ConsoleAuditEvent.OUTCOME_SUCCESS,
+            "ok": ConsoleAuditEvent.OUTCOME_SUCCESS,
+            "conflict": ConsoleAuditEvent.OUTCOME_CONFLICT,
+            "partial": ConsoleAuditEvent.OUTCOME_PARTIAL,
+            "recovery_required": ConsoleAuditEvent.OUTCOME_RECOVERY,
+        }.get(str(status), ConsoleAuditEvent.OUTCOME_SUCCESS)
 
     @io_action
     def delete(self, ctx, model=None, ids=None):

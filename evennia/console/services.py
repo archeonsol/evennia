@@ -282,6 +282,27 @@ _SPECS = {
 }
 
 
+def mutation_field_types(model_label: str) -> dict[str, tuple[type, ...]]:
+    """Return the exact Python types each writable field accepts.
+
+    The mutation validator compares with ``type(value) not in types`` rather
+    than ``isinstance``, deliberately: a bool is not an int here, and a
+    subclass is not its parent. A caller building a request from JSON must
+    coerce to these exact types first, and this is the authority on which.
+
+    Args:
+        model_label: Lowercased ``app_label.modelname``.
+
+    Returns:
+        dict: Field name to the tuple of accepted types.
+
+    Raises:
+        ValueError: The model has no mutation adapter.
+    """
+
+    return dict(admin_spec(model_label).field_types)
+
+
 def writable_models() -> frozenset[str]:
     """Return the model labels with a bounded IO mutation adapter.
 
