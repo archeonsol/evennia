@@ -24,6 +24,8 @@ retry safety from a status code alone.
 from __future__ import annotations
 
 from django.conf import settings
+from django.http import Http404
+from django.views.generic import TemplateView
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
@@ -129,6 +131,25 @@ class ConsoleView(APIView):
             return panel_registry.get(key)
         except PanelError as err:
             raise NotFound(str(err)) from err
+
+
+class ConsoleAppView(TemplateView):
+    """Serve the console shell.
+
+    Deliberately not behind :class:`ConsolePermission`. The shell is a static
+    document that renders nothing on its own; every byte of data it shows comes
+    from the API, which does enforce the capability. Gating the page as well
+    would mean an operator whose grant lapsed gets a bare 403 with no way to
+    understand why, instead of the console telling them in its own words.
+    """
+
+    template_name = "console/index.html"
+
+    def get(self, request, *args, **kwargs):
+        """Return the shell, or 404 when the console is switched off."""
+        if not getattr(settings, "CONSOLE_ENABLED", True):
+            raise Http404("The console is disabled.")
+        return super().get(request, *args, **kwargs)
 
 
 class RootView(ConsoleView):

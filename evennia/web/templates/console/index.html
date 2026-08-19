@@ -1,0 +1,55 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en" data-console>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>Console</title>
+<link rel="stylesheet" href="{% static 'console/console.css' %}">
+</head>
+<body>
+<!--
+THESIS: The console is a flight controller's station, not a dashboard. Every
+region owns one subsystem and never moves, so the operator learns positions
+instead of navigation. It refuses the card grid that rearranges itself.
+OWN-WORLD: Apollo-era mission control. Graphite console metal under low light,
+warm off-white engraved legends, hairline panel separations, and illuminated
+legend blocks carrying discrete state. Tabular figures throughout. No glow, no
+neon, no gradient.
+STORY: The operator arrives with a question, finds the station that owns it,
+reads state without interpreting it, acts, and sees the result recorded.
+FIRST VIEWPORT: A status strip across the top carrying server identity and the
+subsystem lamps. A fixed station rail on the left. The selected station fills
+the rest, dense, with its own legend header and toolbar.
+FORM: Grounded candidate 1 (mission control), pinned by the user over roll
+assignment 6, seed key 388469cc.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the
+finish review, the verdict, and DESIGN.md
+-->
+<a class="skip" href="#station">Go to the station</a>
+
+<header class="strip" aria-label="Server status">
+  <div class="strip-id">
+    <span class="strip-mark" aria-hidden="true"></span>
+    <span class="strip-name">CONSOLE</span>
+    <span class="strip-version" id="strip-version" data-empty="--"></span>
+  </div>
+  <div class="strip-lamps" id="strip-lamps" role="status" aria-live="polite"></div>
+  <div class="strip-actor" id="strip-actor"></div>
+</header>
+
+<div class="frame">
+  <nav class="rail" id="rail" aria-label="Stations"></nav>
+
+  <main class="station" id="station" tabindex="-1">
+    <div class="boot" id="boot">
+      <p class="boot-line">CONNECT TO THE CONSOLE API.</p>
+    </div>
+  </main>
+</div>
+
+<div class="notice" id="notice" role="alert" hidden></div>
+
+<script type="module" src="{% static 'console/console.js' %}"></script>
+</body>
+</html>

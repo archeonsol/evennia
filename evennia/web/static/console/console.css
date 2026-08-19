@@ -1,0 +1,509 @@
+/* Engine console.
+ *
+ * Apollo-era mission control, rendered for a dim room and a long night. The
+ * grammar is a console panel: graphite metal, hairline separations between
+ * modules, engraved legends, and illuminated legend blocks that carry discrete
+ * state. Position is meaning here -- a station occupies the same place every
+ * time, so an operator reads by muscle memory rather than by hunting.
+ *
+ * No external asset host is referenced. The console must work on an air-gapped
+ * deployment, and must not tell a third party that a staff session exists.
+ */
+
+:root {
+  /* Console metal under low light. Not near-black: a lit panel needs a ground
+   * it can sit on without becoming a light source itself. */
+  --ground: #15191b;
+  --panel: #1c2124;
+  --raised: #232a2e;
+  --rule: #303a3f;
+  --rule-soft: #262e32;
+
+  /* Warm off-white, the colour of an engraved legend under a work lamp. */
+  --ink: #e8e6e0;
+  --ink-dim: #9ba4a7;
+  --ink-faint: #8b9497;
+
+  /* The status vocabulary. Four states, no more, used identically everywhere:
+   * a lamp means the same thing on the strip, in a table, and in a panel. */
+  --ok: #58b57c;
+  --attn: #dfa63f;
+  --fail: #d4574c;
+  --idle: #4a565b;
+
+  --ok-ink: #0c1410;
+  --attn-ink: #1a1206;
+  --fail-ink: #1a0a08;
+
+  --focus: #dfa63f;
+
+  --mono: ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --strip-h: 44px;
+  --rail-w: 208px;
+
+  --step: 4px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every numeral in this interface is compared against the numeral above it, so
+ * digits must occupy identical width. Declared with !important because the
+ * `font` shorthand resets font-variant-numeric, and this interface sets `font`
+ * on nearly every element it draws. */
+body, body * {
+  font-variant-numeric: tabular-nums !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 10;
+  padding: 8px 12px;
+  background: var(--attn);
+  color: var(--attn-ink);
+  font: 600 12px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+.skip:focus { left: 8px; top: 8px; }
+
+/* ---------------------------------------------------------------- legends */
+
+/* Engraved panel lettering: small, spaced, and never competing with data. */
+.legend {
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* --------------------------------------------------------- illuminated lamp */
+
+/* The signature element. A filled legend block, lit or unlit, exactly as a
+ * mission-control event indicator: the legend is readable when dark, so the
+ * operator knows what is NOT lit as well as what is. */
+.lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink-faint);
+  font: 600 11px/1.35 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease),
+    border-color 160ms var(--ease);
+}
+
+.lamp::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--idle);
+  transition: background-color 160ms var(--ease);
+}
+
+.lamp[data-state="ok"] { background: var(--ok); border-color: var(--ok); color: var(--ok-ink); }
+.lamp[data-state="ok"]::before { background: var(--ok-ink); }
+
+.lamp[data-state="attn"] { background: var(--attn); border-color: var(--attn); color: var(--attn-ink); }
+.lamp[data-state="attn"]::before { background: var(--attn-ink); }
+
+.lamp[data-state="fail"] { background: var(--fail); border-color: var(--fail); color: var(--fail-ink); }
+.lamp[data-state="fail"]::before { background: var(--fail-ink); }
+
+/* --------------------------------------------------------------- top strip */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--strip-h);
+  padding: 0 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+}
+
+.strip-id {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.strip-mark {
+  align-self: center;
+  width: 10px;
+  height: 10px;
+  background: var(--attn);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.strip-name {
+  font: 600 13px/1 var(--mono);
+  letter-spacing: 0.2em;
+}
+
+.strip-version {
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-faint);
+}
+.strip-version:empty::before { content: attr(data-empty); }
+
+.strip-lamps {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.strip-actor {
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+  padding-left: 12px;
+  border-left: 1px solid var(--rule);
+}
+
+/* ------------------------------------------------------------------- frame */
+
+.frame {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  height: calc(100% - var(--strip-h));
+}
+
+/* --------------------------------------------------------------------- rail */
+
+.rail {
+  background: var(--panel);
+  border-right: 1px solid var(--rule);
+  padding: 12px 0;
+  overflow-y: auto;
+}
+
+.rail-heading {
+  padding: 0 12px 8px;
+}
+
+.rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 12px 7px 10px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--ink-dim);
+  font: 500 13px/1.3 var(--sans);
+  cursor: pointer;
+  transition: background-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.rail-item:hover { background: var(--raised); color: var(--ink); }
+
+.rail-item[aria-current="true"] {
+  background: var(--raised);
+  border-left-color: var(--attn);
+  color: var(--ink);
+}
+
+.rail-item small {
+  display: block;
+  font: 400 11px/1.35 var(--sans);
+  color: var(--ink-faint);
+  margin-top: 2px;
+}
+
+.rail-note {
+  margin: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  font: 400 11px/1.5 var(--mono);
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ station */
+
+.station {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.station:focus { outline: none; }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.panel-title {
+  margin: 0;
+  font: 600 13px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.panel-count {
+  margin-left: auto;
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--ground);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+label.legend { cursor: default; }
+
+select, input[type="search"] {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 12px/1.3 var(--mono);
+}
+
+select { min-width: 220px; }
+input[type="search"] { width: 200px; }
+
+input::placeholder { color: var(--ink-faint); }
+
+button {
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink-dim);
+  font: 500 11px/1.35 var(--mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+
+button:hover:not(:disabled) { background: var(--raised); color: var(--ink); border-color: var(--ink-faint); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.spacer { margin-left: auto; }
+
+/* -------------------------------------------------------------------- body */
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ------------------------------------------------------------------- table */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 12px/1.4 var(--mono);
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 10px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-dim);
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+
+thead th button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+thead th button:hover { background: none; color: var(--ink); }
+
+tbody td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+  color: var(--ink);
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+tbody tr:hover td { background: var(--panel); }
+
+tbody td.null { color: var(--ink-faint); }
+tbody td.num { text-align: right; }
+
+/* ------------------------------------------------------------------ states */
+
+.empty, .boot {
+  padding: 28px 16px;
+  color: var(--ink-dim);
+}
+
+.empty-line, .boot-line {
+  margin: 0 0 6px;
+  font: 400 12px/1.6 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.empty-hint {
+  margin: 0;
+  font: 400 12px/1.6 var(--sans);
+  color: var(--ink-faint);
+  max-width: 70ch;
+}
+
+.rows {
+  display: grid;
+  gap: 1px;
+  padding: 12px 14px;
+}
+
+.row-pair {
+  display: grid;
+  grid-template-columns: minmax(160px, 22%) minmax(0, 1fr);
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.row-pair dt {
+  font: 500 11px/1.5 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.row-pair dd {
+  margin: 0;
+  font: 400 12px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.row-pair dd.overridden { color: var(--attn); }
+
+/* ------------------------------------------------------------------ notice */
+
+.notice {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  max-width: 46ch;
+  padding: 10px 12px;
+  border: 1px solid var(--fail);
+  border-left-width: 1px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 45%);
+  color: var(--ink);
+  font: 400 12px/1.5 var(--mono);
+}
+
+.notice[data-kind="attn"] { border-color: var(--attn); }
+
+.notice-legend {
+  display: block;
+  margin-bottom: 4px;
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------ narrow width */
+
+@media (max-width: 860px) {
+  :root { --rail-w: 100%; }
+
+  .frame {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    height: auto;
+    min-height: calc(100% - var(--strip-h));
+  }
+
+  .rail {
+    display: flex;
+    gap: 4px;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    overflow-x: auto;
+  }
+
+  .rail-heading, .rail-item small, .rail-note { display: none; }
+
+  .rail-item {
+    width: auto;
+    white-space: nowrap;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+  }
+
+  .rail-item[aria-current="true"] { border-left: 0; border-bottom-color: var(--attn); }
+
+  .strip-actor { display: none; }
+  select, input[type="search"] { width: 100%; min-width: 0; }
+  .field { flex: 1 1 180px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 1ms !important; }
+}
