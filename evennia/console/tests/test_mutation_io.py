@@ -17,14 +17,7 @@ from django.urls import reverse
 
 from evennia.accounts.models import AccountDB
 from evennia.comms.models import ChannelDB, Msg
-from evennia.help.models import HelpEntry
-from evennia.objects.models import ObjectDB
-from evennia.scripts.models import ScriptDB
-from evennia.server.models import AuthorizationGrant, ServerConfig
-from evennia.utils import class_from_module, clock
-from evennia.utils.create import create_account, create_object
-from evennia.utils.test_resources import BaseEvenniaTest
-from evennia.web.admin.io import (
+from evennia.console.services import (
     AdminDeleteRequest,
     AdminDeleteResult,
     AdminMutationRequest,
@@ -33,6 +26,13 @@ from evennia.web.admin.io import (
     freeze_plain,
     mutate_admin,
 )
+from evennia.help.models import HelpEntry
+from evennia.objects.models import ObjectDB
+from evennia.scripts.models import ScriptDB
+from evennia.server.models import AuthorizationGrant, ServerConfig
+from evennia.utils import class_from_module, clock
+from evennia.utils.create import create_account, create_object
+from evennia.utils.test_resources import BaseEvenniaTest
 from evennia.web.admin.objects import ObjectAdmin
 
 
@@ -79,7 +79,7 @@ class AdminCodecTest(SimpleTestCase):
             (("db_account_subscriptions", (HostileInt(1),)),),
             (),
         )
-        with patch("evennia.web.admin.io._fresh_actor") as fresh_actor:
+        with patch("evennia.console.services._fresh_actor") as fresh_actor:
             result = mutate_admin(request)
         self.assertEqual(result.status, "conflict")
         fresh_actor.assert_not_called()
@@ -93,7 +93,7 @@ class AdminCodecTest(SimpleTestCase):
             (),
             (),
         )
-        with patch("evennia.web.admin.io._fresh_actor") as fresh_actor:
+        with patch("evennia.console.services._fresh_actor") as fresh_actor:
             result = mutate_admin(request)
         self.assertEqual(result.status, "conflict")
         fresh_actor.assert_not_called()
@@ -109,7 +109,7 @@ class AdminCodecTest(SimpleTestCase):
         )
         with (
             patch(
-                "evennia.web.admin.io._fresh_actor",
+                "evennia.console.services._fresh_actor",
                 side_effect=PermissionDenied("revoked"),
             ),
             patch.object(ObjectDB.objects, "filter", side_effect=AssertionError("FK SQL ran")),

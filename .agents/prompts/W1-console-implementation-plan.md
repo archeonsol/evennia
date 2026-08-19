@@ -1,6 +1,20 @@
 # W1: engine console (Django-admin successor)
 
-Status: todo
+Status: in-progress (branch `w1-console-phase1`, off `6.0.0+underspire.209`)
+
+**Phase 1 progress.** Landed: the `evennia.console` app; `services.py` (the
+kernel, moved out of `web/admin/io.py` and decoupled from `django.contrib.admin`
+via an injected cascade-authority checker); `registry.py` (`Panel` /
+`@io_action` / `WorkerContext` / `IOContext` / `dispatch`); `spec.py` (model
+introspection with the storage and write-policy classification); `models.py` +
+`audit.py` (the `LogEntry` successor, with retention); the two capabilities;
+the settings block; and an admin-to-console audit mirror so the console's
+timeline covers admin activity during coexistence. 95 tests in
+`evennia.console`, 120 in `evennia.web` -- the 151 that existed before the move
+are all still present and passing, split across the two.
+
+Remaining in phase 1: DRF endpoints under `api/console/`, the frontend shell,
+and the Records, Migrations, Settings, and Health panels.
 
 The implementation plan for the console half of **W1** (see
 [`engine-architecture/committed.md`](../docs/engine-architecture/committed.md)).

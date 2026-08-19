@@ -173,6 +173,14 @@ def _register_engine_defaults() -> None:
         "engine.help.manage": (True, False),
         "engine.moderation.manage": (False, True),
         "engine.runtime.manage": (False, True),
+        # The engine console. Holding this is equivalent to shell access on the
+        # game server: it carries a REPL, a SQL console, and process control.
+        # Never delegable, always sensitive. See decision D1 in
+        # `.agents/prompts/W1-console-implementation-plan.md`.
+        "engine.console.access": (False, True),
+        # Admits a non-superuser moderator to the console's moderation panel and
+        # nothing else. The one internal boundary the console has.
+        "engine.console.moderation": (False, True),
         "engine.channel.banned": (False, False),
         "engine.message.banned": (False, False),
         "engine.channel.listen": (True, False),
@@ -209,6 +217,10 @@ def _register_engine_defaults() -> None:
         ),
     )
     capability_registry.register_bundle(
+        "console_moderator",
+        ("engine.console.moderation",),
+    )
+    capability_registry.register_bundle(
         "runtime_operator",
         (
             "engine.runtime.manage",
@@ -229,6 +241,7 @@ def _register_engine_defaults() -> None:
             "engine.channel.control",
             "engine.script.control",
             "engine.system.inspect",
+            "engine.console.access",
         ),
     )
 

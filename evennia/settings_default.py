@@ -796,6 +796,39 @@ JOB_QUEUE_REDIS_ALIAS = "default"
 JOB_QUEUE_REDIS_KEY = "evennia:jobs:pending"
 JOB_QUEUE_DRAIN_EVERY_N_TICKS = 10
 JOB_QUEUE_DRAIN_MAX_JOBS = 5
+
+######################################################################
+# Engine console
+######################################################################
+# The staff-facing web surface at /console/ (the Django-admin successor).
+#
+# Console access is ONE capability, `engine.console.access`, because a console
+# holder has a REPL on the running process: that is shell access by every
+# definition that matters, and a fine-grained permission grid over it would
+# imply a containment the REPL removes. Treat granting it as equivalent to
+# adding an SSH key. `engine.console.moderation` is the single exception -- it
+# admits a non-superuser moderator to the moderation panel and nothing else.
+#
+# The dangerous panels are therefore governed by DEPLOYMENT POLICY (these
+# settings), not by who holds what. They default off and cannot be flipped
+# from inside the console.
+CONSOLE_ENABLED = True
+# Modules exposing `register_panels(registry)`, mirroring SYSTEM_MODULES. A
+# listed module that fails to import or registers nothing is a startup error.
+CONSOLE_PANEL_MODULES = []
+# Arbitrary Python executed in-process by a web request.
+CONSOLE_REPL_ENABLED = False
+# Read-only SQL with a statement timeout and a row cap.
+CONSOLE_SQL_ENABLED = False
+# Reload, reset, and shutdown of the running server.
+CONSOLE_SERVER_CONTROL_ENABLED = False
+# Audit retention. Rows recording a moderation decision or a break-glass grant
+# are never pruned regardless of these windows: appeal evidence has to outlive
+# any window, and investigation evidence is what an attacker most wants gone.
+CONSOLE_AUDIT_RETENTION_DAYS = 365
+# REPL source text is the bulkiest audit content and the least often needed
+# long-term, so it prunes on its own shorter window.
+CONSOLE_AUDIT_REPL_RETENTION_DAYS = 90
 # Redis SET index for channel subscribers (PG M2M remains source of truth).
 CHANNEL_SUBSCRIBER_CACHE_ENABLED = True
 CHANNEL_SUBSCRIBER_CACHE_ALIAS = "default"
@@ -1447,6 +1480,7 @@ INSTALLED_APPS = [
     "evennia.comms",
     "evennia.help",
     "evennia.scripts",
+    "evennia.console",
     "evennia.web",
 ]
 # The user profile extends the User object with more functionality;
