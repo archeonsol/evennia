@@ -6,13 +6,14 @@ Mounted by :mod:`evennia.web.urls` under ``api/console/`` when
 
 from django.urls import path
 
-from evennia.web.console import views
+from evennia.web.console import stream, views
 
 app_name = "console"
 
 urlpatterns = [
     path("", views.RootView.as_view(), name="root"),
     path("health/", views.HealthView.as_view(), name="health"),
+    path("feed/", stream.feed_view, name="feed"),
     path("models/", views.ModelSpecView.as_view(), name="models"),
     path("models/<str:label>/", views.ModelSpecView.as_view(), name="model-detail"),
     path("panels/<str:key>/rows/", views.PanelRowsView.as_view(), name="panel-rows"),

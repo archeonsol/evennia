@@ -8,14 +8,18 @@ replacing it.
 
 from evennia.console.panels.attributes import AttributesPanel
 from evennia.console.panels.health import HealthPanel
+from evennia.console.panels.logs import LogsPanel
 from evennia.console.panels.migrations import MigrationsPanel
 from evennia.console.panels.records import RecordsPanel
+from evennia.console.panels.runtime import RuntimePanel
 from evennia.console.panels.settings import SettingsPanel
 
 #: Built-in panels, in the order they should appear in the nav.
 BUILTIN_PANELS = (
     RecordsPanel,
     AttributesPanel,
+    RuntimePanel,
+    LogsPanel,
     MigrationsPanel,
     SettingsPanel,
     HealthPanel,
@@ -25,8 +29,10 @@ __all__ = (
     "AttributesPanel",
     "BUILTIN_PANELS",
     "HealthPanel",
+    "LogsPanel",
     "MigrationsPanel",
     "RecordsPanel",
+    "RuntimePanel",
     "SettingsPanel",
     "register_builtin_panels",
 )

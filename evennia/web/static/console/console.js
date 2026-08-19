@@ -36,6 +36,9 @@ const state = {
   attrModel: "",
   attrSearch: "",
   editing: null,
+  logFile: "",
+  logSearch: "",
+  live: { source: null, health: null, metrics: null, log: [] },
 };
 
 /* Keys carried in the address bar. A view an operator reached by clicking must
@@ -146,8 +149,16 @@ function drawStrip(root) {
   el.version.textContent = root.version || "";
   el.actor.textContent = root.actor ? `${root.actor.name}` : "";
   el.lamps.textContent = "";
-  el.lamps.append(lamp("DATABASE", "ok"));
-  el.lamps.append(lamp("GAME SERVER", root.degraded ? "attn" : "ok"));
+  const database = lamp("DATABASE", "ok");
+  database.dataset.check = "database";
+  el.lamps.append(database);
+  const server = lamp("GAME SERVER", root.degraded ? "attn" : "ok");
+  server.dataset.check = "io_owner";
+  el.lamps.append(server);
+  const live = lamp("LIVE", "attn");
+  live.dataset.live = "1";
+  live.title = "The live feed";
+  el.lamps.append(live);
   if (root.settings) {
     for (const [key, label] of [
       ["repl_enabled", "REPL"],
@@ -721,8 +732,137 @@ async function drawAttributes() {
   }
 }
 
+async function drawRuntime() {
+  const result = await call("panels/runtime/rows/");
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  const alarms = node("dl", { class: "rows" });
+  for (const alarm of data.alarms || []) {
+    alarms.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: alarm.name.replace(/^evennia_/, "").replace(/_/g, " ") }),
+        node("dd", {}, [
+          lamp(alarm.ok ? "ZERO" : String(alarm.value), alarm.ok ? "ok" : "fail"),
+          node("span", { class: "empty-hint", text: " " + alarm.meaning }),
+        ]),
+      ]),
+    );
+  }
+
+  const caches = node("dl", { class: "rows" });
+  for (const cache of data.caches || []) {
+    caches.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: cache.name }),
+        node("dd", {}, [
+          node("span", {
+            text:
+              cache.hit_rate === null
+                ? "not used yet"
+                : (cache.hit_rate * 100).toFixed(1) + "% hit",
+          }),
+          node("span", { class: "empty-hint", text: " " + cache.invalidation }),
+        ]),
+      ]),
+    );
+  }
+
+  body.append(section("Alarms"), alarms, section("Caches"), caches, section("Metrics"));
+  body.append(node("div", { id: "live-metrics" }));
+
+  el.station.textContent = "";
+  el.station.append(
+    head("RUNTIME"),
+    node("div", { class: "toolbar" }, [
+      lamp(
+        data.metrics_available ? "METRICS LIVE" : "NO METRICS",
+        data.metrics_available ? "ok" : "attn",
+      ),
+      data.reason ? node("span", { class: "legend", text: data.reason }) : null,
+    ]),
+    body,
+  );
+  paintMetrics();
+}
+
+function section(label) {
+  return node("p", { class: "section-legend", text: label });
+}
+
+async function drawLogs() {
+  const query = new URLSearchParams({
+    file: state.logFile || "",
+    search: state.logSearch || "",
+    lines: "200",
+  });
+  const result = await call("panels/logs/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+
+  const picker = node("select", {
+    id: "log-file",
+    onchange: (event) => {
+      state.logFile = event.target.value;
+      select_render();
+    },
+  });
+  for (const file of data.files || []) {
+    picker.append(
+      node("option", {
+        value: file.label,
+        selected: file.label === data.file,
+        text: file.label + " (" + file.size_bytes + " bytes)",
+      }),
+    );
+  }
+
+  const search = node("input", {
+    type: "search",
+    value: state.logSearch || "",
+    placeholder: "FILTER BY TEXT OR PATTERN",
+    "aria-label": "Filter log lines",
+    onchange: (event) => {
+      state.logSearch = event.target.value;
+      select_render();
+    },
+  });
+
+  const body = node("div", { class: "panel-body" });
+  const history = node("div", { class: "log-view" });
+  for (const row of data.rows || []) {
+    history.append(
+      node("div", { class: "log-line" }, [
+        node("span", { class: "log-source", text: row.source }),
+        node("span", { class: "log-text", text: row.line }),
+      ]),
+    );
+  }
+  body.append(section("Recorded"), history, section("Live"));
+  body.append(node("div", { id: "live-log", class: "log-view" }));
+
+  el.station.textContent = "";
+  el.station.append(
+    head("LOGS", data.line_count ? data.line_count + " LINES" : ""),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "log-file", text: "File" }),
+        picker,
+      ]),
+      node("div", { class: "field" }, [search]),
+      node("span", { class: "spacer" }),
+      lamp((data.backups || []).length + " BACKUPS", "off"),
+    ]),
+    body,
+  );
+  appendLiveLog();
+}
+
 const RENDERERS = {
   records: drawRecords,
+  runtime: drawRuntime,
+  logs: drawLogs,
   attributes: drawAttributes,
   migrations: drawMigrations,
   settings: drawSettings,
@@ -751,6 +891,101 @@ function select(key) {
   state.current = key;
   drawRail();
   select_render();
+}
+
+/* -------------------------------------------------------------------- feed */
+
+/* One connection for the whole console. EventSource reconnects on its own and
+ * replays what was missed through Last-Event-ID, so there is no retry loop to
+ * write and no gap to paper over. */
+const LIVE_LOG_LIMIT = 300;
+
+function openFeed() {
+  if (state.live.source) return;
+  const source = new EventSource(API + "feed/", { withCredentials: true });
+  state.live.source = source;
+
+  source.addEventListener("health", (event) => {
+    const payload = JSON.parse(event.data);
+    state.live.health = payload;
+    paintStripLamps(payload);
+    if (state.current === "health") select_render();
+  });
+
+  source.addEventListener("metrics", (event) => {
+    state.live.metrics = JSON.parse(event.data);
+    if (state.current === "runtime") paintMetrics();
+  });
+
+  source.addEventListener("log", (event) => {
+    state.live.log.push(JSON.parse(event.data));
+    if (state.live.log.length > LIVE_LOG_LIMIT) {
+      state.live.log.splice(0, state.live.log.length - LIVE_LOG_LIMIT);
+    }
+    if (state.current === "logs") appendLiveLog();
+  });
+
+  source.onerror = () => {
+    /* EventSource retries by itself. Show the state rather than intervene. */
+    const lamp = el.lamps.querySelector(".lamp[data-live]");
+    if (lamp) lamp.dataset.state = "attn";
+  };
+}
+
+/* The strip is the one place the feed is visible whichever station is open, so
+ * an operator reading a table still sees the server change state. */
+function paintStripLamps(payload) {
+  for (const item of el.lamps.querySelectorAll(".lamp")) {
+    const check = item.dataset.check;
+    if (!check) continue;
+    item.dataset.state = (payload.checks || {})[check] ? "ok" : "fail";
+  }
+  const live = el.lamps.querySelector(".lamp[data-live]");
+  if (live) live.dataset.state = "ok";
+  state.degraded = Boolean(payload.degraded);
+}
+
+function paintMetrics() {
+  const host = document.getElementById("live-metrics");
+  if (!host || !state.live.metrics) return;
+  const payload = state.live.metrics;
+  host.textContent = "";
+  if (!payload.available) {
+    host.append(node("p", { class: "empty-hint", text: payload.reason || "" }));
+    return;
+  }
+  const table = node("table");
+  table.append(
+    node("thead", {}, [
+      node("tr", {}, [
+        node("th", { scope: "col", text: "METRIC" }),
+        node("th", { scope: "col", text: "VALUE" }),
+      ]),
+    ]),
+  );
+  const tbody = node("tbody");
+  for (const sample of (payload.samples || []).slice(0, 200)) {
+    tbody.append(
+      node("tr", {}, [cell(sample.name), node("td", { class: "num", text: String(sample.value) })]),
+    );
+  }
+  table.append(tbody);
+  host.append(table);
+}
+
+function appendLiveLog() {
+  const host = document.getElementById("live-log");
+  if (!host) return;
+  host.textContent = "";
+  for (const entry of state.live.log.slice(-LIVE_LOG_LIMIT)) {
+    host.append(
+      node("div", { class: "log-line" }, [
+        node("span", { class: "log-source", text: entry.source }),
+        node("span", { class: "log-text", text: entry.line }),
+      ]),
+    );
+  }
+  host.scrollTop = host.scrollHeight;
 }
 
 /* -------------------------------------------------------------------- boot */
@@ -782,6 +1017,7 @@ async function boot() {
     return;
   }
   select(first.key);
+  openFeed();
 }
 
 /* Keyboard first: the audience already works this way, and the surface is

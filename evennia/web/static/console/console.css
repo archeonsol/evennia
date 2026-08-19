@@ -555,3 +555,42 @@ tbody td.num { text-align: right; }
 tbody tr[title] {
   cursor: pointer;
 }
+
+/* --------------------------------------------------------------------- logs */
+
+.section-legend {
+  margin: 12px 0 4px;
+  padding: 0 14px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.log-view {
+  max-height: 38vh;
+  overflow: auto;
+  padding: 6px 14px;
+  font: 400 12px/1.5 var(--mono);
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  padding: 1px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.log-source {
+  flex: 0 0 84px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.log-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
