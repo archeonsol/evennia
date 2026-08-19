@@ -7,11 +7,4 @@ evennia.events
    :show-inheritance:
    :undoc-members:
 
-
-
-.. toctree::
-   :maxdepth: 6
-
-   evennia.events.bus
-
 ```

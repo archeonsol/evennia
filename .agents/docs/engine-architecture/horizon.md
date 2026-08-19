@@ -48,12 +48,16 @@ so the thought isn't lost; not direction.
 
 - **Reactive / event-sourced engine.** Every state change an event; world state
   the fold of events. Natural answer to multi-puppet, undo, replay, audit,
-  AI-training capture. **Caution, with evidence:** `evennia/jobs/` (a job queue)
-  and `evennia/events/bus.py` (a `GameEvent` bus) were speculatively built toward
-  this shape and are **dead/unconsumed** — exactly the "designing for
-  hypothetical demand" this section warns against. Resolve via the
-  [jobs/eventbus prompt](../../prompts/ALPHA-jobs-eventbus-boundary.md) before
-  treating event-sourcing as a real direction.
+  AI-training capture. **Caution, with a corrected example (2026-08-19):**
+  `evennia/jobs/` (a job queue) and `evennia/eventbus/bus.py` (a `GameEvent`
+  bus, renamed from `evennia/events/`) were built speculatively toward this
+  shape and sat unconsumed for a long stretch. They are **no longer dead** —
+  the game now registers eleven job types and funnels its audit trail through
+  the bus; see the [jobs/eventbus prompt](../../prompts/ALPHA-jobs-eventbus-boundary.md).
+  The caution survives in weaker form: building ahead of demand cost a long
+  period of unowned surface, and the demand that eventually arrived was
+  ordinary queueing and auditing, not event sourcing. Neither subsystem is
+  evidence that an event-sourced engine is wanted.
 - **Out-of-process services.** AI inference / heavy simulation as independently
   scalable services rather than reactor-blocking work. AS1 addresses the symptom
   (threaded I/O), not the single-process assumption. Real when a game hits the

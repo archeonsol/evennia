@@ -4,7 +4,7 @@ Tests for engine event bus.
 
 from django.test import override_settings
 
-from evennia.events.bus import emit, subscribe
+from evennia.eventbus.bus import emit, subscribe
 from evennia.server.models import GameEvent
 from evennia.utils.test_resources import BaseEvenniaTest
 

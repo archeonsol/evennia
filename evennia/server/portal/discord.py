@@ -11,6 +11,7 @@ added to `server/conf/secret_settings.py` as your  DISCORD_BOT_TOKEN
 
 import json
 import os
+import time
 from random import random
 
 from django.conf import settings
@@ -38,8 +39,24 @@ OP_HEARTBEAT_ACK = 11
 OP_HELLO = 10
 OP_IDENTIFY = 2
 OP_INVALID_SESSION = 9
+OP_PRESENCE_UPDATE = 3
 OP_RECONNECT = 7
 OP_RESUME = 6
+
+
+# Discord rejects @everyone/@here/role pings from bot posts only if we say so;
+# without this, relayed player text can ping the whole guild.
+NO_MENTIONS = {"parse": []}
+
+# How long a retryable request waits before being re-sent, when Discord gives us
+# no better number to use.
+DEFAULT_RETRY_DELAY = 30
+
+# Cap on re-sends of a single request, so a permanently failing call cannot
+# reschedule itself forever.
+MAX_REQUEST_ATTEMPTS = 5
+
+_RATELIMIT_MAJOR_PARAMS = ("channels", "guilds", "webhooks")
 
 
 def should_retry(status_code):
@@ -52,6 +69,9 @@ def should_retry(status_code):
     Returns:
         retry (bool) - True if request should be retried False otherwise
     """
+    if status_code == 429:
+        # rate limited; the bucket cooldown is applied by RateLimiter
+        return True
     if status_code >= 500 and status_code <= 504:
         # these are common server error codes when the server is temporarily malfunctioning
         # in these cases, we should retry
@@ -59,6 +79,106 @@ def should_retry(status_code):
     else:
         # handle all other cases; this can be expanded later if needed for special cases
         return False
+
+
+def bucket_key(method, path):
+    """
+    Collapse an API path to the rate-limit bucket Discord accounts it against.
+
+    Discord buckets per route *template*, keeping only the "major" parameters
+    (channel, guild and webhook ids) distinct; every other snowflake in the path
+    is folded into a placeholder so e.g. two different message ids on one
+    channel share a bucket.
+
+    Args:
+        method (str) - HTTP method.
+        path (str) - API path, without the base url.
+
+    Returns:
+        key (str) - Opaque bucket identifier.
+    """
+    parts = [p for p in str(path).split("?")[0].strip("/").split("/") if p]
+    out = []
+    for i, part in enumerate(parts):
+        if part.isdigit() and not (i and parts[i - 1] in _RATELIMIT_MAJOR_PARAMS):
+            out.append("{id}")
+        else:
+            out.append(part)
+    return f"{method}:{'/'.join(out)}"
+
+
+class RateLimiter:
+    """
+    Serialize outbound REST calls per Discord rate-limit bucket.
+
+    Discord answers 429 with a cooldown rather than queueing for us, and the
+    bot fans out enough traffic (ticket thread backlog flushes, channel relay,
+    role writes) to hit those limits in normal use. Every request goes through
+    :meth:`run`, which defers the call while its bucket - or the whole bot, on a
+    global limit - is still cooling down.
+    """
+
+    def __init__(self):
+        self.bucket_ready_at = {}
+        self.global_ready_at = 0.0
+
+    def _wait_for(self, key):
+        """Seconds until this bucket may be used again."""
+        now = time.monotonic()
+        ready = max(self.bucket_ready_at.get(key, 0.0), self.global_ready_at)
+        return max(0.0, ready - now)
+
+    def run(self, key, func, *args, **kwargs):
+        """Call ``func`` now, or once bucket ``key`` has cooled down."""
+        wait = self._wait_for(key)
+        if wait <= 0:
+            func(*args, **kwargs)
+        else:
+            delay(wait, func, *args, **kwargs)
+
+    def note_response(self, key, response):
+        """
+        Record the cooldown Discord reported, and return the retry delay to use.
+
+        Args:
+            key (str) - Bucket key the request was sent under.
+            response (Response) - The HTTP response.
+
+        Returns:
+            retry_after (float or None) - Seconds to wait before re-sending, or
+                ``None`` if the response was not rate limited.
+        """
+        headers = {k.lower(): v for k, v in (getattr(response, "headers", None) or {}).items()}
+        now = time.monotonic()
+
+        if response.code == 429:
+            retry_after = _float_or_none(headers.get("retry-after"))
+            if retry_after is None:
+                try:
+                    retry_after = float(json.loads(response.content).get("retry_after"))
+                except Exception:
+                    retry_after = None
+            if retry_after is None:
+                retry_after = DEFAULT_RETRY_DELAY
+            if str(headers.get("x-ratelimit-global", "")).lower() == "true":
+                self.global_ready_at = max(self.global_ready_at, now + retry_after)
+            else:
+                self.bucket_ready_at[key] = max(self.bucket_ready_at.get(key, 0.0), now + retry_after)
+            return retry_after
+
+        remaining = _float_or_none(headers.get("x-ratelimit-remaining"))
+        reset_after = _float_or_none(headers.get("x-ratelimit-reset-after"))
+        if remaining is not None and reset_after is not None and remaining <= 0:
+            # bucket is spent; hold the next call in this bucket until it resets
+            self.bucket_ready_at[key] = max(self.bucket_ready_at.get(key, 0.0), now + reset_after)
+        return None
+
+
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class _ReactorTimer:
@@ -218,9 +338,22 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
     last_sequence = 0
     session_id = None
     discord_id = None
+    _rate_limiter = None
 
     def __init__(self):
         super().__init__()
+
+    @property
+    def rate_limiter(self):
+        """Per-client outbound limiter, created on first use.
+
+        Built lazily rather than in ``__init__`` because the protocol is also
+        brought up through paths that never run it, and a missing limiter would
+        break every REST call rather than just the bookkeeping.
+        """
+        if self._rate_limiter is None:
+            self._rate_limiter = RateLimiter()
+        return self._rate_limiter
 
     def _cancel_heartbeat(self):
         """Cancel any pending heartbeat timer.
@@ -341,30 +474,67 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         """
         return self.sendMessage(json.dumps(data).encode("utf-8"))
 
-    def _post_json(self, url, data, **kwargs):
-        """
-        Post JSON data to a REST API endpoint
-
-        Args:
-            url (str) - The API path which is being posted to
-            data (dict) - Content to be sent
-        """
-        url = f"{DISCORD_API_BASE_URL}/{url}"
-        body = json.dumps(data).encode("utf-8")
-        request_type = kwargs.pop("type", "POST")
-        headers = {
+    def _request_headers(self):
+        return {
             "User-Agent": DISCORD_USER_AGENT,
             "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
             "Content-Type": "application/json",
         }
 
+    def _post_json(self, path, data, **kwargs):
+        """
+        Post JSON data to a REST API endpoint
+
+        Args:
+            path (str) - The API path which is being posted to, without the
+                base url. It is kept unprefixed so a retry can re-enter this
+                method without stacking a second base url onto the target.
+            data (dict) - Content to be sent
+        """
+        request_type = kwargs.pop("type", "POST")
+        attempt = int(kwargs.pop("attempt", 0))
+        key = bucket_key(request_type, path)
+        url = f"{DISCORD_API_BASE_URL}/{path}"
+        body = json.dumps(data).encode("utf-8")
+
         def cbResponse(response):
-            if response.code == 200 or response.code == 204:
+            retry_after = self.rate_limiter.note_response(key, response)
+            if 200 <= response.code < 300:
                 self.post_response(response.content)
             elif should_retry(response.code):
-                delay(300, self._post_json, url, data, **kwargs)
+                if attempt >= MAX_REQUEST_ATTEMPTS:
+                    logger.log_err(
+                        f"Discord {request_type} {path}: giving up after "
+                        f"{attempt} retries (HTTP {response.code})"
+                    )
+                    return
+                wait = retry_after if retry_after is not None else DEFAULT_RETRY_DELAY
+                delay(
+                    wait,
+                    self._post_json,
+                    path,
+                    data,
+                    type=request_type,
+                    attempt=attempt + 1,
+                    **kwargs,
+                )
+            else:
+                self.log_request_failure(request_type, path, response)
 
-        http.request(request_type, url, headers=headers, data=body).addCallback(cbResponse)
+        self.rate_limiter.run(
+            key,
+            lambda: http.request(
+                request_type, url, headers=self._request_headers(), data=body
+            ).addCallback(cbResponse),
+        )
+
+    def log_request_failure(self, method, path, response):
+        """Log a non-retryable REST failure with whatever Discord said about it."""
+        try:
+            detail = response.content.decode("utf-8", errors="replace")[:500]
+        except Exception:
+            detail = ""
+        logger.log_err(f"Discord {method} {path} failed HTTP {response.code}: {detail}")
 
     def post_response(self, body, **kwargs):
         """
@@ -373,8 +543,15 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         Args:
             body (bytes) - The post response body
         """
-        data = json.loads(body)
-        if "errors" in data:
+        if not body:
+            # 204 No Content: role writes and thread PATCHes answer with an empty
+            # body, which is a success and has nothing to parse.
+            return
+        try:
+            data = json.loads(body)
+        except (ValueError, TypeError):
+            return
+        if isinstance(data, dict) and "errors" in data:
             self.handle_error(data)
 
     def handle_error(self, data, **kwargs):
@@ -474,7 +651,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
 
         """
 
-        data = {"content": text}
+        data = {"content": text, "allowed_mentions": NO_MENTIONS}
         data.update(kwargs)
         self._post_json(f"channels/{channel_id}/messages", data)
 
@@ -509,7 +686,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         Sends an CHANNEL_MESSAGE_WITH_SOURCE (type 4) response by default.
         Pass response_type=6 for DEFERRED_UPDATE_MESSAGE on component clicks.
         """
-        data_payload = {}
+        data_payload = {"allowed_mentions": NO_MENTIONS}
         if content:
             data_payload["content"] = str(content)[:2000]
         if kwargs.get("embeds"):
@@ -548,21 +725,23 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
           message (dict) — initial thread/post body (embeds/content)
           forum (bool) — omit type 11 (required for forum channel parents)
         """
-        url = f"{DISCORD_API_BASE_URL}/channels/{channel_id}/threads"
         forum = kwargs.pop("forum", False)
+        attempt = int(kwargs.pop("attempt", 0))
+        path = f"channels/{channel_id}/threads"
+        url = f"{DISCORD_API_BASE_URL}/{path}"
+        key = bucket_key("POST", path)
         data = {"name": str(name)[:100], "auto_archive_duration": 1440}
         if not forum and "message" not in kwargs:
             # type 11 = GUILD_PUBLIC_THREAD in a text channel.
             data["type"] = 11
         data.update(kwargs)
+        if isinstance(data.get("message"), dict):
+            data["message"] = dict(data["message"], allowed_mentions=NO_MENTIONS)
         body = json.dumps(data).encode("utf-8")
-        headers = {
-            "User-Agent": DISCORD_USER_AGENT,
-            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
-            "Content-Type": "application/json",
-        }
+        headers = self._request_headers()
 
         def cbResponse(response):
+            retry_after = self.rate_limiter.note_response(key, response)
             if response.code in (200, 201):
                 try:
                     payload = json.loads(response.content)
@@ -584,10 +763,20 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                     )
                 else:
                     logger.log_err(f"Discord thread create: no thread id in response job={job_id}")
-            elif should_retry(response.code):
+            elif should_retry(response.code) and attempt < MAX_REQUEST_ATTEMPTS:
                 # forum was popped from kwargs above; restore it so the retry
                 # still targets a forum parent (else it re-adds the type-11 flag).
-                delay(300, self.send_create_thread, name, channel_id, job_id, forum=forum, **kwargs)
+                wait = retry_after if retry_after is not None else DEFAULT_RETRY_DELAY
+                delay(
+                    wait,
+                    self.send_create_thread,
+                    name,
+                    channel_id,
+                    job_id,
+                    forum=forum,
+                    attempt=attempt + 1,
+                    **kwargs,
+                )
             else:
                 err_body = ""
                 try:
@@ -610,7 +799,10 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                     ),
                 )
 
-        http.request("POST", url, headers=headers, data=body).addCallback(cbResponse)
+        self.rate_limiter.run(
+            key,
+            lambda: http.request("POST", url, headers=headers, data=body).addCallback(cbResponse),
+        )
 
     def send_thread_message(self, thread_id, **kwargs):
         """
@@ -626,6 +818,7 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         if kwargs.get("components") is not None:
             data["components"] = kwargs["components"]
         if data:
+            data["allowed_mentions"] = NO_MENTIONS
             self._post_json(f"channels/{thread_id}/messages", data)
 
     def send_thread_update(self, thread_id, **kwargs):
@@ -663,15 +856,15 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         Send a direct message to a user: open (or reuse) their DM channel, then
         post. Use with session.msg(dm=(user_id, text)).
         """
-        url = f"{DISCORD_API_BASE_URL}/users/@me/channels"
+        attempt = int(kwargs.pop("attempt", 0))
+        path = "users/@me/channels"
+        url = f"{DISCORD_API_BASE_URL}/{path}"
+        key = bucket_key("POST", path)
         body = json.dumps({"recipient_id": str(user_id)}).encode("utf-8")
-        headers = {
-            "User-Agent": DISCORD_USER_AGENT,
-            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
-            "Content-Type": "application/json",
-        }
+        headers = self._request_headers()
 
         def cbResponse(response):
+            retry_after = self.rate_limiter.note_response(key, response)
             if response.code in (200, 201):
                 try:
                     channel_id = json.loads(response.content).get("id")
@@ -680,14 +873,43 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                 if channel_id:
                     self._post_json(
                         f"channels/{channel_id}/messages",
-                        {"content": str(text)[:2000]},
+                        {"content": str(text)[:2000], "allowed_mentions": NO_MENTIONS},
                     )
-            elif should_retry(response.code):
-                delay(300, self.send_dm, user_id, text, **kwargs)
+            elif should_retry(response.code) and attempt < MAX_REQUEST_ATTEMPTS:
+                wait = retry_after if retry_after is not None else DEFAULT_RETRY_DELAY
+                delay(wait, self.send_dm, user_id, text, attempt=attempt + 1, **kwargs)
+            else:
+                # A player who blocks bot DMs answers 403 here; that is expected
+                # and must not be retried.
+                self.log_request_failure("POST", path, response)
 
-        http.request("POST", url, headers=headers, data=body).addCallback(cbResponse)
+        self.rate_limiter.run(
+            key,
+            lambda: http.request("POST", url, headers=headers, data=body).addCallback(cbResponse),
+        )
 
-        d.addCallback(cbResponse)
+    def send_presence(self, status_text, **kwargs):
+        """
+        Set the bot's Discord presence over the gateway.
+
+        Use with session.msg(presence=(status_text,)). ``activity_type`` picks the
+        verb Discord shows: 0 Playing, 2 Listening, 3 Watching (default).
+        """
+        payload = {
+            "op": OP_PRESENCE_UPDATE,
+            "d": {
+                "since": None,
+                "activities": [
+                    {
+                        "name": str(status_text)[:128],
+                        "type": int(kwargs.get("activity_type", 3)),
+                    }
+                ],
+                "status": str(kwargs.get("status", "online")),
+                "afk": False,
+            },
+        }
+        self._send_json(payload)
 
     def send_default(self, *args, **kwargs):
         """
@@ -695,6 +917,32 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
 
         """
         pass
+
+    def _reply_context(self, data):
+        """
+        Summarize the message a Discord reply was aimed at.
+
+        Discord threads a reply by attaching the parent under
+        ``referenced_message``; without it the game sees a flat run of lines and
+        loses who was answering whom.
+
+        Args:
+            data (dict) - A MESSAGE_CREATE/MESSAGE_UPDATE payload.
+
+        Returns:
+            context (dict or None) - ``{message_id, author, author_id, excerpt}``,
+                or ``None`` when the message is not a reply.
+        """
+        referenced = data.get("referenced_message")
+        if not isinstance(referenced, dict):
+            return None
+        ref_author = referenced.get("author") or {}
+        return {
+            "message_id": referenced.get("id"),
+            "author": ref_author.get("username"),
+            "author_id": ref_author.get("id"),
+            "excerpt": (referenced.get("content") or "")[:120],
+        }
 
     def data_in(self, data, **kwargs):
         """
@@ -706,26 +954,38 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
         """
         action_type = data.get("t", "UNKNOWN")
 
-        if action_type == "MESSAGE_CREATE":
-            # someone posted a message on Discord that the bot can see
+        if action_type in ("MESSAGE_CREATE", "MESSAGE_UPDATE"):
+            # someone posted or edited a message on Discord that the bot can see
             data = data["d"]
-            if data["author"]["id"] == self.discord_id:
+            author = data.get("author") or {}
+            if author.get("id") == self.discord_id:
                 # it's by the bot itself! disregard
                 return
             if data.get("webhook_id"):
                 # Webhook posts (including our own channel webhook fallback) must not
                 # re-enter the game via BUS.emit — they are not player chat.
                 return
-            message = data["content"]
+            if action_type == "MESSAGE_UPDATE" and "content" not in data:
+                # partial MESSAGE_UPDATE (embed unfurl, pin, flag change) carries no
+                # new text; there is nothing for the game to re-render.
+                return
+            message = data.get("content") or ""
             channel_id = data["channel_id"]
-            keywords = {"channel_id": channel_id}
+            keywords = {
+                "channel_id": channel_id,
+                "message_id": data.get("id"),
+                "edited": action_type == "MESSAGE_UPDATE",
+            }
+            reply_to = self._reply_context(data)
+            if reply_to:
+                keywords["reply_to"] = reply_to
             if "guild_id" in data:
                 # message received to a Discord channel
                 keywords["type"] = "channel"
                 member = data.get("member") or {}
-                author = member.get("nick") or data["author"]["username"]
-                author_id = data["author"]["id"]
-                keywords["sender"] = (author_id, author)
+                author_name = member.get("nick") or author.get("username")
+                author_id = author.get("id")
+                keywords["sender"] = (author_id, author_name)
                 keywords["guild_id"] = data["guild_id"]
                 if member.get("roles"):
                     keywords["discord_member_role_ids"] = member["roles"]
@@ -733,12 +993,29 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
             else:
                 # message sent directly to the bot account via DM
                 keywords["type"] = "direct"
-                author = data["author"]["username"]
-                author_id = data["author"]["id"]
-                keywords["sender"] = (author_id, author)
+                author_name = author.get("username")
+                author_id = author.get("id")
+                keywords["sender"] = (author_id, author_name)
 
             # pass the processed data to the server
             self.sessionhandler.data_in(self, bot_data_in=(message, keywords))
+
+        elif action_type == "MESSAGE_DELETE":
+            # a Discord message was removed; tell the server so the relayed copy
+            # can be retracted on the game side
+            inner = data["d"]
+            self.sessionhandler.data_in(
+                self,
+                bot_data_in=(
+                    "",
+                    {
+                        "type": "MESSAGE_DELETE",
+                        "message_id": inner.get("id"),
+                        "channel_id": inner.get("channel_id"),
+                        "guild_id": inner.get("guild_id"),
+                    },
+                ),
+            )
 
         elif action_type in ("GUILD_CREATE", "GUILD_UPDATE"):
             # we received the current status of a guild the bot is on; process relevant info

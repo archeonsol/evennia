@@ -25,6 +25,7 @@ evennia
    evennia.commands
    evennia.comms
    evennia.contrib
+   evennia.eventbus
    evennia.events
    evennia.help
    evennia.hooks

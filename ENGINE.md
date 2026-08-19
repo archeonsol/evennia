@@ -60,7 +60,7 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 ### Tier 2 (subsystem modernization)
 
 - **AMP session serde:** `AMP_SESSION_SERDE = "json"` for Msg* traffic (no pickle on hot path). Admin/sync still uses pickle. Reject legacy pickle unless `AMP_SESSION_ACCEPT_LEGACY_PICKLE = True`.
-- **Event bus:** `evennia.events.emit(subject, payload, actor=..., persist=...)` — sanitized JSON payloads; optional Redis stream + `GameEvent` Postgres rows (`EVENT_BUS_BACKEND`, `EVENT_BUS_PERSIST_SUBJECTS`).
+- **Event bus:** `evennia.eventbus.emit(subject, payload, actor=..., persist=...)` — sanitized JSON payloads; optional Redis stream + `GameEvent` Postgres rows (`EVENT_BUS_BACKEND`, `EVENT_BUS_PERSIST_SUBJECTS`).
 - **Job queue:** `evennia.jobs.enqueue_job(type, payload)` — **registry-only** callables (`JOB_QUEUE_REGISTRY`); Redis list or `EngineJob` table; drain via `JOB_QUEUE_DRAIN_EVERY_N_TICKS` on global tick.
 - **Channel subscriber cache:** Redis SET per channel (`CHANNEL_SUBSCRIBER_CACHE_ENABLED`); PG M2M remains source of truth; invalidates on subscribe/unsubscribe.
 - **Postgres tooling:** `evennia.server.database_postgres.apply_postgres_engine_defaults(DATABASES)` — `CONN_MAX_AGE`, health checks, statement timeout. Read replicas for website/logs only (not game thread).
@@ -70,7 +70,7 @@ Requires **Django 6.0.2+** and **Python 3.12+**.
 ### Tier 2.5 (game + engine hooks)
 
 - **Room scene index:** `evennia.objects.scene_index` — Redis SET per room; `DefaultObject.get_message_recipients()` uses it when `ROOM_SCENE_INDEX_ENABLED`.
-- **Audit:** `evennia.events.emit` via `mootest/world/audit.py` (economy, staff pending, ban/unban, `@perm`).
+- **Audit:** `evennia.eventbus.emit` via `mootest/world/audit.py` (economy, staff pending, ban/unban, `@perm`).
 - **Jobs:** extended `JOB_QUEUE_REGISTRY` in game settings (indexes, channel cache rebuild, event export, Discord webhook).
 - **Channel cache:** PG M2M is truth; Redis rebuilt on start via `channel_subscriber_cache_rebuild` job.
 

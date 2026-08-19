@@ -1,13 +1,34 @@
 """
-Engine event bus for moderation audit, analytics, and cross-subsystem decoupling.
+Deprecated alias for :mod:`evennia.eventbus`.
 
-Usage::
+The engine event bus moved to ``evennia.eventbus`` so the top-level
+``evennia.events`` name stopped shadowing :mod:`evennia.actions.events`, the
+unrelated in-process ``EventRegistry`` that backs ``@subscribe`` on action
+handlers. Every ``subscribe`` call site in the tree resolves to that other
+module; this one's ``subscribe`` had no consumers at all.
 
-    from evennia.events import emit
+This shim exists for one release so a repo that has not been updated fails
+loudly instead of silently. Callers that swallow import errors around
+``emit`` -- see the game's ``world/audit/emit.py`` -- would otherwise stop
+auditing without raising anything.
 
-    emit("economy.transfer", {"amount": 50, "from_key": "a", "to_key": "b"}, actor=account)
+Update imports to::
+
+    from evennia.eventbus import emit
+
+This module is removed in the release after the one that introduced it.
+
 """
 
-from evennia.events.bus import emit, subscribe
+import warnings
+
+from evennia.eventbus.bus import emit, subscribe
+
+warnings.warn(
+    "evennia.events is deprecated and will be removed in the next release; "
+    "import from evennia.eventbus instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 __all__ = ("emit", "subscribe")

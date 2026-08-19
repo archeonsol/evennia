@@ -29,6 +29,18 @@ Currently parallel-startable (no unresolved dependencies):
   migration, L1/R1/I2 consuming that `Actor`) is unresolved; the
   architecture-doc I1 entry is stale on this. Confirm before starting.
 
+- [W1: engine console](W1-console-implementation-plan.md) — the
+  Django-admin successor half of W1. **Unblocked:** its two
+  dependencies (R1, H1) both shipped. Unlike the other prompts here it
+  commits to a design rather than inviting one cold, and carries eleven
+  decisions (D1-D11) with reasoning rather than open questions; the
+  executing agent confirms those, then builds. Phase 1 (kernel
+  extraction + generic Records lens) is self-justifying and everything
+  after it is earned. Folds the moderation web surface up from the game
+  repo. **D6 supersedes item 2 below**: both `jobs/` and the event bus have
+  live game-side consumers, so that prompt's "zero consumers" premise is
+  stale.
+
 **Shipped:**
 
 - [AS1: sync/async commitment](AS1-implementation-roadmap.md) — engine
@@ -80,10 +92,15 @@ shim + except cleanup, login engine ownership (`.95`).
    the boundary-guard test is principle-driven. Revisit only on a trigger in the
    prompt.
 2. [ALPHA: jobs/ + event bus boundary](ALPHA-jobs-eventbus-boundary.md) —
-   cross-repo decision; settle before the squash (it owns the `server/0004`
-   model). Two fully-built-but-unconsumed subsystems + an `evennia.events` vs
-   `evennia.actions.events` name collision. Wire (machinery in engine, usage in
-   game) or cut.
+   **premise corrected 2026-08-19.** Both subsystems turned out to have live
+   game-side consumers (eleven registered job types; the bus behind
+   `world/audit/emit.py`), so wire-or-cut is settled as **wire** and the squash
+   gains nothing — `server/0004`'s models stay. The `evennia.events` →
+   `evennia.eventbus` rename **is done** (uncommitted, both repos, with a
+   one-release deprecation shim). What remains: reconcile
+   `EVENT_BUS_PERSIST_SUBJECTS` (two listed subjects never fire; two firing ones
+   are not persisted), write down the usage contract, cut the release, and drop
+   the shim one release later.
 3. [ALPHA: cmdset retirement](ALPHA-cmdset-retirement-audit.md) — the CM1 finish
    line, **unblocked and chunked** (2026-06-15) into six self-contained PRs
    (`ALPHA-cmdset-1-*` … `-6-*`). Gates (EvMore/EvEditor, EvMenu removal `.85`,
