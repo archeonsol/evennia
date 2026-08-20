@@ -21,10 +21,17 @@ import time
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 
 from evennia.console.feed import KEEPALIVE_SECONDS, TICK_SECONDS, Stream, parse_topics
-from evennia.web.console.auth import CONSOLE_HEADER, _meta_key, live_capabilities
+from evennia.web.console.auth import (
+    CONSOLE_HEADER,
+    _meta_key,
+    enforce_transport,
+    live_capabilities,
+    touch_idle,
+)
 
 
 def _authorize(request):
@@ -50,6 +57,11 @@ def _authorize(request):
         return frozenset()
     if not request.META.get(_meta_key(CONSOLE_HEADER)):
         return frozenset()
+    try:
+        enforce_transport(request)
+        touch_idle(request)
+    except PermissionDenied:
+        return frozenset()
     return live_capabilities(user)
 
 
@@ -67,12 +79,21 @@ def _last_seen(request):
         return None
 
 
-async def _events(stream, last_seq):
+#: Seconds between capability re-checks inside an open stream. Far below any
+#: useful attack window, and one cached lookup each time.
+RECHECK_SECONDS = 30.0
+
+
+async def _events(stream, last_seq, recheck=None):
     """Yield SSE text for one connected console.
 
     Args:
         stream: The :class:`~evennia.console.feed.Stream` to draw from.
         last_seq: Sequence the client already received, or ``None``.
+        recheck: Callable returning whether the caller still holds access. A
+            stream outlives the request that opened it, so a grant revoked
+            mid-stream would otherwise keep flowing until the client chose to
+            reconnect.
 
     Yields:
         str: Encoded SSE frames and keepalive comments.
@@ -83,7 +104,13 @@ async def _events(stream, last_seq):
         yield frame.encode()
 
     last_write = time.monotonic()
+    last_check = time.monotonic()
     while True:
+        if recheck is not None and time.monotonic() - last_check > RECHECK_SECONDS:
+            last_check = time.monotonic()
+            if not await sync_to_async(recheck, thread_sensitive=True)():
+                yield 'event: closed\ndata: {"t":"closed","reason":"access revoked"}\n\n'
+                return
         frames = await sync_to_async(stream.due, thread_sensitive=False)()
         if frames:
             yield "".join(frame.encode() for frame in frames)
@@ -119,7 +146,7 @@ async def feed_view(request):
     topics = parse_topics(request.GET.get("topics"))
     stream = Stream(topics=topics)
     response = StreamingHttpResponse(
-        _events(stream, _last_seen(request)),
+        _events(stream, _last_seen(request), recheck=lambda: bool(_authorize(request))),
         content_type="text/event-stream",
     )
     # Buffering a stream defeats it; a proxy that ignores this will simply

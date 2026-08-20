@@ -825,6 +825,18 @@ CONSOLE_SERVER_CONTROL_ENABLED = False
 # Audit retention. Rows recording a moderation decision or a break-glass grant
 # are never pruned regardless of these windows: appeal evidence has to outlive
 # any window, and investigation evidence is what an attacker most wants gone.
+# Console sessions are shells, and the site-wide SESSION_COOKIE_AGE is a
+# player-website default measured in weeks. These bound the console instead of
+# logging every player out. See W1-console-security-review.md.
+# Seconds of console inactivity after which a session is refused, not expired.
+CONSOLE_IDLE_TIMEOUT = 1800
+# Seconds a password re-entry stays valid before a dangerous action.
+CONSOLE_REAUTH_WINDOW = 300
+# Serve the console over a non-TLS connection. Deliberate, for localhost only.
+CONSOLE_ALLOW_INSECURE = False
+# Read-only SQL bounds.
+CONSOLE_SQL_TIMEOUT_MS = 5000
+CONSOLE_SQL_MAX_ROWS = 1000
 CONSOLE_AUDIT_RETENTION_DAYS = 365
 # REPL source text is the bulkiest audit content and the least often needed
 # long-term, so it prunes on its own shorter window.

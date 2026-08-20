@@ -35,7 +35,7 @@ from rest_framework.views import APIView
 from evennia.console import health, spec
 from evennia.console.panels.coerce import CoercionError
 from evennia.console.registry import PanelError, dispatch, panel_registry
-from evennia.web.console.auth import ConsolePermission, worker_context
+from evennia.web.console.auth import ConsoleIdle, ConsoleInsecure, ConsolePermission, worker_context
 from evennia.web.utils.io import (
     IOThreadCallIndeterminate,
     IOThreadCallTimeout,
@@ -130,6 +130,15 @@ class ConsoleView(APIView):
         mapped = _bridge_failure(exc)
         if mapped is not None:
             return mapped
+        if isinstance(exc, (ConsoleIdle, ConsoleInsecure)):
+            # Distinguished from an ordinary refusal: the operator has to be
+            # told what to do about it, and "403" alone does not say.
+            return _outcome(
+                {"detail": str(exc), "reauthenticate": isinstance(exc, ConsoleIdle)},
+                code=status.HTTP_403_FORBIDDEN,
+                retryable=False,
+                outcome="conflict",
+            )
         if isinstance(exc, CoercionError):
             return self.handle_exception(ValidationError({"detail": str(exc), "field": exc.field}))
         if isinstance(exc, FieldError):
