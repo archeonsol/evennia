@@ -1427,6 +1427,21 @@ async function drawErrors() {
   });
 
   const body = node("div", { class: "panel-body" });
+
+  /* A fault nobody has judged is the one that wants a person. A muted or
+   * acknowledged one has already had the decision it needs. */
+  const unjudged = rows.filter((group) => group.state === "open");
+  const loud = unjudged.filter((group) => (group.count || 0) >= 100);
+  body.append(
+    annunciator(
+      [
+        loud.length && { text: loud.length + " FAULTS OVER 100 OCCURRENCES", state: "fail" },
+        unjudged.length && { text: unjudged.length + " FAULTS NOBODY HAS JUDGED", state: "attn" },
+      ],
+      "EVERY FAULT HAS BEEN JUDGED",
+    ),
+  );
+
   if (rows.length === 0) {
     body.append(
       empty(
@@ -1546,12 +1561,83 @@ async function reviewFault(signature, wanted, note) {
 /* The flag queue leads, because it is the only list here that is asking for
  * somebody's attention. Sanctions and sessions are reference material for
  * deciding what to do about a flag. */
+/* The annunciator.
+ *
+ * A row that answers "is anything wrong" before the panel answers "what". It
+ * came from the staff ticket board and belongs on every station that opens
+ * with a queue: a table alone asks the operator to find what matters by
+ * scanning it, which is the work a console exists to save.
+ *
+ * Two rules it carries with it. An alarm names a count and a condition --
+ * "3 dead letters" -- never a severity word on its own, because "attention
+ * needed" tells somebody to go and find out. And a panel with nothing wrong
+ * still lights one block: an empty region reads as a panel that failed to
+ * load, which is the one thing an operations surface must never look like.
+ */
+function annunciator(alarms, calm) {
+  const row = node("div", { class: "annunciator" });
+  const lit = (alarms || []).filter(Boolean);
+  if (!lit.length) {
+    row.append(lamp(calm || "NOTHING NEEDS A PERSON", "ok"));
+    return row;
+  }
+  for (const alarm of lit) row.append(lamp(alarm.text, alarm.state));
+  return row;
+}
+
+/* Count blocks that are their own filter.
+ *
+ * Readout and selector in one object. A row of chips beside a row of counts is
+ * the same information twice, and the operator has to match them by eye to use
+ * either.
+ */
+function countBlocks(items, current, onSelect) {
+  const list = node("ul", { class: "kinds" });
+  for (const item of items || []) {
+    const chosen = String(item.key) === String(current || "");
+    list.append(
+      node("li", {}, [
+        node(
+          "button",
+          {
+            type: "button",
+            class: "kind",
+            "aria-current": chosen ? "true" : "false",
+            onclick: () => onSelect(chosen ? "" : item.key),
+          },
+          [
+            node("span", { class: "kind-name", text: item.label }),
+            node("span", { class: "kind-count", text: String(item.count) }),
+            node("span", {
+              class: item.wants ? "kind-sub wants" : "kind-sub clear",
+              text: item.sub || (item.wants ? item.wants + " need a person" : "clear"),
+            }),
+          ],
+        ),
+      ]),
+    );
+  }
+  return list;
+}
+
 async function drawModeration() {
   const query = new URLSearchParams({ state: state.modState || "" });
   const result = await call("panels/moderation/rows/?" + query);
   report(result);
   const data = result.payload.rows || {};
   const body = node("div", { class: "panel-body" });
+
+  const flags = data.flags || [];
+  const severe = flags.filter((row) => (row.severity || 0) >= 2);
+  body.append(
+    annunciator(
+      [
+        severe.length && { text: severe.length + " HIGH-SEVERITY FLAGS", state: "fail" },
+        flags.length && { text: flags.length + " FLAGS AWAITING A PERSON", state: "attn" },
+      ],
+      "NO FLAG IS WAITING",
+    ),
+  );
 
   body.append(section("Flags awaiting a person"));
   if ((data.flags || []).length === 0) {
@@ -2968,29 +3054,44 @@ async function drawJobs() {
   const data = result.payload.rows || {};
   const body = node("div", { class: "panel-body" });
 
-  const depth = node("dl", { class: "rows" });
-  for (const row of data.by_status || []) {
-    depth.append(
-      node("div", { class: "row-pair" }, [
-        node("dt", { text: row.status }),
-        node("dd", {}, [
-          lamp(
-            String(row.total),
-            row.status === "dead" ? "fail" : row.status === "pending" ? "attn" : "ok",
-          ),
-        ]),
-      ]),
-    );
-  }
-  body.append(section("Depth"), depth);
+  body.append(
+    annunciator(
+      [
+        data.dead && { text: data.dead + " DEAD LETTERS", state: "fail" },
+        data.overdue_leases && {
+          text: data.overdue_leases + " LEASES OUT OF DATE",
+          state: "attn",
+        },
+      ],
+      "THE QUEUE IS DRAINING",
+    ),
+  );
+
+  /* Depth by status, as blocks that are also the filter. */
+  body.append(
+    countBlocks(
+      (data.by_status || []).map((row) => ({
+        key: row.status,
+        label: row.status,
+        count: row.total,
+        wants: row.status === "dead" ? row.total : 0,
+        sub: row.status === "dead" ? "need a person" : "",
+      })),
+      state.jobStatus,
+      (key) => {
+        state.jobStatus = key;
+        state.jobOpen = null;
+        select_render();
+      },
+    ),
+  );
 
   if (data.overdue_leases) {
     body.append(
       node("p", {
-        class: "empty-hint fail-text",
+        class: "empty-hint",
         text:
-          data.overdue_leases +
-          " lease(s) are out of date. The workers that held these jobs stopped. The next queue run takes the jobs again.",
+          "A lease that is out of date shows that the worker stopped. The next queue run takes the job again. You do not need to do this.",
       }),
     );
   }

@@ -255,3 +255,87 @@ tbody td.num { text-align: right; }
 }
 
 .row-pair dd.overridden { color: var(--attn); }
+
+/* ------------------------------------------------------------ annunciator */
+
+/* The row that answers "is anything wrong" before the queue answers "what".
+ * Worst first, and a board with nothing wrong still shows one lit block:
+ * an empty region reads as a panel that failed to load, which is the one
+ * thing an operations surface must never look like. */
+.annunciator {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 0 14px;
+}
+
+/* -------------------------------------------------------------- kind blocks */
+
+/* Readout and selector in one object. Each block reports its kind's open count
+ * and, when it has any, how many are past a shift unclaimed; touching it
+ * filters the queue to that kind. A separate row of filter chips beside a
+ * separate row of counts would be the same information twice, and the operator
+ * would have to match them by eye. */
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  margin: 0 0 2px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--rule);
+  list-style: none;
+}
+
+.kinds li { flex: 1 1 130px; }
+
+.kind {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+  padding: 10px 12px 11px;
+  border: 0;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.kind:hover { background: var(--raised); color: var(--ink); }
+
+.kind[aria-current="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--attn);
+}
+
+.kind-name {
+  font: 500 10px/1.2 var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.kind-count {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--ink);
+  font: 400 20px/1 var(--mono);
+}
+
+.kind[aria-current="true"] .kind-count { color: var(--attn); }
+
+.kind-sub {
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kind-sub.wants { color: var(--fail-text); }
+.kind-sub.clear { color: var(--ink-faint); }
