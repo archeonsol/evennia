@@ -40,10 +40,12 @@ class TestBuiltinRegistration(TestCase):
             [panel.key for panel in registry.panels()],
             [
                 "attributes",
+                "authorization",
                 "errors",
                 "health",
                 "logs",
                 "migrations",
+                "moderation",
                 "records",
                 "runtime",
                 "settings",

@@ -41,6 +41,10 @@ const state = {
   errorState: "",
   errorSearch: "",
   errorOpen: null,
+  modState: "",
+  modFlag: null,
+  authView: "grants",
+  probe: null,
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -1017,8 +1021,377 @@ async function reviewFault(signature, wanted, note) {
   select_render();
 }
 
+/* The flag queue leads, because it is the only list here that is asking for
+ * somebody's attention. Sanctions and sessions are reference material for
+ * deciding what to do about a flag. */
+async function drawModeration() {
+  const query = new URLSearchParams({ state: state.modState || "" });
+  const result = await call("panels/moderation/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  body.append(section("Flags awaiting a person"));
+  if ((data.flags || []).length === 0) {
+    body.append(empty("QUEUE CLEAR.", "No flag is waiting for review."));
+  } else {
+    const table = node("table");
+    table.append(
+      node("thead", {}, [
+        node("tr", {}, [
+          node("th", { scope: "col", text: "SEV" }),
+          node("th", { scope: "col", text: "KIND" }),
+          node("th", { scope: "col", text: "ACCOUNT" }),
+          node("th", { scope: "col", text: "SUMMARY" }),
+          node("th", { scope: "col", text: "SEEN" }),
+          node("th", { scope: "col", text: "LAST" }),
+        ]),
+      ]),
+    );
+    const tbody = node("tbody");
+    for (const flag of data.flags) {
+      tbody.append(
+        node("tr", {
+          title: "Open this flag",
+          onclick: () => {
+            state.modFlag = state.modFlag === flag.id ? null : flag.id;
+            select_render();
+          },
+        }, [
+          node("td", { class: "num", text: String(flag.severity) }),
+          cell(flag.kind),
+          cell(flag.account),
+          cell(flag.summary),
+          node("td", { class: "num", text: String(flag.seen_count) }),
+          cell(flag.last_seen),
+        ]),
+      );
+    }
+    table.append(tbody);
+    body.append(table);
+  }
+
+  if (state.modFlag !== null) {
+    body.append(await flagDossier(data));
+  }
+
+  body.append(section("Active sanctions"));
+  const sanctions = node("table");
+  sanctions.append(
+    node("thead", {}, [
+      node("tr", {}, [
+        node("th", { scope: "col", text: "LEVEL" }),
+        node("th", { scope: "col", text: "SUBJECT" }),
+        node("th", { scope: "col", text: "REASON" }),
+        node("th", { scope: "col", text: "EXPIRES" }),
+        node("th", { scope: "col", text: "" }),
+      ]),
+    ]),
+  );
+  const sbody = node("tbody");
+  for (const item of data.sanctions || []) {
+    sbody.append(
+      node("tr", {}, [
+        node("td", {}, [lamp(item.level.toUpperCase(), item.level === "watch" ? "off" : "fail")]),
+        cell(item.subject_type + " " + item.subject),
+        cell(item.reason),
+        cell(item.expires),
+        node("td", {}, [
+          node("button", {
+            type: "button",
+            text: "LIFT",
+            onclick: async () => {
+              const reason = prompt("Why is this sanction being lifted?");
+              if (!reason) return;
+              const done = await call("panels/moderation/actions/revoke/", {
+                body: { sanction_id: item.id, reason },
+              });
+              if (report(done)) select_render();
+            },
+          }),
+        ]),
+      ]),
+    );
+  }
+  sanctions.append(sbody);
+  body.append((data.sanctions || []).length ? sanctions : empty("NO ACTIVE SANCTIONS."));
+
+  body.append(section("Recent connections"));
+  const sessions = node("div", { class: "log-view" });
+  for (const row of data.sessions || []) {
+    sessions.append(
+      node("div", { class: "session-row" }, [
+        node("span", { class: "log-source", text: row.protocol }),
+        node("span", { class: "log-text", text: (row.account || "(anonymous)") + "  " + row.cidr + "  " + (row.network || "") }),
+        row.address_trustworthy
+          ? node("span", { class: "legend", text: row.country || "" })
+          : lamp("ADDRESS VOID", "attn"),
+      ]),
+    );
+  }
+  body.append((data.sessions || []).length ? sessions : empty("NO CONNECTIONS RECORDED."));
+
+  const filter = node("select", {
+    id: "mod-state",
+    onchange: (event) => {
+      state.modState = event.target.value;
+      state.modFlag = null;
+      select_render();
+    },
+  });
+  for (const option of [""].concat(data.flag_states || [])) {
+    filter.append(
+      node("option", {
+        value: option,
+        selected: option === (state.modState || ""),
+        text: option ? option.toUpperCase() : "OPEN ONLY",
+      }),
+    );
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("MODERATION", data.open_flags ? data.open_flags + " OPEN" : "QUEUE CLEAR"),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "mod-state", text: "Show" }),
+        filter,
+      ]),
+      node("span", { class: "spacer" }),
+      node("span", { class: "legend", text: data.note || "" }),
+      node("button", {
+        type: "button",
+        text: "VERIFY CHAIN",
+        title: "Check the sanction hash chain",
+        onclick: async (event) => {
+          const button = event.target;
+          button.textContent = "CHECKING";
+          const done = await call("panels/moderation/actions/verify_chain/", { body: {} });
+          const payload = done.payload.result || {};
+          button.textContent = payload.ok === false ? "CHAIN BROKEN" : "CHAIN INTACT";
+        },
+      }),
+    ]),
+    body,
+  );
+}
+
+async function flagDossier(queue) {
+  const result = await call(
+    "panels/moderation/detail/" + encodeURIComponent(state.modFlag) + "/",
+  );
+  if (!report(result)) return node("div");
+  const flag = result.payload.record || {};
+  const wrap = node("div", { class: "editor" });
+
+  const evidence = node("dl", { class: "rows" });
+  for (const row of flag.evidence || []) {
+    evidence.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: row.key }),
+        node("dd", { text: String(row.value) }),
+      ]),
+    );
+  }
+
+  const note = node("input", {
+    type: "text",
+    placeholder: "WHY, FOR WHOEVER READS THIS NEXT",
+    "aria-label": "Resolution note",
+  });
+
+  const subjectType = node("select", { "aria-label": "Sanction subject type" });
+  for (const option of queue.subject_types || []) {
+    subjectType.append(node("option", { value: option, text: option }));
+  }
+  const subjectValue = node("input", {
+    type: "text",
+    placeholder: "SUBJECT VALUE",
+    "aria-label": "Sanction subject value",
+    value: flag.account || "",
+  });
+  const level = node("select", { "aria-label": "Sanction level" });
+  for (const option of queue.levels || []) {
+    level.append(node("option", { value: option, text: option }));
+  }
+
+  async function resolve(wanted) {
+    const done = await call("panels/moderation/actions/resolve/", {
+      body: { flag_id: flag.id, state: wanted, note: note.value },
+    });
+    if (report(done)) {
+      state.modFlag = null;
+      select_render();
+    }
+  }
+
+  wrap.append(
+    node("div", { class: "editor-head" }, [
+      node("span", { class: "legend", text: "FLAG " + flag.id + "  " + flag.kind }),
+      node("span", { class: "spacer" }),
+      node("button", { type: "button", text: "DISMISS", onclick: () => resolve("dismissed") }),
+      node("button", { type: "button", text: "ACKNOWLEDGE", onclick: () => resolve("acknowledged") }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.modFlag = null;
+          select_render();
+        },
+      }),
+    ]),
+    node("p", { class: "empty-hint", text: flag.summary || "" }),
+    evidence,
+    node("div", { class: "fault-actions" }, [note]),
+    node("p", { class: "section-legend", text: "Issue a sanction from this flag" }),
+    node("div", { class: "fault-actions" }, [
+      subjectType,
+      subjectValue,
+      level,
+      node("button", {
+        type: "button",
+        text: "SANCTION",
+        onclick: async () => {
+          const done = await call("panels/moderation/actions/sanction/", {
+            body: {
+              subject_type: subjectType.value,
+              subject_value: subjectValue.value,
+              level: level.value,
+              reason: note.value,
+              flag_id: flag.id,
+            },
+          });
+          if (report(done)) {
+            state.modFlag = null;
+            select_render();
+          }
+        },
+      }),
+    ]),
+  );
+  return wrap;
+}
+
+async function drawAuthorization() {
+  const query = new URLSearchParams({ view: state.authView || "grants" });
+  const result = await call("panels/authorization/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+
+  const views = node("select", {
+    id: "auth-view",
+    onchange: (event) => {
+      state.authView = event.target.value;
+      select_render();
+    },
+  });
+  for (const option of data.views || []) {
+    views.append(
+      node("option", { value: option, selected: option === data.view, text: option.toUpperCase() }),
+    );
+  }
+
+  const body = node("div", { class: "panel-body" });
+  body.append(prober(data));
+  body.append(section(data.model || ""));
+
+  if ((data.rows || []).length === 0) {
+    body.append(empty("NO ROWS."));
+  } else {
+    const shown = (data.fields || []).slice(0, 7);
+    const table = node("table");
+    table.append(
+      node("thead", {}, [node("tr", {}, shown.map((f) => node("th", { scope: "col", text: f })))]),
+    );
+    const tbody = node("tbody");
+    for (const row of data.rows) {
+      tbody.append(node("tr", {}, shown.map((f) => cell(row[f]))));
+    }
+    table.append(tbody);
+    body.append(table);
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("AUTHORIZATION", data.row_count ? data.row_count + " ROWS" : ""),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "auth-view", text: "View" }),
+        views,
+      ]),
+      node("span", { class: "spacer" }),
+      node("span", { class: "legend", text: (data.capabilities || []).length + " CAPABILITIES" }),
+    ]),
+    body,
+  );
+}
+
+/* Ask the resolver rather than reading grant rows and simulating it in your
+ * head. The verdict is one lamp; the sentence beside it is the point. */
+function prober(data) {
+  const wrap = node("div", { class: "editor" });
+  const principal = node("input", {
+    type: "text",
+    placeholder: "ACCOUNT ID",
+    "aria-label": "Account id",
+  });
+  const capability = node("input", {
+    type: "text",
+    placeholder: "CAPABILITY",
+    "aria-label": "Capability",
+    list: "capability-list",
+  });
+  const options = node("datalist", { id: "capability-list" });
+  for (const item of data.capabilities || []) {
+    options.append(node("option", { value: item.key }));
+  }
+  const verdict = node("div", { class: "probe-verdict" });
+
+  wrap.append(
+    node("div", { class: "editor-head" }, [
+      node("span", { class: "legend", text: "WHY CAN THIS ACCOUNT DO THAT" }),
+    ]),
+    node("div", { class: "fault-actions" }, [
+      principal,
+      capability,
+      options,
+      node("button", {
+        type: "button",
+        text: "ASK",
+        onclick: async () => {
+          const done = await call("panels/authorization/actions/probe/", {
+            body: {
+              principal_id: Number(principal.value),
+              capability: capability.value,
+            },
+          });
+          verdict.textContent = "";
+          if (!report(done)) return;
+          const answer = done.payload.result || {};
+          verdict.append(
+            lamp(answer.allowed ? "ALLOWED" : "DENIED", answer.allowed ? "ok" : "fail"),
+            node("span", { class: "probe-text", text: answer.explanation || "" }),
+          );
+          for (const grant of answer.matching_grants || []) {
+            verdict.append(
+              node("div", { class: "log-line" }, [
+                node("span", { class: "log-source", text: grant.scope_kind }),
+                node("span", { class: "log-text", text: grant.scope_key + "  from " + grant.origin }),
+              ]),
+            );
+          }
+        },
+      }),
+    ]),
+    verdict,
+  );
+  return wrap;
+}
+
 const RENDERERS = {
   records: drawRecords,
+  moderation: drawModeration,
+  authorization: drawAuthorization,
   errors: drawErrors,
   runtime: drawRuntime,
   logs: drawLogs,
