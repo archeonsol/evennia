@@ -2724,6 +2724,50 @@ async function auditDetail(id) {
     actions.append(node("p", { class: "empty-hint", text: data.undo_reason || "" }));
   }
 
+  /* State as of a moment. Not event sourcing and no new store: it folds the
+   * audit table backwards from the newest recorded values. */
+  const asOf = node("div", { id: "as-of" });
+  const stamp = node("input", {
+    type: "datetime-local",
+    id: "as-of-when",
+    "aria-label": "Date and time to reconstruct",
+  });
+  const reconstruct = node("button", {
+    type: "button",
+    text: "SHOW VALUES AT THIS TIME",
+    onclick: async () => {
+      if (!stamp.value) return;
+      const done = await call("panels/audit/actions/state_as_of/", {
+        body: { target: data.target_ref, when: stamp.value },
+      });
+      asOf.textContent = "";
+      if (!report(done)) return;
+      const state_ = done.payload.result || {};
+      const fields = Object.entries(state_.fields || {});
+      asOf.append(
+        node("p", {}, [
+          lamp(state_.covered ? "COMPLETE" : "INCOMPLETE", state_.covered ? "ok" : "attn"),
+          node("span", {
+            class: "legend",
+            text:
+              " " +
+              (state_.reason ||
+                "The console undid " + state_.changes_undone + " change(s)."),
+          }),
+        ]),
+      );
+      asOf.append(
+        fields.length
+          ? dataTable(
+              ["FIELD", "VALUE AT THIS TIME"],
+              fields.map(([name, value]) => [cell(name), cell(value)]),
+            )
+          : empty("THE CONSOLE HAS NO RECORDED VALUES FOR THIS RECORD."),
+      );
+      if (state_.note) asOf.append(node("p", { class: "empty-hint", text: state_.note }));
+    },
+  });
+
   wrap.append(
     node("div", { class: "toolbar" }, [
       node("span", { class: "legend", text: "RECORDED OPERATION" }),
@@ -2747,6 +2791,15 @@ async function auditDetail(id) {
         })
       : null,
     actions,
+    section("Values at a past time"),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "as-of-when", text: "Time" }),
+        stamp,
+      ]),
+      reconstruct,
+    ]),
+    asOf,
   );
   return wrap;
 }

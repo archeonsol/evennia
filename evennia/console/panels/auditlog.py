@@ -43,6 +43,11 @@ PAGE = 50
 #: Hard ceiling regardless of what the caller asks for.
 MAX_PAGE = 200
 
+#: Audit rows read when reconstructing a past state. A record with more
+#: changes than this is reconstructed from the most recent ones, and the panel
+#: reports how many it read.
+MAX_HISTORY = 500
+
 #: Payload entries rendered in a diff before it is cut short. A frozen payload
 #: is already bounded by the codec budget; this bounds the *rendering*.
 MAX_DIFF_ENTRIES = 200
@@ -321,6 +326,95 @@ class AuditPanel(Panel):
         return (
             "The console did not record how to reverse this operation. The console cannot undo it."
         )
+
+    def state_as_of(self, ctx, target=None, when=None):
+        """Reconstruct one record's field values at a past moment.
+
+        Not event sourcing, and it adds no store. It reads the audit table the
+        console already writes: start from the newest recorded state and walk
+        backwards, replacing each field with the ``before`` value of every
+        change made after the moment asked for.
+
+        The answer is only as good as the coverage, so the coverage is
+        reported rather than assumed. If the earliest audit row for this target
+        is later than the moment asked for, the fields changed before that are
+        unknown to this table and are named as unknown -- which is a different
+        answer from "they were empty".
+
+        Args:
+            ctx: Worker context.
+            target: Target reference, as the panels build it.
+            when: ISO timestamp to reconstruct at.
+
+        Returns:
+            dict: The reconstructed fields, and what the coverage was.
+
+        Raises:
+            ValueError: No target or no moment was given.
+        """
+
+        reference = str(target or "").strip()
+        if not reference:
+            raise ValueError("Enter the record reference.")
+        moment = str(when or "").strip()
+        if not moment:
+            raise ValueError("Enter the date and time to reconstruct.")
+
+        history = list(
+            ConsoleAuditEvent.objects.filter(target_ref=reference)
+            .order_by("-created_at", "-id")
+            .values("created_at", "operation", "before", "after", "outcome", "event_id")[
+                :MAX_HISTORY
+            ]
+        )
+        if not history:
+            return {
+                "target": reference,
+                "when": moment,
+                "fields": {},
+                "covered": False,
+                "reason": (
+                    "The audit table holds no record of this reference, so the "
+                    "console cannot reconstruct it."
+                ),
+            }
+
+        # Newest recorded state first, then undo each change made after the
+        # moment by putting its "before" value back.
+        fields = dict(history[0].get("after") or {})
+        applied = 0
+        for row in history:
+            stamp = row["created_at"].isoformat() if row["created_at"] else ""
+            if stamp <= moment:
+                break
+            for key, value in (row.get("before") or {}).items():
+                fields[key] = value
+            applied += 1
+
+        earliest = history[-1]["created_at"]
+        earliest_stamp = earliest.isoformat() if earliest else ""
+        covered = bool(earliest_stamp) and earliest_stamp <= moment
+        return {
+            "target": reference,
+            "when": moment,
+            "fields": {str(key): str(value) for key, value in sorted(fields.items())},
+            "changes_undone": applied,
+            "records_read": len(history),
+            "earliest_record": earliest_stamp,
+            "covered": covered,
+            "reason": (
+                ""
+                if covered
+                else (
+                    "The console has records for this reference only from "
+                    f"{earliest_stamp[:19]}. Any field changed before that time is "
+                    "unknown to the console."
+                )
+            ),
+            "note": (
+                "The console builds these values from its own records. It does not read the object."
+            ),
+        }
 
     @io_action
     def undo(self, ctx, audit_id=None, reason=""):

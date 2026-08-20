@@ -39,9 +39,7 @@ class TestSavedViews(TestCase):
         self.panel = ViewsPanel()
 
     def test_saving_stores_the_address(self):
-        view = self.panel.save(
-            _ctx(), name="Open flags", panel="moderation", query="modState=open"
-        )
+        view = self.panel.save(_ctx(), name="Open flags", panel="moderation", query="modState=open")
         self.assertEqual(view["query"], "modState=open")
         self.assertEqual(view["url"], "#moderation?modState=open")
 
@@ -187,9 +185,7 @@ class TestPresence(TestCase):
 
     def test_the_client_is_told_the_interval(self):
         # One number in one place. Two copies would drift.
-        self.assertEqual(
-            self.panel.heartbeat(_ctx())["heartbeat_seconds"], presence.HEARTBEAT
-        )
+        self.assertEqual(self.panel.heartbeat(_ctx())["heartbeat_seconds"], presence.HEARTBEAT)
 
     def test_the_interval_is_shorter_than_the_expiry(self):
         # Otherwise one missed beat makes somebody vanish mid-edit.

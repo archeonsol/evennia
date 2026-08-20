@@ -1,107 +1,85 @@
 # W1: engine console (Django-admin successor)
 
-Status: phases 1-4 built (branch `w1-console-phase1`, off `6.0.0+underspire.209`)
+Status: built (branch `w1-console-phase1`, off `6.0.0+underspire.209`)
 
 ---
 
 ## Build status
 
-Audited against this document on 2026-08-20, by reading the shipped code rather
-than the commit log. Eighteen panels are registered and under test. **The panel
-layer is nearly complete. The cross-cutting layer is mostly not**, and that is
-the honest summary of how far the console is from what this document describes:
-what makes it "one product rather than twenty pages" is the part still missing.
+Audited against this document on 2026-08-20 by reading the shipped code, then
+rebuilt against that audit the same day. **Twenty-three panels are registered and
+under test, and every cross-cutting promise in this document is implemented.**
 
-### Built
+### Panels
 
-The kernel: `services.py`, `registry.py` (`Panel` / `@io_action` /
-`WorkerContext` / `IOContext` / `dispatch`), `spec.py`, `runtime_spec.py`,
-`models.py` + `audit.py`, `health.py`, `feed.py` (SSE). The web layer under
-`evennia/web/console/` with idle timeout, re-authentication, and transport
-checks. The frontend shell and all eighteen station views. The two capabilities,
-the settings block, and the admin-to-console audit mirror.
+Records, Attributes, Moderation, Authorization, Runtime, Logs, Errors, Objects,
+Actions, Hooks, Prototypes, Jobs, Event bus, Live sessions, Server control,
+REPL, SQL, Database, Saved views, Migrations, Settings, Audit, Health.
 
-Eighteen panels: Records, Objects, Attributes, Authorization, Moderation,
-Runtime, Logs, REPL, SQL, Actions, Hooks, Server control, Live sessions, Errors,
-Migrations, Settings, Prototypes, Health.
+P15 Database was numbered here and never built. P20 Jobs and P21 Event bus were
+committed in D6 and never numbered, so the commitment was unreadable from either
+section alone and nobody built them. P22 Audit did not exist in any form: the
+console wrote a full trail from phase 1 and could not show one row of it.
 
-### Not built
-
-- **P15 Database.** The only numbered panel with no implementation. Table sizes,
-  `db_attrs` document-size distribution, `pg_stat_user_indexes`, pool state,
-  long-running queries, bloat and last vacuum.
-- **P20 Jobs** and **P21 Event bus.** D6 concludes "the Jobs panel and a
-  `GameEvent` view ship as planned" — but the panel list ran P1 to P19 and
-  contained neither, so the commitment was made in the decisions section and
-  never given a number, a phase, or an owner. That is a defect in this document
-  as much as in the build. Numbered below so it stops being invisible.
-- **The job-queue half of P6 Runtime.** Depth by status, dead-letter inspection,
-  requeue, and per-`job_type` rates across the six handlers in
-  `world/engine_jobs.py`.
-- **An audit view.** The console writes `ConsoleAuditEvent` rows with frozen
-  before/after payloads, an inverse, and a five-way outcome — and offers no way
-  to read them. The only audit *reads* anywhere are the REPL and SQL panels
-  showing an operator their own last fifty submissions. A dev console that
-  records everything it does and cannot show you the record is not finished.
-  Numbered P22 below.
-- **The `console.*` eventbus emission** that D2 describes. The audit table is
-  written; the bus subject is not published.
-
-### Built in Python, dropped by the frontend
-
-`RuntimePanel.rows()` returns `systems` (the scheduler registry — cadence,
-scope, last-run, the "`@systems` as a page" item in P6) and `tasks` (supervised
-task roots by `task_kind`). `drawRuntime` renders neither. Two named plan items
-exist, are tested, and are invisible to the operator.
-
-### Partly built
-
-**P3 Attributes — decoded, but not a tree, and not writable.** The panel
-decodes the storage layout (`"~"` for the default category, `_d` for values),
-groups entries by category, computes document size, flags documents past the
-4 KB threshold, ranks the largest, offers `key_stats`, and offers the
-containment query as `find`. What is missing is the part P3 called a tree: a
-*value* is rendered by `_preview(value, 400)`, a truncated string, so a nested
-dict or list is not expandable and not navigable. Separately, the panel has zero
-`@io_action`: P3's last bullet — edits through the IO thread with a before/after
-diff — is unimplemented, and Attributes is read-only.
-
-**Deep linking.** `URL_KEYS` carries seven keys, all of them Records and
-Attributes state. The eleven other panels that hold view state (`logFile`,
-`errorState`, `modState`, `authView`, `objSearch`, `hookEvent`, and the rest)
-put none of it in the address bar, so those views cannot be pasted into a bug
-report. "Everything deep-linkable" is currently "Records and Attributes are
-deep-linkable".
-
-**Keyboard-first.** Digit keys select panels by index, which reached every panel
-when there were nine and reaches half of them now that there are eighteen. There
-is no command palette. This is a case of the shell being outgrown by the thing
-it holds, not of a feature never started.
-
-### Cross-cutting layer: two of nine
+### Cross-cutting layer
 
 | Promise | State |
 | --- | --- |
 | Degraded mode | Built, tested, enforced by a registration guard |
 | English only | Held |
-| Everything deep-linkable | Records and Attributes only |
-| Command palette, keyboard-first | Digits 1-9 of 18 panels; no palette |
-| Undo and state-as-of | `inverse` column and `can_undo()` exist; nothing applies either |
-| Saved views | Not built |
-| Export (CSV/JSON, audited) | Not built |
-| Bulk operations with dry run | Cascade preview exists in `services.py`; no bulk UI |
-| Multi-operator presence | Not built |
+| Everything deep-linkable | Every panel's view state is in the address bar |
+| Command palette, keyboard-first | Ctrl-K palette, matching name and description |
+| Undo and state-as-of | Both built on the audit table; no new store |
+| Saved views | `ConsoleSavedView`, shared and pinnable |
+| Export (CSV/JSON, audited) | Built; recorded as a disclosure event |
+| Bulk operations with dry run | Cascade counted per row before the operator commits |
+| Multi-operator presence | Built in the cache; no database writes |
 
-### Is it first class?
+### Rules the rebuild had to hold
 
-Against Django admin, yes and not narrowly: eighteen panels against eight
-registered models, plus degraded mode, an audit trail with real outcomes,
-moderation, and a live feed. The "supersede, do not match" bar is met on the
-panel axis.
+**Nothing may cost the running server.** Every listing is bounded and keyset
+paged. No panel counts a table that grows per event. Presence is a cache
+entry, not a heartbeat row: a test asserts its query count is zero. The
+`db_attrs` size distribution is sampled rather than aggregated, because
+`length(db_attrs::text)` across a table is the sequential scan the Database
+panel exists to discourage.
 
-Against this document, no — and the gap is concentrated, not scattered. It is
-in the cross-cutting layer, in the two subsystems that never got a P number, and
-in the audit trail the console writes but does not show.
+**The write-behind cache has to be respected, not ignored.** Attribute writes
+are drained on a cadence, so any SQL read of `db_attrs` answers from before the
+write. Point queries run the read-your-writes barrier that
+`objects/manager.py` already documents; the catalogue does not, and says so
+instead, because a process-wide flush does not belong on a page an operator
+leaves open.
+
+**Operator-facing text is Simplified Technical English.** One meaning per word,
+one instruction per sentence, active voice, the same word for the same thing.
+
+### Undo, deliberately narrow
+
+Records records an inverse for a change that succeeded, and for nothing else.
+Reversing a create means deleting, and delete carries a cascade the service
+preflights for a reason; attaching one to a control an operator reaches for
+after a mistake is the wrong shape. A write that faulted did not necessarily
+leave the row in the state the row records. Where undo is unavailable the panel
+says which of the two applies, because an absent control explains nothing.
+
+Undo never revises the row it reverses. It writes a new row pointing back at
+it, so the trail holds the mistake and the correction as two facts.
+
+### Defects the rebuild found
+
+Five of these were the same bug: **guessing a registry's shape fails silently,
+and the panel renders happily while telling the operator something untrue.**
+The scheduler read reached for `_SYSTEMS`, `REGISTRY`, and `_REGISTRY`, none of
+which is the name, and reported "the scheduler does not expose a readable
+registry" about a scheduler that exposes one. `RuntimePanel` returned `systems`
+and `tasks` and the renderer dropped both. `PanelActionView` refused every
+action during an outage, including worker-side ones that never touch the IO
+owner. The JSONB row-state caches survive a test rollback exactly as the
+idmapper does. And the export read `columns` as records when it is a list of
+names.
+
+Every one is locked in by a test.
 
 The implementation plan for the console half of **W1** (see
 [`engine-architecture/committed.md`](../docs/engine-architecture/committed.md)).
@@ -1334,32 +1312,29 @@ Resolve the jobs/event-bus doc-rot question before the job-queue view.
 Objects, Actions, Hooks, Prototypes. The panels that make the engine legible to
 someone learning it, and the ones that most exercise `spec.py`.
 
-By the end of phase 4 the registry API has been used by nineteen panels, which is
-the real proof that it is a public API — a stronger test than importing one
-external tool would have been.
+The registry API is now used by twenty-three panels, which is the real proof
+that it is a public API — a stronger test than importing one external tool
+would have been.
 
-Phase 4 landed with eighteen, not nineteen: P15 Database was not built.
+Phase 4 itself landed with eighteen, not nineteen: P15 Database was not built
+until phase 5.
 
 ### Phase 5 — the layer that makes it one product
 
-Named by the 2026-08-20 audit. Everything here is cross-cutting or was
-committed in the decisions section without a phase, which is exactly why none of
-it happened on its own.
+Named by the 2026-08-20 audit and built the same day. Ordered by what an
+operator reaches for first during an incident.
 
-1. **P22 Audit**, with undo. The console's record is unreadable today.
-2. **The Runtime frontend gap.** `systems` and `tasks` are already computed and
-   tested; the renderer drops them. Cheapest real gain in the list.
-3. **P3 Attributes: the tree, and the write path.** A nested value is a
-   truncated string today, and the panel has no `@io_action` at all.
-4. **Deep linking for every panel**, not two. A view that cannot be pasted into
-   a bug report is a view the bug report has to describe in prose.
-5. **A command palette**, replacing a digit shortcut that the panel count
-   outgrew.
+1. **P22 Audit**, with undo and state-as-of.
+2. **The Runtime frontend gap** — `systems` and `tasks` were computed, tested,
+   and dropped by the renderer.
+3. **P3 Attributes: the tree, and the write path.**
+4. **Deep linking for every panel.**
+5. **A command palette**, replacing a digit shortcut the panel count outgrew.
 6. **P15 Database**, **P20 Jobs**, **P21 Event bus**.
 7. Export, saved views, bulk dry run, multi-operator presence.
 
-The ordering is by what an operator hits first during an incident, not by
-difficulty.
+All landed. What remains is not console work: the moderation migration steps
+below, and the release that drops the `evennia.events` shim.
 
 ### Deferred
 

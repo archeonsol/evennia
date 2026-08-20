@@ -8,6 +8,8 @@ button that quietly performs a cascading delete is worse than no undo button.
 
 """
 
+from datetime import timedelta
+
 from django.core.exceptions import PermissionDenied
 from django.test import TestCase
 
@@ -275,3 +277,93 @@ class TestUndo(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.inverse, stored)
         self.assertEqual(row.operation, "change")
+
+
+class TestStateAsOf(TestCase):
+    """Reconstruct a record's past values by folding the trail backwards."""
+
+    def setUp(self):
+        self.panel = AuditPanel()
+
+    def _change(self, before, after, target="objects.objectdb#1"):
+        return audit.record(
+            panel="records",
+            operation="change",
+            actor_id=1,
+            target_ref=target,
+            before=before,
+            after=after,
+        )
+
+    def test_it_undoes_a_change_made_after_the_moment(self):
+        self._change({"db_key": "old"}, {"db_key": "new"})
+        row = ConsoleAuditEvent.objects.first()
+        before_the_change = (row.created_at - timedelta(minutes=1)).isoformat()
+        result = self.panel.state_as_of(_ctx(), target="objects.objectdb#1", when=before_the_change)
+        self.assertEqual(result["fields"]["db_key"], "old")
+
+    def test_it_keeps_a_change_made_before_the_moment(self):
+        self._change({"db_key": "old"}, {"db_key": "new"})
+        row = ConsoleAuditEvent.objects.first()
+        after_the_change = (row.created_at + timedelta(minutes=1)).isoformat()
+        result = self.panel.state_as_of(_ctx(), target="objects.objectdb#1", when=after_the_change)
+        self.assertEqual(result["fields"]["db_key"], "new")
+
+    def test_it_walks_back_through_several_changes(self):
+        self._change({"db_key": "first"}, {"db_key": "second"})
+        self._change({"db_key": "second"}, {"db_key": "third"})
+        earliest = ConsoleAuditEvent.objects.order_by("created_at").first()
+        result = self.panel.state_as_of(
+            _ctx(),
+            target="objects.objectdb#1",
+            when=(earliest.created_at - timedelta(minutes=1)).isoformat(),
+        )
+        self.assertEqual(result["fields"]["db_key"], "first")
+        self.assertEqual(result["changes_undone"], 2)
+
+    def test_it_says_when_the_trail_does_not_reach_back_far_enough(self):
+        # "Unknown to this table" is a different answer from "empty", and an
+        # operator acting on the second when the first is true acts wrongly.
+        self._change({"db_key": "old"}, {"db_key": "new"})
+        row = ConsoleAuditEvent.objects.first()
+        result = self.panel.state_as_of(
+            _ctx(),
+            target="objects.objectdb#1",
+            when=(row.created_at - timedelta(days=30)).isoformat(),
+        )
+        self.assertFalse(result["covered"])
+        self.assertIn("unknown to the console", result["reason"])
+
+    def test_a_reference_with_no_records_is_reported_as_such(self):
+        result = self.panel.state_as_of(
+            _ctx(), target="objects.objectdb#999", when="2020-01-01T00:00:00"
+        )
+        self.assertFalse(result["covered"])
+        self.assertEqual(result["fields"], {})
+
+    def test_another_record_does_not_contribute(self):
+        self._change({"db_key": "mine"}, {"db_key": "mine2"}, target="objects.objectdb#1")
+        self._change({"db_key": "theirs"}, {"db_key": "theirs2"}, target="objects.objectdb#2")
+        result = self.panel.state_as_of(
+            _ctx(), target="objects.objectdb#2", when="2999-01-01T00:00:00"
+        )
+        self.assertEqual(result["fields"]["db_key"], "theirs2")
+
+    def test_a_target_is_required(self):
+        with self.assertRaises(ValueError):
+            self.panel.state_as_of(_ctx(), target="  ", when="2020-01-01T00:00:00")
+
+    def test_a_moment_is_required(self):
+        with self.assertRaises(ValueError):
+            self.panel.state_as_of(_ctx(), target="objects.objectdb#1", when="")
+
+    def test_it_reads_the_object_not_at_all(self):
+        # It adds no store and reads no live state: it folds the table the
+        # console already writes.
+        with self.assertNumQueries(1):
+            self.panel.state_as_of(_ctx(), target="objects.objectdb#1", when="2020-01-01T00:00:00")
+
+    def test_it_does_not_need_the_io_owner(self):
+        from evennia.console.registry import is_io_action
+
+        self.assertFalse(is_io_action(AuditPanel.state_as_of))
