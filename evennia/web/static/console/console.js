@@ -106,6 +106,7 @@ const URL_KEYS = [
   "errorOpen",
   "modState",
   "modFlag",
+  "modAccount",
   "authView",
   "objSearch",
   "actionSearch",
@@ -741,19 +742,6 @@ async function editor(data) {
     text: "CANCEL",
     onclick: () => { state.editing = null; select_render(); },
   });
-
-  /* A duration is required. The old banlist had no expiry column, so every
-   * entry in it was permanent by default; that is the mistake this field
-   * exists to stop repeating. */
-  const duration = node("input", {
-    type: "text",
-    value: "7d",
-    size: "6",
-    "aria-label": "How long the sanction lasts",
-    title: "30m, 12h, 7d, 2w, or perm",
-    placeholder: "7d",
-  });
-  const reach = node("div", { class: "collateral" });
 
   wrap.append(
     node("div", { class: "editor-head" }, [
@@ -1668,7 +1656,7 @@ async function drawModeration() {
         }, [
           node("td", { class: "num", text: String(flag.severity) }),
           cell(flag.kind),
-          cell(flag.account),
+          accountCell(flag.account),
           cell(flag.summary),
           node("td", { class: "num", text: String(flag.seen_count) }),
           cell(flag.last_seen),
@@ -1725,6 +1713,10 @@ async function drawModeration() {
   body.append((data.sanctions || []).length ? sanctions : empty("NO ACTIVE SANCTIONS."));
   body.append(await drawProposals());
 
+  if (state.modAccount) body.append(await accountDossier());
+
+  body.append(await drawSignalCoverage());
+
   body.append(section("Recent connections"));
   const sessions = node("div", { class: "log-view" });
   for (const row of data.sessions || []) {
@@ -1732,6 +1724,9 @@ async function drawModeration() {
       node("div", { class: "session-row" }, [
         node("span", { class: "log-source", text: row.protocol }),
         node("span", { class: "log-text", text: (row.account || "(anonymous)") + "  " + row.cidr + "  " + (row.network || "") }),
+        signatureMarks(row.signatures),
+        row.address_state === "purged" ? lamp("ADDRESS PURGED", "off") : null,
+        row.address_state === "absent" ? lamp("NO ADDRESS", "off") : null,
         row.address_trustworthy
           ? node("span", { class: "legend", text: row.country || "" })
           : lamp("ADDRESS VOID", "attn"),
@@ -1766,6 +1761,22 @@ async function drawModeration() {
         node("label", { class: "legend", for: "mod-state", text: "Show" }),
         filter,
       ]),
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "mod-account", text: "Account" }),
+        node("input", {
+          id: "mod-account",
+          type: "search",
+          size: "18",
+          value: state.modAccount || "",
+          placeholder: "NAME",
+          title: "Show every identity key this account connected with",
+          "aria-label": "Look up an account",
+          onchange: (event) => {
+            state.modAccount = event.target.value.trim();
+            select_render();
+          },
+        }),
+      ]),
       node("span", { class: "spacer" }),
       node("span", { class: "legend", text: data.note || "" }),
       node("button", {
@@ -1783,6 +1794,231 @@ async function drawModeration() {
     ]),
     body,
   );
+}
+
+/* Which signatures one connection carried, in four characters each.
+ *
+ * Abbreviated rather than named, because this sits at the end of a row that is
+ * already carrying an account, a network, and a host. The full name is on the
+ * marker for anybody who does not recognise it, and the coverage table above
+ * spells all four out.
+ */
+const SIGNATURE_MARKS = {
+  telnet_sig: "NEG",
+  tls_sig: "TLS",
+  http_order_fp: "HDR",
+  csessid: "SES",
+};
+
+function signatureMarks(signatures) {
+  const present = (signatures || []).filter((item) => item.present);
+  if (!present.length) {
+    return node("span", { class: "legend sig-marks none", text: "NO SIGNATURE" });
+  }
+  return node("span", {
+    class: "legend sig-marks",
+    title: present.map((item) => item.label).join(", "),
+    text: present.map((item) => SIGNATURE_MARKS[item.field] || item.field).join(" "),
+  });
+}
+
+/* Which signals are arriving at all.
+ *
+ * A signal that was configured and is silently absent leaves the queue looking
+ * calm for the wrong reason, and nothing else in the console would ever say so.
+ * This is the only place that reports the difference between "nobody is evading"
+ * and "the server cannot see them".
+ */
+async function drawSignalCoverage() {
+  const wrap = node("div");
+  const result = await call("panels/moderation/actions/signals/", { body: {} });
+  if (!report(result)) return wrap;
+  const data = result.payload.result || {};
+  wrap.append(section("Signal coverage"));
+
+  if (!data.sample) {
+    wrap.append(empty("NO CONNECTIONS RECORDED.", data.note || ""));
+    return wrap;
+  }
+
+  const table = node("table");
+  table.append(
+    node("thead", {}, [
+      node("tr", {}, [
+        node("th", { scope: "col", text: "SIGNAL" }),
+        node("th", { scope: "col", text: "SEEN" }),
+        node("th", { scope: "col", text: "" }),
+        node("th", { scope: "col", text: "WHAT TO DO" }),
+      ]),
+    ]),
+  );
+  const tbody = node("tbody");
+  for (const row of data.rows || []) {
+    tbody.append(
+      node("tr", {}, [
+        cell(row.label.toUpperCase()),
+        node("td", { class: "num", text: row.of ? row.seen + " / " + row.of : "--" }),
+        node("td", {}, [
+          lamp(
+            { ok: "ARRIVING", attn: "PARTIAL", fail: "ABSENT", off: "NO DATA" }[row.state],
+            row.state,
+          ),
+        ]),
+        cell(row.advice),
+      ]),
+    );
+  }
+  table.append(tbody);
+  wrap.append(table);
+  wrap.append(node("p", { class: "legend", text: data.note || "" }));
+  return wrap;
+}
+
+/* An account name that opens the dossier for it.
+ *
+ * A name in the queue is the start of the investigation, so it has to be the
+ * control that starts it. Reading a name, then typing it into a box beside the
+ * table, is the operator doing the computer's work. */
+function accountCell(name) {
+  if (!name) return cell(name);
+  return node("td", {}, [
+    node("button", {
+      type: "button",
+      class: "linkish",
+      text: name,
+      title: "Show every identity key " + name + " connected with",
+      onclick: () => {
+        state.modAccount = state.modAccount === name ? "" : name;
+        select_render();
+      },
+    }),
+  ]);
+}
+
+/* Every identity key one account connected with, and who else used it.
+ *
+ * Exact matches only. Two accounts used the same device token or they did not;
+ * the console never reports a likelihood, because the rule this package is
+ * built on is that a conclusion has to be showable to the player it is used
+ * against, and a percentage cannot be shown to anybody.
+ */
+async function accountDossier() {
+  const wrap = node("div", { class: "editor" });
+  const result = await call(
+    "panels/moderation/actions/account/",
+    { body: { name: state.modAccount } },
+  );
+  if (!report(result)) return wrap;
+  const data = result.payload.result || {};
+
+  wrap.append(
+    node("div", { class: "editor-head" }, [
+      node("span", { class: "legend", text: "ACCOUNT " + (data.account || "") }),
+      node("span", { class: "spacer" }),
+      node("span", {
+        class: "legend",
+        text: data.first_seen ? "SEEN " + data.first_seen + " TO " + data.last_seen : "NEVER SEEN",
+      }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.modAccount = "";
+          select_render();
+        },
+      }),
+    ]),
+  );
+
+  if (!(data.keys || []).length) {
+    wrap.append(
+      empty("NO CONNECTION RECORDED.", "This account has no session history to compare."),
+    );
+    return wrap;
+  }
+
+  const table = node("table");
+  table.append(
+    node("thead", {}, [
+      node("tr", {}, [
+        node("th", { scope: "col", text: "KIND" }),
+        node("th", { scope: "col", text: "VALUE" }),
+        node("th", { scope: "col", text: "SESSIONS" }),
+        node("th", { scope: "col", text: "LAST" }),
+        node("th", { scope: "col", text: "ALSO USED BY" }),
+        node("th", { scope: "col", text: "" }),
+      ]),
+    ]),
+  );
+  const tbody = node("tbody");
+  for (const key of data.keys) {
+    const shared = key.shared_with || [];
+    tbody.append(
+      node("tr", {}, [
+        cell(key.label.toUpperCase()),
+        cell(key.value),
+        node("td", { class: "num", text: String(key.sessions) }),
+        cell(key.last_seen),
+        shared.length
+          ? node("td", {
+              title: shared.join(", "),
+              text:
+                shared.join(", ") +
+                (key.shared_count > shared.length
+                  ? " (+" + (key.shared_count - shared.length) + " more)"
+                  : ""),
+            })
+          : node("td", { class: "null", text: "nobody" }),
+        node("td", {}, [
+          key.sanctioned
+            ? lamp("BANNED", "fail")
+            : key.bannable
+              ? null
+              : /* Said, not left to be inferred from a missing button. This
+                 * value identifies a piece of software, so banning it would
+                 * ban everybody who uses that software. */
+                node("span", {
+                  class: "legend",
+                  title: "This identifies a program, not a person.",
+                  text: "NOT BANNABLE",
+                }),
+        ]),
+      ]),
+    );
+  }
+  table.append(tbody);
+  wrap.append(table);
+  wrap.append(node("p", { class: "legend", text: data.note || "" }));
+
+  if ((data.sanctions || []).length) {
+    wrap.append(section("Sanctions on this account"));
+    wrap.append(
+      dataTable(
+        ["LEVEL", "REASON", "FROM", "EXPIRES"],
+        data.sanctions.map((row) => [
+          cell(row.level),
+          cell(row.reason),
+          cell(row.created),
+          cell(row.expires),
+        ]),
+      ),
+    );
+  }
+  if ((data.flags || []).length) {
+    wrap.append(section("Flags naming this account"));
+    wrap.append(
+      dataTable(
+        ["SEV", "KIND", "STATE", "SUMMARY"],
+        data.flags.map((row) => [
+          cell(row.severity),
+          cell(row.kind),
+          cell(row.state),
+          cell(row.summary),
+        ]),
+      ),
+    );
+  }
+  return wrap;
 }
 
 async function flagDossier(queue) {
@@ -1823,6 +2059,20 @@ async function flagDossier(queue) {
   for (const option of queue.levels || []) {
     level.append(node("option", { value: option, text: option }));
   }
+
+  /* A duration is required. The old banlist had no expiry column, so every
+   * entry in it was permanent by default; that is the mistake this field
+   * exists to stop repeating. */
+  const duration = node("input", {
+    type: "text",
+    value: "7d",
+    size: "6",
+    "aria-label": "How long the sanction lasts",
+    title: "30m, 12h, 7d, 2w, or perm",
+    placeholder: "7d",
+  });
+  const reach = node("div", { class: "collateral" });
+
 
   async function resolve(wanted) {
     const done = await call("panels/moderation/actions/resolve/", {

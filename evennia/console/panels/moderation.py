@@ -49,9 +49,27 @@ QUEUE_FLAGS = 40
 QUEUE_SANCTIONS = 30
 QUEUE_SESSIONS = 25
 
-#: Key kinds whose raw value identifies a person's network or device. Masked
-#: until an operator asks, and the asking is recorded.
-ADDRESS_KINDS = frozenset({"ip", "ip_hash", "device_token", "client_fp", "csessid"})
+#: Key kinds whose raw value identifies a person's network, device, or client
+#: build. Masked until an operator asks, and the asking is recorded.
+#:
+#: The signature columns belong here even though none of them can be banned. An
+#: opaque identifier that reaches the browser is recoverable from devtools, and
+#: an audit trail that records a reveal nobody had to perform is a lie. What a
+#: value can be used *for* does not decide whether it is shown; that it
+#: identifies somebody does.
+ADDRESS_KINDS = frozenset(
+    {
+        "ip",
+        "ip_hash",
+        "device_token",
+        "client_fp",
+        "csessid",
+        "telnet_sig",
+        "tls_sig",
+        "http_fp",
+        "http_order_fp",
+    }
+)
 
 #: Characters of an opaque key kept when shortening for readability.
 KEEP = 8
@@ -64,6 +82,45 @@ COLLATERAL_SAMPLE = 5000
 #: Distinct accounts listed by name in a collateral report. Past this the count
 #: is what matters, not the roll call.
 COLLATERAL_NAMES = 25
+
+#: The signatures a connection can carry, and what an operator should call them.
+#: Order is the order they are shown in, not a ranking: the detector's own
+#: ranking lives in ``evennia.moderation.detect.CORRELATION_SIGNATURES``.
+SESSION_SIGNATURES = (
+    ("telnet_sig", "client negotiation"),
+    ("tls_sig", "browser handshake"),
+    ("http_order_fp", "header order"),
+    ("csessid", "browser session"),
+)
+
+#: The identity columns an account dossier lists, and the sanction subject each
+#: one can become. ``None`` means the value cannot be sanctioned: a handshake
+#: and a negotiation identify a *build*, so banning one bans everybody who uses
+#: that software. They are here to be compared, never to be banned.
+DOSSIER_COLUMNS = (
+    ("cidr", "network", "cidr"),
+    ("device_token", "device token", "device_token"),
+    ("client_fp", "client fingerprint", "client_fp"),
+    ("csessid", "browser session", "csessid"),
+    ("telnet_sig", "client negotiation", None),
+    ("tls_sig", "browser handshake", None),
+)
+
+#: Distinct values listed per column, and accounts listed per value. Both are
+#: caps on a staff page, not on the data: a network with two hundred names on
+#: it is answered by the count, and the roll call adds nothing after the first
+#: dozen.
+DOSSIER_KEYS = 20
+DOSSIER_MATCHES = 12
+
+#: Sessions read when reporting which signals are arriving. Bounded for the
+#: same reason every other query here is: the answer is a proportion.
+SIGNAL_SAMPLE = 500
+
+#: Protocols that carry a TLS handshake and HTTP headers. Everything else
+#: reaches the portal over a raw socket and has neither, so counting it as
+#: missing coverage would report a fault that is not one.
+WEB_PROTOCOLS = frozenset({"websocket", "webclient", "ajax"})
 
 
 def mask(value, reveal=False):
@@ -207,6 +264,11 @@ class ModerationPanel(Panel):
             "country",
             "client_fp",
             "device_token",
+            "ip_hash",
+            "telnet_sig",
+            "tls_sig",
+            "http_order_fp",
+            "csessid",
             "xff_present",
             "xff_applied",
         )[:QUEUE_SESSIONS]
@@ -221,6 +283,7 @@ class ModerationPanel(Panel):
         """
 
         trustworthy = not (row["xff_present"] and not row["xff_applied"])
+        address_state, address_state_note = self._address_state(row)
         return {
             "id": row["id"],
             "account": row["account_name"],
@@ -228,11 +291,22 @@ class ModerationPanel(Panel):
             "connected": _stamp(row["connected_at"]),
             "disconnected": _stamp(row["disconnected_at"]),
             "ip": mask(row["ip"]),
+            "address_state": address_state,
+            "address_state_note": address_state_note,
             "cidr": row["cidr"],
             "network": row["asn_org"],
             "country": row["country"],
             "client_fp": mask(row["client_fp"]),
             "device_token": mask(row["device_token"]),
+            "signatures": [
+                {
+                    "field": field,
+                    "label": label,
+                    "value": mask(row[field]),
+                    "present": bool(row[field]),
+                }
+                for field, label in SESSION_SIGNATURES
+            ],
             "address_trustworthy": trustworthy,
             "address_warning": (
                 ""
@@ -244,6 +318,41 @@ class ModerationPanel(Panel):
                 )
             ),
         }
+
+    def _address_state(self, row):
+        """Return why this row has no address, when it has none.
+
+        Three different facts arrive at the panel as the same empty string, and
+        an operator reading a blank cell cannot tell them apart:
+
+        ``held`` -- the address is recorded and is being withheld.
+
+        ``purged`` -- the address was recorded and the retention sweep cleared
+        it. The hash outlived it, so the row still matches and still bans.
+
+        ``absent`` -- no address was ever recorded for this connection.
+
+        The discriminator is the hash, not the row's age. Retention windows are
+        settings that change, and a row purged under an old window would be
+        described wrongly by any calculation from today's.
+
+        Returns:
+            tuple: The state, and a sentence for an operator, empty when the
+            address is simply being withheld.
+        """
+
+        if row.get("ip"):
+            return "held", ""
+        if row.get("ip_hash"):
+            return (
+                "purged",
+                (
+                    "The server deleted this address after the retention period. "
+                    "The network and the hash remain, so this row still matches "
+                    "and you can still ban it."
+                ),
+            )
+        return "absent", "The server recorded no address for this connection."
 
     def _subject_display(self, subject_type, value):
         """Show a sanction subject, masking the address-grade kinds."""
@@ -290,10 +399,18 @@ class ModerationPanel(Panel):
             ],
         }
 
+    #: Evidence keys whose value identifies a network, a device, or a client
+    #: build. Matched exactly or by suffix, never by substring: ``signal`` is a
+    #: key on every flag and carries only the detector's own name, and a
+    #: substring rule on ``sig`` would withhold it from every dossier.
+    SECRET_EVIDENCE_KEYS = frozenset({"ip", "cidr", "csessid", "matches"})
+    SECRET_EVIDENCE_SUFFIXES = ("_ip", "_hash", "_token", "_fp", "_sig")
+
     def _evidence_value(self, key, value):
         """Mask evidence entries whose key names an address-grade signal."""
 
-        if any(kind in key.lower() for kind in ("ip", "token", "fp", "csessid")):
+        name = str(key).lower()
+        if name in self.SECRET_EVIDENCE_KEYS or name.endswith(self.SECRET_EVIDENCE_SUFFIXES):
             return mask(value)
         return str(value)[:400]
 
@@ -522,6 +639,284 @@ class ModerationPanel(Panel):
                 "does not include connections that the server deleted."
             ),
         }
+
+    def account(self, ctx, name=""):
+        """One account's identity keys, and which other accounts share them.
+
+        The alt-correlation view. Exact matches on indexed columns and nothing
+        else: either two accounts used the same device token or they did not.
+        No score is computed and none would be usable, because the package's
+        rule is that any conclusion has to be showable to the player it is used
+        against, and "87% likely" cannot be shown to anybody.
+
+        Two queries per column regardless of how many keys come back. The
+        surface this replaces ran one query per *value*, which on an account
+        with a long history was eighty round trips to render one page. Grouping
+        the shared-with lookup by column costs one ``IN`` clause on an index and
+        answers the same question.
+
+        Args:
+            ctx: Worker context.
+            name: The account name to look up.
+
+        Returns:
+            dict: The keys, who shares each, the account's sanctions, and the
+            flags that name it.
+
+        Raises:
+            LookupError: No name was given.
+        """
+
+        from django.db.models import Count, Max, Min
+
+        from evennia.server.models import ModerationFlag, Sanction, SessionRecord
+
+        name = str(name or "").strip()
+        if not name:
+            raise LookupError("Enter the account name.")
+
+        mine = SessionRecord.objects.filter(account_name__iexact=name)
+        bounds = mine.aggregate(first=Min("connected_at"), last=Max("connected_at"))
+
+        keys = []
+        for column, label, subject in DOSSIER_COLUMNS:
+            grouped = list(
+                mine.exclude(**{column: ""})
+                .values(column)
+                .annotate(
+                    sessions=Count("id"),
+                    first_seen=Min("connected_at"),
+                    last_seen=Max("connected_at"),
+                )
+                .order_by("-last_seen")[:DOSSIER_KEYS]
+            )
+            values = [group[column] for group in grouped if group[column]]
+            if not values:
+                continue
+
+            shared = {}
+            for value, other in (
+                SessionRecord.objects.filter(**{f"{column}__in": values})
+                .exclude(account_name__iexact=name)
+                .exclude(account_name="")
+                # The model orders by connected_at, and an ordering column
+                # joins the DISTINCT. That would make each *session* distinct
+                # rather than each pair, and one busy account would fill the
+                # limit with itself and hide everybody else on the key.
+                .order_by()
+                .values_list(column, "account_name")
+                .distinct()[: DOSSIER_MATCHES * len(values)]
+            ):
+                shared.setdefault(value, []).append(other)
+
+            banned = set()
+            if subject:
+                banned = set(
+                    Sanction.objects.active()
+                    .filter(subject_type=subject, subject_value__in=values)
+                    .values_list("subject_value", flat=True)
+                )
+
+            for group in grouped:
+                value = group[column]
+                others = sorted(set(shared.get(value, [])))
+                keys.append(
+                    {
+                        "kind": column,
+                        "label": label,
+                        "value": self._subject_display(column, value),
+                        "sessions": group["sessions"],
+                        "first_seen": _stamp(group["first_seen"]),
+                        "last_seen": _stamp(group["last_seen"]),
+                        "shared_with": others[:DOSSIER_MATCHES],
+                        "shared_count": len(others),
+                        "sanctioned": value in banned,
+                        # Stated per row rather than left to be inferred from a
+                        # missing button. An absent control explains nothing.
+                        "bannable": bool(subject),
+                        "subject_type": subject or "",
+                    }
+                )
+
+        return {
+            "account": name,
+            "first_seen": _stamp(bounds["first"]),
+            "last_seen": _stamp(bounds["last"]),
+            "keys": keys,
+            "sanctions": [
+                {
+                    "id": row["id"],
+                    "level": row["level"],
+                    "reason": row["reason"],
+                    "created": _stamp(row["created_at"]),
+                    "expires": _stamp(row["expires_at"]) or "indefinite",
+                }
+                for row in Sanction.objects.active()
+                .filter(subject_type=Sanction.SUBJECT_ACCOUNT, subject_value=name.lower())
+                .order_by("-created_at")
+                .values("id", "level", "reason", "created_at", "expires_at")[:QUEUE_SANCTIONS]
+            ],
+            "flags": [
+                {
+                    "id": row["id"],
+                    "kind": row["kind"],
+                    "severity": row["severity"],
+                    "state": row["state"],
+                    "summary": row["summary"],
+                    "last_seen": _stamp(row["last_seen_at"]),
+                }
+                for row in ModerationFlag.objects.filter(account_name__iexact=name)
+                .order_by("-severity", "-last_seen_at")
+                .values("id", "kind", "severity", "state", "summary", "last_seen_at")[:QUEUE_FLAGS]
+            ],
+            "caps": {"keys": DOSSIER_KEYS, "shared": DOSSIER_MATCHES},
+            "note": (
+                "Two accounts share a key or they do not. The console does not "
+                "guess that two players are the same person."
+            ),
+        }
+
+    def signals(self, ctx):
+        """Report which identity signals are actually arriving, and which are not.
+
+        A signal that is configured and silently absent is worse than one that
+        was never set up, because the queue looks calm for the wrong reason.
+        This is the readout that says so.
+
+        It exists mostly for ``tls_sig``, which needs a reverse proxy to report
+        the handshake it terminated. Nothing in the engine can tell whether that
+        proxy was configured; only the arriving rows can. The two ways it fails
+        look identical in the flag queue and completely different here:
+
+        The proxy is trusted and sends no TLS headers -- the proxy configuration
+        is incomplete.
+
+        The proxy is not trusted at all -- ``UPSTREAM_IPS`` is wrong, and the
+        recorded addresses are the proxy's own, which is the larger fault.
+
+        Counts only. No fingerprint value is read out of the database: the
+        columns are turned into booleans by the query itself, so a coverage
+        report cannot become a way to page through everybody's fingerprints.
+
+        Args:
+            ctx: Worker context.
+
+        Returns:
+            dict: One entry per signal, with a verdict and what to do about it.
+        """
+
+        from django.db.models import BooleanField, Case, Value, When
+
+        from evennia.server.models import SessionRecord
+
+        fields = [field for field, _ in SESSION_SIGNATURES] + ["http_fp", "device_token"]
+        annotations = {
+            f"has_{field}": Case(
+                When(**{field: ""}, then=Value(False)),
+                default=Value(True),
+                output_field=BooleanField(),
+            )
+            for field in fields
+        }
+        rows = list(
+            SessionRecord.objects.order_by("-connected_at")
+            .annotate(**annotations)
+            .values("protocol", "xff_present", "xff_applied", *annotations)[:SIGNAL_SAMPLE]
+        )
+        if not rows:
+            return {
+                "sample": 0,
+                "web_sessions": 0,
+                "socket_sessions": 0,
+                "rows": [],
+                "note": "No connection is recorded yet. Connect once, then look again.",
+            }
+
+        web, socket_rows = [], []
+        for row in rows:
+            target = web if str(row["protocol"] or "").lower() in WEB_PROTOCOLS else socket_rows
+            target.append(row)
+        trusted = sum(1 for row in web if row["xff_applied"])
+
+        def count(population, field):
+            return sum(1 for row in population if row[f"has_{field}"])
+
+        report = []
+        for field, label in SESSION_SIGNATURES:
+            population = socket_rows if field == "telnet_sig" else web
+            seen = count(population, field)
+            report.append(
+                {
+                    "field": field,
+                    "label": label,
+                    "seen": seen,
+                    "of": len(population),
+                    "state": self._signal_state(seen, len(population)),
+                    "advice": self._signal_advice(field, seen, len(population), trusted),
+                }
+            )
+
+        return {
+            "sample": len(rows),
+            "web_sessions": len(web),
+            "socket_sessions": len(socket_rows),
+            "web_addresses_trusted": trusted,
+            "rows": report,
+            "note": (
+                "These counts cover the last %s connections. A signal that shows "
+                "zero is not arriving at the server." % len(rows)
+            ),
+        }
+
+    def _signal_state(self, seen, total):
+        """Return the lamp state for one coverage proportion."""
+
+        if not total:
+            return "off"
+        if not seen:
+            return "fail"
+        return "ok" if seen >= total * 0.8 else "attn"
+
+    def _signal_advice(self, field, seen, total, trusted):
+        """Return one sentence about what an absent signal means.
+
+        Written for the person who has to fix it, not for the person who built
+        it. Each sentence names the file or the setting to change.
+        """
+
+        if not total:
+            return "No connection of this kind is recorded yet."
+        if seen:
+            if seen >= total * 0.8:
+                return ""
+            return "Some connections carry this signal and some do not. This is normal when players use different software."
+
+        if field == "telnet_sig":
+            return (
+                "No connection over a raw socket negotiated any option. This is "
+                "normal if every player uses the web client."
+            )
+        if field == "tls_sig":
+            if not trusted:
+                return (
+                    "The server does not trust the proxy in front of it, so it "
+                    "reads neither the player address nor the handshake. Add the "
+                    "proxy address to UPSTREAM_IPS first. Every address signal is "
+                    "wrong until you do."
+                )
+            return (
+                "The server trusts the proxy, but the proxy sends no handshake "
+                "headers. Add the four X-TLS headers to the proxy configuration, "
+                "in the same block as the other proxy headers."
+            )
+        if field == "http_order_fp":
+            return (
+                "No web connection recorded its header order. This is a fault in "
+                "the server, not in the proxy. Report it."
+            )
+        if field == "csessid":
+            return "No web connection carried a browser session id."
+        return ""
 
     @io_action
     def sanction(
@@ -1022,7 +1417,20 @@ class ModerationPanel(Panel):
         from evennia.server.models import ModerationFlag, Sanction, SessionRecord
 
         models = {
-            "session": (SessionRecord, {"ip", "ip_hash", "device_token", "client_fp", "csessid"}),
+            "session": (
+                SessionRecord,
+                {
+                    "ip",
+                    "ip_hash",
+                    "device_token",
+                    "client_fp",
+                    "csessid",
+                    "telnet_sig",
+                    "tls_sig",
+                    "http_order_fp",
+                    "http_fp",
+                },
+            ),
             "sanction": (Sanction, {"subject_value"}),
             "flag": (ModerationFlag, {"session_uid"}),
         }

@@ -39,6 +39,27 @@ SEVERITY = {
 }
 
 
+#: Signatures that identify the software behind a session, strongest first.
+#: Each is enough to raise a correlation flag once the network already matches,
+#: and :func:`detect_identity_correlation` checks every one the session carries.
+#:
+#: ``http_order_fp`` is deliberately absent. Header order identifies a browser
+#: *build*, not a person, so on any busy network it would match most web
+#: players at once. A flag that fires for everybody teaches staff to skip the
+#: queue, which costs more than the case it would have caught. It is recorded,
+#: indexed, and readable from the console; it is not a trigger.
+CORRELATION_SIGNATURES = (
+    # The client's own protocol stack. Changing it means changing client.
+    ("telnet_sig", "client negotiation"),
+    # The TLS handshake, as a trusted reverse proxy reported it. Changing it
+    # means changing browser or operating system. Empty without that proxy.
+    ("tls_sig", "browser handshake"),
+    # The browser session. Conclusive when it matches and one cookie clear away
+    # from never matching again, which is why it is not the only one checked.
+    ("csessid", "browser session"),
+)
+
+
 def _lookback():
     days = int(getattr(settings, "MODERATION_DETECTION_LOOKBACK_DAYS", 90) or 0)
     if days <= 0:
@@ -364,6 +385,11 @@ def detect_identity_correlation(snapshot: dict):
     name. This one has the session, which is all the evidence there is at that
     moment.
 
+    The software half comes from :data:`CORRELATION_SIGNATURES`, and every
+    signature the session carries is checked rather than only the first. A web
+    player who clears cookies still has a TLS handshake, and that is the case
+    the handshake was added for.
+
     It flags. It never refuses: refusing at the door tells the evader which
     signal to change next.
     """
@@ -372,39 +398,43 @@ def detect_identity_correlation(snapshot: dict):
     if not cidr:
         return None
 
-    signature = ""
-    label = ""
-    for field, name in (("telnet_sig", "client negotiation"), ("csessid", "browser session")):
-        value = str(snapshot.get(field) or "")
-        if value:
-            signature, label, signature_field = value, name, field
-            break
-    if not signature:
-        return None
-
     account_name = (snapshot.get("account_name") or "").strip()
 
-    # Accounts that have used this network AND this signature. Two filters on
-    # one query rather than two sets intersected: the pair is the signal.
-    rows = _window(SessionRecord.objects.filter(cidr=cidr, **{signature_field: signature}))
-    names = set(rows.exclude(account_name="").values_list("account_name", flat=True).distinct())
-    names.discard(account_name)
-    if not names:
+    # Every signature this session carries that is worth a flag on its own once
+    # a network already matches. Each is checked; the hits are pooled. Checking
+    # only the first present one would mean a web player who clears cookies is
+    # never compared on the handshake, which is the case the handshake is for.
+    candidates: dict = {}
+    for field, label in CORRELATION_SIGNATURES:
+        value = str(snapshot.get(field) or "")
+        if not value:
+            continue
+        rows = _window(SessionRecord.objects.filter(cidr=cidr, **{field: value}))
+        names = set(rows.exclude(account_name="").values_list("account_name", flat=True).distinct())
+        names.discard(account_name)
+        for name in names:
+            # Every signature that matched, not the first. Two matching
+            # signatures and one matching signature are different cases, and
+            # the person reading the flag is the one who has to weigh them.
+            candidates.setdefault(name, []).append(label)
+
+    if not candidates:
         return None
 
     blocked = set(
         Sanction.objects.active()
         .filter(
             subject_type=Sanction.SUBJECT_ACCOUNT,
-            subject_value__in=[name.lower() for name in names],
+            subject_value__in=[name.lower() for name in candidates],
             level__in=Sanction.BLOCKING_LEVELS,
         )
         .values_list("subject_value", flat=True)
     )
-    hits = sorted(name for name in names if name.lower() in blocked)
+    hits = sorted(name for name in candidates if name.lower() in blocked)
     if not hits:
         return None
 
+    labels = sorted({label for name in hits for label in candidates[name]})
     kind = ModerationFlag.KIND_IDENTITY_CORRELATION
     who = account_name or "An unauthenticated session"
     return raise_flag(
@@ -415,12 +445,13 @@ def detect_identity_correlation(snapshot: dict):
         account_name=account_name,
         session_uid=snapshot.get("session_uid", ""),
         summary=(
-            f"{who} shares a network and a {label} with blocked account(s): " + ", ".join(hits)
+            f"{who} shares a network and a {' and a '.join(labels)} with "
+            "blocked account(s): " + ", ".join(hits)
         ),
         evidence={
             "signal": kind,
             "cidr": cidr,
-            "matched_on": label,
+            "matched_on": labels,
             "accounts": hits,
             "observed_from_session": snapshot.get("session_uid", ""),
         },

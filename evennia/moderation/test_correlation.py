@@ -341,3 +341,89 @@ class TestHeaderOrderSignature(TestCase):
         self.assertEqual(
             capture.header_order_signature({"HTTP_ORDER": ["X-Forwarded-For", "Connection"]}), ""
         )
+
+
+class TestCorrelationSignatures(TestCase):
+    """Which signatures raise a correlation flag, and which deliberately do not.
+
+    The handshake exists for the case cookies cannot cover: somebody who was
+    banned clears their browser data and comes back. Everything they cleared is
+    gone; the handshake their browser performs is not.
+    """
+
+    def snapshot(self, **kwargs):
+        base = {
+            "session_uid": "probe",
+            "cidr": "104.16.0.0/24",
+            "telnet_sig": "",
+            "csessid": "",
+            "tls_sig": "",
+            "http_order_fp": "",
+            "account_name": "",
+        }
+        base.update(kwargs)
+        return base
+
+    def test_a_shared_handshake_on_a_shared_network_flags(self):
+        _session(account_name="evader", telnet_sig="", tls_sig="tls-a")
+        _ban("evader")
+        flag = detect.detect_identity_correlation(self.snapshot(tls_sig="tls-a"))
+        self.assertIsNotNone(flag)
+        self.assertEqual(flag.kind, ModerationFlag.KIND_IDENTITY_CORRELATION)
+        self.assertIn("browser handshake", flag.evidence["matched_on"])
+
+    def test_a_different_handshake_does_not_flag(self):
+        _session(account_name="evader", telnet_sig="", tls_sig="tls-a")
+        _ban("evader")
+        self.assertIsNone(detect.detect_identity_correlation(self.snapshot(tls_sig="tls-b")))
+
+    def test_a_cleared_cookie_no_longer_hides_the_match(self):
+        # The whole reason every signature is checked instead of the first one
+        # present. Before this, a session with a csessid that matched nothing
+        # was never compared on its handshake.
+        _session(account_name="evader", telnet_sig="", tls_sig="tls-a", csessid="old-browser")
+        _ban("evader")
+        flag = detect.detect_identity_correlation(
+            self.snapshot(tls_sig="tls-a", csessid="new-browser")
+        )
+        self.assertIsNotNone(flag)
+
+    def test_a_shared_header_order_alone_never_flags(self):
+        # Header order identifies a browser build, not a person. On any busy
+        # network it would match most web players at once, and a flag that
+        # fires for everybody teaches staff to skip the queue.
+        _session(account_name="evader", telnet_sig="", http_order_fp="order-a")
+        _ban("evader")
+        self.assertIsNone(
+            detect.detect_identity_correlation(self.snapshot(http_order_fp="order-a"))
+        )
+
+    def test_header_order_is_not_in_the_trigger_list(self):
+        # Stated directly, so removing it from the docstring cannot quietly
+        # remove it from the rule.
+        self.assertNotIn("http_order_fp", [field for field, _ in detect.CORRELATION_SIGNATURES])
+
+    def test_two_signatures_matching_are_both_named(self):
+        _session(account_name="evader", telnet_sig="sig-a", tls_sig="tls-a")
+        _ban("evader")
+        flag = detect.detect_identity_correlation(
+            self.snapshot(telnet_sig="sig-a", tls_sig="tls-a")
+        )
+        self.assertEqual(
+            sorted(flag.evidence["matched_on"]), ["browser handshake", "client negotiation"]
+        )
+
+    def test_an_unblocked_neighbour_does_not_flag(self):
+        # A household on one address using the same browser is the normal case,
+        # and it must stay silent.
+        _session(account_name="sibling", telnet_sig="", tls_sig="tls-a")
+        self.assertIsNone(detect.detect_identity_correlation(self.snapshot(tls_sig="tls-a")))
+
+    def test_the_handshake_works_for_a_session_with_no_account(self):
+        # Somebody banned reconnects and sits at the login prompt. There is no
+        # account name to match on, which is exactly when this has to work.
+        _session(account_name="evader", telnet_sig="", tls_sig="tls-a")
+        _ban("evader")
+        flag = detect.detect_identity_correlation(self.snapshot(tls_sig="tls-a", account_name=""))
+        self.assertIsNotNone(flag)
+        self.assertIn("unauthenticated", flag.summary)

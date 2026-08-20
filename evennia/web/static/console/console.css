@@ -438,6 +438,46 @@ tbody tr[title] {
   border-bottom: 1px solid var(--rule-soft);
 }
 
+/* A name that is also the control for looking it up.
+ *
+ * Not styled as a link: it navigates nothing and copies as nothing. It reads as
+ * the value it is, and only says it is reachable when the operator is on it. */
+.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.linkish:hover,
+.linkish:focus-visible {
+  color: var(--ink);
+  border-bottom-color: currentColor;
+}
+
+/* Which signatures one connection carried.
+ *
+ * Fixed width so the column lines up down the list. An operator scanning for
+ * the row that is missing a handshake is reading the shape of the column, not
+ * each row in turn, and ragged text destroys that. */
+.sig-marks {
+  flex: 0 0 auto;
+  min-width: 116px;
+  text-align: right;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* Nothing was recorded, which is not the same as nothing being shown. */
+.sig-marks.none {
+  color: var(--ink-dim);
+  opacity: 0.55;
+}
+
 .probe-verdict {
   display: flex;
   flex-wrap: wrap;

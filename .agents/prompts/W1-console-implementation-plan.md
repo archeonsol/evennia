@@ -10,6 +10,56 @@ Audited against this document on 2026-08-20 by reading the shipped code, then
 rebuilt against that audit the same day. **Twenty-three panels are registered and
 under test, and every cross-cutting promise in this document is implemented.**
 
+Re-audited the same day against P5 specifically, after the TLS and negotiation
+signals were wired in. That pass is the one worth reading: the first audit
+checked that each panel existed and answered, and **three of the four defects
+below survived it**, because a panel can exist, answer, and still be wrong.
+
+### What the P5 re-audit found
+
+**The flag dossier threw before it rendered.** `duration` and `reach` were
+declared inside `editor()`, used only inside `flagDossier()`, and resolved in
+neither — a `ReferenceError` on every click. The single path this document calls
+"the one path that creates sanctions" did not open at all. Nothing caught it
+because the panel's tests are service-side and the renderer had no test that ran
+it. A scope sweep over every top-level function in `console.js` found no second
+instance.
+
+**An unrevealed signature reached the browser.** `tls_sig` and `telnet_sig` are
+opaque identifiers with no sanction subject, and being unbannable was quietly
+treated as a reason not to mask them. This document already answers that: an
+unrevealed value must never reach the browser or devtools recovers it and the
+audit trail lies. What a value can be *used for* does not decide whether it is
+shown; that it identifies somebody does.
+
+**Purged and never-recorded addresses read identically.** Both arrive as an
+empty string. The retention promise in P5 — show retention state per row — was
+not implemented, so a row whose address the ninety-day sweep cleared looked like
+a row that never had one. The discriminator is `ip_hash`, not the row's age:
+retention windows are settings that change, and a row purged under an old window
+would be described wrongly by any calculation from today's.
+
+**Alt correlation was never built.** P5 commits to it explicitly and the
+migration step says anything the old surface does that the new one does not is a
+bug. The account dossier is now `ModerationPanel.account()`. It costs two
+queries per column rather than the game surface's one per *value*, which on an
+account with a long history was eighty round trips to render one page.
+
+One further defect, found while testing that dossier: the model's default
+ordering joins a `DISTINCT`, so a limited shared-with lookup was distinct per
+*session* rather than per pair, and thirty sessions from one account filled the
+limit and hid everybody else on the key. `.order_by()` before `.distinct()`.
+
+### Identity signals
+
+`telnet_sig`, `tls_sig`, and `http_order_fp` are captured, indexed, masked,
+revealable through the audited action, and correlated in the account dossier.
+`tls_sig` is a correlation trigger; `http_order_fp` is deliberately not one, and
+`evennia/moderation/README.md` carries the reasoning. The Moderation panel
+reports per-signal coverage, because a signal that was configured and is
+silently absent leaves the queue looking calm for the wrong reason, and no other
+readout in the console would ever say so.
+
 ### Panels
 
 Records, Attributes, Moderation, Authorization, Runtime, Logs, Errors, Objects,
@@ -748,10 +798,14 @@ substrate itself is plain ORM.
   `cidr`, `ip_hash`, `csessid`) — exact matches only, matching the package's
   hard-signals-only stance. No scoring, no inference, no similarity metric. The
   README's justification is that any conclusion must be showable to the player it
-  is used against; a UI that quietly adds a heuristic breaks that.
+  is used against; a UI that quietly adds a heuristic breaks that. **Built** as
+  `ModerationPanel.account()`; `telnet_sig` and `tls_sig` join the column list,
+  marked as keys that can be compared but never banned, since each identifies a
+  piece of software rather than a person.
 - **Retention.** `ip` is purged on schedule while `ip_hash` and `cidr` outlive
   it. Show retention state per row so staff understand why an older row has no
-  address.
+  address. **Built** as `address_state`: `held`, `purged`, or `absent`, keyed off
+  `ip_hash` rather than the row's age.
 - **Address reveal is audited, not gated.** The game-side service splits
   `act` from `address` as two capabilities. That split does not survive the
   console's two-capability decision, but the *value* behind it must, because the

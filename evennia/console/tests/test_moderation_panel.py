@@ -340,3 +340,390 @@ class TestAccess(TestCase):
     def test_the_hash_chain_can_be_checked(self):
         # Tamper evidence nobody can check is decoration.
         self.assertTrue(hasattr(ModerationPanel, "verify_chain"))
+
+
+class TestSignatureDisplay(ModerationTestCase):
+    """What software a connection used, and whether it was recorded at all.
+
+    A row that carries no signature and a row whose signature is withheld are
+    different facts, and the panel must not let them render the same way. The
+    first means the server saw nothing; the second means the server saw
+    something and is not showing it.
+    """
+
+    def _session(self, **kwargs):
+        defaults = {
+            "session_uid": f"sig{SessionRecord.objects.count():04d}",
+            "account_name": "player",
+            "protocol": "websocket",
+            "cidr": "203.0.113.0/24",
+        }
+        defaults.update(kwargs)
+        return SessionRecord.objects.create(**defaults)
+
+    def _marks(self, row):
+        return {item["field"]: item for item in row["signatures"]}
+
+    def test_every_signature_is_reported_on_every_row(self):
+        # Absent ones included. A signal missing from the list and a signal
+        # reported absent read differently to whoever is scanning the column.
+        self._session()
+        marks = self._marks(self.panel.rows(_ctx())["sessions"][0])
+        self.assertEqual(set(marks), {"telnet_sig", "tls_sig", "http_order_fp", "csessid"})
+
+    def test_a_recorded_signature_is_withheld_not_shown(self):
+        self._session(tls_sig="a" * 64)
+        mark = self._marks(self.panel.rows(_ctx())["sessions"][0])["tls_sig"]
+        self.assertTrue(mark["present"])
+        self.assertEqual(mark["value"], "withheld")
+
+    def test_an_absent_signature_says_so(self):
+        self._session(tls_sig="")
+        mark = self._marks(self.panel.rows(_ctx())["sessions"][0])["tls_sig"]
+        self.assertFalse(mark["present"])
+        self.assertEqual(mark["value"], "")
+
+    def test_the_signatures_can_be_revealed_with_a_reason(self):
+        session = self._session(tls_sig="a" * 64)
+        shown = self.panel.reveal(
+            self.io(),
+            record="session",
+            record_id=session.pk,
+            field="tls_sig",
+            reason="checking a ban appeal",
+        )
+        self.assertEqual(shown["value"], "a" * 64)
+
+    def test_revealing_one_is_recorded_permanently(self):
+        session = self._session(http_order_fp="b" * 64)
+        self.panel.reveal(
+            self.io(),
+            record="session",
+            record_id=session.pk,
+            field="http_order_fp",
+            reason="checking a ban appeal",
+        )
+        event = ConsoleAuditEvent.objects.latest("id")
+        self.assertEqual(event.operation, "reveal")
+        self.assertEqual(event.retention, "permanent")
+
+
+class TestEvidenceMasking(ModerationTestCase):
+    """Which evidence keys are withheld, and which are not.
+
+    The rule used to be a substring match. ``sig`` is a substring of ``signal``,
+    which is a key on every flag and holds nothing but the detector's own name,
+    so a careless rule withholds the one field that says what the flag is.
+    """
+
+    def _dossier(self, evidence):
+        flag = self.make_flag(evidence=evidence)
+        return {row["key"]: row["value"] for row in self.panel.detail(_ctx(), flag.pk)["evidence"]}
+
+    def test_a_handshake_signature_is_withheld(self):
+        self.assertEqual(self._dossier({"tls_sig": "a" * 64})["tls_sig"], "withheld")
+
+    def test_a_negotiation_signature_is_withheld(self):
+        self.assertEqual(self._dossier({"telnet_sig": "a" * 64})["telnet_sig"], "withheld")
+
+    def test_the_detector_name_is_not_withheld(self):
+        # The regression this class exists for.
+        self.assertEqual(
+            self._dossier({"signal": "identity_correlation"})["signal"], "identity_correlation"
+        )
+
+    def test_a_network_is_withheld(self):
+        self.assertEqual(self._dossier({"cidr": "203.0.113.0/24"})["cidr"], "withheld")
+
+    def test_which_signal_matched_is_not_withheld(self):
+        # An operator cannot judge the flag without knowing what it matched on,
+        # and a label is not an identifier.
+        self.assertEqual(
+            self._dossier({"matched_on": "browser handshake"})["matched_on"], "browser handshake"
+        )
+
+
+class TestSignalCoverage(ModerationTestCase):
+    """Whether the signals an operator configured are arriving at all.
+
+    This is the only readout that distinguishes "nobody is evading" from "the
+    server cannot see them". Both look like an empty queue.
+    """
+
+    def _web(self, **kwargs):
+        defaults = {
+            "session_uid": f"web{SessionRecord.objects.count():04d}",
+            "protocol": "websocket",
+            "cidr": "203.0.113.0/24",
+            "xff_present": True,
+            "xff_applied": True,
+            "http_order_fp": "b" * 64,
+            "csessid": "c" * 32,
+        }
+        defaults.update(kwargs)
+        return SessionRecord.objects.create(**defaults)
+
+    def _report(self, ctx=None):
+        return {row["field"]: row for row in self.panel.signals(ctx or _ctx())["rows"]}
+
+    def test_no_data_is_said_plainly(self):
+        result = self.panel.signals(_ctx())
+        self.assertEqual(result["sample"], 0)
+        self.assertIn("Connect once", result["note"])
+
+    def test_an_arriving_signal_reads_as_arriving(self):
+        for _ in range(5):
+            self._web(tls_sig="a" * 64)
+        self.assertEqual(self._report()["tls_sig"]["state"], "ok")
+
+    def test_an_absent_signal_reads_as_absent(self):
+        for _ in range(5):
+            self._web(tls_sig="")
+        self.assertEqual(self._report()["tls_sig"]["state"], "fail")
+
+    def test_an_untrusted_proxy_is_named_as_the_cause(self):
+        # The larger of the two faults: the addresses are wrong too.
+        for _ in range(5):
+            self._web(tls_sig="", xff_present=True, xff_applied=False)
+        self.assertIn("UPSTREAM_IPS", self._report()["tls_sig"]["advice"])
+
+    def test_a_trusted_proxy_that_sends_no_headers_is_named_differently(self):
+        for _ in range(5):
+            self._web(tls_sig="", xff_applied=True)
+        advice = self._report()["tls_sig"]["advice"]
+        self.assertIn("X-TLS", advice)
+        self.assertNotIn("UPSTREAM_IPS", advice)
+
+    def test_telnet_sessions_are_not_counted_against_the_handshake(self):
+        # A raw socket has no TLS handshake. Counting it as missing coverage
+        # reports a fault that is not one.
+        SessionRecord.objects.create(
+            session_uid="t1", protocol="telnet", telnet_sig="d" * 64, cidr="203.0.113.0/24"
+        )
+        report = self._report()
+        self.assertEqual(report["tls_sig"]["of"], 0)
+        self.assertEqual(report["telnet_sig"]["seen"], 1)
+
+    def test_a_partial_signal_is_not_reported_as_a_fault(self):
+        # Players use different software. Some coverage is the normal state.
+        for _ in range(8):
+            self._web(tls_sig="a" * 64)
+        for _ in range(4):
+            self._web(tls_sig="")
+        self.assertEqual(self._report()["tls_sig"]["state"], "attn")
+
+    def test_no_signature_value_is_read_out_of_the_database(self):
+        # The coverage report must not become a way to page through everybody's
+        # fingerprints. It reports counts; the values stay in the column.
+        self._web(tls_sig="a" * 64)
+        rendered = repr(self.panel.signals(_ctx()))
+        self.assertNotIn("a" * 64, rendered)
+
+
+class TestAddressRetentionState(ModerationTestCase):
+    """Why a row has no address, said out loud.
+
+    Three different facts reach the panel as the same empty string: the address
+    is withheld, the address was deleted by the retention sweep, or no address
+    was ever recorded. An operator reading a blank cell cannot tell them apart,
+    and the third one means every address signal on the row is missing rather
+    than hidden.
+    """
+
+    def _session(self, **kwargs):
+        defaults = {
+            "session_uid": f"ret{SessionRecord.objects.count():04d}",
+            "protocol": "telnet",
+            "cidr": "203.0.113.0/24",
+        }
+        defaults.update(kwargs)
+        return SessionRecord.objects.create(**defaults)
+
+    def _row(self):
+        return self.panel.rows(_ctx())["sessions"][0]
+
+    def test_a_recorded_address_reads_as_held(self):
+        self._session(ip="203.0.113.7", ip_hash="h" * 64)
+        row = self._row()
+        self.assertEqual(row["address_state"], "held")
+        self.assertEqual(row["ip"], "withheld")
+        self.assertEqual(row["address_state_note"], "")
+
+    def test_a_purged_address_says_the_server_deleted_it(self):
+        # The hash outlives the address on purpose, so the row still matches.
+        self._session(ip=None, ip_hash="h" * 64)
+        row = self._row()
+        self.assertEqual(row["address_state"], "purged")
+        self.assertIn("deleted", row["address_state_note"])
+
+    def test_an_address_that_was_never_recorded_says_that_instead(self):
+        self._session(ip=None, ip_hash="")
+        row = self._row()
+        self.assertEqual(row["address_state"], "absent")
+        self.assertIn("no address", row["address_state_note"])
+
+    def test_purged_and_absent_do_not_read_the_same(self):
+        # The regression this class exists for.
+        self._session(ip=None, ip_hash="h" * 64)
+        purged = self._row()
+        SessionRecord.objects.all().delete()
+        self._session(ip=None, ip_hash="")
+        absent = self._row()
+        self.assertNotEqual(purged["address_state"], absent["address_state"])
+        self.assertNotEqual(purged["address_state_note"], absent["address_state_note"])
+
+
+class TestAccountDossier(ModerationTestCase):
+    """Which accounts share an identity key with this one.
+
+    Exact matches on indexed columns and nothing else. The panel must never
+    report a likelihood, because the rule the package is built on is that a
+    conclusion has to be showable to the player it is used against.
+    """
+
+    def _session(self, account_name, **kwargs):
+        defaults = {
+            "session_uid": f"dos{SessionRecord.objects.count():04d}",
+            "account_name": account_name,
+            "protocol": "telnet",
+            "cidr": "203.0.113.0/24",
+        }
+        defaults.update(kwargs)
+        return SessionRecord.objects.create(**defaults)
+
+    def _keys(self, name="suspect"):
+        return {row["kind"]: row for row in self.panel.account(_ctx(), name=name)["keys"]}
+
+    def test_a_missing_name_is_refused(self):
+        with self.assertRaises(LookupError):
+            self.panel.account(_ctx(), name="  ")
+
+    def test_an_account_with_no_history_reports_no_keys(self):
+        result = self.panel.account(_ctx(), name="stranger")
+        self.assertEqual(result["keys"], [])
+        self.assertEqual(result["first_seen"], "")
+
+    def test_a_shared_device_token_names_the_other_account(self):
+        self._session("suspect", device_token="t" * 32)
+        self._session("evader", device_token="t" * 32)
+        self.assertEqual(self._keys()["device_token"]["shared_with"], ["evader"])
+
+    def test_an_unshared_key_names_nobody(self):
+        self._session("suspect", device_token="t" * 32)
+        self.assertEqual(self._keys()["device_token"]["shared_with"], [])
+
+    def test_the_account_itself_is_never_listed_as_a_match(self):
+        self._session("suspect", device_token="t" * 32)
+        self._session("Suspect", device_token="t" * 32)
+        self.assertEqual(self._keys()["device_token"]["shared_with"], [])
+
+    def test_the_new_signatures_are_correlated_too(self):
+        self._session("suspect", tls_sig="a" * 64)
+        self._session("evader", tls_sig="a" * 64)
+        self.assertEqual(self._keys()["tls_sig"]["shared_with"], ["evader"])
+
+    def test_a_handshake_signature_never_reaches_the_browser(self):
+        # It cannot be banned, which is not a reason to show it. Anything
+        # opaque that reaches the page is recoverable from devtools, and an
+        # audit trail that records a reveal nobody had to perform is a lie.
+        self._session("suspect", tls_sig="a" * 64, telnet_sig="b" * 64)
+        keys = self._keys()
+        self.assertEqual(keys["tls_sig"]["value"], "withheld")
+        self.assertEqual(keys["telnet_sig"]["value"], "withheld")
+
+    def test_no_signature_value_appears_anywhere_in_the_payload(self):
+        self._session("suspect", tls_sig="a" * 64, device_token="t" * 32)
+        rendered = repr(self.panel.account(_ctx(), name="suspect"))
+        self.assertNotIn("a" * 64, rendered)
+        self.assertNotIn("t" * 32, rendered)
+
+    def test_a_handshake_is_marked_as_something_you_cannot_ban(self):
+        # It identifies a browser build. Banning one bans everybody who uses
+        # that browser, which is why it has no sanction subject at all.
+        self._session("suspect", tls_sig="a" * 64)
+        self.assertFalse(self._keys()["tls_sig"]["bannable"])
+        self.assertEqual(self._keys()["tls_sig"]["subject_type"], "")
+
+    def test_a_device_token_is_marked_as_something_you_can_ban(self):
+        self._session("suspect", device_token="t" * 32)
+        self.assertTrue(self._keys()["device_token"]["bannable"])
+        self.assertEqual(self._keys()["device_token"]["subject_type"], "device_token")
+
+    def test_an_opaque_key_is_masked(self):
+        self._session("suspect", device_token="t" * 32)
+        self.assertEqual(self._keys()["device_token"]["value"], "withheld")
+
+    def test_a_network_is_readable_because_it_names_nobody(self):
+        self._session("suspect")
+        self.assertEqual(self._keys()["cidr"]["value"], "203.0.113.0/24")
+
+    def test_an_active_ban_on_a_key_is_reported(self):
+        self._session("suspect", device_token="t" * 32)
+        Sanction.objects.create(
+            subject_type=Sanction.SUBJECT_DEVICE,
+            subject_value="t" * 32,
+            level=Sanction.LEVEL_BAN,
+            reason="test",
+        )
+        self.assertTrue(self._keys()["device_token"]["sanctioned"])
+
+    def test_a_lifted_ban_is_not_reported_as_active(self):
+        self._session("suspect", device_token="t" * 32)
+        sanction = Sanction.objects.create(
+            subject_type=Sanction.SUBJECT_DEVICE,
+            subject_value="t" * 32,
+            level=Sanction.LEVEL_BAN,
+            reason="test",
+        )
+        sanction.revoked_at = timezone.now()
+        sanction.save(update_fields=["revoked_at"])
+        self.assertFalse(self._keys()["device_token"]["sanctioned"])
+
+    def test_the_flags_naming_this_account_come_back_with_it(self):
+        self._session("suspect")
+        self.make_flag(account_name="suspect")
+        self.assertEqual(len(self.panel.account(_ctx(), name="suspect")["flags"]), 1)
+
+    def test_the_panel_states_that_it_guesses_nothing(self):
+        self.assertIn("does not guess", self.panel.account(_ctx(), name="x")["note"])
+
+    def _history(self, count, start=0):
+        for index in range(start, start + count):
+            self._session(
+                "suspect",
+                cidr=f"203.0.113.{index}/24",
+                device_token=f"token{index:027d}",
+                client_fp=f"fp{index:030d}",
+            )
+
+    def test_the_query_count_does_not_grow_with_the_history(self):
+        # The surface this replaces ran one shared-with query per value, so an
+        # account with a long history cost eighty round trips to render one
+        # page. The cost here is per column, and the column list is a constant.
+        #
+        # Asserted as "the same for a long history as for a short one" rather
+        # than as a number, because a number here would just restate the length
+        # of the column list and would have to be edited every time it changes.
+        self._history(2)
+        short = self._measure()
+        SessionRecord.objects.all().delete()
+        self._history(60)
+        self.assertEqual(self._measure(), short)
+
+    def _measure(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as captured:
+            self.panel.account(_ctx(), name="suspect")
+        return len(captured)
+
+    def test_one_busy_account_does_not_hide_the_others_on_a_key(self):
+        # The model orders by connected_at, and an ordering column joins the
+        # DISTINCT. Without clearing it, thirty sessions from one account fill
+        # the limit and the account that matters never appears.
+        for _ in range(30):
+            self._session("noisy", device_token="t" * 32)
+        self._session("suspect", device_token="t" * 32)
+        self._session("evader", device_token="t" * 32)
+        self.assertEqual(self._keys()["device_token"]["shared_with"], ["evader", "noisy"])
