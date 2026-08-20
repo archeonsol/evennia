@@ -123,3 +123,43 @@ class ConsoleAuditEvent(models.Model):
         """Return whether this row carries an inverse the console can apply."""
 
         return self.outcome == self.OUTCOME_SUCCESS and bool(self.inverse)
+
+
+class ConsoleErrorState(models.Model):
+    """One operator judgement about one recurring fault.
+
+    Only judgements are stored. The faults themselves are grouped from the log
+    files on each request, so there is no capture path to maintain, no second
+    copy of every traceback, and no table that grows on its own -- a row
+    appears here when somebody decides something about a signature, and not
+    before.
+    """
+
+    STATE_OPEN = "open"
+    STATE_ACKNOWLEDGED = "acknowledged"
+    STATE_MUTED = "muted"
+    STATE_CHOICES = [
+        (STATE_OPEN, "awaiting review"),
+        (STATE_ACKNOWLEDGED, "seen, still happening"),
+        (STATE_MUTED, "known, hide until the signature changes"),
+    ]
+
+    #: Exception type plus the call path. Excludes line numbers, so an edit
+    #: above a fault does not read as a new fault.
+    signature = models.CharField(max_length=64, unique=True, db_index=True)
+    state = models.CharField(
+        max_length=16, choices=STATE_CHOICES, default=STATE_OPEN, db_index=True
+    )
+    note = models.CharField(max_length=500, default="", blank=True)
+
+    actor_id = models.IntegerField(null=True, blank=True)
+    actor_name = models.CharField(max_length=255, default="", blank=True)
+    updated_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Console error state"
+        verbose_name_plural = "Console error states"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"ConsoleErrorState({self.signature[:12]}, {self.state})"

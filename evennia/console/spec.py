@@ -48,6 +48,9 @@ DOMAIN_OWNED = {
     "server.authorizationauditevent": "append-only by definition",
     "server.gameevent": "evennia.eventbus.emit",
     "server.enginejob": "evennia.jobs.queue; use the queue's own requeue and dead-letter paths",
+    "console.consoleerrorstate": (
+        "the errors panel's own review action; a judgement is recorded, not edited"
+    ),
     "console.consoleauditevent": (
         "append-only; the console has no write path to its own audit trail "
         "because under one capability that trail is the only internal control"

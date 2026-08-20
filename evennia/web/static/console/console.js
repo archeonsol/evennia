@@ -38,6 +38,9 @@ const state = {
   editing: null,
   logFile: "",
   logSearch: "",
+  errorState: "",
+  errorSearch: "",
+  errorOpen: null,
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -859,8 +862,164 @@ async function drawLogs() {
   appendLiveLog();
 }
 
+async function drawErrors() {
+  const query = new URLSearchParams({
+    state: state.errorState || "",
+    search: state.errorSearch || "",
+  });
+  const result = await call("panels/errors/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const rows = data.rows || [];
+
+  const filter = node("select", {
+    id: "error-state",
+    onchange: (event) => {
+      state.errorState = event.target.value;
+      select_render();
+    },
+  });
+  for (const option of [""].concat(data.states || [])) {
+    filter.append(
+      node("option", {
+        value: option,
+        selected: option === (state.errorState || ""),
+        text: option ? option.toUpperCase() : "ALL STATES",
+      }),
+    );
+  }
+
+  const search = node("input", {
+    type: "search",
+    value: state.errorSearch || "",
+    placeholder: "SEARCH EXCEPTION OR MESSAGE",
+    "aria-label": "Search faults",
+    onchange: (event) => {
+      state.errorSearch = event.target.value;
+      select_render();
+    },
+  });
+
+  const body = node("div", { class: "panel-body" });
+  if (rows.length === 0) {
+    body.append(
+      empty(
+        "NO FAULTS.",
+        state.errorSearch || state.errorState
+          ? "No fault matches the filter. Clear it to show all faults."
+          : "No traceback appears in the recent end of the log files.",
+      ),
+    );
+  } else {
+    for (const group of rows) {
+      body.append(faultRow(group));
+    }
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("ERRORS", data.group_count ? data.group_count + " FAULTS" : ""),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "error-state", text: "State" }),
+        filter,
+      ]),
+      node("div", { class: "field" }, [search]),
+      node("span", { class: "spacer" }),
+      lamp(data.occurrence_count + " OCCURRENCES", "off"),
+    ]),
+    body,
+  );
+}
+
+/* One fault, collapsed. The count is the point: an operator needs to know a
+ * thing is happening constantly before they need its stack. */
+function faultRow(group) {
+  const open = state.errorOpen === group.signature;
+  const wrap = node("div", { class: "fault" });
+
+  const stateLamp =
+    group.state === "muted"
+      ? lamp("MUTED", "off")
+      : group.state === "acknowledged"
+        ? lamp("SEEN", "attn")
+        : lamp("OPEN", "fail");
+
+  wrap.append(
+    node("div", {
+      class: "fault-head",
+      onclick: () => {
+        state.errorOpen = open ? null : group.signature;
+        select_render();
+      },
+    }, [
+      stateLamp,
+      node("span", { class: "fault-name", text: group.exception }),
+      node("span", { class: "fault-message", text: group.message }),
+      node("span", { class: "fault-count", text: "x" + group.count }),
+      node("span", { class: "fault-when", text: group.last_seen }),
+    ]),
+  );
+
+  if (!open) return wrap;
+
+  const frames = node("div", { class: "fault-frames" });
+  for (const frame of group.frames || []) {
+    frames.append(
+      node("div", { class: "log-line" }, [
+        node("span", { class: "log-source", text: String(frame.line) }),
+        node("span", { class: "log-text", text: frame.function + "  " + frame.file }),
+      ]),
+    );
+  }
+
+  const note = node("input", {
+    type: "text",
+    placeholder: "WHY, FOR WHOEVER READS THIS NEXT",
+    "aria-label": "Review note",
+    value: group.note || "",
+  });
+
+  const actions = node("div", { class: "fault-actions" }, [
+    note,
+    node("button", {
+      type: "button",
+      text: "ACKNOWLEDGE",
+      onclick: () => reviewFault(group.signature, "acknowledged", note.value),
+    }),
+    node("button", {
+      type: "button",
+      text: "MUTE",
+      title: "Hide until this fault's signature changes",
+      onclick: () => reviewFault(group.signature, "muted", note.value),
+    }),
+    node("button", {
+      type: "button",
+      text: "REOPEN",
+      onclick: () => reviewFault(group.signature, "open", note.value),
+    }),
+  ]);
+
+  wrap.append(frames, actions);
+  if (group.reviewed_by) {
+    wrap.append(
+      node("p", { class: "empty-hint", text: "Last reviewed by " + group.reviewed_by }),
+    );
+  }
+  return wrap;
+}
+
+async function reviewFault(signature, wanted, note) {
+  const result = await call("panels/errors/actions/review/", {
+    body: { signature, state: wanted, note },
+  });
+  if (!report(result)) return;
+  select_render();
+}
+
 const RENDERERS = {
   records: drawRecords,
+  errors: drawErrors,
   runtime: drawRuntime,
   logs: drawLogs,
   attributes: drawAttributes,
