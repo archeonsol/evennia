@@ -29,6 +29,7 @@ from evennia.utils import logger
 # Severity is a sort order for the review queue, not a probability.
 SEVERITY = {
     ModerationFlag.KIND_SANCTIONED_KEY: 4,
+    ModerationFlag.KIND_IDENTITY_CORRELATION: 3,
     ModerationFlag.KIND_SHARED_DEVICE: 3,
     ModerationFlag.KIND_SHARED_CSESSID: 3,
     ModerationFlag.KIND_SHARED_CLIENT_CIDR: 1,
@@ -168,6 +169,10 @@ def detect_sanctioned_key_reuse(snapshot: dict):
         ("device_token", "device token"),
         ("csessid", "browser session"),
         ("ip_hash", "address"),
+        # The client's own telnet stack, which a player cannot change without
+        # changing client. client_fp is deliberately absent: it includes the
+        # client name and terminal type, which are a settings dialog away.
+        ("telnet_sig", "client negotiation"),
     ):
         value = snapshot.get(field) or ""
         for other in _other_accounts(field=field, value=value, exclude_name=account_name):
@@ -342,8 +347,89 @@ def detect_signup_burst(snapshot: dict):
     )
 
 
+def detect_identity_correlation(snapshot: dict):
+    """Two weak signals together, pointing at a sanctioned account.
+
+    Neither half is worth a flag alone. A shared ``/24`` is a household, a
+    school, or one carrier-grade NAT; a shared client signature is two people
+    who both use Mudlet. Either on its own would flag half the player base.
+
+    Together, against an account that is currently blocked, they are the shape
+    ban evasion actually has: the same person, on the same connection, with the
+    same software, under a new name.
+
+    Fires for an unauthenticated session too. That is the point of it -- a
+    person who has been banned reconnects and sits at the login prompt, and
+    ``detect_sanctioned_key_reuse`` cannot see them because it needs an account
+    name. This one has the session, which is all the evidence there is at that
+    moment.
+
+    It flags. It never refuses: refusing at the door tells the evader which
+    signal to change next.
+    """
+
+    cidr = str(snapshot.get("cidr") or "")
+    if not cidr:
+        return None
+
+    signature = ""
+    label = ""
+    for field, name in (("telnet_sig", "client negotiation"), ("csessid", "browser session")):
+        value = str(snapshot.get(field) or "")
+        if value:
+            signature, label, signature_field = value, name, field
+            break
+    if not signature:
+        return None
+
+    account_name = (snapshot.get("account_name") or "").strip()
+
+    # Accounts that have used this network AND this signature. Two filters on
+    # one query rather than two sets intersected: the pair is the signal.
+    rows = _window(SessionRecord.objects.filter(cidr=cidr, **{signature_field: signature}))
+    names = set(rows.exclude(account_name="").values_list("account_name", flat=True).distinct())
+    names.discard(account_name)
+    if not names:
+        return None
+
+    blocked = set(
+        Sanction.objects.active()
+        .filter(
+            subject_type=Sanction.SUBJECT_ACCOUNT,
+            subject_value__in=[name.lower() for name in names],
+            level__in=Sanction.BLOCKING_LEVELS,
+        )
+        .values_list("subject_value", flat=True)
+    )
+    hits = sorted(name for name in names if name.lower() in blocked)
+    if not hits:
+        return None
+
+    kind = ModerationFlag.KIND_IDENTITY_CORRELATION
+    who = account_name or "An unauthenticated session"
+    return raise_flag(
+        kind=kind,
+        dedupe_key=make_dedupe_key(kind, account_name or cidr, *hits),
+        severity=SEVERITY.get(kind, 0),
+        account_id=snapshot.get("account_id"),
+        account_name=account_name,
+        session_uid=snapshot.get("session_uid", ""),
+        summary=(
+            f"{who} shares a network and a {label} with blocked account(s): " + ", ".join(hits)
+        ),
+        evidence={
+            "signal": kind,
+            "cidr": cidr,
+            "matched_on": label,
+            "accounts": hits,
+            "observed_from_session": snapshot.get("session_uid", ""),
+        },
+    )
+
+
 DETECTORS = (
     detect_sanctioned_key_reuse,
+    detect_identity_correlation,
     detect_shared_device,
     detect_shared_csessid,
     detect_shared_client_on_network,

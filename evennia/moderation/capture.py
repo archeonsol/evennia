@@ -22,6 +22,19 @@ from evennia.utils import logger
 
 # Capability flags that make up the client fingerprint. Screen dimensions are
 # excluded on purpose: they change every time the player resizes the window.
+#: Subnegotiations whose completion is decided by the client's telnet stack
+#: rather than by the player. Screen size is deliberately absent: it completes
+#: or not depending on the terminal, and it changes when a window is resized.
+_NEG_SUBNEG_FLAGS = (
+    "GMCP",
+    "MCCP",
+    "MSDP",
+    "MSSP",
+    "MXP",
+    "MNES",
+    "TTYPE",
+)
+
 _FP_BOOL_FLAGS = (
     "ANSI",
     "AUTORESIZE",
@@ -130,6 +143,42 @@ def client_fingerprint(flags: dict, protocol_key: str = "") -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def negotiation_signature(flags: dict, protocol_key: str = "") -> str:
+    """Hash of the option negotiation the client library performed.
+
+    Distinct from :func:`client_fingerprint`, and harder to change on purpose.
+    That one includes ``CLIENTNAME``, ``TERM`` and ``ENCODING``, which a player
+    sets: somebody evading a ban edits them in a settings dialog and the
+    fingerprint moves.
+
+    This reads only what the client's telnet stack chose to do -- which options
+    it offered, in what order, and which subnegotiations it completed. A player
+    cannot change that without changing client, and each dedicated MUD client
+    negotiates a distinct and deterministic sequence.
+
+    The order is kept rather than sorted. Sorting would throw away the part
+    that identifies the library: two clients that support the same options
+    still ask for them in their own order.
+
+    Empty for a session that negotiated nothing, which is every web-client
+    connection and any raw socket. An empty value is never a match: callers
+    must not treat two blanks as the same client.
+    """
+
+    order = _neg_order(flags)
+    if not order:
+        return ""
+    # Subnegotiations that actually completed, as a sorted set: whether the
+    # client finished a subnegotiation is a property of its stack, but the
+    # order it finished them in depends on the network.
+    completed = sorted(name for name in _NEG_SUBNEG_FLAGS if flags and flags.get(name))
+    canonical = json.dumps(
+        {"protocol": str(protocol_key or ""), "order": order, "subneg": completed},
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def http_fingerprint(flags: dict) -> str:
     """
     Hash of the browser's handshake headers.
@@ -230,6 +279,7 @@ def snapshot_session(session, *, reason=None) -> dict:
             "screen_h": _screen_dimension(flags, "SCREENHEIGHT"),
             "flags": flags,
             "neg_order": _neg_order(flags),
+            "telnet_sig": negotiation_signature(flags, protocol_key),
             "neg_timing_ms": _neg_timing(flags),
             "csessid": str(getattr(session, "csessid", "") or "")[:64],
             "device_token": str(flags.get("DEVICE_TOKEN") or "")[:64],
@@ -264,6 +314,7 @@ _PERSIST_FIELDS = (
     "screen_h",
     "flags",
     "neg_order",
+    "telnet_sig",
     "neg_timing_ms",
     "csessid",
     "device_token",

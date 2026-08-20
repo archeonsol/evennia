@@ -385,6 +385,11 @@ class SessionRecord(models.Model):
     encoding = models.CharField(max_length=32, default="", blank=True)
     screen_w = models.IntegerField(null=True, blank=True)
     screen_h = models.IntegerField(null=True, blank=True)
+    # Hash of the option negotiation the client's telnet stack performed.
+    # Harder to change on purpose than client_fp, which includes the client
+    # name and terminal type a player sets: evading that one is a settings
+    # dialog, evading this one is a different client.
+    telnet_sig = models.CharField(max_length=64, default="", blank=True, db_index=True)
     # Negotiation order and per-option timing, for signals not yet promoted to columns.
     neg_order = models.JSONField(default=list, blank=True)
     neg_timing_ms = models.JSONField(default=dict, blank=True)
@@ -409,6 +414,7 @@ class SessionRecord(models.Model):
             models.Index(fields=["cidr", "-connected_at"]),
             models.Index(fields=["device_token", "-connected_at"]),
             models.Index(fields=["client_fp", "cidr"]),
+            models.Index(fields=["telnet_sig", "cidr"]),
             models.Index(fields=["ip_hash", "-connected_at"]),
         ]
 
@@ -600,6 +606,11 @@ class ModerationFlag(models.Model):
     #: sockets, and the connection limiter cannot see one logged-in account
     #: sending three hundred tells a minute.
     KIND_MESSAGE_BURST = "message_burst"
+    #: Two weak signals that mean little apart. A shared network is a
+    #: household or a campus; a shared client signature is two people who
+    #: both use Mudlet. The same pair together, pointing at a sanctioned
+    #: account, is the shape ban evasion actually has.
+    KIND_IDENTITY_CORRELATION = "identity_correlation"
 
     kind = models.CharField(max_length=48, db_index=True)
     severity = models.IntegerField(default=0, db_index=True)
