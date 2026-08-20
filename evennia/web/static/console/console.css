@@ -833,3 +833,79 @@ textarea::placeholder {
   border-color: var(--focus);
   color: var(--ink);
 }
+
+/* -------------------------------------------------------------------- tree */
+
+.tree {
+  margin-bottom: 14px;
+  font: 400 12px/1.6 var(--mono);
+}
+
+.tree-entry {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.tree-key {
+  flex: 1 1 auto;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+
+.tree-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.tree-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink-dim);
+  font: 500 11px/1.4 var(--mono);
+}
+
+.tree-name {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+}
+
+.tree-kind {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tree-summary {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A table cell that acts as a link into another view. Styled as text rather
+   than as a button: it sits in a data column and a row of buttons would read
+   as a toolbar. */
+.linky {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linky:hover {
+  color: var(--focus);
+}

@@ -60,6 +60,8 @@ const state = {
   auditTarget: "",
   auditCursor: "",
   auditOpen: null,
+  attrObject: "",
+  attrKeyOpen: "",
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -105,6 +107,8 @@ const URL_KEYS = [
   "auditTarget",
   "auditCursor",
   "auditOpen",
+  "attrObject",
+  "attrKeyOpen",
 ];
 
 function readUrl() {
@@ -767,7 +771,19 @@ async function drawAttributes() {
     for (const row of rows) {
       tbody.append(
         node("tr", {}, [
-          cell(row.key),
+          node("td", {}, [
+            node("button", {
+              type: "button",
+              class: "linky",
+              text: row.key,
+              title: "Find the objects carrying this key",
+              onclick: () => {
+                state.attrKeyOpen = row.key;
+                state.attrObject = "";
+                select_render();
+              },
+            }),
+          ]),
           node("td", { class: row.category ? null : "null", text: row.category || "(default)" }),
           node("td", { class: "num", text: String(row.objects) }),
           cell(row.kinds.join(", ")),
@@ -777,6 +793,12 @@ async function drawAttributes() {
     }
     table.append(tbody);
     body.append(table);
+  }
+
+  if (state.attrObject) {
+    body.prepend(await attrDocument(data.model));
+  } else if (state.attrKeyOpen) {
+    body.prepend(await attrCarriers(data.model, state.attrKeyOpen));
   }
 
   const sample = data.sample || {};
@@ -804,6 +826,214 @@ async function drawAttributes() {
       ]),
     );
   }
+}
+
+/* The objects carrying one key. This is the step between "which keys exist"
+ * and "what does this object hold": without it an operator has a catalogue and
+ * no way to reach a single document from it. */
+async function attrCarriers(model, key) {
+  const wrap = node("div", { class: "detail" });
+  const result = await call("panels/attributes/actions/carriers/", {
+    body: { model: model || "", key },
+  });
+  wrap.append(
+    node("div", { class: "toolbar" }, [
+      node("span", { class: "legend", text: "OBJECTS CARRYING " + key.toUpperCase() }),
+      node("span", { class: "spacer" }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.attrKeyOpen = "";
+          select_render();
+        },
+      }),
+    ]),
+  );
+  if (!report(result)) return wrap;
+  const data = result.payload.result || {};
+  const rows = data.rows || [];
+  if (!rows.length) {
+    wrap.append(empty("NO OBJECT CARRIES THIS KEY."));
+    return wrap;
+  }
+  wrap.append(
+    dataTable(
+      ["ID", "NAME", "VALUE", ""],
+      rows.map((row) => [
+        node("td", { class: "num", text: String(row.id) }),
+        cell(row.name || ""),
+        cell(row.value || ""),
+        node("td", {}, [
+          node("button", {
+            type: "button",
+            text: "DOCUMENT",
+            onclick: () => {
+              state.attrObject = String(row.id);
+              select_render();
+            },
+          }),
+        ]),
+      ]),
+    ),
+  );
+  if (data.note) wrap.append(node("p", { class: "empty-hint", text: data.note }));
+  return wrap;
+}
+
+/* One value, walked rather than truncated. A dict of dicts flattened into a
+ * 400-character preview is not readable and not navigable; this opens. */
+function attrTree(name, treeNode, depth) {
+  const label = node("span", { class: "tree-name", text: name });
+  const kind = node("span", { class: "tree-kind", text: treeNode.kind });
+  const summary = node("span", { class: "tree-summary", text: treeNode.summary || "" });
+  const line = node("div", { class: "tree-line", style: "padding-left:" + depth * 14 + "px" });
+
+  if (!(treeNode.children || []).length) {
+    line.append(label, kind, summary);
+    return [line];
+  }
+
+  const children = node("div", { hidden: depth > 0 });
+  const toggle = node("button", {
+    type: "button",
+    class: "tree-toggle",
+    "aria-expanded": depth === 0 ? "true" : "false",
+    text: depth === 0 ? "-" : "+",
+    onclick: () => {
+      const open = children.hidden;
+      children.hidden = !open;
+      toggle.textContent = open ? "-" : "+";
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    },
+  });
+  line.append(toggle, label, kind, summary);
+
+  for (const child of treeNode.children) {
+    for (const element of attrTree(child.name, child, depth + 1)) children.append(element);
+  }
+  if (treeNode.truncated) {
+    children.append(
+      node("div", {
+        class: "tree-line empty-hint",
+        style: "padding-left:" + (depth + 1) * 14 + "px",
+        text: treeNode.truncated + " more entries are stored but not shown.",
+      }),
+    );
+  }
+  return [line, children];
+}
+
+async function attrDocument(model) {
+  const wrap = node("div", { class: "detail" });
+  const result = await call(
+    "panels/attributes/detail/" + encodeURIComponent(state.attrObject) +
+      "/?model=" + encodeURIComponent(model || ""),
+  );
+  wrap.append(
+    node("div", { class: "toolbar" }, [
+      node("span", { class: "legend", text: "ATTRIBUTE DOCUMENT" }),
+      node("span", { class: "spacer" }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.attrObject = "";
+          select_render();
+        },
+      }),
+    ]),
+  );
+  if (!report(result)) return wrap;
+  const data = result.payload.record || {};
+
+  wrap.append(
+    node("dl", { class: "rows" }, [
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "object" }),
+        node("dd", { text: "#" + data.id + " " + (data.name || "") }),
+      ]),
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "entries" }),
+        node("dd", { class: "num", text: String(data.entry_count ?? 0) }),
+      ]),
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "document size" }),
+        node("dd", {}, [
+          lamp(data.size_bytes + " BYTES", data.fat ? "attn" : "ok"),
+          data.fat ? node("span", { class: "empty-hint", text: " " + data.size_note }) : null,
+        ]),
+      ]),
+    ]),
+  );
+
+  for (const group of data.categories || []) {
+    wrap.append(section(group.category ? "Category: " + group.category : "Default category"));
+    const tree = node("div", { class: "tree" });
+    for (const entry of group.entries || []) {
+      const head = node("div", { class: "tree-entry" }, [
+        node("span", { class: "tree-key", text: entry.key }),
+        node("button", {
+          type: "button",
+          text: "EDIT",
+          disabled: !entry.editable,
+          title: entry.editable
+            ? "Change this value"
+            : "A packed Python object cannot be edited as JSON",
+          onclick: () => attrEdit(data.model, data.id, entry.key, group.category, entry.value),
+        }),
+        node("button", {
+          type: "button",
+          text: "REMOVE",
+          onclick: () => attrRemove(data.model, data.id, entry.key, group.category),
+        }),
+      ]);
+      tree.append(head);
+      for (const element of attrTree(entry.key, entry.tree || {}, 0)) tree.append(element);
+    }
+    wrap.append(tree);
+  }
+
+  wrap.append(
+    node("div", { class: "fault-actions" }, [
+      node("button", {
+        type: "button",
+        text: "ADD AN ATTRIBUTE",
+        onclick: () => {
+          const key = prompt("Attribute key");
+          if (!key) return;
+          attrEdit(data.model, data.id, key, "", "");
+        },
+      }),
+    ]),
+  );
+  return wrap;
+}
+
+/* JSON, not a guess. An operator who types 123 means the number and one who
+ * types "123" means the string, and a panel that decides for them stores the
+ * wrong type into a document nothing else validates. */
+async function attrEdit(model, pk, key, category, current) {
+  const value = prompt(
+    'Value for "' + key + '" as JSON.\nQuote a string as "text". Write a number bare.',
+    current || "",
+  );
+  if (value === null) return;
+  const reason = prompt("Why is this attribute being changed?");
+  if (!reason) return;
+  const done = await call("panels/attributes/actions/set/", {
+    body: { model, pk, key, category: category || "", value, reason },
+  });
+  if (report(done)) select_render();
+}
+
+async function attrRemove(model, pk, key, category) {
+  const reason = prompt('Why is "' + key + '" being removed?');
+  if (!reason) return;
+  const done = await call("panels/attributes/actions/unset/", {
+    body: { model, pk, key, category: category || "", reason },
+  });
+  if (report(done)) select_render();
 }
 
 async function drawRuntime() {

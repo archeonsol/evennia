@@ -12,7 +12,7 @@ from django.test.runner import DiscoverRunner
 
 
 def flush_identity_caches():
-    """Empty every idmapper identity cache.
+    """Empty every cache keyed by row identity.
 
     The identity cache holds one Python instance per row and answers a lookup
     by primary key from memory, without touching the database. That is correct
@@ -30,6 +30,15 @@ def flush_identity_caches():
     The rollback is therefore paired with a flush, once per test, for every
     test.
 
+    Two caches are keyed this way, and both have the same problem.
+
+    The **idmapper** holds one instance per row. The **JSONB attribute row
+    states** hold one decoded ``db_attrs`` document per row. Both are keyed by
+    primary key, and a rolled-back primary key is reissued to the next row
+    created, so the second test to reach ``pk=1`` inherits the first test's
+    attributes -- which reads as "this attribute already existed" for a key
+    nobody set.
+
     Notes:
         The public ``flush_instance_cache`` asserts IO ownership, which a test
         that rebound the clock and did not restore it no longer holds. Between
@@ -43,6 +52,11 @@ def flush_identity_caches():
     _cancel_active_cache_flush()
     for model in _leaf_cache_models():
         model.__instance_cache__ = {}
+
+    from evennia.typeclasses import jsonb_handler
+
+    jsonb_handler._ROW_STATES.clear()
+    jsonb_handler._STRONG_ROW_STATES.clear()
 
 
 class IdmapperFlushResultMixin:

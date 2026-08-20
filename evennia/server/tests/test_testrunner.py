@@ -49,6 +49,22 @@ class TestFlushIdentityCaches(TestCase):
         with self.assertRaises(ObjectDB.DoesNotExist):
             dbid_to_obj(f"#{pk}", ObjectDB)
 
+    def test_it_empties_the_jsonb_row_states(self):
+        # The second cache with the same problem. A rolled-back primary key is
+        # reissued, so without this the next row created at pk=1 inherits the
+        # previous test's attributes and every key looks like it already
+        # existed.
+        from evennia.typeclasses import jsonb_handler
+
+        obj = ObjectDB.objects.create(db_key="attributed")
+        obj.attributes.add("hp", 10)
+        self.assertTrue(obj.attributes.has("hp"))
+        self.assertTrue(jsonb_handler._ROW_STATES or jsonb_handler._STRONG_ROW_STATES)
+
+        flush_identity_caches()
+        self.assertFalse(jsonb_handler._ROW_STATES)
+        self.assertFalse(jsonb_handler._STRONG_ROW_STATES)
+
     def test_it_runs_with_the_caches_already_empty(self):
         flush_identity_caches()
         flush_identity_caches()

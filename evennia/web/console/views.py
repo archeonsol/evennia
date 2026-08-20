@@ -35,7 +35,7 @@ from rest_framework.views import APIView
 from evennia.console import health, spec
 from evennia.console.panels.coerce import CoercionError
 from evennia.console.panels.dangerous import PanelDisabled
-from evennia.console.registry import PanelError, dispatch, panel_registry
+from evennia.console.registry import PanelError, dispatch, is_io_action, panel_registry
 from evennia.web.console.auth import (
     ConsoleIdle,
     ConsoleInsecure,
@@ -312,7 +312,12 @@ class PanelActionView(ConsoleView):
             require_reauthentication(request)
         payload = request.data if isinstance(request.data, dict) else {}
         ctx = worker_context(request)
-        if not health.io_available():
+        # Gated on the action, not on the panel. A worker-side action reads the
+        # database and never touches the IO owner, so refusing it during an
+        # outage removes a read that still works -- which is the opposite of
+        # what degraded mode is for.
+        action = getattr(panel, str(name), None)
+        if is_io_action(action) and not health.io_available():
             return _degraded_panel(panel)
         try:
             result = dispatch(panel, name, ctx, **payload)

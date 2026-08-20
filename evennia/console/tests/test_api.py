@@ -21,7 +21,13 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from evennia.console.registry import CONSOLE_ACCESS, CONSOLE_MODERATION, Panel, panel_registry
+from evennia.console.registry import (
+    CONSOLE_ACCESS,
+    CONSOLE_MODERATION,
+    Panel,
+    io_action,
+    panel_registry,
+)
 from evennia.web.console import auth as console_auth
 from evennia.web.console import views as console_views
 from evennia.web.utils.io import (
@@ -45,6 +51,15 @@ class PlainPanel(Panel):
 
     def detail(self, ctx, pk):
         return {"id": pk}
+
+    def lookup(self, ctx, term=""):
+        """A worker-side action. Reads the database, never the IO owner."""
+        return {"term": term}
+
+    @io_action
+    def touch(self, ctx):
+        """An action that needs the IO owner."""
+        return {"touched": True}
 
 
 class LivePanel(Panel):
@@ -261,11 +276,25 @@ class TestDegradedMode(ConsoleAPITestCase):
         self.assertTrue(response.json()["degraded"])
         self.assertIn("not reachable", response.json()["detail"])
 
-    def test_actions_are_disabled(self):
+    def test_an_action_that_needs_the_io_owner_is_disabled(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["plain", "rows"]), **HEADERS
+            reverse("console:panel-action", args=["plain", "touch"]), **HEADERS
         )
         self.assertEqual(response.status_code, 503)
+
+    def test_a_worker_side_action_still_runs(self):
+        # Gated on the action, not on the panel. A worker-side action reads the
+        # database and never touches the IO owner, so refusing it during an
+        # outage removes a read that still works -- the opposite of what
+        # degraded mode is for.
+        response = self.client.post(
+            reverse("console:panel-action", args=["plain", "lookup"]),
+            data={"term": "x"},
+            content_type="application/json",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["result"], {"term": "x"})
 
     def test_every_registered_panel_answers_rather_than_500s(self):
         # The regression net for degraded mode: a panel that adds an
