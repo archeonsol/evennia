@@ -1,20 +1,107 @@
 # W1: engine console (Django-admin successor)
 
-Status: in-progress (branch `w1-console-phase1`, off `6.0.0+underspire.209`)
+Status: phases 1-4 built (branch `w1-console-phase1`, off `6.0.0+underspire.209`)
 
-**Phase 1 progress.** Landed: the `evennia.console` app; `services.py` (the
-kernel, moved out of `web/admin/io.py` and decoupled from `django.contrib.admin`
-via an injected cascade-authority checker); `registry.py` (`Panel` /
-`@io_action` / `WorkerContext` / `IOContext` / `dispatch`); `spec.py` (model
-introspection with the storage and write-policy classification); `models.py` +
-`audit.py` (the `LogEntry` successor, with retention); the two capabilities;
-the settings block; and an admin-to-console audit mirror so the console's
-timeline covers admin activity during coexistence. 95 tests in
-`evennia.console`, 120 in `evennia.web` -- the 151 that existed before the move
-are all still present and passing, split across the two.
+---
 
-Remaining in phase 1: DRF endpoints under `api/console/`, the frontend shell,
-and the Records, Migrations, Settings, and Health panels.
+## Build status
+
+Audited against this document on 2026-08-20, by reading the shipped code rather
+than the commit log. Eighteen panels are registered and under test. **The panel
+layer is nearly complete. The cross-cutting layer is mostly not**, and that is
+the honest summary of how far the console is from what this document describes:
+what makes it "one product rather than twenty pages" is the part still missing.
+
+### Built
+
+The kernel: `services.py`, `registry.py` (`Panel` / `@io_action` /
+`WorkerContext` / `IOContext` / `dispatch`), `spec.py`, `runtime_spec.py`,
+`models.py` + `audit.py`, `health.py`, `feed.py` (SSE). The web layer under
+`evennia/web/console/` with idle timeout, re-authentication, and transport
+checks. The frontend shell and all eighteen station views. The two capabilities,
+the settings block, and the admin-to-console audit mirror.
+
+Eighteen panels: Records, Objects, Attributes, Authorization, Moderation,
+Runtime, Logs, REPL, SQL, Actions, Hooks, Server control, Live sessions, Errors,
+Migrations, Settings, Prototypes, Health.
+
+### Not built
+
+- **P15 Database.** The only numbered panel with no implementation. Table sizes,
+  `db_attrs` document-size distribution, `pg_stat_user_indexes`, pool state,
+  long-running queries, bloat and last vacuum.
+- **P20 Jobs** and **P21 Event bus.** D6 concludes "the Jobs panel and a
+  `GameEvent` view ship as planned" — but the panel list ran P1 to P19 and
+  contained neither, so the commitment was made in the decisions section and
+  never given a number, a phase, or an owner. That is a defect in this document
+  as much as in the build. Numbered below so it stops being invisible.
+- **The job-queue half of P6 Runtime.** Depth by status, dead-letter inspection,
+  requeue, and per-`job_type` rates across the six handlers in
+  `world/engine_jobs.py`.
+- **An audit view.** The console writes `ConsoleAuditEvent` rows with frozen
+  before/after payloads, an inverse, and a five-way outcome — and offers no way
+  to read them. The only audit *reads* anywhere are the REPL and SQL panels
+  showing an operator their own last fifty submissions. A dev console that
+  records everything it does and cannot show you the record is not finished.
+  Numbered P22 below.
+- **The `console.*` eventbus emission** that D2 describes. The audit table is
+  written; the bus subject is not published.
+
+### Built in Python, dropped by the frontend
+
+`RuntimePanel.rows()` returns `systems` (the scheduler registry — cadence,
+scope, last-run, the "`@systems` as a page" item in P6) and `tasks` (supervised
+task roots by `task_kind`). `drawRuntime` renders neither. Two named plan items
+exist, are tested, and are invisible to the operator.
+
+### Partly built
+
+**P3 Attributes — decoded, but not a tree, and not writable.** The panel
+decodes the storage layout (`"~"` for the default category, `_d` for values),
+groups entries by category, computes document size, flags documents past the
+4 KB threshold, ranks the largest, offers `key_stats`, and offers the
+containment query as `find`. What is missing is the part P3 called a tree: a
+*value* is rendered by `_preview(value, 400)`, a truncated string, so a nested
+dict or list is not expandable and not navigable. Separately, the panel has zero
+`@io_action`: P3's last bullet — edits through the IO thread with a before/after
+diff — is unimplemented, and Attributes is read-only.
+
+**Deep linking.** `URL_KEYS` carries seven keys, all of them Records and
+Attributes state. The eleven other panels that hold view state (`logFile`,
+`errorState`, `modState`, `authView`, `objSearch`, `hookEvent`, and the rest)
+put none of it in the address bar, so those views cannot be pasted into a bug
+report. "Everything deep-linkable" is currently "Records and Attributes are
+deep-linkable".
+
+**Keyboard-first.** Digit keys select panels by index, which reached every panel
+when there were nine and reaches half of them now that there are eighteen. There
+is no command palette. This is a case of the shell being outgrown by the thing
+it holds, not of a feature never started.
+
+### Cross-cutting layer: two of nine
+
+| Promise | State |
+| --- | --- |
+| Degraded mode | Built, tested, enforced by a registration guard |
+| English only | Held |
+| Everything deep-linkable | Records and Attributes only |
+| Command palette, keyboard-first | Digits 1-9 of 18 panels; no palette |
+| Undo and state-as-of | `inverse` column and `can_undo()` exist; nothing applies either |
+| Saved views | Not built |
+| Export (CSV/JSON, audited) | Not built |
+| Bulk operations with dry run | Cascade preview exists in `services.py`; no bulk UI |
+| Multi-operator presence | Not built |
+
+### Is it first class?
+
+Against Django admin, yes and not narrowly: eighteen panels against eight
+registered models, plus degraded mode, an audit trail with real outcomes,
+moderation, and a live feed. The "supersede, do not match" bar is met on the
+panel axis.
+
+Against this document, no — and the gap is concentrated, not scattered. It is
+in the cross-cutting layer, in the two subsystems that never got a P number, and
+in the audit trail the console writes but does not show.
 
 The implementation plan for the console half of **W1** (see
 [`engine-architecture/committed.md`](../docs/engine-architecture/committed.md)).
@@ -957,6 +1044,47 @@ Green or not green per line, with the underlying number. Also served as a plain
 JSON endpoint so an external uptime check can consume the same judgement rather
 than inventing its own.
 
+### P20. Jobs
+
+Committed by D6 and never numbered until the 2026-08-20 audit found it missing.
+
+- Queue depth by status and by `job_type`, across the six live handlers in
+  `world/engine_jobs.py`.
+- Dead-letter inspection with the failing payload and the traceback that put it
+  there, and a requeue action.
+- Rates per `job_type`, so a handler that has quietly stopped draining is
+  visible before its queue is the thing that reports it.
+
+Ungated: D6 confirms the subsystem is in use.
+
+### P21. Event bus
+
+The other half of D6. Labelled **Event bus**, never a bare "Events", so it stays
+distinguishable from `evennia.actions.events` after the `evennia.events`
+deprecation shim is dropped.
+
+- `GameEvent` rows by subject, with the payload rendered rather than shown raw.
+- Subject prefixes as a filter, since the subjects are namespaced by producer.
+- Read-only. The bus is a stream; nothing here replays or injects onto it.
+
+### P22. Audit
+
+The console's own record, which it currently writes and cannot show.
+
+- `ConsoleAuditEvent` rows by actor, panel, operation, outcome, and target,
+  with the frozen before/after payloads rendered as a diff.
+- The five-way outcome vocabulary shown as itself. A `partial` and a
+  `recovery_required` must not render alike; the distinction is the reason the
+  taxonomy exists.
+- Undo where the row carries an inverse, per the cross-cutting promise, gated on
+  `can_undo()` so a row without one offers nothing rather than a control that
+  fails.
+- Retention class per row, so an operator can see what is about to age out
+  before it does.
+
+This panel is what makes the audit trail a feature instead of a liability: an
+unreadable record satisfies an auditor on paper and helps nobody at 03:00.
+
 ---
 
 ## Cross-cutting behaviour
@@ -1209,6 +1337,29 @@ someone learning it, and the ones that most exercise `spec.py`.
 By the end of phase 4 the registry API has been used by nineteen panels, which is
 the real proof that it is a public API — a stronger test than importing one
 external tool would have been.
+
+Phase 4 landed with eighteen, not nineteen: P15 Database was not built.
+
+### Phase 5 — the layer that makes it one product
+
+Named by the 2026-08-20 audit. Everything here is cross-cutting or was
+committed in the decisions section without a phase, which is exactly why none of
+it happened on its own.
+
+1. **P22 Audit**, with undo. The console's record is unreadable today.
+2. **The Runtime frontend gap.** `systems` and `tasks` are already computed and
+   tested; the renderer drops them. Cheapest real gain in the list.
+3. **P3 Attributes: the tree, and the write path.** A nested value is a
+   truncated string today, and the panel has no `@io_action` at all.
+4. **Deep linking for every panel**, not two. A view that cannot be pasted into
+   a bug report is a view the bug report has to describe in prose.
+5. **A command palette**, replacing a digit shortcut that the panel count
+   outgrew.
+6. **P15 Database**, **P20 Jobs**, **P21 Event bus**.
+7. Export, saved views, bulk dry run, multi-operator presence.
+
+The ordering is by what an operator hits first during an incident, not by
+difficulty.
 
 ### Deferred
 
@@ -1468,6 +1619,11 @@ send; moderation network-list refresh; signup screening; game-event export.
 Verdict: **wire, both — already wired.** The Jobs panel and a `GameEvent` view
 ship as planned, and the ALPHA prompt should be rewritten from "wire or cut" to
 "confirm the contract and fix the collision."
+
+They are **P20** and **P21**. This decision originally named no panel number,
+and the panel list ran P1 to P19 without them, so the commitment was invisible
+to anyone reading either section alone and neither panel was built. Numbering
+them is the fix.
 
 **The name collision is resolved.** The bus moved to `evennia.eventbus` on
 2026-08-19, so it no longer shadows `evennia.actions.events` (the live
