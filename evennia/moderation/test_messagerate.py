@@ -50,9 +50,7 @@ class TestObservation(TestCase):
     def _send(self, times, account_id=1, start=100.0):
         results = []
         for index in range(times):
-            results.append(
-                self.observer.note(account_id, "player", now=start + index * 0.01)
-            )
+            results.append(self.observer.note(account_id, "player", now=start + index * 0.01))
         return results
 
     def test_normal_volume_raises_nothing(self):
