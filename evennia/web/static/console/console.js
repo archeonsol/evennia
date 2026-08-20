@@ -62,6 +62,14 @@ const state = {
   auditOpen: null,
   attrObject: "",
   attrKeyOpen: "",
+  jobStatus: "",
+  jobType: "",
+  jobOpen: null,
+  busPrefix: "",
+  busSubject: "",
+  busBefore: "",
+  busOpen: null,
+  dbModel: "",
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -109,6 +117,14 @@ const URL_KEYS = [
   "auditOpen",
   "attrObject",
   "attrKeyOpen",
+  "jobStatus",
+  "jobType",
+  "jobOpen",
+  "busPrefix",
+  "busSubject",
+  "busBefore",
+  "busOpen",
+  "dbModel",
 ];
 
 function readUrl() {
@@ -2591,8 +2607,498 @@ async function auditDetail(id) {
   return wrap;
 }
 
+function bytes(value) {
+  const size = Number(value || 0);
+  if (size < 1024) return size + " B";
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + " KB";
+  if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed(1) + " MB";
+  return (size / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function picker(id, label, values, key, blank) {
+  const element = node("select", {
+    id,
+    "aria-label": label,
+    onchange: (event) => {
+      state[key] = event.target.value;
+      select_render();
+    },
+  });
+  element.append(node("option", { value: "", text: blank, selected: !state[key] }));
+  for (const value of values || []) {
+    element.append(
+      node("option", { value, selected: value === state[key], text: String(value) }),
+    );
+  }
+  return node("div", { class: "field" }, [
+    node("label", { class: "legend", for: id, text: label }),
+    element,
+  ]);
+}
+
+async function drawJobs() {
+  const query = new URLSearchParams({
+    status: state.jobStatus || "",
+    job_type: state.jobType || "",
+  });
+  const result = await call("panels/jobs/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  const depth = node("dl", { class: "rows" });
+  for (const row of data.by_status || []) {
+    depth.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: row.status }),
+        node("dd", {}, [
+          lamp(
+            String(row.total),
+            row.status === "dead" ? "fail" : row.status === "pending" ? "attn" : "ok",
+          ),
+        ]),
+      ]),
+    );
+  }
+  body.append(section("Depth"), depth);
+
+  if (data.overdue_leases) {
+    body.append(
+      node("p", {
+        class: "empty-hint fail-text",
+        text:
+          data.overdue_leases +
+          " lease(s) are past their expiry. The worker that held them stopped; the next drain reclaims them.",
+      }),
+    );
+  }
+
+  if (state.jobOpen) body.append(await jobDetail(state.jobOpen));
+
+  body.append(section("Queue"));
+  const rows = data.rows || [];
+  if (!rows.length) {
+    body.append(empty("NO JOB MATCHES THIS FILTER."));
+  } else {
+    body.append(
+      dataTable(
+        ["TYPE", "STATUS", "ATTEMPTS", "CREATED", "LAST ERROR", ""],
+        rows.map((row) => [
+          cell(row.job_type),
+          node("td", {}, [
+            lamp(
+              row.status.toUpperCase(),
+              row.status === "dead" ? "fail" : row.status === "pending" ? "attn" : "ok",
+            ),
+          ]),
+          node("td", { class: "num", text: row.attempts + "/" + row.max_attempts }),
+          cell(row.created_at.replace("T", " ").slice(0, 19)),
+          cell(row.last_error),
+          node("td", {}, [
+            node("button", {
+              type: "button",
+              text: "OPEN",
+              onclick: () => {
+                state.jobOpen = row.id;
+                select_render();
+              },
+            }),
+          ]),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  const backend = data.backend || {};
+  el.station.textContent = "";
+  el.station.append(
+    head("JOBS", data.dead ? data.dead + " DEAD" : ""),
+    node("div", { class: "toolbar" }, [
+      picker("job-status", "Status", (data.by_status || []).map((row) => row.status), "jobStatus", "ALL STATUSES"),
+      picker("job-type", "Type", data.types, "jobType", "ALL TYPES"),
+      node("span", { class: "spacer" }),
+      lamp(
+        (backend.backend || "NO BACKEND").toUpperCase(),
+        backend.enabled ? "ok" : "off",
+      ),
+    ]),
+    body,
+  );
+}
+
+async function jobDetail(id) {
+  const wrap = node("div", { class: "detail" });
+  const result = await call("panels/jobs/detail/" + encodeURIComponent(id) + "/");
+  wrap.append(
+    node("div", { class: "toolbar" }, [
+      node("span", { class: "legend", text: "JOB" }),
+      node("span", { class: "spacer" }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.jobOpen = null;
+          select_render();
+        },
+      }),
+    ]),
+  );
+  if (!report(result)) return wrap;
+  const data = result.payload.record || {};
+
+  const facts = node("dl", { class: "rows" });
+  for (const [label, value] of [
+    ["job", data.job_id],
+    ["type", data.job_type],
+    ["status", data.status],
+    ["attempts", data.attempts + " of " + data.max_attempts],
+    ["priority", data.priority],
+    ["idempotency key", data.idempotency_key || "--"],
+    ["created", (data.created_at || "").replace("T", " ").slice(0, 19)],
+    ["available at", (data.available_at || "--").replace("T", " ").slice(0, 19)],
+    ["lease until", (data.lease_until || "--").replace("T", " ").slice(0, 19)],
+  ]) {
+    facts.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: label }),
+        node("dd", { text: String(value ?? "") }),
+      ]),
+    );
+  }
+  wrap.append(facts, section("Payload"), node("pre", { class: "code", text: data.payload || "" }));
+  if (data.last_error) {
+    wrap.append(section("Last error"), node("pre", { class: "code", text: data.last_error }));
+  }
+  if (data.can_requeue) {
+    wrap.append(
+      node("div", { class: "fault-actions" }, [
+        node("button", {
+          type: "button",
+          text: "REQUEUE",
+          title: "Return this job to the queue. The existing drain runs it.",
+          onclick: async () => {
+            const reason = prompt("Why is this job being requeued?");
+            if (!reason) return;
+            const done = await call("panels/jobs/actions/requeue/", {
+              body: { job_id: data.id, reason },
+            });
+            if (report(done)) {
+              state.jobOpen = null;
+              select_render();
+            }
+          },
+        }),
+      ]),
+    );
+  } else {
+    wrap.append(
+      node("p", {
+        class: "empty-hint",
+        text: "Only a dead-lettered job is requeued. This one is " + data.status + ".",
+      }),
+    );
+  }
+  return wrap;
+}
+
+async function drawEventbus() {
+  const query = new URLSearchParams({
+    prefix: state.busPrefix || "",
+    subject: state.busSubject || "",
+    before: state.busBefore || "",
+  });
+  const result = await call("panels/eventbus/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (state.busOpen) body.append(await busDetail(state.busOpen));
+
+  const rows = data.rows || [];
+  if (!rows.length) {
+    body.append(empty("NO RECORD MATCHES THIS FILTER."));
+  } else {
+    body.append(
+      dataTable(
+        ["WHEN", "SUBJECT", "ACTOR", ""],
+        rows.map((row) => [
+          cell(row.created_at.replace("T", " ").slice(0, 19)),
+          cell(row.subject),
+          cell(row.actor_ref),
+          node("td", {}, [
+            node("button", {
+              type: "button",
+              text: "OPEN",
+              onclick: () => {
+                state.busOpen = row.id;
+                select_render();
+              },
+            }),
+          ]),
+        ]),
+      ),
+    );
+  }
+  if (data.next_before) {
+    body.append(
+      node("div", { class: "fault-actions" }, [
+        node("button", {
+          type: "button",
+          text: "OLDER",
+          onclick: () => {
+            state.busBefore = data.next_before;
+            select_render();
+          },
+        }),
+      ]),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  const bus = data.bus || {};
+  el.station.textContent = "";
+  el.station.append(
+    head("EVENT BUS", rows.length ? rows.length + " SHOWN" : ""),
+    node("div", { class: "toolbar" }, [
+      picker("bus-prefix", "Prefix", data.prefixes, "busPrefix", "ALL PREFIXES"),
+      picker("bus-subject", "Subject", data.subjects, "busSubject", "ALL SUBJECTS"),
+      node("span", { class: "spacer" }),
+      lamp((bus.backend || "NO BACKEND").toUpperCase(), bus.enabled ? "ok" : "off"),
+    ]),
+    body,
+  );
+}
+
+async function busDetail(id) {
+  const wrap = node("div", { class: "detail" });
+  const result = await call("panels/eventbus/detail/" + encodeURIComponent(id) + "/");
+  wrap.append(
+    node("div", { class: "toolbar" }, [
+      node("span", { class: "legend", text: "BUS RECORD" }),
+      node("span", { class: "spacer" }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.busOpen = null;
+          select_render();
+        },
+      }),
+    ]),
+  );
+  if (!report(result)) return wrap;
+  const data = result.payload.record || {};
+  wrap.append(
+    node("dl", { class: "rows" }, [
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "subject" }),
+        node("dd", { text: data.subject || "" }),
+      ]),
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "actor" }),
+        node("dd", { text: data.actor_ref || "--" }),
+      ]),
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "when" }),
+        node("dd", { text: (data.created_at || "").replace("T", " ").slice(0, 19) }),
+      ]),
+    ]),
+    section("Payload"),
+    node("pre", { class: "code", text: data.payload || "" }),
+  );
+  return wrap;
+}
+
+async function drawDatabase() {
+  const result = await call("panels/database/rows/");
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.supported) {
+    body.append(empty("THIS BACKEND CANNOT ANSWER.", data.reason || ""));
+    el.station.textContent = "";
+    el.station.append(
+      head("DATABASE"),
+      node("div", { class: "toolbar" }, [
+        lamp((data.vendor || "UNKNOWN").toUpperCase(), "off"),
+      ]),
+      body,
+    );
+    return;
+  }
+
+  const connections = data.connections || {};
+  const conn = node("dl", { class: "rows" });
+  for (const row of connections.by_state || []) {
+    conn.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: row.state }),
+        node("dd", { class: "num", text: String(row.total) }),
+      ]),
+    );
+  }
+  conn.append(
+    node("div", { class: "row-pair" }, [
+      node("dt", { text: "headroom" }),
+      node("dd", {}, [
+        lamp(
+          connections.headroom + " OF " + connections.max_connections,
+          connections.headroom > 10 ? "ok" : "fail",
+        ),
+      ]),
+    ]),
+  );
+  body.append(section("Connections"), conn);
+
+  const slow = data.long_running || [];
+  body.append(section("Long-running statements"));
+  body.append(
+    slow.length
+      ? dataTable(
+          ["PID", "SECONDS", "STATE", "STATEMENT"],
+          slow.map((row) => [
+            node("td", { class: "num", text: String(row.pid) }),
+            node("td", { class: "num fail-text", text: String(row.seconds) }),
+            cell(row.state),
+            cell(row.query),
+          ]),
+        )
+      : empty("NOTHING IS RUNNING LONG."),
+  );
+
+  body.append(section("Tables"));
+  body.append(
+    dataTable(
+      ["TABLE", "ROWS", "TOTAL", "HEAP", "INDEXES", "DEAD ROWS", "LAST VACUUM"],
+      (data.tables || []).map((row) => [
+        cell(row.table),
+        node("td", { class: "num", text: String(row.rows) }),
+        node("td", { class: "num", text: bytes(row.total_bytes) }),
+        node("td", { class: "num", text: bytes(row.heap_bytes) }),
+        node("td", { class: "num", text: bytes(row.index_bytes) }),
+        node("td", { class: "num", text: String(row.dead_rows) }),
+        cell(String(row.last_autovacuum || row.last_vacuum || "never").slice(0, 19)),
+      ]),
+    ),
+  );
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  const unused = data.unused_indexes || {};
+  body.append(section("Indexes never scanned"));
+  body.append(
+    (unused.rows || []).length
+      ? dataTable(
+          ["TABLE", "INDEX", "SIZE"],
+          unused.rows.map((row) => [
+            cell(row.table),
+            node("td", { class: "fail-text", text: row.index }),
+            node("td", { class: "num", text: bytes(row.bytes) }),
+          ]),
+        )
+      : empty("EVERY INDEX HAS BEEN SCANNED."),
+  );
+  body.append(
+    node("p", {
+      class: "empty-hint",
+      text: (unused.note || "") + " Statistics reset: " + (unused.stats_reset || "unknown") + ".",
+    }),
+  );
+
+  body.append(section("Index usage"));
+  body.append(
+    dataTable(
+      ["TABLE", "INDEX", "SCANS", "TUPLES READ", "SIZE"],
+      (data.indexes || []).map((row) => [
+        cell(row.table),
+        cell(row.index),
+        node("td", { class: "num", text: String(row.scans) }),
+        node("td", { class: "num", text: String(row.tuples_read) }),
+        node("td", { class: "num", text: bytes(row.bytes) }),
+      ]),
+    ),
+  );
+
+  body.append(section("Attribute document sizes"), await dbSizes());
+
+  el.station.textContent = "";
+  el.station.append(
+    head("DATABASE"),
+    node("div", { class: "toolbar" }, [
+      lamp((data.vendor || "").toUpperCase(), "ok"),
+      lamp((data.tables || []).length + " TABLES", "off"),
+    ]),
+    body,
+  );
+}
+
+async function dbSizes() {
+  const wrap = node("div");
+  const listing = await call("panels/database/actions/models/", { body: {} });
+  if (!report(listing)) return wrap;
+  const models = (listing.payload.result || {}).models || [];
+  if (!models.length) return wrap;
+  if (!state.dbModel) state.dbModel = models[0];
+
+  wrap.append(
+    node("div", { class: "toolbar" }, [
+      picker("db-model", "Model", models, "dbModel", "CHOOSE A MODEL"),
+    ]),
+  );
+
+  const result = await call("panels/database/actions/sizes/", {
+    body: { model: state.dbModel },
+  });
+  if (!report(result)) return wrap;
+  const data = result.payload.result || {};
+  wrap.append(
+    node("dl", { class: "rows" }, [
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "documents measured" }),
+        node("dd", {}, [
+          node("span", { class: "num", text: String(data.sampled ?? 0) }),
+          node("span", {
+            class: "empty-hint",
+            text: data.complete ? " (every row)" : " (most recent only)",
+          }),
+        ]),
+      ]),
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "median size" }),
+        node("dd", { class: "num", text: bytes(data.median_bytes) }),
+      ]),
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: "over " + bytes(data.threshold_bytes) }),
+        node("dd", {}, [
+          lamp(String(data.fat_count ?? 0), data.fat_count ? "attn" : "ok"),
+        ]),
+      ]),
+    ]),
+  );
+  if ((data.largest || []).length) {
+    wrap.append(
+      dataTable(
+        ["OBJECT", "DOCUMENT SIZE"],
+        data.largest.map((row) => [
+          node("td", { class: "num", text: "#" + row.id }),
+          node("td", {
+            class: row.bytes > data.threshold_bytes ? "num fail-text" : "num",
+            text: bytes(row.bytes),
+          }),
+        ]),
+      ),
+    );
+  }
+  wrap.append(node("p", { class: "empty-hint", text: data.note || "" }));
+  return wrap;
+}
+
 const RENDERERS = {
   records: drawRecords,
+  jobs: drawJobs,
+  eventbus: drawEventbus,
+  database: drawDatabase,
   audit: drawAudit,
   objects: drawObjects,
   actions: drawActions,

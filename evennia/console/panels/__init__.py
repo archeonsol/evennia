@@ -15,6 +15,7 @@ from evennia.console.panels.dangerous import (
     SessionsPanel,
     SqlPanel,
 )
+from evennia.console.panels.database import DatabasePanel
 from evennia.console.panels.errors import ErrorsPanel
 from evennia.console.panels.health import HealthPanel
 from evennia.console.panels.introspection import (
@@ -29,6 +30,7 @@ from evennia.console.panels.moderation import ModerationPanel
 from evennia.console.panels.records import RecordsPanel
 from evennia.console.panels.runtime import RuntimePanel
 from evennia.console.panels.settings import SettingsPanel
+from evennia.console.panels.subsystems import EventBusPanel, JobsPanel
 
 #: Built-in panels, in the order they should appear in the nav.
 BUILTIN_PANELS = (
@@ -43,10 +45,13 @@ BUILTIN_PANELS = (
     ActionsPanel,
     HooksPanel,
     PrototypesPanel,
+    JobsPanel,
+    EventBusPanel,
     SessionsPanel,
     ServerPanel,
     ReplPanel,
     SqlPanel,
+    DatabasePanel,
     MigrationsPanel,
     SettingsPanel,
     AuditPanel,
@@ -55,6 +60,9 @@ BUILTIN_PANELS = (
 
 __all__ = (
     "AttributesPanel",
+    "DatabasePanel",
+    "EventBusPanel",
+    "JobsPanel",
     "AuditPanel",
     "ActionsPanel",
     "AuthorizationPanel",

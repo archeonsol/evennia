@@ -909,3 +909,19 @@ textarea::placeholder {
 .linky:hover {
   color: var(--focus);
 }
+
+/* -------------------------------------------------------------------- code */
+
+/* A stored payload or traceback, shown as stored. Scrolls in its own box so a
+   long line cannot push the page sideways. */
+pre.code {
+  max-height: 320px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 11px/1.6 var(--mono);
+  white-space: pre;
+}
