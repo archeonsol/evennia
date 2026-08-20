@@ -34,8 +34,15 @@ from rest_framework.views import APIView
 
 from evennia.console import health, spec
 from evennia.console.panels.coerce import CoercionError
+from evennia.console.panels.dangerous import PanelDisabled
 from evennia.console.registry import PanelError, dispatch, panel_registry
-from evennia.web.console.auth import ConsoleIdle, ConsoleInsecure, ConsolePermission, worker_context
+from evennia.web.console.auth import (
+    ConsoleIdle,
+    ConsoleInsecure,
+    ConsolePermission,
+    require_reauthentication,
+    worker_context,
+)
 from evennia.web.utils.io import (
     IOThreadCallIndeterminate,
     IOThreadCallTimeout,
@@ -130,6 +137,13 @@ class ConsoleView(APIView):
         mapped = _bridge_failure(exc)
         if mapped is not None:
             return mapped
+        if isinstance(exc, PanelDisabled):
+            return _outcome(
+                {"detail": str(exc), "disabled": True},
+                code=status.HTTP_403_FORBIDDEN,
+                retryable=False,
+                outcome="conflict",
+            )
         if isinstance(exc, (ConsoleIdle, ConsoleInsecure)):
             # Distinguished from an ordinary refusal: the operator has to be
             # told what to do about it, and "403" alone does not say.
@@ -253,12 +267,49 @@ class PanelDetailView(ConsoleView):
             raise PermissionDenied(str(err)) from err
 
 
+#: Panels whose every action demands a recent password re-entry. A capability
+#: says who you are; this says you are here, which is the only thing between an
+#: unlocked laptop and a REPL. Enforced at the boundary rather than inside each
+#: panel, so a new action cannot be written without it.
+REAUTH_PANELS = frozenset({"repl", "sql", "server"})
+
+#: Individual actions elsewhere that carry the same weight.
+REAUTH_ACTIONS = frozenset({"break_glass", "reveal", "watch"})
+
+
+class ReauthView(ConsoleView):
+    """Confirm the operator is present, not merely signed in."""
+
+    def post(self, request):
+        """Record a password re-entry, or refuse it."""
+        password = str((request.data or {}).get("password") or "")
+        user = request.user
+        if not password or not user.check_password(password):
+            return _outcome(
+                {"detail": "That password was not accepted."},
+                code=status.HTTP_403_FORBIDDEN,
+                retryable=True,
+                outcome="conflict",
+            )
+        from evennia.web.console.auth import mark_reauthenticated
+
+        mark_reauthenticated(request)
+        return _outcome(
+            {
+                "confirmed": True,
+                "window_seconds": int(getattr(settings, "CONSOLE_REAUTH_WINDOW", 300)),
+            }
+        )
+
+
 class PanelActionView(ConsoleView):
     """Invoke one named panel action."""
 
     def post(self, request, key, name):
         """Run the action and report its outcome honestly."""
         panel = self._panel(key)
+        if key in REAUTH_PANELS or name in REAUTH_ACTIONS:
+            require_reauthentication(request)
         payload = request.data if isinstance(request.data, dict) else {}
         ctx = worker_context(request)
         if not health.io_available():

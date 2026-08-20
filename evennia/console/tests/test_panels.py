@@ -47,15 +47,33 @@ class TestBuiltinRegistration(TestCase):
                 "migrations",
                 "moderation",
                 "records",
+                "repl",
                 "runtime",
+                "server",
+                "sessions",
                 "settings",
+                "sql",
             ],
         )
 
-    def test_no_builtin_needs_the_io_owner_to_read(self):
-        # Every phase-1 panel must survive degraded mode.
+    #: The only panels allowed to be unusable when the game server is down.
+    #: Both genuinely need live in-process state -- a Python namespace and the
+    #: session handler -- and neither has a meaningful read without it. Every
+    #: other panel keeps working during an outage, which is the point of
+    #: degraded mode, so a new name here is a deliberate act rather than an
+    #: oversight.
+    MAY_NEED_IO = {"repl", "sessions"}
+
+    def test_only_the_named_panels_need_the_io_owner(self):
         for panel in BUILTIN_PANELS:
+            if panel.key in self.MAY_NEED_IO:
+                continue
             self.assertFalse(panel.needs_io, f"{panel.key} would break degraded mode")
+
+    def test_the_exceptions_are_still_the_exceptions(self):
+        # Guards the list above against quietly growing.
+        needing = {panel.key for panel in BUILTIN_PANELS if panel.needs_io}
+        self.assertEqual(needing, self.MAY_NEED_IO)
 
     def test_a_game_cannot_silently_shadow_a_builtin(self):
         from evennia.console.registry import Panel, PanelError

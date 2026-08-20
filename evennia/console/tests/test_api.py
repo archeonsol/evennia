@@ -485,3 +485,66 @@ class TestReauthentication(ConsoleAPITestCase):
         request = self._request()
         console_auth.mark_reauthenticated(request)
         console_auth.require_reauthentication(request)
+
+
+class TestDangerousActionsNeedPresence(ConsoleAPITestCase):
+    """Proof of presence is demanded at the boundary, not inside each panel."""
+
+    def setUp(self):
+        super().setUp()
+        panel_registry._reset_for_tests()
+        from evennia.console.panels import register_builtin_panels
+
+        register_builtin_panels(panel_registry)
+        self.account.set_password("a-real-password-1!")
+        self.account.save()
+        # Changing a password rotates the session auth hash, which invalidates
+        # the login done by the base setUp.
+        self.client.force_login(self.account)
+
+    def _post(self, panel, action):
+        return self.client.post(reverse("console:panel-action", args=[panel, action]), **HEADERS)
+
+    def test_the_repl_refuses_without_a_confirmation(self):
+        response = self._post("repl", "execute")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("password", response.json()["detail"].lower())
+
+    def test_sql_and_server_control_refuse_too(self):
+        for panel, action in (("sql", "query"), ("server", "control")):
+            self.assertEqual(self._post(panel, action).status_code, 403)
+
+    def test_named_actions_elsewhere_refuse_too(self):
+        # break_glass, reveal, and watch carry the same weight as a REPL even
+        # though their panels do not.
+        self.assertEqual(self._post("authorization", "break_glass").status_code, 403)
+        self.assertEqual(self._post("moderation", "reveal").status_code, 403)
+
+    def test_an_ordinary_action_does_not_demand_it(self):
+        response = self.client.post(
+            reverse("console:panel-action", args=["records", "models"]), **HEADERS
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_confirming_with_a_wrong_password_is_refused(self):
+        response = self.client.post(
+            reverse("console:confirm"),
+            data={"password": "not it"},
+            content_type="application/json",
+            **HEADERS,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_confirming_then_acting(self):
+        confirmed = self.client.post(
+            reverse("console:confirm"),
+            data={"password": "a-real-password-1!"},
+            content_type="application/json",
+            **HEADERS,
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertTrue(confirmed.json()["confirmed"])
+        # Now the panel's own deployment gate is what refuses, not presence.
+        response = self._post("repl", "execute")
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(response.json().get("disabled"))

@@ -45,6 +45,9 @@ const state = {
   modFlag: null,
   authView: "grants",
   probe: null,
+  replSource: "",
+  sqlText: "",
+  confirmed: false,
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -1388,8 +1391,306 @@ function prober(data) {
   return wrap;
 }
 
+/* Proof of presence. A capability says who you are; this says you are here,
+ * which is the only thing between an unlocked laptop and a REPL. The server
+ * demands it independently -- this only saves the operator a round trip into a
+ * refusal they can do nothing about. */
+async function confirmPresence() {
+  const password = prompt("Confirm your password to continue.");
+  if (!password) return false;
+  const result = await call("confirm/", { body: { password } });
+  if (!report(result)) return false;
+  state.confirmed = true;
+  return true;
+}
+
+/* A panel a deployment has not switched on. Distinct from a refusal about who
+ * you are, so the message names the setting rather than implying you lack
+ * standing. */
+function disabledNotice(data) {
+  return node("div", { class: "empty" }, [
+    node("p", { class: "empty-line", text: "THIS PANEL IS SWITCHED OFF." }),
+    node("p", {
+      class: "empty-hint",
+      text: "Set " + data.setting + " = True in the game's settings to permit it here.",
+    }),
+  ]);
+}
+
+async function drawRepl() {
+  const result = await call("panels/repl/rows/");
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.enabled) {
+    body.append(disabledNotice(data));
+  } else {
+    const source = node("textarea", {
+      id: "repl-source",
+      rows: "6",
+      spellcheck: "false",
+      "aria-label": "Python to run",
+      placeholder: "PYTHON. EVERY SUBMISSION IS RECORDED WITH ITS SOURCE.",
+    });
+    source.value = state.replSource || "";
+    const output = node("div", { class: "log-view", id: "repl-output" });
+
+    const run = node("button", {
+      type: "button",
+      text: "RUN",
+      onclick: async () => {
+        state.replSource = source.value;
+        if (!state.confirmed && !(await confirmPresence())) return;
+        const done = await call("panels/repl/actions/execute/", {
+          body: { source: source.value },
+        });
+        output.textContent = "";
+        if (!report(done)) {
+          state.confirmed = false;
+          return;
+        }
+        const payload = done.payload.result || {};
+        for (const line of payload.output || []) {
+          output.append(node("div", { class: "log-line" }, [
+            node("span", { class: "log-text", text: line }),
+          ]));
+        }
+        if (payload.message) {
+          output.append(node("div", { class: "log-line" }, [
+            node("span", { class: "log-text", style: "color:var(--fail)", text: payload.message }),
+          ]));
+        }
+        output.scrollTop = output.scrollHeight;
+      },
+    });
+
+    body.append(
+      node("div", { class: "editor" }, [source, node("div", { class: "fault-actions" }, [run])]),
+      section("Output"),
+      output,
+    );
+
+    if ((data.history || []).length) {
+      body.append(section("Your recent submissions"));
+      const history = node("div", { class: "log-view" });
+      for (const item of data.history) {
+        history.append(node("div", { class: "log-line" }, [
+          node("span", { class: "log-source", text: item.outcome }),
+          node("span", { class: "log-text", text: item.source }),
+        ]));
+      }
+      body.append(history);
+    }
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("REPL"),
+    node("div", { class: "toolbar" }, [
+      lamp(data.enabled ? "ENABLED" : "DISABLED", data.enabled ? "attn" : "off"),
+      node("span", { class: "legend", text: data.note || "" }),
+    ]),
+    body,
+  );
+}
+
+async function drawSql() {
+  const result = await call("panels/sql/rows/");
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.enabled) {
+    body.append(disabledNotice(data));
+  } else {
+    const text = node("textarea", {
+      id: "sql-text",
+      rows: "4",
+      spellcheck: "false",
+      "aria-label": "Read-only SQL",
+      placeholder: "READ-ONLY SQL. ALLOWED: " + (data.allowed || []).join(", ").toUpperCase(),
+    });
+    text.value = state.sqlText || "";
+    const results = node("div", { id: "sql-results" });
+
+    const run = node("button", {
+      type: "button",
+      text: "RUN",
+      onclick: async () => {
+        state.sqlText = text.value;
+        if (!state.confirmed && !(await confirmPresence())) return;
+        const done = await call("panels/sql/actions/query/", { body: { sql: text.value } });
+        results.textContent = "";
+        if (!report(done)) {
+          state.confirmed = false;
+          return;
+        }
+        const payload = done.payload.result || {};
+        if (payload.message) {
+          results.append(empty("THE QUERY DID NOT RUN.", payload.message));
+          return;
+        }
+        const table = node("table");
+        table.append(node("thead", {}, [
+          node("tr", {}, (payload.columns || []).map((c) => node("th", { scope: "col", text: c }))),
+        ]));
+        const tbody = node("tbody");
+        for (const row of payload.rows || []) {
+          tbody.append(node("tr", {}, row.map((value) => cell(value))));
+        }
+        table.append(tbody);
+        results.append(table);
+        if (payload.capped) {
+          results.append(node("p", {
+            class: "empty-hint",
+            text: "Capped at " + data.max_rows + " rows. Narrow the query to see more.",
+          }));
+        }
+      },
+    });
+
+    body.append(
+      node("div", { class: "editor" }, [text, node("div", { class: "fault-actions" }, [run])]),
+      results,
+    );
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("SQL"),
+    node("div", { class: "toolbar" }, [
+      lamp(data.enabled ? "ENABLED" : "DISABLED", data.enabled ? "attn" : "off"),
+      node("span", { class: "legend", text: data.enabled ? data.timeout_ms + "MS TIMEOUT, " + data.max_rows + " ROW CAP" : "" }),
+    ]),
+    body,
+  );
+}
+
+async function drawServer() {
+  const result = await call("panels/server/rows/");
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  const checks = node("dl", { class: "rows" });
+  for (const [name, ok] of Object.entries(data.checks || {})) {
+    checks.append(node("div", { class: "row-pair" }, [
+      node("dt", { text: name.replace(/_/g, " ") }),
+      node("dd", {}, [lamp(ok ? "OK" : "FAILED", ok ? "ok" : "fail")]),
+    ]));
+  }
+  checks.append(node("div", { class: "row-pair" }, [
+    node("dt", { text: "version" }),
+    node("dd", { text: data.version || "--" }),
+  ]));
+  body.append(section("Status"), checks);
+
+  body.append(section("Control"));
+  if (!data.enabled) {
+    body.append(disabledNotice(data));
+  } else {
+    const controls = node("div", { class: "fault-actions" });
+    for (const action of data.actions || []) {
+      controls.append(node("button", {
+        type: "button",
+        text: action.toUpperCase(),
+        onclick: async () => {
+          const reason = prompt("Why is the server being told to " + action + "?");
+          if (!reason) return;
+          if (!state.confirmed && !(await confirmPresence())) return;
+          const done = await call("panels/server/actions/control/", { body: { action, reason } });
+          if (!report(done)) state.confirmed = false;
+        },
+      }));
+    }
+    body.append(controls);
+    body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("SERVER CONTROL"),
+    node("div", { class: "toolbar" }, [
+      lamp(data.degraded ? "DEGRADED" : "RUNNING", data.degraded ? "attn" : "ok"),
+      lamp(data.enabled ? "CONTROL ENABLED" : "CONTROL DISABLED", data.enabled ? "attn" : "off"),
+    ]),
+    body,
+  );
+}
+
+async function drawSessions() {
+  const result = await call("panels/sessions/rows/");
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.available) {
+    body.append(empty("THE SESSION HANDLER IS NOT LOADED.", data.reason || ""));
+  } else if ((data.rows || []).length === 0) {
+    body.append(empty("NOBODY IS CONNECTED."));
+  } else {
+    const table = node("table");
+    table.append(node("thead", {}, [
+      node("tr", {}, [
+        node("th", { scope: "col", text: "ACCOUNT" }),
+        node("th", { scope: "col", text: "PUPPET" }),
+        node("th", { scope: "col", text: "PROTOCOL" }),
+        node("th", { scope: "col", text: "COMMANDS" }),
+        node("th", { scope: "col", text: "" }),
+      ]),
+    ]));
+    const tbody = node("tbody");
+    for (const row of data.rows) {
+      tbody.append(node("tr", {}, [
+        cell(row.account),
+        cell(row.puppet),
+        cell(row.protocol),
+        node("td", { class: "num", text: String(row.commands) }),
+        node("td", {}, [
+          node("button", {
+            type: "button",
+            text: "WATCH",
+            title: "Recorded permanently, and in the watched account's own timeline",
+            onclick: () => sessionAction("watch", row.sessid, "Why is this session being watched?"),
+          }),
+          node("button", {
+            type: "button",
+            text: "DISCONNECT",
+            onclick: () => sessionAction("disconnect", row.sessid, "Why is this session being disconnected?"),
+          }),
+        ]),
+      ]));
+    }
+    table.append(tbody);
+    body.append(table);
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("LIVE SESSIONS", data.count ? data.count + " CONNECTED" : ""),
+    node("div", { class: "toolbar" }, [
+      node("span", { class: "legend", text: data.note || "" }),
+    ]),
+    body,
+  );
+}
+
+async function sessionAction(action, sessid, question) {
+  const reason = prompt(question);
+  if (!reason) return;
+  if (action === "watch" && !state.confirmed && !(await confirmPresence())) return;
+  const done = await call("panels/sessions/actions/" + action + "/", { body: { sessid, reason } });
+  if (report(done)) select_render();
+  else state.confirmed = false;
+}
+
 const RENDERERS = {
   records: drawRecords,
+  repl: drawRepl,
+  sql: drawSql,
+  server: drawServer,
+  sessions: drawSessions,
   moderation: drawModeration,
   authorization: drawAuthorization,
   errors: drawErrors,

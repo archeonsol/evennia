@@ -13,6 +13,7 @@ app_name = "console"
 urlpatterns = [
     path("", views.RootView.as_view(), name="root"),
     path("health/", views.HealthView.as_view(), name="health"),
+    path("confirm/", views.ReauthView.as_view(), name="confirm"),
     path("feed/", stream.feed_view, name="feed"),
     path("models/", views.ModelSpecView.as_view(), name="models"),
     path("models/<str:label>/", views.ModelSpecView.as_view(), name="model-detail"),

@@ -683,3 +683,19 @@ tbody tr[title] {
   font: 400 12px/1.5 var(--mono);
   color: var(--ink);
 }
+
+/* -------------------------------------------------------------- repl, sql */
+
+textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 12px/1.5 var(--mono);
+  resize: vertical;
+}
+
+textarea::placeholder {
+  color: var(--ink-faint);
+}

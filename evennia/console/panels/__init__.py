@@ -8,6 +8,12 @@ replacing it.
 
 from evennia.console.panels.attributes import AttributesPanel
 from evennia.console.panels.authorization import AuthorizationPanel
+from evennia.console.panels.dangerous import (
+    ReplPanel,
+    ServerPanel,
+    SessionsPanel,
+    SqlPanel,
+)
 from evennia.console.panels.errors import ErrorsPanel
 from evennia.console.panels.health import HealthPanel
 from evennia.console.panels.logs import LogsPanel
@@ -26,6 +32,10 @@ BUILTIN_PANELS = (
     RuntimePanel,
     LogsPanel,
     ErrorsPanel,
+    SessionsPanel,
+    ServerPanel,
+    ReplPanel,
+    SqlPanel,
     MigrationsPanel,
     SettingsPanel,
     HealthPanel,
@@ -40,7 +50,11 @@ __all__ = (
     "LogsPanel",
     "MigrationsPanel",
     "ModerationPanel",
+    "ReplPanel",
     "RecordsPanel",
+    "ServerPanel",
+    "SessionsPanel",
+    "SqlPanel",
     "RuntimePanel",
     "SettingsPanel",
     "register_builtin_panels",
