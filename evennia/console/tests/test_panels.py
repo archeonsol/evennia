@@ -39,13 +39,17 @@ class TestBuiltinRegistration(TestCase):
         self.assertEqual(
             [panel.key for panel in registry.panels()],
             [
+                "actions",
                 "attributes",
                 "authorization",
                 "errors",
                 "health",
+                "hooks",
                 "logs",
                 "migrations",
                 "moderation",
+                "objects",
+                "prototypes",
                 "records",
                 "repl",
                 "runtime",

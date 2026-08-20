@@ -1,10 +1,10 @@
 /* Engine console client.
  *
  * Plain ES modules, no build step and no dependencies. That is a deliberate
- * choice rather than a shortcut: the console currently renders a station rail
- * and four panels, the engine promises that a game never runs npm, and a
- * committed build artifact rots. Revisit when the live feed arrives or the
- * panel count passes roughly eight, whichever comes first.
+ * choice rather than a shortcut: the console renders a station rail and one
+ * panel at a time, the engine promises that a game never runs npm, and a
+ * committed build artifact rots. Revisit if a station needs more than the DOM
+ * can carry plainly.
  *
  * Copy in this file follows Simplified Technical English: one meaning per
  * word, one instruction per sentence, active voice, and the same word for the
@@ -48,6 +48,12 @@ const state = {
   replSource: "",
   sqlText: "",
   confirmed: false,
+  objSearch: "",
+  actionSearch: "",
+  actionProbe: null,
+  hookEvent: "",
+  hookSearch: "",
+  protoSearch: "",
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -1685,8 +1691,354 @@ async function sessionAction(action, sessid, question) {
   else state.confirmed = false;
 }
 
+/* A search box that writes one state key and redraws. Four stations wanted the
+ * same control, and four hand-rolled copies drift. */
+function searchField(key, label) {
+  return node("div", { class: "field" }, [
+    node("input", {
+      type: "search",
+      value: state[key] || "",
+      placeholder: label,
+      "aria-label": label,
+      onchange: (event) => {
+        state[key] = event.target.value;
+        select_render();
+      },
+    }),
+  ]);
+}
+
+function dataTable(headings, rows) {
+  const element = node("table");
+  element.append(
+    node("thead", {}, [
+      node("tr", {}, headings.map((text) => node("th", { scope: "col", text }))),
+    ]),
+  );
+  const body = node("tbody");
+  for (const row of rows) body.append(node("tr", {}, row));
+  element.append(body);
+  return element;
+}
+
+async function drawObjects() {
+  const query = new URLSearchParams({ search: state.objSearch || "" });
+  const result = await call("panels/objects/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  /* Orphans first, and only when there are some. A stored path that no longer
+   * imports is the one finding on this station that needs an operator; the
+   * rest is reference. */
+  const orphans = data.orphans || [];
+  if (orphans.length) {
+    body.append(section("Paths that do not import"));
+    body.append(
+      dataTable(
+        ["PATH", "ROWS"],
+        orphans.map((row) => [
+          node("td", { class: "fail-text", text: row.path }),
+          node("td", { class: "num", text: String(row.instances) }),
+        ]),
+      ),
+    );
+    body.append(
+      node("p", {
+        class: "empty-hint",
+        text: "These rows still load through a fallback. Nothing else reports this.",
+      }),
+    );
+  }
+
+  body.append(section("Stored"));
+  const stored = data.stored || [];
+  if (!stored.length) {
+    body.append(empty("NO ROWS CARRY A TYPECLASS PATH."));
+  } else {
+    body.append(
+      dataTable(
+        ["PATH", "ROWS", "IMPORTS"],
+        stored.map((row) => [
+          cell(row.path),
+          node("td", { class: "num", text: String(row.instances) }),
+          node("td", {}, [
+            lamp(row.importable ? "LOADED" : "NOT LOADED", row.importable ? "ok" : "off"),
+          ]),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  body.append(section("Loaded classes"));
+  const rows = data.rows || [];
+  if (!rows.length) {
+    body.append(empty("NO CLASS MATCHES THIS SEARCH."));
+  } else {
+    body.append(
+      dataTable(
+        ["CLASS", "PATH", "PARENT", "ROWS"],
+        rows.map((row) => [
+          cell(row.name),
+          cell(row.path),
+          cell(row.base),
+          node("td", { class: "num", text: row.instances === null ? "--" : String(row.instances) }),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.importable_caveat || "" }));
+
+  el.station.textContent = "";
+  el.station.append(
+    head("OBJECTS", data.typeclass_count ? data.typeclass_count + " CLASSES" : ""),
+    node("div", { class: "toolbar" }, [
+      searchField("objSearch", "FILTER BY CLASS OR PATH"),
+      node("span", { class: "spacer" }),
+      orphans.length
+        ? lamp(orphans.length + " DO NOT IMPORT", "fail")
+        : lamp("ALL STORED PATHS IMPORT", "ok"),
+    ]),
+    body,
+  );
+}
+
+async function drawActions() {
+  const query = new URLSearchParams({ search: state.actionSearch || "" });
+  const result = await call("panels/actions/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.available) {
+    body.append(empty("THE ACTION REGISTRY IS NOT LOADED.", data.reason || ""));
+    el.station.textContent = "";
+    el.station.append(head("ACTIONS"), body);
+    return;
+  }
+
+  /* The question an operator has is "why did that not work". Answering it by
+   * reading the verb trie by hand is what this replaces. Nothing runs. */
+  body.append(section("Resolve one line"));
+  const input = node("input", {
+    type: "text",
+    id: "action-probe",
+    placeholder: "A LINE OF PLAYER INPUT, FOR EXAMPLE: DROP SWORD",
+    "aria-label": "Player input to resolve",
+    spellcheck: "false",
+  });
+  const verdict = node("div", { id: "action-verdict" });
+
+  const paint = () => {
+    verdict.textContent = "";
+    const probe = state.actionProbe;
+    if (!probe) return;
+    verdict.append(
+      node("p", {}, [
+        lamp(probe.matched ? "MATCH" : "NO MATCH", probe.matched ? "ok" : "attn"),
+        node("span", { class: "legend", text: " " + probe.explanation }),
+      ]),
+    );
+    if (probe.matched) {
+      const pairs = node("dl", { class: "rows" });
+      for (const [label, value] of [
+        ["action", probe.matched.action],
+        ["module", probe.matched.module],
+        ["matched verb", probe.matched.verb],
+        ["score", probe.matched.score === null ? "--" : String(probe.matched.score)],
+      ]) {
+        pairs.append(
+          node("div", { class: "row-pair" }, [
+            node("dt", { text: label }),
+            node("dd", { text: value }),
+          ]),
+        );
+      }
+      verdict.append(pairs);
+    } else if ((probe.suggestions || []).length) {
+      verdict.append(
+        node("p", { class: "empty-hint", text: "Near it: " + probe.suggestions.join(", ") }),
+      );
+    }
+  };
+
+  const run = async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    const done = await call("panels/actions/actions/resolve/", { body: { text } });
+    if (!report(done)) return;
+    state.actionProbe = done.payload.result || null;
+    paint();
+  };
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") run();
+  });
+  body.append(
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field grow" }, [input]),
+      node("button", { type: "button", text: "RESOLVE", onclick: run }),
+    ]),
+    verdict,
+  );
+  paint();
+
+  body.append(section("Registered"));
+  const rows = data.rows || [];
+  if (!rows.length) {
+    body.append(empty("NO ACTION MATCHES THIS SEARCH."));
+  } else {
+    body.append(
+      dataTable(
+        ["ACTION", "VERBS", "CAPABILITY", "SUMMARY"],
+        rows.map((row) => [
+          cell(row.name),
+          cell((row.verbs || []).join(" ")),
+          cell(row.capability),
+          cell(row.summary),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  el.station.textContent = "";
+  el.station.append(
+    head("ACTIONS", data.action_count ? data.action_count + " ACTIONS" : ""),
+    node("div", { class: "toolbar" }, [
+      searchField("actionSearch", "FILTER BY ACTION OR VERB"),
+      node("span", { class: "spacer" }),
+      lamp((data.verbs || []).length + " VERBS", "off"),
+    ]),
+    body,
+  );
+}
+
+async function drawHooks() {
+  const query = new URLSearchParams({
+    event: state.hookEvent || "",
+    search: state.hookSearch || "",
+  });
+  const result = await call("panels/hooks/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.available) {
+    body.append(empty("THE HOOK REGISTRY IS NOT LOADED.", data.reason || ""));
+    el.station.textContent = "";
+    el.station.append(head("HOOKS"), body);
+    return;
+  }
+
+  const findings = data.findings || [];
+  if (findings.length) {
+    body.append(section("Lint findings"));
+    body.append(
+      dataTable(
+        ["HOOK", "PROBLEM"],
+        findings.map((row) => [
+          node("td", { class: "fail-text", text: row.name }),
+          cell(row.problem),
+        ]),
+      ),
+    );
+  }
+
+  body.append(section("Declared"));
+  const rows = data.rows || [];
+  if (!rows.length) {
+    body.append(empty("NO HOOK MATCHES THIS FILTER."));
+  } else {
+    body.append(
+      dataTable(
+        ["HOOK", "EVENT", "PHASE", "RETURNS", "DISCIPLINE"],
+        rows.map((row) => [
+          cell(row.name),
+          cell(row.event),
+          cell(row.phase),
+          cell(row.returns),
+          cell(row.discipline),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  const picker = node("select", {
+    id: "hook-event",
+    "aria-label": "Filter by event",
+    onchange: (event) => {
+      state.hookEvent = event.target.value;
+      select_render();
+    },
+  });
+  picker.append(node("option", { value: "", text: "ALL EVENTS", selected: !state.hookEvent }));
+  for (const event of data.events || []) {
+    picker.append(node("option", { value: event, selected: event === state.hookEvent, text: event }));
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("HOOKS", data.hook_count ? data.hook_count + " HOOKS" : ""),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "hook-event", text: "Event" }),
+        picker,
+      ]),
+      searchField("hookSearch", "FILTER BY HOOK OR EVENT"),
+      node("span", { class: "spacer" }),
+      findings.length ? lamp(findings.length + " FINDINGS", "fail") : lamp("LINT CLEAN", "ok"),
+    ]),
+    body,
+  );
+}
+
+async function drawPrototypes() {
+  const query = new URLSearchParams({ search: state.protoSearch || "" });
+  const result = await call("panels/prototypes/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  if (!data.available) {
+    body.append(empty("PROTOTYPES ARE NOT LOADED.", data.reason || ""));
+  } else if (!(data.rows || []).length) {
+    body.append(empty("THIS GAME DECLARES NO PROTOTYPE."));
+  } else {
+    body.append(
+      dataTable(
+        ["KEY", "TYPECLASS", "PARENT", "FIELDS"],
+        data.rows.map((row) => [
+          cell(row.key),
+          cell(row.typeclass),
+          cell(row.parent),
+          cell((row.fields || []).join(" ")),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  el.station.textContent = "";
+  el.station.append(
+    head("PROTOTYPES", data.count ? data.count + " PROTOTYPES" : ""),
+    node("div", { class: "toolbar" }, [
+      searchField("protoSearch", "FILTER BY KEY"),
+      node("span", { class: "spacer" }),
+      lamp("READ ONLY", "off"),
+    ]),
+    body,
+  );
+}
+
 const RENDERERS = {
   records: drawRecords,
+  objects: drawObjects,
+  actions: drawActions,
+  hooks: drawHooks,
+  prototypes: drawPrototypes,
   repl: drawRepl,
   sql: drawSql,
   server: drawServer,

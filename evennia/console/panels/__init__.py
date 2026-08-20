@@ -16,6 +16,12 @@ from evennia.console.panels.dangerous import (
 )
 from evennia.console.panels.errors import ErrorsPanel
 from evennia.console.panels.health import HealthPanel
+from evennia.console.panels.introspection import (
+    ActionsPanel,
+    HooksPanel,
+    ObjectsPanel,
+    PrototypesPanel,
+)
 from evennia.console.panels.logs import LogsPanel
 from evennia.console.panels.migrations import MigrationsPanel
 from evennia.console.panels.moderation import ModerationPanel
@@ -32,6 +38,10 @@ BUILTIN_PANELS = (
     RuntimePanel,
     LogsPanel,
     ErrorsPanel,
+    ObjectsPanel,
+    ActionsPanel,
+    HooksPanel,
+    PrototypesPanel,
     SessionsPanel,
     ServerPanel,
     ReplPanel,
@@ -43,12 +53,16 @@ BUILTIN_PANELS = (
 
 __all__ = (
     "AttributesPanel",
+    "ActionsPanel",
     "AuthorizationPanel",
     "BUILTIN_PANELS",
     "ErrorsPanel",
     "HealthPanel",
+    "HooksPanel",
     "LogsPanel",
     "MigrationsPanel",
+    "ObjectsPanel",
+    "PrototypesPanel",
     "ModerationPanel",
     "ReplPanel",
     "RecordsPanel",

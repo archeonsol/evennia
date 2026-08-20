@@ -699,3 +699,19 @@ textarea {
 textarea::placeholder {
   color: var(--ink-faint);
 }
+
+/* ------------------------------------------------------ introspection rows */
+
+/* A field that takes the free width of a toolbar. The action resolver takes a
+   whole line of player input, which does not fit a search-box width. */
+.field.grow {
+  flex: 1 1 auto;
+}
+
+.field.grow input {
+  width: 100%;
+}
+
+.fail-text {
+  color: var(--fail);
+}
