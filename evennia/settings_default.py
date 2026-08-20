@@ -103,6 +103,20 @@ UPSTREAM_IPS = ["127.0.0.1"]
 # hash uncomparable with every new one. Empty falls back to SECRET_KEY, which
 # ties the same problem to SECRET_KEY rotation instead.
 MODERATION_HASH_SALT = ""
+# How much wider the IPv6 site allowance is than the per-network one. An IPv6
+# customer holds a whole /48 or /56, so counting only /64 lets one subscriber
+# multiply the limit by the number of subnets they were assigned. 0 disables
+# the site bucket and counts /64 alone.
+MODERATION_CONNECT_RATE_SITE_FACTOR = 8
+# Message-volume observation. Off by default: "high" is a property of the game
+# rather than of the engine, so a game turns this on after watching its own
+# numbers. Crossing the threshold raises a flag for staff. It never blocks a
+# message, because a limit that blocks will eventually refuse a real player in
+# the middle of a scene.
+MODERATION_MESSAGE_RATE_ENABLED = False
+MODERATION_MESSAGE_RATE_LIMIT = 120
+MODERATION_MESSAGE_RATE_WINDOW = 60
+MODERATION_MESSAGE_RATE_MAX_KEYS = 4096
 # Record a SessionRecord row per connection. Every other moderation feature
 # reads that history, so disabling this disables the substrate.
 MODERATION_SESSION_CAPTURE_ENABLED = True

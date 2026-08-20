@@ -30,10 +30,19 @@ an appeal never requires that staff have seen the address.
 
 from __future__ import annotations
 
+import re
+
+from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 
 from evennia.console import audit
-from evennia.console.registry import Panel, io_action
+from evennia.console.registry import (
+    ADDRESS_SUBJECTS,
+    CONSOLE_MODERATION_ADDRESS,
+    CONSOLE_MODERATION_PERMANENT,
+    Panel,
+    io_action,
+)
 
 #: Row caps. Each table grows by one row per connection or per detection.
 QUEUE_FLAGS = 40
@@ -46,6 +55,15 @@ ADDRESS_KINDS = frozenset({"ip", "ip_hash", "device_token", "client_fp", "csessi
 
 #: Characters of an opaque key kept when shortening for readability.
 KEEP = 8
+
+#: Sessions read when counting what an address sanction would reach. Bounded:
+#: the answer is an order of magnitude, and an exact count of a busy network
+#: costs a scan to change a number nobody reads differently.
+COLLATERAL_SAMPLE = 5000
+
+#: Distinct accounts listed by name in a collateral report. Past this the count
+#: is what matters, not the roll call.
+COLLATERAL_NAMES = 25
 
 
 def mask(value, reveal=False):
@@ -324,6 +342,187 @@ class ModerationPanel(Panel):
         )
         return {"id": resolved.pk, "state": resolved.state, "note": resolved.resolution_note}
 
+    # -- guards --------------------------------------------------------
+
+    #: One duration word. The same grammar the ``@ban`` command and the staff
+    #: web form use, so a ban issued from a browser and one issued from the
+    #: command line cannot mean different things by ``7d``.
+    DURATION = re.compile(r"^(\d+)([mhdw])$")
+    DURATION_UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+    def _expiry(self, expires_at):
+        """Return ``(datetime_or_None, is_permanent)`` from what was submitted.
+
+        Accepts a duration word (``30m``, ``12h``, ``7d``, ``2w``), the word
+        ``perm``, an ISO timestamp, or nothing.
+
+        This exists because the console previously passed the submitted value
+        straight through to ``issue_sanction``, which needs a datetime. A value
+        arriving as JSON is a string, so **every timed sanction the console
+        tried to issue raised inside the hash chain**. Nothing caught it,
+        because no test issued one with an expiry.
+
+        Args:
+            expires_at: Submitted duration, timestamp, or empty value.
+
+        Returns:
+            tuple: The expiry, and whether the request is for an indefinite
+            sanction.
+
+        Raises:
+            ValueError: The value is neither a duration nor a timestamp.
+        """
+
+        from datetime import datetime, timedelta
+
+        text = str(expires_at or "").strip().lower()
+        if not text or text == "perm":
+            return None, True
+
+        match = self.DURATION.match(text)
+        if match:
+            amount, unit = match.groups()
+            delta = timedelta(**{self.DURATION_UNITS[unit]: int(amount)})
+            return timezone.now() + delta, False
+
+        try:
+            parsed = datetime.fromisoformat(str(expires_at))
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"{expires_at!r} is not a duration. Enter 30m, 12h, 7d, or 2w. "
+                "Enter perm for a ban that never ends."
+            ) from err
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed)
+        return parsed, False
+
+    def _require_look_reason(self, reason):
+        """Return the reason for looking at a masked value, or refuse.
+
+        An audit row that says somebody looked and not why is a log line, not
+        an audit. The reason is the part an appeal or a review actually reads.
+        """
+
+        text = str(reason or "").strip()
+        if not text:
+            raise PermissionDenied(
+                "Enter why you need this value. The console keeps this record permanently."
+            )
+        return text
+
+    def _require_reason(self, reason):
+        """Return the reason text, or refuse.
+
+        The reason is shown to the player. A sanction with an empty one tells
+        somebody they cannot play and does not tell them anything else, which
+        makes an appeal impossible to write and impossible to answer.
+        """
+
+        text = str(reason or "").strip()
+        if not text:
+            raise PermissionDenied(
+                "Enter the reason. The player reads this text. Do not write how you found them."
+            )
+        return text
+
+    def _require_address_authority(self, ctx, subject_type):
+        """Refuse an address-like subject without the address capability.
+
+        A sanction on an account reaches one person. A sanction on a network,
+        an autonomous system, or a device token reaches everybody who shares
+        it, and behind a carrier-grade NAT that can be thousands of people who
+        did nothing. The two are not the same decision and do not carry the
+        same authority.
+        """
+
+        if str(subject_type) in ADDRESS_SUBJECTS and not ctx.has(CONSOLE_MODERATION_ADDRESS):
+            raise PermissionDenied(
+                "You cannot ban a single address or a device. Ask a staff member "
+                "who has the address permission. You can ban the network instead, "
+                "which is what most moderation work needs."
+            )
+
+    def _permanent_requested(self, expires_at) -> bool:
+        """Return whether this request asks for a sanction that never expires."""
+
+        return self._expiry(expires_at)[1]
+
+    def collateral(self, ctx, subject_type=None, subject_value=None):
+        """Report how many accounts a sanction on this subject would reach.
+
+        Worker-side and read-only. This is the number the console never showed
+        at the moment of decision: a /24 can be one household or a whole
+        campus, and the two look identical in a form field.
+
+        Counted from the retained session history, which is bounded by the
+        retention window. An address purged by the ninety-day sweep leaves its
+        network behind, so the count still works after the address is gone.
+
+        Args:
+            ctx: Worker context.
+            subject_type: Sanction subject type.
+            subject_value: Sanction subject value.
+
+        Returns:
+            dict: Distinct accounts seen on this subject, and how many.
+
+        Raises:
+            LookupError: The subject type carries no session history.
+        """
+
+        from evennia.server.models import SessionRecord
+
+        column = {
+            "ip": "ip_hash",
+            "cidr": "cidr",
+            "asn": "asn",
+            "device_token": "device_token",
+            "client_fp": "client_fp",
+            "csessid": "csessid",
+            "account": "account_name",
+        }.get(str(subject_type or ""))
+        if column is None:
+            raise LookupError(
+                f"The console cannot count the players that a ban of the type "
+                f"{subject_type!r} affects."
+            )
+
+        value = str(subject_value or "").strip()
+        if not value:
+            raise LookupError("Enter the subject value.")
+        # An address subject is matched on its hash, because the raw column is
+        # cleared by the retention sweep and the hash is not.
+        if str(subject_type) == "ip":
+            from evennia.moderation.capture import hash_value
+
+            value = hash_value(value)
+
+        rows = (
+            SessionRecord.objects.filter(**{column: value})
+            .order_by("-id")
+            .values("account_name", "account_id")[:COLLATERAL_SAMPLE]
+        )
+        accounts, sessions = {}, 0
+        for row in rows:
+            sessions += 1
+            name = row["account_name"] or ""
+            if name:
+                accounts[name] = row["account_id"]
+
+        names = sorted(accounts)
+        return {
+            "subject_type": str(subject_type),
+            "subject_value": str(subject_value),
+            "accounts": names[:COLLATERAL_NAMES],
+            "account_count": len(names),
+            "sessions": sessions,
+            "capped": sessions >= COLLATERAL_SAMPLE,
+            "note": (
+                "This count uses the connections that the server still stores. It "
+                "does not include connections that the server deleted."
+            ),
+        }
+
     @io_action
     def sanction(
         self,
@@ -358,7 +557,25 @@ class ModerationPanel(Panel):
         if str(level) not in known_levels:
             raise LookupError(f"{level!r} is not a sanction level")
         if not str(subject_value or "").strip():
-            raise LookupError("a subject value is required")
+            raise LookupError("Enter the subject value.")
+
+        reason = self._require_reason(reason)
+        self._require_address_authority(ctx, subject_type)
+
+        # A permanent sanction from somebody without the authority becomes a
+        # proposal. It is not refused: the person who found the case is usually
+        # the right person to make it, and the wrong person to be the only one
+        # who decides it never ends.
+        if self._permanent_requested(expires_at) and not ctx.has(CONSOLE_MODERATION_PERMANENT):
+            return self._propose(
+                ctx,
+                subject_type=subject_type,
+                subject_value=subject_value,
+                level=level,
+                reason=reason,
+                staff_note=staff_note,
+                flag_id=flag_id,
+            )
 
         flag = ModerationFlag.objects.filter(pk=flag_id).first() if flag_id else None
         evidence = dict(flag.evidence or {}) if flag is not None else {}
@@ -373,7 +590,7 @@ class ModerationPanel(Panel):
             actor=self._actor(ctx),
             reason=str(reason or ""),
             staff_note=str(staff_note or ""),
-            expires_at=expires_at,
+            expires_at=self._expiry(expires_at)[0],
             evidence=evidence,
             silent=bool(silent),
         )
@@ -412,6 +629,345 @@ class ModerationPanel(Panel):
             "flag_closed": flag.pk if flag is not None else None,
         }
 
+    # -- proposals -----------------------------------------------------
+
+    def _propose(
+        self,
+        ctx,
+        subject_type=None,
+        subject_value=None,
+        level=None,
+        reason="",
+        staff_note="",
+        flag_id=None,
+    ):
+        """Record a request for a permanent sanction, and change nothing else.
+
+        Runs when somebody without ``engine.console.moderation.permanent``
+        asks for a sanction that never expires. The proposal has no effect on
+        the subject: it is an observation with a name attached, and it follows
+        the same rule the flag queue follows.
+
+        The collateral count is stored with the proposal rather than recomputed
+        when it is read. A reviewer should see the number the requester saw,
+        and a network's population changes between the two.
+        """
+
+        from evennia.server.models import ModerationFlag, SanctionProposal
+
+        try:
+            reach = self.collateral(ctx, subject_type=subject_type, subject_value=subject_value)
+        except LookupError:
+            reach = {}
+
+        flag = None
+        if flag_id:
+            flag = ModerationFlag.objects.filter(pk=flag_id).first()
+
+        proposal = SanctionProposal.objects.create(
+            subject_type=str(subject_type),
+            subject_value=str(subject_value)[:255],
+            level=str(level),
+            reason=str(reason)[:500],
+            staff_note=str(staff_note or ""),
+            collateral={
+                "account_count": reach.get("account_count", 0),
+                "sessions": reach.get("sessions", 0),
+                "accounts": reach.get("accounts", []),
+            },
+            flag=flag,
+            proposed_by_id=ctx.actor_id,
+            proposed_by_name=str(ctx.actor_name or "")[:255],
+        )
+        audit.record(
+            panel=self.key,
+            operation="propose",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"server.sanctionproposal#{proposal.pk}",
+            after={
+                "subject_type": proposal.subject_type,
+                "subject_value": mask(proposal.subject_value),
+                "level": proposal.level,
+            },
+            message=str(reason)[:500],
+            retention="permanent",
+        )
+        return {
+            "proposed": True,
+            "id": proposal.pk,
+            "state": proposal.state,
+            "subject_type": proposal.subject_type,
+            "level": proposal.level,
+            "message": (
+                "You cannot make a ban that never ends. The console saved your "
+                "proposal. A senior staff member accepts it or refuses it. "
+                "Nothing has changed for this player yet."
+            ),
+        }
+
+    def proposals(self, ctx, state=""):
+        """Return the sanction proposals awaiting a decision.
+
+        Args:
+            ctx: Worker context.
+            state: One proposal state, or empty for the open ones.
+
+        Returns:
+            dict: Proposals, and whether this caller may decide them.
+        """
+
+        from evennia.server.models import SanctionProposal
+
+        queryset = SanctionProposal.objects.all()
+        wanted = str(state or "").strip()
+        if wanted:
+            queryset = queryset.filter(state=wanted)
+        else:
+            queryset = queryset.filter(state__in=SanctionProposal.OPEN_STATES)
+
+        rows = []
+        for row in queryset.values(
+            "id",
+            "subject_type",
+            "subject_value",
+            "level",
+            "reason",
+            "staff_note",
+            "collateral",
+            "state",
+            "proposed_by_name",
+            "proposed_by_id",
+            "created_at",
+            "decided_by_name",
+            "decided_at",
+            "decision_note",
+        )[:QUEUE_SANCTIONS]:
+            reveal = ctx.has(CONSOLE_MODERATION_ADDRESS)
+            rows.append(
+                {
+                    "id": row["id"],
+                    "subject_type": row["subject_type"],
+                    "subject_value": self._subject_display(
+                        row["subject_type"], row["subject_value"]
+                    )
+                    if not reveal
+                    else row["subject_value"],
+                    "level": row["level"],
+                    "reason": row["reason"],
+                    "staff_note": row["staff_note"][:2000],
+                    "collateral": row["collateral"] or {},
+                    "state": row["state"],
+                    "proposed_by": row["proposed_by_name"] or "(unknown)",
+                    "proposed_by_id": row["proposed_by_id"],
+                    "created_at": _stamp(row["created_at"]),
+                    "decided_by": row["decided_by_name"] or "",
+                    "decided_at": _stamp(row["decided_at"]),
+                    "decision_note": row["decision_note"],
+                    # A person must not be the one who decides their own
+                    # request. That is the whole point of the split.
+                    "yours": row["proposed_by_id"] == ctx.actor_id,
+                }
+            )
+
+        return {
+            "rows": rows,
+            "states": [
+                {"value": value, "meaning": meaning}
+                for value, meaning in SanctionProposal.STATE_CHOICES
+            ],
+            "may_decide": ctx.has(CONSOLE_MODERATION_PERMANENT),
+            "note": (
+                "A proposal does nothing to the player. It shows that a staff member "
+                "asked for a ban that never ends."
+            ),
+        }
+
+    @io_action
+    def approve(self, ctx, proposal_id=None, note=""):
+        """Approve one proposal and issue the sanction it asks for.
+
+        Raises:
+            PermissionDenied: The caller may not decide proposals, or is the
+                person who made this one.
+            LookupError: No such proposal.
+            ValueError: The proposal is already decided, or no note was given.
+        """
+
+        from evennia.server.models import SanctionProposal
+
+        proposal = self._decidable(ctx, proposal_id)
+        text = str(note or "").strip()
+        if not text:
+            raise ValueError("Enter the reason for your decision.")
+
+        result = self.sanction(
+            ctx,
+            subject_type=proposal.subject_type,
+            subject_value=proposal.subject_value,
+            level=proposal.level,
+            reason=proposal.reason,
+            staff_note=proposal.staff_note,
+            expires_at=None,
+            flag_id=proposal.flag_id,
+        )
+
+        from evennia.server.models import Sanction
+
+        proposal.state = SanctionProposal.STATE_APPROVED
+        proposal.decided_by_id = ctx.actor_id
+        proposal.decided_by_name = str(ctx.actor_name or "")[:255]
+        proposal.decided_at = timezone.now()
+        proposal.decision_note = text[:500]
+        proposal.sanction = Sanction.objects.filter(pk=result.get("id")).first()
+        proposal.save(
+            update_fields=[
+                "state",
+                "decided_by_id",
+                "decided_by_name",
+                "decided_at",
+                "decision_note",
+                "sanction",
+            ]
+        )
+
+        audit.record(
+            panel=self.key,
+            operation="approve",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"server.sanctionproposal#{proposal.pk}",
+            before={"state": SanctionProposal.STATE_PENDING},
+            after={"state": proposal.state, "sanction": result.get("id")},
+            message=text[:500],
+            retention="permanent",
+        )
+        return {"id": proposal.pk, "state": proposal.state, "sanction": result}
+
+    def decline(self, ctx, proposal_id=None, note=""):
+        """Refuse one proposal, and keep the record of refusing it.
+
+        Kept rather than deleted. "We considered this and said no" is what
+        stops the same case being re-argued from scratch in six months, and it
+        is what an appeal needs.
+
+        Raises:
+            PermissionDenied: The caller may not decide proposals, or is the
+                person who made this one.
+            LookupError: No such proposal.
+            ValueError: The proposal is already decided, or no note was given.
+        """
+
+        from evennia.server.models import SanctionProposal
+
+        proposal = self._decidable(ctx, proposal_id)
+        text = str(note or "").strip()
+        if not text:
+            raise ValueError("Enter the reason for your decision.")
+
+        proposal.state = SanctionProposal.STATE_DECLINED
+        proposal.decided_by_id = ctx.actor_id
+        proposal.decided_by_name = str(ctx.actor_name or "")[:255]
+        proposal.decided_at = timezone.now()
+        proposal.decision_note = text[:500]
+        proposal.save(
+            update_fields=[
+                "state",
+                "decided_by_id",
+                "decided_by_name",
+                "decided_at",
+                "decision_note",
+            ]
+        )
+        audit.record(
+            panel=self.key,
+            operation="decline",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"server.sanctionproposal#{proposal.pk}",
+            before={"state": SanctionProposal.STATE_PENDING},
+            after={"state": proposal.state},
+            message=text[:500],
+            retention="permanent",
+        )
+        return {"id": proposal.pk, "state": proposal.state}
+
+    def withdraw(self, ctx, proposal_id=None, note=""):
+        """Take back a proposal you made.
+
+        Only the person who asked may withdraw, and only while it is open. A
+        reviewer who wants it gone declines it, which leaves the reason on the
+        record.
+
+        Raises:
+            LookupError: No such proposal.
+            PermissionDenied: The proposal belongs to somebody else.
+            ValueError: The proposal is already decided.
+        """
+
+        from evennia.server.models import SanctionProposal
+
+        proposal = SanctionProposal.objects.filter(pk=self._proposal_id(proposal_id)).first()
+        if proposal is None:
+            raise LookupError(f"no proposal with id {proposal_id!r}")
+        if proposal.proposed_by_id != ctx.actor_id:
+            raise PermissionDenied(
+                "You can cancel only a proposal that you made. Another staff member "
+                "refuses a proposal instead, and the console saves the reason."
+            )
+        if not proposal.is_open:
+            raise ValueError(f"This proposal is already {proposal.state}.")
+
+        proposal.state = SanctionProposal.STATE_WITHDRAWN
+        proposal.decided_at = timezone.now()
+        proposal.decision_note = str(note or "")[:500]
+        proposal.save(update_fields=["state", "decided_at", "decision_note"])
+        audit.record(
+            panel=self.key,
+            operation="withdraw",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"server.sanctionproposal#{proposal.pk}",
+            after={"state": proposal.state},
+            message=str(note or "")[:500],
+        )
+        return {"id": proposal.pk, "state": proposal.state}
+
+    def _proposal_id(self, value):
+        """Return one proposal identifier, or refuse."""
+
+        try:
+            return int(value)
+        except (TypeError, ValueError) as err:
+            raise LookupError(f"{value!r} is not a valid proposal id") from err
+
+    def _decidable(self, ctx, proposal_id):
+        """Return one proposal this caller may decide, or refuse.
+
+        Raises:
+            PermissionDenied: The caller lacks the authority, or made it.
+            LookupError: No such proposal.
+            ValueError: It is already decided.
+        """
+
+        from evennia.server.models import SanctionProposal
+
+        if not ctx.has(CONSOLE_MODERATION_PERMANENT):
+            raise PermissionDenied(
+                "You cannot accept or refuse a proposal. This needs the permanent-ban permission."
+            )
+        proposal = SanctionProposal.objects.filter(pk=self._proposal_id(proposal_id)).first()
+        if proposal is None:
+            raise LookupError(f"no proposal with id {proposal_id!r}")
+        if not proposal.is_open:
+            raise ValueError(f"This proposal is already {proposal.state}.")
+        if proposal.proposed_by_id == ctx.actor_id:
+            raise PermissionDenied(
+                "You cannot decide your own proposal. Ask another staff member who "
+                "has the permanent-ban permission."
+            )
+        return proposal
+
     @io_action
     def revoke(self, ctx, sanction_id=None, reason=""):
         """Lift a sanction. The row stays; history is never deleted.
@@ -446,13 +1002,21 @@ class ModerationPanel(Panel):
     def reveal(self, ctx, record=None, record_id=None, field=None, reason=""):
         """Show one masked value, and record that it was shown.
 
-        The console has no address capability, so this replaces the game's
-        second grant. An appeal never requires that staff have seen an address,
-        so the useful property was never prevention -- it was knowing who
-        looked. Nobody is blocked; everybody is recorded, permanently.
+        Looking is not the same act as banning, and the two are gated
+        differently on purpose.
+
+        **Banning a network needs the address capability.** It stops every
+        player who shares that network, and the person who finds a case is
+        often not the person who should decide that.
+
+        **Looking at one needs a reason and a password.** Nobody is prevented,
+        because an investigation sometimes needs the raw value and refusing it
+        only moves the work somewhere with no record. Everybody is recorded,
+        permanently, and the record says why.
 
         Raises:
             LookupError: The record or field is unknown.
+            PermissionDenied: No reason was given.
         """
 
         from evennia.server.models import ModerationFlag, Sanction, SessionRecord
@@ -468,6 +1032,11 @@ class ModerationPanel(Panel):
         model, allowed = entry
         if str(field) not in allowed:
             raise LookupError(f"{field!r} is not a revealable field on a {record}")
+
+        # Asked for after the request is known to be well formed. Demanding a
+        # justification for a request that names no real field would be asking
+        # a person to explain a mistake rather than a decision.
+        reason = self._require_look_reason(reason)
 
         row = model.objects.filter(pk=record_id).values(str(field)).first()
         if row is None:

@@ -24,13 +24,27 @@ from rest_framework import permissions
 from rest_framework.exceptions import PermissionDenied
 
 from evennia.authorization.service import has_capability
-from evennia.console.registry import CONSOLE_ACCESS, CONSOLE_MODERATION, WorkerContext
+from evennia.console.registry import (
+    CONSOLE_ACCESS,
+    CONSOLE_MODERATION,
+    CONSOLE_MODERATION_ADDRESS,
+    CONSOLE_MODERATION_PERMANENT,
+    WorkerContext,
+)
 
 #: Header a console request must carry alongside its session cookie.
 CONSOLE_HEADER = "X-Evennia-Console"
 
 #: Every capability that admits a caller to some part of the console.
 CONSOLE_CAPABILITIES = (CONSOLE_ACCESS, CONSOLE_MODERATION)
+
+#: Capabilities that grant authority *inside* a panel rather than admission to
+#: one. Holding one of these alone admits nobody: it only widens what a caller
+#: already admitted may do.
+CONSOLE_AUTHORITIES = (CONSOLE_MODERATION_ADDRESS, CONSOLE_MODERATION_PERMANENT)
+
+#: Everything resolved onto a request context, admitting and authorising alike.
+RESOLVED_CAPABILITIES = CONSOLE_CAPABILITIES + CONSOLE_AUTHORITIES
 
 #: Session keys holding console-scoped timers.
 IDLE_KEY = "_console_seen"
@@ -161,7 +175,7 @@ def live_capabilities(user) -> frozenset[str]:
     if user is None or not getattr(user, "is_authenticated", False):
         return frozenset()
     return frozenset(
-        capability for capability in CONSOLE_CAPABILITIES if has_capability(user, capability)
+        capability for capability in RESOLVED_CAPABILITIES if has_capability(user, capability)
     )
 
 

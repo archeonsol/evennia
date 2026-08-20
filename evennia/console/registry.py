@@ -44,6 +44,35 @@ CONSOLE_ACCESS = "engine.console.access"
 #: Capability that admits a caller to the moderation panel and nothing else.
 CONSOLE_MODERATION = "engine.console.moderation"
 
+#: Capability to sanction a single address or a device token.
+#:
+#: Decision D1 kept the console to two capabilities, on the reasoning that
+#: everybody admitted can already do everything. That reasoning covers reading.
+#: It does not cover enforcement, and the console shipped without the gate the
+#: game-side form had.
+#:
+#: The line is drawn where the game drew it, not wider. Banning a **network**
+#: is ordinary staff work: the network is the ban unit, because a residential
+#: address changes and a /24 does not. Banning a **single address** or a
+#: **device token** means acting on a value that is masked until somebody
+#: reveals it, and that is the narrower act this gates.
+CONSOLE_MODERATION_ADDRESS = "engine.console.moderation.address"
+
+#: Capability to issue a sanction that never expires.
+#:
+#: Without it an operator may still ask for one. The request becomes a proposal
+#: that a holder approves or declines, so the work of investigating a case and
+#: the authority to make it permanent can sit with different people.
+CONSOLE_MODERATION_PERMANENT = "engine.console.moderation.permanent"
+
+#: Sanction subjects whose value is masked until somebody reveals it. Acting
+#: on one of these is what ``CONSOLE_MODERATION_ADDRESS`` gates.
+#:
+#: ``cidr`` and ``asn`` are deliberately absent. Staff without the capability
+#: still see which network a session came from and may still ban it, which is
+#: what most moderation work needs.
+ADDRESS_SUBJECTS = frozenset({"ip", "device_token"})
+
 
 class PanelError(Exception):
     """A panel was declared, registered, or dispatched incorrectly."""

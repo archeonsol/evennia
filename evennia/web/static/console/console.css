@@ -943,3 +943,12 @@ td.pick {
   padding-right: 0;
   text-align: center;
 }
+
+/* The count of accounts a ban would reach, shown next to the form that issues
+   it rather than on another page. */
+.collateral {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--attn);
+  background: var(--ground);
+}

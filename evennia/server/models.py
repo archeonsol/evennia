@@ -596,6 +596,10 @@ class ModerationFlag(models.Model):
     KIND_DISPOSABLE_EMAIL = "disposable_email"
     KIND_EMAIL_ALIAS = "email_alias_reuse"
     KIND_UNDELIVERABLE_EMAIL = "undeliverable_email"
+    #: Volume, not content. A text game floods with text rather than with
+    #: sockets, and the connection limiter cannot see one logged-in account
+    #: sending three hundred tells a minute.
+    KIND_MESSAGE_BURST = "message_burst"
 
     kind = models.CharField(max_length=48, db_index=True)
     severity = models.IntegerField(default=0, db_index=True)
@@ -640,3 +644,96 @@ class ModerationFlag(models.Model):
 
     def __str__(self):
         return f"ModerationFlag({self.kind}, {self.state}, {self.account_name or '-'})"
+
+
+class SanctionProposal(models.Model):
+    """A request for a sanction that the requester may not issue alone.
+
+    Two things separate here on purpose: the work of investigating a case, and
+    the authority to make a decision permanent. A staff member who reads a
+    queue all day is the right person to find an evader and the wrong person to
+    be the only one who decides that a ban never ends.
+
+    So a permanent sanction asked for by somebody without
+    ``engine.console.moderation.permanent`` becomes one of these instead of a
+    sanction. It has no effect on anybody until a holder approves it, which is
+    the same rule a ``ModerationFlag`` follows: an observation is not an
+    enforcement decision.
+
+    A declined proposal is kept rather than deleted. "We considered this and
+    said no" is the record that stops the same case being re-argued from
+    scratch every few months, and it is the record an appeal needs.
+    """
+
+    STATE_PENDING = "pending"
+    STATE_APPROVED = "approved"
+    STATE_DECLINED = "declined"
+    STATE_WITHDRAWN = "withdrawn"
+    STATE_CHOICES = [
+        (STATE_PENDING, "awaiting a decision"),
+        (STATE_APPROVED, "approved, sanction issued"),
+        (STATE_DECLINED, "reviewed, refused"),
+        (STATE_WITHDRAWN, "withdrawn by the person who asked"),
+    ]
+    OPEN_STATES = frozenset({STATE_PENDING})
+
+    subject_type = models.CharField(max_length=32, db_index=True)
+    subject_value = models.CharField(max_length=255, db_index=True)
+    level = models.CharField(max_length=16, db_index=True)
+
+    #: Shown to the player if the proposal becomes a sanction, so it carries
+    #: the same rule: it must not name the signal that matched.
+    reason = models.CharField(max_length=500, default="", blank=True)
+    #: Staff-only. This is where the signal belongs.
+    staff_note = models.TextField(default="", blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+
+    #: What the sanction would reach, counted when the proposal was made. Kept
+    #: rather than recomputed: the reviewer should see the number the requester
+    #: saw, and a network's population changes.
+    collateral = models.JSONField(default=dict, blank=True)
+
+    flag = models.ForeignKey(
+        ModerationFlag,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="proposals",
+    )
+
+    proposed_by_id = models.IntegerField(null=True, blank=True, db_index=True)
+    proposed_by_name = models.CharField(max_length=255, default="", blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    state = models.CharField(
+        max_length=16, choices=STATE_CHOICES, default=STATE_PENDING, db_index=True
+    )
+    decided_by_id = models.IntegerField(null=True, blank=True)
+    decided_by_name = models.CharField(max_length=255, default="", blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.CharField(max_length=500, default="", blank=True)
+    sanction = models.ForeignKey(
+        Sanction,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="proposals",
+    )
+
+    class Meta:
+        verbose_name = "Sanction proposal"
+        verbose_name_plural = "Sanction proposals"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["state", "-created_at"]),
+            models.Index(fields=["subject_type", "subject_value"]),
+        ]
+
+    def __str__(self):
+        return f"SanctionProposal({self.level} {self.subject_type}:{self.subject_value})"
+
+    @property
+    def is_open(self) -> bool:
+        """Return whether this proposal still awaits a decision."""
+
+        return self.state in self.OPEN_STATES

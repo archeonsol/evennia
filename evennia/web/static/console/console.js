@@ -742,6 +742,19 @@ async function editor(data) {
     onclick: () => { state.editing = null; select_render(); },
   });
 
+  /* A duration is required. The old banlist had no expiry column, so every
+   * entry in it was permanent by default; that is the mistake this field
+   * exists to stop repeating. */
+  const duration = node("input", {
+    type: "text",
+    value: "7d",
+    size: "6",
+    "aria-label": "How long the sanction lasts",
+    title: "30m, 12h, 7d, 2w, or perm",
+    placeholder: "7d",
+  });
+  const reach = node("div", { class: "collateral" });
+
   wrap.append(
     node("div", { class: "editor-head" }, [
       node("span", { class: "legend", text: creating ? "NEW ROW" : `ROW ${state.editing}` }),
@@ -1624,6 +1637,7 @@ async function drawModeration() {
   }
   sanctions.append(sbody);
   body.append((data.sanctions || []).length ? sanctions : empty("NO ACTIVE SANCTIONS."));
+  body.append(await drawProposals());
 
   body.append(section("Recent connections"));
   const sessions = node("div", { class: "log-view" });
@@ -1757,6 +1771,13 @@ async function flagDossier(queue) {
       subjectType,
       subjectValue,
       level,
+      duration,
+      node("button", {
+        type: "button",
+        text: "CHECK WHO THIS REACHES",
+        title: "Count the accounts that have connected from this subject.",
+        onclick: () => showCollateral(subjectType.value, subjectValue.value, reach),
+      }),
       node("button", {
         type: "button",
         text: "SANCTION",
@@ -1767,18 +1788,122 @@ async function flagDossier(queue) {
               subject_value: subjectValue.value,
               level: level.value,
               reason: note.value,
+              expires_at: duration.value,
               flag_id: flag.id,
             },
           });
-          if (report(done)) {
-            state.modFlag = null;
-            select_render();
+          if (!report(done)) return;
+          const result = done.payload.result || {};
+          if (result.proposed) {
+            // Not a failure. The console recorded a proposal instead, and the
+            // operator has to be told that plainly or they will assume the ban
+            // is in place.
+            alert(result.message);
           }
+          state.modFlag = null;
+          select_render();
         },
       }),
     ]),
+    reach,
   );
   return wrap;
+}
+
+/* What a ban on this subject would reach, before it is issued. A /24 can be one
+ * household or a whole campus, and the two look identical in a form field. */
+async function showCollateral(subjectType, subjectValue, target) {
+  target.textContent = "";
+  if (!subjectValue) return;
+  const done = await call("panels/moderation/actions/collateral/", {
+    body: { subject_type: subjectType, subject_value: subjectValue },
+  });
+  if (!report(done)) return;
+  const data = done.payload.result || {};
+  target.append(
+    node("p", {}, [
+      lamp(
+        data.account_count + " ACCOUNT(S)",
+        data.account_count > 1 ? "attn" : "ok",
+      ),
+      node("span", {
+        class: "legend",
+        text:
+          " have connected from this subject, over " + data.sessions + " connection(s).",
+      }),
+    ]),
+  );
+  if ((data.accounts || []).length) {
+    target.append(node("p", { class: "empty-hint", text: data.accounts.join(", ") }));
+  }
+  target.append(node("p", { class: "empty-hint", text: data.note || "" }));
+}
+
+/* Sanction proposals: what a staff member asked for and cannot issue alone. */
+async function drawProposals() {
+  const done = await call("panels/moderation/actions/proposals/", { body: {} });
+  const wrap = node("div");
+  if (!report(done)) return wrap;
+  const data = done.payload.result || {};
+  const rows = data.rows || [];
+
+  wrap.append(section("Proposals"));
+  if (!rows.length) {
+    wrap.append(empty("NOBODY HAS ASKED FOR A PERMANENT BAN."));
+    return wrap;
+  }
+
+  wrap.append(
+    dataTable(
+      ["SUBJECT", "LEVEL", "REASON", "REACHES", "ASKED BY", ""],
+      rows.map((row) => [
+        cell(row.subject_type + " " + row.subject_value),
+        cell(row.level),
+        cell(row.reason),
+        node("td", {
+          class: (row.collateral || {}).account_count > 1 ? "num fail-text" : "num",
+          text: String((row.collateral || {}).account_count ?? 0),
+        }),
+        cell(row.proposed_by),
+        node("td", {}, [
+          node("button", {
+            type: "button",
+            text: "ACCEPT",
+            disabled: !data.may_decide || row.yours,
+            title: row.yours
+              ? "You cannot decide your own proposal."
+              : data.may_decide
+                ? "Issue the ban this proposal asks for."
+                : "This needs the permanent-ban permission.",
+            onclick: () => decideProposal("approve", row.id),
+          }),
+          node("button", {
+            type: "button",
+            text: "REFUSE",
+            disabled: !data.may_decide || row.yours,
+            onclick: () => decideProposal("decline", row.id),
+          }),
+          node("button", {
+            type: "button",
+            text: "CANCEL",
+            disabled: !row.yours,
+            title: "Take back a proposal that you made.",
+            onclick: () => decideProposal("withdraw", row.id),
+          }),
+        ]),
+      ]),
+    ),
+  );
+  wrap.append(node("p", { class: "empty-hint", text: data.note || "" }));
+  return wrap;
+}
+
+async function decideProposal(action, id) {
+  const note = prompt("Enter the reason for your decision.");
+  if (!note) return;
+  const body = action === "withdraw" ? { proposal_id: id, note } : { proposal_id: id, note };
+  const done = await call("panels/moderation/actions/" + action + "/", { body });
+  if (report(done)) select_render();
 }
 
 async function drawAuthorization() {

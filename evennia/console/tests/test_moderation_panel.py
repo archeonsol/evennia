@@ -19,7 +19,14 @@ from django.utils import timezone
 
 from evennia.console.models import ConsoleAuditEvent
 from evennia.console.panels.moderation import ModerationPanel, mask
-from evennia.console.registry import CONSOLE_ACCESS, CONSOLE_MODERATION, IOContext, WorkerContext
+from evennia.console.registry import (
+    CONSOLE_ACCESS,
+    CONSOLE_MODERATION,
+    CONSOLE_MODERATION_ADDRESS,
+    CONSOLE_MODERATION_PERMANENT,
+    IOContext,
+    WorkerContext,
+)
 from evennia.server.models import ModerationFlag, Sanction, SessionRecord
 
 
@@ -39,9 +46,35 @@ class ModerationTestCase(TestCase):
             username="moderator", is_active=True, is_staff=True, is_superuser=True
         )
 
-    def io(self):
+    #: Senior staff: may ban a network and may make a ban permanent. Most
+    #: tests here exercise what a sanction does rather than who may issue one,
+    #: so this is the default and the guards get their own fixtures below.
+    SENIOR = frozenset({CONSOLE_MODERATION_ADDRESS, CONSOLE_MODERATION_PERMANENT})
+
+    def io(self, capabilities=None):
         """Return an IO context for the acting staff account."""
-        return IOContext(actor_id=self.actor.pk, actor_name="moderator", capabilities=frozenset())
+        return IOContext(
+            actor_id=self.actor.pk,
+            actor_name="moderator",
+            capabilities=self.SENIOR if capabilities is None else frozenset(capabilities),
+        )
+
+    def junior(self, actor_id=None):
+        """Return an IO context with neither authority."""
+        return IOContext(
+            actor_id=self.actor.pk if actor_id is None else actor_id,
+            actor_name="junior",
+            capabilities=frozenset(),
+        )
+
+    def worker(self, capabilities=None, **params):
+        """Return a worker context for the acting staff account."""
+        return WorkerContext(
+            actor_id=self.actor.pk,
+            actor_name="moderator",
+            capabilities=self.SENIOR if capabilities is None else frozenset(capabilities),
+            params=params,
+        )
 
     def make_flag(self, **kwargs):
         """Create one moderation flag."""
@@ -279,7 +312,9 @@ class TestReveal(ModerationTestCase):
 
     def test_a_missing_record_is_a_lookup_error(self):
         with self.assertRaises(LookupError):
-            self.panel.reveal(self.io(), record="session", record_id=999999, field="ip")
+            self.panel.reveal(
+                self.io(), record="session", record_id=999999, field="ip", reason="appeal"
+            )
 
 
 class TestAccess(TestCase):
