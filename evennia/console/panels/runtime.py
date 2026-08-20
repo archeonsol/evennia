@@ -80,6 +80,22 @@ def _samples():
     return True, values, ""
 
 
+def _plain(value) -> str:
+    """Return a value's label without its repr wrapper.
+
+    Cadence and Scope stringify as ``<Cadence every 60s>``. The angle brackets
+    and the class name are noise in a table whose column is already headed
+    CADENCE, so they are dropped and the description is kept.
+    """
+
+    text = str(value or "").strip()
+    if text.startswith("<") and text.endswith(">"):
+        inner = text[1:-1]
+        _, _, rest = inner.partition(" ")
+        text = rest or inner
+    return text[:80]
+
+
 class RuntimePanel(Panel):
     """Metrics, caches, scheduled systems, and supervised tasks."""
 
@@ -146,39 +162,57 @@ class RuntimePanel(Panel):
         return rows
 
     def _systems(self):
-        """Return every registered scheduler system with cadence and scope."""
+        """Return every registered scheduler system with cadence and scope.
+
+        Read through ``all_systems()``, the module's public API. An earlier
+        version guessed at ``_SYSTEMS`` / ``REGISTRY`` / ``_REGISTRY``, none of
+        which is the real name (``_SYSTEM_REGISTRY`` is), so the panel reported
+        "the scheduler does not expose a readable registry" for a scheduler that
+        exposes one perfectly well.
+
+        An empty list is reported as empty rather than as a failure. Only the
+        Server process calls ``load_system_modules()``, so nothing registered
+        is a real answer in a process that never loads them, and it must not
+        look like a broken read.
+        """
 
         try:
             from evennia.utils import systems
-        except Exception:  # noqa: BLE001
-            return {"available": False, "rows": []}
+        except Exception as err:  # noqa: BLE001
+            return {"available": False, "rows": [], "reason": str(err)[:200]}
 
-        registry = (
-            getattr(systems, "_SYSTEMS", None)
-            or getattr(systems, "REGISTRY", None)
-            or getattr(systems, "_REGISTRY", None)
-        )
-        if registry is None:
-            return {
-                "available": False,
-                "rows": [],
-                "reason": "The scheduler does not expose a readable registry.",
-            }
-        rows = []
         try:
-            entries = registry.values() if hasattr(registry, "values") else list(registry)
-            for entry in entries:
-                rows.append(
-                    {
-                        "name": str(getattr(entry, "name", entry))[:120],
-                        "cadence": str(getattr(entry, "cadence", ""))[:80],
-                        "scope": str(getattr(entry, "scope", ""))[:80],
-                        "last_run": str(getattr(entry, "last_run", "") or ""),
-                    }
-                )
-        except Exception:  # noqa: BLE001
-            return {"available": False, "rows": []}
-        return {"available": True, "rows": sorted(rows, key=lambda row: row["name"])}
+            entries = systems.all_systems()
+        except Exception as err:  # noqa: BLE001
+            return {"available": False, "rows": [], "reason": str(err)[:200]}
+
+        rows = []
+        for entry in entries or ():
+            rows.append(
+                {
+                    "name": str(getattr(entry, "name", entry))[:120],
+                    "cadence": _plain(getattr(entry, "cadence", "")),
+                    "scope": _plain(getattr(entry, "scope", "")),
+                    "workload": str(getattr(entry, "workload_class", "") or "")[:60],
+                    "last_run": str(getattr(entry, "last_run", "") or ""),
+                    "fires": int(getattr(entry, "fire_count", 0) or 0),
+                    # The overlap guard. A system that skips is a system whose
+                    # run takes longer than its cadence, which no other number
+                    # here reveals.
+                    "skips": int(getattr(entry, "skip_count", 0) or 0),
+                    "in_flight": bool(getattr(entry, "in_flight", False)),
+                }
+            )
+        return {
+            "available": True,
+            "rows": sorted(rows, key=lambda row: row["name"]),
+            "reason": (
+                ""
+                if rows
+                else "No system is registered in this process. Only the Server "
+                "process loads the scheduler modules."
+            ),
+        }
 
     def _tasks(self, values):
         """Return supervised task-root counts."""

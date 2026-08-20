@@ -785,7 +785,59 @@ async function drawRuntime() {
     );
   }
 
-  body.append(section("Alarms"), alarms, section("Caches"), caches, section("Metrics"));
+  body.append(section("Alarms"), alarms, section("Caches"), caches);
+
+  /* The scheduler, which is "@systems as a page". A system that skips is one
+   * whose run outlasts its own cadence, and no other number on this station
+   * shows that. */
+  body.append(section("Scheduled systems"));
+  const systems = data.systems || {};
+  if (!systems.available) {
+    body.append(empty("THE SCHEDULER CANNOT BE READ.", systems.reason || ""));
+  } else if (!(systems.rows || []).length) {
+    body.append(empty("NO SYSTEM IS REGISTERED.", systems.reason || ""));
+  } else {
+    body.append(
+      dataTable(
+        ["SYSTEM", "CADENCE", "SCOPE", "WORKLOAD", "FIRES", "SKIPS", "LAST RUN"],
+        systems.rows.map((row) => [
+          cell(row.name),
+          cell(row.cadence),
+          cell(row.scope),
+          cell(row.workload),
+          node("td", { class: "num", text: String(row.fires) }),
+          node("td", {
+            class: row.skips ? "num fail-text" : "num",
+            text: String(row.skips),
+          }),
+          node("td", {}, [
+            row.in_flight ? lamp("RUNNING", "attn") : null,
+            node("span", { text: row.last_run || "--" }),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  /* Task roots. The unmanaged-access counter is an alarm and is already above;
+   * these three are the supervision picture behind it. */
+  const tasks = data.tasks || {};
+  const taskRows = node("dl", { class: "rows" });
+  for (const [label, key] of [
+    ["active task roots", "active"],
+    ["task roots started", "started"],
+    ["database scope closes", "db_scope_closes"],
+  ]) {
+    taskRows.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: label }),
+        node("dd", { class: "num", text: String(tasks[key] ?? 0) }),
+      ]),
+    );
+  }
+  body.append(section("Supervised tasks"), taskRows);
+
+  body.append(section("Metrics"));
   body.append(node("div", { id: "live-metrics" }));
 
   el.station.textContent = "";
