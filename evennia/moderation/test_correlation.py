@@ -166,9 +166,7 @@ class TestCorrelation(TestCase):
     def test_it_does_not_flag_the_account_against_itself(self):
         _session(account_name="evader")
         _ban("evader")
-        self.assertIsNone(
-            detect.detect_identity_correlation(self.snapshot(account_name="evader"))
-        )
+        self.assertIsNone(detect.detect_identity_correlation(self.snapshot(account_name="evader")))
 
     def test_a_session_with_no_network_is_skipped(self):
         _session(account_name="evader")
@@ -188,9 +186,7 @@ class TestCorrelation(TestCase):
         # falls through to the key they do have.
         _session(account_name="evader", telnet_sig="", csessid="browser-1")
         _ban("evader")
-        flag = detect.detect_identity_correlation(
-            self.snapshot(telnet_sig="", csessid="browser-1")
-        )
+        flag = detect.detect_identity_correlation(self.snapshot(telnet_sig="", csessid="browser-1"))
         self.assertIsNotNone(flag)
 
     def test_the_evidence_names_both_halves(self):
@@ -230,3 +226,118 @@ class TestKeyReuseTakesTheSignature(TestCase):
         )
         self.assertIsNotNone(flag)
         self.assertEqual(flag.kind, ModerationFlag.KIND_SANCTIONED_KEY)
+
+
+class TestTLSSignature(TestCase):
+    """The handshake a reverse proxy terminated, as it reported it."""
+
+    def tls(self, **kwargs):
+        base = {
+            "x-tls-version": "TLSv1.3",
+            "x-tls-ciphers": "1301:1302:1303:c02b:c02f",
+            "x-tls-curves": "001d:0017:0018",
+            "x-tls-alpn": "h2",
+        }
+        base.update(kwargs)
+        return {"TLS_FP": base}
+
+    def test_the_same_handshake_gives_the_same_value(self):
+        first = capture.tls_signature(self.tls())
+        self.assertTrue(first)
+        self.assertEqual(first, capture.tls_signature(self.tls()))
+
+    def test_a_different_cipher_list_differs(self):
+        self.assertNotEqual(
+            capture.tls_signature(self.tls()),
+            capture.tls_signature(self.tls(**{"x-tls-ciphers": "1301:c030"})),
+        )
+
+    def test_grease_is_stripped(self):
+        # The whole reason JA3 aged badly. Chrome inserts a random reserved
+        # value on every connection; a fingerprint that keeps it changes every
+        # time, and staff read "different fingerprint" as "different person".
+        plain = capture.tls_signature(self.tls())
+        greased = capture.tls_signature(
+            self.tls(**{"x-tls-ciphers": "3a3a:1301:1302:1303:c02b:c02f"})
+        )
+        other_grease = capture.tls_signature(
+            self.tls(**{"x-tls-ciphers": "1301:1302:baba:1303:c02b:c02f"})
+        )
+        self.assertEqual(plain, greased)
+        self.assertEqual(plain, other_grease)
+
+    def test_grease_in_the_curves_is_stripped_too(self):
+        self.assertEqual(
+            capture.tls_signature(self.tls()),
+            capture.tls_signature(self.tls(**{"x-tls-curves": "caca:001d:0017:0018"})),
+        )
+
+    def test_a_real_value_that_looks_close_is_kept(self):
+        # 0x0a0a is GREASE; 0x0a0b is not. The rule is both bytes equal and
+        # both nibbles A, not "contains an a".
+        self.assertFalse(capture._is_grease("0a0b"))
+        self.assertFalse(capture._is_grease("1a2a"))
+        self.assertTrue(capture._is_grease("0a0a"))
+        self.assertTrue(capture._is_grease("fafa"))
+
+    def test_the_order_the_proxy_reports_does_not_matter(self):
+        # A client's cipher order is stable per build, but the proxy is free to
+        # report them however it read them, and a fingerprint that depends on
+        # the proxy breaks when the proxy is upgraded.
+        self.assertEqual(
+            capture.tls_signature(self.tls()),
+            capture.tls_signature(self.tls(**{"x-tls-ciphers": "c02f:1303:1301:c02b:1302"})),
+        )
+
+    def test_no_headers_means_no_signature(self):
+        # Which is every deployment that has not configured its proxy, and
+        # every connection whose peer was not trusted.
+        self.assertEqual(capture.tls_signature({}), "")
+        self.assertEqual(capture.tls_signature({"TLS_FP": {}}), "")
+
+
+class TestHeaderOrderSignature(TestCase):
+    """Which headers a client sent, and in what order."""
+
+    def test_order_changes_the_value(self):
+        first = capture.header_order_signature(
+            {"HTTP_ORDER": ["Host", "User-Agent", "Accept-Language"]}
+        )
+        second = capture.header_order_signature(
+            {"HTTP_ORDER": ["Host", "Accept-Language", "User-Agent"]}
+        )
+        self.assertTrue(first)
+        self.assertNotEqual(first, second)
+
+    def test_casing_is_part_of_it(self):
+        self.assertNotEqual(
+            capture.header_order_signature({"HTTP_ORDER": ["User-Agent"]}),
+            capture.header_order_signature({"HTTP_ORDER": ["user-agent"]}),
+        )
+
+    def test_proxy_headers_are_ignored(self):
+        # A proxy adds and reorders these, so including them would fingerprint
+        # the hop rather than the client.
+        bare = capture.header_order_signature({"HTTP_ORDER": ["Host", "User-Agent"]})
+        proxied = capture.header_order_signature(
+            {
+                "HTTP_ORDER": [
+                    "Host",
+                    "X-Forwarded-For",
+                    "User-Agent",
+                    "X-Real-IP",
+                    "Connection",
+                    "X-TLS-Ciphers",
+                ]
+            }
+        )
+        self.assertEqual(bare, proxied)
+
+    def test_nothing_sent_means_no_signature(self):
+        self.assertEqual(capture.header_order_signature({}), "")
+        self.assertEqual(capture.header_order_signature({"HTTP_ORDER": []}), "")
+
+    def test_a_list_of_only_proxy_headers_is_no_signature(self):
+        self.assertEqual(
+            capture.header_order_signature({"HTTP_ORDER": ["X-Forwarded-For", "Connection"]}), ""
+        )

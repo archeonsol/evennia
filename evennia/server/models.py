@@ -400,6 +400,14 @@ class SessionRecord(models.Model):
     csessid = models.CharField(max_length=64, default="", blank=True, db_index=True)
     device_token = models.CharField(max_length=64, default="", blank=True, db_index=True)
     http_fp = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    # Which headers the client sent and in what order. A property of the
+    # browser build; a scripted client claiming to be Chrome rarely reproduces
+    # Chrome's order.
+    http_order_fp = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    # The TLS handshake the reverse proxy terminated, as it reported it. Empty
+    # unless a trusted proxy supplied the headers: a client can set any header,
+    # and a forged fingerprint is worse than none.
+    tls_sig = models.CharField(max_length=64, default="", blank=True, db_index=True)
     user_agent = models.CharField(max_length=512, default="", blank=True)
 
     # --- activity -------------------------------------------------------
@@ -415,6 +423,7 @@ class SessionRecord(models.Model):
             models.Index(fields=["device_token", "-connected_at"]),
             models.Index(fields=["client_fp", "cidr"]),
             models.Index(fields=["telnet_sig", "cidr"]),
+            models.Index(fields=["tls_sig", "cidr"]),
             models.Index(fields=["ip_hash", "-connected_at"]),
         ]
 

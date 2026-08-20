@@ -39,6 +39,7 @@ import time
 from collections import deque
 
 from django.conf import settings
+
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
 from evennia.server.portal.ws_protocol import CLOSE_NORMAL, GOING_AWAY, Disconnected, WSProtocolBase
 from evennia.utils.utils import class_from_module, mod_import
@@ -333,6 +334,34 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             return {}
         return collected
 
+    def _collect_tls_fingerprint(self):
+        """Copy the TLS handshake headers, but only from a trusted proxy.
+
+        These describe a handshake this process never saw: the proxy terminated
+        it. That makes them ordinary request headers, and a client can send any
+        header it likes.
+
+        So the same gate the forwarded address uses applies here, and for a
+        sharper reason. A wrong address is a wrong address; a forged
+        fingerprint is a client choosing what staff believe about it, which is
+        worse than having no fingerprint at all.
+
+        Returns:
+            dict: header name to value, empty when the peer is not trusted.
+
+        """
+        try:
+            peer = self.transport.getPeer()
+            if getattr(peer, "host", None) not in settings.UPSTREAM_IPS:
+                return {}
+            headers = getattr(self, "http_headers", None) or {}
+            from evennia.moderation.capture import TLS_HEADERS
+
+            return {name: str(headers[name])[:512] for name in TLS_HEADERS if headers.get(name)}
+        except Exception:
+            # Fingerprint detail is never worth breaking a connection over.
+            return {}
+
     def onOpen(self):
         """
         This is called when the WebSocket connection is fully established.
@@ -363,7 +392,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # Sanctioned addresses are dropped here, before the Server ever learns
         # of the connection.
         from evennia.moderation.portal_guard import REFUSAL_TEXT, refuses
-        from evennia.moderation.ratelimit import REFUSAL_TEXT as RATE_TEXT, rate_limited
+        from evennia.moderation.ratelimit import REFUSAL_TEXT as RATE_TEXT
+        from evennia.moderation.ratelimit import rate_limited
 
         if refuses(client_address):
             self.sendClose(CLOSE_NORMAL, REFUSAL_TEXT.strip())
@@ -427,6 +457,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # only populated for the lifetime of the connection and nothing else in the
         # codebase looks at it. Raw values only; hashing happens server-side.
         self.protocol_flags["HTTP_FP"] = self._collect_http_fingerprint()
+        self.protocol_flags["HTTP_ORDER"] = list(getattr(self, "http_header_order", None) or ())[
+            :64
+        ]
+        self.protocol_flags["TLS_FP"] = self._collect_tls_fingerprint()
         # page_id is only set when the client sends the three-argument form.
         self.protocol_flags["BROWSERSTR"] = str(getattr(self, "browserstr", "") or "")
         self.protocol_flags["PAGE_ID"] = str(getattr(self, "page_id", "") or "")
