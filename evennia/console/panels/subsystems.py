@@ -139,8 +139,8 @@ class JobsPanel(Panel):
             ),
             "backend": self._backend(),
             "note": (
-                "A lease past its expiry means the worker that held the job stopped. "
-                "The next drain reclaims it; nothing here needs to."
+                "A lease that is out of date shows that the worker stopped. The next "
+                "queue run takes the job again. You do not need to do this."
             ),
         }
 
@@ -251,8 +251,9 @@ class JobsPanel(Panel):
             raise LookupError(f"no job with id {job_id!r}")
         if job.status != "dead":
             raise ValueError(
-                f"job {job.job_id} is {job.status!r}, not dead. Only a dead-lettered "
-                "job is requeued; a pending or leased one is already going to run."
+                f"This job has the status {job.status!r}. You can requeue only a job "
+                "with the status 'dead'. A pending job or a leased job runs again "
+                "without your help."
             )
 
         before = {"status": job.status, "attempts": job.attempts, "error": job.last_error[:300]}
@@ -353,8 +354,8 @@ class EventBusPanel(Panel):
             "prefixes": sorted({name.split(".", 1)[0] for name in subjects if name}),
             "bus": self._bus(),
             "note": (
-                "Only the subjects the game configured for persistence appear here. "
-                "The bus itself carries more than this table records."
+                "This list shows only the subjects that the game saves. The event bus "
+                "sends more subjects than it saves."
             ),
         }
 

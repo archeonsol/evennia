@@ -61,6 +61,7 @@ class TestBuiltinRegistration(TestCase):
                 "sessions",
                 "settings",
                 "sql",
+                "views",
             ],
         )
 

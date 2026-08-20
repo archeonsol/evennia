@@ -286,9 +286,8 @@ class AttributesPanel(Panel):
                 "barrier": {
                     "flushed": False,
                     "reason": (
-                        "The catalogue does not force a write-behind flush, so an "
-                        "attribute set in the last few seconds may not appear yet. "
-                        "Open the key to run a query that does."
+                        "This list does not include very recent changes. Select a key "
+                        "to run a query that includes them."
                     ),
                 },
                 "note": (
@@ -692,13 +691,14 @@ class AttributesPanel(Panel):
 
         text = "" if raw is None else str(raw)
         if not text.strip():
-            raise ValueError("a value is required; use null for an empty one")
+            raise ValueError("Enter a value. To store an empty value, enter null.")
         try:
             return json.loads(text)
         except json.JSONDecodeError as err:
             raise ValueError(
-                f"that is not valid JSON ({err.msg} at position {err.pos}). "
-                'Quote a string as "text"; write a number bare.'
+                f"This value is not valid JSON. {err.msg} at position {err.pos}. "
+                "Put quotation marks around text. Write a number without "
+                "quotation marks."
             ) from err
 
     def _current(self, obj, key, category):
@@ -748,7 +748,7 @@ class AttributesPanel(Panel):
 
         name = str(key or "").strip()
         if not name:
-            raise ValueError("an attribute key is required")
+            raise ValueError("Enter the attribute key.")
         label = self._model_label(model)
         category = str(category).strip() or None if category else None
         decoded = self._decode(value)
@@ -804,7 +804,7 @@ class AttributesPanel(Panel):
 
         name = str(key or "").strip()
         if not name:
-            raise ValueError("an attribute key is required")
+            raise ValueError("Enter the attribute key.")
         label = self._model_label(model)
         category = str(category).strip() or None if category else None
 

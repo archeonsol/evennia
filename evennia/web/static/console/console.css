@@ -925,3 +925,21 @@ pre.code {
   font: 400 11px/1.6 var(--mono);
   white-space: pre;
 }
+
+/* ---------------------------------------------------------------- presence */
+
+#presence {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 10px;
+}
+
+/* A selection column. Narrow, and it does not participate in the row's own
+   click target. */
+th.pick,
+td.pick {
+  width: 28px;
+  padding-right: 0;
+  text-align: center;
+}

@@ -158,7 +158,7 @@ class TestDetail(TestCase):
         row = ConsoleAuditEvent.objects.first()
         detail = self.panel.detail(_ctx(), row.id)
         self.assertFalse(detail["can_undo"])
-        self.assertIn("No inverse", detail["undo_reason"])
+        self.assertIn("cannot undo", detail["undo_reason"])
 
         ConsoleAuditEvent.objects.update(outcome=ConsoleAuditEvent.OUTCOME_PARTIAL)
         detail = self.panel.detail(_ctx(), row.id)

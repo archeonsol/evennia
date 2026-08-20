@@ -205,8 +205,8 @@ class AuditPanel(Panel):
             "panels": self._distinct("panel"),
             "operations": self._distinct("operation"),
             "note": (
-                "Append-only. Undo writes a new row that points back at the one "
-                "it reverses; it does not revise it."
+                "This list does not change. An undo makes a new record that refers "
+                "to the record it reverses. It does not change that record."
             ),
         }
 
@@ -315,12 +315,11 @@ class AuditPanel(Panel):
             return ""
         if row.outcome != ConsoleAuditEvent.OUTCOME_SUCCESS:
             return (
-                f"This operation ended as {row.outcome!r}, so its recorded state is "
-                "not a state to restore."
+                f"This operation ended with the result {row.outcome!r}. The recorded "
+                "values are not safe to restore."
             )
         return (
-            "No inverse was recorded. The service could not derive one for this "
-            "operation, which is different from undo being unbuilt."
+            "The console did not record how to reverse this operation. The console cannot undo it."
         )
 
     @io_action
@@ -367,8 +366,8 @@ class AuditPanel(Panel):
         kind = str(inverse.get("kind") or "")
         if kind != "records.change":
             raise PermissionDenied(
-                f"This console cannot apply an inverse of kind {kind!r}. "
-                "Only a field change on a generically writable model is reversible."
+                f"The console cannot reverse an operation of the type {kind!r}. "
+                "The console reverses only a field change to a writable model."
             )
 
         from evennia.console.panels.records import RecordsPanel

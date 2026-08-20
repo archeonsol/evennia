@@ -163,3 +163,47 @@ class ConsoleErrorState(models.Model):
 
     def __str__(self):
         return f"ConsoleErrorState({self.signature[:12]}, {self.state})"
+
+
+class ConsoleSavedView(models.Model):
+    """One named console view.
+
+    A filter combination that staff rebuild by hand daily -- a moderation queue
+    narrowed to one flag kind, a session query for one network range -- named
+    once and kept.
+
+    What is stored is the address-bar state, not a query. The console already
+    puts every panel's view state in the URL, so a saved view is that string
+    plus a name, and it stays correct as long as the panel that reads those
+    keys does. A stored query would have to be re-validated against the panel
+    on every load and would drift the first time a filter was renamed.
+
+    Views are shared rather than private. Under decision D1 everyone admitted
+    to the console can already see everything these views point at, so a
+    private view would hide the view and not the data, which helps nobody and
+    means the same queue gets rebuilt by the next person anyway.
+    """
+
+    name = models.CharField(max_length=120)
+    panel = models.CharField(max_length=64, db_index=True)
+    #: The URL fragment after the panel key, exactly as the address bar holds
+    #: it. Opaque to this model on purpose.
+    query = models.CharField(max_length=1000, default="", blank=True)
+    description = models.CharField(max_length=300, default="", blank=True)
+    #: Shown in the station rail rather than only in the saved-view list.
+    pinned = models.BooleanField(default=False, db_index=True)
+
+    created_by_id = models.IntegerField(null=True, blank=True, db_index=True)
+    created_by_name = models.CharField(max_length=255, default="", blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Console saved view"
+        verbose_name_plural = "Console saved views"
+        ordering = ["panel", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["panel", "name"], name="console_view_unique_name")
+        ]
+
+    def __str__(self):
+        return f"ConsoleSavedView({self.panel}:{self.name})"

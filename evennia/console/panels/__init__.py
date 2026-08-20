@@ -31,6 +31,7 @@ from evennia.console.panels.records import RecordsPanel
 from evennia.console.panels.runtime import RuntimePanel
 from evennia.console.panels.settings import SettingsPanel
 from evennia.console.panels.subsystems import EventBusPanel, JobsPanel
+from evennia.console.panels.views import ViewsPanel
 
 #: Built-in panels, in the order they should appear in the nav.
 BUILTIN_PANELS = (
@@ -52,6 +53,7 @@ BUILTIN_PANELS = (
     ReplPanel,
     SqlPanel,
     DatabasePanel,
+    ViewsPanel,
     MigrationsPanel,
     SettingsPanel,
     AuditPanel,
@@ -82,6 +84,7 @@ __all__ = (
     "SqlPanel",
     "RuntimePanel",
     "SettingsPanel",
+    "ViewsPanel",
     "register_builtin_panels",
 )
 

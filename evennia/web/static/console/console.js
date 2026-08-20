@@ -70,6 +70,9 @@ const state = {
   busBefore: "",
   busOpen: null,
   dbModel: "",
+  viewPanel: "",
+  chosen: [],
+  presence: [],
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
@@ -125,6 +128,7 @@ const URL_KEYS = [
   "busBefore",
   "busOpen",
   "dbModel",
+  "viewPanel",
 ];
 
 function readUrl() {
@@ -320,6 +324,82 @@ function cell(value) {
   });
 }
 
+/* Show or hide the bulk control without redrawing the table, so a page of
+ * checkboxes does not reset while the operator is still ticking them. */
+function paintChosen() {
+  const button = document.getElementById("bulk-delete");
+  if (!button) return;
+  button.hidden = state.chosen.length === 0;
+  button.textContent = "DELETE " + state.chosen.length + " SELECTED";
+}
+
+/* An export leaves the console. The server records what was taken and by whom
+ * before it answers, so the download and the record cannot disagree. */
+async function runExport(format) {
+  const query = new URLSearchParams({
+    model: state.model || "",
+    search: state.search || "",
+    order: state.order || "",
+    columns: state.columns || "",
+  });
+  const result = await call("panels/records/actions/export/?" + query, {
+    body: {
+      model: state.model,
+      fmt: format,
+      search: state.search || "",
+      order: state.order || "",
+      columns: state.columns || "",
+    },
+  });
+  if (!report(result)) return;
+  const data = result.payload.result || {};
+  const blob = new Blob([data.body || ""], { type: data.content_type || "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const link = node("a", { href: url, download: data.filename || "export.txt" });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* Counted first, decided second. Django admin commits and reports afterwards;
+ * this reports and then asks. */
+async function previewDelete(ids) {
+  const result = await call("panels/records/actions/preview_delete/", {
+    body: { model: state.model, ids },
+  });
+  if (!report(result)) return;
+  const data = result.payload.result || {};
+  const lines = (data.rows || [])
+    .slice(0, 12)
+    .map((row) => "  #" + row.id + " removes " + row.reach + " related row(s)");
+  const missing = (data.missing || []).length
+    ? "\n" + data.missing.length + " selected row(s) no longer exist."
+    : "";
+  const proceed = confirm(
+    "Delete " +
+      data.found +
+      " row(s) from " +
+      data.model +
+      "?\n\nThe database also removes " +
+      data.total_cascade +
+      " related row(s):\n" +
+      lines.join("\n") +
+      missing +
+      "\n\nThis cannot be undone.",
+  );
+  if (!proceed) return;
+  const reason = prompt("Why are these rows being deleted?");
+  if (!reason) return;
+  const done = await call("panels/records/actions/delete/", {
+    body: { model: state.model, ids, reason },
+  });
+  if (report(done)) {
+    state.chosen = [];
+    select_render();
+  }
+}
+
 async function drawRecords() {
   const models = await call("panels/records/actions/models/", { body: {} });
   if (!report(models)) {
@@ -390,6 +470,23 @@ async function drawRecords() {
   } else {
     const table = node("table");
     const headRow = node("tr");
+    if (data.writable) {
+      headRow.append(
+        node("th", { scope: "col", class: "pick" }, [
+          node("input", {
+            type: "checkbox",
+            "aria-label": "Select every row on this page",
+            checked: state.chosen.length > 0 && state.chosen.length === data.rows.length,
+            onchange: (event) => {
+              state.chosen = event.target.checked
+                ? data.rows.map((row) => String(row[data.columns[0]]))
+                : [];
+              select_render();
+            },
+          }),
+        ]),
+      );
+    }
     for (const field of data.columns) {
       const next = state.order === field ? `-${field}` : field;
       headRow.append(
@@ -410,16 +507,37 @@ async function drawRecords() {
     table.append(node("thead", {}, [headRow]));
     const tbody = node("tbody");
     for (const row of data.rows) {
-      const id = row[data.columns[0]];
+      const id = String(row[data.columns[0]]);
+      const cells = data.columns.map((field) => cell(row[field]));
+      if (data.writable) {
+        cells.unshift(
+          node("td", { class: "pick" }, [
+            node("input", {
+              type: "checkbox",
+              "aria-label": "Select row " + id,
+              checked: state.chosen.includes(id),
+              // The row itself opens the editor. Without this a click meant
+              // to select a row for deletion opens it instead.
+              onclick: (event) => event.stopPropagation(),
+              onchange: (event) => {
+                state.chosen = event.target.checked
+                  ? [...new Set([...state.chosen, id])]
+                  : state.chosen.filter((value) => value !== id);
+                paintChosen();
+              },
+            }),
+          ]),
+        );
+      }
       tbody.append(
         node("tr", {
           title: data.writable ? "Open this row" : "",
           onclick: () => {
             if (!data.writable) return;
-            state.editing = String(id);
+            state.editing = id;
             select_render();
           },
-        }, data.columns.map((field) => cell(row[field]))),
+        }, cells),
       );
     }
     table.append(tbody);
@@ -445,6 +563,27 @@ async function drawRecords() {
     text: "NEXT",
     disabled: !data.has_more,
     onclick: () => { state.trail.push(state.cursor); state.cursor = data.next_cursor; select_render(); },
+  });
+
+  const bulk = node("button", {
+    type: "button",
+    id: "bulk-delete",
+    text: "DELETE SELECTED",
+    hidden: state.chosen.length === 0,
+    onclick: () => previewDelete(state.chosen),
+  });
+
+  const exportCsv = node("button", {
+    type: "button",
+    text: "EXPORT CSV",
+    title: "Download these rows. The console records the export.",
+    onclick: () => runExport("csv"),
+  });
+  const exportJson = node("button", {
+    type: "button",
+    text: "EXPORT JSON",
+    title: "Download these rows. The console records the export.",
+    onclick: () => runExport("json"),
   });
 
   const share = node("button", {
@@ -509,7 +648,11 @@ async function drawRecords() {
       node("span", { class: "spacer" }),
       data.writable ? lamp("WRITE ENABLED", "ok") : lamp("DOMAIN OWNED", "attn"),
       add,
+      bulk,
       share,
+      saveViewButton(),
+      exportCsv,
+      exportJson,
       total,
       first,
       previous,
@@ -792,7 +935,7 @@ async function drawAttributes() {
               type: "button",
               class: "linky",
               text: row.key,
-              title: "Find the objects carrying this key",
+              title: "Show the objects that hold this key.",
               onclick: () => {
                 state.attrKeyOpen = row.key;
                 state.attrObject = "";
@@ -933,7 +1076,7 @@ function attrTree(name, treeNode, depth) {
       node("div", {
         class: "tree-line empty-hint",
         style: "padding-left:" + (depth + 1) * 14 + "px",
-        text: treeNode.truncated + " more entries are stored but not shown.",
+        text: "This value contains " + treeNode.truncated + " more entries. This page does not show them.",
       }),
     );
   }
@@ -994,8 +1137,8 @@ async function attrDocument(model) {
           text: "EDIT",
           disabled: !entry.editable,
           title: entry.editable
-            ? "Change this value"
-            : "A packed Python object cannot be edited as JSON",
+            ? "Change this value."
+            : "You cannot edit a packed Python object as JSON.",
           onclick: () => attrEdit(data.model, data.id, entry.key, group.category, entry.value),
         }),
         node("button", {
@@ -1031,7 +1174,8 @@ async function attrDocument(model) {
  * wrong type into a document nothing else validates. */
 async function attrEdit(model, pk, key, category, current) {
   const value = prompt(
-    'Value for "' + key + '" as JSON.\nQuote a string as "text". Write a number bare.',
+    "Enter the value for " + key + " as JSON.\n" +
+      "Put quotation marks around text. Write a number without quotation marks.",
     current || "",
   );
   if (value === null) return;
@@ -1774,7 +1918,7 @@ function disabledNotice(data) {
     node("p", { class: "empty-line", text: "THIS PANEL IS SWITCHED OFF." }),
     node("p", {
       class: "empty-hint",
-      text: "Set " + data.setting + " = True in the game's settings to permit it here.",
+      text: "To use this panel, set " + data.setting + " to True in the game settings.",
     }),
   ]);
 }
@@ -2013,7 +2157,7 @@ async function drawSessions() {
           node("button", {
             type: "button",
             text: "WATCH",
-            title: "Recorded permanently, and in the watched account's own timeline",
+            title: "The console records this action permanently. The account sees it in its own timeline.",
             onclick: () => sessionAction("watch", row.sessid, "Why is this session being watched?"),
           }),
           node("button", {
@@ -2599,7 +2743,7 @@ async function auditDetail(id) {
     diff.truncated
       ? node("p", {
           class: "empty-hint",
-          text: diff.truncated + " more fields are recorded but not shown.",
+          text: "The record contains " + diff.truncated + " more fields. This page does not show them.",
         })
       : null,
     actions,
@@ -2668,7 +2812,7 @@ async function drawJobs() {
         class: "empty-hint fail-text",
         text:
           data.overdue_leases +
-          " lease(s) are past their expiry. The worker that held them stopped; the next drain reclaims them.",
+          " lease(s) are out of date. The workers that held these jobs stopped. The next queue run takes the jobs again.",
       }),
     );
   }
@@ -2776,7 +2920,7 @@ async function jobDetail(id) {
         node("button", {
           type: "button",
           text: "REQUEUE",
-          title: "Return this job to the queue. The existing drain runs it.",
+          title: "Return this job to the queue. The next queue run starts it.",
           onclick: async () => {
             const reason = prompt("Why is this job being requeued?");
             if (!reason) return;
@@ -2795,7 +2939,7 @@ async function jobDetail(id) {
     wrap.append(
       node("p", {
         class: "empty-hint",
-        text: "Only a dead-lettered job is requeued. This one is " + data.status + ".",
+        text: "You can requeue only a job with the status 'dead'. This job has the status " + data.status + ".",
       }),
     );
   }
@@ -3094,8 +3238,167 @@ async function dbSizes() {
   return wrap;
 }
 
+/* Presence.
+ *
+ * Two staff on the same flag queue is the normal case. Without this the second
+ * person to open a record learns about the first when their write is refused
+ * as a conflict, or does not learn at all. The heartbeat writes nothing to the
+ * database, so it can run this often. */
+let heartbeatTimer = null;
+
+async function beat() {
+  const result = await call("panels/views/actions/heartbeat/", {
+    body: { panel: state.current || "", record: openRecord() },
+  });
+  if (!result.ok) return;
+  const data = result.payload.result || {};
+  state.presence = data.present || [];
+  paintPresence(data.on_this_record || []);
+  if (heartbeatTimer) clearTimeout(heartbeatTimer);
+  heartbeatTimer = setTimeout(beat, (data.heartbeat_seconds || 30) * 1000);
+}
+
+/* What this operator has open, in the same form the panels use for a target,
+ * so two people on one row match on the same string. */
+function openRecord() {
+  if (state.current === "records" && state.model && state.editing) {
+    return state.model + "#" + state.editing;
+  }
+  if (state.current === "moderation" && state.modFlag) return "moderation.flag#" + state.modFlag;
+  if (state.current === "audit" && state.auditOpen) return "console.audit#" + state.auditOpen;
+  if (state.current === "jobs" && state.jobOpen) return "server.enginejob#" + state.jobOpen;
+  return "";
+}
+
+function paintPresence(sharing) {
+  let strip = document.getElementById("presence");
+  if (!strip) {
+    strip = node("div", { id: "presence" });
+    el.strip = el.strip || el.lamps.parentElement;
+    el.lamps.parentElement.append(strip);
+  }
+  strip.textContent = "";
+  if (sharing.length) {
+    strip.append(
+      lamp(
+        sharing.map((entry) => entry.actor_name).join(", ").toUpperCase() + " IS ON THIS RECORD",
+        "attn",
+      ),
+    );
+  } else if (state.presence.length) {
+    strip.append(lamp(state.presence.length + " OTHER OPERATOR(S)", "off"));
+  }
+}
+
+window.addEventListener("beforeunload", () => {
+  navigator.sendBeacon?.(
+    API + "panels/views/actions/depart/",
+    new Blob(["{}"], { type: "application/json" }),
+  );
+});
+
+async function drawViews() {
+  const query = new URLSearchParams({ panel: state.viewPanel || "" });
+  const result = await call("panels/views/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  const rows = data.rows || [];
+  body.append(section("Saved views"));
+  if (!rows.length) {
+    body.append(
+      empty(
+        "NO SAVED VIEWS.",
+        "Open a panel, set the filters you want, then select SAVE THIS VIEW.",
+      ),
+    );
+  } else {
+    body.append(
+      dataTable(
+        ["NAME", "PANEL", "DESCRIPTION", "SAVED BY", "PINNED", ""],
+        rows.map((row) => [
+          node("td", {}, [
+            node("button", {
+              type: "button",
+              class: "linky",
+              text: row.name,
+              onclick: () => {
+                location.hash = row.url.slice(1);
+              },
+            }),
+          ]),
+          cell(row.panel),
+          cell(row.description),
+          cell(row.created_by_name),
+          node("td", {}, [row.pinned ? lamp("PINNED", "ok") : null]),
+          node("td", {}, [
+            node("button", {
+              type: "button",
+              text: "FORGET",
+              onclick: async () => {
+                const done = await call("panels/views/actions/forget/", {
+                  body: { view_id: row.id },
+                });
+                if (report(done)) select_render();
+              },
+            }),
+          ]),
+        ]),
+      ),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  body.append(section("Operators here now"));
+  const present = data.present || [];
+  body.append(
+    present.length
+      ? dataTable(
+          ["OPERATOR", "PANEL", "RECORD"],
+          present.map((entry) => [
+            cell(entry.actor_name),
+            cell(entry.panel),
+            cell(entry.record),
+          ]),
+        )
+      : empty("NOBODY ELSE HAS THE CONSOLE OPEN."),
+  );
+  body.append(node("p", { class: "empty-hint", text: data.presence_note || "" }));
+
+  el.station.textContent = "";
+  el.station.append(
+    head("SAVED VIEWS", rows.length ? rows.length + " SAVED" : ""),
+    node("div", { class: "toolbar" }, [
+      picker("view-panel", "Panel", [...new Set(rows.map((row) => row.panel))], "viewPanel", "ALL PANELS"),
+    ]),
+    body,
+  );
+}
+
+/* Save the current address as a named view. Offered on every panel, because
+ * the thing worth saving is whatever the operator has just set up. */
+function saveViewButton() {
+  return node("button", {
+    type: "button",
+    text: "SAVE THIS VIEW",
+    title: "Give this set of filters a name.",
+    onclick: async () => {
+      const name = prompt("Enter a name for this view.");
+      if (!name) return;
+      const description = prompt("Describe the view. Leave empty to skip.") || "";
+      const query = (location.hash.split("?")[1] || "");
+      const done = await call("panels/views/actions/save/", {
+        body: { name, panel: state.current, query, description },
+      });
+      report(done);
+    },
+  });
+}
+
 const RENDERERS = {
   records: drawRecords,
+  views: drawViews,
   jobs: drawJobs,
   eventbus: drawEventbus,
   database: drawDatabase,
@@ -3268,6 +3571,7 @@ async function boot() {
   }
   select(first.key);
   openFeed();
+  beat();
 }
 
 /* The command palette.

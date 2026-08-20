@@ -318,4 +318,4 @@ class TestWriteBehindBarrier(TestCase):
         # leaves open must not carry that on every render.
         barrier = self.panel.rows(_ctx(model="objects.ObjectDB"))["sample"]["barrier"]
         self.assertFalse(barrier["flushed"])
-        self.assertIn("may not appear yet", barrier["reason"])
+        self.assertIn("recent changes", barrier["reason"])

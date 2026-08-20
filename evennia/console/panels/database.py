@@ -77,10 +77,10 @@ class DatabasePanel(Panel):
                 "supported": False,
                 "vendor": connection.vendor,
                 "reason": (
-                    f"This deployment uses {connection.vendor}. Table sizes, index "
-                    "usage, connection state, and vacuum age all come from "
-                    "PostgreSQL catalogue views that have no equivalent here. "
-                    "Production runs PostgreSQL; a development install does not."
+                    f"This server uses {connection.vendor}. This panel reads table "
+                    "sizes, index use, connection counts, and vacuum times from "
+                    "PostgreSQL system views. Those views do not exist in "
+                    f"{connection.vendor}. The production server uses PostgreSQL."
                 ),
                 "tables": [],
                 "indexes": [],
@@ -98,9 +98,9 @@ class DatabasePanel(Panel):
             "connections": self._connections(),
             "long_running": self._long_running(),
             "note": (
-                "Row counts are planner estimates from pg_class, not counts. They "
-                "are refreshed by ANALYZE, so a table written heavily since the "
-                "last one reads low."
+                "These row counts are estimates, not exact counts. PostgreSQL "
+                "updates them when it runs ANALYZE. A table with many recent "
+                "writes shows a low count."
             ),
         }
 
@@ -173,8 +173,8 @@ class DatabasePanel(Panel):
             "rows": found,
             "stats_reset": str(reset[0]["stats_reset"]) if reset else "",
             "note": (
-                "Counted since statistics were last reset. A recent reset makes "
-                "every index look unused."
+                "PostgreSQL counts scans from the time it last reset the "
+                "statistics. After a recent reset, every index looks unused."
             ),
         }
 
@@ -277,8 +277,8 @@ class DatabasePanel(Panel):
             "median_bytes": sizes[len(sizes) // 2] if sizes else 0,
             "total_bytes": sum(sizes),
             "note": (
-                "Every attribute write on an object re-serializes its whole document. "
-                "A large static value here is a tax on every small frequent one."
+                "The server writes the full document each time one attribute "
+                "changes. A large value makes every small change more expensive."
             ),
         }
 

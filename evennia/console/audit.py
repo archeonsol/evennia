@@ -137,7 +137,43 @@ def record(
     except Exception:  # noqa: BLE001 - auditing must not break the operation
         logger.log_trace(f"console audit write failed for {panel}.{operation}")
         return None
+    _announce(panel, operation, event_id, actor_id, target_ref, outcome)
     return event_id
+
+
+def _announce(panel, operation, event_id, actor_id, target_ref, outcome) -> None:
+    """Emit one ``console.*`` subject onto the event bus.
+
+    Decision D2: the bus is the stream and this table is the record. They are
+    not redundant. The bus payload is a JSON ``TextField``; it cannot carry
+    indexed before and after snapshots, an inverse for undo, the five-way
+    outcome as a queryable column, or a target reference anything can filter
+    on. What it can do is reach a notifier or an exporter without either of
+    them polling this table.
+
+    So the announcement carries identity, not content: enough to react to and
+    to find the row, and nothing that would make the bus a second copy of the
+    audit trail.
+
+    Never raises. The row is already written and committed by the time this
+    runs, and an unreachable bus must not turn a completed operation into a
+    reported failure.
+    """
+
+    try:
+        from evennia.eventbus import bus
+
+        bus.emit(
+            f"console.{panel}.{operation}",
+            {
+                "event_id": event_id,
+                "actor_id": actor_id,
+                "target_ref": target_ref,
+                "outcome": outcome,
+            },
+        )
+    except Exception:  # noqa: BLE001 - the record is written; the stream is best effort
+        logger.log_trace(f"console bus emit failed for {panel}.{operation}")
 
 
 def prune(now=None) -> dict:

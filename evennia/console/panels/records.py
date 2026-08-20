@@ -36,6 +36,8 @@ the response rather than hidden behind a disabled button.
 from __future__ import annotations
 
 import base64
+import csv
+import io
 import json
 
 from django.apps import apps
@@ -104,6 +106,11 @@ FILTER_LOOKUPS = {
     "isnull": "isnull",
     "in": "in",
 }
+
+
+#: Rows one bulk preview will consider. A preview that walked an unbounded
+#: selection would be the expensive query the preview exists to avoid.
+MAX_BULK = 200
 
 
 def _encode_cursor(sort_value, pk) -> str:
@@ -472,6 +479,193 @@ class RecordsPanel(Panel):
             "partial": ConsoleAuditEvent.OUTCOME_PARTIAL,
             "recovery_required": ConsoleAuditEvent.OUTCOME_RECOVERY,
         }.get(str(status), ConsoleAuditEvent.OUTCOME_SUCCESS)
+
+    # -- export --------------------------------------------------------
+
+    def export(self, ctx, model=None, fmt="json", **filters):
+        """Return the current view as CSV or JSON, and record that it happened.
+
+        Bounded by the same row cap as the view it exports. An export that
+        quietly returned more than the page it came from would be a different
+        query wearing the same name.
+
+        **An export is a disclosure event.** Rows leave the console and stop
+        being subject to it: they land in a spreadsheet, an email, a ticket.
+        The audit row records what was taken, by whom, and how much -- not the
+        contents, which would put a second copy of the data in the audit table
+        and defeat the retention window that governs the first.
+
+        Args:
+            ctx: Worker context carrying the same filter parameters the listing
+                takes.
+            model: Model label.
+            fmt: ``"csv"`` or ``"json"``.
+            **filters: Ignored; filters are read from ``ctx.params``.
+
+        Returns:
+            dict: The serialized body, its content type, and a filename.
+
+        Raises:
+            ValueError: The format is not one this exports.
+        """
+
+        shape = str(fmt or "json").strip().lower()
+        if shape not in ("csv", "json"):
+            raise ValueError(f"{fmt!r} is not an export format; use csv or json")
+
+        listing = self.rows(ctx)
+        rows = listing.get("rows") or []
+        # ``columns`` is a list of field names, not of column records. Reading
+        # it as records raised a TypeError on every export.
+        names = [str(name) for name in (listing.get("columns") or [])]
+        if not names and rows:
+            names = sorted(rows[0])
+
+        if shape == "csv":
+            body = self._csv(names, rows)
+            content_type = "text/csv"
+        else:
+            body = json.dumps(rows, indent=2, default=str)
+            content_type = "application/json"
+
+        label = self._spec(model).label if model else str(ctx.params.get("model") or "")
+        audit.record(
+            panel=self.key,
+            operation="export",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"{label}"[:160],
+            # What was taken, not what was in it. Copying the contents here
+            # would put a second copy of the data in a table with its own
+            # retention window, which is the opposite of what that window is
+            # for.
+            before={},
+            after={
+                "format": shape,
+                "rows": len(rows),
+                "columns": names,
+                "filters": {
+                    key: str(value)[:120]
+                    for key, value in ctx.params.items()
+                    if key not in ("cursor", "page_size") and value
+                },
+            },
+            message=f"exported {len(rows)} rows of {label} as {shape}",
+        )
+        return {
+            "model": label,
+            "format": shape,
+            "content_type": content_type,
+            "filename": f"{label.replace('.', '-')}.{shape}",
+            "rows": len(rows),
+            "body": body,
+            "note": ("Bounded by the same row cap as the view. Page and export again for more."),
+        }
+
+    def _csv(self, names, rows):
+        """Return rows as CSV text.
+
+        ``csv`` rather than string joining: a value containing a comma, a
+        quote, or a newline has exactly one correct encoding and it is not the
+        obvious one.
+        """
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(names)
+        for row in rows:
+            writer.writerow(["" if row.get(name) is None else str(row.get(name)) for name in names])
+        return buffer.getvalue()
+
+    # -- bulk ----------------------------------------------------------
+
+    def preview_delete(self, ctx, model=None, ids=None):
+        """Report what deleting these rows would do, without deleting anything.
+
+        Django admin's bulk actions commit and report afterwards. This is the
+        other order: the cascade is counted first, per row, and the operator
+        decides against a number rather than a guess.
+
+        Worker-side and read-only. It answers the question that decides whether
+        to cross to the IO owner at all.
+
+        Args:
+            ctx: Worker context.
+            model: Model label.
+            ids: Row identifiers.
+
+        Returns:
+            dict: Per-row cascade counts and the totals.
+
+        Raises:
+            PermissionDenied: The model has no generic delete path.
+            ValueError: No rows were named.
+        """
+
+        model_spec = self._spec(model)
+        if not model_spec.writable:
+            # Refused on the same gate as the delete itself. Counting a cascade
+            # for a row the console will not delete implies a delete is
+            # available, which is the misunderstanding the preview exists to
+            # prevent rather than create.
+            raise PermissionDenied(
+                f"{model_spec.label} is not generically writable, so there is no delete to preview."
+            )
+        wanted = [int(value) for value in (ids or []) if str(value).strip().lstrip("-").isdigit()]
+        if not wanted:
+            raise ValueError("no rows were named")
+        wanted = wanted[:MAX_BULK]
+
+        target = apps.get_model(model_spec.label)
+        found = list(target._base_manager.filter(pk__in=wanted).values_list("pk", flat=True))
+        missing = sorted(set(wanted) - set(found))
+
+        rows = []
+        total = 0
+        for pk in found:
+            counts = self._cascade_counts(target, pk)
+            reach = sum(counts.values())
+            total += reach
+            rows.append({"id": pk, "cascade": counts, "reach": reach})
+
+        return {
+            "model": model_spec.label,
+            "rows": sorted(rows, key=lambda row: -row["reach"]),
+            "requested": len(wanted),
+            "found": len(found),
+            "missing": missing,
+            "total_cascade": total,
+            "capped": len(wanted) >= MAX_BULK,
+            "note": (
+                "These counts show the rows that the database removes with each "
+                "row you selected. The console has deleted nothing."
+            ),
+        }
+
+    def _cascade_counts(self, model, pk):
+        """Return how many related rows each relation would take with one row.
+
+        Walks the concrete reverse relations that cascade. A relation that
+        nulls or protects is not counted, because it does not remove anything:
+        counting it would overstate the blast radius and train an operator to
+        ignore the number.
+        """
+
+        from django.db.models.deletion import CASCADE
+
+        counts = {}
+        for relation in model._meta.related_objects:
+            if getattr(relation, "on_delete", None) is not CASCADE:
+                continue
+            related = relation.related_model
+            field = relation.field.name
+            try:
+                total = related._base_manager.filter(**{field: pk}).count()
+            except Exception:  # noqa: BLE001 - one unreadable relation is not the answer
+                continue
+            if total:
+                counts[f"{related._meta.label_lower}.{field}"] = total
+        return counts
 
     @io_action
     def delete(self, ctx, model=None, ids=None):

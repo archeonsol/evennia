@@ -158,7 +158,7 @@ class TestRequeue(TestCase):
         job = _job(status="pending")
         with self.assertRaises(ValueError) as caught:
             self.panel.requeue(_io(), job_id=job.id, reason="why not")
-        self.assertIn("already going to run", str(caught.exception))
+        self.assertIn("'dead'", str(caught.exception))
 
     def test_it_refuses_without_a_reason(self):
         job = _job(status="dead")
