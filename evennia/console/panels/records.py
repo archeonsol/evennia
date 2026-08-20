@@ -406,18 +406,58 @@ class RecordsPanel(Panel):
             "message": getattr(result, "message", ""),
             "retryable": bool(getattr(result, "retryable", False)),
         }
+        outcome = self._audit_outcome(result.status)
         audit.record(
             panel=self.key,
             operation="change" if target is not None else "add",
             actor_id=ctx.actor_id,
             actor_name=ctx.actor_name,
             target_ref=f"{model_spec.label}#{result.object_id or target or ''}"[:160],
-            outcome=self._audit_outcome(result.status),
+            outcome=outcome,
             before=before,
             after={key: str(value) for key, value in concrete},
+            inverse=self._inverse(model_spec, target, before, outcome),
             message=payload["message"][:500],
         )
         return payload
+
+    def _inverse(self, model_spec, target, before, outcome):
+        """Return the payload that would reverse this write, or ``None``.
+
+        Only a change to an existing row is reversible here, and only one that
+        succeeded. Two deliberate exclusions:
+
+        An **add** would be reversed by a delete, and delete carries a cascade
+        that the mutation service preflights for a reason. Silently attaching a
+        cascading delete to an undo button is the wrong shape for a control an
+        operator reaches for after a mistake.
+
+        A **failed or partial** write did not necessarily leave the row in the
+        state this row records, so restoring ``before`` could overwrite a value
+        nobody chose.
+
+        Args:
+            model_spec: Spec for the model written.
+            target: Primary key changed, or ``None`` for a create.
+            before: Field values read immediately before the write.
+            outcome: The audit outcome just computed for this write.
+
+        Returns:
+            dict | None: An inverse the Audit panel can apply, or ``None``.
+        """
+
+        from evennia.console.models import ConsoleAuditEvent
+
+        if target is None or not before:
+            return None
+        if outcome != ConsoleAuditEvent.OUTCOME_SUCCESS:
+            return None
+        return {
+            "kind": "records.change",
+            "model": model_spec.label,
+            "pk": target,
+            "values": dict(before),
+        }
 
     def _audit_outcome(self, status):
         """Map a service status onto the audit trail's outcome vocabulary."""

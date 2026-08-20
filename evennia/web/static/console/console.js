@@ -54,13 +54,58 @@ const state = {
   hookEvent: "",
   hookSearch: "",
   protoSearch: "",
+  auditOutcome: "",
+  auditPanel: "",
+  auditActor: "",
+  auditTarget: "",
+  auditCursor: "",
+  auditOpen: null,
   live: { source: null, health: null, metrics: null, log: [] },
 };
 
 /* Keys carried in the address bar. A view an operator reached by clicking must
  * be reachable again by pasting, or a bug report cannot contain the thing it
- * is about. `trail` stays out: it is how you walked here, not where you are. */
-const URL_KEYS = ["model", "cursor", "columns", "search", "order", "attrModel", "attrSearch", "editing"];
+ * is about.
+ *
+ * Three groups stay out, each for its own reason.
+ *
+ * `trail` is how you walked here, not where you are.
+ *
+ * `replSource` and `sqlText` are operator input, and a URL is copied into chat
+ * messages, tickets, and server logs. A pasted link must not be a way to leak
+ * a query someone ran against production.
+ *
+ * `confirmed` is proof of presence. Putting it in a link would make the link
+ * carry the presence check, which is the one thing it must never do. */
+const URL_KEYS = [
+  "model",
+  "cursor",
+  "columns",
+  "search",
+  "order",
+  "attrModel",
+  "attrSearch",
+  "editing",
+  "logFile",
+  "logSearch",
+  "errorState",
+  "errorSearch",
+  "errorOpen",
+  "modState",
+  "modFlag",
+  "authView",
+  "objSearch",
+  "actionSearch",
+  "hookEvent",
+  "hookSearch",
+  "protoSearch",
+  "auditOutcome",
+  "auditPanel",
+  "auditActor",
+  "auditTarget",
+  "auditCursor",
+  "auditOpen",
+];
 
 function readUrl() {
   const hash = location.hash.replace(/^#/, "");
@@ -190,7 +235,20 @@ function drawStrip(root) {
 
 function drawRail() {
   el.rail.textContent = "";
-  el.rail.append(node("div", { class: "rail-heading" }, [node("span", { class: "legend", text: "Stations" })]));
+  el.rail.append(
+    node("div", { class: "rail-heading" }, [
+      node("span", { class: "legend", text: "Stations" }),
+      // Discoverability: a shortcut nobody is told about is a shortcut nobody
+      // uses, and this one is how you reach a station without the rail.
+      node("button", {
+        class: "rail-palette",
+        type: "button",
+        title: "Go to a station",
+        text: "CTRL K",
+        onclick: () => openPalette(),
+      }),
+    ]),
+  );
   for (const panel of state.panels) {
     el.rail.append(
       node("button", {
@@ -2085,8 +2143,227 @@ async function drawPrototypes() {
   );
 }
 
+/* The five outcomes must not render alike. A partial and a recovery_required
+ * both mean "it wrote, then faulted", and the difference between them is
+ * whether a person has to go fix something. */
+const OUTCOME_STATE = {
+  success: "ok",
+  conflict: "off",
+  partial: "fail",
+  recovery_required: "fail",
+  indeterminate: "attn",
+};
+
+async function drawAudit() {
+  const query = new URLSearchParams({
+    outcome: state.auditOutcome || "",
+    panel: state.auditPanel || "",
+    actor: state.auditActor || "",
+    target: state.auditTarget || "",
+    cursor: state.auditCursor || "",
+  });
+  const result = await call("panels/audit/rows/?" + query);
+  report(result);
+  const data = result.payload.rows || {};
+  const body = node("div", { class: "panel-body" });
+
+  const rows = data.rows || [];
+  if (!rows.length) {
+    body.append(empty("NO RECORDED OPERATION MATCHES THIS FILTER."));
+  } else {
+    body.append(
+      dataTable(
+        ["WHEN", "OPERATOR", "OPERATION", "OUTCOME", "TARGET", ""],
+        rows.map((row) => [
+          cell(row.created_at.replace("T", " ").slice(0, 19)),
+          cell(row.actor_name),
+          cell(row.panel + "." + row.operation),
+          node("td", {}, [lamp(row.outcome.toUpperCase(), OUTCOME_STATE[row.outcome] || "off")]),
+          cell(row.target_ref),
+          node("td", {}, [
+            node("button", {
+              type: "button",
+              text: "OPEN",
+              onclick: async () => {
+                state.auditOpen = row.id;
+                await select_render();
+              },
+            }),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  if (data.next_cursor) {
+    body.append(
+      node("div", { class: "fault-actions" }, [
+        node("button", {
+          type: "button",
+          text: "NEXT PAGE",
+          onclick: () => {
+            state.auditCursor = data.next_cursor;
+            select_render();
+          },
+        }),
+      ]),
+    );
+  }
+  body.append(node("p", { class: "empty-hint", text: data.note || "" }));
+
+  if (state.auditOpen) {
+    body.prepend(await auditDetail(state.auditOpen));
+  }
+
+  const outcomes = node("select", {
+    id: "audit-outcome",
+    "aria-label": "Filter by outcome",
+    onchange: (event) => {
+      state.auditOutcome = event.target.value;
+      state.auditCursor = "";
+      select_render();
+    },
+  });
+  outcomes.append(
+    node("option", { value: "", text: "ALL OUTCOMES", selected: !state.auditOutcome }),
+  );
+  for (const item of data.outcomes || []) {
+    outcomes.append(
+      node("option", {
+        value: item.value,
+        selected: item.value === state.auditOutcome,
+        text: item.value.toUpperCase() + " - " + item.meaning,
+      }),
+    );
+  }
+
+  const panels = node("select", {
+    id: "audit-panel",
+    "aria-label": "Filter by panel",
+    onchange: (event) => {
+      state.auditPanel = event.target.value;
+      state.auditCursor = "";
+      select_render();
+    },
+  });
+  panels.append(node("option", { value: "", text: "ALL PANELS", selected: !state.auditPanel }));
+  for (const item of data.panels || []) {
+    panels.append(
+      node("option", { value: item, selected: item === state.auditPanel, text: item }),
+    );
+  }
+
+  el.station.textContent = "";
+  el.station.append(
+    head("AUDIT", rows.length ? rows.length + " SHOWN" : ""),
+    node("div", { class: "toolbar" }, [
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "audit-outcome", text: "Outcome" }),
+        outcomes,
+      ]),
+      node("div", { class: "field" }, [
+        node("label", { class: "legend", for: "audit-panel", text: "Panel" }),
+        panels,
+      ]),
+      searchField("auditActor", "OPERATOR NAME OR ID"),
+      searchField("auditTarget", "TARGET PREFIX"),
+    ]),
+    body,
+  );
+}
+
+async function auditDetail(id) {
+  const result = await call("panels/audit/detail/" + encodeURIComponent(id) + "/");
+  const wrap = node("div", { class: "detail" });
+  if (!report(result)) return wrap;
+  const data = result.payload.record || {};
+
+  const facts = node("dl", { class: "rows" });
+  for (const [label, value] of [
+    ["event", data.event_id],
+    ["when", (data.created_at || "").replace("T", " ").slice(0, 19)],
+    ["operator", data.actor_name],
+    ["operation", data.panel + "." + data.operation],
+    ["target", data.target_ref],
+    ["outcome", data.outcome + " - " + data.outcome_meaning],
+    ["retryable", data.retryable ? "yes" : "no"],
+    ["retention", data.retention + " - " + data.retention_meaning],
+    ["correlation", data.correlation_id || "--"],
+    ["message", data.message || "--"],
+  ]) {
+    facts.append(
+      node("div", { class: "row-pair" }, [
+        node("dt", { text: label }),
+        node("dd", { text: String(value ?? "") }),
+      ]),
+    );
+  }
+
+  const diff = data.diff || {};
+  const diffTable = (diff.entries || []).length
+    ? dataTable(
+        ["FIELD", "BEFORE", "AFTER"],
+        diff.entries.map((entry) => [
+          node("td", { class: entry.changed ? "fail-text" : "", text: entry.field }),
+          cell(entry.before),
+          cell(entry.after),
+        ]),
+      )
+    : empty("THIS OPERATION RECORDED NO FIELD STATE.");
+
+  const actions = node("div", { class: "fault-actions" });
+  if (data.can_undo) {
+    actions.append(
+      node("button", {
+        type: "button",
+        text: "UNDO",
+        onclick: async () => {
+          const reason = prompt("Why is this operation being reversed?");
+          if (!reason) return;
+          const done = await call("panels/audit/actions/undo/", {
+            body: { audit_id: data.id, reason },
+          });
+          if (report(done)) {
+            state.auditCursor = "";
+            select_render();
+          }
+        },
+      }),
+    );
+  } else {
+    actions.append(node("p", { class: "empty-hint", text: data.undo_reason || "" }));
+  }
+
+  wrap.append(
+    node("div", { class: "toolbar" }, [
+      node("span", { class: "legend", text: "RECORDED OPERATION" }),
+      node("span", { class: "spacer" }),
+      node("button", {
+        type: "button",
+        text: "CLOSE",
+        onclick: () => {
+          state.auditOpen = null;
+          select_render();
+        },
+      }),
+    ]),
+    facts,
+    section("Field state"),
+    diffTable,
+    diff.truncated
+      ? node("p", {
+          class: "empty-hint",
+          text: diff.truncated + " more fields are recorded but not shown.",
+        })
+      : null,
+    actions,
+  );
+  return wrap;
+}
+
 const RENDERERS = {
   records: drawRecords,
+  audit: drawAudit,
   objects: drawObjects,
   actions: drawActions,
   hooks: drawHooks,
@@ -2257,21 +2534,117 @@ async function boot() {
   openFeed();
 }
 
+/* The command palette.
+ *
+ * This replaces selecting a panel by its digit, which worked while there were
+ * nine panels and reached half of them once there were eighteen. A palette
+ * does not care how many there are, and it matches on the panel's description
+ * as well as its name, so an operator who knows what they want but not what it
+ * is called still arrives. */
+function openPalette() {
+  if (document.getElementById("palette")) return;
+
+  const input = node("input", {
+    type: "text",
+    id: "palette-input",
+    autocomplete: "off",
+    spellcheck: "false",
+    placeholder: "GO TO A STATION",
+    "aria-label": "Go to a station",
+  });
+  const list = node("ul", { id: "palette-list", role: "listbox" });
+  const overlay = node("div", { id: "palette", role: "dialog", "aria-modal": "true" }, [
+    node("div", { class: "palette-box" }, [input, list]),
+  ]);
+
+  let matches = [];
+  let cursor = 0;
+
+  const paint = () => {
+    const term = input.value.trim().toLowerCase();
+    matches = state.panels.filter((panel) => {
+      if (!term) return true;
+      const hay = (panel.key + " " + panel.label + " " + (panel.description || "")).toLowerCase();
+      return hay.includes(term);
+    });
+    cursor = Math.min(cursor, Math.max(0, matches.length - 1));
+    list.textContent = "";
+    matches.forEach((panel, index) => {
+      list.append(
+        node(
+          "li",
+          {
+            role: "option",
+            "aria-selected": index === cursor,
+            class: index === cursor ? "current" : "",
+            onclick: () => choose(index),
+          },
+          [
+            node("span", { class: "palette-name", text: panel.label.toUpperCase() }),
+            node("span", { class: "palette-hint", text: panel.description || "" }),
+          ],
+        ),
+      );
+    });
+    if (!matches.length) {
+      list.append(node("li", { class: "palette-empty", text: "NO STATION MATCHES." }));
+    }
+  };
+
+  const close = () => overlay.remove();
+
+  const choose = (index) => {
+    const panel = matches[index];
+    if (!panel) return;
+    close();
+    select(panel.key);
+  };
+
+  input.addEventListener("input", paint);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || (event.key === "n" && event.ctrlKey)) {
+      event.preventDefault();
+      cursor = Math.min(cursor + 1, matches.length - 1);
+      paint();
+    } else if (event.key === "ArrowUp" || (event.key === "p" && event.ctrlKey)) {
+      event.preventDefault();
+      cursor = Math.max(cursor - 1, 0);
+      paint();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      choose(cursor);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+    }
+  });
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+
+  document.body.append(overlay);
+  paint();
+  input.focus();
+}
+
 /* Keyboard first: the audience already works this way, and the surface is
  * dense enough that reaching for a mouse costs more than it saves. */
 document.addEventListener("keydown", (event) => {
-  if (event.target.matches("input, select, textarea")) return;
-  const index = Number(event.key) - 1;
-  if (index >= 0 && index < state.panels.length) {
-    select(state.panels[index].key);
+  // The palette opens from anywhere, including from inside a field, because
+  // an operator halfway through typing a filter is exactly who wants it.
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    openPalette();
     return;
   }
+  if (event.target.matches("input, select, textarea")) return;
   if (event.key === "/") {
     const search = document.querySelector('input[type="search"]');
     if (search) {
       event.preventDefault();
       search.focus();
     }
+    return;
   }
   if (event.key === "Escape") el.notice.hidden = true;
 });

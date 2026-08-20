@@ -7,6 +7,7 @@ replacing it.
 """
 
 from evennia.console.panels.attributes import AttributesPanel
+from evennia.console.panels.auditlog import AuditPanel
 from evennia.console.panels.authorization import AuthorizationPanel
 from evennia.console.panels.dangerous import (
     ReplPanel,
@@ -48,11 +49,13 @@ BUILTIN_PANELS = (
     SqlPanel,
     MigrationsPanel,
     SettingsPanel,
+    AuditPanel,
     HealthPanel,
 )
 
 __all__ = (
     "AttributesPanel",
+    "AuditPanel",
     "ActionsPanel",
     "AuthorizationPanel",
     "BUILTIN_PANELS",

@@ -715,3 +715,121 @@ textarea::placeholder {
 .fail-text {
   color: var(--fail);
 }
+
+/* ------------------------------------------------------------------ detail */
+
+/* An inline record opened above the list it came from. Bordered rather than
+   floated: a modal would hide the row that led here, and the two are read
+   together. */
+.detail {
+  margin-bottom: 20px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+}
+
+/* ----------------------------------------------------------------- palette */
+
+#palette {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgb(0 0 0 / 55%);
+}
+
+.palette-box {
+  width: min(560px, 92vw);
+  height: fit-content;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+#palette-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 13px/1.4 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+#palette-input:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+#palette-list {
+  max-height: 46vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#palette-list li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+#palette-list li:last-child {
+  border-bottom: 0;
+}
+
+#palette-list li.current {
+  background: var(--ground);
+  box-shadow: inset 2px 0 0 var(--focus);
+}
+
+.palette-name {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.palette-hint {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-empty {
+  color: var(--ink-faint);
+  cursor: default;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.rail-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rail-palette {
+  padding: 2px 6px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink-faint);
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.rail-palette:hover {
+  border-color: var(--focus);
+  color: var(--ink);
+}

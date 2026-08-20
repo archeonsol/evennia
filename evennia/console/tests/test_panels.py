@@ -41,6 +41,7 @@ class TestBuiltinRegistration(TestCase):
             [
                 "actions",
                 "attributes",
+                "audit",
                 "authorization",
                 "errors",
                 "health",
