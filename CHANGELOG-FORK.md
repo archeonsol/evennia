@@ -25,6 +25,46 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.211 — Console authentication, declared
+
+### Engine
+
+- [`web/console/views.py`](evennia/web/console/views.py): `ConsoleView` now
+  declares `authentication_classes = [SessionAuthentication]` rather than
+  inheriting whatever a game configured.
+
+  `APIView` reads `DEFAULT_AUTHENTICATION_CLASSES` once, at import, into a class
+  attribute. A game whose own API is token only -- and which therefore drops
+  `SessionAuthentication` from that setting -- left **every console request
+  anonymous**. DRF answered 401, the console page rendered, the strip lamps lit,
+  and the first fetch failed with nothing naming the cause. The console's auth
+  module already stated the model in its docstring ("the session cookie
+  authenticates and a scoped custom header must accompany it"); it just never
+  said so to DRF.
+
+  `BasicAuthentication` is deliberately not offered even though it is in the
+  stock defaults. It would carry credentials on every request rather than once
+  at sign-in, which is the wrong trade in front of a REPL.
+
+### Tests
+
+- `override_settings` cannot reproduce this, because the class attribute is
+  bound before any test runs -- the first version of these tests passed against
+  the bug. They now assert the invariant directly (the console declares rather
+  than inherits) and patch the inherited attribute to prove the declaration is
+  what serves the request. Three of the five fail without the fix.
+
+### Migration
+
+- No migration, no settings change. Games on `underspire.210` that saw a 401
+  from `/api/console/` while signed in need only this release.
+- Reaching the console still requires an explicit grant. `is_superuser` does not
+  imply `engine.console.access`: that is decision D1, and the capability is
+  equivalent to shell access on the game server. Grant it in game with
+  `@grant/account *<name> = engine.console.access`.
+
+---
+
 ## 6.0.0+underspire.210 — Engine console, and the signals it reads
 
 Supersedes Django admin for this fork's staff work. Django admin covered eight
