@@ -12,8 +12,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from evennia.server.portal import webclient as webclient_mod
-from evennia.server.portal.webclient import (BATCH_MAX_FRAMES,
-                                             RESUME_STASH_MAX, WebSocketClient)
+from evennia.server.portal.webclient import BATCH_MAX_FRAMES, RESUME_STASH_MAX, WebSocketClient
 
 
 class _Transport(WebSocketClient):
@@ -28,9 +27,7 @@ class _Transport(WebSocketClient):
         self.uid = uid
         self.protocol_flags = {"AZABAN_CAPS": caps} if caps is not None else {}
         self.wire_format = Mock(supports_resume=resume)
-        self.sendMessage = Mock(
-            side_effect=lambda data, isBinary=False: self.sent.append(data)
-        )
+        self.sendMessage = Mock(side_effect=lambda data, isBinary=False: self.sent.append(data))
 
     def disconnect(self, reason=None):  # pragma: no cover - not reached in these tests
         raise AssertionError("disconnect should not be called")
@@ -139,17 +136,13 @@ class TestResumeHandshake(TestCase):
     def test_fresh_hello_restarts_the_sequence(self):
         # The client re-bases off this `s`, so it must reflect the new counter.
         t = _Transport()
-        t._handle_client_hello(
-            {"t": "hello", "resume": {"token": "tok", "last_seq": 400}}
-        )
+        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 400}})
         self.assertEqual(_frames(t)[-1]["s"], 1)
 
     def test_reconnect_replays_only_unseen_frames(self):
         self._disconnected()
         t = _Transport(uid=7)
-        t._handle_client_hello(
-            {"t": "hello", "resume": {"token": "tok", "last_seq": 1}}
-        )
+        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 1}})
         envs = _frames(t)
         self.assertEqual([e["n"] for e in envs if e["t"] == "render"], [1, 2])
         self.assertTrue(envs[-1]["resumed"])
@@ -159,9 +152,7 @@ class TestResumeHandshake(TestCase):
         # ask the next reconnect to resend frames it already has.
         self._disconnected()
         t = _Transport(uid=7)
-        t._handle_client_hello(
-            {"t": "hello", "resume": {"token": "tok", "last_seq": 0}}
-        )
+        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 0}})
         envs = _frames(t)
         replayed = [e["s"] for e in envs if e["t"] == "render"]
         self.assertEqual(envs[-1]["s"], max(replayed) + 1)
@@ -169,9 +160,7 @@ class TestResumeHandshake(TestCase):
     def test_stash_is_not_replayed_to_another_uid(self):
         self._disconnected(uid=7)
         t = _Transport(uid=9)
-        t._handle_client_hello(
-            {"t": "hello", "resume": {"token": "tok", "last_seq": 0}}
-        )
+        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 0}})
         envs = _frames(t)
         self.assertEqual([e for e in envs if e["t"] == "render"], [])
         self.assertFalse(envs[-1]["resumed"])
@@ -180,9 +169,7 @@ class TestResumeHandshake(TestCase):
         # A wrong-uid claim pops the stash; that is fine (the owner's own
         # reconnect brings a fresh buffer) but it must not leak frames.
         self._disconnected(uid=7)
-        _Transport(uid=9)._handle_client_hello(
-            {"t": "hello", "resume": {"token": "tok"}}
-        )
+        _Transport(uid=9)._handle_client_hello({"t": "hello", "resume": {"token": "tok"}})
         self.assertNotIn("tok", webclient_mod._RESUME_STASH)
 
     def test_stash_is_capped(self):
@@ -219,9 +206,7 @@ class TestBatching(TestCase):
         self.loop.call_soon.assert_called_once_with(t._flush_batch)
 
     def test_without_running_loop_flushes_immediately(self):
-        with patch.object(
-            webclient_mod.asyncio, "get_running_loop", side_effect=RuntimeError
-        ):
+        with patch.object(webclient_mod.asyncio, "get_running_loop", side_effect=RuntimeError):
             t = _Transport(caps={"batching": True})
             t.sendEncoded(json.dumps({"t": "render"}).encode("utf-8"))
 

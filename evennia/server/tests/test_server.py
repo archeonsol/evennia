@@ -156,9 +156,7 @@ class TestServer(TestCase):
     def test_initial_setup(self):
         from evennia.utils.create import create_account
 
-        acct = create_account(
-            "TestSuperuser", "test@test.com", "testpassword", is_superuser=True
-        )
+        acct = create_account("TestSuperuser", "test@test.com", "testpassword", is_superuser=True)
 
         with patch.multiple(
             "evennia.server.initial_setup", reset_server=DEFAULT, AccountDB=DEFAULT
@@ -171,9 +169,7 @@ class TestServer(TestCase):
     def test_initial_setup_retry(self):
         from evennia.utils.create import create_account
 
-        acct = create_account(
-            "TestSuperuser2", "test@test.com", "testpassword", is_superuser=True
-        )
+        acct = create_account("TestSuperuser2", "test@test.com", "testpassword", is_superuser=True)
 
         with patch.multiple(
             "evennia.server.initial_setup",
@@ -188,9 +184,7 @@ class TestServer(TestCase):
         acct.delete()
 
     def test_get_info_dict(self):
-        with patch.object(
-            self.server, "get_info_dict", return_value={"test": "foo"}
-        ) as mocks:
+        with patch.object(self.server, "get_info_dict", return_value={"test": "foo"}) as mocks:
             self.assertEqual(self.server.get_info_dict(), {"test": "foo"})
 
 
@@ -244,10 +238,7 @@ class TestInitHooks(TestCase):
         # watchdog, system-scheduler driver); stop them so they don't leak
         # pending timers into the event loop and trip trial's dirty-reactor
         # check when server tests share a process with trial-based tests.
-        if (
-            self.server.maintenance_task is not None
-            and self.server.maintenance_task.running
-        ):
+        if self.server.maintenance_task is not None and self.server.maintenance_task.running:
             self.server.maintenance_task.stop()
         if self.server.stall_watchdog is not None:
             self.server.stall_watchdog.stop()
@@ -285,9 +276,7 @@ class TestInitHooks(TestCase):
                 return_value=self.objects,
             ),
             patch("evennia.utils.clock.call_later", side_effect=_sync_call_later),
-            patch.object(
-                self.server, "at_server_reload_start", new=MagicMock()
-            ) as reload,
+            patch.object(self.server, "at_server_reload_start", new=MagicMock()) as reload,
             patch.object(self.server, "at_server_cold_start", new=MagicMock()) as cold,
         ):
             self.server.run_init_hooks("reload")

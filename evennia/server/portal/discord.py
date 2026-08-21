@@ -163,7 +163,9 @@ class RateLimiter:
             if str(headers.get("x-ratelimit-global", "")).lower() == "true":
                 self.global_ready_at = max(self.global_ready_at, now + retry_after)
             else:
-                self.bucket_ready_at[key] = max(self.bucket_ready_at.get(key, 0.0), now + retry_after)
+                self.bucket_ready_at[key] = max(
+                    self.bucket_ready_at.get(key, 0.0), now + retry_after
+                )
             return retry_after
 
         remaining = _float_or_none(headers.get("x-ratelimit-remaining"))
