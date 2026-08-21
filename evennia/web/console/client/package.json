@@ -1,0 +1,24 @@
+{
+  "name": "evennia-console-client",
+  "private": true,
+  "type": "module",
+  "description": "Engine console client (Svelte 5). The staff surface that supersedes Django admin; built into Django's static tree so a game never runs npm.",
+  "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "dev": "vite",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@testing-library/svelte": "^5.2.6",
+    "jsdom": "^26.0.0",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^3.0.5"
+  }
+}

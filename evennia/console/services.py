@@ -1,4 +1,13 @@
-"""IO-owner services for bounded Django-admin game-state mutations."""
+"""IO-owner services for bounded game-state mutations from web surfaces.
+
+These services are frontend-agnostic. Django admin reaches them through
+``evennia.web.admin.mixins``; the engine console reaches them through its
+panel registry. Nothing here imports ``django.contrib.admin`` -- the one
+place that needed it (cascade delete permissions) takes an injected checker
+so each caller supplies its own authority model.
+
+See ``docs/source/Components/Web-Mutation-Bridge.md`` for the contract.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +20,6 @@ from uuid import UUID
 
 from django.apps import apps
 from django.conf import settings
-from django.contrib import admin
-from django.contrib.admin.utils import NestedObjects
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DEFAULT_DB_ALIAS, IntegrityError, router
 from django.http import HttpRequest
@@ -73,11 +80,18 @@ class AdminMutationResult:
 
 @dataclass(frozen=True, slots=True)
 class AdminDeleteRequest:
-    """Bounded request for single or bulk domain deletion."""
+    """Bounded request for single or bulk domain deletion.
+
+    ``authority`` names which cascade-permission model applies. It is a plain
+    string rather than a callable so the request stays frozen data that can
+    cross the worker-to-owner boundary; the owner resolves it against
+    :data:`_CASCADE_CHECKERS`.
+    """
 
     actor_id: int
     model_label: str
     object_ids: tuple[int, ...]
+    authority: str = "model_permission"
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +280,41 @@ _SPECS = {
         ),
     ),
 }
+
+
+def mutation_field_types(model_label: str) -> dict[str, tuple[type, ...]]:
+    """Return the exact Python types each writable field accepts.
+
+    The mutation validator compares with ``type(value) not in types`` rather
+    than ``isinstance``, deliberately: a bool is not an int here, and a
+    subclass is not its parent. A caller building a request from JSON must
+    coerce to these exact types first, and this is the authority on which.
+
+    Args:
+        model_label: Lowercased ``app_label.modelname``.
+
+    Returns:
+        dict: Field name to the tuple of accepted types.
+
+    Raises:
+        ValueError: The model has no mutation adapter.
+    """
+
+    return dict(admin_spec(model_label).field_types)
+
+
+def writable_models() -> frozenset[str]:
+    """Return the model labels with a bounded IO mutation adapter.
+
+    A model absent from this set is readable but not generically writable.
+    That is the fail-closed default the mutation bridge requires: adapters are
+    registered deliberately, never derived. See ``Web-Mutation-Bridge.md``.
+
+    Returns:
+        frozenset[str]: Lowercased ``app_label.modelname`` labels.
+    """
+
+    return frozenset(_SPECS)
 
 
 def admin_spec(model_label: str) -> _AdminSpec:
@@ -1005,25 +1054,73 @@ def mutate_admin(request: AdminMutationRequest) -> AdminMutationResult:
         )
 
 
-def _preflight_delete(actor, obj):
-    """Recompute protected rows and cascade permissions on the owner."""
+def _check_cascade_by_model_permission(actor, related_model, instances):
+    """Require Django's per-model delete permission for one cascade branch.
+
+    The frontend-neutral default. It asks only whether the actor may delete
+    this model at all, which is the weakest claim every caller can make.
+    """
+    codename = f"{related_model._meta.app_label}.delete_{related_model._meta.model_name}"
+    if not actor.has_perm(codename):
+        raise PermissionDenied("Cascade delete permission was revoked")
+
+
+def _check_cascade_by_django_admin(actor, related_model, instances):
+    """Defer to a registered ``ModelAdmin.has_delete_permission`` per row.
+
+    Preserves Django admin's exact historical behavior for the admin frontend:
+    a registered admin decides per instance, and an unregistered model falls
+    back to the plain model permission.
+    """
+    from django.contrib import admin
+
+    model_admin = admin.site._registry.get(related_model)
+    if model_admin is None:
+        _check_cascade_by_model_permission(actor, related_model, instances)
+        return
+    request = HttpRequest()
+    request.user = actor
+    for instance in instances:
+        if not model_admin.has_delete_permission(request, instance):
+            raise PermissionDenied("Cascade delete permission was revoked")
+
+
+#: Cascade-permission strategies by ``AdminDeleteRequest.authority``. Frontends
+#: pick one; nothing here imports the admin site unless the admin asks for it.
+_CASCADE_CHECKERS = {
+    "model_permission": _check_cascade_by_model_permission,
+    "django_admin": _check_cascade_by_django_admin,
+}
+
+
+def _cascade_checker(authority):
+    """Return one registered cascade checker or fail closed."""
+    try:
+        return _CASCADE_CHECKERS[authority]
+    except KeyError as err:
+        raise ValueError("Unknown cascade authority") from err
+
+
+def _preflight_delete(actor, obj, authority="model_permission"):
+    """Recompute protected rows and cascade permissions on the owner.
+
+    ``NestedObjects`` is imported here rather than at module scope: importing
+    ``django.contrib.admin.utils`` pulls in ContentType, which is too early
+    during app loading and would make this module unimportable from an
+    ``AppConfig.ready()``. It is also the last admin-package dependency in the
+    services layer, so keeping it lazy keeps the import graph honest about the
+    fact that these services do not belong to the admin.
+    """
+    from django.contrib.admin.utils import NestedObjects
+
+    check = _cascade_checker(authority)
     using = router.db_for_write(obj.__class__, instance=obj)
     collector = NestedObjects(using=using)
     collector.collect([obj])
     if collector.protected:
         raise ValidationError("Deletion is protected by related rows")
-    request = HttpRequest()
-    request.user = actor
     for related_model, instances in collector.model_objs.items():
-        model_admin = admin.site._registry.get(related_model)
-        if model_admin is None:
-            codename = f"{related_model._meta.app_label}.delete_{related_model._meta.model_name}"
-            if not actor.has_perm(codename):
-                raise PermissionDenied("Cascade delete permission was revoked")
-            continue
-        for instance in instances:
-            if not model_admin.has_delete_permission(request, instance):
-                raise PermissionDenied("Cascade delete permission was revoked")
+        check(actor, related_model, instances)
 
 
 def _concrete_object_repr(obj):
@@ -1051,6 +1148,7 @@ def delete_admin(request: AdminDeleteRequest) -> AdminDeleteResult:
         type(value) is not int or value <= 0 for value in request.object_ids
     ):
         raise ValueError("Invalid admin delete identifiers")
+    _cascade_checker(request.authority)
     model = _model(request.model_label)
     if len(request.object_ids) > _MAX_RELATED_IDS:
         raise ValueError("Too many rows were selected")
@@ -1068,7 +1166,7 @@ def delete_admin(request: AdminDeleteRequest) -> AdminDeleteResult:
             missing.append(object_id)
             continue
         try:
-            _preflight_delete(actor, obj)
+            _preflight_delete(actor, obj, request.authority)
         except ValidationError:
             vetoed.append(object_id)
             continue

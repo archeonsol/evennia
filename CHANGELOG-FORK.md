@@ -25,6 +25,169 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.210 — Engine console, and the signals it reads
+
+Supersedes Django admin for this fork's staff work. Django admin covered eight
+models; `server/models.py` alone defines twelve, and the engine's own substrate
+was administered from the game repo. This ships the replacement, then the
+identity signals the moderation half of it reads.
+
+### Engine
+
+- **New `evennia.console` package.** Twenty-three panels behind one capability,
+  `engine.console.access`, with `engine.console.moderation` admitting a caller
+  to the moderation queue alone: Records, Attributes, Moderation, Authorization,
+  Runtime, Logs, Errors, Objects, Actions, Hooks, Prototypes, Jobs, Event bus,
+  Live sessions, Server control, REPL, SQL, Database, Saved views, Migrations,
+  Settings, Audit, Health. [`console/registry.py`](evennia/console/registry.py)
+  carries the `Panel` + `@io_action` split that decides which thread a method
+  runs on; [`console/services.py`](evennia/console/services.py) is the mutation
+  kernel; [`console/audit.py`](evennia/console/audit.py) writes a trail in the
+  five-outcome vocabulary the web boundary already uses.
+- **Nothing costs the running server.** Every listing is bounded and keyset
+  paged, no panel counts a table that grows per event, and multi-operator
+  presence is a cache entry rather than a heartbeat row — asserted by a test
+  that its query count is zero. The `db_attrs` size distribution is sampled
+  rather than aggregated, because `length(db_attrs::text)` across a table is the
+  sequential scan the Database panel exists to discourage.
+- **Undo is deliberately narrow.** Records records an inverse for a change that
+  succeeded and for nothing else, and where undo is unavailable the panel says
+  which of the two reasons applies. Undo never revises the row it reverses; it
+  writes a new row pointing back at it, so the trail holds the mistake and the
+  correction as two facts. `state_as_of` folds the same table backwards — not
+  event sourcing, and no new store.
+- [`console/panels/moderation.py`](evennia/console/panels/moderation.py):
+  addresses, device tokens and every opaque signature are **masked in the
+  service, not the template**, and revealing one is an audited action needing a
+  reason and a password. An unrevealed value never reaches the browser, or
+  devtools recovers it and the audit trail lies. A truncated value and a
+  withheld one render differently on purpose.
+- **Address provenance is a sentence.** When a proxy header was sent and not
+  trusted, the recorded address is the proxy's own and every address signal on
+  that row is void; the panel says so rather than showing two booleans somebody
+  has to reconstruct the meaning of.
+- **Retention state per row**: `held`, `purged`, or `absent`, keyed off
+  `ip_hash` rather than the row's age — retention windows are settings that
+  change, and a row purged under an old window would be described wrongly by any
+  calculation from today's.
+
+### Moderation
+
+- **Three identity signatures**, in
+  [`moderation/capture.py`](evennia/moderation/capture.py). `telnet_sig` hashes
+  the option negotiation the client's own stack performed — narrower than
+  `client_fp` on purpose, since that folds in the client name and terminal type
+  a player types into a settings box. `tls_sig` hashes the TLS handshake a
+  trusted reverse proxy terminated: version, offered ciphers, curves and
+  negotiated ALPN. `http_order_fp` hashes which headers the client sent and in
+  what order, and needs no proxy at all.
+- **`tls_sig` is not JA4, and says so.** JA4 also hashes the extension list,
+  which no stock proxy variable exposes. Two rules keep it stable rather than
+  noisy: GREASE values are stripped, because they are random per connection by
+  design and keeping them is the reason JA3 stopped being useful; and the lists
+  are sorted, because a proxy may report them in whatever order it read them and
+  a fingerprint that depends on proxy behaviour breaks when the proxy is
+  upgraded. Empty unless the peer is in `settings.UPSTREAM_IPS` — a client can
+  set any header, and a forged fingerprint is worse than none because staff
+  would believe it.
+- **`detect_identity_correlation`** in
+  [`moderation/detect.py`](evennia/moderation/detect.py): a shared network plus
+  a shared client signature, against an account that is currently blocked.
+  Neither half is worth a flag alone — a `/24` is a household or one
+  carrier-grade NAT, and a shared signature is two people who both use Mudlet.
+  Every signature the session carries is checked rather than only the first
+  present, because a player who clears cookies still performs the same TLS
+  handshake. Fires for an unauthenticated session, which is the case
+  `detect_sanctioned_key_reuse` cannot see. `http_order_fp` is deliberately
+  **not** a trigger: header order identifies a browser build, so on a busy
+  network it would match most web players at once, and a flag that fires for
+  everybody teaches staff to skip the queue.
+- **Alt correlation** is `ModerationPanel.account()` — exact matches on indexed
+  columns, no score, because any conclusion has to be showable to the player it
+  is used against. Two queries per column regardless of history length.
+- **Restored sanction guards.** A collateral count before an address ban is
+  issued, IPv6 bucketed at `/48` as well as `/64`, and a permanent ban from
+  somebody without `engine.console.moderation.permanent` becomes a proposal
+  rather than a refusal — the person who found the case is usually the right
+  person to make it and the wrong person to be the only one who decides it never
+  ends. Nobody decides their own proposal.
+- **Message-volume observation** (`moderation/messagerate.py`): flag-only, never
+  refuses, off by default, and no database call under the threshold.
+
+### Frontend
+
+- **Svelte 5 + Vite**, source in
+  [`web/console/client/`](evennia/web/console/client/), built to
+  `web/static/console/app/` and committed so a game never runs `npm`. This
+  replaces a vanilla client whose absent toolchain let a `ReferenceError` ship in
+  the flag dossier: two names declared in one function and read in another made
+  the one path that creates a sanction throw on every click, while every
+  service-side test passed and was right to.
+- Tables are virtualized — forty thousand rows put fewer than two hundred in the
+  DOM while the scrollbar still describes the whole listing.
+- `npm run dev` serves the console standalone against any game server. The dev
+  proxy rewrites the `Origin` header rather than asking anyone to widen
+  `CSRF_TRUSTED_ORIGINS` on a live game.
+
+### Tests
+
+- [`server/tests/testrunner.py`](evennia/server/tests/testrunner.py): a test's
+  transaction rollback now pairs with an identity-cache flush. The idmapper and
+  the JSONB row-state caches survive a rollback, so a test that created a row
+  left a stale identity behind and the failure surfaced in whichever unrelated
+  test ran next.
+- Renderer tests exist for the first time: every panel is rendered twice —
+  synchronously, where a scope error surfaces, and after a stubbed reply lands,
+  where a wrong-shape payload read surfaces — plus every detail view and every
+  panel under a failed request.
+
+### Settings
+
+New, all defaulting to the safe value:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `CONSOLE_ENABLED` | `True` | Mounts `/console/` and its API |
+| `CONSOLE_PANEL_MODULES` | `[]` | Game-side panel modules to import |
+| `CONSOLE_REPL_ENABLED` | `False` | The Python REPL panel |
+| `CONSOLE_SQL_ENABLED` | `False` | The read-only SQL panel |
+| `CONSOLE_SERVER_CONTROL_ENABLED` | `False` | Reload and stop from the browser |
+| `CONSOLE_ALLOW_INSECURE` | `False` | Permits the console over plain HTTP |
+| `CONSOLE_IDLE_TIMEOUT` | `1800` | Seconds before a console session is stale |
+| `CONSOLE_REAUTH_WINDOW` | `300` | Seconds a password re-entry stays valid |
+| `CONSOLE_SQL_TIMEOUT_MS` | `5000` | Statement timeout for the SQL panel |
+| `CONSOLE_SQL_MAX_ROWS` | `1000` | Row cap for the SQL panel |
+| `CONSOLE_AUDIT_RETENTION_DAYS` | `365` | Audit trail retention |
+| `CONSOLE_AUDIT_REPL_RETENTION_DAYS` | `90` | REPL submission retention |
+| `MODERATION_MESSAGE_RATE_ENABLED` | `False` | Message-volume flags |
+| `MODERATION_MESSAGE_RATE_LIMIT` | `120` | Messages before a flag |
+| `MODERATION_MESSAGE_RATE_WINDOW` | `60` | Window, in seconds |
+| `MODERATION_MESSAGE_RATE_MAX_KEYS` | `4096` | Bound on tracked accounts |
+| `MODERATION_CONNECT_RATE_SITE_FACTOR` | `8` | Site-wide connect-rate multiple |
+
+### Migration
+
+- **Six migrations, all additive.** `console.0001`–`0003` create the audit,
+  error-state and saved-view tables; `server.0009` adds `SanctionProposal`;
+  `server.0010` and `server.0011` add `telnet_sig`, `tls_sig` and
+  `http_order_fp` to `SessionRecord` with their indexes. Run `evennia migrate`
+  before serving the console — the moderation panel reads those columns and
+  fails wholesale, not partially, against an unmigrated database.
+- **`tls_sig` needs a reverse proxy to report the handshake.** Add the four
+  `X-TLS-*` headers in the same block as the other `proxy_set_header` lines, and
+  put the proxy's address in `UPSTREAM_IPS`. Without both, the column stays
+  empty and the console's signal-coverage readout says which of the two is
+  missing. nginx ≥1.21.4 for `$ssl_alpn_protocol`, ≥1.11.7 for the rest.
+- **`engine.console.access` is equivalent to shell access on the game server.**
+  A REPL, a SQL console, live server control, session watching and raw
+  moderation data sit behind one capability. Grant it accordingly; the three
+  most dangerous panels are off by default and each demands a password re-entry
+  as well.
+- Downstream games running a game-side moderation web surface can retire it: the
+  console reads the same tables, and reaching it needs no game-side route.
+
+---
+
 ## 6.0.0+underspire.209 — Moderation substrate
 
 ### Engine

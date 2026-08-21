@@ -103,3 +103,65 @@ class RateLimitTest(TestCase):
     def test_a_broken_settings_value_does_not_refuse_anybody(self):
         with override_settings(MODERATION_CONNECT_RATE_LIMIT="not-a-number"):
             self.assertFalse(self.limiter.check("104.16.0.1", now=100.0))
+
+
+class TestIPv6SiteBucket(TestCase):
+    """One IPv6 subscriber holds many /64 networks."""
+
+    def setUp(self):
+        self.limiter = ConnectionRateLimiter()
+
+    @override_settings(
+        MODERATION_CONNECT_RATE_LIMIT=2,
+        MODERATION_CONNECT_RATE_WINDOW=60,
+        MODERATION_CONNECT_RATE_SITE_FACTOR=2,
+    )
+    def test_walking_subnets_no_longer_multiplies_the_limit(self):
+        # The defect: a customer is assigned a /48 or /56, so counting only
+        # /64 lets one subscriber open the limit once per subnet they hold.
+        refused = 0
+        for index in range(12):
+            address = f"2606:4700:0:{index:x}::1"
+            if self.limiter.check(address):
+                refused += 1
+        self.assertTrue(refused, "every /64 was allowed its own full limit")
+
+    @override_settings(
+        MODERATION_CONNECT_RATE_LIMIT=2,
+        MODERATION_CONNECT_RATE_WINDOW=60,
+        MODERATION_CONNECT_RATE_SITE_FACTOR=4,
+    )
+    def test_the_site_allowance_is_wider_than_one_network(self):
+        # A shared site must not be refused at the same count as one household.
+        self.assertFalse(self.limiter.check("2606:4700:0:1::1", now=100.0))
+        self.assertFalse(self.limiter.check("2606:4700:0:1::1", now=100.0))
+        self.assertTrue(self.limiter.check("2606:4700:0:1::1", now=100.0))
+        # A different /64 in the same /48 still has room under the site bucket.
+        self.assertFalse(self.limiter.check("2606:4700:0:2::1", now=100.0))
+
+    @override_settings(
+        MODERATION_CONNECT_RATE_LIMIT=2,
+        MODERATION_CONNECT_RATE_WINDOW=60,
+        MODERATION_CONNECT_RATE_SITE_FACTOR=0,
+    )
+    def test_the_site_bucket_can_be_turned_off(self):
+        for index in range(6):
+            self.limiter.check(f"2606:4700:0:{index:x}::1", now=100.0)
+        self.assertFalse(self.limiter.check("2606:4700:0:99::1", now=100.0))
+
+    @override_settings(
+        MODERATION_CONNECT_RATE_LIMIT=2,
+        MODERATION_CONNECT_RATE_WINDOW=60,
+        MODERATION_CONNECT_RATE_SITE_FACTOR=8,
+    )
+    def test_ipv4_is_counted_once(self):
+        # IPv4 gets one bucket. A second /24 has to be rented.
+        self.assertFalse(self.limiter.check("104.16.0.7", now=100.0))
+        self.assertFalse(self.limiter.check("104.16.0.8", now=100.0))
+        self.assertTrue(self.limiter.check("104.16.0.9", now=100.0))
+        self.assertFalse(self.limiter.check("104.17.0.1", now=100.0))
+
+    @override_settings(MODERATION_CONNECT_RATE_LIMIT=2, MODERATION_CONNECT_RATE_WINDOW=60)
+    def test_a_private_address_is_still_exempt(self):
+        for _ in range(20):
+            self.assertFalse(self.limiter.check("fd00::1", now=100.0))

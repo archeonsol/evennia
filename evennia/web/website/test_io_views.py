@@ -134,9 +134,7 @@ class StockWebsiteDTOTest(EvenniaWebTest):
         ):
             with (
                 self.subTest(route=route),
-                patch.object(
-                    character_views, "run_on_io_thread", wraps=run_on_io_thread
-                ) as bridge,
+                patch.object(character_views, "run_on_io_thread", wraps=run_on_io_thread) as bridge,
                 patch.object(general_context, "run_on_io_thread") as menu_bridge,
             ):
                 response = self.client.get(reverse(route))
@@ -154,9 +152,7 @@ class StockWebsiteDTOTest(EvenniaWebTest):
             for error in (IOThreadCallTimeout(), IOThreadCallIndeterminate()):
                 with (
                     self.subTest(route=route, error=type(error).__name__),
-                    patch.object(
-                        character_views, "run_on_io_thread", side_effect=error
-                    ),
+                    patch.object(character_views, "run_on_io_thread", side_effect=error),
                 ):
                     response = self.client.get(reverse(route))
                 self.assertEqual(response.status_code, 504)
@@ -165,9 +161,7 @@ class StockWebsiteDTOTest(EvenniaWebTest):
     @override_settings(MAX_NR_CHARACTERS=5)
     def test_create_puppet_and_delete_each_dispatch_once(self):
         """Reachable character mutations never fall through inherited model views."""
-        with patch.object(
-            character_views, "run_on_io_thread", wraps=run_on_io_thread
-        ) as bridge:
+        with patch.object(character_views, "run_on_io_thread", wraps=run_on_io_thread) as bridge:
             created = self.client.post(
                 reverse("character-create"),
                 {"db_key": "Bridge Created", "desc": "plain"},
@@ -175,9 +169,7 @@ class StockWebsiteDTOTest(EvenniaWebTest):
         self.assertEqual(created.status_code, 302)
         bridge.assert_called_once()
 
-        with patch.object(
-            character_views, "run_on_io_thread", wraps=run_on_io_thread
-        ) as bridge:
+        with patch.object(character_views, "run_on_io_thread", wraps=run_on_io_thread) as bridge:
             puppeted = self.client.post(
                 reverse(
                     "character-puppet",
@@ -198,9 +190,7 @@ class StockWebsiteDTOTest(EvenniaWebTest):
             405,
         )
 
-        with patch.object(
-            character_views, "run_on_io_thread", wraps=run_on_io_thread
-        ) as bridge:
+        with patch.object(character_views, "run_on_io_thread", wraps=run_on_io_thread) as bridge:
             deleted = self.client.post(
                 reverse(
                     "character-delete",
@@ -345,9 +335,7 @@ class StockWebsiteDTOTest(EvenniaWebTest):
                 reverse("channel-detail", kwargs={"slug": slugify(channel.key)})
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.context["attribute_list"], {"Name": "Detail DTO channel"}
-        )
+        self.assertEqual(response.context["attribute_list"], {"Name": "Detail DTO channel"})
 
 
 class StockWebsiteASGIBoundaryTest(TransactionTestCase):
@@ -374,9 +362,7 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
             None,
             password="test-password",
         )
-        self.character = create_object(
-            settings.BASE_CHARACTER_TYPECLASS, key="ASGI Character"
-        )
+        self.character = create_object(settings.BASE_CHARACTER_TYPECLASS, key="ASGI Character")
         self.account.characters.add(self.character)
         grant_capability(
             f"account:{self.account.pk}",
@@ -401,9 +387,7 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
 
         clock.bind_loop(loop)
         try:
-            with patch.object(
-                channel_views, "load_channel_list", side_effect=record_loop
-            ):
+            with patch.object(channel_views, "load_channel_list", side_effect=record_loop):
                 response = await AsyncClient().get("/channels/")
         finally:
             clock._main_loop = previous
@@ -432,9 +416,7 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
             settings.BASE_CHARACTER_TYPECLASS,
             key="Foreign matching type",
         )
-        await sync_to_async(self.account.characters.add, thread_sensitive=True)(
-            other_type
-        )
+        await sync_to_async(self.account.characters.add, thread_sensitive=True)(other_type)
 
         def record_page(*args, **kwargs):
             callbacks.append(threading.get_ident())
@@ -449,12 +431,8 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
         clock.bind_loop(loop)
         try:
             with (
-                patch.object(
-                    character_views, "load_character_page", side_effect=record_page
-                ),
-                patch.object(
-                    character_views, "run_on_io_thread", side_effect=record_worker
-                ),
+                patch.object(character_views, "load_character_page", side_effect=record_page),
+                patch.object(character_views, "run_on_io_thread", side_effect=record_worker),
             ):
                 response = await client.get("/__compat-characters/")
         finally:
@@ -485,15 +463,11 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
         original_create = character_views.create_character
 
         def record_page(*args, **kwargs):
-            callbacks.append(
-                ("page", threading.get_ident(), asyncio.get_running_loop())
-            )
+            callbacks.append(("page", threading.get_ident(), asyncio.get_running_loop()))
             return original_page(*args, **kwargs)
 
         def record_create(*args, **kwargs):
-            callbacks.append(
-                ("create", threading.get_ident(), asyncio.get_running_loop())
-            )
+            callbacks.append(("create", threading.get_ident(), asyncio.get_running_loop()))
             return original_create(*args, **kwargs)
 
         def record_worker(*args, **kwargs):
@@ -505,15 +479,9 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
         clock.bind_loop(loop)
         try:
             with (
-                patch.object(
-                    character_views, "load_character_page", side_effect=record_page
-                ),
-                patch.object(
-                    character_views, "create_character", side_effect=record_create
-                ),
-                patch.object(
-                    character_views, "run_on_io_thread", side_effect=record_worker
-                ),
+                patch.object(character_views, "load_character_page", side_effect=record_page),
+                patch.object(character_views, "create_character", side_effect=record_create),
+                patch.object(character_views, "run_on_io_thread", side_effect=record_worker),
             ):
                 listed = await client.get("/characters/")
                 managed = await client.get("/characters/manage/")
@@ -547,14 +515,9 @@ class StockWebsiteASGIBoundaryTest(TransactionTestCase):
         self.assertEqual(timed_out.headers["X-Evennia-Retryable"], "false")
         for response in (listed, managed):
             _assert_plain(self, list(response.context["object_list"]))
-        self.assertEqual(
-            [kind for kind, _thread, _loop in callbacks], ["page", "page", "create"]
-        )
+        self.assertEqual([kind for kind, _thread, _loop in callbacks], ["page", "page", "create"])
         self.assertTrue(
-            all(
-                thread == io_thread and seen_loop is loop
-                for _, thread, seen_loop in callbacks
-            )
+            all(thread == io_thread and seen_loop is loop for _, thread, seen_loop in callbacks)
         )
         self.assertEqual(len(workers), 3)
         self.assertTrue(all(worker != io_thread for worker in workers))

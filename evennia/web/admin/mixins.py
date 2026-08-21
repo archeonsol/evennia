@@ -13,15 +13,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.debug import sensitive_post_parameters
 
-from evennia.web.utils.io import (
-    IOThreadCallIndeterminate,
-    IOThreadCallTimeout,
-    IOThreadCallUnavailable,
-    release_worker_db_connections,
-    run_on_io_thread,
-)
-
-from .io import (
+from evennia.console.services import (
     AdminDeleteRequest,
     AdminMutationRequest,
     TagDelta,
@@ -30,6 +22,14 @@ from .io import (
     freeze_plain,
     mutate_admin,
 )
+from evennia.web.utils.io import (
+    IOThreadCallIndeterminate,
+    IOThreadCallTimeout,
+    IOThreadCallUnavailable,
+    release_worker_db_connections,
+    run_on_io_thread,
+)
+
 from .tags import TagFormSet
 
 _AUXILIARY_FORM_FIELDS = {
@@ -174,23 +174,52 @@ class OwnerSafeModelAdminMixin:
     def _record_audit_warning(self, request):
         request._evennia_admin_audit_warning = True
 
+    def _mirror_console_audit(self, request, operation, obj=None, object_id=None, repr_text=""):
+        """Also record this mutation in the console audit trail.
+
+        Django admin and the console coexist for now, and the console's
+        timeline is worthless if it shows only half the mutations a server
+        actually received. This mirrors admin activity into it.
+
+        Best-effort in the same sense as the LogEntry write above: the mutation
+        already happened, so a failure here raises an audit warning rather than
+        an error. ``audit.record`` never raises on its own.
+        """
+        from evennia.console import audit
+
+        target = object_id if object_id is not None else getattr(obj, "pk", None)
+        event_id = audit.record(
+            panel="admin",
+            operation=operation,
+            actor_id=getattr(request.user, "pk", None),
+            actor_name=str(getattr(request.user, "username", ""))[:255],
+            target_ref=f"{self.model._meta.label_lower}#{target}" if target is not None else "",
+            message=repr_text or (str(obj)[:200] if obj is not None else ""),
+        )
+        if event_id is None:
+            self._record_audit_warning(request)
+
     def log_addition(self, request, obj, message):
         """Write auxiliary audit only after definite owner success."""
         try:
             with transaction.atomic():
-                return super().log_addition(request, obj, message)
+                entry = super().log_addition(request, obj, message)
         except Exception:
             self._record_audit_warning(request)
             return None
+        self._mirror_console_audit(request, "add", obj=obj)
+        return entry
 
     def log_change(self, request, obj, message):
         """Write auxiliary audit only after definite owner success."""
         try:
             with transaction.atomic():
-                return super().log_change(request, obj, message)
+                entry = super().log_change(request, obj, message)
         except Exception:
             self._record_audit_warning(request)
             return None
+        self._mirror_console_audit(request, "change", obj=obj)
+        return entry
 
     def _map_bridge_error(self, error):
         if isinstance(error, IOThreadCallIndeterminate):
@@ -267,12 +296,22 @@ class OwnerSafeModelAdminMixin:
                     )
         except Exception:
             self._record_audit_warning(request)
+        for object_id in deleted_ids:
+            self._mirror_console_audit(
+                request,
+                "delete",
+                object_id=object_id,
+                repr_text=snapshots.get(object_id, str(object_id))[:200],
+            )
 
     def _run_delete_bridge(self, request, ids):
         owner_request = AdminDeleteRequest(
             actor_id=int(request.user.pk),
             model_label=self.model._meta.label_lower,
             object_ids=tuple(int(value) for value in ids),
+            # Django admin keeps its per-instance ModelAdmin cascade check; the
+            # service's frontend-neutral default is the plain model permission.
+            authority="django_admin",
         )
         release_worker_db_connections()
         return run_on_io_thread(delete_admin, owner_request)

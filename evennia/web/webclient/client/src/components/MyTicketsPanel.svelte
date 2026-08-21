@@ -64,17 +64,19 @@
               <span class="status s-{t.status}">{t.status}</span>
               <span class="age">{ageOf(t.updated)}</span>
             </span>
+            {#if t.subject}<span class="subject">{t.subject}</span>{/if}
             <span class="prev">{t.preview || "…"}</span>
           </button>
         {/each}
       {:else}
-        <p class="empty">You have no {showClosed ? "" : "open "}tickets. Use <b>@request</b>, <b>@bug</b> or <b>@puppetrequest</b> in the game to open one.</p>
+        <p class="empty">You have no {showClosed ? "" : "open "}tickets. Use <b>@request subject = what you need</b>, <b>@bug</b> or <b>@puppetrequest</b> in the game to open one.</p>
       {/if}
     </div>
   {:else}
     <div class="convo">
       <div class="chead">
-        <span class="ctitle">{ticket.label}</span>
+        <span class="ctitle">{ticket.subject || ticket.label}</span>
+        {#if ticket.subject}<span class="ckind">{ticket.label}</span>{/if}
         <span class="status s-{ticket.status}">{ticket.status}</span>
       </div>
       <div class="msgs">
@@ -128,4 +130,6 @@
   .chev { color: var(--accent-bright); }
   .reply input { flex: 1; background: transparent; border: none; outline: none; color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright); }
   .closed-note { padding: 6px 10px; border-top: 1px solid var(--border); color: var(--fg-faint); font-size: 0.72rem; font-style: italic; }
+  .subject { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ckind { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; }
 </style>

@@ -103,6 +103,20 @@ UPSTREAM_IPS = ["127.0.0.1"]
 # hash uncomparable with every new one. Empty falls back to SECRET_KEY, which
 # ties the same problem to SECRET_KEY rotation instead.
 MODERATION_HASH_SALT = ""
+# How much wider the IPv6 site allowance is than the per-network one. An IPv6
+# customer holds a whole /48 or /56, so counting only /64 lets one subscriber
+# multiply the limit by the number of subnets they were assigned. 0 disables
+# the site bucket and counts /64 alone.
+MODERATION_CONNECT_RATE_SITE_FACTOR = 8
+# Message-volume observation. Off by default: "high" is a property of the game
+# rather than of the engine, so a game turns this on after watching its own
+# numbers. Crossing the threshold raises a flag for staff. It never blocks a
+# message, because a limit that blocks will eventually refuse a real player in
+# the middle of a scene.
+MODERATION_MESSAGE_RATE_ENABLED = False
+MODERATION_MESSAGE_RATE_LIMIT = 120
+MODERATION_MESSAGE_RATE_WINDOW = 60
+MODERATION_MESSAGE_RATE_MAX_KEYS = 4096
 # Record a SessionRecord row per connection. Every other moderation feature
 # reads that history, so disabling this disables the substrate.
 MODERATION_SESSION_CAPTURE_ENABLED = True
@@ -796,6 +810,51 @@ JOB_QUEUE_REDIS_ALIAS = "default"
 JOB_QUEUE_REDIS_KEY = "evennia:jobs:pending"
 JOB_QUEUE_DRAIN_EVERY_N_TICKS = 10
 JOB_QUEUE_DRAIN_MAX_JOBS = 5
+
+######################################################################
+# Engine console
+######################################################################
+# The staff-facing web surface at /console/ (the Django-admin successor).
+#
+# Console access is ONE capability, `engine.console.access`, because a console
+# holder has a REPL on the running process: that is shell access by every
+# definition that matters, and a fine-grained permission grid over it would
+# imply a containment the REPL removes. Treat granting it as equivalent to
+# adding an SSH key. `engine.console.moderation` is the single exception -- it
+# admits a non-superuser moderator to the moderation panel and nothing else.
+#
+# The dangerous panels are therefore governed by DEPLOYMENT POLICY (these
+# settings), not by who holds what. They default off and cannot be flipped
+# from inside the console.
+CONSOLE_ENABLED = True
+# Modules exposing `register_panels(registry)`, mirroring SYSTEM_MODULES. A
+# listed module that fails to import or registers nothing is a startup error.
+CONSOLE_PANEL_MODULES = []
+# Arbitrary Python executed in-process by a web request.
+CONSOLE_REPL_ENABLED = False
+# Read-only SQL with a statement timeout and a row cap.
+CONSOLE_SQL_ENABLED = False
+# Reload, reset, and shutdown of the running server.
+CONSOLE_SERVER_CONTROL_ENABLED = False
+# Audit retention. Rows recording a moderation decision or a break-glass grant
+# are never pruned regardless of these windows: appeal evidence has to outlive
+# any window, and investigation evidence is what an attacker most wants gone.
+# Console sessions are shells, and the site-wide SESSION_COOKIE_AGE is a
+# player-website default measured in weeks. These bound the console instead of
+# logging every player out. See W1-console-security-review.md.
+# Seconds of console inactivity after which a session is refused, not expired.
+CONSOLE_IDLE_TIMEOUT = 1800
+# Seconds a password re-entry stays valid before a dangerous action.
+CONSOLE_REAUTH_WINDOW = 300
+# Serve the console over a non-TLS connection. Deliberate, for localhost only.
+CONSOLE_ALLOW_INSECURE = False
+# Read-only SQL bounds.
+CONSOLE_SQL_TIMEOUT_MS = 5000
+CONSOLE_SQL_MAX_ROWS = 1000
+CONSOLE_AUDIT_RETENTION_DAYS = 365
+# REPL source text is the bulkiest audit content and the least often needed
+# long-term, so it prunes on its own shorter window.
+CONSOLE_AUDIT_REPL_RETENTION_DAYS = 90
 # Redis SET index for channel subscribers (PG M2M remains source of truth).
 CHANNEL_SUBSCRIBER_CACHE_ENABLED = True
 CHANNEL_SUBSCRIBER_CACHE_ALIAS = "default"
@@ -1447,6 +1506,7 @@ INSTALLED_APPS = [
     "evennia.comms",
     "evennia.help",
     "evennia.scripts",
+    "evennia.console",
     "evennia.web",
 ]
 # The user profile extends the User object with more functionality;

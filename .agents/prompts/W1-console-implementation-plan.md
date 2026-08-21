@@ -1,6 +1,138 @@
 # W1: engine console (Django-admin successor)
 
-Status: todo
+Status: built (branch `w1-console-phase1`, off `6.0.0+underspire.209`)
+
+---
+
+## Build status
+
+Audited against this document on 2026-08-20 by reading the shipped code, then
+rebuilt against that audit the same day. **Twenty-three panels are registered and
+under test, and every cross-cutting promise in this document is implemented.**
+
+Re-audited the same day against P5 specifically, after the TLS and negotiation
+signals were wired in. That pass is the one worth reading: the first audit
+checked that each panel existed and answered, and **three of the four defects
+below survived it**, because a panel can exist, answer, and still be wrong.
+
+### What the P5 re-audit found
+
+**The flag dossier threw before it rendered.** `duration` and `reach` were
+declared inside `editor()`, used only inside `flagDossier()`, and resolved in
+neither — a `ReferenceError` on every click. The single path this document calls
+"the one path that creates sanctions" did not open at all. Nothing caught it
+because the panel's tests are service-side and the renderer had no test that ran
+it. A scope sweep over every top-level function in `console.js` found no second
+instance.
+
+**An unrevealed signature reached the browser.** `tls_sig` and `telnet_sig` are
+opaque identifiers with no sanction subject, and being unbannable was quietly
+treated as a reason not to mask them. This document already answers that: an
+unrevealed value must never reach the browser or devtools recovers it and the
+audit trail lies. What a value can be *used for* does not decide whether it is
+shown; that it identifies somebody does.
+
+**Purged and never-recorded addresses read identically.** Both arrive as an
+empty string. The retention promise in P5 — show retention state per row — was
+not implemented, so a row whose address the ninety-day sweep cleared looked like
+a row that never had one. The discriminator is `ip_hash`, not the row's age:
+retention windows are settings that change, and a row purged under an old window
+would be described wrongly by any calculation from today's.
+
+**Alt correlation was never built.** P5 commits to it explicitly and the
+migration step says anything the old surface does that the new one does not is a
+bug. The account dossier is now `ModerationPanel.account()`. It costs two
+queries per column rather than the game surface's one per *value*, which on an
+account with a long history was eighty round trips to render one page.
+
+One further defect, found while testing that dossier: the model's default
+ordering joins a `DISTINCT`, so a limited shared-with lookup was distinct per
+*session* rather than per pair, and thirty sessions from one account filled the
+limit and hid everybody else on the key. `.order_by()` before `.distinct()`.
+
+### Identity signals
+
+`telnet_sig`, `tls_sig`, and `http_order_fp` are captured, indexed, masked,
+revealable through the audited action, and correlated in the account dossier.
+`tls_sig` is a correlation trigger; `http_order_fp` is deliberately not one, and
+`evennia/moderation/README.md` carries the reasoning. The Moderation panel
+reports per-signal coverage, because a signal that was configured and is
+silently absent leaves the queue looking calm for the wrong reason, and no other
+readout in the console would ever say so.
+
+### Panels
+
+Records, Attributes, Moderation, Authorization, Runtime, Logs, Errors, Objects,
+Actions, Hooks, Prototypes, Jobs, Event bus, Live sessions, Server control,
+REPL, SQL, Database, Saved views, Migrations, Settings, Audit, Health.
+
+P15 Database was numbered here and never built. P20 Jobs and P21 Event bus were
+committed in D6 and never numbered, so the commitment was unreadable from either
+section alone and nobody built them. P22 Audit did not exist in any form: the
+console wrote a full trail from phase 1 and could not show one row of it.
+
+### Cross-cutting layer
+
+| Promise | State |
+| --- | --- |
+| Degraded mode | Built, tested, enforced by a registration guard |
+| Frontend on Svelte 5 + Vite | Built; the vanilla client is deleted |
+| Virtualized tables | Built in `DataTable`; asserted at 40,000 rows |
+| Renderers under test | 75 client tests; every panel and detail view |
+| English only | Held |
+| Everything deep-linkable | Every panel's view state is in the address bar |
+| Command palette, keyboard-first | Ctrl-K, combobox semantics, verified live |
+| Undo and state-as-of | Both built on the audit table; no new store |
+| Saved views | `ConsoleSavedView`, shared and pinnable |
+| Export (CSV/JSON, audited) | Built; recorded as a disclosure event |
+| Bulk operations with dry run | Cascade counted per row before the operator commits |
+| Multi-operator presence | Built in the cache; no database writes |
+
+### Rules the rebuild had to hold
+
+**Nothing may cost the running server.** Every listing is bounded and keyset
+paged. No panel counts a table that grows per event. Presence is a cache
+entry, not a heartbeat row: a test asserts its query count is zero. The
+`db_attrs` size distribution is sampled rather than aggregated, because
+`length(db_attrs::text)` across a table is the sequential scan the Database
+panel exists to discourage.
+
+**The write-behind cache has to be respected, not ignored.** Attribute writes
+are drained on a cadence, so any SQL read of `db_attrs` answers from before the
+write. Point queries run the read-your-writes barrier that
+`objects/manager.py` already documents; the catalogue does not, and says so
+instead, because a process-wide flush does not belong on a page an operator
+leaves open.
+
+**Operator-facing text is Simplified Technical English.** One meaning per word,
+one instruction per sentence, active voice, the same word for the same thing.
+
+### Undo, deliberately narrow
+
+Records records an inverse for a change that succeeded, and for nothing else.
+Reversing a create means deleting, and delete carries a cascade the service
+preflights for a reason; attaching one to a control an operator reaches for
+after a mistake is the wrong shape. A write that faulted did not necessarily
+leave the row in the state the row records. Where undo is unavailable the panel
+says which of the two applies, because an absent control explains nothing.
+
+Undo never revises the row it reverses. It writes a new row pointing back at
+it, so the trail holds the mistake and the correction as two facts.
+
+### Defects the rebuild found
+
+Five of these were the same bug: **guessing a registry's shape fails silently,
+and the panel renders happily while telling the operator something untrue.**
+The scheduler read reached for `_SYSTEMS`, `REGISTRY`, and `_REGISTRY`, none of
+which is the name, and reported "the scheduler does not expose a readable
+registry" about a scheduler that exposes one. `RuntimePanel` returned `systems`
+and `tasks` and the renderer dropped both. `PanelActionView` refused every
+action during an outage, including worker-side ones that never touch the IO
+owner. The JSONB row-state caches survive a test rollback exactly as the
+idmapper does. And the export read `columns` as records when it is a list of
+names.
+
+Every one is locked in by a test.
 
 The implementation plan for the console half of **W1** (see
 [`engine-architecture/committed.md`](../docs/engine-architecture/committed.md)).
@@ -669,10 +801,14 @@ substrate itself is plain ORM.
   `cidr`, `ip_hash`, `csessid`) — exact matches only, matching the package's
   hard-signals-only stance. No scoring, no inference, no similarity metric. The
   README's justification is that any conclusion must be showable to the player it
-  is used against; a UI that quietly adds a heuristic breaks that.
+  is used against; a UI that quietly adds a heuristic breaks that. **Built** as
+  `ModerationPanel.account()`; `telnet_sig` and `tls_sig` join the column list,
+  marked as keys that can be compared but never banned, since each identifies a
+  piece of software rather than a person.
 - **Retention.** `ip` is purged on schedule while `ip_hash` and `cidr` outlive
   it. Show retention state per row so staff understand why an older row has no
-  address.
+  address. **Built** as `address_state`: `held`, `purged`, or `absent`, keyed off
+  `ip_hash` rather than the row's age.
 - **Address reveal is audited, not gated.** The game-side service splits
   `act` from `address` as two capabilities. That split does not survive the
   console's two-capability decision, but the *value* behind it must, because the
@@ -943,6 +1079,47 @@ Green or not green per line, with the underlying number. Also served as a plain
 JSON endpoint so an external uptime check can consume the same judgement rather
 than inventing its own.
 
+### P20. Jobs
+
+Committed by D6 and never numbered until the 2026-08-20 audit found it missing.
+
+- Queue depth by status and by `job_type`, across the six live handlers in
+  `world/engine_jobs.py`.
+- Dead-letter inspection with the failing payload and the traceback that put it
+  there, and a requeue action.
+- Rates per `job_type`, so a handler that has quietly stopped draining is
+  visible before its queue is the thing that reports it.
+
+Ungated: D6 confirms the subsystem is in use.
+
+### P21. Event bus
+
+The other half of D6. Labelled **Event bus**, never a bare "Events", so it stays
+distinguishable from `evennia.actions.events` after the `evennia.events`
+deprecation shim is dropped.
+
+- `GameEvent` rows by subject, with the payload rendered rather than shown raw.
+- Subject prefixes as a filter, since the subjects are namespaced by producer.
+- Read-only. The bus is a stream; nothing here replays or injects onto it.
+
+### P22. Audit
+
+The console's own record, which it currently writes and cannot show.
+
+- `ConsoleAuditEvent` rows by actor, panel, operation, outcome, and target,
+  with the frozen before/after payloads rendered as a diff.
+- The five-way outcome vocabulary shown as itself. A `partial` and a
+  `recovery_required` must not render alike; the distinction is the reason the
+  taxonomy exists.
+- Undo where the row carries an inverse, per the cross-cutting promise, gated on
+  `can_undo()` so a row without one offers nothing rather than a control that
+  fails.
+- Retention class per row, so an operator can see what is about to age out
+  before it does.
+
+This panel is what makes the audit trail a feature instead of a liability: an
+unreadable record satisfies an auditor on paper and helps nobody at 03:00.
+
 ---
 
 ## Cross-cutting behaviour
@@ -1063,7 +1240,51 @@ authorization cache generation counters make this cheap.
 ## Frontend
 
 Svelte 5 + Vite, matching the stack already proven in `underspire/rrms-client`.
-Build output committed to `evennia/web/console/static/console/` (C9).
+Build output committed to `evennia/web/static/console/app/` (C9).
+
+**Built, after a detour.** The first implementation was 4,230 lines of vanilla
+JavaScript in one file, chosen for the reasons in its own header comment: no
+build step, no dependencies, and no artifact to rot. That reasoning is not
+wrong, and it cost more than it saved.
+
+The bill arrived as a `ReferenceError` in the flag dossier -- `duration` and
+`reach` declared in `editor()` and read in `flagDossier()` -- which made the one
+path that creates a sanction throw on every click. It shipped because the
+repository has no `package.json`, CI runs no Node, and nothing read that file
+until a browser did. Nine hundred service-side tests passed the whole time, and
+they were right to: the service was correct.
+
+Three of this document's own commitments were also unmet under vanilla, and all
+three are consequences of the same choice: tables were not virtualized, the data
+layer was hand-written per panel rather than driven from `spec.py`, and there
+was no test runner to notice either.
+
+What the ported stack delivers:
+
+`vitest` + `jsdom` run the renderers. `panels.test.ts` renders every panel
+twice -- synchronously, where a scope error surfaces, and after a stubbed reply
+lands, where a payload read against the wrong shape surfaces -- plus every
+detail view and every panel under a failed request. The suite's own
+effectiveness is asserted by injecting the original defect.
+
+`DataTable` is one component instead of twelve hand-rolled tables, and it is
+virtualized: forty thousand rows put fewer than two hundred in the DOM while the
+scrollbar still describes the whole listing.
+
+State is reactive rather than painted. The strip lamps derive from the feed, so
+they follow the server whichever station is open; the vanilla client walked
+`el.lamps` and set `dataset.state`, which only worked when the strip happened to
+be on the page.
+
+Output is one file, not a split bundle. Splitting would make the browser resolve
+chunk URLs a game is free to rewrite, and `ManifestStaticFilesStorage` hashes
+static filenames without rewriting import specifiers -- so a split build breaks
+on exactly the deployments that hash their assets. Panels are componentized in
+`src/panels/`, which is what "lazily loaded" was for.
+
+`npm run dev` serves the console standalone against any game server. The dev
+proxy rewrites the `Origin` header rather than asking anyone to widen
+`CSRF_TRUSTED_ORIGINS` on a live game.
 
 - Single shell, left nav from the registry, panels lazily loaded. Nav filtering
   has exactly two shapes: everything, or moderation only.
@@ -1192,9 +1413,29 @@ Resolve the jobs/event-bus doc-rot question before the job-queue view.
 Objects, Actions, Hooks, Prototypes. The panels that make the engine legible to
 someone learning it, and the ones that most exercise `spec.py`.
 
-By the end of phase 4 the registry API has been used by nineteen panels, which is
-the real proof that it is a public API — a stronger test than importing one
-external tool would have been.
+The registry API is now used by twenty-three panels, which is the real proof
+that it is a public API — a stronger test than importing one external tool
+would have been.
+
+Phase 4 itself landed with eighteen, not nineteen: P15 Database was not built
+until phase 5.
+
+### Phase 5 — the layer that makes it one product
+
+Named by the 2026-08-20 audit and built the same day. Ordered by what an
+operator reaches for first during an incident.
+
+1. **P22 Audit**, with undo and state-as-of.
+2. **The Runtime frontend gap** — `systems` and `tasks` were computed, tested,
+   and dropped by the renderer.
+3. **P3 Attributes: the tree, and the write path.**
+4. **Deep linking for every panel.**
+5. **A command palette**, replacing a digit shortcut the panel count outgrew.
+6. **P15 Database**, **P20 Jobs**, **P21 Event bus**.
+7. Export, saved views, bulk dry run, multi-operator presence.
+
+All landed. What remains is not console work: the moderation migration steps
+below, and the release that drops the `evennia.events` shim.
 
 ### Deferred
 
@@ -1454,6 +1695,11 @@ send; moderation network-list refresh; signup screening; game-event export.
 Verdict: **wire, both — already wired.** The Jobs panel and a `GameEvent` view
 ship as planned, and the ALPHA prompt should be rewritten from "wire or cut" to
 "confirm the contract and fix the collision."
+
+They are **P20** and **P21**. This decision originally named no panel number,
+and the panel list ran P1 to P19 without them, so the commitment was invisible
+to anyone reading either section alone and neither panel was built. Numbering
+them is the fix.
 
 **The name collision is resolved.** The bus moved to `evennia.eventbus` on
 2026-08-19, so it no longer shadows `evennia.actions.events` (the live

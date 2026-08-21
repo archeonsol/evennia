@@ -107,6 +107,7 @@
               </span>
             </span>
             <span class="who">{t.account_name || t.short_id}</span>
+            {#if t.subject}<span class="subject">{t.subject}</span>{/if}
             <span class="prev">{t.preview || "-"}</span>
           </button>
         {/each}
@@ -117,7 +118,10 @@
   {:else}
     <div class="convo">
       <div class="head">
-        <span class="petitioner">{ticket.label}: {ticket.account_name || ticket.short_id}</span>
+        <span class="petitioner">
+          {#if ticket.subject}{ticket.subject}{:else}{ticket.label}{/if}
+          <span class="sub">{ticket.label}: {ticket.account_name || ticket.short_id}</span>
+        </span>
         <span class="actions">
           <button class="act" onclick={() => chat.ticketClaim(ticket.id)}>Claim</button>
           {#if ticket.approvable}
@@ -287,4 +291,6 @@
     color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);
   }
   .reply input::placeholder { color: var(--fg-faint); font-style: italic; }
+  .subject { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .petitioner .sub { display: block; color: var(--fg-dim); font-weight: 400; font-size: 0.72rem; }
 </style>

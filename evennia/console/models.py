@@ -1,0 +1,209 @@
+"""Console audit trail.
+
+Django admin writes ``django.contrib.admin.models.LogEntry``. That model dies
+with the admin, and it cannot hold what this trail needs: a five-way outcome,
+frozen before/after payloads, an inverse for undo, and a correlation id that
+joins a mutation to the render nodes and log lines around it.
+
+Under the console's single-capability model (decision D1) the audit trail is
+the *only* internal control: everyone admitted to the console can already do
+everything. So this table is append-only at the service layer, has no console
+write path, and appears in the Records lens read-only alongside the sanction
+chain.
+
+Rows reference actors by id and name rather than by foreign key, matching the
+moderation substrate's convention: an audit record has to outlive the account
+it describes.
+
+"""
+
+from django.db import models
+from django.utils import timezone
+
+
+class ConsoleAuditEvent(models.Model):
+    """One recorded console operation.
+
+    Written after the domain result, in its own transaction, per the mutation
+    bridge's audit-ordering rule: a failure to record must never roll back or
+    invalidate a mutation that already happened. The operator is warned
+    instead.
+    """
+
+    OUTCOME_CONFLICT = "conflict"
+    OUTCOME_SUCCESS = "success"
+    OUTCOME_PARTIAL = "partial"
+    OUTCOME_RECOVERY = "recovery_required"
+    OUTCOME_INDETERMINATE = "indeterminate"
+    OUTCOME_CHOICES = [
+        (OUTCOME_CONFLICT, "rejected before any write"),
+        (OUTCOME_SUCCESS, "completed and verified"),
+        (OUTCOME_PARTIAL, "wrote, then faulted; do not retry"),
+        (OUTCOME_RECOVERY, "wrote, then faulted; needs operator action"),
+        (OUTCOME_INDETERMINATE, "started, outcome unknown; do not retry"),
+    ]
+    #: Outcomes that must never be automatically retried.
+    NON_RETRYABLE = frozenset({OUTCOME_PARTIAL, OUTCOME_RECOVERY, OUTCOME_INDETERMINATE})
+
+    #: Retention class. Moderation decisions and break-glass grants outlive any
+    #: configured window: appeal evidence and investigation evidence
+    #: respectively, and the latter is what an attacker would most want gone.
+    RETENTION_NORMAL = "normal"
+    RETENTION_REPL = "repl"
+    RETENTION_PERMANENT = "permanent"
+    RETENTION_CHOICES = [
+        (RETENTION_NORMAL, "pruned on the standard window"),
+        (RETENTION_REPL, "pruned on the REPL window"),
+        (RETENTION_PERMANENT, "never pruned"),
+    ]
+
+    event_id = models.CharField(max_length=32, unique=True, db_index=True)
+
+    # --- who ------------------------------------------------------------
+    actor_id = models.IntegerField(null=True, blank=True, db_index=True)
+    actor_name = models.CharField(max_length=255, default="", blank=True, db_index=True)
+
+    # --- what -----------------------------------------------------------
+    panel = models.CharField(max_length=64, db_index=True)
+    operation = models.CharField(max_length=64, db_index=True)
+    # Generic reference, e.g. "objects.objectdb#42". Not a FK: the target may
+    # be deleted by the very operation this row records.
+    target_ref = models.CharField(max_length=160, default="", blank=True, db_index=True)
+
+    # --- result ---------------------------------------------------------
+    outcome = models.CharField(
+        max_length=24, choices=OUTCOME_CHOICES, default=OUTCOME_SUCCESS, db_index=True
+    )
+    message = models.CharField(max_length=500, default="", blank=True)
+
+    # --- payloads -------------------------------------------------------
+    # Frozen plain data under the service codec budget. ``inverse`` is present
+    # only when the service could build one, which is what gates undo; an
+    # absent inverse means undo is genuinely unavailable, not merely unbuilt.
+    before = models.JSONField(default=dict, blank=True)
+    after = models.JSONField(default=dict, blank=True)
+    inverse = models.JSONField(null=True, blank=True)
+
+    # --- joins ----------------------------------------------------------
+    # Ties this row to the render nodes and log lines from the same operation.
+    correlation_id = models.CharField(max_length=64, default="", blank=True, db_index=True)
+
+    retention = models.CharField(
+        max_length=16, choices=RETENTION_CHOICES, default=RETENTION_NORMAL, db_index=True
+    )
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Console audit event"
+        verbose_name_plural = "Console audit events"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["actor_id", "-created_at"]),
+            models.Index(fields=["panel", "operation", "-created_at"]),
+            models.Index(fields=["target_ref", "-created_at"]),
+            models.Index(fields=["outcome", "-created_at"]),
+        ]
+
+    def __str__(self):
+        who = self.actor_name or "(unknown)"
+        return f"ConsoleAuditEvent({self.panel}.{self.operation}, {who}, {self.outcome})"
+
+    @property
+    def is_retryable(self) -> bool:
+        """Return whether the recorded operation may be safely retried.
+
+        Only a deterministic pre-write rejection is retryable. Everything that
+        reached a write is not, regardless of how it ended.
+        """
+
+        return self.outcome == self.OUTCOME_CONFLICT
+
+    @property
+    def can_undo(self) -> bool:
+        """Return whether this row carries an inverse the console can apply."""
+
+        return self.outcome == self.OUTCOME_SUCCESS and bool(self.inverse)
+
+
+class ConsoleErrorState(models.Model):
+    """One operator judgement about one recurring fault.
+
+    Only judgements are stored. The faults themselves are grouped from the log
+    files on each request, so there is no capture path to maintain, no second
+    copy of every traceback, and no table that grows on its own -- a row
+    appears here when somebody decides something about a signature, and not
+    before.
+    """
+
+    STATE_OPEN = "open"
+    STATE_ACKNOWLEDGED = "acknowledged"
+    STATE_MUTED = "muted"
+    STATE_CHOICES = [
+        (STATE_OPEN, "awaiting review"),
+        (STATE_ACKNOWLEDGED, "seen, still happening"),
+        (STATE_MUTED, "known, hide until the signature changes"),
+    ]
+
+    #: Exception type plus the call path. Excludes line numbers, so an edit
+    #: above a fault does not read as a new fault.
+    signature = models.CharField(max_length=64, unique=True, db_index=True)
+    state = models.CharField(
+        max_length=16, choices=STATE_CHOICES, default=STATE_OPEN, db_index=True
+    )
+    note = models.CharField(max_length=500, default="", blank=True)
+
+    actor_id = models.IntegerField(null=True, blank=True)
+    actor_name = models.CharField(max_length=255, default="", blank=True)
+    updated_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Console error state"
+        verbose_name_plural = "Console error states"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"ConsoleErrorState({self.signature[:12]}, {self.state})"
+
+
+class ConsoleSavedView(models.Model):
+    """One named console view.
+
+    A filter combination that staff rebuild by hand daily -- a moderation queue
+    narrowed to one flag kind, a session query for one network range -- named
+    once and kept.
+
+    What is stored is the address-bar state, not a query. The console already
+    puts every panel's view state in the URL, so a saved view is that string
+    plus a name, and it stays correct as long as the panel that reads those
+    keys does. A stored query would have to be re-validated against the panel
+    on every load and would drift the first time a filter was renamed.
+
+    Views are shared rather than private. Under decision D1 everyone admitted
+    to the console can already see everything these views point at, so a
+    private view would hide the view and not the data, which helps nobody and
+    means the same queue gets rebuilt by the next person anyway.
+    """
+
+    name = models.CharField(max_length=120)
+    panel = models.CharField(max_length=64, db_index=True)
+    #: The URL fragment after the panel key, exactly as the address bar holds
+    #: it. Opaque to this model on purpose.
+    query = models.CharField(max_length=1000, default="", blank=True)
+    description = models.CharField(max_length=300, default="", blank=True)
+    #: Shown in the station rail rather than only in the saved-view list.
+    pinned = models.BooleanField(default=False, db_index=True)
+
+    created_by_id = models.IntegerField(null=True, blank=True, db_index=True)
+    created_by_name = models.CharField(max_length=255, default="", blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Console saved view"
+        verbose_name_plural = "Console saved views"
+        ordering = ["panel", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["panel", "name"], name="console_view_unique_name")
+        ]
+
+    def __str__(self):
+        return f"ConsoleSavedView({self.panel}:{self.name})"

@@ -37,6 +37,11 @@ from collections import OrderedDict, deque
 from django.conf import settings
 
 from evennia.moderation.capture import derive_cidr, normalize_address
+
+#: Prefix an IPv6 site is counted against, alongside its /64. A customer
+#: assignment is a /56 or a /48, so /48 is the widest unit that is still one
+#: subscriber rather than a whole carrier.
+_IPV6_SITE_PREFIX = 48
 from evennia.utils import logger
 
 REFUSAL_TEXT = "Too many connections from your network. Wait a minute and try again.\r\n"
@@ -96,11 +101,63 @@ class ConnectionRateLimiter:
         normalized = normalize_address(address)
         if not normalized or self._exempt(normalized):
             return False
-        key = derive_cidr(normalized)
-        if not key:
-            return False
 
         now = time.monotonic() if now is None else now
+        for key, bucket_limit in self._buckets(normalized, limit):
+            if self._over(key, bucket_limit, window, now):
+                return True
+        return False
+
+    def _buckets(self, address: str, limit: int):
+        """Yield every ``(key, limit)`` this address is counted against.
+
+        IPv4 gets one bucket, its /24, and that is the whole story: an attacker
+        who wants a second /24 has to rent one.
+
+        IPv6 gets two. A residential customer is handed a /56 or a /48, not a
+        single /64, so one person routinely holds between 256 and 65,536
+        distinct /64 keys. A limit that counts only /64 is a limit that
+        multiplies by that number for anybody who reads their own address
+        assignment, which is not a sophisticated attack.
+
+        The wider bucket carries a wider allowance, set by
+        ``MODERATION_CONNECT_RATE_SITE_FACTOR``. It has to be loose enough that
+        a genuinely shared site -- a university, a large household behind one
+        prefix -- is not refused during a normal evening, and tight enough that
+        one prefix cannot open unlimited connections by walking its own
+        subnets.
+
+        Args:
+            address: Normalized client address.
+            limit: The configured per-network limit.
+
+        Yields:
+            tuple: A counting key and the limit that applies to it.
+        """
+
+        narrow = derive_cidr(address)
+        if narrow:
+            yield narrow, limit
+
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError:
+            return
+        if parsed.version != 6:
+            return
+
+        factor = float(_setting("MODERATION_CONNECT_RATE_SITE_FACTOR", 8))
+        if factor <= 0:
+            return
+        try:
+            site = str(ipaddress.ip_network(f"{address}/{_IPV6_SITE_PREFIX}", strict=False))
+        except ValueError:
+            return
+        yield site, max(limit, int(limit * factor))
+
+    def _over(self, key, limit, window, now) -> bool:
+        """Return whether one key has passed its limit inside the window."""
+
         timestamps = self._windows.get(key)
         if timestamps is None:
             # maxlen caps a single network's memory. One slot past the limit is

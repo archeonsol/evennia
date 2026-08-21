@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-console>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Console (development)</title>
+    <!--
+      The development entry, used by `npm run dev`. Django serves the real one
+      from templates/console/index.html; this exists so the console can be
+      worked on without a running game server.
+
+      The stylesheets are the engine's own, loaded straight off disk through the
+      `/engine-static/` alias in vite.config.ts. Copying them here would create a
+      second copy of the visual world that drifts from the one Django serves,
+      which is the specific failure this file is arranged to avoid.
+    -->
+    <link rel="stylesheet" href="/engine-static/console/mission.css" />
+    <link rel="stylesheet" href="/engine-static/console/console.css" />
+  </head>
+  <body>
+    <div id="console-root">
+      <div class="boot"><p class="boot-line">CONNECT TO THE CONSOLE API.</p></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

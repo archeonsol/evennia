@@ -253,6 +253,7 @@ class _WSServerRole:
         # Handshake data the session layer reads (autobahn attribute names).
         self.http_request_uri = None
         self.http_headers = {}
+        self.http_header_order = []
         super().__init__(ConnectionType.SERVER, *args, **kwargs)
 
     def _handle_event(self, event):
@@ -263,9 +264,17 @@ class _WSServerRole:
 
     def _accept_handshake(self, event):
         headers = {}
+        # The names as sent, in the order sent. A dict loses both: it lowercases
+        # on the way in and a repeated header overwrites its earlier self. The
+        # order a browser sends its headers in is a property of its build, and
+        # it costs nothing to keep here.
+        order = []
         for name, value in event.extra_headers:
-            headers[name.decode("latin1").lower()] = value.decode("latin1")
+            raw = name.decode("latin1")
+            order.append(raw)
+            headers[raw.lower()] = value.decode("latin1")
         self.http_headers = headers
+        self.http_header_order = order[:64]
         self.http_request_uri = event.target  # path + query, e.g. "/?csessid&.."
 
         request = _ConnectionRequest(

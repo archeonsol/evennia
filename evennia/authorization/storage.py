@@ -151,6 +151,45 @@ def resource_ref(resource) -> str:
     return f"{kind}:{pk}"
 
 
+#: Attribute document keys for the quell flag. Read directly from the column
+#: when the handler is unavailable; see :func:`_quell_flag`.
+_QUELL_CATEGORY = "~"
+_QUELL_DATA = "_d"
+_QUELL_KEY = "_quell"
+
+
+def _read_quell_document(source) -> bool:
+    """Return the quell flag from the principal's stored attribute document.
+
+    Readable from any thread, because it is an ordinary column on the
+    principal's own row rather than handler state.
+
+    Staleness contract: this sees the last flushed document, so a quell set
+    within the current ``ATTRIBUTE_FLUSH_INTERVAL`` (one second by default)
+    may not be visible yet. Acceptable because quell is a voluntary,
+    self-imposed suppression rather than a revocation, and because the
+    alternative -- denying every capability whenever the reader is not the IO
+    owner -- is not fail-closed, it is fail-broken.
+    """
+
+    pk = getattr(source, "pk", None)
+    if pk is None:
+        return False
+    try:
+        row = type(source)._base_manager.filter(pk=pk).values_list("db_attrs", flat=True).first()
+    except Exception:  # noqa: BLE001 - a failed read must not deny authority
+        return False
+    if not isinstance(row, dict):
+        return False
+    section = row.get(_QUELL_CATEGORY)
+    if not isinstance(section, dict):
+        return False
+    data = section.get(_QUELL_DATA)
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get(_QUELL_KEY))
+
+
 def load_grants(principal) -> GrantSnapshot:
     """Load or return cached positive grants for a principal."""
 
@@ -182,6 +221,13 @@ def load_grants(principal) -> GrantSnapshot:
         authority_suppressed = bool(authority_source.attributes.get("_quell"))
     except AttributeError:
         authority_suppressed = False
+    except Exception:  # noqa: BLE001 - the handler is IO-owner-only
+        # Off the IO thread, building or reading the attribute handler raises.
+        # That exception used to travel into has_capability's blanket except
+        # and become "holds no capabilities at all", so every authorization
+        # decision made from a worker thread failed for a reason unrelated to
+        # authorization. Read the stored document instead.
+        authority_suppressed = _read_quell_document(authority_source)
     valid_until = None
     for grant in query.only(
         "principal_ref",

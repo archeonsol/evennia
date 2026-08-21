@@ -1,0 +1,764 @@
+/* Engine console: the shell.
+ *
+ * The world this is drawn in lives in mission.css, which the template loads
+ * first. This file carries only what belongs to the console page itself: the
+ * top strip, the station rail, and the panels' own furniture.
+ *
+ * Position is meaning here -- a station occupies the same place every time, so
+ * an operator reads by muscle memory rather than by hunting.
+ */
+/* --------------------------------------------------------------- top strip */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--strip-h);
+  padding: 0 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+}
+
+.strip-id {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.strip-mark {
+  align-self: center;
+  width: 10px;
+  height: 10px;
+  background: var(--attn);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.strip-name {
+  font: 600 13px/1 var(--mono);
+  letter-spacing: 0.2em;
+}
+
+.strip-version {
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-faint);
+}
+.strip-version:empty::before { content: attr(data-empty); }
+
+.strip-lamps {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.strip-actor {
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+  padding-left: 12px;
+  border-left: 1px solid var(--rule);
+}
+
+/* ------------------------------------------------------------------- frame */
+
+.frame {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  height: calc(100% - var(--strip-h));
+}
+
+/* --------------------------------------------------------------------- rail */
+
+.rail {
+  background: var(--panel);
+  border-right: 1px solid var(--rule);
+  padding: 12px 0;
+  overflow-y: auto;
+}
+
+.rail-heading {
+  padding: 0 12px 8px;
+}
+
+.rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 12px 7px 10px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--ink-dim);
+  font: 500 13px/1.3 var(--sans);
+  cursor: pointer;
+  transition: background-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.rail-item:hover { background: var(--raised); color: var(--ink); }
+
+.rail-item[aria-current="true"] {
+  background: var(--raised);
+  border-left-color: var(--attn);
+  color: var(--ink);
+}
+
+.rail-item small {
+  display: block;
+  font: 400 11px/1.35 var(--sans);
+  color: var(--ink-faint);
+  margin-top: 2px;
+}
+
+.rail-note {
+  margin: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  font: 400 11px/1.5 var(--mono);
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ station */
+
+.station {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.station:focus { outline: none; }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.panel-title {
+  margin: 0;
+  font: 600 13px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.panel-count {
+  margin-left: auto;
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--ground);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+label.legend { cursor: default; }
+
+select, input[type="search"] {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 12px/1.3 var(--mono);
+}
+
+select { min-width: 220px; }
+input[type="search"] { width: 200px; }
+
+input::placeholder { color: var(--ink-faint); }
+
+button {
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink-dim);
+  font: 500 11px/1.35 var(--mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+
+button:hover:not(:disabled) { background: var(--raised); color: var(--ink); border-color: var(--ink-faint); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.spacer { margin-left: auto; }
+
+/* -------------------------------------------------------------------- body */
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* ------------------------------------------------------------------ notice */
+
+.notice {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  max-width: 46ch;
+  padding: 10px 12px;
+  border: 1px solid var(--fail);
+  border-left-width: 1px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 45%);
+  color: var(--ink);
+  font: 400 12px/1.5 var(--mono);
+}
+
+.notice[data-kind="attn"] { border-color: var(--attn); }
+
+.notice-legend {
+  display: block;
+  margin-bottom: 4px;
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------ narrow width */
+
+@media (max-width: 860px) {
+  :root { --rail-w: 100%; }
+
+  .frame {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    height: auto;
+    min-height: calc(100% - var(--strip-h));
+  }
+
+  .rail {
+    display: flex;
+    gap: 4px;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    overflow-x: auto;
+  }
+
+  .rail-heading, .rail-item small, .rail-note { display: none; }
+
+  .rail-item {
+    width: auto;
+    white-space: nowrap;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+  }
+
+  .rail-item[aria-current="true"] { border-left: 0; border-bottom-color: var(--attn); }
+
+  .strip-actor { display: none; }
+  select, input[type="search"] { width: 100%; min-width: 0; }
+  .field { flex: 1 1 180px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 1ms !important; }
+}
+
+/* ------------------------------------------------------------------ editor */
+
+/* A region of the station rather than a modal: nothing here needs protected
+ * focus, and an operator checking a value against the rows above should not
+ * have the table hidden behind a sheet. */
+.editor {
+  padding: 12px 14px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px 14px;
+}
+
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.editor-field input {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 12px/1.3 var(--mono);
+}
+
+.editor .empty-hint {
+  margin-top: 10px;
+}
+
+tbody tr[title] {
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------------- logs */
+
+.section-legend {
+  margin: 12px 0 4px;
+  padding: 0 14px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.log-view {
+  max-height: 38vh;
+  overflow: auto;
+  padding: 6px 14px;
+  font: 400 12px/1.5 var(--mono);
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  padding: 1px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.log-source {
+  flex: 0 0 84px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.log-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------------- faults */
+
+.fault {
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.fault-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font: 400 12px/1.4 var(--mono);
+}
+
+.fault-head:hover {
+  background: var(--panel);
+}
+
+.fault-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.fault-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.fault-count {
+  flex: 0 0 auto;
+  color: var(--attn);
+}
+
+.fault-when {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+}
+
+.fault-frames {
+  padding: 4px 14px 8px;
+  background: var(--panel);
+}
+
+.fault-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 14px 12px;
+  background: var(--panel);
+}
+
+.fault-actions input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 12px/1.3 var(--mono);
+}
+
+/* -------------------------------------------------------- moderation, authz */
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+/* A name that is also the control for looking it up.
+ *
+ * Not styled as a link: it navigates nothing and copies as nothing. It reads as
+ * the value it is, and only says it is reachable when the operator is on it. */
+.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.linkish:hover,
+.linkish:focus-visible {
+  color: var(--ink);
+  border-bottom-color: currentColor;
+}
+
+/* Which signatures one connection carried.
+ *
+ * Fixed width so the column lines up down the list. An operator scanning for
+ * the row that is missing a handshake is reading the shape of the column, not
+ * each row in turn, and ragged text destroys that. */
+.sig-marks {
+  flex: 0 0 auto;
+  min-width: 116px;
+  text-align: right;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* Nothing was recorded, which is not the same as nothing being shown. */
+.sig-marks.none {
+  color: var(--ink-dim);
+  opacity: 0.55;
+}
+
+.probe-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 0;
+}
+
+.probe-text {
+  font: 400 12px/1.5 var(--mono);
+  color: var(--ink);
+}
+
+/* -------------------------------------------------------------- repl, sql */
+
+textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 12px/1.5 var(--mono);
+  resize: vertical;
+}
+
+textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------ introspection rows */
+
+/* A field that takes the free width of a toolbar. The action resolver takes a
+   whole line of player input, which does not fit a search-box width. */
+.field.grow {
+  flex: 1 1 auto;
+}
+
+.field.grow input {
+  width: 100%;
+}
+
+/* --fail is a lamp fill that carries dark ink on top. As a word on the panel
+ * ground it measures 4.08:1, which is below AA, so a word uses the text-weight
+ * red instead. */
+.fail-text {
+  color: var(--fail-text);
+}
+
+/* ------------------------------------------------------------------ detail */
+
+/* An inline record opened above the list it came from. Bordered rather than
+   floated: a modal would hide the row that led here, and the two are read
+   together. */
+.detail {
+  margin-bottom: 20px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+}
+
+/* ----------------------------------------------------------------- palette */
+
+#palette {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgb(0 0 0 / 55%);
+}
+
+.palette-box {
+  width: min(560px, 92vw);
+  height: fit-content;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+#palette-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 13px/1.4 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+#palette-input:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+#palette-list {
+  max-height: 46vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#palette-list li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+#palette-list li:last-child {
+  border-bottom: 0;
+}
+
+#palette-list li.current {
+  background: var(--ground);
+  box-shadow: inset 2px 0 0 var(--focus);
+}
+
+.palette-name {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.palette-hint {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-empty {
+  color: var(--ink-faint);
+  cursor: default;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.rail-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rail-palette {
+  padding: 2px 6px;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink-faint);
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.rail-palette:hover {
+  border-color: var(--focus);
+  color: var(--ink);
+}
+
+/* -------------------------------------------------------------------- tree */
+
+.tree {
+  margin-bottom: 14px;
+  font: 400 12px/1.6 var(--mono);
+}
+
+.tree-entry {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.tree-key {
+  flex: 1 1 auto;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+
+.tree-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.tree-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink-dim);
+  font: 500 11px/1.4 var(--mono);
+}
+
+.tree-name {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+}
+
+.tree-kind {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tree-summary {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A table cell that acts as a link into another view. Styled as text rather
+   than as a button: it sits in a data column and a row of buttons would read
+   as a toolbar. */
+.linky {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linky:hover {
+  color: var(--focus);
+}
+
+/* -------------------------------------------------------------------- code */
+
+/* A stored payload or traceback, shown as stored. Scrolls in its own box so a
+   long line cannot push the page sideways. */
+pre.code {
+  max-height: 320px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 11px/1.6 var(--mono);
+  white-space: pre;
+}
+
+/* ---------------------------------------------------------------- presence */
+
+#presence {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 10px;
+}
+
+/* A selection column. Narrow, and it does not participate in the row's own
+   click target. */
+th.pick,
+td.pick {
+  width: 28px;
+  padding-right: 0;
+  text-align: center;
+}
+
+/* The count of accounts a ban would reach, shown next to the form that issues
+   it rather than on another page. */
+.collateral {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--attn);
+  background: var(--ground);
+}

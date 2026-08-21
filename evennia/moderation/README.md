@@ -67,6 +67,25 @@ deployment.** Behind Cloudflare, `CF-Connecting-IP` is the header to trust, not
 - `client_fp` — SHA-256 over the negotiated capability set: client name, terminal
   type, encoding, and the option flags. Screen dimensions are deliberately
   excluded, since they change whenever the player resizes their window.
+- `telnet_sig` — SHA-256 over the option negotiation the client's own stack
+  performed: which options it asked for, in which order, and which subnegotiations
+  completed. Narrower than `client_fp` on purpose. `client_fp` folds in the client
+  name and terminal type, which a player edits in a settings box; changing this
+  one means changing client.
+- `tls_sig` — SHA-256 over the TLS handshake a reverse proxy terminated:
+  protocol version, offered ciphers, curves, and negotiated ALPN. **Not JA4.**
+  JA4 also hashes the extension list, which no stock proxy variable exposes, so
+  this is named for what it is. Two rules keep it stable: GREASE values are
+  stripped, because they are random per connection by design and keeping them is
+  why JA3 stopped being useful; and the lists are sorted, because a proxy may
+  report them in whatever order it read them and a fingerprint that depends on
+  proxy behaviour breaks when the proxy is upgraded. Empty unless the peer is in
+  `settings.UPSTREAM_IPS` — a client can set any header, and a forged
+  fingerprint is worse than none, because staff would believe it.
+- `http_order_fp` — SHA-256 over which headers the client sent and in what order.
+  Names only; the values are hashed separately by `http_fp`. Hop-by-hop headers
+  are excluded, since a proxy adds and reorders those. Needs no proxy support:
+  the websocket handshake already arrives as an ordered list.
 
 ## Linking accounts
 
@@ -76,14 +95,39 @@ By exact match on a shared key, not by a confidence number:
 - same `csessid`
 - same `client_fp` **and** same `cidr`
 - same `cidr` within a window
+- same `cidr` **and** one of `telnet_sig`, `tls_sig`, or `csessid`, where the
+  other account is currently blocked
 
 `client_fp` alone is not identity. A default PuTTY or a stock webclient produces
 a common value shared by many unrelated players; it is a narrowing signal, never
 a conclusion.
 
+The last rule is `detect_identity_correlation`, and every signature the session
+carries is checked rather than the first one present — a player who clears
+cookies still performs the same TLS handshake, which is the case the handshake
+was added for. It fires for an unauthenticated session too, because somebody who
+has been banned reconnects and sits at the login prompt with no account name to
+match on.
+
+`http_order_fp` is deliberately **not** one of those signatures. Header order
+identifies a browser build, so on any busy network it would match most web
+players at once, and a flag that fires for everybody teaches staff to skip the
+queue. It is recorded, indexed, and readable from the console; it is not a
+trigger.
+
 ## Not built yet
 
-Sanctions (the `server_bans` replacement), the staff UI, portal-level blocking,
-ASN/geo enrichment, the web device token, negotiation order and timing, and
-registration signals. Retention purging of the raw `ip` column is also still to
-come — until it exists, addresses are kept indefinitely.
+Nothing on the original list. Sanctions, the staff UI, portal-level blocking,
+ASN/geo enrichment, the web device token, negotiation order and timing,
+registration signals, and retention purging of the raw `ip` column all shipped;
+see `sanctions.py`, `portal_guard.py`, `enrich.py`, `device.py`,
+`registration.py`, and `retention.py`. The staff UI is the engine console's
+Moderation panel (`evennia/console/panels/moderation.py`).
+
+What is captured and not yet acted on: `tls_sig` and `http_order_fp` are
+recorded, indexed, correlated in the account dossier, and reported by the
+console's signal-coverage readout. `tls_sig` is a correlation trigger;
+`http_order_fp` is not, for the reason above. Neither is used by
+`detect_sanctioned_key_reuse`, which matches on a key alone with no network
+gate — a build signature there would flag every player who uses the same
+browser as somebody banned.

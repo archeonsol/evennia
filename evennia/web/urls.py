@@ -20,6 +20,8 @@ from django.conf import settings
 from django.urls import include, path
 from django.views.generic import RedirectView
 
+from evennia.web.console.views import ConsoleAppView
+
 # Setup the root url tree from /
 
 urlpatterns = [
@@ -33,6 +35,14 @@ urlpatterns = [
     # favicon
     path("favicon.ico", RedirectView.as_view(url="/media/images/favicon.ico", permanent=False)),
 ]
+
+if getattr(settings, "CONSOLE_ENABLED", True):
+    # Engine console API. The console's own page is mounted by the game; the
+    # engine ships the API and the built frontend assets.
+    urlpatterns += [
+        path("api/console/", include("evennia.web.console.urls", namespace="console")),
+        path("console/", ConsoleAppView.as_view(), name="console-app"),
+    ]
 
 if settings.REST_API_ENABLED:
     # Rest API
