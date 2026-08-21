@@ -577,3 +577,54 @@ class TestDangerousActionsNeedPresence(ConsoleAPITestCase):
         response = self._post("repl", "execute")
         self.assertEqual(response.status_code, 403)
         self.assertTrue(response.json().get("disabled"))
+
+
+class TestAuthenticationIsDeclared(ConsoleAPITestCase):
+    """The console names its own authentication instead of inheriting one.
+
+    ``APIView`` reads ``DEFAULT_AUTHENTICATION_CLASSES`` once, at import, into
+    a class attribute. A game whose own API is token only -- and which
+    therefore drops ``SessionAuthentication`` from that setting -- left every
+    console request anonymous, and DRF answered 401 with nothing in the console
+    naming the cause. The page rendered, the lamps lit, and the first fetch
+    failed.
+
+    Because that read happens at import, ``override_settings`` cannot
+    reproduce it: the class attribute is already bound. The test that matters
+    is therefore the invariant itself -- the console declares its own -- plus
+    one that patches the inherited attribute to prove the declaration is what
+    is being used.
+    """
+
+    def test_the_console_declares_rather_than_inherits(self):
+        # The whole fix. Inheriting means a game's API settings decide whether
+        # the console's own credential is read.
+        self.assertIn("authentication_classes", console_views.ConsoleView.__dict__)
+
+    def test_session_authentication_is_declared(self):
+        from rest_framework.authentication import SessionAuthentication
+
+        self.assertIn(SessionAuthentication, console_views.ConsoleView.authentication_classes)
+
+    def test_basic_authentication_is_not_offered(self):
+        # It is in the stock defaults and has no business in front of a REPL:
+        # it would put credentials on every request rather than once at sign-in.
+        from rest_framework.authentication import BasicAuthentication
+
+        self.assertNotIn(BasicAuthentication, console_views.ConsoleView.authentication_classes)
+
+    def test_a_token_only_game_still_admits_a_signed_in_operator(self):
+        """The regression, reproduced the way it actually happens."""
+
+        from rest_framework.authentication import TokenAuthentication
+        from rest_framework.views import APIView
+
+        # Stand in for a game that narrowed the default before import time.
+        with patch.object(APIView, "authentication_classes", [TokenAuthentication]):
+            response = self.client.get(reverse("console:root"), **HEADERS)
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_signed_out_caller_is_still_refused(self):
+        self.client.logout()
+        response = self.client.get(reverse("console:root"), **HEADERS)
+        self.assertIn(response.status_code, (401, 403))
