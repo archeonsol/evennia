@@ -35,7 +35,9 @@ describe("DataTable", () => {
     // The operator must not be able to tell. A spacer below carries the height
     // of every row that is not in the DOM.
     const { container } = render(Harness, { rows: rows(40000) });
-    const spacers = container.querySelectorAll("tr.spacer");
+    // The height lives on the cell, not the row: a `tr` with no cells collapses
+    // to nothing whatever height it is given.
+    const spacers = container.querySelectorAll("tr.spacer > td");
     expect(spacers.length).toBeGreaterThan(0);
     const total = Array.from(spacers).reduce(
       (sum, node) => sum + parseInt((node as HTMLElement).style.height || "0", 10),
@@ -60,5 +62,32 @@ describe("DataTable", () => {
     const { container } = render(Harness, { rows: [] });
     expect(container.querySelectorAll("tbody tr")).toHaveLength(0);
     expect(container.querySelectorAll("th")).toHaveLength(2);
+  });
+});
+
+describe("the scroll frame", () => {
+  it("gives the spacers a real cell so they can hold height", () => {
+    // A `tr` with no cells collapses to nothing whatever height it is given,
+    // so the scrollbar stopped describing the listing and the virtual window
+    // never advanced.
+    const { container } = render(Harness, { rows: rows(40000) });
+    const spacerCells = container.querySelectorAll("tr.spacer > td");
+    expect(spacerCells.length).toBeGreaterThan(0);
+    for (const cell of spacerCells) {
+      expect(parseInt((cell as HTMLElement).style.height || "0", 10)).toBeGreaterThan(0);
+    }
+  });
+
+  it("spans the spacer across every column", () => {
+    const { container } = render(Harness, { rows: rows(40000) });
+    const cell = container.querySelector("tr.spacer > td");
+    expect(cell?.getAttribute("colspan")).toBe("2");
+  });
+
+  it("puts the table in a frame that can scroll", () => {
+    const { container } = render(Harness, { rows: rows(40000) });
+    const frame = container.querySelector(".table-scroll");
+    expect(frame).not.toBeNull();
+    expect((frame as HTMLElement).style.maxHeight).toBeTruthy();
   });
 });

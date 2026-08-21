@@ -160,6 +160,34 @@ body, body * {
 
 /* ------------------------------------------------------------------- table */
 
+/* The scrolling frame a long listing lives in.
+ *
+ * `max-height` is set per table by the component. Without an `overflow` rule
+ * beside it the rows simply spilled past the box and drew over whatever came
+ * next, and the frame never scrolled -- which also froze the virtualized
+ * window, because that window is computed from `scrollTop`. One listing's
+ * worth of rows was all anybody could reach.
+ *
+ * The sticky `thead` below only sticks relative to this element, so the two
+ * belong together. */
+.table-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+/* Rows the virtualizer is standing in for. They carry the height of everything
+ * scrolled past so the scrollbar describes the whole listing, and they must
+ * hold that height without drawing a rule or a hover. */
+tr.spacer td {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+tr.spacer:hover td { background: none; }
+
+
 table {
   width: 100%;
   border-collapse: collapse;

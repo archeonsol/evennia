@@ -25,6 +25,42 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.213 — Long listings scroll, and a masked value can be asked for
+
+### Frontend
+
+- `DataTable` set a `max-height` on its frame and nothing gave that frame an
+  `overflow`. Two symptoms, one omission: rows past the height drew over
+  whatever followed the table -- the note lines under Actions, Objects and
+  Prototypes, and the second table on Database, all appeared stacked on the
+  rows -- and the frame could not scroll, which froze the virtualized window,
+  since that window is computed from `scrollTop`. One screenful was all anybody
+  could reach of 657 actions or 667 prototypes, so the panels looked unpaged
+  because in effect they were.
+- The virtualizer's spacer rows were `tr` elements with no cells. Such a row
+  collapses to nothing whatever height it is given, so the rows standing in for
+  everything scrolled past held no space and the scrollbar never described the
+  whole listing. They carry a `td` spanning the columns now.
+- `thead th` was already `position: sticky`, which does nothing without a
+  scrolling ancestor and now has one.
+
+### Moderation
+
+- **The reveal control exists.** The audited `reveal` action has been there
+  since the panel shipped -- a reason and a password, recorded permanently --
+  but no client ever called it, so a masked address read as a permission the
+  operator lacked rather than a value they could ask for. It is not a
+  capability and never was: nobody is prevented, everybody is recorded, and the
+  record says why. The revealed value is held in the control and never written
+  back into the row, so it is gone on the next render rather than left on the
+  page.
+
+### Migration
+
+- No migration and no settings change.
+
+---
+
 ## 6.0.0+underspire.212 — Two prod faults the logs were already reporting
 
 ### Engine
