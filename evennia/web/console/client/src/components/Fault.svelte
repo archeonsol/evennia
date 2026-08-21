@@ -17,7 +17,13 @@
   const { group, onReviewed }: Props = $props();
 
   const open = $derived(view.errorOpen === group.signature);
-  let note = $state(group.note ?? "");
+
+  /* The operator's draft, or the note the server holds when there is no draft.
+   * Keeping the draft in plain `$state` seeded from the prop would capture the
+   * first value and never follow a reload, so after reviewing a fault the box
+   * would still show what was typed rather than what was saved. */
+  let draft = $state<string | null>(null);
+  const note = $derived(draft ?? group.note ?? "");
 
   const lampState = $derived(
     group.state === "muted" ? "off" : group.state === "acknowledged" ? "attn" : "fail",
@@ -32,7 +38,10 @@
       state: wanted,
       note,
     });
-    if (done !== null) onReviewed();
+    if (done === null) return;
+    // What was saved replaces the draft, so the box shows the record.
+    draft = null;
+    onReviewed();
   }
 </script>
 
@@ -65,7 +74,8 @@
         type="text"
         placeholder="WHY, FOR WHOEVER READS THIS NEXT"
         aria-label="Review note"
-        bind:value={note}
+        value={note}
+        oninput={(event) => (draft = event.currentTarget.value)}
       />
       <button type="button" onclick={() => review("acknowledged")}>ACKNOWLEDGE</button>
       <button

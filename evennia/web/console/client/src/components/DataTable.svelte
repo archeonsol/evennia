@@ -30,6 +30,9 @@
     rows: Row[];
     /** Renders one row's cells. Receives the row and its index. */
     row: Snippet<[Row, number]>;
+    /** Replaces the whole header row, for headings that are also controls.
+     *  Records needs this: its headings sort, and one of them selects a page. */
+    head?: Snippet;
     /** Stable identity per row, so a scroll does not re-create every node. */
     key?: (row: Row, index: number) => string | number;
     /** Height of one rendered row, in pixels. Rows are single-line by design. */
@@ -47,6 +50,7 @@
     columns,
     rows,
     row,
+    head,
     key,
     rowHeight = 26,
     overscan = 8,
@@ -96,11 +100,15 @@
 >
   <table aria-label={label || undefined} aria-rowcount={rows.length}>
     <thead>
-      <tr>
-        {#each columns as column (column.key)}
-          <th scope="col" class={column.numeric ? "num" : undefined}>{column.label}</th>
-        {/each}
-      </tr>
+      {#if head}
+        {@render head()}
+      {:else}
+        <tr>
+          {#each columns as column (column.key)}
+            <th scope="col" class={column.numeric ? "num" : undefined}>{column.label}</th>
+          {/each}
+        </tr>
+      {/if}
     </thead>
     <tbody>
       {#if above > 0}

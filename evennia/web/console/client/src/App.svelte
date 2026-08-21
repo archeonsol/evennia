@@ -6,7 +6,7 @@
   import Station from "./components/Station.svelte";
   import { call } from "./lib/api";
   import { openFeed } from "./lib/feed.svelte";
-  import { session, readUrl, writeUrl, select } from "./lib/state.svelte";
+  import { session, view, URL_KEYS, readUrl, writeUrl, select } from "./lib/state.svelte";
 
   /* The shell. Three regions that never move, so the operator learns positions
    * instead of navigation. */
@@ -60,6 +60,18 @@
 
   $effect(() => {
     boot();
+  });
+
+  /* Every view change reaches the address bar.
+   *
+   * The vanilla client got this for free because one function both re-rendered
+   * and rewrote the URL. Here the panels change `view` directly and nothing
+   * else was watching, so a filter set by clicking was not in the link that was
+   * copied -- which is exactly the promise the address bar is carrying. */
+  $effect(() => {
+    for (const key of URL_KEYS) void view[key];
+    void session.current;
+    if (session.booted) writeUrl();
   });
 
   $effect(() => {

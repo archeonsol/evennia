@@ -26,31 +26,17 @@ FORM: Grounded candidate 1 (mission control), pinned by the user over roll
 assignment 6, seed key 388469cc.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the
 finish review, the verdict, and DESIGN.md
+
+The shell is rendered by the client, not by this template. The strip, the rail,
+and the station were static markup that a script then filled in, which meant
+every region had two owners and neither could be tested. The stylesheets stay
+here: they are the visual world, shared with the game's own staff pages, and
+the port replaced the logic rather than the design.
 -->
-<a class="skip" href="#station">Go to the station</a>
-
-<header class="strip" aria-label="Server status">
-  <div class="strip-id">
-    <span class="strip-mark" aria-hidden="true"></span>
-    <span class="strip-name">CONSOLE</span>
-    <span class="strip-version" id="strip-version" data-empty="--"></span>
-  </div>
-  <div class="strip-lamps" id="strip-lamps" role="status" aria-live="polite"></div>
-  <div class="strip-actor" id="strip-actor"></div>
-</header>
-
-<div class="frame">
-  <nav class="rail" id="rail" aria-label="Stations"></nav>
-
-  <main class="station" id="station" tabindex="-1">
-    <div class="boot" id="boot">
-      <p class="boot-line">CONNECT TO THE CONSOLE API.</p>
-    </div>
-  </main>
+<div id="console-root">
+  <div class="boot"><p class="boot-line">CONNECT TO THE CONSOLE API.</p></div>
 </div>
 
-<div class="notice" id="notice" role="alert" hidden></div>
-
-<script type="module" src="{% static 'console/console.js' %}"></script>
+<script type="module" src="{% static 'console/app/console-app.js' %}"></script>
 </body>
 </html>
