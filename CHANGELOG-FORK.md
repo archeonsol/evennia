@@ -25,6 +25,57 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.212 — Two prod faults the logs were already reporting
+
+### Engine
+
+- [`server/redis_bus.py`](evennia/server/redis_bus.py): `RedisPortalBus` gains
+  `send_Status2Launcher` and `get_status`. `ipc_handlers_portal` pushes status
+  to the launcher after a PSYNC by calling that method on whatever link it was
+  handed, and only the AMP protocol had it, so every server restart on the
+  Redis bus raised
+
+      AttributeError: 'RedisPortalBus' object has no attribute 'send_Status2Launcher'
+
+  swallowed as "PSYNC status push failed". The launcher never learned the server
+  had come back: it waited for a status that could not arrive and timed out its
+  graceful shutdown on every restart, which is the `Graceful shutdown timed out;
+  stopping immediately` followed by `Retrying Evennia start once` that a deploy
+  shows.
+
+  The Redis bus has no socket to the server, so it reads the server *process*
+  for liveness through the `_PidTransport` already in that module. The status
+  tuple is now built by one shared function in
+  [`amp_server.py`](evennia/server/portal/amp_server.py): the two transports
+  disagree about exactly one thing -- how they know the server is up -- so that
+  is the argument and the rest is computed identically.
+
+- [`server/models.py`](evennia/server/models.py): the `SessionRecord` indexes on
+  `telnet_sig` and `tls_sig` are named to match the migrations that created
+  them. Django derives a hashed name for an unnamed index, so the model
+  disagreed with its own applied state: `makemigrations` produced a rename
+  nobody wanted, and every deploy reported pending migrations against a database
+  that was already correct.
+
+### Tests
+
+- `server/tests/test_redis_status.py` covers the status push without needing
+  Redis: the bus object is built without connecting, because what is under test
+  is what it answers rather than what it transports. Four of its ten fail
+  without the fix.
+- The `test_redis_bus` and `test_redis_reload` suites flake under fakeredis,
+  which never wakes a blocked `XREADGROUP`. This release was checked against
+  that: the same tests fail one-or-two times per run both with and without the
+  change, and the failing set shuffles in both directions.
+
+### Migration
+
+- No migration and no settings change. A game seeing pending migrations for the
+  `server` app after `underspire.211` needs only this release -- the database
+  was always correct; the model was describing it wrongly.
+
+---
+
 ## 6.0.0+underspire.211 — Console authentication, declared
 
 ### Engine

@@ -381,6 +381,36 @@ class RedisPortalBus(_RedisBusMixin):
         elif cmdkey == b"AdminServer2Portal":
             ipc_handlers_portal.receive_adminserver2portal(self, data)
 
+    def get_status(self):
+        """Return the launcher status tuple.
+
+        There is no socket to the server on this transport, so liveness is the
+        server process rather than a connection. `_PidTransport` already
+        answers exactly that question and is reused here.
+        """
+
+        from evennia.server.portal.amp_server import build_status
+
+        portal = self.factory.portal
+        return build_status(portal, _PidTransport(portal).connected)
+
+    def send_Status2Launcher(self):
+        """Push status to the launcher, if one is listening.
+
+        Without this the Redis bus raised AttributeError on every PSYNC --
+        `ipc_handlers_portal` calls this on the link it is given, and only the
+        AMP protocol had it. The launcher therefore never learned the server
+        had come back, waited for a status that could not arrive, and timed out
+        its graceful shutdown on every restart.
+        """
+
+        conn = self.factory.launcher_connection
+        if conn is None:
+            return
+        status = self.get_status()
+        if hasattr(conn, "push_status"):
+            conn.push_status(status)
+
     def send_MsgPortal2Server(self, session, **kwargs):
         return ipc_handlers_portal.send_msgportal2server(self, session, **kwargs)
 
