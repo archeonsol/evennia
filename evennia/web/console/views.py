@@ -28,6 +28,7 @@ from django.core.exceptions import FieldError
 from django.http import Http404
 from django.views.generic import TemplateView
 from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -120,6 +121,16 @@ class ConsoleView(APIView):
     """Base view: console permission, no throttle, uniform failure mapping."""
 
     permission_classes = [ConsolePermission]
+    # Declared, not inherited. The console authenticates with the session
+    # cookie and a scoped custom header, and it must say so: a game is free to
+    # narrow DEFAULT_AUTHENTICATION_CLASSES for its own API, and one that drops
+    # SessionAuthentication left every console request anonymous and answered
+    # 401, with nothing in the console naming the cause.
+    #
+    # Session only. BasicAuthentication is in the stock defaults and has no
+    # business in front of a REPL: it would let credentials reach this surface
+    # on every request instead of once at sign-in.
+    authentication_classes = [SessionAuthentication]
     # A leaked console session is bounded by the live capability re-check and
     # by session expiry, not by a rate limit; the console's own reads are
     # bounded by row caps in each panel.
