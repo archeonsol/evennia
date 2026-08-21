@@ -235,22 +235,31 @@ class TestSessions(TestCase):
             with self.assertRaises(LookupError):
                 SessionsPanel().watch(_io(), sessid=4242, reason="investigating")
 
-    def test_watching_is_recorded_permanently_and_names_the_watched(self):
-        # Surveillance whose subject cannot discover it was used is a
-        # different product from the one this plan describes.
+    def test_watching_refuses_because_nothing_mirrors_session_output(self):
+        # The control, the reason prompt and the permanent audit row were all
+        # built before the thing they describe. Nothing in the engine copies a
+        # session's output anywhere, so the action cannot do what it says.
         from types import SimpleNamespace
 
         account = SimpleNamespace(pk=7, username="player")
         with patch("evennia.server.sessionhandler.SESSIONS") as sessions:
             sessions.session_from_sessid.return_value = SimpleNamespace(account=account)
-            result = SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
+            with self.assertRaises(NotImplementedError):
+                SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
 
-        row = ConsoleAuditEvent.objects.get(panel="sessions", operation="watch")
-        self.assertEqual(row.retention, ConsoleAuditEvent.RETENTION_PERMANENT)
-        self.assertEqual(row.after["watched_account"], "player")
-        self.assertEqual(row.after["watched_account_id"], 7)
-        self.assertEqual(row.target_ref, "accounts.accountdb#7")
-        self.assertIn("watched account", result["note"])
+    def test_a_refused_watch_records_nothing(self):
+        # A permanent row saying an account was watched, when nobody saw
+        # anything, is a false statement about a real person -- and the account
+        # it names can read it in their own timeline.
+        from types import SimpleNamespace
+
+        account = SimpleNamespace(pk=7, username="player")
+        with patch("evennia.server.sessionhandler.SESSIONS") as sessions:
+            sessions.session_from_sessid.return_value = SimpleNamespace(account=account)
+            with self.assertRaises(NotImplementedError):
+                SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
+
+        self.assertFalse(ConsoleAuditEvent.objects.filter(operation="watch").exists())
 
     def test_disconnecting_is_recorded(self):
         from types import SimpleNamespace

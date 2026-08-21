@@ -449,16 +449,23 @@ class SessionsPanel(Panel):
 
     @io_action
     def watch(self, ctx, sessid=None, reason=""):
-        """Begin watching one session's output.
+        """Refuse to watch, because nothing mirrors a session's output yet.
 
-        Surveillance of a player by a staff member. The audit row is permanent
-        and names the watched account, so the person watched can discover it
-        was done -- which is the difference between a debugging tool and
-        something nobody agreed to.
+        The control and the audit trail for surveillance were built before the
+        thing they describe. No part of the engine copies a session's output
+        anywhere a second person could read it, so the action cannot do what
+        its name says.
+
+        It must not write the audit row regardless. A permanent record saying
+        an account was watched -- readable by that account, in their own
+        timeline -- is a false statement about a real person, and that is the
+        worse of the two faults. So this refuses, records nothing, and says
+        which of the two it is.
 
         Raises:
             LookupError: No such session.
             ValueError: No reason was given.
+            NotImplementedError: Always, when the arguments were valid.
         """
 
         from evennia.server.sessionhandler import SESSIONS
@@ -468,28 +475,7 @@ class SessionsPanel(Panel):
         session = SESSIONS.session_from_sessid(int(sessid)) if sessid else None
         if session is None:
             raise LookupError(f"no connected session with id {sessid!r}")
-
-        account = getattr(session, "account", None)
-        audit.record(
-            panel=self.key,
-            operation="watch",
-            actor_id=ctx.actor_id,
-            actor_name=ctx.actor_name,
-            target_ref=f"accounts.accountdb#{getattr(account, 'pk', '')}",
-            after={
-                "sessid": int(sessid),
-                "watched_account": str(getattr(account, "username", "")),
-                "watched_account_id": getattr(account, "pk", None),
-            },
-            message=str(reason)[:500],
-            retention="permanent",
+        raise NotImplementedError(
+            "Watching a session is not built: nothing mirrors session output "
+            "yet, so there is nothing to show. Nothing was recorded."
         )
-        return {
-            "sessid": int(sessid),
-            "watching": True,
-            "watched_account": str(getattr(account, "username", "")),
-            "note": (
-                "This is recorded permanently and appears in the watched account's "
-                "own audit timeline."
-            ),
-        }

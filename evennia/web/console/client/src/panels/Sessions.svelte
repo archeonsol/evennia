@@ -6,7 +6,6 @@
   import { Loader, rowsPath } from "../lib/load.svelte";
   import { call } from "../lib/api";
   import { report } from "../lib/report";
-  import { withPresence } from "../lib/presence";
 
   interface Row {
     sessid: number;
@@ -48,10 +47,7 @@
       return report(done);
     };
 
-    // Watching another person's session is the one read here that needs proof
-    // of presence. Disconnecting is disruptive and reversible; watching is not
-    // reversible, because it cannot be un-seen.
-    const ok = action === "watch" ? await withPresence(run) : await run();
+    const ok = await run();
     if (ok) reload += 1;
   }
 </script>
@@ -87,13 +83,6 @@
           <Cell value={item.protocol} />
           <Cell value={item.commands} />
           <td>
-            <button
-              type="button"
-              title="The console records this action permanently. The account sees it in its own timeline."
-              onclick={() => act("watch", item.sessid, "Why is this session being watched?")}
-            >
-              WATCH
-            </button>
             <button
               type="button"
               onclick={() =>
