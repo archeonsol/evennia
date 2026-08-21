@@ -25,6 +25,61 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.214 -- Two console readouts that were not telling the truth
+
+### Engine
+
+- [`console/panels/moderation.py`](evennia/console/panels/moderation.py): the
+  signal coverage readout sorted connections by an exact match against three
+  protocol names, and treated everything that did not match as a raw socket.
+
+  The list missed the shipped web client, whose `protocol_key` is
+  `webclient/websocket`, so on a stock game every browser connection was filed
+  as a raw socket and the TLS handshake coverage read zero against a population
+  of zero. This panel exists to say when a configured signal is silently
+  absent; it would have reported a correct proxy as a broken one.
+
+  "Everything else" then swept in the connections that are neither web nor
+  telnet. A Discord relay negotiates no telnet option and terminates no TLS,
+  so counting one as a raw socket that failed to negotiate measures nothing. A
+  game whose players all use the web client saw `CLIENT NEGOTIATION 0 / 14
+  ABSENT` in red, where the fourteen were its bot links.
+
+  Protocols are now matched as substrings and sort into three groups: web,
+  telnet, and neither. A connection carrying no identity signal is counted in
+  no population and reported as `other_sessions`, so the sample and the two
+  denominators add up on screen.
+
+- [`console/panels/dangerous.py`](evennia/console/panels/dangerous.py): the
+  session `watch` action refuses instead of pretending. The control, the reason
+  prompt, the presence check and the permanent audit row were all built; the
+  thing they describe was not, because nothing mirrors a session's output
+  anywhere. The action wrote its audit row and returned `"watching": true`
+  while the operator saw nothing.
+
+  The missing feature is the smaller fault. The audit row is permanent, names
+  the watched account, and is readable by that account -- that visibility is
+  why it was designed to be permanent. The console was therefore writing a
+  false statement about a real person into the one record meant to let them
+  find out what was done to them. It now records nothing and says which of the
+  two faults it is. The client control is removed rather than left to raise.
+
+### Interface
+
+- The withheld address on a connection row is labelled as the host rather than
+  the address. The row prints the `/24` beside it and is meant to -- that is
+  the coarse key operators correlate on -- so a chip reading `WITHHELD` next to
+  a visible network read as a mask that was not working.
+
+### Migration
+
+- No migration and no settings change. A game that saw `CLIENT NEGOTIATION`
+  reported as absent, or web coverage reported against a population of zero,
+  needs only this release: the recorded rows were always right and the readout
+  was grouping them wrongly.
+
+---
+
 ## 6.0.0+underspire.213 — Long listings scroll, and a masked value can be asked for
 
 ### Frontend
