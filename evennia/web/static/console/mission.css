@@ -367,3 +367,66 @@ tbody td.num { text-align: right; }
 
 .kind-sub.wants { color: var(--fail-text); }
 .kind-sub.clear { color: var(--ink-faint); }
+
+/* Captured session traffic.
+ *
+ * A transcript, not a table: what an operator reads here is the shape of a
+ * conversation, and columns break that. The two directions are told apart by
+ * colour and by one leading character, so the distinction survives being
+ * copied out of the page as plain text.
+ */
+.watch-statuses {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--rule);
+  list-style: none;
+}
+
+.watch-status {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 9px;
+  background: var(--panel);
+}
+
+.watch-reason {
+  min-width: 0;
+  color: var(--ink-dim);
+  font: 400 12px/1.4 var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.watch-feed {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.watch-line {
+  display: block;
+  color: var(--ink);
+}
+
+.watch-line[data-dir="in"] {
+  color: var(--attn);
+}
+
+.watch-direction {
+  color: currentColor;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 600px) {
+  .watch-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from evennia.console import feed
+from evennia.console import feed, watch
 from evennia.console.feed import (
     REPLAY_BUFFER,
     Frame,
@@ -22,6 +22,7 @@ from evennia.console.feed import (
     MetricsProducer,
     Producer,
     Stream,
+    WatchProducer,
     available_topics,
     parse_topics,
 )
@@ -157,6 +158,22 @@ class TestStream(SimpleTestCase):
     def test_only_subscribed_topics_produce(self):
         stream = Stream(topics=("health",))
         self.assertEqual({p.key for p in stream._producers}, {"health"})
+
+
+class TestWatchProducer(SimpleTestCase):
+    """A live stream drains only the operator it was built for."""
+
+    def test_the_stream_binds_the_operator_to_the_watch_producer(self):
+        with patch.object(watch, "drain", return_value=[]) as drain:
+            stream = Stream(topics=("watch",), actor_id=42)
+            stream.due(now=1.0)
+        drain.assert_called_once_with(42)
+
+    def test_an_anonymous_stream_never_drains_watch_traffic(self):
+        with patch.object(watch, "drain", return_value=[]) as drain:
+            producer = WatchProducer()
+            self.assertEqual(producer.sample(), ())
+        drain.assert_not_called()
 
 
 class TestHealthProducer(TestCase):

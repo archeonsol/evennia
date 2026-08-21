@@ -27,6 +27,8 @@ different product from the one this plan describes.
 
 from __future__ import annotations
 
+import time
+
 from django.conf import settings
 
 from evennia.console import audit
@@ -449,25 +451,37 @@ class SessionsPanel(Panel):
 
     @io_action
     def watch(self, ctx, sessid=None, reason=""):
-        """Refuse to watch, because nothing mirrors a session's output yet.
+        """Begin watching one session's traffic.
 
-        The control and the audit trail for surveillance were built before the
-        thing they describe. No part of the engine copies a session's output
-        anywhere a second person could read it, so the action cannot do what
-        its name says.
+        Both directions, unredacted, live on the operator's feed. That includes
+        what the player types, which at a login prompt can be a password, so
+        the captured text is held in memory for the life of the watch and is
+        never written to the database. What is written is who watched whom, for
+        how long, and how much they saw.
 
-        It must not write the audit row regardless. A permanent record saying
-        an account was watched -- readable by that account, in their own
-        timeline -- is a false statement about a real person, and that is the
-        worse of the two faults. So this refuses, records nothing, and says
-        which of the two it is.
+        No audit row is written here. It is written when the first frame is
+        actually delivered, so a watch on a silent session claims nothing --
+        which is the difference between recording surveillance and recording an
+        intention to perform it.
+
+        The watched player is told nothing, by design. That is what makes the
+        audit trail load-bearing: other console users are the only people who
+        can find out this happened.
+
+        Args:
+            ctx: IO context.
+            sessid: The session to watch.
+            reason: Why. Required, and kept with both audit rows.
+
+        Returns:
+            dict: The started watch.
 
         Raises:
             LookupError: No such session.
-            ValueError: No reason was given.
-            NotImplementedError: Always, when the arguments were valid.
+            ValueError: No reason was given, or the watch limit is reached.
         """
 
+        from evennia.console import watch as watchlib
         from evennia.server.sessionhandler import SESSIONS
 
         if not str(reason or "").strip():
@@ -475,7 +489,54 @@ class SessionsPanel(Panel):
         session = SESSIONS.session_from_sessid(int(sessid)) if sessid else None
         if session is None:
             raise LookupError(f"no connected session with id {sessid!r}")
-        raise NotImplementedError(
-            "Watching a session is not built: nothing mirrors session output "
-            "yet, so there is nothing to show. Nothing was recorded."
-        )
+
+        entry = watchlib.start(int(sessid), session, ctx.actor_id, ctx.actor_name, str(reason))
+        return {
+            "sessid": entry.sessid,
+            "watching": True,
+            "watched_account": entry.account_name,
+            "seconds": max(0, int(entry.expires - time.monotonic())),
+            "note": (
+                "Server output and complete submitted lines appear on your watch feed. "
+                "Client-side echo, partially typed text, aliases, triggers, and local UI "
+                "are not visible. The watch stops when its time runs out or the session "
+                "disconnects, and its audit trail is permanent."
+            ),
+        }
+
+    @io_action
+    def unwatch(self, ctx, sessid=None):
+        """Stop watching one session.
+
+        Args:
+            ctx: IO context.
+            sessid: The watched session.
+
+        Returns:
+            dict: What was stopped.
+
+        Raises:
+            LookupError: This operator was not watching that session.
+        """
+
+        from evennia.console import watch as watchlib
+
+        entry = watchlib.stop(int(sessid), ctx.actor_id, why="the operator stopped it")
+        if entry is None:
+            raise LookupError(f"you are not watching session {sessid!r}")
+        return {"sessid": entry.sessid, "watching": False, "frames": entry.delivered}
+
+    def watches(self, ctx):
+        """Return every watch running now, whoever started it.
+
+        Deliberately not scoped to the caller. The feed is private to each
+        operator, but the fact that a watch is running is not: staff watching
+        players is exactly the activity that other staff should be able to see
+        without going to the audit log for it.
+        """
+
+        from evennia.console import watch as watchlib
+
+        watchlib.sweep()
+        rows = watchlib.active(viewer_id=ctx.actor_id)
+        return {"rows": rows, "count": len(rows)}
