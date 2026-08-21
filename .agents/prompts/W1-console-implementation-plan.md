@@ -76,9 +76,12 @@ console wrote a full trail from phase 1 and could not show one row of it.
 | Promise | State |
 | --- | --- |
 | Degraded mode | Built, tested, enforced by a registration guard |
+| Frontend on Svelte 5 + Vite | Built; the vanilla client is deleted |
+| Virtualized tables | Built in `DataTable`; asserted at 40,000 rows |
+| Renderers under test | 75 client tests; every panel and detail view |
 | English only | Held |
 | Everything deep-linkable | Every panel's view state is in the address bar |
-| Command palette, keyboard-first | Ctrl-K palette, matching name and description |
+| Command palette, keyboard-first | Ctrl-K, combobox semantics, verified live |
 | Undo and state-as-of | Both built on the audit table; no new store |
 | Saved views | `ConsoleSavedView`, shared and pinnable |
 | Export (CSV/JSON, audited) | Built; recorded as a disclosure event |
@@ -1237,7 +1240,51 @@ authorization cache generation counters make this cheap.
 ## Frontend
 
 Svelte 5 + Vite, matching the stack already proven in `underspire/rrms-client`.
-Build output committed to `evennia/web/console/static/console/` (C9).
+Build output committed to `evennia/web/static/console/app/` (C9).
+
+**Built, after a detour.** The first implementation was 4,230 lines of vanilla
+JavaScript in one file, chosen for the reasons in its own header comment: no
+build step, no dependencies, and no artifact to rot. That reasoning is not
+wrong, and it cost more than it saved.
+
+The bill arrived as a `ReferenceError` in the flag dossier -- `duration` and
+`reach` declared in `editor()` and read in `flagDossier()` -- which made the one
+path that creates a sanction throw on every click. It shipped because the
+repository has no `package.json`, CI runs no Node, and nothing read that file
+until a browser did. Nine hundred service-side tests passed the whole time, and
+they were right to: the service was correct.
+
+Three of this document's own commitments were also unmet under vanilla, and all
+three are consequences of the same choice: tables were not virtualized, the data
+layer was hand-written per panel rather than driven from `spec.py`, and there
+was no test runner to notice either.
+
+What the ported stack delivers:
+
+`vitest` + `jsdom` run the renderers. `panels.test.ts` renders every panel
+twice -- synchronously, where a scope error surfaces, and after a stubbed reply
+lands, where a payload read against the wrong shape surfaces -- plus every
+detail view and every panel under a failed request. The suite's own
+effectiveness is asserted by injecting the original defect.
+
+`DataTable` is one component instead of twelve hand-rolled tables, and it is
+virtualized: forty thousand rows put fewer than two hundred in the DOM while the
+scrollbar still describes the whole listing.
+
+State is reactive rather than painted. The strip lamps derive from the feed, so
+they follow the server whichever station is open; the vanilla client walked
+`el.lamps` and set `dataset.state`, which only worked when the strip happened to
+be on the page.
+
+Output is one file, not a split bundle. Splitting would make the browser resolve
+chunk URLs a game is free to rewrite, and `ManifestStaticFilesStorage` hashes
+static filenames without rewriting import specifiers -- so a split build breaks
+on exactly the deployments that hash their assets. Panels are componentized in
+`src/panels/`, which is what "lazily loaded" was for.
+
+`npm run dev` serves the console standalone against any game server. The dev
+proxy rewrites the `Origin` header rather than asking anyone to widen
+`CSRF_TRUSTED_ORIGINS` on a live game.
 
 - Single shell, left nav from the registry, panels lazily loaded. Nav filtering
   has exactly two shapes: everything, or moderation only.
