@@ -144,7 +144,9 @@ async def feed_view(request):
         return HttpResponse(status=403, content=b"The console feed requires console access.")
 
     topics = parse_topics(request.GET.get("topics"))
-    stream = Stream(topics=topics)
+    # The watch feed is scoped to the operator who started the watch, so the
+    # stream has to know who is on the other end of it.
+    stream = Stream(topics=topics, actor_id=getattr(getattr(request, "user", None), "pk", 0) or 0)
     response = StreamingHttpResponse(
         _events(stream, _last_seen(request), recheck=lambda: bool(_authorize(request))),
         content_type="text/event-stream",

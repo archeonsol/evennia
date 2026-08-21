@@ -1,4 +1,4 @@
-import { render } from "@testing-library/svelte";
+import { render, waitFor } from "@testing-library/svelte";
 import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -178,4 +178,48 @@ describe("a panel whose request fails", () => {
       expect(container.querySelector(".panel-head, .panel-body")).not.toBeNull();
     });
   }
+});
+
+describe("session watch status", () => {
+  beforeEach(() => {
+    for (const key of URL_KEYS) view[key] = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const payload = url.includes("/actions/watches/")
+          ? {
+              result: {
+                rows: [
+                  {
+                    watch_id: "watch-other",
+                    sessid: 7,
+                    account: "player",
+                    watcher: "other staff",
+                    reason: "a report",
+                    seconds_left: 120,
+                    mine: false,
+                  },
+                ],
+              },
+            }
+          : { rows: { rows: [] } };
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => payload,
+        } as unknown as Response;
+      }),
+    );
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("unwraps action results and shows another operator's active watch", async () => {
+    const { container } = render(PANELS.sessions, {});
+    await waitFor(() => expect(container.textContent).toContain("other staff"));
+    expect(container.textContent).toContain("player");
+    expect(container.textContent).not.toContain("YOUR LIVE TRANSCRIPT");
+  });
 });

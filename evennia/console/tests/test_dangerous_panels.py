@@ -217,6 +217,23 @@ class TestServerControl(TestCase):
 class TestSessions(TestCase):
     """Watching and disconnecting, both recorded."""
 
+    def setUp(self):
+        """Start each test without a process-local session watch."""
+
+        from evennia.console import watch
+
+        self.clock_patcher = patch("evennia.utils.clock.call_later")
+        self.clock_patcher.start()
+        watch.WATCHES.clear()
+
+    def tearDown(self):
+        """Do not let a started watch escape into the next test."""
+
+        from evennia.console import watch
+
+        watch.WATCHES.clear()
+        self.clock_patcher.stop()
+
     def test_reads_the_live_handler(self):
         result = SessionsPanel().rows(_ctx())
         self.assertIn("rows", result)
@@ -235,31 +252,29 @@ class TestSessions(TestCase):
             with self.assertRaises(LookupError):
                 SessionsPanel().watch(_io(), sessid=4242, reason="investigating")
 
-    def test_watching_refuses_because_nothing_mirrors_session_output(self):
-        # The control, the reason prompt and the permanent audit row were all
-        # built before the thing they describe. Nothing in the engine copies a
-        # session's output anywhere, so the action cannot do what it says.
+    def test_watching_starts_for_a_live_session(self):
+        """A valid request registers a bounded live watch."""
+
         from types import SimpleNamespace
 
         account = SimpleNamespace(pk=7, username="player")
         with patch("evennia.server.sessionhandler.SESSIONS") as sessions:
             sessions.session_from_sessid.return_value = SimpleNamespace(account=account)
-            with self.assertRaises(NotImplementedError):
-                SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
+            result = SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
+        self.assertTrue(result["watching"])
+        self.assertEqual(result["watched_account"], "player")
 
-    def test_a_refused_watch_records_nothing(self):
-        # A permanent row saying an account was watched, when nobody saw
-        # anything, is a false statement about a real person -- and the account
-        # it names can read it in their own timeline.
+    def test_a_watch_records_nothing_before_it_delivers_traffic(self):
+        """Registering intent alone does not claim surveillance occurred."""
+
         from types import SimpleNamespace
 
         account = SimpleNamespace(pk=7, username="player")
         with patch("evennia.server.sessionhandler.SESSIONS") as sessions:
             sessions.session_from_sessid.return_value = SimpleNamespace(account=account)
-            with self.assertRaises(NotImplementedError):
-                SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
+            SessionsPanel().watch(_io(), sessid=3, reason="report of harassment")
 
-        self.assertFalse(ConsoleAuditEvent.objects.filter(operation="watch").exists())
+        self.assertFalse(ConsoleAuditEvent.objects.filter(operation__startswith="watch.").exists())
 
     def test_disconnecting_is_recorded(self):
         from types import SimpleNamespace

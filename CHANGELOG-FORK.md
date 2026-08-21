@@ -25,6 +25,92 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.215 -- A session watch that actually watches
+
+### Engine
+
+- [`console/watch.py`](evennia/console/watch.py) and
+  [`server/sessionhandler.py`](evennia/server/sessionhandler.py) implement the
+  session watch withheld in `.214`. The tap is at the common Server/Portal
+  session-handler boundary, after outbound batching and function parsing and
+  before inbound commands are handled. It therefore works for telnet, the web
+  client, Mudlet, SSH, and other session protocols without teaching the console
+  about each client.
+
+  What it shows is the server-side transcript: normalized output frames and
+  complete submitted input payloads, explicitly labelled `OUTPUT` and `INPUT`.
+  It cannot show partially typed text, client-side local echo, aliases,
+  triggers, windows, or other UI state. Input is deliberately unredacted; an
+  operator with this power can see a submitted password or other secret if it
+  crosses the watched game session.
+
+- Watches are private by content and shared by status. Only the operator who
+  started a watch can drain its captured frames, while every operator with
+  console access can see that the watch is running, who started it, which
+  session it covers, and the stated reason. Each lifetime has a unique watch
+  identifier, so ending and restarting a watch cannot make an old transcript
+  recur.
+
+- Captured content lives only in a bounded in-memory deque and is discarded
+  when the watch ends. A server-clock deadline expires the watch even if the
+  operator closes the browser; manual stops, session disconnects, and the
+  fallback sweep cancel or close the same lifetime cleanly.
+
+- [`console/feed.py`](evennia/console/feed.py) adds an actor-scoped producer for
+  the private frames, and [`web/console/stream.py`](evennia/web/console/stream.py)
+  binds that producer to the authenticated console operator rather than to a
+  browser-supplied identity.
+
+### Security and audit
+
+- Starting a watch requires full console access, a fresh reauthentication, and
+  a non-empty reason. The watched player is not notified. This is intentionally
+  a senior-staff surveillance tool, equivalent in sensitivity to the existing
+  console shell rather than a routine moderation control.
+
+- Transcript content is never written to the database. Permanent audit rows
+  record `watch.began` only when the first frame is actually delivered and
+  `watch.ended` with the reason, elapsed lifetime, and frame count. A silent
+  session therefore does not acquire a false record saying somebody watched
+  traffic that did not exist.
+
+### Interface
+
+- [`WatchFeed.svelte`](evennia/web/console/client/src/components/WatchFeed.svelte)
+  and the Sessions panel separate the global list of active watches from the
+  signed-in operator's private transcript. Reasons remain visible, traffic has
+  unambiguous direction labels, and the stop control ends only that operator's
+  watch. The production console bundle is rebuilt with the feature.
+
+### Settings
+
+- `CONSOLE_WATCH_SECONDS` defaults to 1,800 seconds, `CONSOLE_WATCH_FRAMES` to
+  500 retained frames per watch, and `CONSOLE_WATCH_LIMIT` to eight concurrent
+  watches. Games may lower those bounds without changing engine code.
+
+### Performance
+
+- With no watch running, each inbound and outbound session message pays one
+  empty-dictionary truth test before bypassing the capture code. A synthetic
+  CPython run of 10 million iterations measured that added guard at 4.57 ns
+  (`13.50 ns` including the loop body, best of seven); formatting and bounded
+  deque work occur only while at least one watch exists for the session.
+
+### Tests
+
+- Backend coverage exercises watch ownership, audit timing, expiry, bounded
+  retention, disconnect cleanup, input and output normalization, and the
+  session-handler integration. The relevant engine suite passes 771 tests with
+  one skip. The console client passes all 81 tests and Svelte reports no errors
+  or warnings.
+
+### Migration
+
+- No database migration and no downstream game change. The three settings are
+  optional overrides; their engine defaults activate the bounded behavior.
+
+---
+
 ## 6.0.0+underspire.214 -- Two console readouts that were not telling the truth
 
 ### Engine

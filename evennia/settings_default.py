@@ -852,6 +852,15 @@ CONSOLE_ALLOW_INSECURE = False
 CONSOLE_SQL_TIMEOUT_MS = 5000
 CONSOLE_SQL_MAX_ROWS = 1000
 CONSOLE_AUDIT_RETENTION_DAYS = 365
+# Session watching. A watch relays both directions of one session's traffic to
+# the operator who started it, unredacted, and expires on its own -- a watch
+# nobody remembers to stop reads in the audit log as one deliberate act when it
+# was really days of surveillance. Captured text is held in memory only and is
+# never written to the database; the audit rows carry who watched whom and for
+# how long, not what was said.
+CONSOLE_WATCH_SECONDS = 1800
+CONSOLE_WATCH_FRAMES = 500
+CONSOLE_WATCH_LIMIT = 8
 # REPL source text is the bulkiest audit content and the least often needed
 # long-term, so it prunes on its own shorter window.
 CONSOLE_AUDIT_REPL_RETENTION_DAYS = 90

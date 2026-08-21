@@ -105,6 +105,17 @@ class Producer:
     key = ""
     interval = 5.0
 
+    def bind(self, actor_id):
+        """Tell this producer whose stream it is feeding.
+
+        Almost every producer reports on the server and ignores this. A watch
+        feed cannot: one operator's captured traffic must not appear on
+        another's stream, so it needs to know who is listening.
+
+        Args:
+            actor_id: Account primary key of the console user.
+        """
+
     def sample(self):
         """Return payload dicts to emit, or an empty sequence.
 
@@ -318,7 +329,41 @@ class LogProducer(Producer):
 
 
 #: Producers the engine ships, by topic key.
-BUILTIN_PRODUCERS = (HealthProducer, MetricsProducer, LogProducer)
+class WatchProducer(Producer):
+    """Emit the traffic captured by this operator's session watches.
+
+    A push source on a pull feed. The taps run on the IO owner and append to a
+    bounded deque; this drains that deque on each sweep, so the two never meet
+    and the producer contract -- cheap, never raises, never touches the IO
+    owner -- holds unchanged.
+
+    Scoped to one operator. Two staff watching two different sessions do not
+    see each other's capture, and neither sees anything at all before they
+    start a watch of their own.
+    """
+
+    key = "watch"
+    interval = 1.0
+
+    def __init__(self):
+        self._actor_id = 0
+
+    def bind(self, actor_id):
+        """Record whose watches this stream drains."""
+
+        self._actor_id = int(actor_id or 0)
+
+    def sample(self):
+        """Return the frames captured since the last sweep."""
+
+        if not self._actor_id:
+            return ()
+        from evennia.console import watch
+
+        return watch.drain(self._actor_id)
+
+
+BUILTIN_PRODUCERS = (HealthProducer, MetricsProducer, LogProducer, WatchProducer)
 
 
 @dataclass
@@ -332,6 +377,10 @@ class Stream:
     """
 
     topics: tuple[str, ...]
+    #: Account primary key of the console user this stream belongs to. Only the
+    #: watch feed needs it, and it needs it absolutely: without it one
+    #: operator's capture would land on every open console.
+    actor_id: int = 0
     sequence: int = 0
     buffer: list = field(default_factory=list)
     _producers: list = field(default_factory=list)
@@ -344,6 +393,7 @@ class Stream:
         for producer_class in BUILTIN_PRODUCERS:
             if producer_class.key in wanted:
                 producer = producer_class()
+                producer.bind(self.actor_id)
                 self._producers.append(producer)
                 self._next_due[producer.key] = 0.0
 

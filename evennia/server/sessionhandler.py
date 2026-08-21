@@ -20,6 +20,7 @@ from django.utils.translation import gettext as _
 
 import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
+from evennia.console import watch as _watch
 from evennia.server.portal import amp
 from evennia.server.service_registry import IMMEDIATE_RESULT
 from evennia.server.signals import (
@@ -597,6 +598,11 @@ class ServerSessionHandler(SessionHandler):
         if not session:
             return
 
+        # A watch outlives nothing. Ending it here writes its closing audit row
+        # while the session is still around to be named in it.
+        if _watch.WATCHES:
+            _watch.stop_session(session.sessid)
+
         if hasattr(session, "account") and session.account:
             # only log accounts logging off
             nsess = len(self.sessions_from_account(session.account)) - 1
@@ -874,10 +880,17 @@ class ServerSessionHandler(SessionHandler):
             if joined:
                 frame = {"text": (joined, text_options) if text_options else joined}
                 frame = self.clean_senddata(session, frame)
+                # Capture the normalized frame handed to the Portal, after
+                # inline functions and batching. Protocols render it
+                # differently, but these are the words the client receives.
+                if _watch.WATCHES:
+                    _watch.tap(session, "out", frame)
                 bus.send_MsgServer2Portal(session, **frame)
 
         for frame in standalone_frames:
             frame = self.clean_senddata(session, frame)
+            if _watch.WATCHES:
+                _watch.tap(session, "out", frame)
             bus.send_MsgServer2Portal(session, **frame)
 
     def get_inputfuncs(self):
@@ -898,6 +911,8 @@ class ServerSessionHandler(SessionHandler):
         (possibly processed) data.
 
         """
+        if _watch.WATCHES:
+            _watch.tap(session, "in", kwargs)
         if session:
             session.data_in(**kwargs)
 

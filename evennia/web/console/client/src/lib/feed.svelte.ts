@@ -15,6 +15,9 @@ const API = "/api/console/";
 /** How many log lines are kept. Past this, the oldest are dropped. */
 export const LIVE_LOG_LIMIT = 300;
 
+/** How many captured watch lines are kept, across every watch. */
+export const LIVE_WATCH_LIMIT = 500;
+
 export interface Health {
   checks?: Record<string, unknown>;
   degraded?: boolean;
@@ -39,11 +42,26 @@ export interface LogEntry {
   line: string;
 }
 
+export interface WatchEntry {
+  /** Unique watch lifetime, so an old transcript cannot reappear on rewatch. */
+  watch_id: string;
+  sessid: number;
+  account: string;
+  at: number;
+  /** "out" for what the player was shown, "in" for what they typed. */
+  dir: string;
+  line: string;
+}
+
 export const live = $state({
   connected: false,
   health: null as Health | null,
   metrics: null as Metrics | null,
   log: [] as LogEntry[],
+  /* Captured session traffic, for whoever started the watch. Held here and
+   * nowhere else: this is the only copy on the client, it is dropped when the
+   * page closes, and it is never sent anywhere. */
+  watch: [] as WatchEntry[],
 });
 
 let source: EventSource | null = null;
@@ -88,10 +106,31 @@ export function openFeed(onDegraded?: (degraded: boolean) => void): void {
     live.connected = true;
   });
 
+  source.addEventListener("watch", (event) => {
+    live.watch.push(JSON.parse((event as MessageEvent).data) as WatchEntry);
+    if (live.watch.length > LIVE_WATCH_LIMIT) {
+      live.watch.splice(0, live.watch.length - LIVE_WATCH_LIMIT);
+    }
+    live.connected = true;
+  });
+
   source.onerror = () => {
     // EventSource retries by itself. Show the state rather than intervene.
     live.connected = false;
   };
+}
+
+/** Forget every captured line. Used when the last watch stops. */
+export function clearWatch(): void {
+  live.watch.length = 0;
+}
+
+/** Drop transcripts whose bounded watch lifetime has ended. */
+export function retainWatches(watchIds: Iterable<string>): void {
+  const keep = new Set(watchIds);
+  for (let index = live.watch.length - 1; index >= 0; index -= 1) {
+    if (!keep.has(live.watch[index].watch_id)) live.watch.splice(index, 1);
+  }
 }
 
 /** Close the feed. Used by tests; the console itself never closes it. */
