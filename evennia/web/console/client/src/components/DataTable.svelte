@@ -112,13 +112,19 @@
     </thead>
     <tbody>
       {#if above > 0}
-        <tr class="spacer" aria-hidden="true" style:height="{above}px"></tr>
+        <!-- A `tr` with no cells collapses to nothing, whatever height it is
+             given, so the spacer needs a real cell to hold the space open. -->
+        <tr class="spacer" aria-hidden="true">
+          <td colspan={columns.length} style:height="{above}px"></td>
+        </tr>
       {/if}
       {#each visible as item, index (key ? key(item, first + index) : first + index)}
         {@render row(item, first + index)}
       {/each}
       {#if below > 0}
-        <tr class="spacer" aria-hidden="true" style:height="{below}px"></tr>
+        <tr class="spacer" aria-hidden="true">
+          <td colspan={columns.length} style:height="{below}px"></td>
+        </tr>
       {/if}
     </tbody>
   </table>

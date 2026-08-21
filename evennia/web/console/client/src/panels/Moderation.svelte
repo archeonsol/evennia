@@ -11,6 +11,7 @@
   import SignalCoverage from "../components/SignalCoverage.svelte";
   import AccountDossier from "../components/AccountDossier.svelte";
   import SignatureMarks from "../components/SignatureMarks.svelte";
+  import RevealButton from "../components/RevealButton.svelte";
   import { Loader, rowsPath, runAction } from "../lib/load.svelte";
   import { view } from "../lib/state.svelte";
   import type { FlagRow, SanctionRow, SessionRow } from "../lib/types";
@@ -235,6 +236,10 @@
             {row.account || "(anonymous)"}&nbsp;&nbsp;{row.cidr}&nbsp;&nbsp;{row.network || ""}
           </span>
           <SignatureMarks signatures={row.signatures} />
+          {#if row.address_state === "held"}
+            <span class="legend">addr</span>
+            <RevealButton record="session" id={row.id} field="ip" label="this address" />
+          {/if}
           {#if row.address_state === "purged"}
             <Lamp label="ADDRESS PURGED" state="off" title={row.address_state_note} />
           {:else if row.address_state === "absent"}
