@@ -36,6 +36,37 @@ def getenv():
     return env
 
 
+def build_status(portal, server_connected):
+    """Return the launcher status tuple for one portal.
+
+    Shared by both transports. The only thing they disagree about is how they
+    know the server is up -- AMP holds a connection and can ask it, while the
+    Redis bus has no socket to the server and reads the process instead -- so
+    that answer is the argument and everything after it is computed the same
+    way.
+
+    Args:
+        portal: The portal service.
+        server_connected: Whether the server is currently reachable.
+
+    Returns:
+        tuple: portal_live, server_live, portal pid, server pid, and the two
+        info dicts.
+    """
+
+    return (
+        bool(
+            (portal.running or getattr(portal, "_launcher_ipc_ready", False))
+            and not getattr(portal, "shutdown_complete", False)
+        ),
+        bool(server_connected),
+        os.getpid(),
+        portal.server_process_id,
+        portal.get_info_dict(),
+        portal.server_info_dict,
+    )
+
+
 class AMPServerFactory(protocol.ServerFactory):
     """
     This factory creates AMP Server connection. This acts as the 'Portal'-side communication to the
@@ -121,25 +152,12 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
                 (portal_live, server_live, portal_PID, server_PID).
 
         """
-        portal = self.factory.portal
-        server_connected = bool(
-            self.factory.server_connection and self.factory.server_connection.transport.connected
-        )
-        portal_info_dict = portal.get_info_dict()
-        server_info_dict = portal.server_info_dict
-        server_pid = portal.server_process_id
-        portal_pid = os.getpid()
-        portal_live = bool(
-            (portal.running or getattr(portal, "_launcher_ipc_ready", False))
-            and not getattr(portal, "shutdown_complete", False)
-        )
-        return (
-            portal_live,
-            server_connected,
-            portal_pid,
-            server_pid,
-            portal_info_dict,
-            server_info_dict,
+        return build_status(
+            self.factory.portal,
+            bool(
+                self.factory.server_connection
+                and self.factory.server_connection.transport.connected
+            ),
         )
 
     def data_to_server(self, command, sessid, **kwargs):
