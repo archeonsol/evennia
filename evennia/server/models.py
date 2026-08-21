@@ -422,8 +422,13 @@ class SessionRecord(models.Model):
             models.Index(fields=["cidr", "-connected_at"]),
             models.Index(fields=["device_token", "-connected_at"]),
             models.Index(fields=["client_fp", "cidr"]),
-            models.Index(fields=["telnet_sig", "cidr"]),
-            models.Index(fields=["tls_sig", "cidr"]),
+            # Named to match the migrations that created them. Django derives
+            # a hashed name for an unnamed index, so leaving these bare made the
+            # model disagree with its own applied state: every `makemigrations`
+            # produced a rename nobody wanted, and every deploy said migrations
+            # were pending when the database was already correct.
+            models.Index(fields=["telnet_sig", "cidr"], name="server_sess_telnet__idx"),
+            models.Index(fields=["tls_sig", "cidr"], name="server_sess_tls_sig_idx"),
             models.Index(fields=["ip_hash", "-connected_at"]),
         ]
 
