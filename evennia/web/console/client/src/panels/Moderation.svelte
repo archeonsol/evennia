@@ -237,7 +237,11 @@
           </span>
           <SignatureMarks signatures={row.signatures} />
           {#if row.address_state === "held"}
-            <span class="legend">addr</span>
+            <!-- The network is printed in this row already and is meant to be:
+                 it is the coarse key operators correlate on. Only the host part
+                 is withheld, so the label says host rather than address, which
+                 next to a visible 0/24 read as a mask that was not working. -->
+            <span class="legend">host</span>
             <RevealButton record="session" id={row.id} field="ip" label="this address" />
           {/if}
           {#if row.address_state === "purged"}

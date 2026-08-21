@@ -120,7 +120,42 @@ SIGNAL_SAMPLE = 500
 #: Protocols that carry a TLS handshake and HTTP headers. Everything else
 #: reaches the portal over a raw socket and has neither, so counting it as
 #: missing coverage would report a fault that is not one.
-WEB_PROTOCOLS = frozenset({"websocket", "webclient", "ajax"})
+#: Substrings that identify a connection arriving over HTTP, and one that
+#: identifies a raw socket speaking telnet.
+#:
+#: Matched as substrings rather than as an exact list of names. The recorded
+#: value is the protocol's own ``protocol_key``, and that string is not stable
+#: across games: the shipped web client records ``webclient/websocket`` while a
+#: game that subclasses it may record ``websocket`` or ``webclient_ajax``. An
+#: exact list gets one of them wrong, and getting it wrong here reports a
+#: correctly configured proxy as a broken one.
+WEB_PROTOCOL_MARKERS = ("webclient", "websocket", "ajax")
+TELNET_PROTOCOL_MARKERS = ("telnet",)
+
+
+def protocol_family(protocol):
+    """Return which signals a connection of this protocol could carry.
+
+    Three answers, not two. A Discord relay, an IRC bot and an SSH session are
+    neither web nor telnet: they carry no TLS handshake and negotiate no telnet
+    option, so counting them in either population measures nothing. Treating
+    "not web" as "raw socket" is what made a game whose players all use the web
+    client report its client negotiation as absent -- the denominator was its
+    Discord links, which can never negotiate anything.
+
+    Args:
+        protocol (str): The recorded ``protocol_key``.
+
+    Returns:
+        str: ``"web"``, ``"telnet"``, or ``""`` for neither.
+    """
+
+    name = str(protocol or "").lower()
+    if any(marker in name for marker in WEB_PROTOCOL_MARKERS):
+        return "web"
+    if any(marker in name for marker in TELNET_PROTOCOL_MARKERS):
+        return "telnet"
+    return ""
 
 
 def mask(value, reveal=False):
@@ -832,9 +867,10 @@ class ModerationPanel(Panel):
                 "note": "No connection is recorded yet. Connect once, then look again.",
             }
 
-        web, socket_rows = [], []
+        web, socket_rows, other = [], [], []
         for row in rows:
-            target = web if str(row["protocol"] or "").lower() in WEB_PROTOCOLS else socket_rows
+            family = protocol_family(row["protocol"])
+            target = web if family == "web" else socket_rows if family == "telnet" else other
             target.append(row)
         trusted = sum(1 for row in web if row["xff_applied"])
 
@@ -860,11 +896,18 @@ class ModerationPanel(Panel):
             "sample": len(rows),
             "web_sessions": len(web),
             "socket_sessions": len(socket_rows),
+            # Bot links and anything else that carries no identity signal at
+            # all. Reported so the sample and the two populations add up on
+            # screen, rather than leaving rows silently unaccounted for.
+            "other_sessions": len(other),
             "web_addresses_trusted": trusted,
             "rows": report,
             "note": (
-                "These counts cover the last %s connections. A signal that shows "
-                "zero is not arriving at the server." % len(rows)
+                "These counts cover the last %s connections, of which %s are web "
+                "and %s are raw sockets. A signal that shows zero against a "
+                "population above zero is not arriving at the server. Bot links "
+                "carry no identity signal and are counted in neither."
+                % (len(rows), len(web), len(socket_rows))
             ),
         }
 

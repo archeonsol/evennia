@@ -494,6 +494,41 @@ class TestSignalCoverage(ModerationTestCase):
         self.assertIn("X-TLS", advice)
         self.assertNotIn("UPSTREAM_IPS", advice)
 
+    def test_a_bot_link_counts_against_neither_population(self):
+        # A Discord relay negotiates no telnet option and terminates no TLS.
+        # Counting it as a raw socket is what made a game whose players all use
+        # the web client report its client negotiation as absent: the
+        # denominator was its bot links, which can never negotiate anything.
+        for _ in range(3):
+            SessionRecord.objects.create(
+                session_uid=f"bot{SessionRecord.objects.count():04d}",
+                protocol="discord",
+                cidr="",
+            )
+        result = self.panel.signals(_ctx())
+        report = {row["field"]: row for row in result["rows"]}
+        self.assertEqual(report["telnet_sig"]["of"], 0)
+        self.assertEqual(report["telnet_sig"]["state"], "off")
+        self.assertEqual(result["other_sessions"], 3)
+
+    def test_the_stock_web_client_protocol_name_counts_as_web(self):
+        # The shipped web client records "webclient/websocket"; a game that
+        # subclasses it may record "websocket" or "webclient_ajax". An exact
+        # list of names gets one of them wrong, and getting it wrong reports a
+        # working proxy as a broken one.
+        for name in ("webclient/websocket", "webclient_ajax", "websocket"):
+            self._web(protocol=name, tls_sig="a" * 64)
+        report = self._report()
+        self.assertEqual(report["tls_sig"]["of"], 3)
+        self.assertEqual(report["tls_sig"]["state"], "ok")
+        self.assertEqual(report["telnet_sig"]["of"], 0)
+
+    def test_telnet_over_ssl_is_still_telnet(self):
+        SessionRecord.objects.create(
+            session_uid="tls1", protocol="telnet/ssl", telnet_sig="d" * 64, cidr=""
+        )
+        self.assertEqual(self._report()["telnet_sig"]["of"], 1)
+
     def test_telnet_sessions_are_not_counted_against_the_handshake(self):
         # A raw socket has no TLS handshake. Counting it as missing coverage
         # reports a fault that is not one.
