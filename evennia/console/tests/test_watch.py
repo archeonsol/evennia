@@ -61,10 +61,40 @@ class TestCapture(WatchTestCase):
         entry = self._start()
         watch.tap(_session(1), "out", {"text": (("|rred warning|n",), {})})
         self.assertEqual(entry.frames[0]["line"], "red warning")
+        self.assertIn('class="color-009"', entry.frames[0]["html"])
 
-    def test_input_is_captured_unredacted(self):
-        # The operator chose to see both directions in full. The safety is that
-        # this never leaves memory, not that it is filtered.
+    def test_structured_narrative_is_rendered_as_the_player_reads_it(self):
+        entry = self._start()
+        watch.tap(
+            _session(1),
+            "out",
+            {
+                "narrative": (
+                    ([{"body": "|gA green door|n", "kind": "description"}],),
+                    {},
+                )
+            },
+        )
+        self.assertEqual(entry.frames[0]["line"], "A green door")
+        self.assertIn('class="color-010"', entry.frames[0]["html"])
+        self.assertEqual(entry.frames[0]["kind"], "output")
+        self.assertTrue(entry.frames[0]["newline"])
+
+    def test_terminal_html_escapes_player_supplied_tags(self):
+        entry = self._start()
+        watch.tap(_session(1), "out", {"text": (("<script>alert(1)</script>",), {})})
+        self.assertNotIn("<script>", entry.frames[0]["html"])
+        self.assertIn("&lt;script&gt;", entry.frames[0]["html"])
+
+    def test_a_prompt_does_not_end_the_terminal_line(self):
+        entry = self._start()
+        watch.tap(_session(1), "out", {"prompt": (("HP 10> ",), {})})
+        self.assertEqual(entry.frames[0]["line"], "HP 10>")
+        self.assertEqual(entry.frames[0]["kind"], "prompt")
+        self.assertFalse(entry.frames[0]["newline"])
+
+    def test_locally_echoed_input_is_captured(self):
+        # Submitted commands are part of the screen once the client echoes them.
         entry = self._start()
         watch.tap(_session(1), "in", {"text": (("say something private",), {})})
         self.assertEqual(entry.frames[0]["line"], "say something private")
@@ -75,12 +105,22 @@ class TestCapture(WatchTestCase):
         watch.tap(_session(1), "in", {"text": (("say |r is literal",), {})})
         self.assertEqual(entry.frames[0]["line"], "say |r is literal")
 
-    def test_a_structured_payload_is_named_but_not_dumped(self):
-        # A patch carrying a JSON document is noise on a transcript. That one
-        # went past is not.
+    def test_a_scene_patch_is_not_a_terminal_line(self):
         entry = self._start()
         watch.tap(_session(1), "out", {"patch": ((), {"ops": []})})
-        self.assertEqual(entry.frames[0]["line"], "[patch]")
+        self.assertEqual(len(entry.frames), 0)
+
+    def test_input_is_hidden_while_the_players_local_echo_is_disabled(self):
+        entry = self._start()
+        watch.tap(
+            _session(1),
+            "out",
+            {"prompt": (("Password: ",), {"options": {"echo": False}})},
+        )
+        watch.tap(_session(1), "in", {"text": (("hunter2",), {})})
+        self.assertEqual([frame["line"] for frame in entry.frames], ["Password:", ""])
+        self.assertTrue(entry.frames[-1]["newline"])
+        self.assertNotIn("hunter2", repr(entry.frames))
 
     def test_a_watch_on_another_session_captures_nothing(self):
         entry = self._start(sessid=1)
@@ -191,9 +231,8 @@ class TestAudit(WatchTestCase):
         self.assertEqual(row.after["ended_because"], "the operator stopped it")
 
     def test_no_captured_content_reaches_the_database(self):
-        # Input is relayed unredacted, so it can carry a password typed at a
-        # login prompt. That is a live view held in memory for minutes; it must
-        # not become a permanent row that outlives the watch.
+        # Captured commands are a live view held in memory for minutes; they
+        # must not become a permanent row that outlives the watch.
         self._start()
         watch.tap(_session(1), "in", {"text": (("connect sol hunter2",), {})})
         watch.drain(42)

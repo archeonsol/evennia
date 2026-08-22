@@ -1,18 +1,19 @@
 <script lang="ts">
   import Section from "./Section.svelte";
-  import Empty from "./Empty.svelte";
   import Lamp from "./Lamp.svelte";
+  import ShadowTerminal from "./ShadowTerminal.svelte";
   import { live } from "../lib/feed.svelte";
 
-  /* One operator's captured session traffic.
+  /* One operator's player-visible shadow terminals.
    *
-   * Deliberately a plain scrolling transcript rather than a table. What a
-   * person needs from this is the shape of a conversation as it happens, and a
-   * table's columns break exactly the thing that makes it readable.
+   * Each watch is isolated in its own terminal so simultaneous sessions never
+   * interleave. The server has already removed OOB traffic and rendered safe
+   * colour HTML; this component only presents the stream in order.
    *
-   * Both directions are shown unredacted, including what the player types. The
-   * lines live in this component's store and nowhere else: they are never
-   * posted anywhere, and they are gone when the page closes. */
+   * Submitted input appears after Enter while local echo is enabled. Secret
+   * input, partially typed text, client triggers, and local UI never reach the
+   * server and cannot appear here. Frames live in the feed store and nowhere
+   * else: they are never posted anywhere and disappear with the page. */
 
   interface Props {
     /** Every running watch. Only rows marked mine may select feed frames. */
@@ -32,10 +33,6 @@
   const mine = $derived(watches.filter((entry) => entry.mine));
   const mineIds = $derived(new Set(mine.map((entry) => entry.watch_id)));
   const lines = $derived(live.watch.filter((frame) => mineIds.has(frame.watch_id)));
-
-  function stamp(at: number): string {
-    return new Date(at * 1000).toLocaleTimeString();
-  }
 </script>
 
 {#if watches.length}
@@ -55,19 +52,21 @@
 {/if}
 
 {#if mine.length}
-  <Section label="Your live transcript" />
-  {#if lines.length === 0}
-    <Empty
-      line="NOTHING HAS PASSED YET."
-      hint="Submitted lines appear after the client sends them. Local echo and partially typed text are not visible. Nothing is recorded until the first line arrives."
-    />
-  {:else}
-    <div class="table-scroll" style:max-height="40vh" role="log" aria-label="Live watch transcript">
-      <pre class="watch-feed">{#each lines as frame}<span
-            class="watch-line"
-            data-dir={frame.dir}><span class="legend">{stamp(frame.at)}</span> <span
-            class="watch-direction">{frame.dir === "in" ? "INPUT" : "OUTPUT"}</span> {frame.line}
-</span>{/each}</pre>
-    </div>
-  {/if}
+  <Section label="Your shadow terminals" />
+  <div class="shadow-grid">
+    {#each mine as entry (entry.watch_id)}
+      <ShadowTerminal
+        account={entry.account}
+        sessid={entry.sessid}
+        frames={lines.filter((frame) => frame.watch_id === entry.watch_id)}
+      />
+    {/each}
+  </div>
 {/if}
+
+<style>
+  .shadow-grid {
+    display: grid;
+    gap: 12px;
+  }
+</style>

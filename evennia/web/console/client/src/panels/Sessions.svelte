@@ -139,7 +139,7 @@
             {:else}
               <button
                 type="button"
-                title="Server output and complete submitted lines, on your feed only. Client-side echo, partially typed text, aliases, triggers, and local UI are not visible. Recorded permanently once it delivers anything. The player is not told."
+                title="A private shadow terminal of player-visible output, prompts, and locally echoed submitted lines. Secrets, partially typed text, aliases, triggers, and local UI are not visible. Recorded permanently once it delivers anything. The player is not told."
                 onclick={() => act("watch", item.sessid, "Why is this session being watched?")}
               >
                 WATCH

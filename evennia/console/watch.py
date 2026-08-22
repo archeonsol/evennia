@@ -19,9 +19,11 @@ A watch on a silent session now records nothing, because nothing was seen.
 **Captured traffic never reaches the database.** Frames live in a bounded
 in-memory deque and are dropped when the watch ends. The audit rows carry who
 watched whom, for how long, and how many frames -- never a line of content.
-Input is relayed unredacted to the watching operator, which means it can carry
-a password typed at a login prompt; that is a live view held in memory for
-minutes, and it must not become a permanent row in a table that outlives it.
+Submitted input is relayed only while the player's local echo is enabled.
+Password input is therefore absent from the shadow terminal just as it is from
+the player's screen. Captured traffic is still private material held in memory
+for minutes, and it must not become a permanent row in a table that outlives
+it.
 
 Cost when nobody is watching
 ----------------------------
@@ -107,6 +109,7 @@ class Watch:
         began_recorded: Whether the permanent "began" row has been written.
         expiry_handle: Server-clock callback that enforces the deadline even
             when no console browser remains connected.
+        input_echo: Whether submitted input is visible on the player's screen.
     """
 
     watch_id: str
@@ -122,46 +125,101 @@ class Watch:
     delivered: int = 0
     began_recorded: bool = False
     expiry_handle: object | None = field(default=None, repr=False, compare=False)
+    input_echo: bool = field(default=True, repr=False, compare=False)
 
 
-def _render(kwargs, *, strip_markup=False):
-    """Flatten one outbound or inbound message to a readable line.
+def _unpack(payload):
+    """Return normalized positional arguments and keyword arguments."""
 
-    Session traffic arrives as ``{cmdname: (args, kwargs)}``. An operator wants
-    the text a person would have seen, not the envelope, so this takes the
-    first positional argument of each command and labels anything else by name
-    only -- a ``patch`` carrying a JSON document is noise on a watch feed, but
-    knowing one went past is not.
+    if not isinstance(payload, (tuple, list)):
+        return (payload,), {}
+    if not payload:
+        return (), {}
+    raw_args = payload[0]
+    args = tuple(raw_args) if isinstance(raw_args, (tuple, list)) else (raw_args,)
+    cmdkwargs = payload[1] if len(payload) > 1 and isinstance(payload[1], dict) else {}
+    return args, cmdkwargs
+
+
+def _terminal_frame(text, kind, *, newline):
+    """Render one safe, bounded terminal frame.
+
+    Args:
+        text: Evennia-marked-up terminal text.
+        kind: ``output``, ``prompt``, or ``input``.
+        newline: Whether the terminal advances after this frame.
+
+    Returns:
+        dict: Plain text plus safe ANSI-rendered HTML for the console.
+    """
+
+    source = str(text or "")[:MAX_LINE]
+    if kind == "input":
+        plain = source.strip()
+    else:
+        from evennia.utils.ansi import strip_ansi
+
+        plain = strip_ansi(source).strip()
+    frame = {"kind": kind, "line": plain, "newline": bool(newline)}
+    if kind != "input":
+        from evennia.utils.text2html import parse_html
+
+        frame["html"] = parse_html(source)
+    return frame
+
+
+def _narrative_nodes(args):
+    """Yield structured narrative node dictionaries from normalized args."""
+
+    nodes = list(args)
+    if len(nodes) == 1 and isinstance(nodes[0], (tuple, list)):
+        nodes = list(nodes[0])
+    yield from (node for node in nodes if isinstance(node, dict))
+
+
+def _render(kwargs, direction):
+    """Project normalized traffic into player-visible terminal frames.
+
+    Structured narrative becomes the same body text a capable webclient
+    renders. Scene patches and other out-of-band messages are deliberately
+    absent because they are not terminal lines. The returned echo value tracks
+    telnet-style local echo changes so secret input is not mirrored.
 
     Args:
         kwargs: The normalized outbound frame or inbound message.
-        strip_markup: Remove Evennia color markup from outbound text so the
-            console transcript is readable without emulating a terminal.
+        direction: ``"out"`` for server-to-player, ``"in"`` otherwise.
 
     Returns:
-        str: One line, or empty when there was nothing worth showing.
+        tuple[list[dict], bool | None]: Terminal frames and an optional input
+        echo-state update.
     """
 
-    parts = []
+    frames = []
+    echo_update = None
     for cmdname, payload in (kwargs or {}).items():
-        args = ()
-        if isinstance(payload, (tuple, list)) and payload:
-            args = payload[0] if isinstance(payload[0], (tuple, list)) else (payload[0],)
-        first = args[0] if args else ""
+        args, cmdkwargs = _unpack(payload)
+        options = cmdkwargs.get("options", {})
+        if direction == "out" and isinstance(options, dict) and "echo" in options:
+            echo_update = bool(options["echo"])
         if cmdname == "text":
-            text = str(first)
-        elif isinstance(first, str) and first:
-            text = f"[{cmdname}] {first}"
-        else:
-            text = f"[{cmdname}]"
-        if text.strip():
-            parts.append(text.strip())
-    rendered = " ".join(parts)
-    if strip_markup:
-        from evennia.utils.ansi import strip_ansi
-
-        rendered = strip_ansi(rendered)
-    return rendered[:MAX_LINE]
+            first = args[0] if args else ""
+            if direction == "in":
+                frames.append(_terminal_frame(first, "input", newline=True))
+            elif str(first or ""):
+                prompt = bool(isinstance(options, dict) and options.get("send_prompt"))
+                frames.append(
+                    _terminal_frame(first, "prompt" if prompt else "output", newline=not prompt)
+                )
+        elif direction == "out" and cmdname == "prompt":
+            first = args[0] if args else ""
+            if str(first or ""):
+                frames.append(_terminal_frame(first, "prompt", newline=False))
+        elif direction == "out" and cmdname == "narrative":
+            for node in _narrative_nodes(args):
+                body = node.get("body", "")
+                if str(body or ""):
+                    frames.append(_terminal_frame(body, "output", newline=True))
+    return frames, echo_update
 
 
 def tap(session, direction, kwargs):
@@ -181,12 +239,16 @@ def tap(session, direction, kwargs):
         watches = WATCHES.get(getattr(session, "sessid", None))
         if not watches:
             return
-        line = _render(kwargs, strip_markup=direction == "out")
-        if not line:
-            return
-        frame = {"at": time.time(), "dir": direction, "line": line}
+        frames, echo_update = _render(kwargs, direction)
+        captured_at = time.time()
         for entry in watches:
-            entry.frames.append(frame)
+            if echo_update is not None:
+                entry.input_echo = echo_update
+            visible = frames
+            if direction == "in" and not entry.input_echo:
+                visible = [_terminal_frame("", "input", newline=True)] if frames else []
+            for frame in visible:
+                entry.frames.append({"at": captured_at, "dir": direction, **frame})
     except Exception:  # noqa: BLE001
         # A watch is an observer. It does not get to break what it observes.
         pass
