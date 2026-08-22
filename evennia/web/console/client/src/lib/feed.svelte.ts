@@ -1,8 +1,10 @@
 /* The live feed.
  *
- * One connection for the whole console. `EventSource` reconnects on its own and
- * replays what was missed through `Last-Event-ID`, so there is no retry loop to
- * write here and no gap to paper over.
+ * One connection for the whole console. This uses a streaming `fetch` rather
+ * than native `EventSource`: every console endpoint requires the scoped
+ * `X-Evennia-Console` header, and `EventSource` has no API for sending one.
+ * Reconnection and SSE parsing therefore live here as the small price of
+ * applying the same authentication boundary to the long-lived request.
  *
  * Nothing in this module touches the DOM. The vanilla client painted lamps by
  * walking `el.lamps` and setting `dataset.state`, which meant the strip only
@@ -11,6 +13,8 @@
  */
 
 const API = "/api/console/";
+const HEADER = "X-Evennia-Console";
+const RECONNECT_MS = 1000;
 
 /** How many log lines are kept. Past this, the oldest are dropped. */
 export const LIVE_LOG_LIMIT = 300;
@@ -64,7 +68,8 @@ export const live = $state({
   watch: [] as WatchEntry[],
 });
 
-let source: EventSource | null = null;
+let controller: AbortController | null = null;
+let lastSequence = 0;
 
 function readHealth(payload: Health): Health {
   const checks = payload.checks || {};
@@ -83,41 +88,137 @@ function readHealth(payload: Health): Health {
  *     rail can say so without this module importing the rail.
  */
 export function openFeed(onDegraded?: (degraded: boolean) => void): void {
-  if (source) return;
-  source = new EventSource(API + "feed/", { withCredentials: true });
+  if (controller) return;
+  controller = new AbortController();
+  void runFeed(controller, onDegraded);
+}
 
-  source.addEventListener("health", (event) => {
-    const payload = JSON.parse((event as MessageEvent).data) as Health;
-    live.health = readHealth(payload);
-    live.connected = true;
-    onDegraded?.(Boolean(payload.degraded));
-  });
+/** Keep one authenticated stream open, reconnecting after a bounded pause. */
+async function runFeed(
+  run: AbortController,
+  onDegraded?: (degraded: boolean) => void,
+): Promise<void> {
+  while (controller === run && !run.signal.aborted) {
+    try {
+      const suffix = lastSequence ? `?since=${lastSequence}` : "";
+      const response = await fetch(API + "feed/" + suffix, {
+        credentials: "same-origin",
+        headers: { [HEADER]: "1", Accept: "text/event-stream" },
+        signal: run.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`console feed returned ${response.status}`);
+      }
+      live.connected = true;
+      const reconnect = await consume(response.body, run.signal, onDegraded);
+      if (!reconnect) {
+        if (controller === run) controller = null;
+        live.connected = false;
+        return;
+      }
+    } catch {
+      if (run.signal.aborted || controller !== run) return;
+    }
+    live.connected = false;
+    await pause(RECONNECT_MS, run.signal);
+  }
+}
 
-  source.addEventListener("metrics", (event) => {
-    live.metrics = JSON.parse((event as MessageEvent).data) as Metrics;
-    live.connected = true;
-  });
+/** Parse one SSE response and return whether an ended connection may retry. */
+async function consume(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  onDegraded?: (degraded: boolean) => void,
+): Promise<boolean> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let topic = "message";
+  let eventId = "";
+  let data: string[] = [];
 
-  source.addEventListener("log", (event) => {
-    live.log.push(JSON.parse((event as MessageEvent).data) as LogEntry);
+  const dispatch = (): boolean => {
+    if (!data.length) return true;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(data.join("\n")) as Record<string, unknown>;
+    } catch {
+      return true;
+    }
+    const sequence = Number(eventId || payload.s || 0);
+    if (Number.isFinite(sequence)) lastSequence = Math.max(lastSequence, sequence);
+    if (topic === "closed") return false;
+    deliver(topic, payload, onDegraded);
+    return true;
+  };
+
+  while (!signal.aborted) {
+    const chunk = await reader.read();
+    if (chunk.done) return true;
+    buffered += decoder.decode(chunk.value, { stream: true });
+    let newline = buffered.indexOf("\n");
+    while (newline !== -1) {
+      const line = buffered.slice(0, newline).replace(/\r$/, "");
+      buffered = buffered.slice(newline + 1);
+      if (!line) {
+        if (!dispatch()) {
+          await reader.cancel();
+          return false;
+        }
+        topic = "message";
+        eventId = "";
+        data = [];
+      } else if (!line.startsWith(":")) {
+        const separator = line.indexOf(":");
+        const field = separator === -1 ? line : line.slice(0, separator);
+        const value = separator === -1 ? "" : line.slice(separator + 1).replace(/^ /, "");
+        if (field === "event") topic = value;
+        else if (field === "id") eventId = value;
+        else if (field === "data") data.push(value);
+      }
+      newline = buffered.indexOf("\n");
+    }
+  }
+  return false;
+}
+
+/** Route one decoded payload into the reactive store. */
+function deliver(
+  topic: string,
+  payload: Record<string, unknown>,
+  onDegraded?: (degraded: boolean) => void,
+): void {
+  if (topic === "health") {
+    const health = payload as Health;
+    live.health = readHealth(health);
+    onDegraded?.(Boolean(health.degraded));
+  } else if (topic === "metrics") {
+    live.metrics = payload as Metrics;
+  } else if (topic === "log") {
+    live.log.push(payload as unknown as LogEntry);
     if (live.log.length > LIVE_LOG_LIMIT) {
       live.log.splice(0, live.log.length - LIVE_LOG_LIMIT);
     }
-    live.connected = true;
-  });
-
-  source.addEventListener("watch", (event) => {
-    live.watch.push(JSON.parse((event as MessageEvent).data) as WatchEntry);
+  } else if (topic === "watch") {
+    live.watch.push(payload as unknown as WatchEntry);
     if (live.watch.length > LIVE_WATCH_LIMIT) {
       live.watch.splice(0, live.watch.length - LIVE_WATCH_LIMIT);
     }
-    live.connected = true;
-  });
+  }
+  live.connected = true;
+}
 
-  source.onerror = () => {
-    // EventSource retries by itself. Show the state rather than intervene.
-    live.connected = false;
-  };
+/** Wait before reconnecting, but wake immediately when the feed is closed. */
+function pause(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, milliseconds);
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }
 
 /** Forget every captured line. Used when the last watch stops. */
@@ -135,7 +236,8 @@ export function retainWatches(watchIds: Iterable<string>): void {
 
 /** Close the feed. Used by tests; the console itself never closes it. */
 export function closeFeed(): void {
-  source?.close();
-  source = null;
+  controller?.abort();
+  controller = null;
+  lastSequence = 0;
   live.connected = false;
 }

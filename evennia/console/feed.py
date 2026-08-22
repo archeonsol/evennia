@@ -20,9 +20,11 @@ unchanged and only the pipe differs.
   a websocket scope, so one would need an ASGI wrapper plus hand-rolled
   session-cookie authentication -- reimplementing, less carefully, what
   ``ConsolePermission`` already does.
-* **Reconnection comes free and correct.** ``EventSource`` reconnects on its
-  own and replays through ``Last-Event-ID``, which is exactly the
-  replay-across-reconnect behaviour the plan wanted, without writing it.
+* **The scoped header is preserved.** Native ``EventSource`` cannot attach the
+  ``X-Evennia-Console`` header required by every console endpoint. The client
+  therefore parses an ordinary streaming ``fetch`` and reconnects it after a
+  bounded pause. The authenticated feed is more important than delegating that
+  small loop to the browser.
 * **The Portal boundary stays clean.** Azaban is a Portal concern serving
   players. The console is a Server-side staff surface. Sharing the encoder
   would have coupled them.
