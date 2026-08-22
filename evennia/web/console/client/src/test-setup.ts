@@ -14,16 +14,6 @@ if (!globalThis.matchMedia) {
   })) as unknown as typeof globalThis.matchMedia;
 }
 
-if (!globalThis.EventSource) {
-  // The live feed. Tests that need one install their own double; this stub only
-  // stops module import from throwing in tests that never open a feed.
-  globalThis.EventSource = class {
-    close() {}
-    addEventListener() {}
-    removeEventListener() {}
-  } as unknown as typeof globalThis.EventSource;
-}
-
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = function scrollTo() {};
 }

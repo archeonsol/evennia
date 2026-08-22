@@ -25,6 +25,48 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.216 — The live console feed can authenticate
+
+### Interface
+
+- [`feed.svelte.ts`](evennia/web/console/client/src/lib/feed.svelte.ts) no
+  longer opens the console's server-sent event stream with native
+  `EventSource`. Every console endpoint requires the scoped
+  `X-Evennia-Console` header, but the browser's `EventSource` API has no way to
+  attach a custom header. The watch action used the ordinary authenticated API
+  and therefore succeeded, while its separate live stream received HTTP 403.
+  The Sessions panel could show an active watch indefinitely beside an empty
+  transcript; health, metrics, and live log events were refused by the same
+  fault.
+
+- The client now uses a streaming `fetch` carrying the same console header as
+  every other API request. It parses the SSE frames into the existing reactive
+  stores, preserves the last sequence cursor across bounded reconnects, stops
+  cleanly when access is revoked or the page closes, and keeps the existing
+  limits on retained log and watch lines. The production console bundle is
+  rebuilt with the corrected transport.
+
+### Security
+
+- The server-side authorization check is unchanged. The fix authenticates the
+  long-lived request instead of exempting it from the scoped-header rule, so a
+  watch transcript remains available only to the signed-in console operator
+  whose actor ID owns it.
+
+### Tests
+
+- A browser-side regression test opens a real readable stream, asserts that
+  the request carries `X-Evennia-Console`, and proves a decoded watch frame
+  reaches the private transcript store. All 82 console-client tests pass,
+  Svelte reports no errors or warnings, and all 31 engine feed tests pass.
+
+### Migration
+
+- No database migration, setting change, or downstream game change. Deploy the
+  rebuilt static console asset and reload an already-open console page.
+
+---
+
 ## 6.0.0+underspire.215 -- A session watch that actually watches
 
 ### Engine
