@@ -57,6 +57,9 @@ class TestBuiltAssetsArePresent(SimpleTestCase):
         # behind, and it serves with a 200.
         self.assertGreater(bundle.stat().st_size, 10_000)
 
+    def test_component_styles_are_loaded(self):
+        self.assertIn("console/app/console-app.css", self._referenced())
+
     def test_the_source_that_builds_it_is_committed_too(self):
         # Shipping the artifact without its source is how it becomes
         # unmaintainable rather than merely stale.

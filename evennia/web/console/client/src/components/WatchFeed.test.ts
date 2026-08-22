@@ -58,6 +58,96 @@ describe("WatchFeed", () => {
     expect(container.textContent).not.toContain("not mine");
   });
 
+  it("renders player-facing colour without traffic metadata", () => {
+    live.watch.push({
+      watch_id: "watch-mine",
+      sessid: 1,
+      account: "one",
+      at: 1,
+      dir: "out",
+      kind: "output",
+      line: "red warning",
+      html: '<span class="color-009">red warning</span>',
+      newline: true,
+    });
+
+    const { container } = render(WatchFeed, {
+      watches: [
+        {
+          watch_id: "watch-mine",
+          sessid: 1,
+          account: "one",
+          watcher: "me",
+          reason: "a report",
+          seconds_left: 60,
+          mine: true,
+        },
+      ],
+    });
+
+    expect(container.querySelector(".shadow-terminal .color-009")?.textContent).toBe(
+      "red warning",
+    );
+    expect(container.textContent).not.toContain("OUTPUT");
+    expect(container.textContent).not.toContain("12:00");
+  });
+
+  it("keeps simultaneous watches in separate shadow terminals", () => {
+    live.watch.push(
+      {
+        watch_id: "first",
+        sessid: 1,
+        account: "one",
+        at: 1,
+        dir: "out",
+        kind: "output",
+        line: "only first",
+        html: "only first",
+        newline: true,
+      },
+      {
+        watch_id: "second",
+        sessid: 2,
+        account: "two",
+        at: 2,
+        dir: "out",
+        kind: "output",
+        line: "only second",
+        html: "only second",
+        newline: true,
+      },
+    );
+
+    const { container } = render(WatchFeed, {
+      watches: [
+        {
+          watch_id: "first",
+          sessid: 1,
+          account: "one",
+          watcher: "me",
+          reason: "first report",
+          seconds_left: 60,
+          mine: true,
+        },
+        {
+          watch_id: "second",
+          sessid: 2,
+          account: "two",
+          watcher: "me",
+          reason: "second report",
+          seconds_left: 60,
+          mine: true,
+        },
+      ],
+    });
+
+    const terminals = Array.from(container.querySelectorAll(".shadow-terminal"));
+    expect(terminals).toHaveLength(2);
+    expect(terminals[0].textContent).toContain("only first");
+    expect(terminals[0].textContent).not.toContain("only second");
+    expect(terminals[1].textContent).toContain("only second");
+  });
+
   it("forgets transcript lines when their watch lifetime ends", () => {
     live.watch.push(
       { watch_id: "live", sessid: 1, account: "one", at: 1, dir: "out", line: "keep" },

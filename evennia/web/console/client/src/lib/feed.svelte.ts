@@ -54,7 +54,13 @@ export interface WatchEntry {
   at: number;
   /** "out" for what the player was shown, "in" for what they typed. */
   dir: string;
+  /** Terminal role after protocol noise has been removed. */
+  kind?: "output" | "prompt" | "input";
   line: string;
+  /** ANSI-rendered, server-sanitized HTML. Output only; input remains text. */
+  html?: string;
+  /** Whether this frame advances to the next terminal line. */
+  newline?: boolean;
 }
 
 export const live = $state({

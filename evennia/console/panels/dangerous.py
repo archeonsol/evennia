@@ -453,11 +453,11 @@ class SessionsPanel(Panel):
     def watch(self, ctx, sessid=None, reason=""):
         """Begin watching one session's traffic.
 
-        Both directions, unredacted, live on the operator's feed. That includes
-        what the player types, which at a login prompt can be a password, so
-        the captured text is held in memory for the life of the watch and is
-        never written to the database. What is written is who watched whom, for
-        how long, and how much they saw.
+        Player-visible terminal output and locally echoed submitted lines live
+        on the operator's feed. Echo-disabled secrets, structured scene patches,
+        and other out-of-band traffic do not. Captured text is held in memory
+        for the life of the watch and never written to the database. What is
+        written is who watched whom, for how long, and how much they saw.
 
         No audit row is written here. It is written when the first frame is
         actually delivered, so a watch on a silent session claims nothing --
@@ -497,10 +497,10 @@ class SessionsPanel(Panel):
             "watched_account": entry.account_name,
             "seconds": max(0, int(entry.expires - time.monotonic())),
             "note": (
-                "Server output and complete submitted lines appear on your watch feed. "
-                "Client-side echo, partially typed text, aliases, triggers, and local UI "
-                "are not visible. The watch stops when its time runs out or the session "
-                "disconnects, and its audit trail is permanent."
+                "The shadow terminal mirrors player-visible output, prompts, and submitted "
+                "lines while local echo is enabled. Partially typed text, secrets, aliases, "
+                "triggers, and local UI are not visible. The watch stops when its time runs "
+                "out or the session disconnects, and its audit trail is permanent."
             ),
         }
 
