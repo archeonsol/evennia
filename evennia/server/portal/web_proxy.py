@@ -115,24 +115,34 @@ class ReverseProxy:
     async def _forward_and_respond(self, conn, writer, request, body, peer_ip):
         fwd_headers = self._request_headers(request, peer_ip)
         target = request.target.decode("latin1")
+        response_started = False
         try:
-            upstream = await self._client.request(
+            async with self._client.stream(
                 request.method.decode("latin1"),
                 target,
                 headers=fwd_headers,
                 content=body or None,
-            )
+            ) as upstream:
+                out_headers = self._response_headers(upstream)
+                writer.write(
+                    conn.send(h11.Response(status_code=upstream.status_code, headers=out_headers))
+                )
+                response_started = True
+                await writer.drain()
+
+                async for chunk in upstream.aiter_raw():
+                    if chunk:
+                        writer.write(conn.send(h11.Data(data=chunk)))
+                        await writer.drain()
+
+                writer.write(conn.send(h11.EndOfMessage()))
+                await writer.drain()
         except Exception:
             logger.log_trace("web proxy: upstream request failed")
+            if response_started:
+                raise
             self._send_error(conn, writer, 502, b"Bad Gateway")
-            return
-
-        out_headers = self._response_headers(upstream)
-        writer.write(conn.send(h11.Response(status_code=upstream.status_code, headers=out_headers)))
-        if upstream.content:
-            writer.write(conn.send(h11.Data(data=upstream.content)))
-        writer.write(conn.send(h11.EndOfMessage()))
-        await writer.drain()
+            await writer.drain()
 
     def _request_headers(self, request, peer_ip):
         headers = []
