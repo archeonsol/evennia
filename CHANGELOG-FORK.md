@@ -25,6 +25,27 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.218 — Portal proxy streams live responses
+
+### Engine
+
+- [`web_proxy.py`](evennia/server/portal/web_proxy.py) now forwards upstream
+  response headers and body chunks as they arrive instead of buffering the
+  complete response. Server-sent events and other long-lived streaming
+  endpoints can therefore deliver their first frame while the connection stays
+  open.
+
+### Tests
+
+- [`test_web_proxy_streaming.py`](evennia/server/tests/test_web_proxy_streaming.py)
+  covers forwarding an SSE frame before the controlled upstream response closes.
+
+### Migration
+
+- No database migration, setting change, or downstream API change.
+
+---
+
 ## 6.0.0+underspire.217 — Compose previews render game markup safely
 
 ### Interface
