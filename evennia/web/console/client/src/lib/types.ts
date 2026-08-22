@@ -44,13 +44,41 @@ export interface SessionRow {
   address_state: string;
   address_state_note: string;
   cidr: string;
+  asn: number | null;
   network: string;
   country: string;
+  is_datacenter: boolean | null;
+  is_tor: boolean | null;
+  client_name: string;
+  term: string;
+  encoding: string;
+  screen: string;
+  user_agent: string;
   client_fp: string;
   device_token: string;
   signatures: Signature[];
   address_trustworthy: boolean;
   address_warning: string;
+}
+
+export interface ConnectionField {
+  name: string;
+  label: string;
+  value: unknown;
+  recorded: boolean;
+  sensitive: boolean;
+}
+
+export interface ConnectionFieldGroup {
+  label: string;
+  fields: ConnectionField[];
+}
+
+export interface ConnectionDetail {
+  id: number;
+  account: string;
+  protocol: string;
+  groups: ConnectionFieldGroup[];
 }
 
 export interface FlagRow {

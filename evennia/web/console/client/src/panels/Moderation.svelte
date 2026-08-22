@@ -3,7 +3,6 @@
   import Section from "../components/Section.svelte";
   import Empty from "../components/Empty.svelte";
   import Lamp from "../components/Lamp.svelte";
-  import Annunciator from "../components/Annunciator.svelte";
   import DataTable from "../components/DataTable.svelte";
   import Cell from "../components/Cell.svelte";
   import FlagDossier from "../components/FlagDossier.svelte";
@@ -11,7 +10,7 @@
   import SignalCoverage from "../components/SignalCoverage.svelte";
   import AccountDossier from "../components/AccountDossier.svelte";
   import SignatureMarks from "../components/SignatureMarks.svelte";
-  import RevealButton from "../components/RevealButton.svelte";
+  import ConnectionDossier from "../components/ConnectionDossier.svelte";
   import { Loader, rowsPath, runAction } from "../lib/load.svelte";
   import { view } from "../lib/state.svelte";
   import type { FlagRow, SanctionRow, SessionRow } from "../lib/types";
@@ -48,6 +47,7 @@
   const severe = $derived(flags.filter((row) => (row.severity || 0) >= 2));
 
   let chainLabel = $state("VERIFY CHAIN");
+  let openSession = $state<number | null>(null);
 
   async function verifyChain() {
     chainLabel = "CHECKING";
@@ -106,24 +106,14 @@
 </PanelHead>
 
 <div class="panel-body">
-  <Annunciator
-    alarms={[
-      severe.length > 0 && {
-        text: `${severe.length} HIGH-SEVERITY FLAGS`,
-        state: "fail" as const,
-      },
-      flags.length > 0 && {
-        text: `${flags.length} FLAGS AWAITING A PERSON`,
-        state: "attn" as const,
-      },
-    ]}
-    calm="NO FLAG IS WAITING"
-  />
-
-  <Section label="Flags awaiting a person" />
-  {#if flags.length === 0}
-    <Empty line="QUEUE CLEAR." hint="No flag is waiting for review." />
-  {:else}
+  {#if flags.length}
+    <div class="moderation-alerts" aria-label="Moderation alerts">
+      {#if severe.length}
+        <Lamp label={`${severe.length} HIGH-SEVERITY FLAGS`} state="fail" />
+      {/if}
+      <Lamp label={`${flags.length} FLAGS AWAITING REVIEW`} state="attn" />
+    </div>
+    <Section label="Flags awaiting review" />
     <DataTable
       label="Flag queue"
       columns={[
@@ -186,10 +176,8 @@
     />
   {/if}
 
-  <Section label="Active sanctions" />
-  {#if !sanctions.length}
-    <Empty line="NO ACTIVE SANCTIONS." />
-  {:else}
+  {#if sanctions.length}
+    <Section label="Active sanctions" />
     <DataTable
       label="Active sanctions"
       columns={[
@@ -230,32 +218,158 @@
   {:else}
     <div class="log-view">
       {#each sessions as row (row.id)}
-        <div class="session-row">
-          <span class="log-source">{row.protocol}</span>
-          <span class="log-text">
-            {row.account || "(anonymous)"}&nbsp;&nbsp;{row.cidr}&nbsp;&nbsp;{row.network || ""}
-          </span>
-          <SignatureMarks signatures={row.signatures} />
-          {#if row.address_state === "held"}
-            <!-- The network is printed in this row already and is meant to be:
-                 it is the coarse key operators correlate on. Only the host part
-                 is withheld, so the label says host rather than address, which
-                 next to a visible 0/24 read as a mask that was not working. -->
-            <span class="legend">host</span>
-            <RevealButton record="session" id={row.id} field="ip" label="this address" />
-          {/if}
-          {#if row.address_state === "purged"}
-            <Lamp label="ADDRESS PURGED" state="off" title={row.address_state_note} />
-          {:else if row.address_state === "absent"}
-            <Lamp label="NO ADDRESS" state="off" title={row.address_state_note} />
-          {/if}
-          {#if row.address_trustworthy}
-            <span class="legend">{row.country || ""}</span>
-          {:else}
-            <Lamp label="ADDRESS VOID" state="attn" title={row.address_warning} />
+        <div class="connection-record">
+          <button
+            type="button"
+            class="connection-summary"
+            aria-expanded={openSession === row.id}
+            aria-controls={`connection-detail-${row.id}`}
+            aria-label={`${openSession === row.id ? "Close" : "Open"} connection ${row.id} for ${row.account || "anonymous"}`}
+            onclick={() => (openSession = openSession === row.id ? null : row.id)}
+          >
+            <span class="connection-who">
+              <strong>{row.account || "(anonymous)"}</strong>
+              <span>{row.protocol || "unknown protocol"} / #{row.id}</span>
+              <time datetime={row.connected}>{row.connected || "connection time unknown"}</time>
+            </span>
+            <span class="connection-client">
+              <strong>{row.client_name || "CLIENT NAME NOT RECORDED"}</strong>
+              <span>{[row.term, row.encoding, row.screen].filter(Boolean).join(" / ") || "No terminal profile"}</span>
+              <span title={row.user_agent}>{row.user_agent || "No user agent"}</span>
+            </span>
+            <span class="connection-network">
+              <strong>{row.cidr || "NETWORK NOT RECORDED"}</strong>
+              <span>{row.network || "No ASN organization"}</span>
+              <span>{row.asn ? `AS${row.asn}` : "NO ASN"} / {row.country || "NO COUNTRY"}</span>
+            </span>
+            <span class="connection-state">
+              <SignatureMarks signatures={row.signatures} />
+              <span class="connection-marks">
+                {#if row.is_tor}<span class="signal-mark alert">TOR</span>{/if}
+                {#if row.is_datacenter}<span class="signal-mark">DATACENTER</span>{/if}
+                {#if row.address_state === "held"}<span class="signal-mark">HOST HELD</span>{/if}
+                {#if row.address_state === "purged"}<span class="signal-mark">ADDRESS PURGED</span>{/if}
+                {#if row.address_state === "absent"}<span class="signal-mark">NO ADDRESS</span>{/if}
+                {#if !row.address_trustworthy}<span class="signal-mark alert">ADDRESS VOID</span>{/if}
+              </span>
+            </span>
+          </button>
+          {#if openSession === row.id}
+            <div id={`connection-detail-${row.id}`}>
+              <ConnectionDossier
+                sessionId={row.id}
+                account={row.account}
+                protocol={row.protocol}
+                onClose={() => (openSession = null)}
+              />
+            </div>
           {/if}
         </div>
       {/each}
     </div>
   {/if}
 </div>
+
+<style>
+  .moderation-alerts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 14px 2px;
+  }
+
+  .log-view {
+    max-height: none;
+    padding: 0;
+    border-block: 1px solid var(--rule);
+  }
+
+  .connection-record { border-bottom: 1px solid var(--rule-soft); }
+  .connection-record:last-child { border-bottom: 0; }
+
+  .connection-summary {
+    display: grid;
+    grid-template-columns:
+      minmax(150px, 0.85fr)
+      minmax(240px, 1.35fr)
+      minmax(200px, 1.1fr)
+      minmax(180px, auto);
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 68px;
+    padding: 9px 14px;
+    border: 0;
+    background: var(--ground);
+    color: var(--ink);
+    text-align: start;
+    text-transform: none;
+  }
+
+  .connection-summary:hover,
+  .connection-summary[aria-expanded="true"] { background: var(--panel); }
+
+  .connection-summary[aria-expanded="true"] {
+    box-shadow: inset 2px 0 0 var(--attn);
+  }
+
+  .connection-who,
+  .connection-client,
+  .connection-network,
+  .connection-state {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .connection-summary strong {
+    overflow: hidden;
+    color: var(--ink);
+    font: 600 12px/1.3 var(--mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connection-summary span,
+  .connection-summary time {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink-dim);
+    font: 400 11px/1.35 var(--mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connection-state { align-items: flex-start; }
+
+  .connection-marks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .connection-summary .signal-mark {
+    padding: 2px 5px;
+    border: 1px solid var(--rule);
+    color: var(--ink-faint);
+    font: 500 9px/1.2 var(--mono);
+    letter-spacing: 0.06em;
+  }
+
+  .connection-summary .signal-mark.alert {
+    border-color: var(--attn);
+    color: var(--attn);
+  }
+
+  @media (max-width: 1100px) {
+    .connection-summary {
+      grid-template-columns: minmax(160px, 0.8fr) minmax(240px, 1.2fr);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .connection-summary { grid-template-columns: minmax(0, 1fr); }
+    .connection-state { gap: 6px; }
+  }
+</style>

@@ -21,10 +21,10 @@ enforcement action that does not pass through a staff member's hands, and this
 panel does not add one.
 
 One thing changes. The game gated raw addresses behind a second capability;
-the console has no capability grid (decision D1), so an address is **masked by
-default and revealed by an audited action** instead. Nobody is prevented,
-everybody is recorded -- which is what the split was really protecting, since
-an appeal never requires that staff have seen the address.
+the console has no capability grid (decision D1). Recent rows therefore keep
+identifying values out of the list payload, while opening one connection loads
+the complete record and writes an audit event. The console is the senior-staff
+surface: once a record is deliberately opened, every captured field is shown.
 
 """
 
@@ -83,14 +83,78 @@ COLLATERAL_SAMPLE = 5000
 #: is what matters, not the roll call.
 COLLATERAL_NAMES = 25
 
-#: The signatures a connection can carry, and what an operator should call them.
-#: Order is the order they are shown in, not a ranking: the detector's own
-#: ranking lives in ``evennia.moderation.detect.CORRELATION_SIGNATURES``.
-SESSION_SIGNATURES = (
-    ("telnet_sig", "client negotiation"),
-    ("tls_sig", "browser handshake"),
-    ("http_order_fp", "header order"),
-    ("csessid", "browser session"),
+#: Identity signals a connection can carry: field, operator label, and the
+#: protocol population that can produce it. Order is display order, not a
+#: ranking; the detector owns correlation strength separately.
+SESSION_SIGNALS = (
+    ("client_fp", "client capability", "interactive"),
+    ("telnet_sig", "client negotiation", "telnet"),
+    ("device_token", "device token", "web"),
+    ("http_fp", "browser headers", "web"),
+    ("tls_sig", "browser handshake", "web"),
+    ("http_order_fp", "header order", "web"),
+    ("csessid", "browser session", "web"),
+)
+
+SESSION_SIGNATURES = tuple((field, label) for field, label, _family in SESSION_SIGNALS)
+
+#: Every concrete SessionRecord field, arranged for a human rather than in
+#: migration order. ``connection()`` appends any future model field that is not
+#: named here, so adding a capture column cannot silently hide it from staff.
+CONNECTION_FIELD_GROUPS = (
+    ("Record", ("id", "session_uid", "sessid", "protocol")),
+    (
+        "Lifecycle",
+        (
+            "connected_at",
+            "login_at",
+            "disconnected_at",
+            "disconnect_reason",
+            "command_count",
+            "last_command_at",
+        ),
+    ),
+    ("Account", ("account_id", "account_name", "puppet_name")),
+    (
+        "Network and provenance",
+        (
+            "ip",
+            "ip_hash",
+            "cidr",
+            "peer_ip",
+            "xff_present",
+            "xff_applied",
+            "asn",
+            "asn_org",
+            "country",
+            "is_datacenter",
+            "is_tor",
+        ),
+    ),
+    (
+        "Client",
+        (
+            "client_name",
+            "term",
+            "encoding",
+            "screen_w",
+            "screen_h",
+            "user_agent",
+            "client_fp",
+        ),
+    ),
+    (
+        "Identity signals",
+        (
+            "device_token",
+            "csessid",
+            "telnet_sig",
+            "tls_sig",
+            "http_fp",
+            "http_order_fp",
+        ),
+    ),
+    ("Negotiation and protocol flags", ("neg_order", "neg_timing_ms", "flags")),
 )
 
 #: The identity columns an account dossier lists, and the sanction subject each
@@ -296,9 +360,19 @@ class ModerationPanel(Panel):
             "ip",
             "cidr",
             "asn_org",
+            "asn",
             "country",
+            "is_datacenter",
+            "is_tor",
             "client_fp",
+            "client_name",
+            "term",
+            "encoding",
+            "screen_w",
+            "screen_h",
+            "user_agent",
             "device_token",
+            "http_fp",
             "ip_hash",
             "telnet_sig",
             "tls_sig",
@@ -331,6 +405,14 @@ class ModerationPanel(Panel):
             "cidr": row["cidr"],
             "network": row["asn_org"],
             "country": row["country"],
+            "asn": row["asn"],
+            "is_datacenter": row["is_datacenter"],
+            "is_tor": row["is_tor"],
+            "client_name": row["client_name"],
+            "term": row["term"],
+            "encoding": row["encoding"],
+            "screen": self._screen(row["screen_w"], row["screen_h"]),
+            "user_agent": row["user_agent"],
             "client_fp": mask(row["client_fp"]),
             "device_token": mask(row["device_token"]),
             "signatures": [
@@ -352,6 +434,91 @@ class ModerationPanel(Panel):
                     "this row."
                 )
             ),
+        }
+
+    def _screen(self, width, height):
+        """Return one recorded terminal size without inventing a dimension."""
+
+        if width is None and height is None:
+            return ""
+        return f"{width if width is not None else '?'} × {height if height is not None else '?'}"
+
+    def connection(self, ctx, session_id=None):
+        """Return every stored field for one deliberately opened connection.
+
+        Recent rows are summaries. This method is the senior-staff dossier: it
+        returns exact identifying values and records that the operator opened
+        them. Fields are derived from the model at runtime so a future capture
+        column cannot be stored successfully and remain invisible here.
+
+        Args:
+            ctx: Worker context for the operator.
+            session_id: Primary key of the SessionRecord to open.
+
+        Returns:
+            dict: The connection identity and human-grouped concrete fields.
+
+        Raises:
+            LookupError: No matching connection exists.
+        """
+
+        from evennia.server.models import SessionRecord
+
+        try:
+            row = SessionRecord.objects.filter(pk=session_id).values().first()
+        except (TypeError, ValueError) as err:
+            raise LookupError(f"{session_id!r} is not a valid connection identifier") from err
+        if row is None:
+            raise LookupError(f"no connection with id {session_id!r}")
+
+        model_fields = {field.name: field for field in SessionRecord._meta.concrete_fields}
+        grouped = []
+        included = set()
+        for label, names in CONNECTION_FIELD_GROUPS:
+            fields = [
+                self._connection_field(model_fields[name], row[name])
+                for name in names
+                if name in model_fields
+            ]
+            included.update(field["name"] for field in fields)
+            if fields:
+                grouped.append({"label": label, "fields": fields})
+
+        remaining = [
+            self._connection_field(field, row[field.name])
+            for field in SessionRecord._meta.concrete_fields
+            if field.name not in included
+        ]
+        if remaining:
+            grouped.append({"label": "Other recorded fields", "fields": remaining})
+
+        audit.record(
+            panel=self.key,
+            operation="connection_view",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"server.sessionrecord#{row['id']}",
+            after={"fields": len(model_fields)},
+            retention="permanent",
+        )
+        return {
+            "id": row["id"],
+            "account": row["account_name"],
+            "protocol": row["protocol"],
+            "groups": grouped,
+        }
+
+    def _connection_field(self, field, value):
+        """Return one model field as an explicit, JSON-shaped readout."""
+
+        if hasattr(value, "isoformat"):
+            value = value.isoformat()
+        return {
+            "name": field.name,
+            "label": str(field.verbose_name),
+            "value": value,
+            "recorded": value is not None and value != "",
+            "sensitive": field.name in ADDRESS_KINDS or field.name == "peer_ip",
         }
 
     def _address_state(self, row):
@@ -844,7 +1011,7 @@ class ModerationPanel(Panel):
 
         from evennia.server.models import SessionRecord
 
-        fields = [field for field, _ in SESSION_SIGNATURES] + ["http_fp", "device_token"]
+        fields = [field for field, _label, _family in SESSION_SIGNALS]
         annotations = {
             f"has_{field}": Case(
                 When(**{field: ""}, then=Value(False)),
@@ -878,8 +1045,9 @@ class ModerationPanel(Panel):
             return sum(1 for row in population if row[f"has_{field}"])
 
         report = []
-        for field, label in SESSION_SIGNATURES:
-            population = socket_rows if field == "telnet_sig" else web
+        populations = {"web": web, "telnet": socket_rows, "interactive": web + socket_rows}
+        for field, label, family in SESSION_SIGNALS:
+            population = populations[family]
             seen = count(population, field)
             report.append(
                 {
@@ -938,6 +1106,21 @@ class ModerationPanel(Panel):
             return (
                 "No connection over a raw socket negotiated any option. This is "
                 "normal if every player uses the web client."
+            )
+        if field == "client_fp":
+            return (
+                "No interactive connection recorded its negotiated client capabilities. "
+                "This is a capture fault; inspect a recent connection record."
+            )
+        if field == "device_token":
+            return (
+                "No web connection carried a device token. Check that the web client "
+                "loads the device-token bootstrap before opening its socket."
+            )
+        if field == "http_fp":
+            return (
+                "No web connection recorded its browser headers. This is a server-side "
+                "capture fault, not a proxy setting."
             )
         if field == "tls_sig":
             if not trusted:
