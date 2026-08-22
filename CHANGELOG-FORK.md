@@ -25,6 +25,60 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.220 — Complete moderation connection dossiers
+
+### Interface
+
+- [`moderation.py`](evennia/console/panels/moderation.py) and
+  [`Moderation.svelte`](evennia/web/console/client/src/panels/Moderation.svelte)
+  turn recent connections into expandable dossiers. The compact list now shows
+  account, protocol, client and terminal metadata, screen size, user agent,
+  masked network provenance, GeoIP/ASN context, and the presence of every
+  identity signal the server records.
+
+- [`ConnectionDossier.svelte`](evennia/web/console/client/src/components/ConnectionDossier.svelte)
+  exposes the complete stored `SessionRecord` to authorized senior staff on
+  demand, including exact addresses, device and browser tokens, all client,
+  Telnet, TLS, HTTP, and header-order fingerprints, browser-session identity,
+  negotiation details, protocol flags, lifecycle timestamps, and purge state.
+  The serializer derives its field inventory from the model so newly recorded
+  fields cannot silently disappear from the panel.
+
+- Empty moderation sections no longer consume most of the page or announce
+  that no flag is waiting. Calm state proceeds directly to signal coverage and
+  recent connections; flag, sanction, and permanent-ban sections appear only
+  when they contain work.
+
+### Security and privacy
+
+- Connection summaries continue to mask direct identifiers. Exact values load
+  only after an operator deliberately opens a dossier, and every such open is
+  permanently recorded as a `moderation.connection_view` audit event.
+
+### Performance
+
+- The normal moderation refresh still returns bounded connection summaries.
+  Complete records are fetched only for the one row an operator opens, avoiding
+  bulk delivery and rendering of sensitive, high-cardinality field sets.
+
+### Tests
+
+- Backend coverage verifies every concrete `SessionRecord` field, exact
+  sensitive values, audit creation, missing-record handling, readable client
+  and GeoIP summaries, and all seven signal populations. The engine console
+  suite passes 777 tests with one skip.
+
+- Browser coverage verifies summary disclosure boundaries, complete dossier
+  rendering, and the compact calm state. All 86 console-client tests pass, the
+  production bundle builds, and Svelte reports no errors or warnings.
+
+### Migration
+
+- No database migration, setting change, or downstream API change. Deploy the
+  rebuilt console assets and reload an open console page.
+
+---
+
 ## 6.0.0+underspire.219 — Session watches become shadow terminals
 
 ### Interface
