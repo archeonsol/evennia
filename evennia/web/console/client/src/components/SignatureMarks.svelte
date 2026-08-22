@@ -9,7 +9,10 @@
    * spells all four out. */
 
   const MARKS: Record<string, string> = {
+    client_fp: "CAP",
     telnet_sig: "NEG",
+    device_token: "DEV",
+    http_fp: "HTTP",
     tls_sig: "TLS",
     http_order_fp: "HDR",
     csessid: "SES",
@@ -31,3 +34,11 @@
   <!-- Nothing was recorded, which is not the same as nothing being shown. -->
   <span class="legend sig-marks none">NO SIGNATURE</span>
 {/if}
+
+<style>
+  .sig-marks {
+    min-width: 0;
+    text-align: start;
+    white-space: normal;
+  }
+</style>

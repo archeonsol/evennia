@@ -1,6 +1,5 @@
 <script lang="ts">
   import Section from "./Section.svelte";
-  import Empty from "./Empty.svelte";
   import DataTable from "./DataTable.svelte";
   import Cell from "./Cell.svelte";
   import { runAction } from "../lib/load.svelte";
@@ -51,11 +50,8 @@
   }
 </script>
 
-<Section label="Proposals" />
-
-{#if data && !rows.length}
-  <Empty line="NOBODY HAS ASKED FOR A PERMANENT BAN." />
-{:else if data}
+{#if data && rows.length}
+  <Section label="Permanent-ban proposals" />
   <DataTable
     label="Sanction proposals"
     columns={[

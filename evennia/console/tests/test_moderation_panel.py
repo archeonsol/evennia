@@ -183,6 +183,114 @@ class TestSessionProvenance(ModerationTestCase):
         self.assertFalse(row["address_trustworthy"])
         self.assertIn("do not sanction", row["address_warning"].lower())
 
+    def test_recent_rows_carry_readable_client_and_geoip_context(self):
+        self._session(
+            client_name="Mudlet",
+            term="xterm-256color",
+            encoding="utf-8",
+            screen_w=160,
+            screen_h=48,
+            user_agent="Mozilla/5.0 Test Browser",
+            asn=64500,
+            asn_org="Example Transit",
+            country="TR",
+            is_datacenter=False,
+            is_tor=True,
+        )
+
+        row = self.panel.rows(_ctx())["sessions"][0]
+
+        self.assertEqual(row["client_name"], "Mudlet")
+        self.assertEqual(row["term"], "xterm-256color")
+        self.assertEqual(row["encoding"], "utf-8")
+        self.assertEqual(row["screen"], "160 × 48")
+        self.assertEqual(row["user_agent"], "Mozilla/5.0 Test Browser")
+        self.assertEqual(row["asn"], 64500)
+        self.assertEqual(row["network"], "Example Transit")
+        self.assertEqual(row["country"], "TR")
+        self.assertFalse(row["is_datacenter"])
+        self.assertTrue(row["is_tor"])
+
+
+class TestConnectionDossier(ModerationTestCase):
+    """Opening a connection exposes every field the capture model stores."""
+
+    def _session(self):
+        return SessionRecord.objects.create(
+            session_uid="full-record",
+            sessid=42,
+            protocol="webclient/websocket",
+            account_id=17,
+            account_name="player",
+            puppet_name="Player Character",
+            ip="203.0.113.7",
+            ip_hash="i" * 64,
+            cidr="203.0.113.0/24",
+            peer_ip="127.0.0.1",
+            xff_applied=True,
+            xff_present=True,
+            asn=64500,
+            asn_org="Example Transit",
+            country="TR",
+            is_datacenter=False,
+            is_tor=True,
+            client_fp="c" * 64,
+            client_name="Evennia Webclient",
+            term="xterm-256color",
+            encoding="utf-8",
+            screen_w=160,
+            screen_h=48,
+            telnet_sig="n" * 64,
+            neg_order=["TTYPE", "NAWS"],
+            neg_timing_ms={"TTYPE": 12.4},
+            flags={"CLIENTNAME": "Evennia Webclient", "ANSI": True},
+            csessid="browser-session",
+            device_token="device-token",
+            http_fp="h" * 64,
+            http_order_fp="o" * 64,
+            tls_sig="t" * 64,
+            user_agent="Mozilla/5.0 Test Browser",
+            command_count=91,
+        )
+
+    def test_every_concrete_model_field_is_returned(self):
+        session = self._session()
+
+        result = self.panel.connection(self.worker(), session_id=session.pk)
+        returned = {field["name"]: field for group in result["groups"] for field in group["fields"]}
+        model_fields = {field.name for field in SessionRecord._meta.concrete_fields}
+
+        self.assertEqual(set(returned), model_fields)
+
+    def test_sensitive_values_are_exact_in_the_open_dossier(self):
+        session = self._session()
+
+        result = self.panel.connection(self.worker(), session_id=session.pk)
+        values = {
+            field["name"]: field["value"] for group in result["groups"] for field in group["fields"]
+        }
+
+        self.assertEqual(values["ip"], "203.0.113.7")
+        self.assertEqual(values["device_token"], "device-token")
+        self.assertEqual(values["client_fp"], "c" * 64)
+        self.assertEqual(values["http_fp"], "h" * 64)
+        self.assertEqual(values["http_order_fp"], "o" * 64)
+        self.assertEqual(values["tls_sig"], "t" * 64)
+        self.assertEqual(values["telnet_sig"], "n" * 64)
+
+    def test_opening_the_dossier_is_audited(self):
+        session = self._session()
+
+        self.panel.connection(self.worker(), session_id=session.pk)
+
+        event = ConsoleAuditEvent.objects.get(operation="connection_view")
+        self.assertEqual(event.target_ref, f"server.sessionrecord#{session.pk}")
+        self.assertEqual(event.actor_id, self.actor.pk)
+
+    def test_an_unknown_connection_is_a_lookup_error(self):
+        with self.assertRaises(LookupError):
+            self.panel.connection(self.worker(), session_id=999999)
+
 
 class TestFlagDetail(ModerationTestCase):
     """One flag, with its evidence masked where it names a person's device."""
@@ -369,7 +477,18 @@ class TestSignatureDisplay(ModerationTestCase):
         # reported absent read differently to whoever is scanning the column.
         self._session()
         marks = self._marks(self.panel.rows(_ctx())["sessions"][0])
-        self.assertEqual(set(marks), {"telnet_sig", "tls_sig", "http_order_fp", "csessid"})
+        self.assertEqual(
+            set(marks),
+            {
+                "client_fp",
+                "telnet_sig",
+                "device_token",
+                "http_fp",
+                "tls_sig",
+                "http_order_fp",
+                "csessid",
+            },
+        )
 
     def test_a_recorded_signature_is_withheld_not_shown(self):
         self._session(tls_sig="a" * 64)
@@ -475,6 +594,27 @@ class TestSignalCoverage(ModerationTestCase):
         for _ in range(5):
             self._web(tls_sig="a" * 64)
         self.assertEqual(self._report()["tls_sig"]["state"], "ok")
+
+    def test_every_recorded_identity_signal_has_a_coverage_row(self):
+        self._web(
+            client_fp="c" * 64,
+            device_token="d" * 64,
+            http_fp="h" * 64,
+            tls_sig="t" * 64,
+        )
+
+        self.assertEqual(
+            set(self._report()),
+            {
+                "client_fp",
+                "device_token",
+                "http_fp",
+                "telnet_sig",
+                "tls_sig",
+                "http_order_fp",
+                "csessid",
+            },
+        )
 
     def test_an_absent_signal_reads_as_absent(self):
         for _ in range(5):
