@@ -25,6 +25,33 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.217 — Compose previews render game markup safely
+
+### Interface
+
+- [`CommandInput.svelte`](evennia/web/webclient/client/src/components/CommandInput.svelte)
+  now converts the server's compose preview text through the web client's shared
+  Evennia-markup renderer before displaying it. Colour tags now appear as their
+  intended styled text instead of literal `|` codes in the compose preview.
+
+- [`compose-preview.ts`](evennia/web/webclient/client/src/lib/compose-preview.ts)
+  uses the existing safe `pipeToHtml` conversion path. Raw HTML in preview text
+  remains escaped before Svelte inserts the result, so this visual fix does not
+  turn the preview into an HTML injection surface. The production shell bundle
+  is rebuilt with the renderer.
+
+### Tests
+
+- Browser regressions cover both pipe-colour rendering and HTML escaping. The
+  web-client suite passes 478 tests with no Svelte diagnostics.
+
+### Migration
+
+- No database migration, setting change, or downstream game change. Deploy the
+  rebuilt static shell asset and reload open web-client pages.
+
+---
+
 ## 6.0.0+underspire.216 — The live console feed can authenticate
 
 ### Interface
