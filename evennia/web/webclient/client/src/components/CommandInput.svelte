@@ -6,6 +6,7 @@
   import { playKey } from "../lib/audio";
   import { compose } from "../lib/compose.svelte";
   import { COMPOSE_MODES, composeToCommand, specFor } from "../lib/compose-modes";
+  import { composePreviewToHtml } from "../lib/compose-preview";
   import { focusOnMount } from "../lib/focus";
 
   let value = $state("");
@@ -178,11 +179,13 @@
         <div class="c-err">{compose.preview.error}</div>
       {:else if compose.preview.you || compose.preview.room}
         {#if compose.preview.you}
-          <div class="c-line {specFor(compose.mode).msgClass}">{@html compose.preview.you}</div>
+          <div class="c-line {specFor(compose.mode).msgClass}">
+            {@html composePreviewToHtml(compose.preview.you)}
+          </div>
         {/if}
         {#if compose.preview.room}
           <div class="c-line c-room {specFor(compose.mode).msgClass}">
-            {@html compose.preview.room}
+            {@html composePreviewToHtml(compose.preview.room)}
           </div>
         {/if}
       {:else}
