@@ -25,6 +25,62 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.219 — Session watches become shadow terminals
+
+### Interface
+
+- [`watch.py`](evennia/console/watch.py) now turns the shared session traffic
+  tap into a player-facing terminal stream. Narrative output is rendered through
+  Evennia's ANSI/HTML path, prompts remain inline with the submitted command,
+  and scene patches and other out-of-band protocol traffic are omitted. A staff
+  operator therefore sees the terminal content delivered to telnet, the web
+  client, Mudlet, SSH, or another session protocol instead of internal message
+  names such as `narrative` and `perception_relay`.
+
+- [`ShadowTerminal.svelte`](evennia/web/console/client/src/components/ShadowTerminal.svelte)
+  gives each active watch its own terminal surface. Concurrent watches no longer
+  interleave, new output follows the tail until the operator scrolls upward, and
+  finished watch lifetimes cannot leak their transcript into a later watch. The
+  production console JavaScript and stylesheet are rebuilt with the component.
+
+### Security and privacy
+
+- Submitted input is mirrored only while the watched client has local echo
+  enabled. Passwords and other echo-disabled input are absent from the shadow
+  terminal, matching what the player can see. Partially typed text, client-side
+  aliases, triggers, extra Mudlet windows, and other client-local state remain
+  outside the server's view.
+
+- Transcript content remains private to the operator who started the watch,
+  held only in bounded memory, and discarded when that watch ends. The existing
+  console authorization, reauthentication, reason, lifetime, and audit controls
+  are unchanged.
+
+### Performance
+
+- The no-watch path is unchanged from `.215`: each session message pays one
+  empty-dictionary truth test, measured there at 4.57 ns in a synthetic CPython
+  run. ANSI conversion and terminal-frame allocation occur only for watched
+  sessions. Each server watch and the browser feed remain capped at 500 frames,
+  so the richer rendering does not introduce unbounded storage or background
+  polling.
+
+### Tests
+
+- Backend coverage exercises player-facing rendering, inline prompts,
+  out-of-band suppression, echo-disabled input, and independent concurrent
+  watches. Browser coverage exercises terminal grouping, transcript lifetime,
+  safe rendered output, and scroll-follow behavior. The relevant engine suite
+  passes 783 tests with one skip; all 84 console-client tests pass, and Svelte
+  reports no errors or warnings.
+
+### Migration
+
+- No database migration, setting change, or downstream API change. Deploy the
+  rebuilt console assets and reload an open console page.
+
+---
+
 ## 6.0.0+underspire.218 — Portal proxy streams live responses
 
 ### Engine
