@@ -176,8 +176,14 @@ class Put(Action):
             act = cls()
             act._usage = True
             return act
-        item = actor.search(item_spec, location=actor.character)
         container = actor.search(container_spec, location=actor.location)
+        item_location = (
+            actor.location
+            if container is not None
+            and getattr(type(container), "accepts_room_character_put", False)
+            else actor.character
+        )
+        item = actor.search(item_spec, location=item_location)
         act = cls(target=item, container=container)
         if item is None or container is None:
             act._unresolved = True
@@ -434,7 +440,10 @@ class CharacterObjectRules:
             return action.block(0, "You can't put something into yourself.")
         if obj == container:
             return action.block(0, "You can't put something into itself.")
-        if obj.location != caller:
+        accepts_room_target = bool(
+            getattr(type(container), "accepts_room_character_put", False)
+        )
+        if obj.location != caller and not accepts_room_target:
             return action.block(0, "You're not holding that.")
         return PASS
 
