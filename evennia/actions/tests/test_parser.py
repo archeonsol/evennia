@@ -55,7 +55,7 @@ class Emit(Action):
     @classmethod
     def parse(cls, raw_args, actor, context=None, switches=(), verb=None):
         text = (raw_args or "").strip()
-        if verb == ",":
+        if verb in (",", "p,"):
             text = "," + text  # `,` consumed as the verb; re-attach the marker
         return cls(text=text)
 
@@ -262,6 +262,31 @@ class TestSymbolPrefix(unittest.TestCase):
 
     def test_unregistered_symbol_is_nomatch(self):
         res = self._p().parse("@foo", _actor())
+        self.assertIsInstance(res.action, NoMatchAction)
+
+
+class TestExplicitGluedPrefix(unittest.TestCase):
+    """Word-bearing aliases may opt into the no-space prefix surface."""
+
+    def _p(self):
+        reg = ActionRegistry()
+        Emit.__action_glued_verbs__ = ("p.", "p,")
+        reg.register(Emit, ("ppose", "p.", "p,"))
+        return ActionParser(registry=reg)
+
+    def test_glued_word_dot_prefix_routes(self):
+        res = self._p().parse("p.wave a hand", _actor())
+        self.assertIsInstance(res.action, Emit)
+        self.assertEqual(res.action.text, "wave a hand")
+        self.assertEqual(res.raw_verb, "p.")
+
+    def test_glued_word_comma_prefix_preserves_marker(self):
+        res = self._p().parse("p,The stage is calm", _actor())
+        self.assertIsInstance(res.action, Emit)
+        self.assertEqual(res.action.text, ",The stage is calm")
+
+    def test_unmarked_word_alias_is_not_glued(self):
+        res = self._p().parse("pposewaves", _actor())
         self.assertIsInstance(res.action, NoMatchAction)
 
 

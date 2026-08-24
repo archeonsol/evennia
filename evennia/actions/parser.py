@@ -194,16 +194,15 @@ class ActionParser:
         return match_tokens, token_switches
 
     def _match_symbol_prefix(self, stripped):
-        """Match a no-space symbol-prefix verb glued to its arguments.
+        """Match an eligible no-space prefix verb glued to its arguments.
 
-        Tries the registry's all-punctuation verbs longest-first; the first one
-        that ``stripped`` starts with wins (``,`` and ``.`` are single chars, so
-        order rarely matters, but longest-first is correct if a multi-char symbol
-        verb is ever registered). Switches are not supported in the glued form.
+        Tries all-punctuation verbs plus aliases that explicitly opted into
+        glued matching, longest-first. Switches are not supported in the glued
+        form.
 
         Returns ``(verb, switches, match, raw_args)`` or ``None``.
         """
-        for sym in self._registry.symbol_verbs:
+        for sym in self._registry.no_space_prefix_verbs:
             if stripped.startswith(sym):
                 match = self._registry.match_verb(sym)
                 if match is None:
@@ -258,9 +257,9 @@ class ActionParser:
             action_cls = vm.action_cls
             confidence = vm.confidence
         else:
-            # No registered verb matched. Try a no-space symbol prefix
-            # (``.wave``, ``"hi``) — the engine analogue of a command's
-            # ``arg_regex=None``. Only all-punctuation verbs are eligible.
+            # No registered verb matched. Try an eligible no-space prefix
+            # (``.wave``, ``"hi``, ``p.wave``) — the engine analogue of a
+            # command's ``arg_regex=None``. Word-bearing forms must opt in.
             symbol = self._match_symbol_prefix(stripped)
             if symbol is None:
                 # Last chance before no-match: dynamic verbs (exit names, …).

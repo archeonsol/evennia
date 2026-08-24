@@ -266,7 +266,7 @@ class Action:
         return out
 
 
-def action(*verbs, help_category=None, auto_help=False):
+def action(*verbs, help_category=None, auto_help=False, glued=()):
     """Class decorator: register an Action subclass under one or more verbs.
 
     Args:
@@ -275,6 +275,10 @@ def action(*verbs, help_category=None, auto_help=False):
             help is enabled (see ``HELP_INDEX_ACTIONS*`` settings).
         auto_help (bool): If True, include in staff command help when permitted.
             Player-facing prose belongs in file/DB help entries, not docstrings.
+        glued (iterable[str]): Aliases that may be joined directly to their
+            arguments, such as ``p.wave`` for a ``p.`` alias. Every glued alias
+            must also appear in ``verbs``. Punctuation-only aliases already
+            support this without opting in.
 
     Raises:
         ValueError: if no verb is given.
@@ -283,8 +287,17 @@ def action(*verbs, help_category=None, auto_help=False):
     if not verbs:
         raise ValueError("@action requires at least one verb")
 
+    glued = tuple(glued or ())
+    unknown_glued = {verb.lower() for verb in glued} - {verb.lower() for verb in verbs}
+    if unknown_glued:
+        raise ValueError(
+            "glued action aliases must also be registered verbs: "
+            + ", ".join(sorted(unknown_glued))
+        )
+
     def deco(cls):
         cls.__action_verbs__ = tuple(verbs)
+        cls.__action_glued_verbs__ = glued
         if help_category is not None:
             cls.help_category = help_category
         cls.auto_help = auto_help

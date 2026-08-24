@@ -150,6 +150,7 @@ class ActionRegistry:
         self._actions = []
         self._trie = None  # lazily built; invalidated on register
         self._symbol_verbs = None  # lazily built; invalidated on register
+        self._glued_verbs = None  # explicitly opted-in word-bearing prefixes
         self._max_phrase_words = 1
         self._multi_word_starters = frozenset()
 
@@ -186,6 +187,7 @@ class ActionRegistry:
             self._actions.append(action_cls)
         self._trie = None
         self._symbol_verbs = None
+        self._glued_verbs = None
         self._rebuild_phrase_metadata()
         return action_cls
 
@@ -286,6 +288,37 @@ class ActionRegistry:
             syms.sort(key=len, reverse=True)
             self._symbol_verbs = syms
         return self._symbol_verbs
+
+    @property
+    def glued_verbs(self):
+        """Explicit aliases allowed as no-space prefixes, longest-first.
+
+        Punctuation-only verbs already participate through
+        :attr:`symbol_verbs`. This separate opt-in keeps ordinary word verbs
+        from swallowing arbitrary input while permitting compact game syntax
+        such as ``p.wave``.
+        """
+        if self._glued_verbs is None:
+            found = []
+            for action_cls in self._actions:
+                owned = set(self.verbs_for(action_cls))
+                for verb in getattr(action_cls, "__action_glued_verbs__", ()):
+                    key = str(verb).lower()
+                    if key in owned and key not in found:
+                        found.append(key)
+            found.sort(key=len, reverse=True)
+            self._glued_verbs = found
+        return self._glued_verbs
+
+    @property
+    def no_space_prefix_verbs(self):
+        """All aliases eligible to consume glued argument text."""
+        found = list(self.symbol_verbs)
+        for verb in self.glued_verbs:
+            if verb not in found:
+                found.append(verb)
+        found.sort(key=len, reverse=True)
+        return tuple(found)
 
     def suggest_verbs(self, token: str, max_dist: int = 2, limit: int = 3, reachable=None):
         """Return up to ``limit`` registered verbs within edit distance
