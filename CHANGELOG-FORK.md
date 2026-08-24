@@ -25,6 +25,66 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.222 — Described authorization vocabulary
+
+### Interface
+
+- [`Authorization.svelte`](evennia/web/console/client/src/panels/Authorization.svelte)
+  gains a described catalog. Capabilities and bundles are grouped by category,
+  each with its description and any `sensitive`, `central only`, or lifecycle
+  flag; a bundle's explicit capability list expands on demand. An operator no
+  longer has to already know what a key means to grant it.
+
+- Engine-owned and non-active vocabulary is hidden by default. The panel head
+  reports the visible count against the total and offers a
+  `SHOW SYSTEM + LEGACY` toggle, so a game's own grants are what an operator
+  sees first. The capability datalist follows the same visibility.
+
+### Engine
+
+- [`capabilities.py`](evennia/authorization/capabilities.py) adds `category` and
+  `status` to `CapabilityDefinition` and introduces `BundleDefinition`, so a
+  bundle carries a description, category, and status alongside its capability
+  set. `capability_registry.bundle_definitions()` returns them in deterministic
+  key order. Both validate their metadata and accept only the `active`,
+  `internal`, `legacy`, and `retired` lifecycle statuses. Every engine
+  capability and bundle now registers a description and a category.
+
+- Two narrow moderation capabilities join the engine defaults:
+  `engine.console.moderation.address` (sanction one raw address or device
+  token) and `engine.console.moderation.permanent` (issue a sanction that never
+  expires). Both are sensitive, non-delegable, and deliberately sit outside
+  every bundle, so they must be granted explicitly.
+
+- [`authorization.py`](evennia/console/panels/authorization.py) serializes the
+  new metadata and computes `default_visible` per entry. Bundles ship as a list
+  of described objects rather than the previous `{name: [keys]}` map read off
+  the registry's private `_bundles` attribute.
+
+### Migration notes
+
+- The panel's `bundles` payload changed shape: a sorted list of
+  `{key, capabilities, description, category, status, default_visible}` objects
+  replaces the sorted `(name, [capabilities])` pairs. Any downstream consumer of
+  that field needs updating.
+
+- `register_bundle()` accepts `description`, `category`, and `status` as
+  keyword-only arguments and still defaults to `Uncategorized` / `active`, so
+  existing call sites keep working. `expand_bundle()` is unchanged; bundle
+  expansion behavior did not move.
+
+### Tests
+
+- Backend coverage checks metadata validation, lifecycle rejection, described
+  bundle ordering, and the panel's serialized visibility flags.
+  [`Authorization.test.ts`](evennia/web/console/client/src/panels/Authorization.test.ts)
+  verifies the panel shows active game vocabulary first and reveals engine and
+  legacy entries only after the toggle. `evennia.actions`, `evennia.authorization`,
+  and `evennia.console` pass 1255 tests with one skip; the console client suite
+  passes 87 tests.
+
+---
+
 ## 6.0.0+underspire.221 — Glued action prefixes and room-target put
 
 ### Engine
