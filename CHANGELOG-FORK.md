@@ -25,6 +25,41 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.221 — Glued action prefixes and room-target put
+
+### Engine
+
+- [`action.py`](evennia/actions/action.py), [`registry.py`](evennia/actions/registry.py),
+  and [`parser.py`](evennia/actions/parser.py) let a word-bearing alias be typed
+  directly against its arguments. Previously only all-punctuation verbs could do
+  this (`.wave`, `"hi`); a game wanting `p.wave` had no way to register it.
+  `@action("ppose", "p.", "p,", glued=("p.", "p,"))` marks the eligible aliases,
+  `ActionRegistry.no_space_prefix_verbs` merges them with the punctuation set
+  longest-first, and the parser tries that combined set. Ordinary word verbs are
+  unaffected and still refuse to swallow glued input.
+
+- [`objects.py`](evennia/actions/default/objects.py) fixes `put` for containers
+  that declare `accepts_room_character_put`. Item resolution searched the actor's
+  inventory unconditionally and `CharacterObjectRules` blocked anything the actor
+  was not holding, so such a container could never receive a room object. Both
+  now consult the resolved container's type first.
+
+### Migration notes
+
+- `glued` is opt-in and defaults to empty, so existing actions parse identically.
+  A glued alias that is not also a registered verb now raises `ValueError` from
+  `@action` at import time.
+
+### Tests
+
+- `TestExplicitGluedPrefix` in
+  [`test_parser.py`](evennia/actions/tests/test_parser.py) covers the dot form,
+  the comma form's preserved marker, and that an unmarked word alias stays
+  unglued. `evennia.actions`, `evennia.authorization`, and `evennia.console`
+  pass 1255 tests with one skip.
+
+---
+
 ## 6.0.0+underspire.220 — Complete moderation connection dossiers
 
 ### Interface
