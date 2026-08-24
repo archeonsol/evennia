@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from django.conf import settings
 
 _CAPABILITY_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){2,}$")
+_LIFECYCLE_STATUSES = frozenset({"active", "internal", "legacy", "retired"})
 
 
 class InvalidCapability(ValueError):
@@ -30,7 +31,9 @@ def normalize_capability(value: str) -> str:
 
     key = str(value or "").strip().lower()
     if len(key) > 128 or not _CAPABILITY_RE.fullmatch(key):
-        raise InvalidCapability(f"capability {value!r} must be a lowercase three-part namespace")
+        raise InvalidCapability(
+            f"capability {value!r} must be a lowercase three-part namespace"
+        )
     return key
 
 
@@ -42,6 +45,8 @@ class CapabilityDefinition:
     description: str = ""
     delegable: bool = True
     sensitive: bool = False
+    category: str = "Uncategorized"
+    status: str = "active"
 
     def __post_init__(self):
         """Validate and normalize the definition."""
@@ -49,6 +54,44 @@ class CapabilityDefinition:
         object.__setattr__(self, "key", normalize_capability(self.key))
         if len(self.description) > 512:
             raise InvalidCapability("capability description exceeds 512 characters")
+        category = str(self.category or "Uncategorized").strip()
+        if len(category) > 80:
+            raise InvalidCapability("capability category exceeds 80 characters")
+        status = str(self.status or "active").strip().lower()
+        if status not in _LIFECYCLE_STATUSES:
+            raise InvalidCapability(f"unknown capability lifecycle status {status!r}")
+        object.__setattr__(self, "category", category)
+        object.__setattr__(self, "status", status)
+
+
+@dataclass(frozen=True, slots=True)
+class BundleDefinition:
+    """One described administrative package of explicit capabilities."""
+
+    key: str
+    capabilities: frozenset[str]
+    description: str = ""
+    category: str = "Uncategorized"
+    status: str = "active"
+
+    def __post_init__(self):
+        """Normalize display metadata without changing bundle expansion."""
+
+        key = str(self.key or "").strip().lower()
+        if not key or len(key) > 64:
+            raise InvalidCapability("bundle key must contain 1-64 characters")
+        if len(self.description) > 512:
+            raise InvalidCapability("bundle description exceeds 512 characters")
+        category = str(self.category or "Uncategorized").strip()
+        if len(category) > 80:
+            raise InvalidCapability("bundle category exceeds 80 characters")
+        status = str(self.status or "active").strip().lower()
+        if status not in _LIFECYCLE_STATUSES:
+            raise InvalidCapability(f"unknown bundle lifecycle status {status!r}")
+        object.__setattr__(self, "key", key)
+        object.__setattr__(self, "capabilities", frozenset(self.capabilities))
+        object.__setattr__(self, "category", category)
+        object.__setattr__(self, "status", status)
 
 
 class CapabilityRegistry:
@@ -63,6 +106,7 @@ class CapabilityRegistry:
 
         self._definitions: dict[str, CapabilityDefinition] = {}
         self._bundles: dict[str, frozenset[str]] = {}
+        self._bundle_definitions: dict[str, BundleDefinition] = {}
         self._loaded_modules = False
 
     def register(self, definition: CapabilityDefinition) -> CapabilityDefinition:
@@ -81,7 +125,15 @@ class CapabilityRegistry:
         self._definitions[definition.key] = definition
         return definition
 
-    def register_bundle(self, key: str, capabilities) -> frozenset[str]:
+    def register_bundle(
+        self,
+        key: str,
+        capabilities,
+        *,
+        description: str = "",
+        category: str = "Uncategorized",
+        status: str = "active",
+    ) -> frozenset[str]:
         """Register a named capability bundle.
 
         Args:
@@ -96,7 +148,15 @@ class CapabilityRegistry:
         if not bundle_key or len(bundle_key) > 64:
             raise InvalidCapability("bundle key must contain 1-64 characters")
         values = frozenset(self.require(cap).key for cap in capabilities)
+        definition = BundleDefinition(
+            key=bundle_key,
+            capabilities=values,
+            description=description,
+            category=category,
+            status=status,
+        )
         self._bundles[bundle_key] = values
+        self._bundle_definitions[bundle_key] = definition
         return values
 
     def require(self, key: str) -> CapabilityDefinition:
@@ -120,6 +180,13 @@ class CapabilityRegistry:
         """Return definitions in deterministic key order."""
 
         return tuple(self._definitions[key] for key in sorted(self._definitions))
+
+    def bundle_definitions(self) -> tuple[BundleDefinition, ...]:
+        """Return described bundles in deterministic key order."""
+
+        return tuple(
+            self._bundle_definitions[key] for key in sorted(self._bundle_definitions)
+        )
 
     def load_modules(self) -> None:
         """Import configured registration modules and invoke their hook.
@@ -181,6 +248,9 @@ def _register_engine_defaults() -> None:
         # Admits a non-superuser moderator to the console's moderation panel and
         # nothing else. The one internal boundary the console has.
         "engine.console.moderation": (False, True),
+        # Narrow enforcement controls intentionally sit outside every bundle.
+        "engine.console.moderation.address": (False, True),
+        "engine.console.moderation.permanent": (False, True),
         "engine.channel.banned": (False, False),
         "engine.message.banned": (False, False),
         "engine.channel.listen": (True, False),
@@ -193,9 +263,139 @@ def _register_engine_defaults() -> None:
         "engine.script.control": (False, True),
         "engine.system.inspect": (False, True),
     }
+    metadata = {
+        "engine.authorization.break_glass": (
+            "Temporarily bypass capability checks for audited emergency recovery.",
+            "Emergency recovery",
+        ),
+        "engine.object.view": (
+            "View an object through privileged engine surfaces.",
+            "Objects",
+        ),
+        "engine.object.edit": (
+            "Edit an object's stored fields and attributes.",
+            "Objects",
+        ),
+        "engine.object.delete": ("Permanently delete an object.", "Objects"),
+        "engine.object.control": (
+            "Manage an object's authority and control policy.",
+            "Objects",
+        ),
+        "engine.object.move": (
+            "Move an object outside ordinary gameplay rules.",
+            "Objects",
+        ),
+        "engine.object.examine": ("Inspect privileged object metadata.", "Objects"),
+        "engine.object.read": ("Read protected object content.", "Objects"),
+        "engine.object.write": ("Write protected object content.", "Objects"),
+        "engine.object.create": (
+            "Create objects through engine administration surfaces.",
+            "Objects",
+        ),
+        "engine.object.get": (
+            "Take an object through an explicit object policy.",
+            "Objects",
+        ),
+        "engine.object.drop": (
+            "Drop an object through an explicit object policy.",
+            "Objects",
+        ),
+        "engine.object.call": (
+            "Invoke an object through an explicit object policy.",
+            "Objects",
+        ),
+        "engine.object.teleport": (
+            "Teleport an object to another location.",
+            "Objects",
+        ),
+        "engine.object.teleport_here": (
+            "Teleport an object to the operator.",
+            "Objects",
+        ),
+        "engine.object.msg": (
+            "Send an administrative message through an object.",
+            "Objects",
+        ),
+        "engine.object.tell": (
+            "Send a privileged direct message to an object.",
+            "Objects",
+        ),
+        "engine.object.boot": ("Disconnect sessions controlling an object.", "Objects"),
+        "engine.exit.traverse": (
+            "Traverse an exit through an explicit engine policy.",
+            "Movement",
+        ),
+        "engine.character.puppet": (
+            "Take control of a character through engine administration.",
+            "Characters",
+        ),
+        "engine.command.execute": ("Execute a protected command.", "Commands"),
+        "engine.world.build": (
+            "Use the engine's unrestricted world-building tools.",
+            "World building",
+        ),
+        "engine.help.manage": (
+            "Create, inspect, and edit protected help entries.",
+            "Help",
+        ),
+        "engine.moderation.manage": (
+            "Use engine-level moderation operations.",
+            "Moderation",
+        ),
+        "engine.runtime.manage": (
+            "Control the running server and its registries.",
+            "Runtime",
+        ),
+        "engine.console.access": (
+            "Open the full engine console, including REPL, SQL, and process controls.",
+            "Console",
+        ),
+        "engine.console.moderation": (
+            "Open only the console's bounded moderation station.",
+            "Console",
+        ),
+        "engine.console.moderation.address": (
+            "Sanction a single raw address or device token from the moderation console.",
+            "Console",
+        ),
+        "engine.console.moderation.permanent": (
+            "Issue a moderation sanction that never expires.",
+            "Console",
+        ),
+        "engine.channel.banned": (
+            "Mark a principal as barred from channels.",
+            "Restrictions",
+        ),
+        "engine.message.banned": (
+            "Mark a principal as barred from direct messages.",
+            "Restrictions",
+        ),
+        "engine.channel.listen": ("Listen to a protected channel.", "Channels"),
+        "engine.channel.send": ("Send to a protected channel.", "Channels"),
+        "engine.channel.control": ("Configure and moderate a channel.", "Channels"),
+        "engine.message.read": ("Read protected stored messages.", "Messages"),
+        "engine.message.edit": ("Edit protected stored messages.", "Messages"),
+        "engine.message.delete": (
+            "Permanently delete protected stored messages.",
+            "Messages",
+        ),
+        "engine.help.read": ("Read a protected help entry.", "Help"),
+        "engine.script.control": ("Start, stop, and manage engine scripts.", "Runtime"),
+        "engine.system.inspect": (
+            "Inspect protected server and process state.",
+            "Runtime",
+        ),
+    }
     for key, (delegable, sensitive) in keys.items():
+        description, category = metadata[key]
         capability_registry.register(
-            CapabilityDefinition(key, delegable=delegable, sensitive=sensitive)
+            CapabilityDefinition(
+                key,
+                description=description,
+                delegable=delegable,
+                sensitive=sensitive,
+                category=category,
+            )
         )
     capability_registry.register_bundle(
         "world_builder",
@@ -206,6 +406,8 @@ def _register_engine_defaults() -> None:
             "engine.object.move",
             "engine.object.examine",
         ),
+        description="Core unrestricted world-building and object-editing authority.",
+        category="Engine operations",
     )
     capability_registry.register_bundle(
         "moderator",
@@ -215,10 +417,14 @@ def _register_engine_defaults() -> None:
             "engine.channel.send",
             "engine.channel.control",
         ),
+        description="Engine moderation and protected-channel control.",
+        category="Engine operations",
     )
     capability_registry.register_bundle(
         "console_moderator",
         ("engine.console.moderation",),
+        description="Access only the bounded console moderation station.",
+        category="Engine operations",
     )
     capability_registry.register_bundle(
         "runtime_operator",
@@ -243,6 +449,8 @@ def _register_engine_defaults() -> None:
             "engine.system.inspect",
             "engine.console.access",
         ),
+        description="Server-owner authority, including the full engine console and process control.",
+        category="Engine operations",
     )
 
 

@@ -70,10 +70,14 @@ class AuthorizationPanel(Panel):
 
         queryset = model._base_manager.all()
         principal = str(params.get("principal") or "").strip()
-        if principal and any(f.name == "principal_ref" for f in model._meta.concrete_fields):
+        if principal and any(
+            f.name == "principal_ref" for f in model._meta.concrete_fields
+        ):
             queryset = queryset.filter(principal_ref=principal)
         capability = str(params.get("capability") or "").strip()
-        if capability and any(f.name == "capability" for f in model._meta.concrete_fields):
+        if capability and any(
+            f.name == "capability" for f in model._meta.concrete_fields
+        ):
             queryset = queryset.filter(capability=capability)
 
         fields = [field.name for field in model._meta.concrete_fields]
@@ -119,6 +123,12 @@ class AuthorizationPanel(Panel):
                     "delegable": definition.delegable,
                     "sensitive": definition.sensitive,
                     "description": definition.description,
+                    "category": definition.category,
+                    "status": definition.status,
+                    "default_visible": (
+                        definition.status == "active"
+                        and not definition.key.startswith("engine.")
+                    ),
                 }
                 for definition in capability_registry.definitions()
             ]
@@ -131,12 +141,20 @@ class AuthorizationPanel(Panel):
         try:
             from evennia.authorization.capabilities import capability_registry
 
-            return sorted(
+            return [
                 {
-                    name: sorted(capability_registry.expand_bundle(name))
-                    for name in getattr(capability_registry, "_bundles", {})
-                }.items()
-            )
+                    "key": definition.key,
+                    "capabilities": sorted(definition.capabilities),
+                    "description": definition.description,
+                    "category": definition.category,
+                    "status": definition.status,
+                    "default_visible": (
+                        definition.status == "active"
+                        and definition.category != "Engine operations"
+                    ),
+                }
+                for definition in capability_registry.bundle_definitions()
+            ]
         except Exception:  # noqa: BLE001
             return []
 
@@ -165,7 +183,10 @@ class AuthorizationPanel(Panel):
         """
 
         from evennia.accounts.models import AccountDB
-        from evennia.authorization.capabilities import InvalidCapability, capability_registry
+        from evennia.authorization.capabilities import (
+            InvalidCapability,
+            capability_registry,
+        )
         from evennia.authorization.service import has_capability
         from evennia.authorization.storage import load_grants, principal_refs
 
