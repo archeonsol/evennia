@@ -10,6 +10,7 @@
 import { call } from "./api";
 import { report } from "./report";
 import { local } from "./state.svelte";
+import { askText } from "./dialog.svelte";
 
 /**
  * Ask for the password, and record that it was accepted.
@@ -19,7 +20,13 @@ import { local } from "./state.svelte";
  *   callers only need the boolean.
  */
 export async function confirmPresence(): Promise<boolean> {
-  const password = prompt("Confirm your password to continue.");
+  const password = await askText({
+    title: "Confirm your password",
+    description: "This proves that the operator is present. Confirmation expires after the server's short safety window.",
+    label: "Password",
+    input: "password",
+    confirmLabel: "CONFIRM",
+  });
   if (!password) return false;
   const result = await call<Record<string, unknown>>("confirm/", { body: { password } });
   if (!report(result)) return false;

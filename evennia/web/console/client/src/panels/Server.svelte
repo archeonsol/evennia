@@ -7,6 +7,7 @@
   import { call } from "../lib/api";
   import { report } from "../lib/report";
   import { withPresence } from "../lib/presence";
+  import { askText } from "../lib/dialog.svelte";
 
   interface Payload {
     rows?: {
@@ -29,7 +30,14 @@
   const checks = $derived(Object.entries(body.checks ?? {}));
 
   async function control(action: string) {
-    const reason = prompt(`Why is the server being told to ${action}?`);
+    const reason = await askText({
+      title: `${action} the server`,
+      description: "This changes the running service. The console records your reason and the outcome.",
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: action.toUpperCase(),
+      danger: true,
+    });
     if (!reason) return;
     await withPresence(async () => {
       const done = await call<Record<string, unknown>>("panels/server/actions/control/", {

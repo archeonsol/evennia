@@ -9,6 +9,7 @@
   import { retainWatches } from "../lib/feed.svelte";
   import { report } from "../lib/report";
   import { withPresence } from "../lib/presence";
+  import { askText } from "../lib/dialog.svelte";
 
   interface Row {
     sessid: number;
@@ -63,7 +64,14 @@
   const rows = $derived(body.rows ?? []);
 
   async function act(action: string, sessid: number, question: string) {
-    const reason = prompt(question);
+    const reason = await askText({
+      title: action === "watch" ? "Watch this session" : "Disconnect this session",
+      description: question,
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: action.toUpperCase(),
+      danger: action !== "watch",
+    });
     if (!reason) return;
 
     const run = async () => {

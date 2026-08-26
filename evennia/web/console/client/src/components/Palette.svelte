@@ -46,6 +46,9 @@
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      field?.focus();
     }
   }
 

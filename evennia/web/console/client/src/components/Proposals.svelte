@@ -3,6 +3,7 @@
   import DataTable from "./DataTable.svelte";
   import Cell from "./Cell.svelte";
   import { runAction } from "../lib/load.svelte";
+  import { askText } from "../lib/dialog.svelte";
 
   /* Sanction proposals: what a staff member asked for and cannot issue alone. */
 
@@ -41,7 +42,16 @@
   const rows = $derived(data?.rows ?? []);
 
   async function decide(action: string, id: number) {
-    const note = prompt("Enter the reason for your decision.");
+    const note = await askText({
+      title: action === "approve" ? "Accept permanent-ban proposal" : "Reject permanent-ban proposal",
+      description: action === "approve"
+        ? "This issues the proposed permanent sanction. You cannot approve your own proposal."
+        : "The proposal closes without issuing a sanction.",
+      label: "Decision reason",
+      input: "textarea",
+      confirmLabel: action === "approve" ? "ACCEPT PROPOSAL" : "REJECT PROPOSAL",
+      danger: action === "approve",
+    });
     if (!note) return;
     if ((await runAction("moderation", action, { proposal_id: id, note })) !== null) {
       reload += 1;

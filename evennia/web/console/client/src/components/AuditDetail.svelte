@@ -5,6 +5,7 @@
   import DataTable from "./DataTable.svelte";
   import Cell from "./Cell.svelte";
   import { loadDetail, runAction } from "../lib/load.svelte";
+  import { askText } from "../lib/dialog.svelte";
 
   interface DiffEntry {
     field: string;
@@ -80,7 +81,14 @@
 
   async function undo() {
     if (!event) return;
-    const reason = prompt("Why is this operation being reversed?");
+    const reason = await askText({
+      title: "Undo this operation",
+      description: "Undo writes a new audit event; it never erases the original operation.",
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: "UNDO OPERATION",
+      danger: true,
+    });
     if (!reason) return;
     if ((await runAction("audit", "undo", { audit_id: event.id, reason })) !== null) onUndone();
   }

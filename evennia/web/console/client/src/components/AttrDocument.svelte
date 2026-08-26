@@ -6,6 +6,7 @@
   import { call } from "../lib/api";
   import { report } from "../lib/report";
   import { view } from "../lib/state.svelte";
+  import { askText } from "../lib/dialog.svelte";
 
   interface Entry {
     key: string;
@@ -57,13 +58,22 @@
    * wrong type into a document nothing else validates. */
   async function edit(key: string, category: string, current: string) {
     if (!doc) return;
-    const value = prompt(
-      `Enter the value for ${key} as JSON.\n` +
-        "Put quotation marks around text. Write a number without quotation marks.",
-      current || "",
-    );
+    const value = await askText({
+      title: `Change ${key}`,
+      description: "Enter JSON. Put quotation marks around text; write numbers without quotation marks.",
+      label: "JSON value",
+      input: "textarea",
+      initial: current || "",
+      confirmLabel: "CONTINUE",
+    });
     if (value === null) return;
-    const reason = prompt("Why is this attribute being changed?");
+    const reason = await askText({
+      title: `Save ${key}`,
+      description: "The audit trail keeps this reason with the before and after values.",
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: "SAVE ATTRIBUTE",
+    });
     if (!reason) return;
     const done = await call<Record<string, unknown>>("panels/attributes/actions/set/", {
       body: { model: doc.model, pk: doc.id, key, category: category || "", value, reason },
@@ -73,7 +83,14 @@
 
   async function remove(key: string, category: string) {
     if (!doc) return;
-    const reason = prompt(`Why is "${key}" being removed?`);
+    const reason = await askText({
+      title: `Remove ${key}`,
+      description: "Removing an attribute cannot be undone from this screen.",
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: "REMOVE ATTRIBUTE",
+      danger: true,
+    });
     if (!reason) return;
     const done = await call<Record<string, unknown>>("panels/attributes/actions/unset/", {
       body: { model: doc.model, pk: doc.id, key, category: category || "", reason },
@@ -81,8 +98,12 @@
     if (report(done)) onChanged();
   }
 
-  function add() {
-    const key = prompt("Attribute key");
+  async function add() {
+    const key = await askText({
+      title: "Add an attribute",
+      label: "Attribute key",
+      confirmLabel: "SET VALUE",
+    });
     if (!key) return;
     edit(key, "", "");
   }

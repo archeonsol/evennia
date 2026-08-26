@@ -1,6 +1,7 @@
 <script lang="ts">
   import { runAction } from "../lib/load.svelte";
   import { withPresence } from "../lib/presence";
+  import { askText } from "../lib/dialog.svelte";
 
   /* Show one withheld value, and record that it was shown.
    *
@@ -28,9 +29,13 @@
   let shown = $state("");
 
   async function reveal() {
-    const reason = prompt(
-      `Why do you need ${label}? The console keeps this record permanently.`,
-    );
+    const reason = await askText({
+      title: `Reveal ${label}`,
+      description: "The console permanently records who revealed this identifier and why.",
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: "REVEAL VALUE",
+    });
     if (!reason) return;
     await withPresence(async () => {
       const result = await runAction<{ value?: string }>("moderation", "reveal", {

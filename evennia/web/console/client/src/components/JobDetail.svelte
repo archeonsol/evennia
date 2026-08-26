@@ -1,6 +1,7 @@
 <script lang="ts">
   import Section from "./Section.svelte";
   import { loadDetail, runAction } from "../lib/load.svelte";
+  import { askText } from "../lib/dialog.svelte";
 
   interface Job {
     id: number;
@@ -53,7 +54,13 @@
 
   async function requeue() {
     if (!job) return;
-    const reason = prompt("Why is this job being requeued?");
+    const reason = await askText({
+      title: "Requeue this job",
+      description: "The next queue run may execute this job again.",
+      label: "Reason",
+      input: "textarea",
+      confirmLabel: "REQUEUE JOB",
+    });
     if (!reason) return;
     if ((await runAction("jobs", "requeue", { job_id: job.id, reason })) !== null) onRequeued();
   }

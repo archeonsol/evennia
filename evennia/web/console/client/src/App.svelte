@@ -4,6 +4,7 @@
   import Notice from "./components/Notice.svelte";
   import Palette from "./components/Palette.svelte";
   import Station from "./components/Station.svelte";
+  import ConsoleDialog from "./components/ConsoleDialog.svelte";
   import { call } from "./lib/api";
   import { openFeed } from "./lib/feed.svelte";
   import { session, view, URL_KEYS, readUrl, writeUrl, select } from "./lib/state.svelte";
@@ -13,6 +14,17 @@
 
   let paletteOpen = $state(false);
   let bootFault = $state("");
+  let paletteReturnFocus: HTMLElement | null = null;
+
+  function openPalette() {
+    paletteReturnFocus = document.activeElement as HTMLElement | null;
+    paletteOpen = true;
+  }
+
+  function closePalette() {
+    paletteOpen = false;
+    queueMicrotask(() => paletteReturnFocus?.focus());
+  }
 
   interface Root {
     version?: string;
@@ -54,7 +66,7 @@
   function onKeydown(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      paletteOpen = true;
+      openPalette();
     }
   }
 
@@ -91,7 +103,7 @@
 <Strip />
 
 <div class="frame">
-  <Rail onPalette={() => (paletteOpen = true)} />
+  <Rail onPalette={openPalette} />
 
   <main class="station" id="station" tabindex="-1">
     {#if bootFault}
@@ -107,5 +119,7 @@
 <Notice />
 
 {#if paletteOpen}
-  <Palette onClose={() => (paletteOpen = false)} />
+  <Palette onClose={closePalette} />
 {/if}
+
+<ConsoleDialog />
