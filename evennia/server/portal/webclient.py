@@ -41,7 +41,13 @@ from collections import deque
 from django.conf import settings
 
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
-from evennia.server.portal.ws_protocol import CLOSE_NORMAL, GOING_AWAY, Disconnected, WSProtocolBase
+from evennia.server.portal.ws_protocol import (
+    CLOSE_NORMAL,
+    GOING_AWAY,
+    Disconnected,
+    HandshakeDenied,
+    WSProtocolBase,
+)
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -206,6 +212,28 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         self.browserstr = ""
         self.wire_format = None
 
+    @staticmethod
+    def _enforce_websocket_origin(request):
+        """Reject non-empty Origin headers that are not in the allowlist.
+
+        Empty/missing Origin is allowed (matches nginx's ``/ws`` policy and
+        non-browser clients). When ``WEBSOCKET_ALLOWED_ORIGINS`` is unset or
+        empty, the check is disabled so stock games keep working.
+        """
+        allowed = getattr(settings, "WEBSOCKET_ALLOWED_ORIGINS", None) or ()
+        if not allowed:
+            return
+        headers = getattr(request, "headers", None) or {}
+        origin = (headers.get("origin") or "").strip()
+        if not origin:
+            return
+        if origin in allowed:
+            return
+        from evennia.utils import logger
+
+        logger.log_warn("WebSocket Origin rejected: %r" % (origin,))
+        raise HandshakeDenied("forbidden", status_code=403)
+
     def onConnect(self, request):
         """
         Called during the WebSocket opening handshake, before onOpen().
@@ -213,6 +241,12 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         This is where we negotiate the WebSocket subprotocol. The client
         sends a list of subprotocols it supports via Sec-WebSocket-Protocol.
         We select the best match from our supported list.
+
+        When ``settings.WEBSOCKET_ALLOWED_ORIGINS`` is a non-empty iterable,
+        a non-empty ``Origin`` header must match one of those values exactly
+        (case-sensitive). An empty/missing Origin is allowed so non-browser
+        clients and the nginx allowlist stay aligned. A bad Origin raises
+        ``HandshakeDenied`` (HTTP 403) with no useful body.
 
         Args:
             request (ConnectionRequest): The WebSocket connection request,
@@ -225,6 +259,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 or client offered protocols that don't match).
 
         """
+        self._enforce_websocket_origin(request)
+
         wire_formats = _get_wire_formats()
         supported = _get_supported_subprotocols()
 

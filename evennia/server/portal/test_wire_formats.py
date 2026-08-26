@@ -592,10 +592,11 @@ class TestWebSocketSubprotocolNegotiation(TestCase):
         client = WebSocketClient()
         return client
 
-    def _make_request(self, protocols=None):
+    def _make_request(self, protocols=None, headers=None):
         """Create a mock ConnectionRequest with the given protocols list."""
         request = Mock()
         request.protocols = protocols or []
+        request.headers = headers or {}
         return request
 
     def test_no_subprotocol_offered(self):
@@ -606,6 +607,40 @@ class TestWebSocketSubprotocolNegotiation(TestCase):
         self.assertIsNone(result)
         self.assertIsNotNone(client.wire_format)
         self.assertEqual(client.wire_format.name, "v1.evennia.com")
+
+    def test_bad_origin_raises_when_allowlist_set(self):
+        from evennia.server.portal.ws_protocol import HandshakeDenied
+        from django.test import override_settings
+
+        client = self._make_client()
+        request = self._make_request(
+            protocols=[],
+            headers={"origin": "https://evil.example"},
+        )
+        with override_settings(WEBSOCKET_ALLOWED_ORIGINS=["https://underspire.net"]):
+            with self.assertRaises(HandshakeDenied):
+                client.onConnect(request)
+
+    def test_empty_origin_allowed_when_allowlist_set(self):
+        from django.test import override_settings
+
+        client = self._make_client()
+        request = self._make_request(protocols=[], headers={})
+        with override_settings(WEBSOCKET_ALLOWED_ORIGINS=["https://underspire.net"]):
+            result = client.onConnect(request)
+        self.assertIsNone(result)
+
+    def test_allowed_origin_passes(self):
+        from django.test import override_settings
+
+        client = self._make_client()
+        request = self._make_request(
+            protocols=["v1.evennia.com"],
+            headers={"origin": "https://underspire.net"},
+        )
+        with override_settings(WEBSOCKET_ALLOWED_ORIGINS=["https://underspire.net"]):
+            result = client.onConnect(request)
+        self.assertEqual(result, "v1.evennia.com")
 
     def test_v1_subprotocol_offered(self):
         """Client offers v1.evennia.com → selected and returned."""

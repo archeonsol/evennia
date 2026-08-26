@@ -55,6 +55,15 @@ class Disconnected(Exception):
     """Raised when sending on an already-closed socket (autobahn-compatible)."""
 
 
+class HandshakeDenied(Exception):
+    """Raised from ``onConnect`` to reject the WebSocket upgrade (HTTP 403)."""
+
+    def __init__(self, reason="forbidden", status_code=403):
+        super().__init__(reason)
+        self.reason = reason
+        self.status_code = int(status_code)
+
+
 class _ConnectionRequest:
     """Minimal stand-in for autobahn's ConnectionRequest passed to onConnect.
 
@@ -286,6 +295,21 @@ class _WSServerRole:
         subprotocol = None
         try:
             subprotocol = self.onConnect(request)
+        except HandshakeDenied as denied:
+            # Do not accept the upgrade. Keep the reason short — no client-facing
+            # detail beyond the status code.
+            self._safe_write(
+                self._ws.send(
+                    RejectConnection(
+                        status_code=denied.status_code,
+                        headers=[],
+                        has_body=False,
+                    )
+                )
+            )
+            self._notify_close(False, denied.status_code, denied.reason)
+            self._transport_close()
+            return
         except Exception:
             logger.log_trace("websocket onConnect failed")
 
