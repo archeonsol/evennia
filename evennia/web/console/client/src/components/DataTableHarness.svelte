@@ -12,7 +12,7 @@
     overscan?: number;
   }
 
-  const { rows, rowHeight = 26, overscan = 8 }: Props = $props();
+  const { rows, rowHeight = 30, overscan = 8 }: Props = $props();
 </script>
 
 <DataTable

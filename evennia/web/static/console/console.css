@@ -13,7 +13,9 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  height: var(--strip-h);
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: var(--strip-h);
   padding: 0 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--rule);
@@ -23,6 +25,7 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
+  min-width: 0;
 }
 
 .strip-mark {
@@ -48,6 +51,9 @@
   display: flex;
   gap: 6px;
   margin-left: auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .strip-actor {
@@ -63,7 +69,8 @@
 .frame {
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr);
-  height: calc(100% - var(--strip-h));
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* --------------------------------------------------------------------- rail */
@@ -169,7 +176,14 @@
 
 label.legend { cursor: default; }
 
-select, input[type="search"] {
+select,
+input[type="search"],
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
   min-width: 0;
   padding: 5px 7px;
   border: 1px solid var(--rule);
@@ -206,6 +220,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: auto;
+  scrollbar-gutter: stable;
 }
 /* ------------------------------------------------------------------ notice */
 
@@ -242,8 +258,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   .frame {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
-    height: auto;
-    min-height: calc(100% - var(--strip-h));
+    min-height: 0;
   }
 
   .rail {
@@ -269,6 +284,34 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   .strip-actor { display: none; }
   select, input[type="search"] { width: 100%; min-width: 0; }
   .field { flex: 1 1 180px; }
+}
+
+@media (max-width: 620px) {
+  .strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding-block: 7px;
+  }
+
+  .strip-id { overflow: hidden; }
+  .strip-name, .strip-version {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .strip-lamps { width: 100%; margin-left: 0; padding-bottom: 2px; }
+  .toolbar { align-items: stretch; }
+  .toolbar > button { flex: 1 1 auto; }
+  .editor-grid { grid-template-columns: minmax(0, 1fr); }
+  .panel-head { align-items: flex-start; flex-wrap: wrap; }
+  .panel-count { margin-left: 0; }
+  select, input, textarea { font-size: 16px !important; }
+}
+
+@media (pointer: coarse) {
+  button, select, input[type="checkbox"] { min-height: 44px; }
+  .rail-item { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

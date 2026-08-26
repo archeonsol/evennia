@@ -52,7 +52,7 @@
     row,
     head,
     key,
-    rowHeight = 26,
+    rowHeight = 30,
     overscan = 8,
     maxHeight = "62vh",
     label = "",
@@ -93,12 +93,13 @@
 
 <div
   class="table-scroll"
-  style:max-height={maxHeight}
+  class:virtual
+  style:max-height={virtual ? maxHeight : undefined}
   bind:this={scroller}
   use:measure
   onscroll={onScroll}
 >
-  <table aria-label={label || undefined} aria-rowcount={rows.length}>
+  <table aria-label={label || undefined} aria-rowcount={rows.length + 1}>
     <thead>
       {#if head}
         {@render head()}

@@ -43,13 +43,13 @@ describe("DataTable", () => {
       (sum, node) => sum + parseInt((node as HTMLElement).style.height || "0", 10),
       0,
     );
-    // 40000 rows at 26px, less the handful actually rendered.
-    expect(total).toBeGreaterThan(1_000_000);
+    // 40000 rows at 30px, less the handful actually rendered.
+    expect(total).toBeGreaterThan(1_150_000);
   });
 
   it("tells assistive technology how many rows there really are", () => {
     const { container } = render(Harness, { rows: rows(40000) });
-    expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe("40000");
+    expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe("40001");
   });
 
   it("renders every column heading", () => {
@@ -89,5 +89,13 @@ describe("the scroll frame", () => {
     const frame = container.querySelector(".table-scroll");
     expect(frame).not.toBeNull();
     expect((frame as HTMLElement).style.maxHeight).toBeTruthy();
+    expect(frame?.classList.contains("virtual")).toBe(true);
+  });
+
+  it("does not create a second vertical scroll area for short tables", () => {
+    const { container } = render(Harness, { rows: rows(12) });
+    const frame = container.querySelector(".table-scroll") as HTMLElement;
+    expect(frame.classList.contains("virtual")).toBe(false);
+    expect(frame.style.maxHeight).toBe("");
   });
 });
