@@ -27,7 +27,7 @@ from django.conf import settings
 
 from evennia.accounts.models import AccountDB
 from evennia.commands.cmdhandler import cmdhandler
-from evennia.utils.logger import log_err
+from evennia.utils.logger import log_err, log_warn
 from evennia.utils.utils import to_str
 
 BrowserSessionStore = importlib.import_module(settings.SESSION_ENGINE).SessionStore
@@ -103,7 +103,9 @@ def text(session, *args, **kwargs):
         # nick replacement
         puppet = session.get_puppet()
         if puppet:
-            txt = puppet.nicks.nickreplace(txt, categories=("inputline"), include_account=True)
+            txt = puppet.nicks.nickreplace(
+                txt, categories=("inputline"), include_account=True
+            )
         else:
             txt = session.account.nicks.nickreplace(
                 txt, categories=("inputline"), include_account=False
@@ -146,8 +148,22 @@ def bot_data_in(session, *args, **kwargs):
     txt = _maybe_strip_incoming_mxp(txt)
 
     kwargs.pop("options", None)
+    account = session.account
+    if account is None:
+        # Bot transports may deliver one last frame while the Server is still
+        # reconciling or tearing down the Portal session. There is no in-game
+        # recipient in that state, so discard the frame and diagnose it once
+        # per session instead of raising on every frame.
+        if not getattr(session, "_bot_data_unbound_logged", False):
+            log_warn(
+                "bot_data_in: dropping input for unbound session "
+                f"sessid={getattr(session, 'sessid', None)} "
+                f"protocol={getattr(session, 'protocol_key', None)}"
+            )
+            session._bot_data_unbound_logged = True
+        return
     # Trigger the execute_cmd method of the corresponding bot.
-    session.account.execute_cmd(session=session, txt=txt, **kwargs)
+    account.execute_cmd(session=session, txt=txt, **kwargs)
     session.update_session_counters()
 
 
@@ -226,7 +242,9 @@ def client_options(session, *args, **kwargs):
     old_flags = session.protocol_flags
     if not kwargs or kwargs.get("get", False):
         # return current settings
-        options = dict((key, old_flags[key]) for key in old_flags if key.upper() in _CLIENT_OPTIONS)
+        options = dict(
+            (key, old_flags[key]) for key in old_flags if key.upper() in _CLIENT_OPTIONS
+        )
         session.msg(client_options=options)
         return
 
@@ -300,7 +318,9 @@ def client_options(session, *args, **kwargs):
 
     session.protocol_flags.update(flags)
     # we must update the protocol flags on the portal session copy as well
-    session.sessionhandler.session_portal_partial_sync({session.sessid: {"protocol_flags": flags}})
+    session.sessionhandler.session_portal_partial_sync(
+        {session.sessid: {"protocol_flags": flags}}
+    )
 
 
 def get_client_options(session, *args, **kwargs):
@@ -317,7 +337,8 @@ def get_inputfuncs(session, *args, **kwargs):
     So we get it from the sessionhandler.
     """
     inputfuncsdict = dict(
-        (key, func.__doc__) for key, func in session.sessionhandler.get_inputfuncs().items()
+        (key, func.__doc__)
+        for key, func in session.sessionhandler.get_inputfuncs().items()
     )
     session.msg(get_inputfuncs=inputfuncsdict)
 
@@ -463,9 +484,13 @@ def monitored(session, *args, **kwargs):
 
     obj = session.get_puppet()
     monitors = []
-    for mon_obj, fieldname, idstring, persistent, monitor_kwargs in MONITOR_HANDLER.all(obj=obj):
+    for mon_obj, fieldname, idstring, persistent, monitor_kwargs in MONITOR_HANDLER.all(
+        obj=obj
+    ):
         safe_kwargs = {key: _safe_pickle(val) for key, val in monitor_kwargs.items()}
-        monitors.append((_safe_pickle(mon_obj), fieldname, idstring, persistent, safe_kwargs))
+        monitors.append(
+            (_safe_pickle(mon_obj), fieldname, idstring, persistent, safe_kwargs)
+        )
     session.msg(monitored=(monitors, {}))
 
 

@@ -32,6 +32,44 @@ class TestLoginInputfunc(unittest.TestCase):
         login_session.assert_not_called()
 
 
+class TestBotDataInputfunc(unittest.TestCase):
+    """Bot frames must tolerate the session/account binding race."""
+
+    def test_unbound_session_drops_frame_with_warning(self):
+        session = SimpleNamespace(
+            account=None,
+            sessid=41,
+            protocol_key="discord",
+            update_session_counters=mock.Mock(),
+        )
+
+        with mock.patch.object(inputfuncs, "log_warn") as log_warn:
+            inputfuncs.bot_data_in(session, "payload", type="channel")
+            inputfuncs.bot_data_in(session, "second payload", type="channel")
+
+        log_warn.assert_called_once()
+        self.assertIn("41", log_warn.call_args.args[0])
+        session.update_session_counters.assert_not_called()
+
+    def test_bound_session_dispatches_frame(self):
+        account = mock.Mock()
+        session = SimpleNamespace(
+            account=account,
+            sessid=42,
+            protocol_key="discord",
+            update_session_counters=mock.Mock(),
+        )
+
+        inputfuncs.bot_data_in(session, "payload", type="channel")
+
+        account.execute_cmd.assert_called_once_with(
+            session=session,
+            txt="payload",
+            type="channel",
+        )
+        session.update_session_counters.assert_called_once()
+
+
 class TestAzabanHelloInputfunc(unittest.TestCase):
     """The Azaban handshake must survive Server/Portal session resync."""
 
