@@ -43,15 +43,20 @@ def apply_postgres_engine_defaults(databases: Dict[str, Any]) -> Dict[str, Any]:
     Return a copy of ``DATABASES`` with Underspire engine connection defaults applied
     to PostgreSQL backends.
 
-    Applies ``CONN_MAX_AGE`` / ``CONN_HEALTH_CHECKS`` here. The
-    ``statement_timeout`` is *not* set in ``OPTIONS`` to keep PgBouncer
-    transaction-pool mode happy — see the ``connection_created`` receiver below.
+    Applies ``CONN_MAX_AGE`` / ``CONN_HEALTH_CHECKS`` here. When
+    ``ENGINE_DATABASE_TRANSACTION_POOLING`` is enabled, persistent connections
+    and server-side cursors are forcibly disabled because neither may outlive a
+    transaction-pool backend assignment. The ``statement_timeout`` is *not* set
+    in ``OPTIONS`` — see the ``connection_created`` receiver below.
     """
     from django.conf import settings
 
     out = deepcopy(databases)
     conn_max_age = int(getattr(settings, "ENGINE_DATABASE_CONN_MAX_AGE", 600) or 0)
     health_checks = bool(getattr(settings, "ENGINE_DATABASE_CONN_HEALTH_CHECKS", True))
+    transaction_pooling = bool(
+        getattr(settings, "ENGINE_DATABASE_TRANSACTION_POOLING", False)
+    )
 
     for alias, cfg in out.items():
         if not isinstance(cfg, dict):
@@ -59,14 +64,19 @@ def apply_postgres_engine_defaults(databases: Dict[str, Any]) -> Dict[str, Any]:
         engine = cfg.get("ENGINE", "")
         if "postgresql" not in engine and "postgres" not in engine:
             continue
-        if conn_max_age > 0:
+        if transaction_pooling:
+            cfg["CONN_MAX_AGE"] = 0
+            cfg["DISABLE_SERVER_SIDE_CURSORS"] = True
+        elif conn_max_age > 0:
             cfg.setdefault("CONN_MAX_AGE", conn_max_age)
         if health_checks:
             cfg.setdefault("CONN_HEALTH_CHECKS", True)
     return out
 
 
-def build_read_replica_entry(primary: Dict[str, Any], *, name: str = "replica") -> Dict[str, Any]:
+def build_read_replica_entry(
+    primary: Dict[str, Any], *, name: str = "replica"
+) -> Dict[str, Any]:
     """
     Clone primary config for a read replica alias (website, logs, analytics only).
 
@@ -97,7 +107,9 @@ def _apply_engine_pg_session_init(sender, connection, **kwargs):
 
     stmts = []
     if connection.alias == "default":
-        timeout_ms = int(getattr(settings, "ENGINE_DATABASE_STATEMENT_TIMEOUT_MS", 30000) or 0)
+        timeout_ms = int(
+            getattr(settings, "ENGINE_DATABASE_STATEMENT_TIMEOUT_MS", 30000) or 0
+        )
         if timeout_ms > 0:
             stmts.append("SET statement_timeout = %d" % timeout_ms)
     if connection.alias in _READ_REPLICA_ALIASES:

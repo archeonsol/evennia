@@ -870,6 +870,9 @@ CHANNEL_SUBSCRIBER_CACHE_ALIAS = "default"
 # PostgreSQL connection defaults (apply via evennia.server.database_postgres.apply_postgres_engine_defaults).
 ENGINE_DATABASE_CONN_MAX_AGE = 600
 ENGINE_DATABASE_CONN_HEALTH_CHECKS = True
+# Enable for PgBouncer transaction-pool deployments. The PostgreSQL settings
+# helper then forces non-persistent connections and client-side cursor fetching.
+ENGINE_DATABASE_TRANSACTION_POOLING = False
 # Async ORM connections on the game loop must belong to a supervised runtime
 # root. ``warn`` preserves third-party compatibility while exposing violations;
 # use ``error`` in CI once a game has removed unmanaged task creation.

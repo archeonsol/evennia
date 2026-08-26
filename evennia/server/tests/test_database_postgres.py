@@ -36,9 +36,28 @@ class TestApplyPostgresEngineDefaults(SimpleTestCase):
         with self.settings(
             ENGINE_DATABASE_CONN_MAX_AGE=600,
             ENGINE_DATABASE_CONN_HEALTH_CHECKS=True,
+            ENGINE_DATABASE_TRANSACTION_POOLING=False,
         ):
             out = dbpg.apply_postgres_engine_defaults({"default": self._pg()})
         self.assertEqual(out["default"]["CONN_MAX_AGE"], 600)
+        self.assertTrue(out["default"]["CONN_HEALTH_CHECKS"])
+
+    def test_transaction_pooling_disables_server_cursors_and_persistence(self):
+        with self.settings(
+            ENGINE_DATABASE_TRANSACTION_POOLING=True,
+            ENGINE_DATABASE_CONN_MAX_AGE=600,
+        ):
+            out = dbpg.apply_postgres_engine_defaults(
+                {
+                    "default": self._pg(
+                        CONN_MAX_AGE=600,
+                        DISABLE_SERVER_SIDE_CURSORS=False,
+                    )
+                }
+            )
+
+        self.assertEqual(out["default"]["CONN_MAX_AGE"], 0)
+        self.assertTrue(out["default"]["DISABLE_SERVER_SIDE_CURSORS"])
         self.assertTrue(out["default"]["CONN_HEALTH_CHECKS"])
 
     def test_non_postgres_aliases_untouched(self):
