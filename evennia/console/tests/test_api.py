@@ -585,6 +585,7 @@ class TestDangerousActionsNeedPresence(ConsoleAPITestCase):
         # though their panels do not.
         self.assertEqual(self._post("authorization", "break_glass").status_code, 403)
         self.assertEqual(self._post("moderation", "reveal").status_code, 403)
+        self.assertEqual(self._post("records", "create_account").status_code, 403)
 
     def test_an_ordinary_action_does_not_demand_it(self):
         response = self.client.post(

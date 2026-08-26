@@ -166,11 +166,14 @@ class TestForm(TestCase):
         self.assertEqual(result["fields"], [])
         self.assertIn("issue_sanction", result["write_via"])
 
-    def test_names_what_it_does_not_write(self):
+    def test_names_every_specialized_write_control(self):
         result = self.panel.form(_worker(), model="accounts.accountdb")
-        self.assertIn("relations", result["unsupported"])
-        self.assertIn("tags", result["unsupported"])
-        self.assertIn("password", result["unsupported"])
+        self.assertNotIn("password", result["unsupported"])
+        self.assertTrue(result["supports_password"])
+        self.assertTrue(result["supports_tags"])
+        self.assertEqual(
+            {item["name"] for item in result["relations"]}, {"groups", "user_permissions"}
+        )
 
 
 class TestSave(ActingTestCase):
@@ -220,6 +223,164 @@ class TestSave(ActingTestCase):
             self.panel.save(
                 self.io(), model="accounts.accountdb", values={"last_login": "not a date"}
             )
+
+    def test_console_capability_does_not_depend_on_django_staff_flags(self):
+        self.actor.is_staff = False
+        self.actor.is_superuser = False
+        self.actor.save(update_fields=["is_staff", "is_superuser"])
+        result = self.panel.save(
+            self.io(),
+            model="help.helpentry",
+            values={
+                "db_key": "capability-owned",
+                "db_entrytext": "body",
+                "db_help_category": "general",
+            },
+        )
+        self.assertEqual(result["status"], "created")
+
+    def test_console_capability_can_change_django_authority_fields(self):
+        self.actor.is_staff = False
+        self.actor.is_superuser = False
+        self.actor.save(update_fields=["is_staff", "is_superuser"])
+        target = type(self.actor).objects.create(username="authority-target", is_active=True)
+        result = self.panel.save(
+            self.io(),
+            model="accounts.accountdb",
+            pk=target.pk,
+            values={"is_staff": True},
+        )
+        target.refresh_from_db()
+        self.assertEqual(result["status"], "changed")
+        self.assertTrue(target.is_staff)
+
+    def test_console_can_set_an_account_password_without_django_staff_flags(self):
+        target = type(self.actor).objects.create(username="password-target", is_active=True)
+        self.actor.is_staff = False
+        self.actor.is_superuser = False
+        self.actor.save(update_fields=["is_staff", "is_superuser"])
+        result = self.panel.set_password(
+            self.io(), account_id=target.pk, password="N3w-passphrase!123"
+        )
+        target.refresh_from_db()
+        self.assertEqual(result["status"], "changed")
+        self.assertTrue(target.check_password("N3w-passphrase!123"))
+        row = ConsoleAuditEvent.objects.get(operation="password_set")
+        self.assertNotIn("N3w-passphrase", str(row.after))
+
+    def test_account_creation_uses_the_presence_gated_secret_action(self):
+        result = self.panel.create_account(
+            self.io(),
+            values={"username": "console-created-account", "email": "created@example.test"},
+            relations={"groups": [], "user_permissions": []},
+            tags=[],
+            password="Violet-Quasar-4839!",
+        )
+        self.assertEqual(result["status"], "created", result)
+        account = type(self.actor).objects.get(pk=result["object_id"])
+        self.assertTrue(account.check_password("Violet-Quasar-4839!"))
+        row = ConsoleAuditEvent.objects.get(operation="add")
+        self.assertNotIn("Violet-Quasar", str(row.after))
+
+    def test_generic_save_cannot_bypass_account_creation_presence_check(self):
+        with self.assertRaisesRegex(ValueError, "presence-gated"):
+            self.panel.save(self.io(), model="accounts.accountdb", values={"username": "bypass"})
+
+    def test_bulk_change_is_previewed_before_it_is_applied(self):
+        first = HelpEntry.objects.create(
+            db_key="bulk-a", db_entrytext="before", db_help_category="general"
+        )
+        second = HelpEntry.objects.create(
+            db_key="bulk-b", db_entrytext="before", db_help_category="general"
+        )
+        preview = self.panel.preview_change(
+            _worker(),
+            model="help.helpentry",
+            ids=[first.pk, second.pk],
+            values={"db_help_category": "staff"},
+        )
+        self.assertEqual(len(preview["rows"]), 2)
+        self.assertEqual(preview["rows"][0]["after"]["db_help_category"], "staff")
+        self.assertFalse(
+            HelpEntry.objects.filter(
+                pk__in=[first.pk, second.pk], db_help_category="staff"
+            ).exists()
+        )
+
+        result = self.panel.bulk_save(
+            self.io(),
+            model="help.helpentry",
+            ids=[first.pk, second.pk],
+            values={"db_help_category": "staff"},
+            reason="move both entries to the staff category",
+        )
+        self.assertEqual(result["changed"], 2)
+        self.assertEqual(
+            HelpEntry.objects.filter(
+                pk__in=[first.pk, second.pk], db_help_category="staff"
+            ).count(),
+            2,
+        )
+        self.assertEqual(
+            set(
+                ConsoleAuditEvent.objects.filter(operation="change").values_list(
+                    "message", flat=True
+                )
+            ),
+            {"move both entries to the staff category"},
+        )
+
+    def test_relation_search_and_graph_return_navigable_rows(self):
+        from evennia.utils.create import create_object
+
+        room = create_object(key="Searchable Room", nohome=True)
+        child = create_object(key="Child", location=room, home=room)
+        matches = self.panel.related(
+            _worker(), model="objects.objectdb", field="db_location", search="Search"
+        )
+        self.assertEqual(matches["rows"][0]["id"], room.pk)
+        graph = self.panel.relations(_worker(), model="objects.objectdb", pk=child.pk)
+        self.assertIn(
+            room.pk,
+            [row["id"] for row in graph["forward"] if row["field"] == "db_location"],
+        )
+
+    def test_relation_search_includes_aliases_and_tags(self):
+        from evennia.utils.create import create_object
+
+        room = create_object(key="Unrelated key", nohome=True)
+        room.aliases.add("Searchable alias")
+        room.tags.add("searchable-tag")
+        aliases = self.panel.related(
+            _worker(), model="objects.objectdb", field="db_location", search="Searchable alias"
+        )
+        tags = self.panel.related(
+            _worker(), model="objects.objectdb", field="db_location", search="searchable-tag"
+        )
+        self.assertEqual(aliases["rows"][0]["id"], room.pk)
+        self.assertEqual(tags["rows"][0]["id"], room.pk)
+
+    def test_relations_and_tags_round_trip_through_the_records_form(self):
+        from django.contrib.auth.models import Group
+
+        target = type(self.actor).objects.create(username="related-target", is_active=True)
+        group = Group.objects.create(name="Console operators")
+        result = self.panel.save(
+            self.io(),
+            model="accounts.accountdb",
+            pk=target.pk,
+            values={"first_name": "Related"},
+            relations={"groups": [group.pk], "user_permissions": []},
+            tags=[{"key": "reviewed", "category": "console", "type": None, "data": "yes"}],
+        )
+        self.assertEqual(result["status"], "changed")
+        self.assertEqual(list(target.groups.values_list("pk", flat=True)), [group.pk])
+        extras = self.panel.extras(_worker(), model="accounts.accountdb", pk=target.pk)
+        self.assertEqual(extras["relations"]["groups"], [group.pk])
+        self.assertIn(
+            {"key": "reviewed", "category": "console", "type": None, "data": "yes"},
+            extras["tags"],
+        )
 
 
 class TestSaveAudit(ActingTestCase):

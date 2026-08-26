@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from django.apps import apps
 from django.contrib.auth.hashers import check_password as check_password_hash
 from django.contrib.auth.tokens import default_token_generator
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.utils import timezone
 
 from evennia.accounts.creation import compensate_account_creation
@@ -232,13 +232,32 @@ def mutate_password(request: PasswordMutationRequest) -> PasswordMutationResult:
         if request.actor_id is None:
             raise PermissionDenied("Admin identity is required")
         _fresh_admin(request.actor_id, account)
+    elif request.mode in ("console_set", "console_unusable"):
+        if request.actor_id is None:
+            raise PermissionDenied("Console identity is required")
+        actor = AccountDB.objects.filter(pk=int(request.actor_id)).values("is_active").first()
+        if not actor or not actor["is_active"]:
+            raise PermissionDenied("Console access was revoked")
     else:
         raise ValueError("Unknown password operation")
 
-    if request.mode == "admin_unusable":
+    if request.mode in ("admin_unusable", "console_unusable"):
         account.set_unusable_password()
     else:
-        valid, error = account.validate_password(request.new_password, account=account)
+        validator = getattr(account, "validate_password", None)
+        if callable(validator):
+            valid, error = validator(request.new_password, account=account)
+        else:
+            # A raw AccountDB can exist during migrations, tests, imports, and
+            # repair work. It has Django's password methods but none of the
+            # typeclass helpers, so use the same validator stack directly.
+            from django.contrib.auth import password_validation
+
+            try:
+                password_validation.validate_password(request.new_password, user=account)
+                valid, error = True, None
+            except ValidationError as err:
+                valid, error = False, err
         if not valid:
             message = ", ".join(getattr(error, "messages", (str(error),)))
             return PasswordMutationResult("rejected", int(account.pk), message=message[:500])

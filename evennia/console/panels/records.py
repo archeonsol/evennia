@@ -41,7 +41,7 @@ import io
 import json
 
 from django.apps import apps
-from django.core.exceptions import FieldError, PermissionDenied, ValidationError
+from django.core.exceptions import FieldDoesNotExist, FieldError, PermissionDenied, ValidationError
 from django.db.models import Q
 
 from evennia.console import audit, spec
@@ -50,9 +50,12 @@ from evennia.console.registry import Panel, io_action
 from evennia.console.services import (
     AdminDeleteRequest,
     AdminMutationRequest,
+    TagDelta,
     delete_admin,
     mutate_admin,
     mutation_field_types,
+    mutation_relation_models,
+    mutation_supports_tags,
 )
 
 #: Rows a single page may return.
@@ -215,6 +218,7 @@ class RecordsPanel(Panel):
             "verbose_name_plural": model_spec.verbose_name_plural,
             "columns": columns,
             "available_columns": [field.name for field in model_spec.fields],
+            "field_specs": model_spec.as_dict()["fields"],
             "rows": [self._plain(row, columns) for row in window],
             "page_size": page_size,
             "has_more": has_more,
@@ -316,6 +320,8 @@ class RecordsPanel(Panel):
                 "fields": [],
             }
         accepted = mutation_field_types(model_spec.label)
+        relations = mutation_relation_models(model_spec.label)
+        supports_tags = mutation_supports_tags(model_spec.label)
         by_name = {field.name: field for field in model_spec.fields}
         return {
             "model": model_spec.label,
@@ -327,25 +333,126 @@ class RecordsPanel(Panel):
                     "types": [item.__name__ for item in types],
                     "nullable": "NoneType" in {item.__name__ for item in types},
                     "kind": by_name[name].kind if name in by_name else "",
+                    "blank": by_name[name].blank if name in by_name else False,
+                    "relation": by_name[name].relation if name in by_name else "",
+                    "primary_key": by_name[name].primary_key if name in by_name else False,
+                    "has_default": apps.get_model(model_spec.label)
+                    ._meta.get_field(name)
+                    .has_default(),
                     "choices": [list(pair) for pair in by_name[name].choices]
                     if name in by_name
                     else [],
                 }
                 for name, types in sorted(accepted.items())
             ],
-            "unsupported": [
-                "relations",
-                "tags",
-                "password",
+            "supports_password": model_spec.label == "accounts.accountdb",
+            "supports_tags": supports_tags,
+            "relations": [
+                {"name": name, "model": related} for name, related in sorted(relations.items())
             ],
+            "unsupported": [] if model_spec.label == "accounts.accountdb" else ["password"],
             "note": (
-                "Relations, tags, and passwords are not written here. Each has its own "
-                "service with rules a generic form cannot honour."
+                "Relations and tags are applied through their owning handlers. Account "
+                "passwords use the dedicated password control below the field form."
             ),
         }
 
     @io_action
-    def save(self, ctx, model=None, pk=None, values=None):
+    def set_password(self, ctx, account_id=None, password="", usable=True):
+        """Set or disable one account password through the credential service.
+
+        This action requires recent reauthentication at the HTTP boundary. No
+        password value is copied into the console audit trail.
+        """
+
+        from evennia.web.utils.auth import PasswordMutationRequest, mutate_password
+
+        try:
+            target = int(account_id)
+        except (TypeError, ValueError) as err:
+            raise ValueError("Select an account before changing its password.") from err
+        secret = str(password or "")
+        if usable and not secret:
+            raise ValueError("Enter the new password.")
+        result = mutate_password(
+            PasswordMutationRequest(
+                account_id=target,
+                mode="console_set" if usable else "console_unusable",
+                new_password=secret if usable else None,
+                actor_id=int(ctx.actor_id),
+            )
+        )
+        audit.record(
+            panel=self.key,
+            operation="password_set" if usable else "password_disabled",
+            actor_id=ctx.actor_id,
+            actor_name=ctx.actor_name,
+            target_ref=f"accounts.accountdb#{target}",
+            after={"status": result.status, "usable": bool(usable)},
+            message=str(result.message or "")[:500],
+        )
+        if result.status != "changed":
+            raise ValueError(result.message or "The password was not changed.")
+        return {
+            "status": result.status,
+            "account_id": result.account_id,
+            "message": result.message,
+        }
+
+    @io_action
+    def save(self, ctx, model=None, pk=None, values=None, relations=None, tags=None, reason=""):
+        """Create or change a non-secret record through its mutation adapter."""
+
+        if str(model or "").lower() == "accounts.accountdb" and pk is None:
+            submitted = dict(values or {})
+            if "password" in submitted:
+                raise PermissionDenied(
+                    "Passwords are not set through the records lens. Use the password service."
+                )
+            coerce_payload(submitted, mutation_field_types("accounts.accountdb"))
+            raise ValueError("Create an account with the presence-gated account control.")
+        return self._save_record(
+            ctx,
+            model=model,
+            pk=pk,
+            values=values,
+            relations=relations,
+            tags=tags,
+            reason=reason,
+        )
+
+    @io_action
+    def create_account(self, ctx, values=None, relations=None, tags=None, password=""):
+        """Create one account with a validated, repr-hidden password.
+
+        The HTTP boundary requires recent reauthentication for this named
+        action. The secret is passed only to the owner mutation request and is
+        never copied into either audit payload.
+        """
+
+        secret = str(password or "")
+        if not secret:
+            raise ValueError("Enter the new account's password.")
+        return self._save_record(
+            ctx,
+            model="accounts.accountdb",
+            values=values,
+            relations=relations,
+            tags=tags,
+            password=secret,
+        )
+
+    def _save_record(
+        self,
+        ctx,
+        model=None,
+        pk=None,
+        values=None,
+        relations=None,
+        tags=None,
+        reason="",
+        password=None,
+    ):
         """Create or change one row through the bounded mutation service.
 
         Runs on the IO owner: the service reloads the actor, recomputes
@@ -353,16 +460,16 @@ class RecordsPanel(Panel):
         model's own lifecycle. The worker only coerced JSON into the exact
         types the service demands.
 
-        Deliberately narrow. Relations, inline tags, and passwords are refused
-        rather than half-supported: a shared Tag row is cached by many owners,
-        account creation has a provenance contract, and a password has its own
-        service. Refusing with a reason beats a form that appears to save them.
+        Relations and tags use the same allowlisted owner handlers as Django
+        admin. Passwords remain a distinct presence-gated credential action.
 
         Args:
             ctx: IO context.
             model: Model label.
             pk: Row to change, or ``None`` to create one.
             values: Field name to submitted value.
+            relations: Complete related-ID lists for submitted M2M fields.
+            tags: Complete desired owner-handler tag list.
 
         Returns:
             dict: The service's outcome, including its own status string.
@@ -387,14 +494,30 @@ class RecordsPanel(Panel):
 
         before = {}
         target = int(pk) if pk is not None else None
+        target_model = apps.get_model(model_spec.label)
+        relation_payload = self._relation_payload(model_spec.label, relations)
+        tag_payload = self._tag_payload(target_model, target, tags)
+        audit_before = {}
         if target is not None:
             existing = (
-                apps.get_model(model_spec.label)
-                ._base_manager.filter(pk=target)
+                target_model._base_manager.filter(pk=target)
                 .values(*[name for name, _ in concrete])
                 .first()
             )
             before = {key: str(value) for key, value in (existing or {}).items()}
+            audit_before.update(before)
+            if relations is not None or tags is not None:
+                existing_extras = self.extras(ctx, model=model_spec.label, pk=target)
+                if relations is not None:
+                    audit_before["relations"] = existing_extras["relations"]
+                if tags is not None:
+                    audit_before["tags"] = existing_extras["tags"]
+
+        audit_after = {key: str(value) for key, value in concrete}
+        if relations is not None:
+            audit_after["relations"] = {name: list(ids) for name, ids in relation_payload}
+        if tags is not None:
+            audit_after["tags"] = list(tags)
 
         result = mutate_admin(
             AdminMutationRequest(
@@ -402,8 +525,10 @@ class RecordsPanel(Panel):
                 model_label=model_spec.label,
                 object_id=target,
                 concrete=concrete,
-                relations=(),
-                tags=(),
+                relations=relation_payload,
+                tags=tag_payload,
+                password=password,
+                authority="console",
             )
         )
         payload = {
@@ -421,12 +546,194 @@ class RecordsPanel(Panel):
             actor_name=ctx.actor_name,
             target_ref=f"{model_spec.label}#{result.object_id or target or ''}"[:160],
             outcome=outcome,
-            before=before,
-            after={key: str(value) for key, value in concrete},
+            before=audit_before,
+            after=audit_after,
             inverse=self._inverse(model_spec, target, before, outcome),
-            message=payload["message"][:500],
+            message=(str(reason or "").strip() or payload["message"])[:500],
         )
         return payload
+
+    def related(self, ctx, model=None, field=None, search=""):
+        """Return bounded candidates for one foreign-key field."""
+
+        model_spec = self._spec(model)
+        relation_model = mutation_relation_models(model_spec.label).get(str(field))
+        if not relation_model:
+            try:
+                field_spec = next(item for item in model_spec.fields if item.name == field)
+            except StopIteration as err:
+                raise ValueError(f"{field!r} is not a field on {model_spec.label}.") from err
+            relation_model = field_spec.relation
+        if not relation_model:
+            raise ValueError(f"{field!r} is not a relationship field.")
+        related = apps.get_model(relation_model)
+        related_spec = spec.model_spec(related)
+        identities = [
+            item.name
+            for item in related_spec.fields
+            if item.name in IDENTITY_NAMES and item.kind in SEARCHABLE_KINDS
+        ]
+        queryset = related._base_manager.all()
+        wanted = str(search or "").strip()
+        if wanted:
+            query = Q()
+            for name in identities:
+                query |= Q(**{f"{name}__istartswith": wanted})
+            try:
+                related._meta.get_field("db_tags")
+            except FieldDoesNotExist:
+                pass
+            else:
+                # Typeclass-aware lookup: aliases and ordinary tags are both
+                # stored in db_tags and are identifying names in operator use.
+                query |= Q(db_tags__db_key__istartswith=wanted)
+            if wanted.isdigit():
+                query |= Q(pk=int(wanted))
+            queryset = queryset.filter(query).distinct() if query else queryset.none()
+        pk_name = related._meta.pk.name
+        names = list(dict.fromkeys([pk_name, *identities]))
+        rows = list(queryset.order_by(pk_name).values(*names)[:21])
+        return {
+            "model": related_spec.label,
+            "rows": [
+                {
+                    "id": row[pk_name],
+                    "label": next(
+                        (str(row[name]) for name in identities if row.get(name) not in (None, "")),
+                        f"{related_spec.verbose_name} #{row[pk_name]}",
+                    ),
+                }
+                for row in rows[:20]
+            ],
+            "has_more": len(rows) > 20,
+        }
+
+    def extras(self, ctx, model=None, pk=None):
+        """Return current editable M2M relations and owner-handler tags.
+
+        Reads the through tables with ``values_list`` so an idmapper instance is
+        never partially materialized on a web worker.
+        """
+
+        model_spec = self._spec(model)
+        target = apps.get_model(model_spec.label)
+        try:
+            identifier = int(pk)
+        except (TypeError, ValueError) as err:
+            raise ValueError("Select a valid row before reading its related values.") from err
+        if not target._base_manager.filter(pk=identifier).exists():
+            raise LookupError(f"no {model_spec.label} with primary key {identifier!r}")
+        relations = {
+            name: self._m2m_ids(target, name, identifier)
+            for name in mutation_relation_models(model_spec.label)
+        }
+        tags = (
+            self._tag_values(target, identifier) if mutation_supports_tags(model_spec.label) else []
+        )
+        return {"model": model_spec.label, "id": identifier, "relations": relations, "tags": tags}
+
+    def relations(self, ctx, model=None, pk=None):
+        """Return a bounded, navigable relationship graph for one row."""
+
+        model_spec = self._spec(model)
+        target = apps.get_model(model_spec.label)
+        try:
+            identifier = int(pk)
+        except (TypeError, ValueError) as err:
+            raise ValueError("Select a valid row before reading its relationships.") from err
+        if not target._base_manager.filter(pk=identifier).exists():
+            raise LookupError(f"no {model_spec.label} with primary key {identifier!r}")
+
+        forward = []
+        for item in model_spec.fields:
+            if not item.relation:
+                continue
+            value = (
+                target._base_manager.filter(pk=identifier).values_list(item.name, flat=True).first()
+            )
+            if value is not None:
+                forward.append({"field": item.name, "model": item.relation, "id": value})
+
+        reverse = []
+        for relation in target._meta.related_objects:
+            related = relation.related_model
+            field = relation.field.name
+            try:
+                sample = list(
+                    related._base_manager.filter(**{field: identifier})
+                    .order_by(related._meta.pk.name)
+                    .values_list(related._meta.pk.name, flat=True)[:21]
+                )
+            except (FieldError, TypeError, ValueError):
+                continue
+            if sample:
+                reverse.append(
+                    {
+                        "field": relation.get_accessor_name(),
+                        "model": related._meta.label_lower,
+                        "ids": sample[:20],
+                        "has_more": len(sample) > 20,
+                    }
+                )
+        return {"model": model_spec.label, "id": identifier, "forward": forward, "reverse": reverse}
+
+    def preview_change(self, ctx, model=None, ids=None, values=None):
+        """Return per-row before/after values for a bounded bulk change."""
+
+        model_spec = self._spec(model)
+        if not model_spec.writable:
+            raise PermissionDenied(f"{model_spec.label} is not generically writable.")
+        identifiers = tuple(dict.fromkeys(int(value) for value in (ids or ())))[:MAX_BULK]
+        if not identifiers:
+            raise ValueError("Select at least one row to change.")
+        submitted = dict(values or {})
+        if not submitted:
+            raise ValueError("Select at least one field to change.")
+        concrete = dict(coerce_payload(submitted, mutation_field_types(model_spec.label)))
+        target = apps.get_model(model_spec.label)
+        fields = list(concrete)
+        rows = list(target._base_manager.filter(pk__in=identifiers).values("pk", *fields))
+        found = {int(row["pk"]) for row in rows}
+        return {
+            "model": model_spec.label,
+            "rows": [
+                {
+                    "id": row["pk"],
+                    "before": {name: self._plain_value(row[name]) for name in fields},
+                    "after": {name: self._plain_value(concrete[name]) for name in fields},
+                }
+                for row in rows
+            ],
+            "missing": sorted(set(identifiers) - found),
+            "capped": len(identifiers) >= MAX_BULK,
+            "note": "The console has changed nothing. Review every field before applying this bulk change.",
+        }
+
+    @io_action
+    def bulk_save(self, ctx, model=None, ids=None, values=None, reason=""):
+        """Apply one previewed field set to a bounded selection."""
+
+        justification = str(reason or "").strip()
+        if not justification:
+            raise ValueError("Enter why this bulk change is needed.")
+        identifiers = tuple(dict.fromkeys(int(value) for value in (ids or ())))[:MAX_BULK]
+        if not identifiers:
+            raise ValueError("Select at least one row to change.")
+        results = []
+        for identifier in identifiers:
+            result = self.save(
+                ctx,
+                model=model,
+                pk=identifier,
+                values=values,
+                reason=justification,
+            )
+            results.append({"id": identifier, **result})
+        return {
+            "model": self._spec(model).label,
+            "changed": sum(1 for row in results if row["status"] == "changed"),
+            "rows": results,
+        }
 
     def _inverse(self, model_spec, target, before, outcome):
         """Return the payload that would reverse this write, or ``None``.
@@ -668,7 +975,7 @@ class RecordsPanel(Panel):
         return counts
 
     @io_action
-    def delete(self, ctx, model=None, ids=None):
+    def delete(self, ctx, model=None, ids=None, reason=""):
         """Delete rows through the bounded mutation service.
 
         Runs on the IO owner because deletion invokes lifecycle hooks on game
@@ -680,6 +987,7 @@ class RecordsPanel(Panel):
             ctx: IO context.
             model: Model label to delete from.
             ids: Primary keys to delete.
+            reason: Operator justification retained with the audit event.
 
         Returns:
             dict: Which ids were deleted, vetoed, missing, or failed.
@@ -694,6 +1002,10 @@ class RecordsPanel(Panel):
                 f"{model_spec.label} is not generically writable. "
                 f"Mutate it through {model_spec.write_via or 'its own domain service'}."
             )
+        justification = str(reason or "").strip()
+        if not justification:
+            raise ValueError("Enter why these rows must be deleted.")
+        justification = justification[:500]
         identifiers = tuple(int(value) for value in (ids or ()))
         if not identifiers:
             return {"deleted": [], "vetoed": [], "missing": [], "failed": []}
@@ -703,6 +1015,7 @@ class RecordsPanel(Panel):
                 actor_id=int(ctx.actor_id),
                 model_label=model_spec.label,
                 object_ids=identifiers,
+                authority="console",
             )
         )
         payload = {
@@ -711,7 +1024,15 @@ class RecordsPanel(Panel):
             "vetoed": list(getattr(result, "vetoed_ids", ()) or ()),
             "missing": list(getattr(result, "missing_ids", ()) or ()),
             "failed": list(getattr(result, "failed_ids", ()) or ()),
+            "reason": justification,
+            "message": result.message,
         }
+        if result.status == "partial":
+            payload["message"] = (
+                f"Deleted {len(result.deleted_ids)}; vetoed {len(result.vetoed_ids)}; "
+                f"missing {len(result.missing_ids)}; failed {len(result.failed_ids)}. "
+                "Inspect the listed rows before acting again."
+            )
         audit.record(
             panel=self.key,
             operation="delete",
@@ -720,7 +1041,7 @@ class RecordsPanel(Panel):
             target_ref=f"{model_spec.label}#{','.join(str(i) for i in identifiers)}"[:160],
             before={"ids": list(identifiers)},
             after=payload,
-            message=f"deleted {len(payload['deleted'])} of {len(identifiers)}",
+            message=justification,
         )
         return payload
 
@@ -732,6 +1053,90 @@ class RecordsPanel(Panel):
         if not label:
             raise LookupError("a model label is required")
         return spec.get_model_spec(label)
+
+    def _m2m_ids(self, model, field_name, identifier):
+        """Return bounded related IDs from one concrete M2M through table."""
+
+        field = model._meta.get_field(field_name)
+        through = field.remote_field.through
+        source = f"{field.m2m_field_name()}_id"
+        related = f"{field.m2m_reverse_field_name()}_id"
+        return list(
+            through._base_manager.filter(**{source: identifier})
+            .order_by(related)
+            .values_list(related, flat=True)[:2000]
+        )
+
+    def _tag_values(self, model, identifier):
+        """Return one owner's tags as complete handler values."""
+
+        field = model._meta.get_field("db_tags")
+        tag_model = field.remote_field.model
+        tag_ids = self._m2m_ids(model, "db_tags", identifier)
+        return [
+            {
+                "key": row["db_key"],
+                "category": row["db_category"],
+                "type": row["db_tagtype"],
+                "data": row["db_data"],
+            }
+            for row in tag_model._base_manager.filter(pk__in=tag_ids)
+            .order_by("db_tagtype", "db_category", "db_key")
+            .values("db_key", "db_category", "db_tagtype", "db_data")
+        ]
+
+    def _relation_payload(self, model_label, relations):
+        """Validate a complete related-ID mapping for the mutation service."""
+
+        if relations is None:
+            return ()
+        if not isinstance(relations, dict):
+            raise ValueError("Relations must be submitted by field name.")
+        allowed = mutation_relation_models(model_label)
+        unknown = set(relations) - set(allowed)
+        if unknown:
+            raise ValueError(f"Unknown relation {sorted(unknown)[0]!r}.")
+        payload = []
+        for name, values in sorted(relations.items()):
+            try:
+                identifiers = tuple(dict.fromkeys(int(value) for value in (values or ())))
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Relation {name!r} contains an invalid row identifier.") from err
+            if any(value <= 0 for value in identifiers):
+                raise ValueError(f"Relation {name!r} contains an invalid row identifier.")
+            payload.append((name, identifiers))
+        return tuple(payload)
+
+    def _tag_payload(self, model, identifier, submitted):
+        """Build owner-handler deltas from a complete desired tag list."""
+
+        if submitted is None:
+            return ()
+        if not isinstance(submitted, list):
+            raise ValueError("Tags must be submitted as a list.")
+
+        def normalized(item):
+            if not isinstance(item, dict):
+                raise ValueError("Every tag must name a key, category, type, and data value.")
+            key = str(item.get("key") or "").strip()
+            if not key:
+                raise ValueError("Every tag needs a key.")
+            values = [key]
+            for name in ("category", "type", "data"):
+                value = item.get(name)
+                values.append(None if value in (None, "") else str(value))
+            if values[2] not in (None, "alias", "permission"):
+                raise ValueError("Tag type must be alias, permission, or empty.")
+            return tuple(values)
+
+        desired = {normalized(item) for item in submitted}
+        current = {
+            (item["key"], item["category"], item["type"], item["data"])
+            for item in (self._tag_values(model, identifier) if identifier is not None else [])
+        }
+        removed = [TagDelta(old=value, new=None) for value in sorted(current - desired, key=str)]
+        added = [TagDelta(old=None, new=value) for value in sorted(desired - current, key=str)]
+        return tuple([*removed, *added])
 
     def _pk_name(self, model_spec) -> str:
         """Return the primary key's field name."""
@@ -750,7 +1155,7 @@ class RecordsPanel(Panel):
         view carries every field.
         """
 
-        known = {field.name for field in model_spec.fields}
+        known = {field.name: field for field in model_spec.fields}
         if requested:
             names = [name.strip() for name in str(requested).split(",") if name.strip()]
             chosen = [name for name in names if name in known]
@@ -831,7 +1236,7 @@ class RecordsPanel(Panel):
         """
 
         applied = {}
-        known = {field.name for field in model_spec.fields}
+        known = {field.name: field for field in model_spec.fields}
         for raw_key, value in list(params.items()):
             if not str(raw_key).startswith("f."):
                 continue
@@ -842,6 +1247,18 @@ class RecordsPanel(Panel):
             if suffix not in FILTER_LOOKUPS:
                 raise FieldError(f"{suffix!r} is not a supported comparison")
             lookup = FILTER_LOOKUPS[suffix]
+            field_spec = known[name]
+            if field_spec.kind == "JSONField" and suffix in ("", "exact", "contains"):
+                lookup = "contains" if suffix == "contains" else "exact"
+                if isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError as err:
+                        raise ValueError(f"Filter {name!r} must contain valid JSON.") from err
+            elif field_spec.kind == "JSONField" and suffix not in ("isnull",):
+                raise FieldError(
+                    f"JSON field {name!r} supports exact, contains, and is-empty comparisons."
+                )
             if lookup == "isnull":
                 value = str(value).lower() in ("1", "true", "yes")
             elif lookup == "in":
@@ -933,3 +1350,10 @@ class RecordsPanel(Panel):
             else:
                 plain[key] = str(value)
         return plain
+
+    def _plain_value(self, value):
+        """Return one JSON-safe field value for a preview."""
+
+        if isinstance(value, (str, int, float, bool, type(None))):
+            return value
+        return str(value)

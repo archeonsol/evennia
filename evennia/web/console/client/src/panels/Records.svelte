@@ -7,6 +7,7 @@
   import CopyLinkButton from "../components/CopyLinkButton.svelte";
   import SaveViewButton from "../components/SaveViewButton.svelte";
   import RecordEditor from "../components/RecordEditor.svelte";
+  import BulkEditor from "../components/BulkEditor.svelte";
   import { call } from "../lib/api";
   import { report } from "../lib/report";
   import { Loader, rowsPath } from "../lib/load.svelte";
@@ -23,6 +24,8 @@
   interface Body {
     rows?: Row[];
     columns?: string[];
+    available_columns?: string[];
+    field_specs?: FieldSpec[];
     writable?: boolean;
     write_via?: string;
     storage?: string;
@@ -30,10 +33,62 @@
     next_cursor?: string;
   }
 
+  interface FieldSpec {
+    name: string;
+    kind?: string;
+    relation?: string;
+  }
+
+  interface RecordFilter {
+    field: string;
+    lookup: string;
+    value: string;
+  }
+
   const data = new Loader<{ rows?: Body }>();
   let models = $state<Model[]>([]);
   let modelsFailed = $state(false);
   let reload = $state(0);
+  let bulkEditing = $state(false);
+  let filtersOpen = $state(false);
+
+  const LOOKUPS = [
+    ["exact", "IS"],
+    ["iexact", "IS (CASE-INSENSITIVE)"],
+    ["contains", "CONTAINS"],
+    ["startswith", "STARTS WITH"],
+    ["gt", "GREATER THAN"],
+    ["gte", "AT LEAST"],
+    ["lt", "LESS THAN"],
+    ["lte", "AT MOST"],
+    ["isnull", "IS EMPTY"],
+    ["in", "IS ONE OF"],
+  ] as const;
+
+  function parseFilters(raw: string): RecordFilter[] {
+    try {
+      const parsed = JSON.parse(raw || "[]");
+      return Array.isArray(parsed)
+        ? parsed.filter((item) => item && item.field && item.lookup).slice(0, 12)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  const filters = $derived(parseFilters(view.recordFilters));
+
+  function storeFilters(next: RecordFilter[]) {
+    relist(() => (view.recordFilters = next.length ? JSON.stringify(next) : ""));
+  }
+
+  function filterParams(): Record<string, string> {
+    return Object.fromEntries(
+      filters
+        .filter((item) => item.field && (item.lookup === "isnull" || item.value.trim()))
+        .map((item) => [`f.${item.field}__${item.lookup}`, item.lookup === "isnull" ? item.value || "true" : item.value]),
+    );
+  }
 
   $effect(() => {
     loadModels();
@@ -59,6 +114,7 @@
         order: view.order,
         columns: view.columns,
         cursor: view.cursor,
+        ...filterParams(),
       }),
     );
   });
@@ -66,6 +122,7 @@
   const body = $derived(data.value?.rows ?? {});
   const rows = $derived(body.rows ?? []);
   const columns = $derived(body.columns ?? []);
+  const availableColumns = $derived(body.available_columns ?? []);
   const idOf = $derived((row: Row) => String(row[columns[0]]));
 
   const allPicked = $derived(local.chosen.length > 0 && local.chosen.length === rows.length);
@@ -85,6 +142,24 @@
     });
   }
 
+  function toggleColumn(field: string, on: boolean) {
+    const current = view.columns ? view.columns.split(",").filter(Boolean) : [...columns];
+    const next = on ? [...new Set([...current, field])] : current.filter((item) => item !== field);
+    if (!next.length) return;
+    relist(() => (view.columns = next.join(",")));
+  }
+
+  function addFilter() {
+    const first = availableColumns[0] || columns[0];
+    if (!first) return;
+    storeFilters([...filters, { field: first, lookup: "exact", value: "" }]);
+    filtersOpen = true;
+  }
+
+  function updateFilter(index: number, patch: Partial<RecordFilter>) {
+    storeFilters(filters.map((item, at) => (at === index ? { ...item, ...patch } : item)));
+  }
+
   function pick(id: string, on: boolean) {
     local.chosen = on
       ? [...new Set([...local.chosen, id])]
@@ -98,7 +173,7 @@
     counted = "COUNTING";
     const result = await call<{ result?: { rows?: number; exact?: boolean; reason?: string } }>(
       "panels/records/actions/count/",
-      { body: { model: view.model, search: view.search } },
+      { body: { model: view.model, search: view.search, ...filterParams() } },
     );
     const payload = result.payload.result || {};
     counted = payload.exact ? `${payload.rows} ROWS` : `ABOUT ${payload.rows} ROWS`;
@@ -141,6 +216,26 @@
       />
     </div>
 
+    <button type="button" aria-expanded={filtersOpen} onclick={() => (filtersOpen = !filtersOpen)}>
+      FILTERS{filters.length ? ` ${filters.length}` : ""}
+    </button>
+
+    <details class="column-picker">
+      <summary>COLUMNS {columns.length}/{availableColumns.length}</summary>
+      <div class="column-menu">
+        {#each availableColumns as field (field)}
+          <label>
+            <input
+              type="checkbox"
+              checked={columns.includes(field)}
+              onchange={(event) => toggleColumn(field, event.currentTarget.checked)}
+            />
+            <span>{field}</span>
+          </label>
+        {/each}
+      </div>
+    </details>
+
     <span class="spacer"></span>
 
     {#if body.writable}
@@ -159,6 +254,9 @@
     </button>
 
     {#if local.chosen.length}
+      <button type="button" onclick={() => (bulkEditing = true)}>
+        EDIT {local.chosen.length} SELECTED
+      </button>
       <button
         type="button"
         id="bulk-delete"
@@ -221,6 +319,52 @@
 </PanelHead>
 
 <div class="panel-body">
+  {#if filtersOpen || filters.length}
+    <section class="filter-builder" aria-label="Record filters">
+      <div class="filter-builder-head">
+        <span class="legend">MATCH EVERY CONDITION</span>
+        <span class="spacer"></span>
+        <button type="button" onclick={addFilter}>ADD CONDITION</button>
+        {#if filters.length}<button type="button" onclick={() => storeFilters([])}>CLEAR</button>{/if}
+      </div>
+      {#each filters as filter, index (`${index}-${filter.field}`)}
+        <div class="filter-row">
+          <select
+            aria-label={`Field for filter ${index + 1}`}
+            value={filter.field}
+            onchange={(event) => updateFilter(index, { field: event.currentTarget.value })}
+          >
+            {#each availableColumns as field (field)}<option value={field}>{field}</option>{/each}
+          </select>
+          <select
+            aria-label={`Comparison for filter ${index + 1}`}
+            value={filter.lookup}
+            onchange={(event) => updateFilter(index, { lookup: event.currentTarget.value })}
+          >
+            {#each LOOKUPS as option (option[0])}<option value={option[0]}>{option[1]}</option>{/each}
+          </select>
+          {#if filter.lookup === "isnull"}
+            <select
+              aria-label={`Empty state for filter ${index + 1}`}
+              value={filter.value || "true"}
+              onchange={(event) => updateFilter(index, { value: event.currentTarget.value })}
+            ><option value="true">YES</option><option value="false">NO</option></select>
+          {:else}
+            <input
+              type="text"
+              aria-label={`Value for filter ${index + 1}`}
+              value={filter.value}
+              placeholder={filter.lookup === "in" ? "VALUE, VALUE, VALUE" : "VALUE"}
+              onchange={(event) => updateFilter(index, { value: event.currentTarget.value })}
+            />
+          {/if}
+          <button type="button" aria-label={`Remove filter ${index + 1}`} onclick={() => storeFilters(filters.filter((_item, at) => at !== index))}>REMOVE</button>
+        </div>
+      {/each}
+      {#if !filters.length}<p class="empty-hint">Add conditions to narrow by any field. The address bar preserves the complete query.</p>{/if}
+    </section>
+  {/if}
+
   {#if modelsFailed}
     <Empty line="THE MODEL LIST IS NOT AVAILABLE." />
   {:else}
@@ -232,7 +376,21 @@
       <RecordEditor onDone={() => (reload += 1)} />
     {/if}
 
-    {#if data.failed}
+    {#if bulkEditing}
+      <BulkEditor
+        ids={local.chosen}
+        onCancel={() => (bulkEditing = false)}
+        onDone={() => {
+          bulkEditing = false;
+          local.chosen = [];
+          reload += 1;
+        }}
+      />
+    {/if}
+
+    {#if data.loading}
+      <Empty line="LOADING RECORDS…" hint="The model and filters are being read." />
+    {:else if data.failed}
       <Empty line="THE ROWS ARE NOT AVAILABLE." />
     {:else if rows.length === 0}
       <Empty
@@ -247,6 +405,7 @@
         columns={[
           ...(body.writable ? [{ key: "__pick", label: "" }] : []),
           ...columns.map((field) => ({ key: field, label: field })),
+          { key: "__open", label: "" },
         ]}
         {rows}
         key={(row) => idOf(row)}
@@ -272,16 +431,12 @@
                 </button>
               </th>
             {/each}
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
           </tr>
         {/snippet}
 
-        {#snippet row(item)}
-          <tr
-            title={body.writable ? "Open this row" : ""}
-            onclick={() => {
-              if (body.writable) view.editing = idOf(item);
-            }}
-          >
+        {#snippet row(item, absoluteIndex)}
+          <tr aria-rowindex={absoluteIndex + 2}>
             {#if body.writable}
               <td class="pick">
                 <!-- The row itself opens the editor. Without stopping the click
@@ -298,9 +453,24 @@
             {#each columns as field (field)}
               <Cell value={item[field]} />
             {/each}
+            <td><button type="button" onclick={() => (view.editing = idOf(item))}>OPEN</button></td>
           </tr>
         {/snippet}
       </DataTable>
+      {#if data.refreshing}<p class="refresh-note" role="status">REFRESHING THIS VIEW…</p>{/if}
     {/if}
   {/if}
 </div>
+
+<style>
+  .filter-builder { border-block: 1px solid var(--rule); background: var(--panel); }
+  .filter-builder-head, .filter-row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; }
+  .filter-row { display: grid; grid-template-columns: minmax(130px, .8fr) minmax(170px, 1fr) minmax(180px, 1.4fr) auto; border-top: 1px solid var(--rule-soft); }
+  .filter-row select, .filter-row input { width: 100%; min-width: 0; }
+  .column-picker { position: relative; }
+  .column-picker summary { cursor: pointer; list-style: none; padding: 7px 9px; border: 1px solid var(--rule); color: var(--ink); font: 600 10px/1 var(--mono); letter-spacing: .06em; }
+  .column-menu { position: absolute; z-index: 20; inset-block-start: calc(100% + 4px); inset-inline-end: 0; display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); max-height: 55vh; min-width: min(480px, 88vw); overflow: auto; padding: 8px; border: 1px solid var(--rule); background: var(--ground); box-shadow: 0 10px 30px rgb(0 0 0 / .45); }
+  .column-menu label { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 3px 6px; font: 11px/1.3 var(--mono); }
+  .refresh-note { position: sticky; inset-block-end: 0; margin: 0; padding: 6px 14px; border-top: 1px solid var(--rule); background: var(--panel); color: var(--attn); font: 600 10px/1.2 var(--mono); letter-spacing: .08em; }
+  @media (max-width: 620px) { .filter-row { grid-template-columns: 1fr; } .column-menu { grid-template-columns: 1fr; } }
+</style>

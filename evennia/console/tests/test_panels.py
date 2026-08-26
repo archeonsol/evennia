@@ -165,6 +165,12 @@ class TestRecordsReads(TestCase):
         result = self.panel.rows(_ctx(model="console.consoleauditevent", search="findme"))
         self.assertEqual(len(result["rows"]), 1)
 
+    def test_a_json_containment_filter_refuses_invalid_json(self):
+        with self.assertRaisesRegex(ValueError, "valid JSON"):
+            self.panel.rows(
+                _ctx(model="console.consoleauditevent", **{"f.after__contains": "{broken"})
+            )
+
     def test_detail_returns_one_record(self):
         row = ConsoleAuditEvent.objects.create(event_id="c" * 32, panel="p", operation="o")
         result = self.panel.detail(_ctx(model="console.consoleauditevent"), row.pk)
@@ -202,21 +208,27 @@ class TestRecordsWrites(TestCase):
 
     def test_domain_owned_model_refuses_deletion(self):
         with self.assertRaises(PermissionDenied) as caught:
-            self.panel.delete(self.ctx, model="server.sanction", ids=[1])
+            self.panel.delete(self.ctx, model="server.sanction", ids=[1], reason="duplicate")
         # The refusal names where the mutation does belong.
         self.assertIn("issue_sanction", str(caught.exception))
 
     def test_audit_trail_refuses_its_own_deletion(self):
         with self.assertRaises(PermissionDenied):
-            self.panel.delete(self.ctx, model="console.consoleauditevent", ids=[1])
+            self.panel.delete(
+                self.ctx, model="console.consoleauditevent", ids=[1], reason="cleanup"
+            )
 
     def test_tag_refuses_deletion(self):
         with self.assertRaises(PermissionDenied):
-            self.panel.delete(self.ctx, model="typeclasses.tag", ids=[1])
+            self.panel.delete(self.ctx, model="typeclasses.tag", ids=[1], reason="cleanup")
 
     def test_empty_id_list_is_a_no_op(self):
-        result = self.panel.delete(self.ctx, model="objects.objectdb", ids=[])
+        result = self.panel.delete(self.ctx, model="objects.objectdb", ids=[], reason="nothing")
         self.assertEqual(result["deleted"], [])
+
+    def test_delete_requires_a_reason(self):
+        with self.assertRaises(ValueError):
+            self.panel.delete(self.ctx, model="objects.objectdb", ids=[4], reason="   ")
 
     def test_delete_writes_an_audit_row(self):
         from evennia.console.services import AdminDeleteResult
@@ -225,11 +237,13 @@ class TestRecordsWrites(TestCase):
             "evennia.console.panels.records.delete_admin",
             return_value=AdminDeleteResult(status="ok", deleted_ids=(4,)),
         ):
-            self.panel.delete(self.ctx, model="objects.objectdb", ids=[4])
+            self.panel.delete(self.ctx, model="objects.objectdb", ids=[4], reason="duplicate row")
         row = ConsoleAuditEvent.objects.get(panel="records", operation="delete")
         self.assertEqual(row.actor_id, 1)
         self.assertEqual(row.after["deleted"], [4])
         self.assertIn("objects.objectdb#4", row.target_ref)
+        self.assertEqual(row.message, "duplicate row")
+        self.assertEqual(row.after["reason"], "duplicate row")
 
 
 class TestSettingsPanel(TestCase):

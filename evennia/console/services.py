@@ -64,6 +64,7 @@ class AdminMutationRequest:
     relations: tuple[tuple[str, tuple[int, ...]], ...]
     tags: tuple[TagDelta, ...]
     password: str | None = field(default=None, repr=False)
+    authority: str = "model_permission"
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +304,32 @@ def mutation_field_types(model_label: str) -> dict[str, tuple[type, ...]]:
     return dict(admin_spec(model_label).field_types)
 
 
+def mutation_relation_models(model_label: str) -> dict[str, str]:
+    """Return the bounded many-to-many fields accepted by one adapter.
+
+    Args:
+        model_label: Lowercased ``app_label.modelname``.
+
+    Returns:
+        dict: Relation field name to related model label.
+    """
+
+    return dict(admin_spec(model_label).relations)
+
+
+def mutation_supports_tags(model_label: str) -> bool:
+    """Return whether one adapter accepts owner-handler Tag deltas.
+
+    Args:
+        model_label: Lowercased ``app_label.modelname``.
+
+    Returns:
+        bool: Whether the adapter applies tags through the owner's handlers.
+    """
+
+    return bool(admin_spec(model_label).tags)
+
+
 def writable_models() -> frozenset[str]:
     """Return the model labels with a bounded IO mutation adapter.
 
@@ -464,6 +491,8 @@ def _validate_mutation_request(request: AdminMutationRequest) -> _AdminSpec:
         raise ValueError("Invalid admin target")
     if type(request.password) not in (str, type(None)):
         raise ValueError("Invalid admin secret")
+    if request.authority not in ("model_permission", "console"):
+        raise ValueError("Unknown mutation authority")
     if request.password is not None and len(request.password.encode("utf-8")) > _MAX_BYTES:
         raise ValueError("Admin secret is too large")
     if type(request.concrete) is not tuple or len(request.concrete) > _MAX_FIELDS:
@@ -531,15 +560,24 @@ def _bounded_message(error: BaseException) -> str:
     return f"{type(error).__name__}: owner mutation requires review"[:_MAX_ERROR]
 
 
-def _fresh_actor(actor_id: int, model, action: str):
-    """Resolve an admin actor after checking fresh concrete and permission state."""
+def _fresh_actor(actor_id: int, model, action: str, authority="model_permission"):
+    """Resolve an actor after checking the frontend's fresh authority model.
+
+    Django admin uses its staff flag and per-model permissions. The console is
+    admitted by a live capability that is equivalent to shell access, so its
+    owner-side check repeats active-account state without inventing a second,
+    hidden Django permission boundary.
+    """
     AccountDB = apps.get_model("accounts", "AccountDB")
     fresh = (
         AccountDB.objects.filter(pk=int(actor_id))
         .values("is_active", "is_staff", "is_superuser")
         .first()
     )
-    if not fresh or not fresh["is_active"] or not fresh["is_staff"]:
+    if not fresh or not fresh["is_active"]:
+        raise PermissionDenied("Mutation access was revoked")
+    django_authority = authority in ("model_permission", "django_admin")
+    if django_authority and not fresh["is_staff"]:
         raise PermissionDenied("Admin access was revoked")
     actor = AccountDB.objects.get(pk=int(actor_id))
     actor.is_active = fresh["is_active"]
@@ -547,9 +585,12 @@ def _fresh_actor(actor_id: int, model, action: str):
     actor.is_superuser = fresh["is_superuser"]
     for cache_name in ("_perm_cache", "_user_perm_cache", "_group_perm_cache"):
         actor.__dict__.pop(cache_name, None)
-    codename = f"{model._meta.app_label}.{action}_{model._meta.model_name}"
-    if not actor.has_perm(codename):
-        raise PermissionDenied("Admin permission was revoked")
+    if django_authority:
+        codename = f"{model._meta.app_label}.{action}_{model._meta.model_name}"
+        if not actor.has_perm(codename):
+            raise PermissionDenied("Admin permission was revoked")
+    elif authority != "console":
+        raise PermissionDenied("Unknown mutation authority")
     return actor
 
 
@@ -973,13 +1014,17 @@ def mutate_admin(request: AdminMutationRequest) -> AdminMutationResult:
     except (TypeError, ValidationError, ValueError) as err:
         return AdminMutationResult("conflict", message=_bounded_message(err))
     action = "add" if request.object_id is None else "change"
-    actor = _fresh_actor(request.actor_id, model, action)
+    actor = _fresh_actor(request.actor_id, model, action, request.authority)
     try:
         _validate_fk_targets(model, values)
         relations = _resolve_relations(spec, dict(request.relations))
         if request.tags and not spec.tags:
             raise ValueError("Tags are not supported by this adapter")
-        if request.model_label == "accounts.accountdb" and not actor.is_superuser:
+        if (
+            request.authority == "model_permission"
+            and request.model_label == "accounts.accountdb"
+            and not actor.is_superuser
+        ):
             _reject_non_superuser_authority_change(model, request.object_id, values, relations)
         _preflight_concrete(model, request.object_id, values)
     except model.DoesNotExist:
@@ -1065,6 +1110,17 @@ def _check_cascade_by_model_permission(actor, related_model, instances):
         raise PermissionDenied("Cascade delete permission was revoked")
 
 
+def _check_cascade_by_console(actor, related_model, instances):
+    """Accept a cascade already authorized by live console capability.
+
+    The caller is still reloaded as an active account before this runs. The
+    console capability grants shell-equivalent authority, so applying Django's
+    unrelated model-permission grid here would create a hidden second policy.
+    """
+
+    return None
+
+
 def _check_cascade_by_django_admin(actor, related_model, instances):
     """Defer to a registered ``ModelAdmin.has_delete_permission`` per row.
 
@@ -1090,6 +1146,7 @@ def _check_cascade_by_django_admin(actor, related_model, instances):
 _CASCADE_CHECKERS = {
     "model_permission": _check_cascade_by_model_permission,
     "django_admin": _check_cascade_by_django_admin,
+    "console": _check_cascade_by_console,
 }
 
 
@@ -1152,7 +1209,7 @@ def delete_admin(request: AdminDeleteRequest) -> AdminDeleteResult:
     model = _model(request.model_label)
     if len(request.object_ids) > _MAX_RELATED_IDS:
         raise ValueError("Too many rows were selected")
-    actor = _fresh_actor(request.actor_id, model, "delete")
+    actor = _fresh_actor(request.actor_id, model, "delete", request.authority)
     deleted = []
     vetoed = []
     missing = []
@@ -1217,5 +1274,8 @@ __all__ = (
     "admin_spec",
     "delete_admin",
     "freeze_plain",
+    "mutation_field_types",
+    "mutation_relation_models",
+    "mutation_supports_tags",
     "mutate_admin",
 )

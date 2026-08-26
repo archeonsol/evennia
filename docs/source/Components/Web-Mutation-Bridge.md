@@ -6,10 +6,11 @@ that split without granting workers a persistence exception.
 
 ## Admin protocol
 
-`evennia.web.admin.io` contains a closed registry for Account, Object,
+`evennia.console.services` contains a frontend-neutral closed registry for Account, Object,
 Channel, Script, HelpEntry, Msg, and ServerConfig. Each entry allowlists its
 concrete fields, foreign keys, relations, inline Tags, lifecycle adapter, and
-delete behavior. It is not a generic model-save API.
+delete behavior. Django admin and the operations console both use it; it is not
+a generic model-save API.
 
 The worker validates the ModelForm and every formset, then encodes only:
 
@@ -38,11 +39,14 @@ as atomic with the owner connection.
 
 ## Owner operation
 
-The owner callback reads fresh active/staff/superuser state, clears Django
-permission caches, and recomputes the action permission. Account authority
-fields and relations require a current superuser. It validates target and
-related IDs, uniqueness, supported inline kinds, and payload bounds before the
-first write.
+The owner callback always reloads the actor and requires a live, active Account.
+It then applies the authority model named by the frontend. Django admin repeats
+fresh staff, model-permission, and superuser checks; Account authority fields
+and relations still require a current Django superuser there. The operations
+console repeats active-account state under its already-live,
+shell-equivalent `engine.console.access` capability and does not invent a
+second Django-permission boundary. Both paths validate target and related IDs,
+uniqueness, supported inline kinds, and payload bounds before the first write.
 
 Creation uses established lifecycle helpers. Account creation uses
 `create_with_provenance()`. Object, Channel, Script, Msg, and HelpEntry helpers
@@ -83,8 +87,8 @@ autocommit and is never wrapped in an owner outer transaction.
 ## Account web flows
 
 `evennia.web.utils.auth` owns credential verification, password rehash,
-password change, reset-token mutation, admin usable/unusable password modes,
-shared-login activation, `last_login`, and stock registration.
+password change, reset-token mutation, admin and console usable/unusable
+password modes, shared-login activation, `last_login`, and stock registration.
 
 Authentication returns only an Account ID; Django reloads a detached Account
 for session machinery. Password operations repeat mutable authorization and

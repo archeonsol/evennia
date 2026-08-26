@@ -9,6 +9,7 @@
 import { call } from "./api";
 import { report } from "./report";
 import { view, local } from "./state.svelte";
+import { askText } from "./dialog.svelte";
 
 interface ExportPayload {
   body?: string;
@@ -24,12 +25,26 @@ interface ExportPayload {
  * nothing here may work around it.
  */
 export async function runExport(format: "csv" | "json"): Promise<boolean> {
+  let filters: { field: string; lookup: string; value: string }[] = [];
+  try {
+    const parsed = JSON.parse(view.recordFilters || "[]");
+    if (Array.isArray(parsed)) filters = parsed;
+  } catch {
+    filters = [];
+  }
   const query = new URLSearchParams({
     model: view.model,
     search: view.search,
     order: view.order,
     columns: view.columns,
   });
+  for (const item of filters) {
+    if (!item?.field || !item.lookup || (item.lookup !== "isnull" && !String(item.value || "").trim())) continue;
+    query.set(
+      `f.${item.field}__${item.lookup}`,
+      item.lookup === "isnull" ? String(item.value || "true") : String(item.value),
+    );
+  }
   const result = await call<{ result?: ExportPayload }>(
     `panels/records/actions/export/?${query}`,
     {
@@ -90,22 +105,29 @@ export async function previewDelete(ids: string[]): Promise<boolean> {
     ? `\n${(data.missing || []).length} selected row(s) no longer exist.`
     : "";
 
-  const proceed = confirm(
-    `Delete ${data.found} row(s) from ${data.model}?\n\n` +
-      `The database also removes ${data.total_cascade} related row(s):\n` +
-      lines.join("\n") +
-      missing +
-      "\n\nThis cannot be undone.",
-  );
-  if (!proceed) return false;
-
-  const reason = prompt("Why are these rows being deleted?");
+  const reason = await askText({
+    title: `Delete ${data.found || 0} row(s)`,
+    description:
+      `Model: ${data.model}\n` +
+      `Related rows removed: ${data.total_cascade || 0}\n` +
+      `${lines.join("\n")}${missing}\n\nThis cannot be undone. Review the cascade, then enter the reason.`,
+    label: "Deletion reason",
+    input: "textarea",
+    confirmLabel: "DELETE ROWS",
+    danger: true,
+  });
   if (!reason) return false;
 
-  const done = await call<Record<string, unknown>>("panels/records/actions/delete/", {
+  const done = await call<{ result?: { deleted?: number[]; vetoed?: number[]; failed?: number[] } }>("panels/records/actions/delete/", {
     body: { model: view.model, ids, reason },
   });
-  if (!report(done)) return false;
+  if (!report(done)) {
+    if (done.outcome === "indeterminate" && done.payload.result) {
+      local.chosen = [];
+      return true;
+    }
+    return false;
+  }
   local.chosen = [];
   return true;
 }

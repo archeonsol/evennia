@@ -42,6 +42,7 @@ export const URL_KEYS = [
   "columns",
   "search",
   "order",
+  "recordFilters",
   "attrModel",
   "attrSearch",
   "editing",

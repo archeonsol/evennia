@@ -1,10 +1,51 @@
-# The Web Admin
+# Operations Console and Legacy Web Admin
 
-The Evennia _Web admin_ is a customized [Django admin site](https://docs.djangoproject.com/en/4.1/ref/contrib/admin/)
+The operations console at `/console/` is Evennia's primary administration and
+live-operations surface. It combines server health, logs, sessions,
+authorization, moderation, audit history, attributes, and a Records lens over
+every installed Django model. Its frontend is shipped with Evennia; a game does
+not need Node.js to run it.
+
+Console access is granted by the live `engine.console.access` capability. Treat
+it like shell access: the console includes Python and SQL stations when those
+deployment settings are enabled. It does not use Django's `is_staff`, groups,
+or per-model permission grid as a second authority system. A separate
+`engine.console.moderation` capability can reach only the moderation station.
+
+## Operations Console
+
+The Records station lists every concrete installed model without a registration
+step. It supports shareable cross-field filters, JSON containment, sorting,
+column selection, keyset paging, saved views, CSV/JSON export, schema-driven
+forms, related-row search by key/alias/tag, tags and aliases, relationship
+navigation, account passwords, and previewed bulk changes.
+
+Deletion always shows the database cascade before it asks for a reason. The
+reason and per-row outcome are retained in the console audit trail. If a write
+starts but its final outcome cannot be verified, the console says not to retry;
+inspect the record first.
+
+The Moderation station keeps the review queue beside an exact-signal evidence
+map and the selected account dossier. A cell means `exact match`, `observed`,
+`untrusted`, or `absent`. It is not an identity score, does not estimate a
+probability, and never issues a sanction without a staff decision.
+
+The console remains useful while the game Server process is unavailable. Plain
+database reads continue in degraded mode; actions that require the IO owner are
+disabled with an explicit retry-safe outcome.
+
+## Legacy Django Admin
+
+The legacy _Web admin_ is a customized [Django admin site](https://docs.djangoproject.com/en/stable/ref/contrib/admin/)
 used for manipulating the game database using a graphical interface. You
-have to be logged into the site to use it. It then appears as an `Admin` link
+have to be logged into the site to use it. It then appears as an `Admin` link at
 the top of your website. You can also go to [http://localhost:4001/admin](http://localhost:4001/admin) when
 running locally.
+
+It remains available as a compatibility and rollback surface during the console
+transition. New operational workflows should use the console; custom
+`ModelAdmin` extensions may continue to use Django admin until their equivalent
+panel or domain action exists.
 
 Almost all actions done in the admin can also be done in-game by use of Admin-
 or Builder-commands.
