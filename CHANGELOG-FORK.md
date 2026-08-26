@@ -25,6 +25,54 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.223 — Console station depth + WebSocket Origin gate
+
+### Portal
+
+- [`webclient.py`](evennia/server/portal/webclient.py) /
+  [`ws_protocol.py`](evennia/server/portal/ws_protocol.py): when
+  `settings.WEBSOCKET_ALLOWED_ORIGINS` is a non-empty allowlist, a non-empty
+  handshake `Origin` must match exactly or the upgrade is rejected with HTTP
+  403 (`HandshakeDenied`). Empty/missing Origin stays allowed (same policy as
+  nginx `/ws`). Unset/empty allowlist keeps stock behaviour.
+
+### Console
+
+- Records station: bulk edit, relations, tags/aliases, account create and
+  password set, with preview and audited reasons
+  ([`Records`](evennia/web/console/client/src/panels/Records.svelte) /
+  console services authority path).
+- Moderation station: URL-shareable filters and an exact-signal evidence map
+  for triage (no raw identifiers, no scores)
+  ([`Moderation.svelte`](evennia/web/console/client/src/panels/Moderation.svelte)).
+- In-console `askText` dialog replaces `window.prompt` for consequential
+  actions; command palette focus restore on close.
+- Mutation outcomes: rejected/partial/fault no longer report as success;
+  client reads `X-Console-Outcome`; loader cancellation and `untrack` stop
+  stale overwrites and refresh loops.
+- Narrow / coarse-pointer layout: flex `100dvh` shell, single scroll for
+  virtual tables, 44px targets, iOS-safe input sizing.
+- Console static bundle rebuilt for this release.
+
+### Migration notes
+
+- Deployments that want Portal Origin enforcement must set
+  `WEBSOCKET_ALLOWED_ORIGINS` (Underspire sets it from `CSRF_TRUSTED_ORIGINS`
+  in production settings). Portal code changes need a cold Evennia restart,
+  not `@reload`.
+- Records `bundles` / authority payloads already moved in prior console work;
+  this release continues the console contract — ship the rebuilt static
+  bundle with the engine tag.
+
+### Tests
+
+- Portal Origin allow/deny cases in
+  [`test_wire_formats.py`](evennia/server/portal/test_wire_formats.py).
+- Console client and panel coverage for outcomes, evidence map, and records
+  bulk paths landed with the feature commits.
+
+---
+
 ## 6.0.0+underspire.222 — Described authorization vocabulary
 
 ### Interface
