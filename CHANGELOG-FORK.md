@@ -25,6 +25,55 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.224 — Transaction-pool connections and unbound bot frames
+
+### Engine
+
+- [`database_postgres.py`](evennia/server/database_postgres.py) /
+  [`settings_default.py`](evennia/settings_default.py): new
+  `ENGINE_DATABASE_TRANSACTION_POOLING` setting (default `False`). When
+  enabled, PostgreSQL aliases get `CONN_MAX_AGE = 0` and
+  `DISABLE_SERVER_SIDE_CURSORS = True`. Persistent connections and
+  server-side cursors cannot outlive a PgBouncer transaction-pool
+  assignment.
+
+- [`inputfuncs.py`](evennia/server/inputfuncs.py): `bot_data_in` drops a
+  frame when the Portal session has no bound Account (teardown /
+  reconcile race) and logs one warning per session instead of raising
+  on every frame.
+
+- [`web_proxy.py`](evennia/server/portal/web_proxy.py): a closed browser
+  socket during a proxied response is a hangup, not a fault. Long-lived
+  streams (console feed) end this way whenever a tab closes, so the
+  proxy now stops the exchange without a traceback.
+
+### Migration notes
+
+- Stock games are unchanged: the pooling flag defaults off, so
+  `CONN_MAX_AGE` / health-check defaults still apply.
+- PgBouncer transaction-pool deployments should set
+  `ENGINE_DATABASE_TRANSACTION_POOLING = True` in game settings
+  (Underspire production already does).
+- `bot_data_in` call shape is unchanged. Bot transports that delivered
+  one last frame during session teardown will now see a warning rather
+  than a traceback.
+- Portal web-proxy hangup handling needs a cold Portal restart, not
+  `@reload`.
+
+### Tests
+
+- [`test_database_postgres.py`](evennia/server/tests/test_database_postgres.py)
+  asserts pooling forces non-persistent connections and disabled
+  server-side cursors.
+- [`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py) covers
+  unbound drop-once logging and bound dispatch.
+- Existing streaming coverage in
+  [`test_web_proxy_streaming.py`](evennia/server/tests/test_web_proxy_streaming.py)
+  still asserts the first SSE frame is forwarded while the upstream
+  feed remains open.
+
+---
+
 ## 6.0.0+underspire.223 — Console station depth + WebSocket Origin gate
 
 ### Portal
