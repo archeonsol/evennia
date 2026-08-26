@@ -8,6 +8,7 @@
 
 import { call } from "./api";
 import { report } from "./report";
+import { untrack } from "svelte";
 
 /** One panel's data, and whether it has arrived. */
 export class Loader<T> {
@@ -16,6 +17,10 @@ export class Loader<T> {
   loading = $state(true);
   /** True when the last request failed. The previous value is kept, not shown. */
   failed = $state(false);
+  /** True while a refresh is in flight after the first answer. */
+  refreshing = $state(false);
+  #generation = 0;
+  #controller: AbortController | null = null;
 
   /**
    * Fetch, report, and store.
@@ -25,8 +30,23 @@ export class Loader<T> {
    * reading, not the alarm and an empty station.
    */
   async load(path: string, options: { body?: unknown } = {}): Promise<boolean> {
-    const result = await call<Record<string, unknown>>(path, options);
+    const generation = ++this.#generation;
+    this.#controller?.abort();
+    this.#controller = new AbortController();
+    // `load` is normally called from a panel effect. Reading `value` directly
+    // here would make that effect depend on the value it is about to replace,
+    // so every successful reply would schedule the same request again.
+    const hasValue = untrack(() => this.value !== null);
+    if (!hasValue) this.loading = true;
+    else this.refreshing = true;
+    const result = await call<Record<string, unknown>>(path, {
+      ...options,
+      signal: this.#controller.signal,
+    });
+    if (generation !== this.#generation) return false;
     this.loading = false;
+    this.refreshing = false;
+    if (result.outcome === "cancelled") return false;
     if (!report(result)) {
       this.failed = true;
       return false;

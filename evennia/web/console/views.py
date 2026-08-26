@@ -74,6 +74,53 @@ def _outcome(payload, *, code=status.HTTP_200_OK, retryable=False, outcome="succ
     return response
 
 
+def _service_outcome(result):
+    """Translate a completed domain-service result into the HTTP outcome contract.
+
+    A bridge call can complete successfully while the owner rejects the write,
+    or after only part of a multi-step write becomes durable. Treating either
+    as HTTP 200 makes the client close the form and tell the operator it saved.
+
+    Args:
+        result: Plain action result returned by a panel.
+
+    Returns:
+        Response | None: A non-success response for a recognized service
+        outcome, otherwise ``None``.
+    """
+
+    if not isinstance(result, dict):
+        return None
+    service_status = str(result.get("status") or "")
+    message = str(result.get("message") or "")
+    if service_status in {"conflict", "missing", "rejected"}:
+        return _outcome(
+            {"result": result, "detail": message or "The operation was rejected."},
+            code=status.HTTP_409_CONFLICT,
+            retryable=True,
+            outcome="conflict",
+        )
+    if service_status in {"partial", "recovery_required"}:
+        return _outcome(
+            {
+                "result": result,
+                "detail": message
+                or "Part of the operation may be durable. Inspect the named records before acting.",
+            },
+            code=status.HTTP_202_ACCEPTED,
+            retryable=False,
+            outcome="indeterminate",
+        )
+    if service_status == "fault":
+        return _outcome(
+            {"result": result, "detail": message or "The operation did not start."},
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            retryable=bool(result.get("retryable")),
+            outcome="conflict",
+        )
+    return None
+
+
 def _bridge_failure(error):
     """Map an IO-bridge failure onto a console response, or return ``None``.
 
@@ -165,9 +212,26 @@ class ConsoleView(APIView):
                 outcome="conflict",
             )
         if isinstance(exc, CoercionError):
-            return self.handle_exception(ValidationError({"detail": str(exc), "field": exc.field}))
+            return _outcome(
+                {"detail": str(exc), "field": exc.field},
+                code=status.HTTP_400_BAD_REQUEST,
+                retryable=True,
+                outcome="conflict",
+            )
         if isinstance(exc, FieldError):
-            return self.handle_exception(ValidationError({"detail": str(exc)}))
+            return _outcome(
+                {"detail": str(exc)},
+                code=status.HTTP_400_BAD_REQUEST,
+                retryable=True,
+                outcome="conflict",
+            )
+        if isinstance(exc, ValueError):
+            return _outcome(
+                {"detail": str(exc)},
+                code=status.HTTP_400_BAD_REQUEST,
+                retryable=True,
+                outcome="conflict",
+            )
         if isinstance(exc, LookupError) and not isinstance(exc, KeyError):
             return self.handle_exception(NotFound(str(exc)))
         return super().handle_exception(exc)
@@ -285,7 +349,7 @@ class PanelDetailView(ConsoleView):
 REAUTH_PANELS = frozenset({"repl", "sql", "server"})
 
 #: Individual actions elsewhere that carry the same weight.
-REAUTH_ACTIONS = frozenset({"break_glass", "reveal", "watch"})
+REAUTH_ACTIONS = frozenset({"break_glass", "reveal", "watch", "set_password", "create_account"})
 
 
 class ReauthView(ConsoleView):
@@ -322,7 +386,7 @@ class PanelActionView(ConsoleView):
         if key in REAUTH_PANELS or name in REAUTH_ACTIONS:
             require_reauthentication(request)
         payload = request.data if isinstance(request.data, dict) else {}
-        ctx = worker_context(request)
+        ctx = worker_context(request, **request.query_params.dict())
         # Gated on the action, not on the panel. A worker-side action reads the
         # database and never touches the IO owner, so refusing it during an
         # outage removes a read that still works -- which is the opposite of
@@ -334,6 +398,9 @@ class PanelActionView(ConsoleView):
             result = dispatch(panel, name, ctx, **payload)
         except PanelError as err:
             raise PermissionDenied(str(err)) from err
+        service_response = _service_outcome(result)
+        if service_response is not None:
+            return service_response
         return _outcome({"result": result})
 
 

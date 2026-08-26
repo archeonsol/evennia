@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { runAction } from "../lib/load.svelte";
   import type { ConnectionDetail } from "../lib/types";
 
@@ -13,13 +14,11 @@
   let detail = $state<ConnectionDetail | null>(null);
   let failed = $state(false);
 
-  $effect(() => {
-    const wanted = sessionId;
+  onMount(() => {
     detail = null;
     failed = false;
-    runAction<ConnectionDetail>("moderation", "connection", { session_id: wanted }).then(
+    runAction<ConnectionDetail>("moderation", "connection", { session_id: sessionId }).then(
       (found) => {
-        if (wanted !== sessionId) return;
         detail = found;
         failed = found === null;
       },

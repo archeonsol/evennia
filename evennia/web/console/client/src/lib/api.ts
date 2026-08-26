@@ -26,6 +26,7 @@ export function cookie(name: string): string {
 
 export interface CallOptions {
   body?: unknown;
+  signal?: AbortSignal;
 }
 
 /**
@@ -54,8 +55,18 @@ export async function call<T = Record<string, unknown>>(
       credentials: "same-origin",
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: options.signal,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return {
+        ok: false,
+        status: 0,
+        outcome: "cancelled",
+        retryable: false,
+        payload: { detail: "A newer request replaced this one." } as T,
+      };
+    }
     // The request never reached the server, which is the one case where a
     // retry is unambiguously safe.
     return {
@@ -74,10 +85,13 @@ export async function call<T = Record<string, unknown>>(
     payload = null;
   }
 
+  const outcome = response.headers.get("X-Console-Outcome") || "";
   return {
-    ok: response.ok,
+    // HTTP 202 is transport success but console failure: the write may have
+    // started and must not flow through a caller's success path.
+    ok: response.ok && outcome !== "indeterminate",
     status: response.status,
-    outcome: response.headers.get("X-Console-Outcome") || "",
+    outcome,
     retryable: response.headers.get("X-Console-Retryable") === "true",
     payload: (payload || {}) as T,
   };

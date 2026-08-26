@@ -56,6 +56,18 @@ class PlainPanel(Panel):
         """A worker-side action. Reads the database, never the IO owner."""
         return {"term": term}
 
+    def invalid(self, ctx):
+        """Reject operator input with the panel's normal validation error."""
+        raise ValueError("Enter a supported value.")
+
+    def conflict_result(self, ctx):
+        """Return a service rejection after a completed bridge call."""
+        return {"status": "conflict", "message": "The row changed elsewhere."}
+
+    def partial_result(self, ctx):
+        """Return a service result that requires operator recovery."""
+        return {"status": "recovery_required", "message": "Inspect row 7 before retrying."}
+
     @io_action
     def touch(self, ctx):
         """An action that needs the IO owner."""
@@ -246,6 +258,31 @@ class TestOutcomeMapping(ConsoleAPITestCase):
         with patch.object(console_views, "dispatch", side_effect=IOThreadCallIndeterminate("x")):
             response = self._post()
         self.assertNotEqual(response["X-Console-Retryable"], "true")
+
+    def test_panel_validation_is_a_bounded_bad_request(self):
+        response = self.client.post(
+            reverse("console:panel-action", args=["plain", "invalid"]), **HEADERS
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response["X-Console-Outcome"], "conflict")
+        self.assertEqual(response["X-Console-Retryable"], "true")
+        self.assertIn("supported value", response.json()["detail"])
+
+    def test_service_conflict_is_not_labeled_as_success(self):
+        response = self.client.post(
+            reverse("console:panel-action", args=["plain", "conflict_result"]), **HEADERS
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response["X-Console-Outcome"], "conflict")
+        self.assertEqual(response["X-Console-Retryable"], "true")
+
+    def test_partial_service_result_is_indeterminate_and_not_retryable(self):
+        response = self.client.post(
+            reverse("console:panel-action", args=["plain", "partial_result"]), **HEADERS
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response["X-Console-Outcome"], "indeterminate")
+        self.assertEqual(response["X-Console-Retryable"], "false")
 
 
 class TestDegradedMode(ConsoleAPITestCase):

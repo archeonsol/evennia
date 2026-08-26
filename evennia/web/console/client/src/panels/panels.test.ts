@@ -113,6 +113,29 @@ describe("every registered panel", () => {
     // renders the "no view" notice, which is visible but is still a gap.
     expect(Object.keys(PANELS)).toHaveLength(23);
   });
+
+  it("settles a listing without starting a self-sustaining refresh loop", async () => {
+    const fetchMock = stubFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    view.model = "accounts.accountdb";
+
+    render(PANELS.records, {});
+    await waitFor(() => {
+      const listingCalls = fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/panels/records/rows/"),
+      );
+      expect(listingCalls.length).toBeGreaterThan(0);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const settledCount = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/panels/records/rows/"),
+    ).length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const finalCount = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/panels/records/rows/"),
+    ).length;
+    expect(finalCount).toBe(settledCount);
+  });
 });
 
 describe("panels that open a record", () => {

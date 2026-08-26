@@ -65,6 +65,27 @@ describe("call", () => {
     expect(result.retryable).toBe(true);
   });
 
+  it("never treats a 202 indeterminate mutation as success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        answer(
+          { detail: "the operation started; inspect the record" },
+          {
+            status: 202,
+            headers: {
+              "X-Console-Outcome": "indeterminate",
+              "X-Console-Retryable": "false",
+            },
+          },
+        ),
+      ),
+    );
+    const result = await call("panels/records/actions/save/", { body: { id: 7 } });
+    expect(result.ok).toBe(false);
+    expect(result.outcome).toBe("indeterminate");
+  });
+
   it("does not invent a retry flag the server did not send", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answer({}, { status: 500 })));
     const result = await call("panels/objects/rows/");
