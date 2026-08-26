@@ -127,3 +127,19 @@ export interface DossierKey {
   bannable: boolean;
   subject_type: string;
 }
+
+export interface EvidenceCell {
+  field: string;
+  state: "corroborated" | "observed" | "untrusted" | "absent";
+  sessions: number;
+  values: number;
+  shared_accounts: number;
+  untrusted_sessions: number;
+}
+
+export interface EvidenceMatrixData {
+  columns: { field: string; label: string; note?: string }[];
+  rows: { account: string; cells: EvidenceCell[] }[];
+  sample_capped?: boolean;
+  note?: string;
+}

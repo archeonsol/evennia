@@ -11,9 +11,11 @@
   import AccountDossier from "../components/AccountDossier.svelte";
   import SignatureMarks from "../components/SignatureMarks.svelte";
   import ConnectionDossier from "../components/ConnectionDossier.svelte";
+  import EvidenceMatrix from "../components/EvidenceMatrix.svelte";
+  import { askText } from "../lib/dialog.svelte";
   import { Loader, rowsPath, runAction } from "../lib/load.svelte";
   import { view } from "../lib/state.svelte";
-  import type { FlagRow, SanctionRow, SessionRow } from "../lib/types";
+  import type { EvidenceMatrixData, FlagRow, SanctionRow, SessionRow } from "../lib/types";
 
   /* The flag queue leads, because it is the only list here that is asking for
    * somebody's attention. Sanctions and sessions are reference material for
@@ -26,6 +28,9 @@
       sessions?: SessionRow[];
       open_flags?: number;
       flag_states?: string[];
+      flag_kinds?: string[];
+      severity_levels?: number[];
+      evidence_matrix?: EvidenceMatrixData;
       levels?: string[];
       subject_types?: string[];
       note?: string;
@@ -37,7 +42,14 @@
 
   $effect(() => {
     void reload;
-    data.load(rowsPath("moderation", { state: view.modState }));
+    data.load(rowsPath("moderation", {
+      state: view.modState,
+      kind: view.modKind,
+      severity: view.modSeverity,
+      since: view.modSince,
+      search: view.modSearch,
+      account: view.modAccount,
+    }));
   });
 
   const body = $derived(data.value?.rows ?? {});
@@ -56,7 +68,14 @@
   }
 
   async function lift(id: number) {
-    const reason = prompt("Why is this sanction being lifted?");
+    const reason = await askText({
+      title: "Lift this sanction",
+      description: "Enforcement stops immediately. The original sanction and this reason remain in the audit chain.",
+      label: "Reason for lifting",
+      input: "textarea",
+      confirmLabel: "LIFT SANCTION",
+      danger: true,
+    });
     if (!reason) return;
     if ((await runAction("moderation", "revoke", { sanction_id: id, reason })) !== null) {
       reload += 1;
@@ -64,7 +83,10 @@
   }
 </script>
 
-<PanelHead title="MODERATION" count={body.open_flags ? `${body.open_flags} OPEN` : "QUEUE CLEAR"}>
+<PanelHead
+  title="MODERATION"
+  count={data.loading ? "LOADING" : body.open_flags ? `${body.open_flags} OPEN` : "QUEUE CLEAR"}
+>
   {#snippet toolbar()}
     <div class="field">
       <label class="legend" for="mod-state">Show</label>
@@ -84,6 +106,29 @@
     </div>
 
     <div class="field">
+      <label class="legend" for="mod-kind">Kind</label>
+      <select id="mod-kind" value={view.modKind} onchange={(event) => (view.modKind = event.currentTarget.value)}>
+        <option value="">ALL KINDS</option>
+        {#each body.flag_kinds ?? [] as option (option)}<option value={option}>{option}</option>{/each}
+      </select>
+    </div>
+
+    <div class="field">
+      <label class="legend" for="mod-severity">Severity</label>
+      <select id="mod-severity" value={view.modSeverity} onchange={(event) => (view.modSeverity = event.currentTarget.value)}>
+        <option value="">ANY</option>
+        {#each body.severity_levels ?? [] as option (option)}<option value={String(option)}>{option}+</option>{/each}
+      </select>
+    </div>
+
+    <div class="field">
+      <label class="legend" for="mod-since">Seen</label>
+      <select id="mod-since" value={view.modSince} onchange={(event) => (view.modSince = event.currentTarget.value)}>
+        <option value="">ANY TIME</option><option value="24h">24 HOURS</option><option value="7d">7 DAYS</option><option value="30d">30 DAYS</option><option value="90d">90 DAYS</option>
+      </select>
+    </div>
+
+    <div class="field">
       <label class="legend" for="mod-account">Account</label>
       <input
         id="mod-account"
@@ -97,6 +142,15 @@
       />
     </div>
 
+    <div class="field">
+      <label class="legend" for="mod-search">Queue search</label>
+      <input id="mod-search" type="search" size="18" value={view.modSearch} placeholder="SUMMARY OR KIND" onchange={(event) => (view.modSearch = event.currentTarget.value.trim())} />
+    </div>
+
+    {#if view.modState || view.modKind || view.modSeverity || view.modSince || view.modSearch || view.modAccount}
+      <button type="button" onclick={() => { view.modState = ""; view.modKind = ""; view.modSeverity = ""; view.modSince = ""; view.modSearch = ""; view.modAccount = ""; view.modSignal = ""; }}>CLEAR FILTERS</button>
+    {/if}
+
     <span class="spacer"></span>
     <span class="legend">{body.note || ""}</span>
     <button type="button" title="Check the sanction hash chain" onclick={verifyChain}>
@@ -106,6 +160,13 @@
 </PanelHead>
 
 <div class="panel-body">
+  {#if data.loading}
+    <Empty line="LOADING THE REVIEW QUEUE…" hint="Flags, exact signals, sanctions, and recent connections are being read together." />
+  {:else if data.failed}
+    <Empty line="THE MODERATION QUEUE IS NOT AVAILABLE." hint="The last request failed before a complete review set arrived." />
+  {:else}
+  <div class="investigation-grid" class:has-dossier={Boolean(view.modAccount)}>
+    <main class="queue-column">
   {#if flags.length}
     <div class="moderation-alerts" aria-label="Moderation alerts">
       {#if severe.length}
@@ -123,15 +184,13 @@
         { key: "summary", label: "SUMMARY" },
         { key: "seen_count", label: "SEEN", numeric: true },
         { key: "last_seen", label: "LAST" },
+        { key: "review", label: "" },
       ]}
       rows={flags}
       key={(row) => row.id}
     >
       {#snippet row(flag)}
-        <tr
-          title="Open this flag"
-          onclick={() => (view.modFlag = view.modFlag === String(flag.id) ? "" : String(flag.id))}
-        >
+        <tr>
           <td class="num">{flag.severity}</td>
           <Cell value={flag.kind} />
           <td>
@@ -144,8 +203,7 @@
                 type="button"
                 class="linkish"
                 title="Show every identity key {flag.account} connected with"
-                onclick={(event) => {
-                  event.stopPropagation();
+                onclick={() => {
                   view.modAccount = view.modAccount === flag.account ? "" : flag.account;
                 }}
               >
@@ -158,9 +216,16 @@
           <Cell value={flag.summary} />
           <td class="num">{flag.seen_count}</td>
           <Cell value={flag.last_seen} />
+          <td><button type="button" onclick={() => (view.modFlag = view.modFlag === String(flag.id) ? "" : String(flag.id))}>{view.modFlag === String(flag.id) ? "CLOSE" : "REVIEW"}</button></td>
         </tr>
       {/snippet}
     </DataTable>
+  {:else}
+    <Empty line="NO FLAGS MATCH THIS VIEW." hint="Change or clear the queue filters to widen the review set." />
+  {/if}
+
+  {#if body.evidence_matrix && body.evidence_matrix.rows.length}
+    <EvidenceMatrix matrix={body.evidence_matrix} />
   {/if}
 
   {#if view.modFlag}
@@ -175,6 +240,17 @@
       }}
     />
   {/if}
+    </main>
+    {#if view.modAccount}
+      <aside class="account-column" aria-label={`Investigation dossier for ${view.modAccount}`}>
+        <AccountDossier
+          account={view.modAccount}
+          focusKind={view.modSignal}
+          onClose={() => { view.modAccount = ""; view.modSignal = ""; }}
+        />
+      </aside>
+    {/if}
+  </div>
 
   {#if sanctions.length}
     <Section label="Active sanctions" />
@@ -205,10 +281,6 @@
   {/if}
 
   <Proposals onDecided={() => (reload += 1)} />
-
-  {#if view.modAccount}
-    <AccountDossier account={view.modAccount} onClose={() => (view.modAccount = "")} />
-  {/if}
 
   <SignalCoverage />
 
@@ -268,6 +340,7 @@
       {/each}
     </div>
   {/if}
+  {/if}
 </div>
 
 <style>
@@ -277,6 +350,11 @@
     gap: 8px;
     padding: 12px 14px 2px;
   }
+
+  .investigation-grid { display: grid; grid-template-columns: minmax(0, 1fr); border-bottom: 1px solid var(--rule); }
+  .investigation-grid.has-dossier { grid-template-columns: minmax(520px, 1.55fr) minmax(360px, .85fr); }
+  .queue-column, .account-column { min-width: 0; }
+  .account-column { border-inline-start: 1px solid var(--rule); background: var(--panel); }
 
   .log-view {
     max-height: none;
@@ -363,6 +441,8 @@
   }
 
   @media (max-width: 1100px) {
+    .investigation-grid.has-dossier { grid-template-columns: minmax(0, 1fr); }
+    .account-column { border-block-start: 1px solid var(--rule); border-inline-start: 0; }
     .connection-summary {
       grid-template-columns: minmax(160px, 0.8fr) minmax(240px, 1.2fr);
     }

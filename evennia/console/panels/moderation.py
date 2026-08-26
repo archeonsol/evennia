@@ -31,8 +31,10 @@ surface: once a record is deliberately opened, every captured field is shown.
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.utils import timezone
 
 from evennia.console import audit
@@ -181,6 +183,19 @@ DOSSIER_MATCHES = 12
 #: same reason every other query here is: the answer is a proportion.
 SIGNAL_SAMPLE = 500
 
+#: Evidence cells are summaries over a bounded recent sample. They expose
+#: counts and exact-match relationships, never identifier values or a score.
+MATRIX_SESSION_SAMPLE = 5000
+MATRIX_SHARED_SAMPLE = 4000
+EVIDENCE_MATRIX_SIGNALS = (
+    ("cidr", "network", True),
+    ("device_token", "device", False),
+    ("client_fp", "client", False),
+    ("telnet_sig", "telnet order", False),
+    ("tls_sig", "TLS handshake", False),
+    ("http_order_fp", "header order", False),
+)
+
 #: Protocols that carry a TLS handshake and HTTP headers. Everything else
 #: reaches the portal over a raw socket and has neither, so counting it as
 #: missing coverage would report a fault that is not one.
@@ -276,6 +291,37 @@ class ModerationPanel(Panel):
         else:
             flags = flags.filter(state__in=list(ModerationFlag.OPEN_STATES))
 
+        kind = str(ctx.params.get("kind") or "").strip()
+        if kind:
+            flags = flags.filter(kind=kind)
+        severity = str(ctx.params.get("severity") or "").strip()
+        if severity:
+            try:
+                flags = flags.filter(severity__gte=int(severity))
+            except ValueError as err:
+                raise ValueError("Severity must be a whole number.") from err
+        account = str(ctx.params.get("account") or "").strip()
+        if account:
+            flags = flags.filter(account_name__icontains=account)
+        search = str(ctx.params.get("search") or "").strip()
+        if search:
+            flags = flags.filter(
+                Q(account_name__icontains=search)
+                | Q(summary__icontains=search)
+                | Q(kind__icontains=search)
+            )
+        since = str(ctx.params.get("since") or "").strip().lower()
+        if since:
+            windows = {
+                "24h": timedelta(hours=24),
+                "7d": timedelta(days=7),
+                "30d": timedelta(days=30),
+                "90d": timedelta(days=90),
+            }
+            if since not in windows:
+                raise ValueError("Time range must be 24h, 7d, 30d, or 90d.")
+            flags = flags.filter(last_seen_at__gte=timezone.now() - windows[since])
+
         flag_rows = [
             {
                 "id": row["id"],
@@ -334,10 +380,17 @@ class ModerationPanel(Panel):
             "flags": flag_rows,
             "sanctions": sanction_rows,
             "sessions": session_rows,
+            "evidence_matrix": self._evidence_matrix(SessionRecord, flag_rows),
             "open_flags": ModerationFlag.objects.filter(
                 state__in=list(ModerationFlag.OPEN_STATES)
             ).count(),
             "flag_states": [choice[0] for choice in ModerationFlag.STATE_CHOICES],
+            "flag_kinds": list(
+                ModerationFlag.objects.order_by("kind")
+                .values_list("kind", flat=True)
+                .distinct()[:100]
+            ),
+            "severity_levels": [5, 4, 3, 2, 1],
             "levels": [choice[0] for choice in Sanction.LEVEL_CHOICES],
             "subject_types": [choice[0] for choice in Sanction.SUBJECT_CHOICES],
             "caps": {
@@ -346,6 +399,111 @@ class ModerationPanel(Panel):
                 "sessions": QUEUE_SESSIONS,
             },
             "note": ("Detection writes flags. Only a person turns one into a sanction."),
+        }
+
+    def _evidence_matrix(self, model, flags):
+        """Summarize exact signal corroboration for accounts in the queue.
+
+        No identifier value crosses this boundary. A cell reports only whether
+        the account has a recorded value and whether another named account used
+        that exact value. This is a triage map, not a probability or score.
+        """
+
+        accounts = list(dict.fromkeys(row["account"] for row in flags if row.get("account")))
+        columns = [
+            {
+                "field": field,
+                "label": label,
+                "note": "Exact recorded matches only.",
+            }
+            for field, label, _trusted in EVIDENCE_MATRIX_SIGNALS
+        ]
+        if not accounts:
+            return {"columns": columns, "rows": [], "sample_capped": False}
+
+        fields = [field for field, _label, _trusted in EVIDENCE_MATRIX_SIGNALS]
+        recent = list(
+            model.objects.filter(account_name__in=accounts)
+            .order_by("-connected_at")
+            .values("account_name", "xff_present", "xff_applied", *fields)[
+                : MATRIX_SESSION_SAMPLE + 1
+            ]
+        )
+        sample_capped = len(recent) > MATRIX_SESSION_SAMPLE
+        recent = recent[:MATRIX_SESSION_SAMPLE]
+        canonical = {name.casefold(): name for name in accounts}
+        observed = {
+            name: {field: {"values": set(), "sessions": 0, "untrusted": 0} for field in fields}
+            for name in accounts
+        }
+        for row in recent:
+            name = canonical.get(str(row["account_name"] or "").casefold())
+            if not name:
+                continue
+            for field, _label, trusted_address in EVIDENCE_MATRIX_SIGNALS:
+                cell = observed[name][field]
+                if trusted_address and row["xff_present"] and not row["xff_applied"]:
+                    cell["untrusted"] += 1
+                    continue
+                value = row[field]
+                if value not in (None, ""):
+                    cell["values"].add(value)
+                    cell["sessions"] += 1
+
+        shared_by_field = {}
+        for field in fields:
+            values = set()
+            for name in accounts:
+                values.update(observed[name][field]["values"])
+            shared = {}
+            if values:
+                pairs = (
+                    model.objects.filter(**{f"{field}__in": list(values)})
+                    .exclude(account_name="")
+                    .order_by()
+                    .values_list(field, "account_name")
+                    .distinct()[:MATRIX_SHARED_SAMPLE]
+                )
+                for value, name in pairs:
+                    shared.setdefault(value, set()).add(name)
+            shared_by_field[field] = shared
+
+        rows = []
+        for name in accounts:
+            cells = []
+            for field, _label, _trusted in EVIDENCE_MATRIX_SIGNALS:
+                item = observed[name][field]
+                peers = set()
+                for value in item["values"]:
+                    peers.update(shared_by_field[field].get(value, set()))
+                peers = {peer for peer in peers if peer.casefold() != name.casefold()}
+                if peers:
+                    state = "corroborated"
+                elif item["values"]:
+                    state = "observed"
+                elif item["untrusted"]:
+                    state = "untrusted"
+                else:
+                    state = "absent"
+                cells.append(
+                    {
+                        "field": field,
+                        "state": state,
+                        "sessions": item["sessions"],
+                        "values": len(item["values"]),
+                        "shared_accounts": len(peers),
+                        "untrusted_sessions": item["untrusted"],
+                    }
+                )
+            rows.append({"account": name, "cells": cells})
+        return {
+            "columns": columns,
+            "rows": rows,
+            "sample_capped": sample_capped,
+            "note": (
+                "Cells count recorded evidence and exact matches. They do not estimate identity, "
+                "rank accounts, or trigger a sanction."
+            ),
         }
 
     def _recent_sessions(self, model):
@@ -605,7 +763,7 @@ class ModerationPanel(Panel):
     #: build. Matched exactly or by suffix, never by substring: ``signal`` is a
     #: key on every flag and carries only the detector's own name, and a
     #: substring rule on ``sig`` would withhold it from every dossier.
-    SECRET_EVIDENCE_KEYS = frozenset({"ip", "cidr", "csessid", "matches"})
+    SECRET_EVIDENCE_KEYS = frozenset({"ip", "cidr", "csessid", "matches", "ua"})
     SECRET_EVIDENCE_SUFFIXES = ("_ip", "_hash", "_token", "_fp", "_sig")
 
     def _evidence_value(self, key, value):

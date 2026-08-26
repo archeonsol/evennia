@@ -26,10 +26,11 @@
 
   interface Props {
     account: string;
+    focusKind?: string;
     onClose: () => void;
   }
 
-  const { account, onClose }: Props = $props();
+  const { account, focusKind = "", onClose }: Props = $props();
 
   let data = $state<Dossier | null>(null);
 
@@ -39,12 +40,17 @@
   });
 
   const keys = $derived(data?.keys ?? []);
+  const orderedKeys = $derived([
+    ...keys.filter((item) => item.kind === focusKind),
+    ...keys.filter((item) => item.kind !== focusKind),
+  ]);
 </script>
 
 <div class="editor">
   <div class="editor-head">
     <span class="legend">ACCOUNT {account}</span>
     <span class="spacer"></span>
+    {#if focusKind}<span class="legend">FOCUS / {focusKind}</span>{/if}
     <span class="legend">
       {data?.first_seen ? `SEEN ${data.first_seen} TO ${data.last_seen}` : "NEVER SEEN"}
     </span>
@@ -64,11 +70,11 @@
         { key: "shared_with", label: "ALSO USED BY" },
         { key: "standing", label: "" },
       ]}
-      rows={keys}
+      rows={orderedKeys}
       key={(row) => `${row.kind}:${row.value}:${row.last_seen}`}
     >
       {#snippet row(item)}
-        <tr>
+        <tr class:signal-focus={Boolean(focusKind && item.kind === focusKind)}>
           <Cell value={item.label.toUpperCase()} />
           <Cell value={item.value} />
           <td class="num">{item.sessions}</td>
@@ -148,3 +154,7 @@
     {/if}
   {/if}
 </div>
+
+<style>
+  tr.signal-focus { box-shadow: inset 3px 0 0 var(--attn); background: color-mix(in srgb, var(--attn) 8%, transparent); }
+</style>

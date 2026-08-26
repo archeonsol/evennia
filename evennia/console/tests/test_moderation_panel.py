@@ -13,6 +13,8 @@ reading two booleans off a row will eventually ban a reverse proxy.
 
 """
 
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -140,6 +142,42 @@ class TestQueue(ModerationTestCase):
 
     def test_the_panel_states_that_it_decides_nothing(self):
         self.assertIn("person", self.panel.rows(_ctx())["note"])
+
+    def test_filters_by_kind_severity_account_and_age(self):
+        recent = self.make_flag(kind="shared_device", severity=5, account_name="Alpha")
+        old = self.make_flag(kind="signup_burst", severity=1, account_name="Beta")
+        ModerationFlag.objects.filter(pk=old.pk).update(
+            last_seen_at=timezone.now() - timedelta(days=40)
+        )
+        result = self.panel.rows(_ctx(kind=recent.kind, severity="4", account="alp", since="7d"))
+        self.assertEqual([row["id"] for row in result["flags"]], [recent.pk])
+
+    def test_evidence_matrix_reports_exact_corroboration_without_a_score(self):
+        self.make_flag(account_name="Alpha")
+        SessionRecord.objects.create(
+            session_uid="matrix-a",
+            account_name="Alpha",
+            protocol="webclient/websocket",
+            cidr="203.0.113.0/24",
+            device_token="same-device",
+        )
+        SessionRecord.objects.create(
+            session_uid="matrix-b",
+            account_name="Beta",
+            protocol="webclient/websocket",
+            cidr="198.51.100.0/24",
+            device_token="same-device",
+        )
+        result = self.panel.rows(_ctx())
+        matrix = result["evidence_matrix"]
+        alpha = next(row for row in matrix["rows"] if row["account"] == "Alpha")
+        device = next(cell for cell in alpha["cells"] if cell["field"] == "device_token")
+        network = next(cell for cell in alpha["cells"] if cell["field"] == "cidr")
+        self.assertEqual(device["state"], "corroborated")
+        self.assertEqual(device["shared_accounts"], 1)
+        self.assertEqual(network["state"], "observed")
+        self.assertNotIn("score", matrix)
+        self.assertNotIn("score", alpha)
 
 
 class TestSessionProvenance(ModerationTestCase):

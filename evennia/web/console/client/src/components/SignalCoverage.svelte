@@ -37,7 +37,7 @@
 <Section label="Signal coverage" />
 
 {#if data && !data.sample}
-  <Empty line="NO CONNECTIONS RECORDED." hint={data.note || ""} />
+  <Empty line="NO SIGNAL COVERAGE SAMPLE YET." hint={data.note || ""} />
 {:else if data}
   <DataTable
     label="Signal coverage"

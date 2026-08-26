@@ -165,6 +165,11 @@ describe("Moderation connection history", () => {
     view.modState = "";
     view.modAccount = "";
     view.modFlag = "";
+    view.modKind = "";
+    view.modSeverity = "";
+    view.modSince = "";
+    view.modSearch = "";
+    view.modSignal = "";
   });
 
   afterEach(() => vi.unstubAllGlobals());
