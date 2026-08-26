@@ -46,7 +46,14 @@ AccountAdminCap = HasCapability("engine.moderation.manage")
 @action("@option", "@options")
 @dataclass
 class Option(ArgAction):
-    """View or set client interface options (``@option[/save|/clear] [name = value]``)."""
+    """View or set client options and manage saved settings.
+
+    |w@option|n / |w@option <name> = <value>|n /
+    |w@option/save [<name> = <value>]|n / |w@option/clear|n. The bare command
+    shows the current settings. An assignment changes one setting for the active
+    session. |w/save|n persists all displayed settings when bare, or the assigned
+    setting when used with an assignment. |w/clear|n removes all saved settings.
+    """
 
     __primary_handler__ = DefaultAccount
 
@@ -54,7 +61,11 @@ class Option(ArgAction):
 @action("@password")
 @dataclass
 class Password(ArgAction):
-    """Change your own password (``@password <old> = <new>``)."""
+    """Change the caller account's password.
+
+    |w@password <current password> = <new password>|n. The current password
+    must authenticate before the change is saved.
+    """
 
     __primary_handler__ = DefaultAccount
 
@@ -62,7 +73,11 @@ class Password(ArgAction):
 @action("@userpassword")
 @dataclass
 class UserPassword(ArgAction):
-    """Set another account's password (``@userpassword <account> = <new password>``)."""
+    """Set another account's password (requires |wengine.moderation.manage|n).
+
+    |w@userpassword <account> = <new password>|n. The change takes effect
+    immediately.
+    """
 
     __primary_handler__ = DefaultAccount
 

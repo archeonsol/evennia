@@ -52,9 +52,11 @@ __all__ = [
 class Emit(ArgAction):
     """Emit a message to objects, rooms, or accounts.
 
-    ``@emit[/room|/accounts|/contents] [<obj>, <obj>, ... =] <message>``. The
-    ``@remit`` alias forces rooms-only + send-to-contents; ``@pemit`` forces
-    accounts-only.
+    |w@emit[/room|/rooms|/accounts|/contents] [<obj>, <obj>, ... =] <message>|n
+    / |w@remit [<room>, ... =] <message>|n / |w@pemit [<account>, ... =]
+    <message>|n. Requires |wengine.world.build|n and |wtell|n access to each
+    target. |w/contents|n also sends to each target's contents; |w@remit|n
+    forces rooms plus contents, while |w@pemit|n forces puppeted accounts.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -63,7 +65,11 @@ class Emit(ArgAction):
 @action("@wall")
 @dataclass
 class Wall(ArgAction):
-    """Announce a message to all connected sessions (``@wall <message>``)."""
+    """Announce a message to every connected session.
+
+    |w@wall <message>|n. Requires |wengine.moderation.manage|n; recipients see
+    the caller name prefixed to the announcement.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -71,7 +77,11 @@ class Wall(ArgAction):
 @action("@force")
 @dataclass
 class Force(ArgAction):
-    """Force an object to execute a command (``@force <object> = <command>``)."""
+    """Make an editable local object execute a command.
+
+    |w@force <object> = <command>|n. Requires |wengine.world.build|n and
+    |wedit|n access to the target; it executes the command as that object.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -81,7 +91,12 @@ class Force(ArgAction):
 class Grant(ArgAction):
     """View or change explicit capability grants on an object or account.
 
-    ``@grant[/revoke|/account] <object|*account> [= capability|bundle:name]``.
+    |w@grant <object>|n / |w@grant/account <account>|n /
+    |w@grant <object> = <capability|bundle:name>|n /
+    |w@grant/revoke <object> = <grant id>|n / |w@grant/del <object> = <grant id>|n.
+    A leading |w*|n also selects an
+    account. Requires |wengine.runtime.manage|n; assigning or revoking needs
+    control of an object or edit access to an account.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -90,7 +105,13 @@ class Grant(ArgAction):
 @action("@policy", "@policies")
 @dataclass
 class Policy(ArgAction):
-    """Inspect or author typed authorization policies on a resource."""
+    """Inspect, set, or remove an authorization policy override.
+
+    |w@policy <resource>[/<operation>]|n / |w@policy/set <resource>/<operation>
+    = <public|disabled|capability>|n / |w@policy/del <resource>/<operation>|n.
+    A leading |w*|n selects an account. Requires |wengine.world.build|n plus
+    control or edit access; |w/set|n replaces an override and |w/del|n removes it.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -98,7 +119,13 @@ class Policy(ArgAction):
 @action("@scope", "@scopes")
 @dataclass
 class Scope(ArgAction):
-    """Inspect or author searchable authorization scope labels."""
+    """Inspect, replace, or clear authorization scope labels on a resource.
+
+    |w@scope <resource>|n / |w@scope/set <resource> = <kind:key>, ...|n /
+    |w@scope/clear <resource>|n. A leading |w*|n selects an account. Requires
+    |wengine.world.build|n plus control or edit access; |w/set|n replaces all
+    labels and |w/clear|n removes all of them.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -106,7 +133,7 @@ class Scope(ArgAction):
 @action("@access", "@groups", "@hierarchy")
 @dataclass
 class Access(ArgAction):
-    """Show the caller's effective capability grants and scopes."""
+    """Show the caller's effective capability grants and their scopes (|w@access|n)."""
 
     __primary_handler__ = DefaultCharacter
 
@@ -222,7 +249,11 @@ class CharacterAdminRules:
         if not self._is_actor(actor):
             return SKIP
         from evennia.authorization.capabilities import capability_registry
-        from evennia.authorization.storage import grant_capability, principal_refs, revoke_grant
+        from evennia.authorization.storage import (
+            grant_capability,
+            principal_refs,
+            revoke_grant,
+        )
         from evennia.server.models import AuthorizationGrant
 
         caller = self
@@ -271,7 +302,7 @@ class CharacterAdminRules:
         prefix = "account:" if accountmode else "object:"
         principal_ref = next((ref for ref in refs if ref.startswith(prefix)), refs[0])
         actor_ref = principal_refs(caller)[0]
-        if "del" in switches:
+        if "del" in switches or "revoke" in switches:
             grant = AuthorizationGrant.objects.filter(
                 grant_id=rhs.strip(), principal_ref__in=refs
             ).first()

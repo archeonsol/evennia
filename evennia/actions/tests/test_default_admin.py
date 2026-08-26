@@ -198,6 +198,39 @@ class TestGrant(unittest.TestCase):
         )
         self.assertTrue(any("Granted 1" in message for message in char.messages))
 
+    def test_revoke_switch_revokes_a_matching_grant(self):
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        char.pk = 1
+        target = FakeObj(key="bob")
+        target.pk = 2
+        char.search_map["bob"] = target
+        grant = SimpleNamespace(grant_id="grant-1")
+        with (
+            mock.patch("evennia.server.models.AuthorizationGrant") as grant_model,
+            mock.patch("evennia.authorization.storage.revoke_grant", return_value=True) as revoke,
+        ):
+            grant_model.objects.filter.return_value.first.return_value = grant
+            self._grant(char, actor, "bob = grant-1", switches=("revoke",))
+        revoke.assert_called_once_with(
+            "grant-1", actor_ref="object:1", reason="action @grant/revoke"
+        )
+        self.assertTrue(any("Grant revoked." in message for message in char.messages))
+
+    def test_del_switch_remains_a_revoke_alias(self):
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        char.pk = 1
+        target = FakeObj(key="bob")
+        target.pk = 2
+        char.search_map["bob"] = target
+        grant = SimpleNamespace(grant_id="grant-1")
+        with (
+            mock.patch("evennia.server.models.AuthorizationGrant") as grant_model,
+            mock.patch("evennia.authorization.storage.revoke_grant", return_value=True) as revoke,
+        ):
+            grant_model.objects.filter.return_value.first.return_value = grant
+            self._grant(char, actor, "bob = grant-1", switches=("del",))
+        revoke.assert_called_once()
+
     def test_gated_without_runtime_manage(self):
         char, actor = _setup()
         trace = self._grant(char, actor, "bob = engine.world.build")

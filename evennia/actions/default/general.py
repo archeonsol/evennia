@@ -31,7 +31,12 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
-from evennia.authorization.policy import Always, Never, PredicateRequirement, RequiresCapability
+from evennia.authorization.policy import (
+    Always,
+    Never,
+    PredicateRequirement,
+    RequiresCapability,
+)
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
@@ -69,9 +74,9 @@ def _cy(string):
 class Nick(ArgAction):
     """Define personal alias/replacement strings.
 
-    ``@nick[/inputline|/object|/account|/list|/delete|/clearall]
-    <string> [= [replacement]]``. The lhs/rhs split honors ``\\=`` escapes,
-    exactly as the stock command's custom ``parse``.
+    |w@nick[/inputline|/object|/account|/list|/delete|/clearall]
+    <string> [= [replacement]]|n. The lhs/rhs split honors |w\\=|n escapes,
+    exactly as the stock command's custom |wparse|n.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -98,7 +103,11 @@ class Nick(ArgAction):
 @action("home")
 @dataclass
 class Home(ArgAction):
-    """Teleport to your home location (``home``)."""
+    """Teleport to the caller's configured home location (|whome|n).
+
+    Requires |wengine.world.build|n. It does nothing when the caller is already
+    home and fails if no home is configured.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -108,10 +117,13 @@ class Home(ArgAction):
 class SetHelp(ArgAction):
     """Edit the in-DB help database.
 
-    ``@sethelp[/edit|/replace|/append|/extend|/category|/locks|/delete]
-    <topic>[;alias;alias][,category[,locks]] [= <text or new value>]``. The
-    standard mux lhs/rhs and comma splits apply; aliases are parsed from the
-    topic's ``;``-list in the rule, as the stock command does.
+    |w@sethelp <topic>[;<alias>;...][,<category>[,<read capability>]] = <text>|n /
+    |w@sethelp/edit|/replace|/append|/merge|/extend <topic> = <text>|n /
+    |w@sethelp/category <topic> = <category>|n /
+    |w@sethelp/policy <topic> [= <public|capability>]|n /
+    |w@sethelp/delete <topic>|n. Requires |wengine.help.manage|n. |w/replace|n
+    overwrites an entry, |w/delete|n permanently deletes it, and name clashes
+    require confirmation.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -120,7 +132,7 @@ class SetHelp(ArgAction):
 @action("help", "h", "?")
 @dataclass
 class Help(ArgAction):
-    """Show help (``help [topic]``).
+    """Show help (|whelp [topic]|n).
 
     The engine ships only the unlogged-in baseline rule (see
     :class:`~evennia.actions.default.unloggedin.SessionLoginRules`); a game
@@ -131,7 +143,7 @@ class Help(ArgAction):
 @action("look", "l")
 @dataclass
 class Look(ArgAction):
-    """Look at your surroundings (``look [target]``).
+    """Look at your surroundings (|wlook [target]|n).
 
     The engine ships only the unlogged-in baseline rule (re-render the
     connection screen; see
@@ -143,11 +155,11 @@ class Look(ArgAction):
 @action("quit")
 @dataclass
 class Quit(ArgAction):
-    """Disconnect from the game (``quit``).
+    """Disconnect from the game (|wquit|n).
 
     The engine ships only the unlogged-in baseline rule (drop the connection;
     see :class:`~evennia.actions.default.unloggedin.SessionLoginRules`); a game
-    binds its logged-in quit (e.g. unpuppet/confirm, or an ``@quit`` syntax) as
+    binds its logged-in quit (e.g. unpuppet/confirm, or an |w@quit|n syntax) as
     rules on this action type.
     """
 
@@ -369,7 +381,12 @@ class CharacterGeneralRules(NickRules):
         reply. ``return CLAIM`` ends the flow as for any carry_out rule.
         """
         from evennia.help.catalog import is_action_help_topic
-        from evennia.help.formatters import HelpCategory, _loadhelp, _quithelp, _savehelp
+        from evennia.help.formatters import (
+            HelpCategory,
+            _loadhelp,
+            _quithelp,
+            _savehelp,
+        )
         from evennia.utils import create
         from evennia.utils.eveditor import EvEditor
         from evennia.utils.utils import inherits_from
