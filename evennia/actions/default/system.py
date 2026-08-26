@@ -54,7 +54,7 @@ __all__ = [
 @action("@systems")
 @dataclass
 class Systems(ArgAction):
-    """List systems registered with the system scheduler (``@systems``)."""
+    """List systems registered with the system scheduler (|w@systems|n)."""
 
     __primary_handler__ = DefaultCharacter
 
@@ -62,10 +62,12 @@ class Systems(ArgAction):
 @action("@tasks", "@delays", "@task")
 @dataclass
 class Tasks(ArgAction):
-    """Display or terminate active delayed tasks.
+    """List or operate on active delayed tasks.
 
-    ``@tasks[/pause|/unpause|/do_task|/call|/remove|/cancel]
-    [task_id or function_name]``.
+    |w@tasks[/pause|/unpause|/do_task|/call|/remove|/cancel]
+    [<task id>|<function name>]|n. Requires |wengine.runtime.manage|n. A task-id
+    operation asks for confirmation; a function-name operation applies to every
+    matching task.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -76,8 +78,10 @@ class Tasks(ArgAction):
 class Py(ArgAction):
     """Execute Python code, or open the interactive console.
 
-    ``@py [code]`` / ``@py/time <code>`` / ``@py/clientraw <code>`` /
-    ``@py/noecho``. Without code, opens the in-game Python console.
+    |w@py [<code>]|n / |w@py/time <code>|n / |w@py/clientraw <code>|n /
+    |w@py/edit[/time|/clientraw]|n / |w@py/noecho|n. Requires
+    |wengine.runtime.manage|n. Without code, it opens the in-game Python
+    console; |w/edit|n opens the persistent code editor.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -96,7 +100,12 @@ class Py(ArgAction):
 @action("@objects")
 @dataclass
 class Objects(ArgAction):
-    """Show object totals, typeclass distribution, and recently created objects."""
+    """Inspect stored-object totals and recent objects.
+
+    |w@objects [<limit>]|n groups every stored object by typeclass and lists
+    recent creations. The optional numeric limit controls how many recent
+    objects appear; it defaults to 10. Requires |wengine.system.inspect|n.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -104,7 +113,14 @@ class Objects(ArgAction):
 @action("@scripts", "@script")
 @dataclass
 class Scripts(ArgAction):
-    """List, create, attach, inspect, or delete storage scripts."""
+    """List, create, attach, inspect, or delete storage scripts.
+
+    |w@scripts|n / |w@scripts <script>|n / |w@scripts <object>|n /
+    |w@scripts <object> = <script>|n / |w@scripts/delete <script|object>|n.
+    Requires |wengine.script.control|n. Supplying a new script typeclass creates
+    a global script; assigning it to an object attaches it. |w/delete|n removes
+    matching scripts and may require confirmation for multiple matches.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -291,7 +307,12 @@ class CharacterSystemRules(PyRules):
             )
 
         latest = EvTable(
-            "|wcreated|n", "|wdbref|n", "|wname|n", "|wtypeclass|n", align="l", border="table"
+            "|wcreated|n",
+            "|wdbref|n",
+            "|wname|n",
+            "|wtypeclass|n",
+            align="l",
+            border="table",
         )
         objects = ObjectDB.objects.all().order_by("db_date_created")[max(0, total - limit) :]
         for obj in objects:

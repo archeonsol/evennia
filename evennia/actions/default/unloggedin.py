@@ -99,9 +99,9 @@ class _RawArgAction(ArgAction):
 @action("connect", "conn", "con", "co")
 @dataclass
 class Connect(_RawArgAction):
-    """Log in to an existing account (``connect <name> <password>``).
+    """Log in to an existing account (|wconnect <name> <password>|n).
 
-    Quoted names/passwords support spaces; ``connect guest`` requests a guest
+    Quoted names/passwords support spaces; |wconnect guest|n requests a guest
     account when enabled.
     """
 
@@ -109,25 +109,37 @@ class Connect(_RawArgAction):
 @action("create", "cre", "cr")
 @dataclass
 class Create(_RawArgAction):
-    """Create a new account (``create <name> <password>``), with confirmation."""
+    """Create a new account before login.
+
+    |wcreate <name> <password>|n. Quoted names and passwords may contain
+    spaces. The command asks for confirmation before creating the account.
+    """
 
 
 @action("info")
 @dataclass
 class Info(_RawArgAction):
-    """MUDINFO 1.1 output for crawlers (``info``)."""
+    """MUDINFO 1.1 output for crawlers (|winfo|n)."""
 
 
 @action("encoding", "encode")
 @dataclass
 class Encoding(_RawArgAction):
-    """View or set the text encoding before login (``encoding [<encoding>]``)."""
+    """View, set, or reset the text encoding before login.
+
+    |wencoding|n / |wencoding <encoding>|n / |wencoding/clear|n. A valid
+    encoding updates the session and synchronizes it with the portal; |w/clear|n
+    resets the encoding to UTF-8.
+    """
 
 
 @action("screenreader")
 @dataclass
 class Screenreader(_RawArgAction):
-    """Toggle screenreader mode before login (``screenreader``)."""
+    """Toggle screenreader mode before login (|wscreenreader|n).
+
+    The changed setting is synchronized with the portal immediately.
+    """
 
 
 def _split_credentials(args):

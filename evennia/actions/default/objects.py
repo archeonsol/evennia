@@ -71,12 +71,11 @@ def _split_count(spec):
 @action("get", "take")
 @dataclass
 class Get(Action):
-    """Pick up object(s) from the room (``get <obj>`` / ``get 3 coins``).
+    """Pick up object(s) from the current room.
 
-    Carries parsed strings; room search runs in rules so stacked pickup and
-    game-specific branches (``get <item> from <container>``, cash piles, …)
-    can layer via higher-priority providers. ``mode="from"`` is parsed but not
-    handled by the engine baseline — games supply that ``carry_out``.
+    |wget <object>|n / |wget <count> <object>|n / |wget <object> from
+    <container>|n. You need |wget|n access to each object. Objects in the room
+    move into your inventory. A game can add retrieval from containers.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -100,14 +99,23 @@ class Get(Action):
                 act = cls(mode="from")
                 act._usage = True
                 return act
-            return cls(mode="from", count=count, obj_spec=item_spec, container_spec=container_spec)
+            return cls(
+                mode="from",
+                count=count,
+                obj_spec=item_spec,
+                container_spec=container_spec,
+            )
         return cls(mode="plain", count=count, obj_spec=rest)
 
 
 @action("drop")
 @dataclass
 class Drop(Action):
-    """Drop object(s) from inventory into the current room (stacked-aware)."""
+    """Drop object(s) from inventory into the current room.
+
+    |wdrop <object>|n / |wdrop <count> <object>|n. Each item must be carried
+    and may veto the transfer through its pre-drop hook.
+    """
 
     __primary_handler__ = DefaultCharacter
     mode: str = "plain"  # "bare" | "plain"
@@ -126,7 +134,12 @@ class Drop(Action):
 @action("give")
 @dataclass
 class Give(Action):
-    """Give inventory object(s) to another character (``= <target>`` or `` to ``)."""
+    """Give carried object(s) to a character in the current room.
+
+    |wgive <object> = <target>|n / |wgive <object> to <target>|n /
+    |wgive <count> <object> = <target>|n. The target must accept each item;
+    successful transfers move it from the caller's inventory to the target.
+    """
 
     __primary_handler__ = DefaultCharacter
     mode: str = "plain"  # "plain" | "usage"
@@ -153,7 +166,12 @@ class Give(Action):
 @action("put", "insert")
 @dataclass
 class Put(Action):
-    """Put an inventory object into a container in the room."""
+    """Put an item into a container in the current room.
+
+    |wput <item> in <container>|n / |wput <item> into <container>|n. The item
+    normally must be carried; the container's rules decide whether it accepts
+    the item and perform the transfer.
+    """
 
     __primary_handler__ = DefaultObject
     target: GameObject = None
@@ -193,7 +211,11 @@ class Put(Action):
 @action("enter", "ride", "board")
 @dataclass
 class Enter(Action):
-    """Enter a vehicle, arena, or any other enterable object."""
+    """Enter a local enterable object.
+
+    |wenter <object>|n / |wride <object>|n / |wboard <object>|n. The target's
+    enter rules decide eligibility and perform the entry.
+    """
 
     __primary_handler__ = Enterable
     target: GameObject = None
@@ -440,9 +462,7 @@ class CharacterObjectRules:
             return action.block(0, "You can't put something into yourself.")
         if obj == container:
             return action.block(0, "You can't put something into itself.")
-        accepts_room_target = bool(
-            getattr(type(container), "accepts_room_character_put", False)
-        )
+        accepts_room_target = bool(getattr(type(container), "accepts_room_character_put", False))
         if obj.location != caller and not accepts_room_target:
             return action.block(0, "You're not holding that.")
         return PASS

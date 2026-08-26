@@ -39,7 +39,11 @@ class RoleplayBlock(IntFlag):
 @action("say", '"', "'")
 @dataclass
 class Say(Action):
-    """Speak aloud in the acting character's location."""
+    """Speak aloud in the acting character's location.
+
+    |wsay <message>|n / |w\"<message>|n / |w'<message>|n. A nonempty message
+    and a location are required; normal speech hooks transform and deliver it.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -54,7 +58,12 @@ class Say(Action):
 @action("whisper")
 @dataclass
 class Whisper(Action):
-    """Speak privately to one or more locally resolved receivers."""
+    """Speak privately to one or more locally resolved receivers.
+
+    |wwhisper <receiver>[, <receiver> ...] = <message>|n. A nonempty message,
+    location, and at least one resolved receiver are required; recipients are
+    deduplicated and receive the speech through normal whisper hooks.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -94,7 +103,11 @@ class Whisper(Action):
 @action("pose", ".", ",")
 @dataclass
 class Pose(Action):
-    """First-person roleplay pose (room sees third person)."""
+    """Send a first-person roleplay pose to the current room.
+
+    |wpose <text>|n / |w. <text>|n / |w, <continuation>|n. A nonempty pose and
+    location are required; normal emote delivery renders it for observers.
+    """
 
     __primary_handler__ = DefaultCharacter
 
@@ -111,7 +124,11 @@ class Pose(Action):
 @action("emote")
 @dataclass
 class Emote(Action):
-    """Simple emote: name plus literal third-person text."""
+    """Send a third-person emote to the current room.
+
+    |wemote <text>|n. A nonempty message and location are required; normal
+    emote delivery resolves and renders the caller name.
+    """
 
     __primary_handler__ = DefaultCharacter
 
