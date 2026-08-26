@@ -31,6 +31,16 @@ _HOP_BY_HOP = frozenset(
 _MAX_HEADER = 65536
 
 
+class _ClientGone(Exception):
+    """The browser's socket died while we were answering it.
+
+    Raised only by :meth:`ReverseProxy._write`, so it always means the
+    *downstream* peer left -- never that the upstream Server misbehaved. A
+    closed tab, a navigation away, or an aborted long-lived stream all end a
+    request this way, so it is a normal end of connection rather than a fault.
+    """
+
+
 class ReverseProxy:
     """Forward inbound HTTP to a single upstream ``host:port``."""
 
@@ -79,10 +89,14 @@ class ReverseProxy:
                 request, body = await self._read_request(conn, reader)
                 if request is None:
                     break
-                await self._forward_and_respond(conn, writer, request, body, peer_ip)
+                if not await self._forward_and_respond(conn, writer, request, body, peer_ip):
+                    break
                 if conn.our_state is h11.MUST_CLOSE or conn.their_state is h11.MUST_CLOSE:
                     break
                 conn.start_next_cycle()
+        except OSError:
+            # The client reset the socket while we waited for its next request.
+            pass
         except Exception:
             logger.log_trace("web proxy: connection error")
         finally:
@@ -113,6 +127,21 @@ class ReverseProxy:
                 return None, None
 
     async def _forward_and_respond(self, conn, writer, request, body, peer_ip):
+        """Proxy one request/response exchange.
+
+        Args:
+            conn (h11.Connection): Framing for the client-facing connection.
+            writer (asyncio.StreamWriter): The client-facing socket.
+            request (h11.Request): The request to forward.
+            body (bytes): The request body, empty when there is none.
+            peer_ip (str or None): The client address, for `X-Forwarded-For`.
+
+        Returns:
+            bool: Whether the connection may carry another exchange. False
+                once either end has broken, in which case the failure has
+                already been reported (or deliberately not, for a hangup).
+        """
+
         fwd_headers = self._request_headers(request, peer_ip)
         target = request.target.decode("latin1")
         response_started = False
@@ -124,25 +153,47 @@ class ReverseProxy:
                 content=body or None,
             ) as upstream:
                 out_headers = self._response_headers(upstream)
-                writer.write(
-                    conn.send(h11.Response(status_code=upstream.status_code, headers=out_headers))
+                await self._write(
+                    writer,
+                    conn.send(
+                        h11.Response(status_code=upstream.status_code, headers=out_headers)
+                    ),
                 )
                 response_started = True
-                await writer.drain()
 
                 async for chunk in upstream.aiter_raw():
                     if chunk:
-                        writer.write(conn.send(h11.Data(data=chunk)))
-                        await writer.drain()
+                        await self._write(writer, conn.send(h11.Data(data=chunk)))
 
-                writer.write(conn.send(h11.EndOfMessage()))
-                await writer.drain()
+                await self._write(writer, conn.send(h11.EndOfMessage()))
+        except _ClientGone:
+            # Nobody is listening any more. Long-lived streams end no other
+            # way -- the feed never closes itself -- so logging a traceback
+            # here would turn every closed console tab into an error.
+            return False
         except Exception:
             logger.log_trace("web proxy: upstream request failed")
-            if response_started:
-                raise
-            self._send_error(conn, writer, 502, b"Bad Gateway")
+            if not response_started:
+                await self._send_error(conn, writer, 502, b"Bad Gateway")
+            return False
+        return True
+
+    async def _write(self, writer, data):
+        """Push one framed chunk to the client.
+
+        Args:
+            writer (asyncio.StreamWriter): The client-facing socket.
+            data (bytes): Wire bytes produced by ``h11``.
+
+        Raises:
+            _ClientGone: The client's socket is no longer writable.
+        """
+
+        try:
+            writer.write(data)
             await writer.drain()
+        except OSError as err:
+            raise _ClientGone() from err
 
     def _request_headers(self, request, peer_ip):
         headers = []
@@ -169,21 +220,32 @@ class ReverseProxy:
             headers.append((name, value))
         return headers
 
-    def _send_error(self, conn, writer, code, reason):
+    async def _send_error(self, conn, writer, code, reason):
+        """Answer a failed exchange with a minimal plain-text page.
+
+        Stays silent when the client has gone too: there is nobody left to
+        tell, and the upstream failure has already been logged.
+
+        Args:
+            conn (h11.Connection): Framing for the client-facing connection.
+            writer (asyncio.StreamWriter): The client-facing socket.
+            code (int): The HTTP status code to send.
+            reason (bytes): One line of body text.
+        """
+
         try:
             body = reason + b"\n"
-            writer.write(
-                conn.send(
-                    h11.Response(
-                        status_code=code,
-                        headers=[
-                            (b"content-length", str(len(body)).encode()),
-                            (b"content-type", b"text/plain; charset=utf-8"),
-                        ],
-                    )
+            frames = conn.send(
+                h11.Response(
+                    status_code=code,
+                    headers=[
+                        (b"content-length", str(len(body)).encode()),
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                    ],
                 )
             )
-            writer.write(conn.send(h11.Data(data=body)))
-            writer.write(conn.send(h11.EndOfMessage()))
+            frames += conn.send(h11.Data(data=body))
+            frames += conn.send(h11.EndOfMessage())
+            await self._write(writer, frames)
         except Exception:
             pass
