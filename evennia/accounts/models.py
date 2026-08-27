@@ -371,6 +371,35 @@ class ControlBinding(SharedMemoryModel):
         Returns the dropped objects top-first."""
         return self.collapse_to(self.db_account)
 
+    def retarget(self, body):
+        """
+        Replace the body stack with the identity and one requested focus.
+
+        This is the durable half of an identity-wide focus transfer. It writes
+        the shared stack once so co-sessions cannot each pop or push the same
+        binding independently.
+
+        Args:
+            body (ObjectDB): Identity body or a body driven above it.
+
+        Returns:
+            ObjectDB: The requested focus body.
+
+        Raises:
+            ValueError: If this binding has no identity or no target body.
+
+        """
+        identity = self.db_identity
+        if identity is None or body is None:
+            raise ValueError("A focus transfer requires an identity and target body.")
+        stack = [self._entry_for(identity)]
+        if body != identity:
+            stack.append(self._entry_for(body))
+        if self.db_focus_stack != stack:
+            self.db_focus_stack = stack
+            self._bump()
+        return body
+
     def _bump(self):
         self.db_generation = (self.db_generation or 0) + 1
         self.save(update_fields=["db_focus_stack", "db_generation"])

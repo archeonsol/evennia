@@ -19,6 +19,7 @@ from random import getrandbits
 from django.conf import settings
 from django.contrib.auth import authenticate, password_validation
 from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext as _
@@ -64,6 +65,38 @@ _MUDINFO_CHANNEL = None
 _CONNECT_CHANNEL = None
 _CMDHANDLER = None
 _MAX_CREATION_ISSUES = 20
+
+
+def _objects_attached_to_sessions(sessions):
+    """
+    Return the runtime objects carrying any supplied session ID.
+
+    ``Session.get_puppet`` resolves the binding's durable focus, so it cannot
+    reveal a stale source attachment after an interrupted shared-binding
+    transfer. The concrete ``db_sessid`` field is the reverse lookup authority
+    for this repair path.
+
+    Args:
+        sessions (iterable): Live server sessions.
+
+    Returns:
+        dict: Mapping of session ID to attached objects.
+
+    """
+    sessids = {int(session.sessid) for session in sessions if getattr(session, "sessid", None)}
+    attached = {sessid: [] for sessid in sessids}
+    if not sessids:
+        return attached
+    query = Q()
+    for sessid in sessids:
+        query |= Q(db_sessid__contains=str(sessid))
+    for obj in ObjectDB.objects.filter(query):
+        object_sessids = {
+            int(value) for value in str(obj.db_sessid or "").split(",") if value.strip()
+        }
+        for sessid in sessids & object_sessids:
+            attached[sessid].append(obj)
+    return attached
 
 
 # Create throttles for too many account-creations and login attempts
@@ -885,6 +918,89 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         obj.at_post_puppet(reattach=True, session=session)
         SIGNAL_OBJECT_POST_PUPPET.send(sender=obj, account=self, session=session)
         return obj
+
+    def transfer_focus_sessions(self, binding, target):
+        """
+        Retarget one identity binding and all its live sessions as a unit.
+
+        Per-session push/pop operations cannot safely compose this transition:
+        all co-sessions share one durable focus stack, so the first mutation
+        changes what every later session sees. This operation mutates that stack
+        once and then repairs each concrete runtime attachment.
+
+        Args:
+            binding (ControlBinding): Character-anchored binding to transfer.
+            target (ObjectDB): Body that should become the binding focus.
+
+        Returns:
+            bool: Whether the binding and every live session now target ``body``.
+
+        """
+        if binding is None or target is None or binding.db_account_id != self.id:
+            return False
+        if binding.db_identity is None or not target.access(self, "puppet"):
+            return False
+
+        sessions = [
+            session
+            for session in self.sessions.all()
+            if getattr(session, "bid", None) == binding.pk
+        ]
+        attached = _objects_attached_to_sessions(sessions)
+        transitions = []
+        for session in sessions:
+            sources = [obj for obj in attached.get(int(session.sessid), ()) if obj is not target]
+            target_attached = target in attached.get(int(session.sessid), ())
+            for source in sources:
+                if is_veto(source.at_pre_unpuppet()):
+                    return False
+            if not target_attached and is_veto(target.at_pre_puppet(self, session=session)):
+                return False
+            transitions.append((session, sources, target_attached))
+
+        target_was_live = bool(target.sessions.count())
+        binding.retarget(target)
+        last_source_session = {}
+        newly_attached = []
+        for session, sources, target_attached in transitions:
+            for source in sources:
+                source.sessions.remove(session)
+                source.at_post_unpuppet(self, session=session)
+                SIGNAL_OBJECT_POST_UNPUPPET.send(sender=source, session=session, account=self)
+                last_source_session[source] = session
+            session.bid = binding.pk
+            _sync_session_bid_to_portal(session)
+            if not target_attached:
+                target.sessions.add(session)
+                target.at_post_puppet()
+                SIGNAL_OBJECT_POST_PUPPET.send(sender=target, account=self, session=session)
+                newly_attached.append(session)
+            self._emit_focus_changed(session, target, "transfer")
+
+        for source, session in last_source_session.items():
+            if not source.sessions.count():
+                try:
+                    self.at_puppet_removed(source, session=session)
+                except Exception:
+                    logger.log_trace("at_puppet_removed hook failed")
+        if newly_attached and not target_was_live:
+            try:
+                self.at_puppet_added(target, session=newly_attached[0])
+            except Exception:
+                logger.log_trace("at_puppet_added hook failed")
+
+        if binding.focus is not target:
+            return False
+        target_sessions = {int(session.sessid) for session in target.sessions.all()}
+        for session, sources, _target_attached in transitions:
+            sessid = int(session.sessid)
+            if session.bid != binding.pk or sessid not in target_sessions:
+                return False
+            if any(
+                sessid in {int(item.sessid) for item in source.sessions.all()} for source in sources
+            ):
+                return False
+        return True
 
     @hook(
         event="session_sync",

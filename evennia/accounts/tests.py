@@ -767,6 +767,20 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         # in for the avatar/vehicle layered on top.
         self.char2.policies.set("puppet", Always())
 
+    def _second_session(self, sessid=43):
+        """Create one additional live session for the fixture account."""
+        from evennia.server.serversession import ServerSession
+
+        session = ServerSession()
+        session.init_session("telnet", ("localhost", f"testmode{sessid}"), evennia.SESSION_HANDLER)
+        session.sessid = sessid
+        session.uname = self.account.username
+        session.logged_in = True
+        session.account = self.account
+        session.uid = self.account.id
+        evennia.SESSION_HANDLER[sessid] = session
+        return session
+
     def test_push_layers_body_and_keeps_identity(self):
         self.account.puppet_object(self.session, self.char2, push=True)
         binding = self.session.binding
@@ -796,6 +810,62 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         self.assertIsNone(returned)
         self.assertIsNone(self.session.get_puppet())
         self.assertIsNone(self.session.bid)
+
+    @override_settings(MULTISESSION_MODE=1)
+    def test_transfer_focus_moves_every_session_without_changing_identity(self):
+        """An identity-wide transfer updates one binding and all live sessions."""
+        second = self._second_session()
+        try:
+            self.account.puppet_object(second, self.char1)
+            binding = self.session.binding
+            self.assertEqual(second.binding, binding)
+
+            transferred = self.account.transfer_focus_sessions(binding, self.char2)
+
+            self.assertTrue(transferred)
+            self.assertEqual(binding.db_identity, self.char1)
+            self.assertEqual(binding.stack_objects, [self.char1, self.char2])
+            self.assertIs(self.session.get_puppet(), self.char2)
+            self.assertIs(second.get_puppet(), self.char2)
+            self.assertNotIn(self.session, list(self.char1.sessions.all()))
+            self.assertNotIn(second, list(self.char1.sessions.all()))
+            self.assertIn(self.session, list(self.char2.sessions.all()))
+            self.assertIn(second, list(self.char2.sessions.all()))
+            self.assertEqual(self.session.bid, binding.pk)
+            self.assertEqual(second.bid, binding.pk)
+        finally:
+            if 43 in evennia.SESSION_HANDLER:
+                del evennia.SESSION_HANDLER[43]
+
+    @override_settings(MULTISESSION_MODE=1)
+    def test_transfer_focus_repairs_mixed_attachments_on_return_to_identity(self):
+        """A retry converges when one shared-binding session still sits on the source."""
+        second = self._second_session()
+        try:
+            self.account.puppet_object(second, self.char1)
+            binding = self.session.binding
+            self.account.transfer_focus_sessions(binding, self.char2)
+
+            # Model an interrupted runtime attachment repair: durable focus and
+            # one session reached the identity while the other remains on source.
+            binding.retarget(self.char1)
+            self.char2.sessions.remove(self.session)
+            self.char1.sessions.add(self.session)
+
+            transferred = self.account.transfer_focus_sessions(binding, self.char1)
+
+            self.assertTrue(transferred)
+            self.assertEqual(binding.db_identity, self.char1)
+            self.assertEqual(binding.stack_objects, [self.char1])
+            self.assertIs(self.session.get_puppet(), self.char1)
+            self.assertIs(second.get_puppet(), self.char1)
+            self.assertNotIn(self.session, list(self.char2.sessions.all()))
+            self.assertNotIn(second, list(self.char2.sessions.all()))
+            self.assertEqual(self.session.bid, binding.pk)
+            self.assertEqual(second.bid, binding.pk)
+        finally:
+            if 43 in evennia.SESSION_HANDLER:
+                del evennia.SESSION_HANDLER[43]
 
     @override_settings(MULTISESSION_MODE=0)
     def test_takeover_preserves_pushed_stack(self):
