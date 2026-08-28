@@ -25,6 +25,60 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.225 — Shared focus transfer and failure feedback
+
+### Accounts
+
+- [`accounts.py`](evennia/accounts/accounts.py) /
+  [`models.py`](evennia/accounts/models.py): shared identity bindings can now
+  transfer every live session to a new focus as one operation. The durable
+  focus stack is mutated once, then concrete runtime attachments are repaired,
+  avoiding partial transitions when several sessions control the same identity.
+
+### Actions
+
+- [`process.py`](evennia/actions/process.py): unexpected Activity failures now
+  terminate through one contained path that logs the captured exception,
+  unregisters the Activity, invokes `on_error(error)` once, and gives the actor
+  safe feedback. Construction, synchronous advancement, Future, and Deferred
+  failures follow the same contract. Activity bodies must be generators and
+  Activity instances are single-use.
+
+- [`multimatch.py`](evennia/utils/multimatch.py) /
+  [`models.py`](evennia/typeclasses/models.py) /
+  [`utils.py`](evennia/utils/utils.py): global ambiguous searches no longer
+  recurse through the base `get_extra_info()` hook and disappear without a
+  result list. Stock location hints and direct hook compatibility remain intact;
+  custom extra-info hooks are composed exactly once.
+
+### Migration notes
+
+- Callers that implement Activity bodies as coroutines or arbitrary
+  `send()`-capable objects must convert them to generator bodies using the
+  documented yield grammar. Reusing a finished Activity instance is rejected;
+  create a new instance for another run.
+- Custom `get_extra_info()` overrides keep the same return contract. Overrides
+  may call `super()` without duplicating stock context.
+- Focus-transfer consumers may call
+  `DefaultAccount.transfer_focus_sessions(binding, target)` when every live
+  session on a shared identity must move atomically. Existing push/pop APIs are
+  unchanged.
+- Activity scheduler and search-rendering changes are server-side and require a
+  normal Server restart or deployment of this engine version.
+
+### Tests
+
+- [`accounts/tests.py`](evennia/accounts/tests.py) covers multi-session focus
+  transfer and recovery from mixed runtime attachments.
+- [`actions/tests/test_process.py`](evennia/actions/tests/test_process.py)
+  covers generator validation, synchronous and asynchronous failures, safe
+  notices, hook isolation, single-use enforcement, and terminal cleanup.
+- [`utils/tests/test_utils.py`](evennia/utils/tests/test_utils.py) covers
+  locationless global multimatches, direct base-hook behavior, stock context,
+  and once-only custom composition.
+
+---
+
 ## 6.0.0+underspire.224 — Transaction-pool connections and unbound bot frames
 
 ### Engine
