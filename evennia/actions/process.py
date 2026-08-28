@@ -228,6 +228,13 @@ def start_activity(holder, activity):
         _log_activity_crash(activity)
         _finish_activity(activity, None, completed=False, error=exc)
         return activity
+    if not inspect.isgenerator(gen):
+        try:
+            raise TypeError("Activity.run must return a generator")
+        except TypeError as exc:
+            _log_activity_crash(activity)
+            _finish_activity(activity, gen, completed=False, error=exc)
+        return activity
     kind, value = _step_activity(activity, gen, None)
     if kind in ("done", "cancelled", "error"):
         _finish_activity(

@@ -123,6 +123,31 @@ class NonGeneratorActivity(ErrorAwareActivity):
         return None
 
 
+class CoroutineActivity(ErrorAwareActivity):
+    """Return a coroutine, which is send-capable but not an Activity generator."""
+
+    key = "coroutine"
+
+    async def run(self):
+        return None
+
+
+class SendImpostorActivity(ErrorAwareActivity):
+    """Return an arbitrary send-capable object that is not a generator."""
+
+    key = "send-impostor"
+
+    class Body:
+        def send(self, value):
+            raise StopIteration
+
+        def close(self):
+            return None
+
+    def run(self):
+        return self.Body()
+
+
 class StepCrasher(ErrorAwareActivity):
     """Raise while advancing the initial generator step."""
 
@@ -211,7 +236,32 @@ class TestActivityLifecycle(unittest.TestCase):
 
         holder.msg.assert_called_once()
         self.assertEqual(len(activity.errors), 1)
-        self.assertIsInstance(activity.errors[0], AttributeError)
+        self.assertIsInstance(activity.errors[0], TypeError)
+        self.assertFalse(activity.running)
+
+    def test_coroutine_body_is_rejected_as_non_generator(self):
+        holder = _messaging_holder()
+        activity = CoroutineActivity()
+
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        holder.msg.assert_called_once()
+        self.assertEqual(len(activity.errors), 1)
+        self.assertIsInstance(activity.errors[0], TypeError)
+        self.assertIn("generator", str(activity.errors[0]))
+        self.assertFalse(activity.running)
+
+    def test_send_capable_impostor_is_rejected_as_non_generator(self):
+        holder = _messaging_holder()
+        activity = SendImpostorActivity()
+
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        holder.msg.assert_called_once()
+        self.assertEqual(len(activity.errors), 1)
+        self.assertIsInstance(activity.errors[0], TypeError)
         self.assertFalse(activity.running)
 
     def test_error_delivery_prefers_actor_without_duplicate_holder_message(self):
