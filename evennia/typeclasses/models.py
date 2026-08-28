@@ -935,7 +935,7 @@ class TypedObject(SharedMemoryModel):
 
         from evennia.utils.multimatch import location_hint
 
-        return location_hint(self, looker) or ""
+        return location_hint(self, looker, _include_extra=False) or ""
 
     @hook(
         event="rename",

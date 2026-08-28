@@ -2391,8 +2391,6 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
                 label = multimatch_label(num, n)
                 all_labels.append(label)
                 info = location_hint(result, caller)
-                if not info and hasattr(result, "get_extra_info"):
-                    info = result.get_extra_info(caller) or ""
 
                 error += apply_multimatch_template(
                     settings.SEARCH_MULTIMATCH_TEMPLATE,

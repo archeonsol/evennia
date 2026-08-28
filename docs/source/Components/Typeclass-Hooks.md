@@ -98,6 +98,19 @@ Heterogeneous by return type; see §3 reference table. Query hooks return
 content and do not mutate the queried object; callers define whether `None`
 has distinct meaning from an empty value.
 
+### Search disambiguation hooks
+
+`TypedObject.get_extra_info(looker)` supplies optional content for ambiguous
+search rows. The base implementation preserves the stock inventory and
+same-room location hints. Overrides may return extra domain information for
+other matches and may safely compose with `super()`.
+
+`evennia.utils.multimatch.location_hint()` owns composition: it returns stock
+location context immediately, otherwise invokes `get_extra_info()` once. The
+base hook requests only the non-recursive stock portion when it delegates back
+to the compositor. Hooks should remain side-effect-free, but the once-per-row
+contract also prevents duplicate work for overrides that return an empty string.
+
 **`return_*`**: a composite renderer that joins `get_display_*`
 slots. Today only `return_appearance` uses this prefix; treat the
 prefix as deprecated for new hooks.

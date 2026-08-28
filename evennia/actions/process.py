@@ -35,8 +35,9 @@ a scattered ``ndb`` flag.
 
 The driver is an ``async`` coroutine (kicked off via ``clock.run_coroutine``);
 it still awaits ``clock.defer_later`` sleeps and Deferred-returning bodies.
-Cancellation cancels the in-flight ``Deferred`` and runs ``on_cancel``; the
-driver guards a vanished actor/character and a crashing body.
+    Cancellation cancels the in-flight ``Deferred`` and runs ``on_cancel``. An
+    unexpected body failure is logged, reported safely to the actor or holder,
+    and runs ``on_error``. Activity instances are single-use.
 """
 
 import asyncio
@@ -82,6 +83,7 @@ class Activity:
         self._cancel_reason = None
         self._pending = None  # in-flight Deferred, for cancellation
         self._holder = None  # set by start_activity
+        self._finished = False
 
     # -- introspection ------------------------------------------------------
     @property
@@ -91,7 +93,7 @@ class Activity:
     @property
     def running(self) -> bool:
         """True once started and not yet cancelled/finished (registered)."""
-        return self._holder is not None and not self._cancelled
+        return self._holder is not None and not self._cancelled and not self._finished
 
     # -- body + hooks (override) -------------------------------------------
     def run(self):
@@ -105,6 +107,13 @@ class Activity:
     def on_complete(self):
         """Cleanup hook fired when ``run()`` returns normally. Override."""
 
+    def on_error(self, error):
+        """Cleanup hook fired after an unexpected body failure. Override.
+
+        Args:
+            error (Exception): The exception that terminated the activity.
+        """
+
     # -- control ------------------------------------------------------------
     def cancel(self, reason=None):
         """Cancel this activity. Idempotent; safe to call from inside ``run()``.
@@ -112,7 +121,7 @@ class Activity:
         Sets the cancelled flag, records ``reason`` (passed to :meth:`on_cancel`),
         and cancels any in-flight ``Deferred`` so a suspended body unwinds now.
         """
-        if self._cancelled:
+        if self._cancelled or self._finished:
             return
         self._cancelled = True
         self._cancel_reason = reason
@@ -152,10 +161,12 @@ def _registry(holder, *, create=False):
 def _unregister(activity):
     holder = activity._holder
     if holder is None:
-        return
+        return None
     reg = _registry(holder)
     if reg and activity in reg:
         reg.remove(activity)
+    activity._holder = None
+    return holder
 
 
 def _safe(fn, *args):
@@ -182,9 +193,14 @@ def start_activity(holder, activity):
     ``inlineCallbacks`` was), so first-step side effects land before this returns;
     only the awaits/sleeps beyond that run on the loop.
 
+    Activity instances are single-use because their generator and subclass
+    state cannot be reset generically. Construct a fresh instance to restart.
+
     Returns:
         Activity: the started ``activity`` (for chaining / handle-keeping).
     """
+    if activity._holder is not None or activity._finished:
+        raise RuntimeError("Activity instances are single-use; create a fresh instance")
     activity._holder = holder
     existing = _registry(holder) or []
     for other in list(existing):
@@ -206,10 +222,20 @@ def start_activity(holder, activity):
     # first-step side effect (dispatch/msg before the first await) happens before
     # we return, matching the old inlineCallbacks contract. The prefix touches no
     # loop primitive, so deferring it would only reorder observable output.
-    gen = activity.run()
+    try:
+        gen = activity.run()
+    except Exception as exc:  # noqa: BLE001 - construction is part of the activity body
+        _log_activity_crash(activity)
+        _finish_activity(activity, None, completed=False, error=exc)
+        return activity
     kind, value = _step_activity(activity, gen, None)
     if kind in ("done", "cancelled", "error"):
-        _finish_activity(activity, gen, completed=(kind == "done"))
+        _finish_activity(
+            activity,
+            gen,
+            completed=(kind == "done"),
+            error=value if kind == "error" else None,
+        )
     else:
         clock.run_coroutine(_drive_activity(activity, gen, kind, value), task_kind="activity")
     return activity
@@ -279,7 +305,7 @@ def _step_activity(activity, gen, to_send):
     - ``("cancelled", None)`` — the activity was cancelled before a step.
     - ``("await", awaitable)`` — the body yielded an awaitable to await.
     - ``("sleep", seconds)`` — the body yielded a numeric delay to sleep on.
-    - ``("error", None)`` — the body raised (already logged).
+    - ``("error", exception)`` — the body raised (already logged).
 
     The caller owns loop suspension, so the synchronous prefix can run inline in
     :func:`start_activity` and the async remainder in :func:`_drive_activity`
@@ -292,11 +318,9 @@ def _step_activity(activity, gen, to_send):
             value = gen.send(to_send)
         except StopIteration:
             return ("done", None)
-        except Exception:  # noqa: BLE001 - a crashing body must not kill the loop
-            from evennia.utils import logger
-
-            logger.log_trace(f"activity {activity.key!r} crashed")
-            return ("error", None)
+        except Exception as exc:  # noqa: BLE001 - a crashing body must not kill the loop
+            _log_activity_crash(activity)
+            return ("error", exc)
         to_send = None
         if inspect.isawaitable(value) and not isinstance(value, (int, float)):
             return ("await", value)
@@ -305,17 +329,64 @@ def _step_activity(activity, gen, to_send):
         # unknown yield value — resume with None, no loop suspension
 
 
-def _finish_activity(activity, gen, completed):
-    """Close the generator, unregister, and fire the terminal hook once."""
-    try:
-        gen.close()
-    except Exception:  # noqa: BLE001
-        pass
-    _unregister(activity)
+def _finish_activity(activity, gen, completed, error=None):
+    """Close, unregister, notify, and fire exactly one terminal hook."""
+    if activity._finished:
+        return
+    activity._finished = True
+    if gen is not None:
+        try:
+            gen.close()
+        except Exception:  # noqa: BLE001
+            pass
+    holder = _unregister(activity)
     if activity._cancelled:
         _safe(activity.on_cancel, activity._cancel_reason)
+    elif error is not None:
+        _notify_activity_error(activity, holder, error)
+        _safe(activity.on_error, error)
     elif completed:
         _safe(activity.on_complete)
+
+
+def _log_activity_crash(activity):
+    """Log one unexpected Activity failure from an active exception frame."""
+    from evennia.utils import logger
+
+    logger.log_trace(f"activity {activity.key!r} crashed")
+
+
+def _activity_error_message(error):
+    """Render captured Activity failure feedback for development or production."""
+    from traceback import format_exception
+
+    from django.conf import settings
+
+    if getattr(settings, "IN_GAME_ERRORS", False):
+        traceback_text = "".join(format_exception(type(error), error, error.__traceback__)).strip()
+        return f"{traceback_text}\nAn untrapped error occurred."
+    return "An untrapped error occurred. Please file a bug report detailing the steps to reproduce."
+
+
+def _notify_activity_error(activity, holder, error):
+    """Send one player-safe crash notice, falling back across distinct recipients."""
+    from evennia.utils import logger
+
+    message = _activity_error_message(error)
+    seen = set()
+    for target in (activity.actor, holder):
+        if target is None or id(target) in seen:
+            continue
+        seen.add(id(target))
+        msg = getattr(target, "msg", None)
+        if not callable(msg):
+            continue
+        try:
+            msg(message)
+        except Exception:  # noqa: BLE001 - notification must not break cleanup
+            logger.log_trace(f"activity {activity.key!r} error notification failed")
+            continue
+        return
 
 
 async def _drive_activity(activity, gen, kind, value):
@@ -330,6 +401,7 @@ async def _drive_activity(activity, gen, kind, value):
     terminal hook (``on_complete``/``on_cancel``) always fires once.
     """
     completed = False
+    error = None
     try:
         while True:
             try:
@@ -352,11 +424,13 @@ async def _drive_activity(activity, gen, kind, value):
             if kind == "done":
                 completed = True
                 break
-            if kind in ("cancelled", "error"):
+            if kind == "error":
+                error = value
                 break
-    except Exception:  # noqa: BLE001 - an awaited body raising must not kill the loop
-        from evennia.utils import logger
-
-        logger.log_trace(f"activity {activity.key!r} crashed")
+            if kind == "cancelled":
+                break
+    except Exception as exc:  # noqa: BLE001 - an awaited body raising must not kill the loop
+        _log_activity_crash(activity)
+        error = exc
     finally:
-        _finish_activity(activity, gen, completed)
+        _finish_activity(activity, gen, completed, error=error)

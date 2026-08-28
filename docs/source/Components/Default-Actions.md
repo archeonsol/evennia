@@ -23,6 +23,21 @@ retired.
 (`@scripts`, `@script`). Scripts are storage-only: listing, lookup, creation,
 attachment, and deletion are supported; timer controls are not.
 
+## Activities
+
+`evennia.actions.Activity` drives sustained work through generator yields. Each
+instance is single-use and reaches exactly one terminal state:
+
+- normal return unregisters it and calls `on_complete()`;
+- cancellation unregisters it and calls `on_cancel(reason)`;
+- an unexpected exception is logged, sends one player-safe generic error to the
+  actor or holder, unregisters it, and calls `on_error(error)`.
+
+Development error text respects `IN_GAME_ERRORS`; production text does not
+expose exception details. Error hooks are for cleanup, not expected domain
+failures. Activities should catch ordinary refusals themselves and report those
+in game-appropriate language. Restarting work requires a new Activity instance.
+
 ## Authorization
 
 The new staff actions use account-scoped capabilities and still apply

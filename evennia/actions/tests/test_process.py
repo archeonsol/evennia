@@ -14,7 +14,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from django.test import override_settings
 from twisted.internet.defer import Deferred
+from twisted.python.failure import Failure
 
 from evennia.actions import process
 from evennia.actions.process import Activity
@@ -24,6 +26,11 @@ from evennia.utils import logger
 def _holder():
     """A stand-in character/account: all the scheduler needs is ``.ndb``."""
     return SimpleNamespace(ndb=SimpleNamespace())
+
+
+def _messaging_holder():
+    """A holder that can receive scheduler failure feedback."""
+    return SimpleNamespace(ndb=SimpleNamespace(), msg=mock.Mock())
 
 
 # --- test activities --------------------------------------------------------
@@ -87,23 +94,179 @@ class Crasher(Activity):
         self.log = log
 
 
+class ErrorAwareActivity(Activity):
+    """Activity test base recording the terminal error hook."""
+
+    def __init__(self, actor=None):
+        super().__init__(actor)
+        self.errors = []
+
+    def on_error(self, error):
+        self.errors.append(error)
+
+
+class ConstructionCrasher(ErrorAwareActivity):
+    """Raise before returning a generator object."""
+
+    key = "construction-crasher"
+
+    def run(self):
+        raise RuntimeError("construction kaboom")
+
+
+class NonGeneratorActivity(ErrorAwareActivity):
+    """Return an invalid non-generator body."""
+
+    key = "non-generator"
+
+    def run(self):
+        return None
+
+
+class StepCrasher(ErrorAwareActivity):
+    """Raise while advancing the initial generator step."""
+
+    key = "step-crasher"
+
+    def run(self):
+        raise RuntimeError("step kaboom")
+        yield  # pragma: no cover
+
+
+class SuspendedCrasher(ErrorAwareActivity):
+    """Raise after a successful suspension resumes."""
+
+    key = "suspended-crasher"
+
+    def __init__(self, gate, actor=None):
+        super().__init__(actor)
+        self.gate = gate
+
+    def run(self):
+        yield self.gate
+        raise RuntimeError("resume kaboom")
+
+
 # --- lifecycle --------------------------------------------------------------
 class TestActivityLifecycle(unittest.TestCase):
     def test_runs_to_completion_and_unregisters(self):
         holder, log = _holder(), []
+        activity = Counter(log, steps=2)
+        activity.on_error = mock.Mock()
         with mock.patch.object(
             process.clock, "defer_later", side_effect=lambda *a, **k: asyncio.sleep(0)
         ):
-            process.start_activity(holder, Counter(log, steps=2))
+            process.start_activity(holder, activity)
         self.assertEqual(log, ["step0", "step1", "ran", "complete"])
         self.assertEqual(process.get_activities(holder), [])
         self.assertFalse(process.is_active(holder, "counter"))
+        self.assertFalse(activity.running)
+        activity.on_error.assert_not_called()
 
     def test_crashing_body_is_contained(self):
         holder, log = _holder(), []
         with mock.patch.object(logger, "log_trace"):
             process.start_activity(holder, Crasher(log))
         self.assertEqual(log, ["boom"])
+        self.assertEqual(process.get_activities(holder), [])
+
+    @override_settings(IN_GAME_ERRORS=False)
+    def test_run_construction_crash_notifies_and_finishes(self):
+        holder = _messaging_holder()
+        activity = ConstructionCrasher()
+
+        with mock.patch.object(logger, "log_trace") as log_trace:
+            process.start_activity(holder, activity)
+
+        log_trace.assert_called_once()
+        holder.msg.assert_called_once()
+        rendered = holder.msg.call_args.args[0]
+        self.assertIn("untrapped error", rendered.lower())
+        self.assertNotIn("construction kaboom", rendered)
+        self.assertEqual(len(activity.errors), 1)
+        self.assertIsInstance(activity.errors[0], RuntimeError)
+        self.assertEqual(process.get_activities(holder), [])
+        self.assertFalse(activity.running)
+
+    @override_settings(IN_GAME_ERRORS=True)
+    def test_initial_generator_crash_includes_development_traceback(self):
+        holder = _messaging_holder()
+        activity = StepCrasher()
+
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        rendered = holder.msg.call_args.args[0]
+        self.assertIn("RuntimeError: step kaboom", rendered)
+        self.assertEqual(len(activity.errors), 1)
+        self.assertIsInstance(activity.errors[0], RuntimeError)
+        self.assertFalse(activity.running)
+
+    def test_non_generator_body_uses_error_terminal(self):
+        holder = _messaging_holder()
+        activity = NonGeneratorActivity()
+
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        holder.msg.assert_called_once()
+        self.assertEqual(len(activity.errors), 1)
+        self.assertIsInstance(activity.errors[0], AttributeError)
+        self.assertFalse(activity.running)
+
+    def test_error_delivery_prefers_actor_without_duplicate_holder_message(self):
+        holder = _messaging_holder()
+        actor = SimpleNamespace(msg=mock.Mock())
+        activity = StepCrasher(actor=actor)
+
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        actor.msg.assert_called_once()
+        holder.msg.assert_not_called()
+
+    def test_error_delivery_deduplicates_actor_holder_alias(self):
+        holder = _messaging_holder()
+        activity = StepCrasher(actor=holder)
+
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        holder.msg.assert_called_once()
+
+    def test_raising_actor_message_falls_back_to_holder(self):
+        holder = _messaging_holder()
+        actor = SimpleNamespace(msg=mock.Mock(side_effect=RuntimeError("send failed")))
+        activity = StepCrasher(actor=actor)
+
+        with mock.patch.object(logger, "log_trace") as log_trace:
+            process.start_activity(holder, activity)
+
+        actor.msg.assert_called_once()
+        holder.msg.assert_called_once()
+        self.assertGreaterEqual(log_trace.call_count, 2)
+
+    def test_crashing_error_hook_cannot_suppress_notification(self):
+        holder = _messaging_holder()
+
+        class BrokenHook(StepCrasher):
+            def on_error(self, error):
+                raise RuntimeError("hook failed")
+
+        with mock.patch.object(logger, "log_trace") as log_trace:
+            process.start_activity(holder, BrokenHook())
+
+        holder.msg.assert_called_once()
+        self.assertGreaterEqual(log_trace.call_count, 2)
+
+    def test_finished_activity_instance_is_single_use(self):
+        holder = _messaging_holder()
+        activity = StepCrasher()
+        with mock.patch.object(logger, "log_trace"):
+            process.start_activity(holder, activity)
+
+        with self.assertRaisesRegex(RuntimeError, "single-use"):
+            process.start_activity(holder, activity)
         self.assertEqual(process.get_activities(holder), [])
 
 
@@ -184,6 +347,79 @@ class TestActivitySuspend(_LoopActivityTest):
         self.assertEqual(log, ["start:legacy", "resume:legacy:TRACE", "complete:legacy"])
         self.assertEqual(process.get_activities(holder), [])
 
+    def test_post_suspension_generator_crash_notifies_once(self):
+        holder = _messaging_holder()
+
+        async def scenario():
+            gate = self._gate()
+            activity = SuspendedCrasher(gate)
+            with mock.patch.object(logger, "log_trace") as log_trace:
+                process.start_activity(holder, activity)
+                await self._tick()
+                gate.set_result(None)
+                await self._tick()
+            self.assertEqual(log_trace.call_count, 1)
+            holder.msg.assert_called_once()
+            self.assertEqual(len(activity.errors), 1)
+            self.assertIn("resume kaboom", str(activity.errors[0]))
+            self.assertEqual(process.get_activities(holder), [])
+            self.assertFalse(activity.running)
+
+        self._run(scenario())
+
+    def test_future_failure_uses_single_error_terminal(self):
+        holder = _messaging_holder()
+
+        async def scenario():
+            gate = self._gate()
+            activity = SuspendedCrasher(gate)
+            with mock.patch.object(logger, "log_trace") as log_trace:
+                process.start_activity(holder, activity)
+                await self._tick()
+                gate.set_exception(RuntimeError("future kaboom"))
+                await self._tick()
+            self.assertEqual(log_trace.call_count, 1)
+            holder.msg.assert_called_once()
+            self.assertEqual(len(activity.errors), 1)
+            self.assertIn("future kaboom", str(activity.errors[0]))
+            self.assertEqual(process.get_activities(holder), [])
+
+        self._run(scenario())
+
+    def test_deferred_failure_uses_single_error_terminal(self):
+        holder = _messaging_holder()
+
+        async def scenario():
+            gate = Deferred()
+            activity = SuspendedCrasher(gate)
+            with mock.patch.object(logger, "log_trace") as log_trace:
+                process.start_activity(holder, activity)
+                await self._tick()
+                gate.errback(Failure(RuntimeError("deferred kaboom")))
+                await self._tick()
+            self.assertEqual(log_trace.call_count, 1)
+            holder.msg.assert_called_once()
+            self.assertEqual(len(activity.errors), 1)
+            self.assertIn("deferred kaboom", str(activity.errors[0]))
+            self.assertEqual(process.get_activities(holder), [])
+
+        self._run(scenario())
+
+    def test_active_activity_instance_is_single_use(self):
+        holder, log = _holder(), []
+
+        async def scenario():
+            activity = Waiter(log, "a", self._gate())
+            process.start_activity(holder, activity)
+            await self._tick()
+            with self.assertRaisesRegex(RuntimeError, "single-use"):
+                process.start_activity(holder, activity)
+            self.assertEqual(process.get_activities(holder), [activity])
+            activity.cancel()
+            await self._tick()
+
+        self._run(scenario())
+
 
 # --- cancellation -----------------------------------------------------------
 class TestActivityCancel(_LoopActivityTest):
@@ -206,12 +442,16 @@ class TestActivityCancel(_LoopActivityTest):
         holder, log = _holder(), []
 
         async def scenario():
-            process.start_activity(holder, Waiter(log, "a", self._gate()))
+            activity = Waiter(log, "a", self._gate())
+            activity.on_error = mock.Mock()
+            process.start_activity(holder, activity)
             await self._tick()
             process.cancel_activity(holder, "waiter", reason="stop")
             await self._tick()
             self.assertEqual(log, ["start:a", "cancel:a:stop"])
             self.assertFalse(process.is_active(holder, "waiter"))
+            self.assertFalse(activity.running)
+            activity.on_error.assert_not_called()
 
         self._run(scenario())
 

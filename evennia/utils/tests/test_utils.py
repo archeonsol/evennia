@@ -14,9 +14,19 @@ from django.test import TestCase
 from parameterized import parameterized
 from twisted.internet import task
 
+from evennia.objects.objects import DefaultObject
 from evennia.utils import utils
 from evennia.utils.ansi import ANSIString
+from evennia.utils.create import create_object
 from evennia.utils.test_resources import BaseEvenniaTest
+
+
+class ExtraInfoObject(DefaultObject):
+    """Mixin recording composition through ``super().get_extra_info``."""
+
+    def get_extra_info(self, looker, **kwargs):
+        self.ndb.extra_info_calls = int(self.ndb.extra_info_calls or 0) + 1
+        return super().get_extra_info(looker, **kwargs) or " (remote fixture)"
 
 
 class TestIsIter(TestCase):
@@ -1020,6 +1030,76 @@ class TestAtSearchResult(TestCase):
         msg = caller.msg.call_args[0][0]
         self.assertIn("first", msg)
         self.assertIn("other", msg)
+
+    def test_falsy_extra_info_hook_runs_once_per_match(self):
+        """The compositor must not repeat a hook just because it returned no text."""
+        matches = [self.MockObject("obj1") for _ in range(2)]
+        for obj in matches:
+            obj.get_extra_info = mock.Mock(return_value="")
+        caller = mock.MagicMock()
+        caller.location = None
+
+        self.assertIsNone(utils.at_search_result(matches, caller, "obj1"))
+
+        for obj in matches:
+            obj.get_extra_info.assert_called_once_with(caller)
+
+
+class TestAtSearchResultRealObjects(BaseEvenniaTest):
+    """Exercise multimatch rendering through the inherited TypedObject hook."""
+
+    def test_locationless_rooms_render_without_recursive_extra_info(self):
+        self.room1.key = "Twin Destination"
+        self.room2.key = "Twin Destination"
+        self.room1.location = None
+        self.room2.location = None
+
+        with mock.patch.object(self.char1, "msg") as message:
+            result = utils.at_search_result(
+                [self.room1, self.room2], self.char1, "Twin Destination"
+            )
+
+        self.assertIsNone(result)
+        rendered = message.call_args.args[0]
+        self.assertIn("More than one match", rendered)
+        self.assertIn("first", rendered)
+        self.assertIn("other", rendered)
+        self.assertIn("Type", rendered)
+
+    def test_direct_base_extra_info_keeps_stock_location_context(self):
+        self.obj1.location = self.char1
+        self.assertIn("yours", self.obj1.get_extra_info(self.char1))
+
+        self.obj1.location = self.room1
+        self.char1.location = self.room1
+        self.assertIn("here", self.obj1.get_extra_info(self.char1))
+
+    def test_super_composing_override_runs_once_for_remote_match(self):
+        first = create_object(ExtraInfoObject, key="Twin Fixture")
+        second = create_object(ExtraInfoObject, key="Twin Fixture")
+
+        with mock.patch.object(self.char1, "msg") as message:
+            result = utils.at_search_result([first, second], self.char1, "Twin Fixture")
+
+        self.assertIsNone(result)
+        self.assertEqual(first.ndb.extra_info_calls, 1)
+        self.assertEqual(second.ndb.extra_info_calls, 1)
+        rendered = message.call_args.args[0]
+        self.assertEqual(rendered.count("remote fixture"), 2)
+
+    def test_room_hint_short_circuits_custom_override(self):
+        first = create_object(ExtraInfoObject, key="Twin Fixture", location=self.room1)
+        second = create_object(ExtraInfoObject, key="Twin Fixture", location=self.room1)
+        self.char1.location = self.room1
+
+        with mock.patch.object(self.char1, "msg") as message:
+            result = utils.at_search_result([first, second], self.char1, "Twin Fixture")
+
+        self.assertIsNone(result)
+        self.assertIsNone(first.ndb.extra_info_calls)
+        self.assertIsNone(second.ndb.extra_info_calls)
+        rendered = message.call_args.args[0]
+        self.assertEqual(rendered.count("here, on the floor"), 2)
 
 
 class TestGroupObjectsByKeyAndDesc(TestCase):

@@ -230,9 +230,16 @@ def narrow_candidates(caller, scope: str) -> Optional[list]:
     return None
 
 
-def location_hint(obj, caller) -> str:
+def location_hint(obj, caller, *, _include_extra=True) -> str:
     """
     Extra info for multimatch listings (leading space).
+
+    Args:
+        obj: The candidate being described.
+        caller: The searching object.
+        _include_extra: Internal recursion guard. The base
+            ``TypedObject.get_extra_info`` uses ``False`` to request only the
+            stock location context; ordinary callers should leave this alone.
     """
     if not caller:
         return ""
@@ -241,7 +248,7 @@ def location_hint(obj, caller) -> str:
     loc = getattr(caller, "location", None)
     if loc and getattr(obj, "location", None) == loc:
         return _(" (here, on the floor)")
-    if hasattr(obj, "get_extra_info"):
+    if _include_extra and hasattr(obj, "get_extra_info"):
         return obj.get_extra_info(caller) or ""
     return ""
 
