@@ -68,6 +68,24 @@ class TestEmit(unittest.TestCase):
         self._emit(char, actor, "something happens")
         self.assertIn("something happens", room.messages)
 
+    def test_emit_to_a_room_reaches_its_contents(self):
+        """A room has no sessions, so a bare @emit must fan out or reach nobody."""
+        char, actor = _setup()
+        room = FakeObj(key="here")  # rooms have no location
+        char.location = room
+        char.search_map["here"] = room
+        self._emit(char, actor, "something happens")
+        self.assertIn("something happens", room.contents_messages)
+        self.assertTrue(any("and contents" in m for m in char.messages))
+
+    def test_emit_to_a_non_room_does_not_fan_out(self):
+        char, actor = _setup()
+        bob = FakeObj(key="bob", location=FakeObj(key="room"))
+        char.search_map["bob"] = bob
+        self._emit(char, actor, "bob = hello there")
+        self.assertIn("hello there", bob.messages)
+        self.assertEqual([], bob.contents_messages)
+
     def test_remit_forces_rooms_and_contents(self):
         char, actor = _setup()
         room = FakeObj(key="plaza")  # rooms have no location
