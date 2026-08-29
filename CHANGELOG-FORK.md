@@ -25,6 +25,36 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.226 — Emit to a room reaches the room
+
+### Actions
+
+- [`admin.py`](evennia/actions/default/admin.py): a room target of
+  `@emit` now always fans out to the room contents. A room holds no
+  sessions of its own, so the previous `obj.msg(message)` delivered to
+  nobody unless `/contents` or `@remit` set `send_to_contents`. Since a
+  bare `@emit <message>` targets the caller's location, the plainest
+  form of the verb emitted into the void and still reported
+  `Emitted to <room>`. This restores the behaviour the action docstring
+  already documented ("if the object is a room, send to its contents"),
+  which the legacy `CmdEmit` also never implemented.
+
+### Migration notes
+
+- Non-room targets are unchanged, so `@pemit` and object-directed
+  `@emit` keep their existing delivery and echo.
+- A room target's caller echo changes from `Emitted to <room>:` to
+  `Emitted to <room> and contents:`. Anything asserting on the former
+  string for a room target needs updating.
+- Games that worked around this by always typing `@remit` are
+  unaffected; `@remit` still forces rooms plus contents.
+- The legacy `CmdEmit` in
+  [`commands/default/admin.py`](evennia/commands/default/admin.py) is
+  deliberately left alone. Production input routes through the action
+  registry, and the command tree is slated for removal.
+
+---
+
 ## 6.0.0+underspire.225 — Shared focus transfer and failure feedback
 
 ### Accounts

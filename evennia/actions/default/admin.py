@@ -55,8 +55,9 @@ class Emit(ArgAction):
     |w@emit[/room|/rooms|/accounts|/contents] [<obj>, <obj>, ... =] <message>|n
     / |w@remit [<room>, ... =] <message>|n / |w@pemit [<account>, ... =]
     <message>|n. Requires |wengine.world.build|n and |wtell|n access to each
-    target. |w/contents|n also sends to each target's contents; |w@remit|n
-    forces rooms plus contents, while |w@pemit|n forces puppeted accounts.
+    target. A room target always reaches everyone inside it; |w/contents|n
+    adds a non-room target's contents. |w@remit|n forces rooms plus contents,
+    while |w@pemit|n forces puppeted accounts.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -197,8 +198,14 @@ class CharacterAdminRules:
                 caller.msg(f"{objname} has no active account. Ignored.")
                 continue
             if obj.access(caller, "tell"):
+                # A room holds no sessions of its own, so obj.msg() alone reaches
+                # nobody standing in it. The documented contract is "if the object
+                # is a room, send to its contents", so a room target always fans
+                # out; without this a bare `@emit <message>` -- which targets the
+                # caller's location -- emits into the void and reports success.
+                fan_out = send_to_contents or obj.location is None
                 obj.msg(message)
-                if send_to_contents and hasattr(obj, "msg_contents"):
+                if fan_out and hasattr(obj, "msg_contents"):
                     obj.msg_contents(message)
                     caller.msg(f"Emitted to {objname} and contents:\n{message}")
                 else:
