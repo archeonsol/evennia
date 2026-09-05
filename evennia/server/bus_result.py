@@ -40,7 +40,8 @@ class PublicationResult:
             future = asyncio.wrap_future(self._future)
             # A canceled observer must not leave the shared outcome unobserved.
             future.add_done_callback(lambda done: None if done.cancelled() else done.exception())
-            return await asyncio.shield(future)
+            await asyncio.wait((future,))
+            return future.result()
 
         return wait().__await__()
 
