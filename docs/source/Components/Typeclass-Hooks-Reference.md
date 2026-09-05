@@ -334,6 +334,7 @@ the authoritative roster.
 | `at_disconnect` | `ServerSession` | self | Session-side disconnect hook. |
 | `at_login` | `ServerSession` | self | Session-side login hook. Updates last_login on the account. |
 | `at_sync` | `ServerSession` | self | Fires when the session is re-synced (e.g. after a server reload). Reattaches the puppet. |
+| `at_transport_reconnect` | `ServerSession` | self | Refreshes client state after confirmed same-process transport recovery. |
 | `at_post_load` | `TypedObject` | self | Fires on every cache load, not just first-load. Overrides must be idempotent. |
 | `at_post_rename` | `TypedObject` | self | db_key written; post_save signal already fired. AppearanceMixin override clears plural aliases for Objects. |
 

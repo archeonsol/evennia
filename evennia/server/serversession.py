@@ -187,6 +187,15 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
             if restore:
                 restore(session=self)
 
+    @hook(
+        event="transport_reconnect",
+        phase="post",
+        actor="self",
+        returns="ignored",
+        discipline="public",
+        fires_from=(),
+        notes="Refreshes client state after confirmed same-process transport recovery.",
+    )
     def at_transport_reconnect(self):
         """Refresh client state after confirmed transport synchronization."""
         from evennia.server.inputfuncs import _find_editor
