@@ -6,6 +6,7 @@ Uses fakeredis so CI does not need a live redis daemon.
 
 import asyncio
 import os
+import queue
 import subprocess
 import sys
 import time
@@ -16,7 +17,7 @@ import fakeredis
 from django.test import SimpleTestCase, TestCase, override_settings
 
 import evennia
-from evennia.server import ipc_schema, redis_bus, session
+from evennia.server import ipc_schema, redis_bus, redis_transport, session
 from evennia.server.portal import amp, amp_server
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
@@ -38,14 +39,28 @@ _BUS_SETTINGS = {
 }
 
 
+_FRAME_QUEUE = queue.Queue()
+_ACTIVE_BUSES = []
+
+
 def _sync_call_from_thread(fn, *args, **kwargs):
-    """Run frame dispatch immediately (tests have no reactor thread)."""
-    return fn(*args, **kwargs)
+    """Queue handoffs for execution on the fixture's main thread."""
+    _FRAME_QUEUE.put((fn, args, kwargs))
 
 
 def _drain_bus(seconds=0.15):
-    """Let redis reader threads pick up published frames."""
-    time.sleep(seconds)
+    """Pump owned handoffs and heartbeat ticks without running startup timers."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            fn, args, kwargs = _FRAME_QUEUE.get_nowait()
+        except queue.Empty:
+            for bus in _ACTIVE_BUSES:
+                if bus._transport.online and not bus._transport._stop.is_set():
+                    bus._handshake.tick()
+            time.sleep(0.002)
+        else:
+            fn(*args, **kwargs)
 
 
 class _BusTestResources:
@@ -55,6 +70,8 @@ class _BusTestResources:
         """Acquire patches with cleanup registered before service construction."""
         self.stack = ExitStack()
         self.buses = []
+        self.stack.enter_context(patch(__name__ + "._ACTIVE_BUSES", self.buses))
+        self.stack.enter_context(patch(__name__ + "._FRAME_QUEUE", queue.Queue()))
         self.handles = []
         self.loop = asyncio.new_event_loop()
         names = (
@@ -100,6 +117,13 @@ class _BusTestResources:
                 if worker is not None and worker.is_alive():
                     survivors = True
                     errors.append(AssertionError(f"bus fixture left {name} running"))
+        if not survivors:
+            while not _FRAME_QUEUE.empty():
+                fn, args, kwargs = _FRAME_QUEUE.get_nowait()
+                try:
+                    fn(*args, **kwargs)
+                except Exception as error:
+                    errors.append(error)
         for handle in self.handles:
             handle.cancel()
         try:
@@ -136,14 +160,22 @@ class TestRedisBus(TestCase):
 
         self.session = MagicMock()
         self.session.sessid = 1
+        self.session.uid = 42
+        self.session.uname = "test"
+        self.session.logged_in = True
+        self.session.bid = None
+        self.session.protocol_flags = {}
         evennia.SERVER_SESSION_HANDLER[1] = self.session
 
         self.portal = EvenniaPortalService()
         evennia.EVENNIA_PORTAL_SERVICE = self.portal
         self.portalsession = session.Session()
+        self.portalsession.init_session("test", "local", None)
         self.portalsession.sessid = 1
         evennia.PORTAL_SESSION_HANDLER = PortalSessionHandler()
         evennia.PORTAL_SESSION_HANDLER[1] = self.portalsession
+        evennia.PORTAL_SESSION_HANDLER._ensure_bus_socket(self.portalsession)
+        self.portalsession._bus_confirmed = True
         evennia.PORTAL_SESSION_HANDLER.data_in = MagicMock()
         evennia.PORTAL_SESSION_HANDLER.data_out = MagicMock()
         evennia.PORTAL_SESSION_HANDLER.get_all_sync_data = MagicMock(return_value=[])
@@ -166,6 +198,22 @@ class TestRedisBus(TestCase):
         self.portal_bus.start_bus()
         time.sleep(0.05)
         self.server_bus.start_bus()
+        self.portal_bus._handshake._pending = None
+        self.portal_bus._handshake._last_probe = -float("inf")
+        self.portal_bus._handshake.tick()
+        _drain_bus()
+        self.assertTrue(
+            self.server_bus.ready,
+            repr(
+                (
+                    self.server_bus.last_sync_error,
+                    self.portal_bus.last_sync_error,
+                    self.server_bus._handshake.state,
+                    self.portal_bus._handshake.state,
+                )
+            ),
+        )
+        self.assertTrue(self.portal_bus.ready, repr(self.portal_bus.last_sync_error))
 
     def test_stream_topology(self):
         prefix = _BUS_SETTINGS["REDIS_BUS_PREFIX"]
@@ -351,88 +399,43 @@ class TestRedisTransportStop(SimpleTestCase):
 
 
 @override_settings(**_BUS_SETTINGS)
-class TestRedisTransportQueueBound(SimpleTestCase):
-    """Publish queue is bounded: overflow drops the newest frame, logs once per stall."""
-
-    @patch.object(redis_bus, "_MAX_QUEUE", 5)
-    @patch.object(redis_bus.logger, "log_err")
-    def test_publish_queue_bounded_drops_newest_logs_once(self, mock_log_err):
-        # writer thread never started, so nothing drains the queue
-        transport = _RedisTransport("evennia:testbus:s2p", lambda *a: None)
-        for i in range(20):
-            transport.publish("stream", b"MsgPortal2Server", str(i).encode())
-        # capped at _MAX_QUEUE; the first 5 frames are kept, the newer 15 dropped
-        self.assertEqual(transport._q.qsize(), 5)
-        # one log for the whole stall episode, not one per dropped frame
-        self.assertEqual(mock_log_err.call_count, 1)
-
-
-@override_settings(**_BUS_SETTINGS)
-@patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
-class TestRedisTransportDurability(TestCase):
-    """Consumer-group durability: no ``$`` skip, un-acked reclaim, writer retry,
-    control vs data drop policy."""
+class TestRedisTransportForwardCursor(SimpleTestCase):
+    """A fresh baseline skips old history and preserves later FIFO delivery."""
 
     def setUp(self):
-        self.fake = fakeredis.FakeRedis(decode_responses=False)
-        self.p = patch("redis.Redis.from_url", return_value=self.fake)
-        self.p.start()
-        self.addCleanup(self.p.stop)
+        """Own fake Redis and queued handoffs without starting workers."""
+        self.resources = _BusTestResources()
+        self.addCleanup(self.resources.close)
+        self.fake = self.resources.fake
         self.stream = "evennia:testbus:s2p"
 
-    def _transport(self, sink):
-        t = _RedisTransport(self.stream, sink)
-        t._client = self.fake
-        return t
+    def test_fresh_baseline_skips_old_frames_and_keeps_new_frames(self):
+        """A frame written after baseline is read by its explicit cursor."""
+        received = []
+        transport = _RedisTransport(self.stream, lambda command, data: received.append(data))
+        transport._client = self.fake
+        self.fake.xadd(self.stream, {b"c": b"Msg", b"d": b"old", b"o": b"writer", b"n": b"1"})
+        transport._baseline()
+        self.fake.xadd(self.stream, {b"c": b"Msg", b"d": b"new", b"o": b"writer", b"n": b"2"})
+        transport.online = True
+        response = self.fake.xread({self.stream: transport._cursor}, count=10)
+        for _, entries in response:
+            for _, fields in entries:
+                transport._admit_incoming(fields)
+        _drain_bus(0.01)
+        self.assertEqual(received, [b"new"])
 
-    def test_frames_present_before_reader_are_not_skipped(self):
-        # Frames the peer wrote while this side was "down" must be delivered,
-        # not skipped the way a ``$`` cursor did.
-        got = []
-        t = self._transport(lambda cmd, data: got.append(data))
-        self.fake.xadd(self.stream, {redis_bus._CMD: b"MsgServer2Portal", redis_bus._DATA: b"a"})
-        self.fake.xadd(self.stream, {redis_bus._CMD: b"MsgServer2Portal", redis_bus._DATA: b"b"})
-        t._ensure_group()
-        resp = self.fake.xreadgroup(t._group, t._consumer, {self.stream: ">"}, count=10)
-        for _s, entries in resp:
-            for eid, fields in entries:
-                t._dispatch(eid, fields)
-        self.assertEqual(got, [b"a", b"b"])
-
-    def test_unacked_frames_reclaimed_on_restart(self):
-        # Delivered-but-not-acked frames (a crash between dispatch and ack) are
-        # redelivered on the next start via the pending reclaim.
-        self.fake.xadd(self.stream, {redis_bus._CMD: b"MsgServer2Portal", redis_bus._DATA: b"x"})
-        t1 = self._transport(lambda *a: None)
-        t1._ensure_group()
-        # deliver without acking -> stays pending for this consumer
-        self.fake.xreadgroup(t1._group, t1._consumer, {self.stream: ">"}, count=10)
-
-        got = []
-        t2 = self._transport(lambda cmd, data: got.append(data))
-        t2._drain_pending()
-        self.assertEqual(got, [b"x"])
-
-    def test_xadd_retries_then_succeeds(self):
-        client = MagicMock()
-        client.xadd.side_effect = [Exception("down"), Exception("down"), None]
-        t = _RedisTransport(self.stream, lambda *a: None)
-        t._client = client
-        self.assertTrue(t._xadd_with_retry(self.stream, b"MsgX", b"d", attempts=3))
-        self.assertEqual(client.xadd.call_count, 3)
-
-    def test_xadd_gives_up_reports_false(self):
-        client = MagicMock()
-        client.xadd.side_effect = Exception("down")
-        t = _RedisTransport(self.stream, lambda *a: None)
-        t._client = client
-        self.assertFalse(t._xadd_with_retry(self.stream, b"MsgX", b"d", attempts=2))
-
-    def test_control_frame_classification(self):
-        self.assertTrue(_RedisTransport._is_control(b"AdminPortal2Server"))
-        self.assertTrue(_RedisTransport._is_control(b"AdminServer2Portal"))
-        self.assertFalse(_RedisTransport._is_control(b"MsgPortal2Server"))
-        self.assertFalse(_RedisTransport._is_control(b""))
+    def test_baseline_does_not_reclaim_existing_consumer_pending(self):
+        """Legacy group pending entries remain unexecuted by new readers."""
+        self.fake.xadd(self.stream, {b"c": b"Msg", b"d": b"old", b"o": b"writer", b"n": b"1"})
+        self.fake.xgroup_create(self.stream, "legacy", id="0")
+        self.fake.xreadgroup("legacy", "old-consumer", {self.stream: ">"}, count=1)
+        transport = _RedisTransport(self.stream, MagicMock())
+        transport._client = self.fake
+        transport._baseline()
+        self.assertEqual(self.fake.xread({self.stream: transport._cursor}), [])
+        self.assertEqual(self.fake.xpending(self.stream, "legacy")["pending"], 1)
+        transport._on_frame.assert_not_called()
 
 
 class PidAliveTest(SimpleTestCase):
@@ -463,24 +466,30 @@ class TestBoundedTransportStop(SimpleTestCase):
         self.threading = threading
         self.transport = _RedisTransport("test:stop", MagicMock())
         self.transport._client = MagicMock()
+        self.transport.online = True
+        handoffs = patch.object(clock, "call_from_thread", _sync_call_from_thread)
+        handoffs.start()
+        self.addCleanup(handoffs.stop)
+        frames = patch(__name__ + "._FRAME_QUEUE", queue.Queue())
+        frames.start()
+        self.addCleanup(frames.stop)
         self.releases = []
         self.workers = []
-        budget = patch.object(redis_bus, "_STOP_TIMEOUT", 0.05, create=True)
+        budget = patch.object(redis_transport, "STOP_TIMEOUT", 0.05)
         budget.start()
         self.addCleanup(budget.stop)
-        logs = patch.object(redis_bus, "logger")
+        logs = patch.object(redis_transport, "logger")
         self.logs = logs.start()
         self.addCleanup(logs.stop)
         self.addCleanup(self._release)
 
     def _release(self):
-        """Release controlled calls and the original implementation's queue wait."""
+        """Release controlled calls and wake condition waits before restoring patches."""
         self.transport._stop.set()
         for event in self.releases:
             event.set()
-        while not self.transport._q.empty():
-            self.transport._q.get_nowait()
-        self.transport._q.put_nowait(None)
+        with self.transport._condition:
+            self.transport._condition.notify_all()
         for worker in self.workers:
             worker.join(2)
         cleanup = getattr(self.transport, "_cleanup", None)
@@ -507,15 +516,16 @@ class TestBoundedTransportStop(SimpleTestCase):
         return worker
 
     def _bounded_stop(self):
-        """Use an outer watchdog to detect hangs in the original code."""
+        """Use an outer watchdog to detect a stop that exceeds its deadline."""
         worker = self._worker(self.transport.stop)
         worker.join(0.5)
         self.assertFalse(worker.is_alive(), "stop exceeded its shared budget")
 
     def test_full_queue_blocked_workers_and_cleanup_ownership(self):
         """Stop uses one deadline and closes only after both workers exit."""
-        self.transport._q = redis_bus.queue.Queue(maxsize=1)
-        self.transport.publish("s", b"Msg", b"old")
+        with patch.object(redis_transport, "DATA_ENTRIES", 1):
+            self.assertTrue(self.transport.publish("s", b"Msg", b"old"))
+            self.assertFalse(self.transport.publish("s", b"Msg", b"overflow"))
         for name in ("_writer", "_reader"):
             block, entered, release = self._block()
             setattr(self.transport, name, self._worker(block))
@@ -528,8 +538,7 @@ class TestBoundedTransportStop(SimpleTestCase):
         client.close.assert_not_called()
         with self.assertRaises(RuntimeError):
             self.transport.start()
-        with self.assertRaises(RuntimeError):
-            self.transport.publish("s", b"Msg", b"new")
+        self.assertFalse(self.transport.publish("s", b"Msg", b"new"))
         self.releases[0].set()
         self.transport._writer.join(1)
         client.close.assert_not_called()
@@ -579,57 +588,47 @@ class TestBoundedTransportStop(SimpleTestCase):
         self.transport._stop.set()
         worker.join(0.5)
         self.assertFalse(worker.is_alive())
-        self.assertTrue(self.transport._q.empty())
+        self.assertFalse(self.transport._ordinary)
 
-    def test_stop_during_pending_and_normal_reads(self):
-        """Reads released after stop cannot dispatch their returned batches."""
-        for pending in (True, False):
-            with self.subTest(pending=pending):
-                self.transport._stop.clear()
-                block, entered, release = self._block()
+    def test_stop_during_forward_read_discards_returned_batch(self):
+        """A response released after stop cannot schedule its payload."""
+        block, entered, release = self._block()
 
-                def read(*args, **kwargs):
-                    """Hold the response until stop has been requested."""
-                    block()
-                    return [("s", [(b"1-0", {b"c": b"Msg", b"d": b"body"})])]
+        def read(*args, **kwargs):
+            """Hold the response until stop has been requested."""
+            block()
+            return [("s", [(b"1-0", {b"c": b"Msg", b"d": b"body", b"o": b"writer", b"n": b"1"})])]
 
-                self.transport._client.xreadgroup.side_effect = read
-                with patch.object(self.transport, "_dispatch") as dispatch:
-                    if pending:
-                        worker = self._worker(self.transport._drain_pending)
-                    else:
-                        with patch.object(self.transport, "_drain_pending"):
-                            worker = self._worker(self.transport._reader_loop)
-                            self.assertTrue(entered.wait(1))
-                    self.assertTrue(entered.wait(1))
-                    self.transport._stop.set()
-                    release.set()
-                    worker.join(1)
-                    self.assertFalse(worker.is_alive())
-                    dispatch.assert_not_called()
+        self.transport._client.xread.side_effect = read
+        with patch.object(self.transport, "_admit_incoming") as admit:
+            worker = self._worker(self.transport._reader_loop)
+            self.assertTrue(entered.wait(1))
+            self.transport._stop.set()
+            release.set()
+            worker.join(1)
+        self.assertFalse(worker.is_alive())
+        admit.assert_not_called()
 
-    def test_retry_wait_is_interruptible_without_control_requeue(self):
-        """Stop interrupts backoff without another write or queued retry."""
-        entered = self.threading.Event()
-        original_wait = self.transport._stop.wait
+    def test_failed_control_write_is_not_retried_or_requeued(self):
+        """Failure fences remaining work and stop wakes the waiting writer."""
+        called = self.threading.Event()
 
-        def wait(delay):
-            """Expose the event wait without relying on backoff timing."""
-            entered.set()
-            return original_wait(5)
+        def write(*args, **kwargs):
+            """Expose the single publication attempt."""
+            called.set()
+            raise RuntimeError("offline")
 
-        self.transport._client.xadd.side_effect = RuntimeError("offline")
-        self.transport.publish("s", b"AdminX", b"body")
-        with patch.object(self.transport._stop, "wait", side_effect=wait):
-            worker = self._worker(self.transport._writer_loop)
-            try:
-                self.assertTrue(entered.wait(1))
-            finally:
-                self.transport._stop.set()
-                worker.join(0.5)
+        self.transport._client.xadd.side_effect = write
+        result = self.transport.publish("s", b"AdminX", b"body")
+        worker = self._worker(self.transport._writer_loop)
+        self.assertTrue(called.wait(1))
+        self.transport.stop()
+        worker.join(0.5)
+        _drain_bus(0.01)
         self.assertFalse(worker.is_alive())
         self.transport._client.xadd.assert_called_once()
-        self.assertTrue(self.transport._q.empty())
+        self.assertFalse(self.transport._ordinary)
+        self.assertIsNotNone(result._future.exception())
 
     def test_restart_discards_stale_work_and_preserves_old_client(self):
         """Fresh workers publish fresh work without old cleanup touching their client."""
@@ -638,6 +637,7 @@ class TestBoundedTransportStop(SimpleTestCase):
         old = self.transport._client
         self.transport.publish("s", b"Msg", b"stale")
         self.transport.stop()
+        _drain_bus(0.01)
         fresh = fakeredis.FakeRedis()
         with patch.object(redis.Redis, "from_url", return_value=fresh):
             self.assertTrue(self.transport.start())
@@ -654,10 +654,10 @@ class TestBoundedTransportStop(SimpleTestCase):
         finally:
             self.transport.stop()
 
-    def test_server_setup_only_after_fresh_success(self):
-        """Duplicate and rejected starts do not rerun PSYNC or initial setup."""
+    def test_server_setup_runs_once_before_discovery(self):
+        """A duplicate or rejected worker start cannot repeat initial setup."""
         bus = RedisServerBus(MagicMock())
-        with patch.object(bus, "send_AdminServer2Portal") as send:
+        with patch.object(bus, "_tick"):
             for outcome in (False, RuntimeError("survivor"), True):
                 with self.subTest(outcome=outcome):
                     with patch.object(bus._transport, "start", side_effect=[outcome]):
@@ -666,16 +666,25 @@ class TestBoundedTransportStop(SimpleTestCase):
                                 bus.start_bus()
                         else:
                             bus.start_bus()
-                    self.assertEqual(send.call_count, int(outcome is True))
-                    self.assertEqual(
-                        bus.factory.server.run_initial_setup.call_count, int(outcome is True)
-                    )
+                    bus.factory.server.run_initial_setup.assert_called_once()
+
+    def test_failed_initial_setup_cannot_be_skipped(self):
+        """An escaping setup failure requires a new process."""
+        server = MagicMock()
+        server.run_initial_setup.side_effect = ValueError("failed setup")
+        bus = RedisServerBus(server)
+        with self.assertRaises(ValueError):
+            bus.start_bus()
+        with self.assertRaisesRegex(RuntimeError, "initial setup failed"):
+            bus.start_bus()
+        server.run_initial_setup.assert_called_once()
 
     def test_failed_restart_client_is_cleaned_up(self):
         """A failed restart gives its newly created client its own cleanup."""
         import redis
 
         self.transport.stop()
+        _drain_bus(0.01)
         failed = MagicMock()
         failed.ping.side_effect = redis.exceptions.ConnectionError("offline")
         with (
@@ -713,6 +722,21 @@ class TestBoundedTransportStop(SimpleTestCase):
 
 class TestBusFixtureCleanup(SimpleTestCase):
     """Fixture cleanup owns its callbacks without touching ambient work."""
+
+    def test_cleanup_settles_pending_publication_failures(self):
+        """Stopping workers must deliver their queued publication outcomes."""
+        from types import SimpleNamespace
+
+        resources = _BusTestResources()
+        transport = _RedisTransport("fixture:pending", MagicMock())
+        transport.online = True
+        result = transport.publish("fixture:out", b"Msg", b"pending")
+        failed = MagicMock()
+        result.addErrback(failed)
+        resources.buses.append(SimpleNamespace(_transport=transport))
+        resources.close()
+        failed.assert_called_once()
+        self.assertIsNotNone(result._future.exception())
 
     def test_cleanup_cancels_owned_work_before_restoring_globals(self):
         """Only the fixture coroutine sees cancellation; its timer never fires."""

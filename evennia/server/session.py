@@ -104,9 +104,16 @@ class Session:
                 the keys given by self._attrs_to_sync.
 
         """
-        return {
+        data = {
             attr: getattr(self, attr) for attr in settings.SESSION_SYNC_ATTRS if hasattr(self, attr)
         }
+        if getattr(self, "_bus_socket_id", None):
+            data.update(
+                _socket_id=self._bus_socket_id,
+                _protocol_auth=self._bus_protocol_auth,
+                _server_confirmed=self._bus_confirmed,
+            )
+        return data
 
     def load_sync_data(self, sessdata):
         """

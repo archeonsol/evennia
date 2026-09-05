@@ -25,6 +25,85 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.228: Confirm and bound bus recovery
+
+### Session recovery
+
+- [The bus handshake](evennia/server/bus_handshake.py) confirms both process
+  identities, transport generations, and applied session state before admitting
+  actions. Startup order and Redis reconnect no longer depend on one discovery
+  message. Process initialization runs once; same-process recovery preserves
+  existing session objects, authentication, bindings, menus, and editors.
+- [Session reconciliation](evennia/server/bus_sessions.py) uses Portal socket
+  membership and current protocol negotiation while retaining Server authority
+  over authentication and control bindings. Per-socket incarnations prevent
+  reused session IDs from adopting stale sessions.
+- [The recovery hook](evennia/server/serversession.py) refreshes client state
+  after a surviving connection recovers. Games can extend
+  `at_transport_reconnect()` for scene, UI, and media snapshots. Browser output
+  resume remains supported.
+
+### Delivery and shutdown
+
+- [Redis transport](evennia/server/redis_transport.py) reads forward from an
+  explicit cursor. Failed generations discard unsent work and fence pending
+  callbacks. The dedicated bus client does not retry ambiguous writes; retained
+  commands and lifecycle requests are never reclaimed or republished.
+- Incoming and outgoing queues each admit at most 256 entries and 32 MiB of
+  encoded payload. Ordinary data is limited to 224 entries and 24 MiB, reserving
+  capacity for control traffic. A serialized frame payload is limited to 8 MiB;
+  queue accounting also includes metadata, in-flight writes, and active
+  callbacks. A measured 4,096-session snapshot uses 2,586,481 bytes; these bounds are not a production capacity benchmark.
+- [Publication results](evennia/server/bus_result.py) separate local admission
+  from Redis publication and preserve errback and awaitable callers. Canceling
+  one waiter does not cancel or hide the shared publication outcome.
+- Portal rejects unavailable input locally with a rate-limited uncertainty
+  notice. Lifecycle callers arm restart state only after successful publication.
+  An uncertain lifecycle result inhibits watchdog restart until confirmed
+  recovery. Operators can explicitly start Server if needed.
+- [Reload and reset](docs/source/Components/Redis-Bus-Shutdown.md) close input,
+  run cleanup hooks, then allow five seconds for final snapshot publication and
+  Portal application acknowledgment. A failed transition reports uncertainty and
+  continues process cleanup. Transport stop uses a shared three-second worker
+  wait budget and retains ownership of surviving cleanup work. These bounds do
+  not limit arbitrary game cleanup hooks or the complete web-worker drain.
+
+### Migration notes
+
+- **Coordinated cutover required.** Stop Portal and Server before installing the
+  matching engine and game revisions. Mixed bus versions are unsupported.
+  Follow [the cutover and rollback procedure](docs/source/Components/Redis-Bus-Cutover.md)
+  for scoped consumer-group maintenance. Rollback must recreate the old expected
+  groups at current stream tails to avoid delivering retained actions.
+- An interrupted action may already have run. Publication and synchronization
+  acknowledgment do not prove command completion, and no automatic command replay
+  or exactly-once game-effect guarantee is added. Job retry behavior is retained.
+- Games using readiness checks should require confirmed transport readiness.
+  Recovery hooks must refresh session-scoped state without rerunning startup or
+  puppet hooks. No new dependency or database migration is required.
+
+### Validation
+
+- Real Redis 7.2.5: 18 fault tests cover committed XADD reply loss, process death,
+  Redis restart and data loss, queue saturation, retention gaps, delayed final
+  application, scoped cutover, rollback through the previous reader, and atomic
+  job transitions. Process tests use observable handlers rather than full game
+  bootstrap; they do not establish Redis durability, TLS behavior, or production
+  capacity.
+- Full engine suite: 4,226 tests run successfully with 57 skips. The skipped
+  tests include 18 opt-in Redis tests that pass separately.
+- Full game suite: 10,307 tests run successfully with one skip. Registry
+  compilation, 21 registry tests, and migration drift checks pass.
+- Forty-nine focused tests pass on Python 3.12.13 and 3.14.4. Full local suites
+  use Python 3.13.13 and SQLite. Remote CI and PostgreSQL/MySQL matrices were not
+  run locally.
+- [Parallel test workers](evennia/server/tests/testrunner.py) initialize the
+  Server after Django assigns database clones and clear identity caches in the
+  worker that owns each rolled-back transaction. Worker regression checks and
+  database smoke tests pass; serial runner behavior is preserved. Synthetic
+  fixture sessions skip background moderation capture only during setup, keeping
+  configured capture behavior available to the test body.
+
 ## 6.0.0+underspire.227: Engine stability fixes
 
 ### Jobs and persistence

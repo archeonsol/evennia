@@ -235,20 +235,22 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
             mode (str): One of 'shutdown', 'reload' or 'reset'.
 
         """
-        if mode == "reload":
-            self.send_AdminPortal2Server(
-                amp.DUMMYSESSION, operation=amp.SRELOAD, server_restart_mode=mode
-            )
-        elif mode == "reset":
-            self.send_AdminPortal2Server(
-                amp.DUMMYSESSION, operation=amp.SRESET, server_restart_mode=mode
-            )
-        elif mode == "shutdown":
-            self.send_AdminPortal2Server(
-                amp.DUMMYSESSION, operation=amp.SSHUTD, server_restart_mode=mode
-            )
-        # store the mode for use once server comes back up again
-        self.factory.portal.server_restart_mode = mode
+        operations = {"reload": amp.SRELOAD, "reset": amp.SRESET, "shutdown": amp.SSHUTD}
+        if mode not in operations:
+            raise ValueError(f"Unknown Server stop mode: {mode}")
+        result = self.send_AdminPortal2Server(
+            amp.DUMMYSESSION, operation=operations[mode], server_restart_mode=mode
+        )
+
+        if getattr(result, "admitted", True):
+            self.factory.portal._lifecycle_unconfirmed = True
+
+        def published(_entry_id):
+            self.factory.portal.server_restart_mode = mode
+            self.factory.portal._lifecycle_unconfirmed = False
+
+        result.addCallback(published)
+        return result
 
     # sending amp data
 

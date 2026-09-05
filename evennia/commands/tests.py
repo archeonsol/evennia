@@ -2529,13 +2529,11 @@ _POSE_RECORDER = {"raw": None, "routed": None, "text": None}
 
 
 class _PunctRoutingRecorderState(_RPStateProvider):
-    """Stand-in for a game's pose / ``NoMatchRules`` providers: high-priority
-    ``before`` rules on :class:`Pose` and :class:`NoMatchAction` record the action
-    the parser produced and the verbatim text/raw it carried, without disturbing
-    dispatch."""
+    """Provide pose execution and record unmatched input verbatim."""
 
-    @_rp_rule(_RPPose, phase="before", priority=9999)
+    @_rp_rule(_RPPose, phase="carry_out", priority=9999)
     def on_pose(self, action, actor):
+        """Record a provided pose without triggering unavailable-action fallback."""
         _POSE_RECORDER.update(routed="pose", text=action.text, raw=action._raw_string)
         return _RP_PASS
 

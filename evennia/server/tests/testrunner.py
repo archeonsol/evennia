@@ -8,7 +8,15 @@ Runs as part of the Evennia's test suite with 'evennia test evennia"
 
 import unittest
 
-from django.test.runner import DiscoverRunner
+from django.test.runner import (
+    DiscoverRunner,
+    ParallelTestSuite,
+    RemoteTestResult,
+    RemoteTestRunner,
+)
+from django.test.runner import (
+    _init_worker as _django_init_worker,
+)
 
 
 def flush_identity_caches():
@@ -74,6 +82,38 @@ class IdmapperFlushResultMixin:
         super().stopTest(test)
 
 
+def initialize_worker(*args):
+    """Attach Django's worker databases before initializing the Server API.
+
+    Args:
+        *args: Worker setup arguments supplied by Django's parallel suite.
+    """
+    _django_init_worker(*args)
+    from django.conf import settings
+
+    import evennia
+
+    settings.TEST_ENVIRONMENT = True
+    evennia._init()
+
+
+class EvenniaRemoteTestResult(IdmapperFlushResultMixin, RemoteTestResult):
+    """Flush identities in the process that owns each rolled-back test row."""
+
+
+class EvenniaRemoteTestRunner(RemoteTestRunner):
+    """Report parallel test results with worker-local cache cleanup."""
+
+    resultclass = EvenniaRemoteTestResult
+
+
+class EvenniaParallelTestSuite(ParallelTestSuite):
+    """Initialize each Server worker before its test modules are unpickled."""
+
+    init_worker = initialize_worker
+    runner_class = EvenniaRemoteTestRunner
+
+
 class EvenniaTestSuiteRunner(DiscoverRunner):
     """
     Pointed to by the TEST_RUNNER setting.
@@ -81,6 +121,8 @@ class EvenniaTestSuiteRunner(DiscoverRunner):
      avoid running the large number of tests defined by Django
 
     """
+
+    parallel_test_suite = EvenniaParallelTestSuite
 
     def get_resultclass(self):
         """Return Django's result class with the identity-cache flush added.

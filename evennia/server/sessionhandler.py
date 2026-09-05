@@ -395,7 +395,7 @@ class ServerSessionHandler(SessionHandler):
             # protocol_flags etc)
             session.load_sync_data(portalsessiondata)
 
-    def portal_sessions_sync(self, portalsessionsdata):
+    def portal_sessions_sync(self, portalsessionsdata, restart_mode="reload"):
         """
         Syncing all session ids of the portal with the ones of the
         server. This is instantiated by the portal when reconnecting.
@@ -409,10 +409,7 @@ class ServerSessionHandler(SessionHandler):
         delayed_import()
         global _ServerSession, _AccountDB, _ServerConfig, _ScriptDB
 
-        for sess in list(self.values()):
-            # we delete the old session to make sure to catch eventual
-            # lingering references.
-            del sess
+        self.clear()
 
         for sessid, sessdict in portalsessionsdata.items():
             sess = _ServerSession()
@@ -427,10 +424,8 @@ class ServerSessionHandler(SessionHandler):
             self[sessid] = sess
             sess.at_sync()
 
-        mode = "reload"
-
-        # tell the server hook we synced
-        evennia.EVENNIA_SERVER_SERVICE.at_post_portal_sync(mode)
+        # Process-start restoration is separate from transport reconciliation.
+        evennia.EVENNIA_SERVER_SERVICE.at_post_portal_sync(restart_mode)
         # announce the reconnection
         if settings.BROADCAST_SERVER_RESTART_MESSAGES:
             self.announce_all(_(" ... Server restarted."))
@@ -641,6 +636,9 @@ class ServerSessionHandler(SessionHandler):
 
         """
         sessdata = self.get_all_sync_data()
+        bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
+        if bus is not None:
+            return bus.sync_sessions(sessdata)
         return _send_admin_to_portal(DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata)
 
     def session_portal_sync(self, session):

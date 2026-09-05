@@ -20,28 +20,45 @@ def receive_launcher_command(protocol, operation: str, arguments_wire: bytes):
 
     elif operation == amp.SRELOAD:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(protocol.send_Status2Launcher)
-            protocol.stop_server(mode="reload")
+            result = protocol.stop_server(mode="reload")
+            result.addCallback(
+                lambda _value: protocol.factory.server_connection.wait_for_disconnect(
+                    protocol.send_Status2Launcher
+                )
+            )
         else:
             protocol.wait_for_server_connect(protocol.send_Status2Launcher)
             protocol.start_server(amp.loads_launcher_args(arguments_wire))
 
     elif operation == amp.SRESET:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(protocol.send_Status2Launcher)
-            protocol.stop_server(mode="reset")
+            result = protocol.stop_server(mode="reset")
+            result.addCallback(
+                lambda _value: protocol.factory.server_connection.wait_for_disconnect(
+                    protocol.send_Status2Launcher
+                )
+            )
         else:
             protocol.wait_for_server_connect(protocol.send_Status2Launcher)
             protocol.start_server(amp.loads_launcher_args(arguments_wire))
 
     elif operation == amp.SSHUTD:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(protocol.send_Status2Launcher)
-            protocol.stop_server(mode="shutdown")
+            result = protocol.stop_server(mode="shutdown")
+            result.addCallback(
+                lambda _value: protocol.factory.server_connection.wait_for_disconnect(
+                    protocol.send_Status2Launcher
+                )
+            )
 
     elif operation == amp.PSHUTD:
         if server_connected:
-            protocol.factory.server_connection.wait_for_disconnect(protocol.factory.portal.shutdown)
+            result = protocol.stop_server(mode="shutdown")
+            result.addCallback(
+                lambda _value: protocol.factory.server_connection.wait_for_disconnect(
+                    protocol.factory.portal.shutdown
+                )
+            )
         else:
             protocol.factory.portal.shutdown()
 

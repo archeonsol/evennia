@@ -103,9 +103,7 @@ def text(session, *args, **kwargs):
         # nick replacement
         puppet = session.get_puppet()
         if puppet:
-            txt = puppet.nicks.nickreplace(
-                txt, categories=("inputline"), include_account=True
-            )
+            txt = puppet.nicks.nickreplace(txt, categories=("inputline"), include_account=True)
         else:
             txt = session.account.nicks.nickreplace(
                 txt, categories=("inputline"), include_account=False
@@ -242,9 +240,7 @@ def client_options(session, *args, **kwargs):
     old_flags = session.protocol_flags
     if not kwargs or kwargs.get("get", False):
         # return current settings
-        options = dict(
-            (key, old_flags[key]) for key in old_flags if key.upper() in _CLIENT_OPTIONS
-        )
+        options = dict((key, old_flags[key]) for key in old_flags if key.upper() in _CLIENT_OPTIONS)
         session.msg(client_options=options)
         return
 
@@ -318,9 +314,7 @@ def client_options(session, *args, **kwargs):
 
     session.protocol_flags.update(flags)
     # we must update the protocol flags on the portal session copy as well
-    session.sessionhandler.session_portal_partial_sync(
-        {session.sessid: {"protocol_flags": flags}}
-    )
+    session.sessionhandler.session_portal_partial_sync({session.sessid: {"protocol_flags": flags}})
 
 
 def get_client_options(session, *args, **kwargs):
@@ -337,8 +331,7 @@ def get_inputfuncs(session, *args, **kwargs):
     So we get it from the sessionhandler.
     """
     inputfuncsdict = dict(
-        (key, func.__doc__)
-        for key, func in session.sessionhandler.get_inputfuncs().items()
+        (key, func.__doc__) for key, func in session.sessionhandler.get_inputfuncs().items()
     )
     session.msg(get_inputfuncs=inputfuncsdict)
 
@@ -484,13 +477,9 @@ def monitored(session, *args, **kwargs):
 
     obj = session.get_puppet()
     monitors = []
-    for mon_obj, fieldname, idstring, persistent, monitor_kwargs in MONITOR_HANDLER.all(
-        obj=obj
-    ):
+    for mon_obj, fieldname, idstring, persistent, monitor_kwargs in MONITOR_HANDLER.all(obj=obj):
         safe_kwargs = {key: _safe_pickle(val) for key, val in monitor_kwargs.items()}
-        monitors.append(
-            (_safe_pickle(mon_obj), fieldname, idstring, persistent, safe_kwargs)
-        )
+        monitors.append((_safe_pickle(mon_obj), fieldname, idstring, persistent, safe_kwargs))
     session.msg(monitored=(monitors, {}))
 
 
@@ -699,7 +688,12 @@ def editor_client(session, *args, **kwargs):
     Kwargs:
         supported (bool): whether the client provides an editor UI.
     """
-    supported = bool(kwargs.get("supported", True))
+    from evennia.server.client_negotiation import capability_flags
+
+    flags = capability_flags("editor_client", kwargs)
+    if flags is None:
+        return False
+    supported = flags["CLIENT_EDITOR"]
     # Route through update_flags so the portal's authoritative copy also carries
     # the flag; a bare in-place assignment is dropped when portal_sessions_sync
     # rebuilds this session across ``@reload``, losing the web-editor capability.
@@ -725,10 +719,13 @@ def narrative_client(session, *args, **kwargs):
     Kwargs:
         supported (bool): whether the client renders narrative nodes.
     """
-    from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
+    from evennia.server.client_negotiation import capability_flags
 
-    # Sync to the portal (see editor_client) so the flag survives ``@reload``.
-    session.update_flags(**{CLIENT_NARRATIVE_FLAG: bool(kwargs.get("supported", True))})
+    flags = capability_flags("narrative_client", kwargs)
+    if flags is None:
+        return False
+    session.update_flags(**flags)
+    return True
 
 
 def azaban_hello(session, *args, **kwargs):
@@ -746,15 +743,12 @@ def azaban_hello(session, *args, **kwargs):
     Returns:
         bool: ``True`` after the capabilities have been synchronized.
     """
-    from evennia.narrative.rendernode import CLIENT_NARRATIVE_FLAG
+    from evennia.server.client_negotiation import capability_flags
 
-    caps = dict(kwargs.get("caps") or {})
-    session.update_flags(
-        **{
-            CLIENT_NARRATIVE_FLAG: bool(caps.get("rendersNodes")),
-            "AZABAN_CAPS": caps,
-        }
-    )
+    flags = capability_flags("azaban_hello", kwargs)
+    if flags is None:
+        return False
+    session.update_flags(**flags)
     return True
 
 

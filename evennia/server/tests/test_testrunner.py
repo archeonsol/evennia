@@ -101,3 +101,57 @@ class TestResultClass(unittest.TestCase):
         ObjectDB.__dbclass__.__instance_cache__ = {1: object()}
         Composed().stopTest(self)
         self.assertEqual(seen, ["empty"])
+
+
+class TestParallelWorkerMode(unittest.TestCase):
+    """Spawned workers must initialize the Server before importing fixtures."""
+
+    def test_server_handler_is_available(self):
+        """Expose the Server session API in each spawned worker."""
+        import evennia
+
+        self.assertTrue(callable(getattr(evennia.SESSION_HANDLER, "portal_connect", None)))
+
+    def test_remote_results_flush_in_the_worker(self):
+        """Install cache cleanup on the result class used inside workers."""
+        runner = EvenniaTestSuiteRunner.parallel_test_suite.runner_class()
+        self.assertIsInstance(runner.resultclass(), IdmapperFlushResultMixin)
+
+    def test_engine_initialization_follows_database_clone_assignment(self):
+        """Keep Server database access after Django attaches the worker clone."""
+        from unittest.mock import patch
+
+        import evennia
+        from evennia.server.tests import testrunner
+
+        events = []
+        with (
+            patch.object(
+                testrunner,
+                "_django_init_worker",
+                side_effect=lambda *args: events.append("clone"),
+                create=True,
+            ),
+            patch.object(evennia, "_init", side_effect=lambda: events.append("engine")),
+        ):
+            testrunner.initialize_worker("counter")
+        self.assertEqual(events, ["clone", "engine"])
+
+
+class TestParallelWorkerRollback(TestCase):
+    """Consecutive methods stay in one worker and expose stale row identities."""
+
+    def test_a_cache_a_transactional_row(self):
+        """Leave an actual cached row for the result cleanup to discard."""
+        obj = ObjectDB.objects.create(id=900001, db_key="worker rollback")
+        obj.attributes.add("worker-state", "must disappear")
+        self.assertIs(ObjectDB.get_cached_instance(obj.pk), obj)
+
+    def test_b_rolled_back_row_is_absent_from_memory(self):
+        """Reject identities left by the preceding rolled-back transaction."""
+        self.assertFalse(ObjectDB.objects.filter(pk=900001).exists())
+        self.assertIsNone(ObjectDB.get_cached_instance(900001))
+        from evennia.typeclasses import jsonb_handler
+
+        self.assertFalse(jsonb_handler._ROW_STATES)
+        self.assertFalse(jsonb_handler._STRONG_ROW_STATES)

@@ -44,6 +44,104 @@ class ServerShutdownDelayTest(SimpleTestCase):
         mock_clock.call_later.assert_called_once_with(0, mock_clock.stop_loop)
 
 
+class FinalSessionSyncOrderingTest(SimpleTestCase):
+    """Late shutdown changes reach Portal before the process can stop."""
+
+    def exercise_shutdown(self, mode, fail_snapshot=False):
+        """Run the real shutdown body with an explicitly delayed Portal ACK."""
+        from evennia.server import service as service_module
+        from evennia.server.bus_result import TransportUnavailable
+
+        with patch.object(service_module.EvenniaServerService, "sqlite3_prep"):
+            service = service_module.EvenniaServerService()
+        service.stall_watchdog = None
+        service.system_driver = None
+        service.maintenance_task = None
+        service.portal_bus = MagicMock()
+        state = {}
+        order = []
+        service.at_server_reload_stop = MagicMock(side_effect=lambda: order.append("reload_stop"))
+        service.at_server_cold_stop = MagicMock(side_effect=lambda: order.append("cold_stop"))
+
+        def stop_hook():
+            state["hook"] = "final"
+            order.append("stop_hook")
+
+        async def drain_web():
+            await asyncio.sleep(0)
+            state["web"] = "drained"
+            order.append("web_drain")
+
+        service.at_server_stop = stop_hook
+        service.web_root = MagicMock()
+        service.web_root.empty_threadpool = drain_web
+
+        with (
+            patch.object(service_module, "evennia") as mock_evennia,
+            patch.object(service_module.clock, "call_later") as schedule,
+            patch.object(service_module.logger, "log_trace") as log,
+            patch("evennia.scripts.monitorhandler.MONITOR_HANDLER"),
+            patch("evennia.scripts.ondemandhandler.ON_DEMAND_HANDLER"),
+            patch("evennia.typeclasses.attributes.flush_all_dirty"),
+            patch("evennia.typeclasses.jsonb_handler.spool_remaining_dirty"),
+        ):
+            mock_evennia.ObjectDB.get_all_cached_instances.return_value = []
+            mock_evennia.AccountDB.get_all_cached_instances.return_value = []
+            mock_evennia.ScriptDB.get_all_cached_instances.return_value = []
+            mock_evennia.gametime.runtime.return_value = 42
+
+            async def run():
+                sent = asyncio.Event()
+                acknowledged = asyncio.Event()
+                snapshots = []
+
+                async def snapshot():
+                    snapshots.append(dict(state))
+                    order.append("snapshot")
+                    sent.set()
+                    await acknowledged.wait()
+                    if fail_snapshot:
+                        raise TransportUnavailable("Portal ACK lost")
+                    order.append("ack")
+
+                mock_evennia.SESSION_HANDLER.all_sessions_portal_sync = snapshot
+                task = asyncio.create_task(service.shutdown(mode=mode))
+                try:
+                    await asyncio.wait_for(sent.wait(), 1)
+                    self.assertEqual(snapshots, [{"hook": "final", "web": "drained"}])
+                    self.assertLess(order.index("stop_hook"), order.index("snapshot"))
+                    self.assertLess(order.index("web_drain"), order.index("snapshot"))
+                    self.assertFalse(task.done())
+                    schedule.assert_not_called()
+                finally:
+                    acknowledged.set()
+                    await asyncio.wait_for(task, 1)
+
+            asyncio.run(run())
+            schedule.assert_called_once_with(0, service_module.clock.stop_loop)
+            self.assertTrue(service.shutdown_complete)
+            mock_evennia.ServerConfig.objects.conf.assert_any_call("runtime", 42)
+            if fail_snapshot:
+                log.assert_called_once_with(
+                    "shutdown: final Portal snapshot unconfirmed; transition is unclean"
+                )
+            else:
+                self.assertEqual(order[-1], "ack")
+                log.assert_not_called()
+
+    def test_reload_and_reset_snapshot_include_late_state(self):
+        """Final hooks and web writes precede capture; ACK precedes loop stop."""
+        for mode in ("reload", "reset"):
+            with self.subTest(mode=mode):
+                self.exercise_shutdown(mode)
+
+    def test_failed_snapshot_still_finishes_shutdown_cleanup(self):
+        """An unclean final handoff still schedules exit and saves runtime."""
+        for mode in ("reload", "reset"):
+            with self.subTest(mode=mode):
+                self.exercise_shutdown(mode, fail_snapshot=True)
+
+
 class ServerShutdownRequestTest(SimpleTestCase):
     """All production shutdown requests converge on one first-mode-wins task."""
 

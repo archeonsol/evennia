@@ -1,39 +1,47 @@
 # Redis Bus Shutdown
 
-`stop_bus()` requests an abort of local transport work. It does not drain or
-confirm delivery. The stopping caller waits for at most one three-second budget
-for worker exit and client cleanup. Thread scheduling and logging add ordinary
-execution overhead to that wait.
+## Intentional Server stop
 
-The writer checks its stop event through timed queue reads and interruptible
-retry waits. Shutdown does not need a free outbound queue slot. Reader checks
-cover pending reclaim, normal responses, and dispatch between entries.
+Reload and reset close player admission before cleanup. Current-generation output
+and control traffic retain FIFO ordering. After stop hooks and the web worker drain,
+Server sends its final session snapshot and waits for Portal to acknowledge
+application. Redis publication alone does not confirm session preservation.
 
-Stop is cooperative. An in-flight Redis write may finish, and a dispatch that
-passed its final stop check may still hand its callback to the reactor. Already
-scheduled callbacks are not canceled. Redis stream history and the existing
-consumer-group recovery behavior are independent of this local abort.
+The synchronization budget is five seconds from final snapshot creation, including
+queued publication and application acknowledgment. Earlier cleanup hooks do not
+consume that budget. Failure or timeout logs an unclean transition and continues shutdown.
+The bus remains able to answer current-peer heartbeats during this drain. It cannot
+accept a new session reconciliation while stopping.
 
-A single daemon cleanup worker joins the captured writer and reader, then closes
-their captured Redis client. A blocked worker or blocked client close may outlive
-the caller's deadline. Handles remain available, warnings identify survivors,
-and restart is rejected while any old worker or cleanup worker is alive.
-Cleanup errors are logged. Repeated stops reuse the same cleanup worker.
+Portal applies final state only to matching socket incarnations. Protocol flags
+negotiated since the Server's last snapshot remain authoritative. New sockets are
+not disconnected by an older final snapshot.
 
-Publication after stop raises `RuntimeError`, so it cannot be reported as
-accepted through `callRemote()`. Publication before the first start retains the
-existing queue behavior. After a completed explicit stop, restart discards unsent
-local frames and opens admission for fresh work. Existing queue overflow behavior
-is unchanged.
+Launcher restart callbacks and restart mode changes require successful lifecycle
+publication. A rejected request does not arm them. An admitted request with an
+uncertain publication inhibits the watchdog: the request may already have stopped
+Server. A fresh confirmed connection clears that inhibition. If Server actually
+exited, an operator must inspect the outcome and explicitly start it. Lifecycle
+requests are never automatically republished.
 
-An already-running healthy worker pair makes start a no-op. A partially surviving
-pair rejects start. The Server sends PSYNC and runs initial setup only after a
-fresh successful start, never after a rejected, failed, or duplicate start.
-Lifecycle calls belong to the reactor; publication admission is protected by a
-short lock and can be called from other threads.
+## Local transport abort
 
-These methods do not add a shutdown call to the production lifecycle. Tests in
-`evennia.server.tests.test_redis_bus` cover full queues, controlled blocked workers,
-client ownership, read and retry interruption, and completed stop/restart. They
-use real threads with controlled calls and fakeredis, not separate live Redis
-and Portal/Server processes.
+`stop_bus()` aborts local transport work after the lifecycle drain. It invalidates
+queued callbacks, rejects outstanding results, and waits at most one three-second
+budget for worker exit and client cleanup. Thread scheduling and logging add
+ordinary execution overhead. Already running actions and in-flight Redis writes
+may finish; abort does not roll them back.
+
+Shutdown uses a stop event and timed waits, so it needs neither an outbound queue
+slot nor event-loop progress. The bus settles the final failure before loop exit.
+Publication after stop returns a rejected `PublicationResult`.
+
+A single daemon cleanup worker joins the captured writer and reader before closing
+their captured client. Blocked workers or client cleanup may outlive the caller's
+deadline. Handles remain available, warnings identify survivors, and restart is
+rejected while any old worker or cleanup worker remains alive. Repeated stops reuse
+that cleanup worker. Failure settlement must finish before restarting the transport.
+
+An already running worker pair makes start a no-op. A partially surviving pair
+rejects start. Server process initialization remains separate from transport
+[recovery](Redis-Bus-Recovery.md).

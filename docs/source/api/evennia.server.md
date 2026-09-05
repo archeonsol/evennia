@@ -18,6 +18,10 @@ evennia.server
    evennia.server.asgi_webserver
    evennia.server.asyncio_bootstrap
    evennia.server.at_init_scheduler
+   evennia.server.bus_handshake
+   evennia.server.bus_result
+   evennia.server.bus_sessions
+   evennia.server.client_negotiation
    evennia.server.collectstatic_cache
    evennia.server.connection_wizard
    evennia.server.database_postgres
@@ -33,6 +37,7 @@ evennia.server
    evennia.server.models
    evennia.server.prometheus_metrics
    evennia.server.redis_bus
+   evennia.server.redis_transport
    evennia.server.runtime_db
    evennia.server.server
    evennia.server.serversession

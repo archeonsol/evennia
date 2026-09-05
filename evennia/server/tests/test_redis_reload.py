@@ -42,17 +42,25 @@ class TestRedisReloadSurvival(TestCase):
 
         self.session = MagicMock()
         self.session.sessid = 1
+        self.session.uid = 42
+        self.session.uname = "test"
+        self.session.logged_in = True
+        self.session.bid = None
+        self.session.protocol_flags = {}
         evennia.SERVER_SESSION_HANDLER[1] = self.session
 
         self.portal = EvenniaPortalService()
         evennia.EVENNIA_PORTAL_SERVICE = self.portal
         self.portalsession = session.Session()
+        self.portalsession.init_session("test", "local", None)
         self.portalsession.sessid = 1
         self.portalsession.protocol = MagicMock()
         self.portalsession.protocol.transport = MagicMock()
         self.portalsession.protocol.transport.connected = True
         evennia.PORTAL_SESSION_HANDLER = PortalSessionHandler()
         evennia.PORTAL_SESSION_HANDLER[1] = self.portalsession
+        evennia.PORTAL_SESSION_HANDLER._ensure_bus_socket(self.portalsession)
+        self.portalsession._bus_confirmed = True
         evennia.PORTAL_SESSION_HANDLER.get_all_sync_data = MagicMock(
             return_value=[{"sessid": 1, "uid": 42}]
         )
@@ -71,6 +79,24 @@ class TestRedisReloadSurvival(TestCase):
         self.server_bus.start_bus()
         self.portal_bus.start_bus()
         _drain_bus()
+        self.assertTrue(self.server_bus.ready, repr(self.server_bus.last_sync_error))
+        self.assertTrue(self.portal_bus.ready, repr(self.portal_bus.last_sync_error))
+
+    def _wait_for_recovery(self):
+        """Require both peers to confirm the new generation after an outage."""
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            _drain_bus(0.02)
+            if (
+                self.server_bus.ready
+                and self.portal_bus.ready
+                and self.server_bus._handshake.pair == self.portal_bus._handshake.pair
+            ):
+                return
+        self.fail(
+            f"recovery failed: {self.server_bus.last_sync_error!r}, "
+            f"{self.portal_bus.last_sync_error!r}"
+        )
 
     def test_initial_handshake_completed_during_setup(self):
         """The initial PSYNC must dispatch before the test body starts."""
@@ -96,7 +122,11 @@ class TestRedisReloadSurvival(TestCase):
         inner = MagicMock()
         inner.connected = True
         ws = WebSocketClient()
+        ws.init_session("websocket", "local", evennia.PORTAL_SESSION_HANDLER)
         ws.sessid = 1
+        ws._bus_socket_id = self.portalsession._bus_socket_id
+        ws._bus_protocol_auth = self.portalsession._bus_protocol_auth
+        ws._bus_confirmed = True
         ws.protocol_flags = {
             CLIENT_NARRATIVE_FLAG: True,
             "AZABAN_CAPS": {"rendersNodes": True, "patches": True},
@@ -119,19 +149,14 @@ class TestRedisReloadSurvival(TestCase):
         self.assertFalse(ws.transport.disconnecting)
         self.assertIn(1, evennia.PORTAL_SESSION_HANDLER)
 
-        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.reset_mock()
-        sessiondata = ws.get_sync_data()
-        self.portal_bus.send_AdminPortal2Server(
-            amp.DUMMYSESSION,
-            operation=amp.PSYNC,
-            server_restart_mode="reload",
-            sessiondata=[sessiondata],
-            portal_start_time=time.time(),
-        )
-        _drain_bus(0.3)
-        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.assert_called_once_with([sessiondata])
-        synced = evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.call_args.args[0][0]
-        self.assertTrue(synced["protocol_flags"]["AZABAN_CAPS"]["patches"])
+        self.server_bus._handshake.disconnect()
+        self.portal_bus._handshake._last_probe = -float("inf")
+        self.portal_bus._handshake.tick()
+        self._wait_for_recovery()
+        self.assertTrue(self.portal_bus.ready)
+        self.assertIs(evennia.SERVER_SESSION_HANDLER[1], self.session)
+        self.assertTrue(self.session.protocol_flags["AZABAN_CAPS"]["patches"])
+        self.server.run_init_hooks.assert_called_once_with("shutdown")
 
         outbound.clear()
         evennia.PORTAL_SESSION_HANDLER.data_out(ws, text=[["after reload"], {}])
@@ -148,25 +173,50 @@ class TestRedisReloadSurvival(TestCase):
         """Server ``start_bus`` PSYNC must reach Portal and fire ``at_server_connection``."""
         evennia.PORTAL_SESSION_HANDLER.at_server_connection.reset_mock()
         self.server_bus.stop_bus()
+        _drain_bus(0.01)
         self.server_bus.start_bus()
+        self.portal_bus._handshake._last_probe = -float("inf")
+        self.portal_bus._handshake.tick()
         _drain_bus()
         evennia.PORTAL_SESSION_HANDLER.at_server_connection.assert_called()
         self.assertIsNotNone(self.portal.server_process_id)
 
-    def test_psync_after_server_restart_resyncs_sessions(self):
-        """Portal PSYNC payload after Server reconnect reattaches sessions on Server."""
+    def test_legacy_psync_cannot_repeat_startup(self):
+        """Retained legacy discovery cannot rerun process initialization."""
         evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.reset_mock()
         self.portal_bus.send_AdminPortal2Server(
             amp.DUMMYSESSION,
             operation=amp.PSYNC,
             server_restart_mode="reload",
-            sessiondata=[{"sessid": 1, "uid": 42}],
+            sessiondata={1: {"sessid": 1, "uid": 999}},
             portal_start_time=time.time(),
         )
         _drain_bus()
-        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.assert_called_once_with(
-            [{"sessid": 1, "uid": 42}]
-        )
+        evennia.SERVER_SESSION_HANDLER.portal_sessions_sync.assert_not_called()
+        self.server.run_init_hooks.assert_called_once_with("shutdown")
+
+    def test_same_process_recovery_preserves_runtime_and_restart_mode(self):
+        """A transport outage does not reconstruct or rerun startup hooks."""
+        self.portal.server_restart_mode = "reload"
+        self.session.uid = None
+        self.session.logged_in = False
+        menu = self.session.menu = object()
+        self.server_bus._handshake.disconnect()
+        self.portal_bus._handshake._last_probe = -float("inf")
+        self.portal_bus._handshake.tick()
+        self._wait_for_recovery()
+        self.assertTrue(self.portal_bus.ready)
+        self.assertIs(self.session.menu, menu)
+        self.assertIsNone(self.portalsession.uid)
+        self.assertEqual(self.portal.server_restart_mode, "reload")
+        self.server.run_init_hooks.assert_called_once_with("shutdown")
+
+    def test_partial_startup_failure_is_not_repeated(self):
+        """A failed startup cannot be retried through a fresh handshake."""
+        self.server_bus._startup_complete = False
+        with self.assertRaisesRegex(RuntimeError, "startup failed"):
+            self.server_bus._apply_snapshot({"sessions": {}, "restart_mode": "reload"})
+        self.server.run_init_hooks.assert_called_once_with("shutdown")
 
     def test_server_output_after_psync_reaches_portal_session(self):
         """Post-reload output path: Server -> redis -> Portal session data_out."""
