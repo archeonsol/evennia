@@ -27,8 +27,9 @@ local frames and opens admission for fresh work. Existing queue overflow behavio
 is unchanged.
 
 An already-running healthy worker pair makes start a no-op. A partially surviving
-pair rejects start. The Server sends PSYNC and runs initial setup only after a
-fresh successful start, never after a rejected, failed, or duplicate start.
+pair rejects start. The Server runs initial setup once before discovery can apply sessions. A failed
+setup cannot be skipped by a repeated start. Transport recovery uses the
+[confirmed handshake](Redis-Bus-Recovery.md) without rerunning process setup.
 Lifecycle calls belong to the reactor; publication admission is protected by a
 short lock and can be called from other threads.
 

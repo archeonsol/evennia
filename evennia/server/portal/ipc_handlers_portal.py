@@ -55,6 +55,8 @@ def receive_adminserver2portal(link, packed_data):
         link.stop_server(mode="shutdown")
 
     elif operation == amp.PSYNC:
+        if hasattr(link, "_handshake"):
+            return {}
         link.factory.portal.server_info_dict = kwargs.get("info_dict", {})
         link.factory.portal.server_process_id = kwargs.get("spid", None)
         server_restart_mode = link.factory.portal.server_restart_mode
@@ -84,6 +86,9 @@ def receive_adminserver2portal(link, packed_data):
             logger.log_trace("PSYNC status push failed")
 
     elif operation == amp.SSYNC:
+        if kwargs.get("confirmed"):
+            portal_sessionhandler.apply_bus_state({"sessions": kwargs["sessiondata"], "closed": {}})
+            return {}
         portal_sessionhandler.server_session_sync(
             kwargs.get("sessiondata"), kwargs.get("clean", True)
         )

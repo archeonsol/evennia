@@ -20,10 +20,28 @@ def receive_adminportal2server(packed_data):
     sessid, operation, kwargs = ipc_schema.parse_admin(packed_data)
 
     if operation == amp.PCONN:
-        evennia.SERVER_SESSION_HANDLER.portal_connect(kwargs.get("sessiondata"))
+        link = evennia.EVENNIA_SERVER_SERVICE.portal_bus
+        data = kwargs.get("sessiondata")
+        if link is not None and "_socket_id" in data:
+            link._sessions.connect(data)
+            state = link._sessions.server_state()["sessions"]
+            link.send_AdminServer2Portal(
+                amp.DUMMYSESSION,
+                operation=amp.SSYNC,
+                sessiondata={sessid: state[sessid]} if sessid in state else {},
+                clean=False,
+                confirmed=True,
+            )
+        else:
+            evennia.SERVER_SESSION_HANDLER.portal_connect(data)
 
     elif operation == amp.PCONNSYNC:
-        evennia.SERVER_SESSION_HANDLER.portal_session_sync(kwargs.get("sessiondata"))
+        link = evennia.EVENNIA_SERVER_SERVICE.portal_bus
+        data = kwargs.get("sessiondata")
+        if link is not None and "_socket_id" in data:
+            link._sessions.update(data)
+        else:
+            evennia.SERVER_SESSION_HANDLER.portal_session_sync(data)
 
     elif operation == amp.PDISCONN:
         session = evennia.SERVER_SESSION_HANDLER.get(sessid)
@@ -34,6 +52,8 @@ def receive_adminportal2server(packed_data):
         evennia.SERVER_SESSION_HANDLER.portal_disconnect_all()
 
     elif operation == amp.PSYNC:
+        if evennia.EVENNIA_SERVER_SERVICE.portal_bus is not None:
+            return {}
         server_restart_mode = kwargs.get("server_restart_mode", "shutdown")
         evennia.EVENNIA_SERVER_SERVICE.run_init_hooks(server_restart_mode)
         evennia.SERVER_SESSION_HANDLER.portal_sessions_sync(kwargs.get("sessiondata"))

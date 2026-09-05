@@ -5,6 +5,7 @@ Sessionhandler for portal sessions.
 
 import time
 from collections import deque, namedtuple
+from uuid import uuid4
 
 from django.conf import settings
 from django.utils.translation import gettext as _
@@ -60,11 +61,46 @@ class PortalSessionHandler(SessionHandler):
         """
         super().__init__(*args, **kwargs)
         self.latest_sessid = 0
+        self.bus_revision = 0
         self.uptime = time.time()
         self.connection_time = 0
 
         self.connection_last = self.uptime
         self.connection_task = None
+
+    def _ensure_bus_socket(self, session):
+        """Capture socket identity and protocol auth before Server mirrors arrive."""
+        if not getattr(session, "_bus_socket_id", None):
+            session._bus_socket_id = uuid4().hex
+            session._bus_protocol_auth = {
+                key: getattr(session, key, None) for key in ("uid", "uname", "logged_in")
+            }
+            session._bus_confirmed = False
+
+    def get_bus_sync_data(self):
+        """Return every live socket, including sockets awaiting connection admission."""
+        snapshot = {}
+        for sid, session in self.items():
+            self._ensure_bus_socket(session)
+            snapshot[sid] = session.get_sync_data()
+        return snapshot
+
+    def apply_bus_state(self, payload):
+        """Apply auth and disconnects without crossing socket incarnations."""
+        for sid, data in payload["sessions"].items():
+            session = self.get(sid)
+            if session is not None and session._bus_socket_id == data["_socket_id"]:
+                session.load_sync_data(
+                    {key: value for key, value in data.items() if key != "_socket_id"}
+                )
+                session.server_connected = True
+                session._bus_confirmed = True
+                if session in _CONNECTION_QUEUE:
+                    _CONNECTION_QUEUE.remove(session)
+        for sid, socket_id in payload["closed"].items():
+            session = self.get(sid)
+            if session is not None and session._bus_socket_id == socket_id:
+                self.server_disconnect(session)
 
     def at_server_connection(self):
         """
@@ -111,6 +147,9 @@ class PortalSessionHandler(SessionHandler):
                 # if the session already has a sessid (e.g. being inherited in the
                 # case of a webclient auto-reconnect), keep it
                 session.sessid = self.generate_sessid()
+            self._ensure_bus_socket(session)
+            self[session.sessid] = session
+            self.bus_revision += 1
             session.server_connected = False
             _CONNECTION_QUEUE.appendleft(session)
             if len(_CONNECTION_QUEUE) > 1:
@@ -127,8 +166,10 @@ class PortalSessionHandler(SessionHandler):
                 )
         now = time.time()
         if (
-            now - self.connection_last < _MIN_TIME_BETWEEN_CONNECTS
-        ) or not evennia.EVENNIA_PORTAL_SERVICE.server_amp:
+            (now - self.connection_last < _MIN_TIME_BETWEEN_CONNECTS)
+            or not evennia.EVENNIA_PORTAL_SERVICE.server_amp
+            or not getattr(evennia.EVENNIA_PORTAL_SERVICE.server_amp, "ready", True)
+        ):
             if not session or not self.connection_task:
                 self.connection_task = clock.call_later(
                     _MIN_TIME_BETWEEN_CONNECTS, self.connect, None
@@ -166,6 +207,7 @@ class PortalSessionHandler(SessionHandler):
             session (PortalSession): Session to sync.
 
         """
+        self.bus_revision += 1
         if session.sessid and session.server_connected:
             # only use if session already has sessid and has already connected
             # once to the server - if so we must re-sync woth the server, otherwise
@@ -186,6 +228,7 @@ class PortalSessionHandler(SessionHandler):
                         "conn_time",
                         "protocol_flags",
                         "server_data",
+                        "_socket_id",
                     )
                 )
                 evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
@@ -206,7 +249,9 @@ class PortalSessionHandler(SessionHandler):
 
         """
         global _CONNECTION_QUEUE
+        self.bus_revision += 1
         if session in _CONNECTION_QUEUE:
+            self.pop(session.sessid, None)
             # connection was already dropped before we had time
             # to forward this to the Server, so now we just remove it.
             _CONNECTION_QUEUE.remove(session)
@@ -439,14 +484,15 @@ class PortalSessionHandler(SessionHandler):
                 self.data_out(session, text=[[settings.COMMAND_RATE_WARNING], {}])
                 return
 
-            if not evennia.EVENNIA_PORTAL_SERVICE.server_amp:
-                # this can happen if someone connects before AMP connection
-                # was established (usually on first start)
-                clock.call_later(1.0, self.data_in, session, **kwargs)
-                return
-
-            # scrub data
+            # Declarative capabilities remain local even before input admission.
             kwargs = self.clean_senddata(session, kwargs)
+            from evennia.server.client_negotiation import retain_capabilities
+
+            if retain_capabilities(session, kwargs):
+                self.sync(session)
+            link = evennia.EVENNIA_PORTAL_SERVICE.server_amp
+            if not link or not getattr(link, "ready", True):
+                return
 
             # relay data to Server
             session.cmd_last = now

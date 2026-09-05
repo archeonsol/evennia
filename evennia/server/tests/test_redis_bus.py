@@ -136,14 +136,22 @@ class TestRedisBus(TestCase):
 
         self.session = MagicMock()
         self.session.sessid = 1
+        self.session.uid = 42
+        self.session.uname = "test"
+        self.session.logged_in = True
+        self.session.bid = None
+        self.session.protocol_flags = {}
         evennia.SERVER_SESSION_HANDLER[1] = self.session
 
         self.portal = EvenniaPortalService()
         evennia.EVENNIA_PORTAL_SERVICE = self.portal
         self.portalsession = session.Session()
+        self.portalsession.init_session("test", "local", None)
         self.portalsession.sessid = 1
         evennia.PORTAL_SESSION_HANDLER = PortalSessionHandler()
         evennia.PORTAL_SESSION_HANDLER[1] = self.portalsession
+        evennia.PORTAL_SESSION_HANDLER._ensure_bus_socket(self.portalsession)
+        self.portalsession._bus_confirmed = True
         evennia.PORTAL_SESSION_HANDLER.data_in = MagicMock()
         evennia.PORTAL_SESSION_HANDLER.data_out = MagicMock()
         evennia.PORTAL_SESSION_HANDLER.get_all_sync_data = MagicMock(return_value=[])
@@ -166,6 +174,19 @@ class TestRedisBus(TestCase):
         self.portal_bus.start_bus()
         time.sleep(0.05)
         self.server_bus.start_bus()
+        _drain_bus()
+        self.assertTrue(
+            self.server_bus.ready,
+            repr(
+                (
+                    self.server_bus.last_sync_error,
+                    self.portal_bus.last_sync_error,
+                    self.server_bus._handshake.state,
+                    self.portal_bus._handshake.state,
+                )
+            ),
+        )
+        self.assertTrue(self.portal_bus.ready, repr(self.portal_bus.last_sync_error))
 
     def test_stream_topology(self):
         prefix = _BUS_SETTINGS["REDIS_BUS_PREFIX"]
@@ -654,10 +675,10 @@ class TestBoundedTransportStop(SimpleTestCase):
         finally:
             self.transport.stop()
 
-    def test_server_setup_only_after_fresh_success(self):
-        """Duplicate and rejected starts do not rerun PSYNC or initial setup."""
+    def test_server_setup_runs_once_before_discovery(self):
+        """A duplicate or rejected worker start cannot repeat initial setup."""
         bus = RedisServerBus(MagicMock())
-        with patch.object(bus, "send_AdminServer2Portal") as send:
+        with patch.object(bus, "_tick"):
             for outcome in (False, RuntimeError("survivor"), True):
                 with self.subTest(outcome=outcome):
                     with patch.object(bus._transport, "start", side_effect=[outcome]):
@@ -666,10 +687,18 @@ class TestBoundedTransportStop(SimpleTestCase):
                                 bus.start_bus()
                         else:
                             bus.start_bus()
-                    self.assertEqual(send.call_count, int(outcome is True))
-                    self.assertEqual(
-                        bus.factory.server.run_initial_setup.call_count, int(outcome is True)
-                    )
+                    bus.factory.server.run_initial_setup.assert_called_once()
+
+    def test_failed_initial_setup_cannot_be_skipped(self):
+        """An escaping setup failure requires a new process."""
+        server = MagicMock()
+        server.run_initial_setup.side_effect = ValueError("failed setup")
+        bus = RedisServerBus(server)
+        with self.assertRaises(ValueError):
+            bus.start_bus()
+        with self.assertRaisesRegex(RuntimeError, "initial setup failed"):
+            bus.start_bus()
+        server.run_initial_setup.assert_called_once()
 
     def test_failed_restart_client_is_cleaned_up(self):
         """A failed restart gives its newly created client its own cleanup."""

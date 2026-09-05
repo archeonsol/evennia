@@ -187,6 +187,18 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
             if restore:
                 restore(session=self)
 
+    def at_transport_reconnect(self):
+        """Refresh client state after confirmed transport synchronization."""
+        from evennia.server.inputfuncs import _find_editor
+
+        editor = _find_editor(self)
+        if (
+            self.protocol_flags.get("CLIENT_EDITOR")
+            and editor is not None
+            and getattr(editor, "_frontend", None) == "web"
+        ):
+            editor.reopen_web(self)
+
     @hook(
         event="login",
         phase="composite",

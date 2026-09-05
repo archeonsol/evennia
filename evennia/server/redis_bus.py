@@ -26,7 +26,10 @@ import time
 import psutil
 from django.conf import settings
 
+import evennia
 from evennia.server import ipc_handlers_server
+from evennia.server.bus_handshake import BusHandshake
+from evennia.server.bus_sessions import SessionReconciler
 from evennia.server.portal import amp, ipc_handlers_portal
 from evennia.server.service_registry import IMMEDIATE_RESULT
 from evennia.utils import clock, logger
@@ -326,7 +329,68 @@ class _RedisBusMixin:
 
     def _init_bus(self, shim_factory):
         self.factory = shim_factory
-        self._transport = _RedisTransport(self._read_stream, self._on_frame)
+        self._transport = _RedisTransport(self._read_stream, self._receive_frame)
+        self._tick_handle = None
+        self.last_sync_error = None
+        self._handshake = BusHandshake(
+            self._role,
+            send=self._send_handshake,
+            snapshot=self._snapshot,
+            apply=self._apply_snapshot,
+            state_snapshot=self._state_snapshot,
+            apply_state=self._apply_state,
+            on_ready=self._ready,
+            on_unavailable=self._unavailable,
+        )
+
+    @property
+    def ready(self):
+        """Whether both peers confirmed the current session generation."""
+        return self._handshake.state == "ready"
+
+    def _send_handshake(self, frame):
+        """Publish fresh state using the typed admin serializer."""
+        self._transport.publish(
+            self._send_stream,
+            b"BusHandshake",
+            amp.dumps_admin((0, {"sessiondata": frame})),
+        )
+
+    def _receive_frame(self, cmdkey, data):
+        """Keep discovery separate from lifecycle and player frames."""
+        if cmdkey == b"BusHandshake":
+            try:
+                self._handshake.receive(amp.loads_admin(data)[1]["sessiondata"])
+            except Exception as error:
+                self.last_sync_error = error
+                self._handshake.disconnect()
+                logger.log_trace("redis bus: synchronization failed")
+        else:
+            self._on_frame(cmdkey, data)
+
+    def _tick(self):
+        """Own one cancellable heartbeat timer per running transport."""
+        if self._transport._stop.is_set():
+            return
+        self._handshake.tick()
+        self._tick_handle = clock.call_later(0.5, self._tick)
+
+    def _unavailable(self):
+        """Close readiness while retaining live socket and runtime state."""
+
+    def _snapshot(self):
+        """Return Portal state; unused by the Server role."""
+        return 0, {}
+
+    def _apply_snapshot(self, payload):
+        """Apply Portal state; unused by the Portal role."""
+
+    def _state_snapshot(self):
+        """Return Server state; unused by the Portal role."""
+        return {}
+
+    def _apply_state(self, payload):
+        """Apply Server state; unused by the Server role."""
 
     def callRemote(self, command, **kwargs):
         cmdkey = command.key
@@ -339,9 +403,21 @@ class _RedisBusMixin:
         raise NotImplementedError
 
     def start_bus(self):
-        return self._transport.start()
+        """Start transport workers and fresh peer discovery once."""
+        if self._transport._reader is None or self._transport._stop.is_set():
+            self._handshake.disconnect()
+        started = self._transport.start()
+        if started:
+            self._tick()
+        return started
 
     def stop_bus(self):
+        """Cancel owned discovery before stopping worker threads."""
+        if self._tick_handle is not None:
+            self._tick_handle.cancel()
+            self._tick_handle = None
+        self.last_sync_error = None
+        self._handshake.disconnect()
         try:
             self._transport.stop()
         except Exception:
@@ -389,12 +465,19 @@ class _PidTransport:
 
 
 class RedisServerBus(_RedisBusMixin):
+    _role = "server"
+
     def __init__(self, server):
         w = _worker_id()
         prefix = _stream_prefix()
         self._send_stream = f"{prefix}:s2p"
         self._read_stream = f"{prefix}:p2s:{w}"
         self._init_bus(_ServerShimFactory(server))
+        self._initial_setup_done = False
+        self._initial_setup_attempted = False
+        self._startup_attempted = False
+        self._startup_complete = False
+        self._sessions = SessionReconciler(evennia.SERVER_SESSION_HANDLER)
 
     def _on_frame(self, cmdkey, data):
         if cmdkey == b"MsgPortal2Server":
@@ -414,16 +497,59 @@ class RedisServerBus(_RedisBusMixin):
         return ipc_handlers_server.data_to_portal(self, command, sessid, **kwargs)
 
     def start_bus(self):
-        if not _RedisBusMixin.start_bus(self):
-            return
-        info_dict = self.factory.server.get_info_dict()
-        self.send_AdminServer2Portal(
-            amp.DUMMYSESSION, operation=amp.PSYNC, spid=os.getpid(), info_dict=info_dict
-        )
-        self.factory.server.run_initial_setup()
+        """Run process setup once, then negotiate session readiness."""
+        if not self._initial_setup_done:
+            if self._initial_setup_attempted:
+                raise RuntimeError("redis bus: initial setup failed; process restart required")
+            self._initial_setup_attempted = True
+            self.factory.server.run_initial_setup()
+            self._initial_setup_done = True
+        return super().start_bus()
+
+    def _apply_snapshot(self, payload):
+        """Restore once at process start; reconcile surviving sessions later."""
+        sessions = payload["sessions"]
+        portal_id = self._handshake.pair[0][0]
+        handler = self._sessions.handler
+        if not self._startup_attempted:
+            self._startup_attempted = True
+            mode = payload.get("restart_mode") or "shutdown"
+            self.factory.server.run_init_hooks(mode)
+            restored = {
+                sid: {key: value for key, value in data.items() if not key.startswith("_")}
+                for sid, data in sessions.items()
+                if data.get("_server_confirmed")
+            }
+            handler.portal_sessions_sync(restored, restart_mode=mode)
+            self._sessions.adopt({sid: sessions[sid] for sid in restored}, portal_id)
+            self._sessions.reconcile(sessions, portal_id)
+            handler.portal_start_time = payload.get("portal_start_time")
+            self._startup_complete = True
+        elif not self._startup_complete:
+            raise RuntimeError("redis bus: startup failed; process restart required")
+        else:
+            self._sessions.reconcile(sessions, portal_id)
+
+    def _state_snapshot(self):
+        """Return current Server authentication after reciprocal confirmation."""
+        return {
+            **self._sessions.server_state(),
+            "spid": os.getpid(),
+            "info_dict": self.factory.server.get_info_dict(),
+        }
+
+    def _ready(self):
+        """Refresh each current session only after final confirmation is sent."""
+        for session in list(self._sessions.handler.values()):
+            try:
+                session.at_transport_reconnect()
+            except Exception:
+                logger.log_trace("redis bus: session recovery hook failed")
 
 
 class RedisPortalBus(_RedisBusMixin):
+    _role = "portal"
+
     def __init__(self, portal, factory=None):
         w = _worker_id()
         prefix = _stream_prefix()
@@ -438,6 +564,38 @@ class RedisPortalBus(_RedisBusMixin):
             ipc_handlers_portal.receive_server2portal(data)
         elif cmdkey == b"AdminServer2Portal":
             ipc_handlers_portal.receive_adminserver2portal(self, data)
+
+    def _snapshot(self):
+        """Capture current socket membership and its local revision."""
+        handler = evennia.PORTAL_SESSION_HANDLER
+        return handler.bus_revision, {
+            "sessions": handler.get_bus_sync_data(),
+            "restart_mode": self.factory.portal.server_restart_mode,
+            "portal_start_time": self.factory.portal.start_time,
+        }
+
+    def _apply_state(self, payload):
+        """Apply Server authority only to matching socket incarnations."""
+        evennia.PORTAL_SESSION_HANDLER.apply_bus_state(payload)
+        self.factory.portal.server_process_id = payload["spid"]
+        self.factory.portal.server_info_dict = payload["info_dict"]
+
+    def _ready(self):
+        """Fire launcher readiness callbacks only after session application."""
+        self.factory.server_connection = self
+        evennia.PORTAL_SESSION_HANDLER.at_server_connection()
+        server_process = self._handshake.pair[1][0]
+        if getattr(self, "_ready_server_process", None) != server_process:
+            self.factory.portal.server_restart_mode = None
+            self._ready_server_process = server_process
+        callbacks = self.factory.server_connect_callbacks
+        self.factory.server_connect_callbacks = []
+        for callback, args, kwargs in callbacks:
+            try:
+                callback(*args, **kwargs)
+            except Exception:
+                logger.log_trace("redis bus: connection-ready callback failed")
+        self.send_Status2Launcher()
 
     def get_status(self):
         """Return the launcher status tuple.
