@@ -77,7 +77,7 @@ class EvenniaPortalService(MultiService):
 
         if getattr(self, "shutdown_complete", False):
             return
-        if self.server_restart_mode:
+        if self.server_restart_mode or getattr(self, "_lifecycle_unconfirmed", False):
             return
         spid = self.server_process_id
         if not spid or _pid_alive(spid):
@@ -525,13 +525,17 @@ class EvenniaPortalService(MultiService):
 
         try:
             try:
-                evennia.PORTAL_SESSION_HANDLER.disconnect_all()
+                import asyncio
+
+                async with asyncio.timeout(5):
+                    await clock.maybe_await(evennia.PORTAL_SESSION_HANDLER.disconnect_all())
             except Exception:
                 logger.log_trace("portal session disconnect failed")
             await self._stop_asyncio_resources()
             if self._shutdown_stop_server and self.server_amp is not None:
                 try:
-                    self.server_amp.stop_server(mode="shutdown")
+                    async with asyncio.timeout(5):
+                        await clock.maybe_await(self.server_amp.stop_server(mode="shutdown"))
                 except Exception:
                     logger.log_trace("portal Server stop request failed")
             if self._shutdown_publish_status:
@@ -543,5 +547,7 @@ class EvenniaPortalService(MultiService):
                     except Exception:
                         logger.log_trace("portal shutdown status push failed")
         finally:
+            if self.server_bus is not None:
+                self.server_bus.stop_bus()
             if self._shutdown_stop_loop:
                 clock.stop_loop()

@@ -35,23 +35,27 @@ def receive_adminserver2portal(link, packed_data):
     elif operation == amp.SDISCONNALL:
         portal_sessionhandler.server_disconnect_all(reason=kwargs.get("reason"))
 
-    elif operation == amp.SRELOAD:
-        link.factory.server_connection.wait_for_disconnect(
-            link.start_server, link.factory.portal.server_twistd_cmd
+    elif operation in (amp.SRELOAD, amp.SRESET, amp.PSHUTD):
+        mode = (
+            "reload"
+            if operation == amp.SRELOAD
+            else "reset"
+            if operation == amp.SRESET
+            else "shutdown"
         )
-        link.stop_server(mode="reload")
-
-    elif operation == amp.SRESET:
-        link.factory.server_connection.wait_for_disconnect(
-            link.start_server, link.factory.portal.server_twistd_cmd
-        )
-        link.stop_server(mode="reset")
+        result = link.stop_server(mode=mode)
+        if operation == amp.PSHUTD:
+            result.addCallback(
+                lambda _value: link.wait_for_disconnect(link.factory.portal.shutdown)
+            )
+        else:
+            result.addCallback(
+                lambda _value: link.wait_for_disconnect(
+                    link.start_server, link.factory.portal.server_twistd_cmd
+                )
+            )
 
     elif operation == amp.SSHUTD:
-        link.stop_server(mode="shutdown")
-
-    elif operation == amp.PSHUTD:
-        link.factory.server_connection.wait_for_disconnect(link.factory.portal.shutdown)
         link.stop_server(mode="shutdown")
 
     elif operation == amp.PSYNC:
@@ -89,10 +93,13 @@ def receive_adminserver2portal(link, packed_data):
         if kwargs.get("confirmed"):
             portal_sessionhandler.apply_bus_state({"sessions": kwargs["sessiondata"], "closed": {}})
             return {}
-        portal_sessionhandler.server_session_sync(
-            kwargs.get("sessiondata"), kwargs.get("clean", True)
-        )
-        link.factory.server_restart_mode = "shutdown"
+        if kwargs.get("snapshot_id"):
+            portal_sessionhandler.apply_final_bus_state(kwargs["sessiondata"])
+            link.acknowledge_snapshot(kwargs["snapshot_id"])
+        else:
+            portal_sessionhandler.server_session_sync(
+                kwargs.get("sessiondata"), kwargs.get("clean", True)
+            )
 
     elif operation == amp.SCONN:
         portal_sessionhandler.server_connect(**kwargs)

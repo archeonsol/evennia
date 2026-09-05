@@ -91,7 +91,7 @@ class BusHandshake:
 
     def _emit(self, kind, exchange, **payload):
         """Send one stage with its correlation identity."""
-        self._send(
+        return self._send(
             {
                 "kind": kind,
                 **{key: exchange[key] for key in ("probe", "challenge", "pair")},
@@ -101,9 +101,11 @@ class BusHandshake:
 
     def receive(self, frame):
         """Apply a stage only after its freshly issued challenge is answered."""
-        if self.state == "stopping" or not isinstance(frame, dict):
+        if not isinstance(frame, dict):
             return
         kind = frame.get("kind")
+        if self.state == "stopping" and not (self.role == "server" and kind in ("probe", "pulse")):
+            return
         if self.role == "server":
             self._receive_server(kind, frame)
         else:
@@ -129,7 +131,11 @@ class BusHandshake:
             if len(self._offers) >= 8:
                 return
             self._offers[offer["challenge"]] = offer
-            self._emit("offer", offer, ready=self.state == "ready" and self.pair == offer["pair"])
+            self._emit(
+                "offer",
+                offer,
+                ready=self.state in ("ready", "stopping") and self.pair == offer["pair"],
+            )
         elif kind in ("pulse", "snapshot"):
             offer = self._offers.get(frame.get("challenge"))
             if not self._matches(frame, offer):
@@ -138,7 +144,7 @@ class BusHandshake:
                 return
             del self._offers[frame["challenge"]]
             if kind == "pulse":
-                if self.state == "ready" and self.pair == frame["pair"]:
+                if self.state in ("ready", "stopping") and self.pair == frame["pair"]:
                     self._last_seen = self._now()
                     self._emit("pulse_ack", frame)
                 return
@@ -153,8 +159,18 @@ class BusHandshake:
             self._exchange = None
             self.state = "ready"
             self._last_seen = self._now()
-            self._emit("ready", frame, payload=self._state_snapshot())
-            self._on_ready()
+            result = self._emit("ready", frame, payload=self._state_snapshot())
+            pair = self.pair
+
+            def published(_entry_id=None):
+                if self.state == "ready" and self.pair == pair:
+                    self._on_ready()
+
+            if result is None:
+                published()
+            else:
+                result.addCallback(published)
+                result.addErrback(lambda error: self.disconnect())
 
     def _receive_portal(self, kind, frame):
         """Confirm application against the current local socket revision."""

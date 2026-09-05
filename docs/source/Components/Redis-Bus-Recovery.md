@@ -57,7 +57,7 @@ before the input readiness gate. Telnet negotiation continues to update local
 protocol metadata. Player actions, including editor saves, are not retained for
 later input delivery. Browser output resume remains independent of bus recovery.
 
-`ServerSession.at_transport_reconnect()` runs after Server sends the final
+`ServerSession.at_transport_reconnect()` runs after successful publication of the final
 confirmation. The default hook reopens an active web editor. Games can override
 it to send current scene or UI state to that session without commands, movement,
 login, or puppet hooks. Call the base hook to preserve editor refresh.

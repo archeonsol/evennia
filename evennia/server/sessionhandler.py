@@ -636,6 +636,9 @@ class ServerSessionHandler(SessionHandler):
 
         """
         sessdata = self.get_all_sync_data()
+        bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
+        if bus is not None:
+            return bus.sync_sessions(sessdata)
         return _send_admin_to_portal(DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata)
 
     def session_portal_sync(self, session):

@@ -80,6 +80,8 @@ class EvenniaServerService(MultiService):
         if self._shutdown_task is not None:
             return self._shutdown_task
         self._shutdown_request_mode = mode
+        if self.portal_bus is not None:
+            self.portal_bus.begin_shutdown()
         self._shutdown_task = clock.create_bound_runtime_task(
             self._run_shutdown_request(mode), task_kind="service"
         )
@@ -99,6 +101,8 @@ class EvenniaServerService(MultiService):
             if completed:
                 self.shutdown_complete = True
             self._shutdown_in_progress = False
+            if self.portal_bus is not None:
+                self.portal_bus.stop_bus()
             clock.stop_loop()
 
     def server_maintenance(self):
@@ -549,6 +553,13 @@ class EvenniaServerService(MultiService):
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def _final_session_sync(self):
+        """Report unclean synchronization while preserving bounded shutdown cleanup."""
+        try:
+            await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
+        except Exception:
+            logger.log_trace("shutdown: final Portal snapshot unconfirmed; transition is unclean")
+
     async def shutdown(self, mode="reload", _reactor_stopping=False):
         """
         Shuts down the server from inside it.
@@ -580,6 +591,9 @@ class EvenniaServerService(MultiService):
                 return
             self._shutdown_in_progress = True
 
+        if self.portal_bus is not None:
+            self.portal_bus.begin_shutdown()
+
         if mode == "reload":
             # call restart hooks
             evennia.ServerConfig.objects.conf("server_restart_mode", "reload")
@@ -594,7 +608,6 @@ class EvenniaServerService(MultiService):
                     await clock.maybe_await(s.at_server_reload)
                 except Exception:
                     logger.log_trace(f"Error in at_server_reload on script {s}")
-            await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
             self.at_server_reload_stop()
             # only save monitor state on reload, not on shutdown/reset
             from evennia.scripts.monitorhandler import MONITOR_HANDLER
@@ -612,8 +625,6 @@ class EvenniaServerService(MultiService):
                 await self._await_hooks(
                     evennia.AccountDB.get_all_cached_instances(), "at_server_shutdown"
                 )
-                if self.portal_bus:
-                    await clock.maybe_await(evennia.SESSION_HANDLER.all_sessions_portal_sync())
             else:  # shutdown
                 accounts = list(evennia.AccountDB.get_all_cached_instances())
                 for p in accounts:
@@ -681,6 +692,9 @@ class EvenniaServerService(MultiService):
 
         if hasattr(self, "web_root"):  # not set very first start
             await self.web_root.empty_threadpool()
+
+        if mode in ("reload", "reset"):
+            await self._final_session_sync()
 
         if not _reactor_stopping:
             # kill the server

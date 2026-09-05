@@ -3,6 +3,7 @@
 from unittest import TestCase
 
 from evennia.server.bus_handshake import BusHandshake
+from evennia.server.bus_result import PublicationResult, TransportUnavailable
 
 
 class TestHandshake(TestCase):
@@ -141,3 +142,78 @@ class TestHandshake(TestCase):
         self.drain()
         self.assertEqual(self.peers["portal"].state, "ready")
         self.assertEqual(len(self.applied), 1)
+
+    def hold_final_publication(self):
+        """Complete negotiation up to the Server's pending ready write."""
+        result = PublicationResult()
+        self.held_ready = None
+
+        def send(frame):
+            if frame["kind"] == "ready":
+                self.held_ready = frame
+                return result
+            self.wire.append(("server", frame))
+            return None
+
+        self.peers["server"]._send = send
+        self.peers["portal"].tick()
+        self.drain()
+        self.assertIsNotNone(self.held_ready)
+        return result
+
+    def test_ready_hook_waits_for_publication(self):
+        """Admission alone cannot release Server startup output."""
+        result = self.hold_final_publication()
+        self.assertEqual(self.ready, [])
+        self.assertNotEqual(self.peers["portal"].state, "ready")
+        result.succeed("1-0")
+        self.assertEqual(self.ready, ["server"])
+        self.peers["portal"].receive(self.held_ready)
+        self.assertEqual(self.ready, ["server", "portal"])
+
+    def test_late_publication_cannot_open_replaced_generation(self):
+        """A previous final-ready completion cannot reopen the current peer."""
+        result = self.hold_final_publication()
+        server = self.peers["server"]
+        server.disconnect()
+        server.state = "ready"
+        server.pair = [["different", "portal"], server.identity]
+        result.succeed("1-0")
+        self.assertEqual(self.ready, [])
+
+    def test_failed_ready_publication_never_fires_hook(self):
+        """An ambiguous ready write invalidates the exchange."""
+        result = self.hold_final_publication()
+        result.fail(TransportUnavailable("reply lost"))
+        self.assertEqual(self.ready, [])
+        self.assertEqual(self.peers["server"].state, "disconnected")
+
+    def test_stopping_peer_keeps_heartbeat_until_sync_deadline(self):
+        """Healthy shutdown can use its fifth second without lease expiry."""
+        self.connect()
+        self.peers["server"].state = "stopping"
+        pair = self.peers["server"].pair
+        for instant in (1, 2, 3, 4, 4.5):
+            self.now = instant
+            for peer in self.peers.values():
+                peer.tick()
+            self.drain()
+            self.assertEqual(self.peers["portal"].state, "ready")
+            self.assertEqual(self.peers["server"].state, "stopping")
+            self.assertEqual(self.peers["portal"].pair, pair)
+        self.assertEqual(len(self.applied), 1)
+        self.assertEqual(self.ready, ["server", "portal"])
+
+    def test_stopping_peer_rejects_fresh_snapshot_reconciliation(self):
+        """A new Portal cannot replace sessions while Server finalizes them."""
+        self.connect()
+        server = self.peers["server"]
+        pair = server.pair
+        server.state = "stopping"
+        self.peers["portal"].disconnect()
+        self.peers["portal"].tick()
+        self.drain()
+        self.assertEqual(server.state, "stopping")
+        self.assertEqual(server.pair, pair)
+        self.assertEqual(len(self.applied), 1)
+        self.assertNotEqual(self.peers["portal"].state, "ready")

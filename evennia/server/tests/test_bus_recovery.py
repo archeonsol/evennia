@@ -113,6 +113,9 @@ class TestRecoveryEntrypoints(TestCase):
         runtime = self.server_handler[1]
         runtime.uid = 42
         self.socket.server_connected = True
+        self.portal_bus._handshake.state = "ready"
+        self.portal_bus._published_ready = True
+        self.portal_bus._transport.online = True
         self.socket.protocol_flags["SCREENWIDTH"] = {0: 132}
         with patch.object(self.portal_bus, "send_AdminPortal2Server") as send:
             self.portal_handler.sync(self.socket)

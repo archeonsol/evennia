@@ -60,11 +60,9 @@ def receive_adminportal2server(packed_data):
         evennia.SERVER_SESSION_HANDLER.portal_start_time = kwargs.get("portal_start_time")
 
     elif operation == amp.SRELOAD:
-        evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
         evennia.EVENNIA_SERVER_SERVICE.request_shutdown(mode="reload")
 
     elif operation == amp.SRESET:
-        evennia.SERVER_SESSION_HANDLER.all_sessions_portal_sync()
         evennia.EVENNIA_SERVER_SERVICE.request_shutdown(mode="reset")
 
     elif operation == amp.SSHUTD:

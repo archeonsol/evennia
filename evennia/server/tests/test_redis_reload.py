@@ -82,6 +82,22 @@ class TestRedisReloadSurvival(TestCase):
         self.assertTrue(self.server_bus.ready, repr(self.server_bus.last_sync_error))
         self.assertTrue(self.portal_bus.ready, repr(self.portal_bus.last_sync_error))
 
+    def _wait_for_recovery(self):
+        """Require both peers to confirm the new generation after an outage."""
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            _drain_bus(0.02)
+            if (
+                self.server_bus.ready
+                and self.portal_bus.ready
+                and self.server_bus._handshake.pair == self.portal_bus._handshake.pair
+            ):
+                return
+        self.fail(
+            f"recovery failed: {self.server_bus.last_sync_error!r}, "
+            f"{self.portal_bus.last_sync_error!r}"
+        )
+
     def test_initial_handshake_completed_during_setup(self):
         """The initial PSYNC must dispatch before the test body starts."""
         self.server.run_init_hooks.assert_called_once_with("shutdown")
@@ -136,7 +152,7 @@ class TestRedisReloadSurvival(TestCase):
         self.server_bus._handshake.disconnect()
         self.portal_bus._handshake._last_probe = -float("inf")
         self.portal_bus._handshake.tick()
-        _drain_bus(0.3)
+        self._wait_for_recovery()
         self.assertTrue(self.portal_bus.ready)
         self.assertIs(evennia.SERVER_SESSION_HANDLER[1], self.session)
         self.assertTrue(self.session.protocol_flags["AZABAN_CAPS"]["patches"])
@@ -157,6 +173,7 @@ class TestRedisReloadSurvival(TestCase):
         """Server ``start_bus`` PSYNC must reach Portal and fire ``at_server_connection``."""
         evennia.PORTAL_SESSION_HANDLER.at_server_connection.reset_mock()
         self.server_bus.stop_bus()
+        _drain_bus(0.01)
         self.server_bus.start_bus()
         self.portal_bus._handshake._last_probe = -float("inf")
         self.portal_bus._handshake.tick()
@@ -187,7 +204,7 @@ class TestRedisReloadSurvival(TestCase):
         self.server_bus._handshake.disconnect()
         self.portal_bus._handshake._last_probe = -float("inf")
         self.portal_bus._handshake.tick()
-        _drain_bus()
+        self._wait_for_recovery()
         self.assertTrue(self.portal_bus.ready)
         self.assertIs(self.session.menu, menu)
         self.assertIsNone(self.portalsession.uid)

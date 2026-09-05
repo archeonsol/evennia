@@ -1,26 +1,6 @@
-"""Redis-Streams Portal<->Server bus (plain XADD/XREAD; no consumer groups).
-
-Gated by ``settings.SERVER_PORTAL_BUS`` (must be ``"redis"``). Session/admin
-frames are published to redis streams; reader threads block on ``XREAD`` and
-dispatch into :mod:`evennia.server.ipc_handlers_server` /
-:mod:`evennia.server.portal.ipc_handlers_portal` on the reactor thread.
-
-The Portal AMP TCP listener on ``AMP_PORT`` remains for launcher control only.
-
-Threading: writer/reader threads hand off via ``clock.call_from_thread`` so game
-state is only touched on the reactor thread.
-
-Reload: readers use Redis Streams **consumer groups**, so the read cursor lives
-server-side and survives a Server reload. Frames the Portal wrote while the
-Server was down are delivered on restart (no ``$`` skip), and a consumer's
-un-acked (pending) frames from a crash are reclaimed on the next start before new
-frames are read. The writer retries a failed ``XADD`` and never silently drops a
-control frame. PSYNC still re-establishes session metadata on top of this.
-"""
+"""Portal/Server bus with confirmed recovery and bounded no-replay delivery."""
 
 import os
-import queue
-import threading
 import time
 
 import psutil
@@ -29,27 +9,11 @@ from django.conf import settings
 import evennia
 from evennia.server import ipc_handlers_server
 from evennia.server.bus_handshake import BusHandshake
+from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.server.bus_sessions import SessionReconciler
 from evennia.server.portal import amp, ipc_handlers_portal
-from evennia.server.service_registry import IMMEDIATE_RESULT
+from evennia.server.redis_transport import RedisTransport as _RedisTransport
 from evennia.utils import clock, logger
-
-# Frame field names in the redis stream entries.
-_CMD = b"c"
-_DATA = b"d"
-
-# Cap the outbound publish queue so a stalled/unreachable redis (writer thread
-# blocked in xadd) cannot grow it without bound and OOM the process. On
-# overflow the newest frame is dropped (best-effort delivery is the bus
-# contract); one log per stall episode keeps a real outage visible without
-# flooding.
-_MAX_QUEUE = 10000
-_STOP_TIMEOUT = 3.0
-_QUEUE_WAIT = 0.1
-
-
-def _bus_url():
-    return getattr(settings, "REDIS_BUS_URL", "redis://127.0.0.1:6379/1")
 
 
 def _stream_prefix():
@@ -60,276 +24,22 @@ def _worker_id():
     return str(getattr(settings, "SERVER_WORKER_ID", "0"))
 
 
-class _RedisTransport:
-    """Shared redis stream transport: a writer thread + a reader thread."""
-
-    def __init__(self, read_stream, on_frame):
-        self._url = _bus_url()
-        self._read_stream = read_stream
-        self._on_frame = on_frame
-        self._client = None
-        self._q = queue.Queue(maxsize=_MAX_QUEUE)
-        self._queue_full_logged = False
-        self._writer = None
-        self._reader = None
-        self._stop = threading.Event()
-        self._admission_lock = threading.Lock()
-        self._cleanup = None
-        # Consumer-group identity for the read stream. The group's last-delivered
-        # cursor lives on the redis server, so it survives a Server reload — that
-        # is what stops the old ``$`` reader from skipping frames written during
-        # downtime.
-        self._group = f"{read_stream}:grp"
-        self._consumer = f"{_worker_id()}-{os.getpid()}"
-
-    def _ensure_group(self):
-        """Create the consumer group if absent. New group starts at ``0`` so a
-        first-ever boot reads from the start of the retained stream rather than
-        skipping; an existing group keeps its durable cursor (BUSYGROUP)."""
-        import redis
-
-        try:
-            self._client.xgroup_create(self._read_stream, self._group, id="0", mkstream=True)
-        except redis.exceptions.ResponseError as err:
-            if "BUSYGROUP" not in str(err):
-                logger.log_trace("redis bus: xgroup_create failed")
-        except Exception:
-            logger.log_trace("redis bus: xgroup_create error")
-
-    def start(self):
-        """Start a fresh worker pair, rejecting overlap with prior workers.
-
-        Returns:
-            bool: Whether a fresh pair was started.
-
-        Raises:
-            RuntimeError: Old workers or cleanup still own the transport.
-        """
-        writer_alive = self._writer is not None and self._writer.is_alive()
-        reader_alive = self._reader is not None and self._reader.is_alive()
-        cleanup_alive = self._cleanup is not None and self._cleanup.is_alive()
-        if writer_alive or reader_alive or cleanup_alive:
-            if writer_alive and reader_alive and not self._stop.is_set() and not cleanup_alive:
-                return False
-            raise RuntimeError("redis bus: previous workers or cleanup still running")
-        import redis
-
-        self._client = redis.Redis.from_url(self._url)
-        self._cleanup = None
-        try:
-            self._client.ping()
-        except redis.exceptions.RedisError as err:
-            # The redis bus is the sole Portal<->Server transport; a Server that
-            # cannot reach it on boot has no way to serve. Fail fast: log clearly
-            # and stop the loop so the process exits and the launcher watchdog
-            # retries at process level (throttled) rather than half-initializing.
-            logger.log_err(
-                "redis bus: cannot reach redis at %s on boot (%s); stopping the "
-                "process for launcher retry." % (self._url, err)
-            )
-            clock.stop_loop()
-            return False
-        self._ensure_group()
-        with self._admission_lock:
-            if self._stop.is_set():
-                self._q = queue.Queue(maxsize=_MAX_QUEUE)
-                self._queue_full_logged = False
-            self._stop.clear()
-        self._writer = threading.Thread(
-            target=self._writer_loop, name="redis-bus-writer", daemon=True
-        )
-        self._reader = threading.Thread(
-            target=self._reader_loop, name="redis-bus-reader", daemon=True
-        )
-        self._writer.start()
-        self._reader.start()
-        return True
-
-    def _close_after_workers(self, workers, client):
-        """Close the captured client only after its captured workers exit."""
-        for worker in workers:
-            if worker is not None:
-                worker.join()
-        try:
-            if client is not None:
-                client.close()
-        except Exception:
-            logger.log_trace("redis bus: client cleanup failed")
-
-    def stop(self):
-        """Abort local transport work within one bounded wait for worker cleanup."""
-        deadline = time.monotonic() + _STOP_TIMEOUT
-        with self._admission_lock:
-            self._stop.set()
-        if self._cleanup is None and any(
-            item is not None for item in (self._writer, self._reader, self._client)
-        ):
-            self._cleanup = threading.Thread(
-                target=self._close_after_workers,
-                args=((self._writer, self._reader), self._client),
-                name="redis-bus-cleanup",
-                daemon=True,
-            )
-            self._cleanup.start()
-        if self._cleanup is not None:
-            self._cleanup.join(timeout=max(0, deadline - time.monotonic()))
-        for name in ("_writer", "_reader", "_cleanup"):
-            worker = getattr(self, name)
-            if worker is not None and worker.is_alive():
-                logger.log_warn(
-                    f"redis bus: {name[1:]} still running after shutdown wait; restart blocked"
-                )
-            elif name != "_cleanup":
-                setattr(self, name, None)
-
-    def publish(self, stream, cmdkey, data):
-        """Admit a frame unless explicitly stopped; retain the overflow policy.
-
-        Raises:
-            RuntimeError: The transport has been stopped.
-        """
-        warn_full = False
-        with self._admission_lock:
-            if self._stop.is_set():
-                raise RuntimeError("redis bus: publication rejected after stop")
-            try:
-                self._q.put_nowait((stream, cmdkey, data))
-                self._queue_full_logged = False
-            except queue.Full:
-                warn_full = not self._queue_full_logged
-                self._queue_full_logged = True
-        if warn_full:
-            logger.log_err(
-                "redis bus: publish queue full (%d); dropping frames until it drains" % _MAX_QUEUE
-            )
-
-    @staticmethod
-    def _is_control(cmdkey):
-        """Admin* frames carry control/administration traffic (session sync,
-        reload, shutdown). They must never share the replaceable-output drop
-        policy of ordinary data frames."""
-        return bool(cmdkey) and bytes(cmdkey).startswith(b"Admin")
-
-    def _xadd_with_retry(self, stream, cmdkey, data, attempts=3):
-        """Publish one frame, retrying a transient failure with backoff. True on
-        success, False if it could not be written within ``attempts``."""
-        for i in range(attempts):
-            if self._stop.is_set():
-                return False
-            try:
-                self._client.xadd(
-                    stream,
-                    {_CMD: cmdkey, _DATA: data if data is not None else b""},
-                    maxlen=10000,
-                    approximate=True,
-                )
-                return True
-            except Exception:
-                logger.log_trace("redis bus: xadd attempt %d failed" % (i + 1))
-                if self._stop.wait(min(0.5, 0.05 * (2**i))):
-                    return False
-        return False
-
-    def _writer_loop(self):
-        while not self._stop.is_set():
-            try:
-                item = self._q.get(timeout=_QUEUE_WAIT)
-            except queue.Empty:
-                continue
-            if self._stop.is_set() or item is None:
-                break
-            stream, cmdkey, data = item
-            if self._xadd_with_retry(stream, cmdkey, data):
-                continue
-            if self._stop.is_set():
-                break
-            # Persistent failure: a control frame is not replaceable output — do
-            # not silently drop it. Re-queue it (best effort) and escalate; a
-            # data frame follows the best-effort contract and is dropped loudly.
-            if self._is_control(cmdkey):
-                try:
-                    self._q.put_nowait((stream, cmdkey, data))
-                    logger.log_err(
-                        "redis bus: CONTROL frame %r could not be published; re-queued "
-                        "for retry (redis unreachable?)." % cmdkey
-                    )
-                except queue.Full:
-                    logger.log_err(
-                        "redis bus: CONTROL frame %r dropped — queue full during a redis "
-                        "outage. Control traffic may be lost." % cmdkey
-                    )
-            else:
-                logger.log_err("redis bus: data frame %r dropped after retries" % cmdkey)
-
-    def _dispatch(self, entry_id, fields):
-        """Hand one stream entry to the reactor and ack it. At-least-once: the
-        durable group cursor + pending reclaim guarantee no frame is skipped;
-        a rare double-delivery after a crash-between-dispatch-and-ack is
-        tolerable for this transport."""
-        cmdkey = fields.get(_CMD, b"")
-        data = fields.get(_DATA, b"")
-        try:
-            clock.call_from_thread(self._on_frame, cmdkey, data)
-        except Exception:
-            logger.log_trace("redis bus: dispatch failed")
-        try:
-            self._client.xack(self._read_stream, self._group, entry_id)
-        except Exception:
-            logger.log_trace("redis bus: xack failed")
-
-    def _drain_pending(self):
-        """Reclaim this consumer's un-acked frames from a prior crash (delivered
-        but never acked), redelivered by reading the group at id ``0``."""
-        if self._stop.is_set():
-            return
-        try:
-            resp = self._client.xreadgroup(
-                self._group, self._consumer, {self._read_stream: "0"}, count=256
-            )
-        except Exception:
-            logger.log_trace("redis bus: pending reclaim failed")
-            return
-        for _stream, entries in resp or []:
-            for entry_id, fields in entries:
-                if self._stop.is_set():
-                    return
-                self._dispatch(entry_id, fields)
-
-    def _reader_loop(self):
-        # First redeliver anything this consumer had in-flight before a restart.
-        self._drain_pending()
-        while not self._stop.is_set():
-            try:
-                resp = self._client.xreadgroup(
-                    self._group,
-                    self._consumer,
-                    {self._read_stream: ">"},
-                    count=64,
-                    block=1000,
-                )
-            except Exception:
-                if self._stop.is_set():
-                    break
-                logger.log_trace("redis bus: xreadgroup failed")
-                # a reconnect may have lost the group; re-ensure and retry
-                self._ensure_group()
-                continue
-            if not resp:
-                continue
-            for _stream, entries in resp:
-                for entry_id, fields in entries:
-                    if self._stop.is_set():
-                        return
-                    self._dispatch(entry_id, fields)
-
-
 class _RedisBusMixin:
     _send_stream = ""
     _read_stream = ""
 
     def _init_bus(self, shim_factory):
         self.factory = shim_factory
-        self._transport = _RedisTransport(self._read_stream, self._receive_frame)
+        self._transport = _RedisTransport(
+            self._read_stream,
+            self._receive_frame,
+            on_failure=self._transport_failed,
+            on_recovered=self._transport_recovered,
+        )
+        self._published_ready = False
+        self._draining = False
+        self._snapshot_waiters = {}
+        self._shutdown_deadline = None
         self._tick_handle = None
         self.last_sync_error = None
         self._handshake = BusHandshake(
@@ -346,14 +56,20 @@ class _RedisBusMixin:
     @property
     def ready(self):
         """Whether both peers confirmed the current session generation."""
-        return self._handshake.state == "ready"
+        return (
+            self._handshake.state == "ready"
+            and self._transport.online
+            and self._published_ready
+            and not self._draining
+        )
 
     def _send_handshake(self, frame):
         """Publish fresh state using the typed admin serializer."""
-        self._transport.publish(
+        return self._transport.publish(
             self._send_stream,
             b"BusHandshake",
             amp.dumps_admin((0, {"sessiondata": frame})),
+            handshake=True,
         )
 
     def _receive_frame(self, cmdkey, data):
@@ -365,18 +81,113 @@ class _RedisBusMixin:
                 self.last_sync_error = error
                 self._handshake.disconnect()
                 logger.log_trace("redis bus: synchronization failed")
-        else:
+        elif cmdkey == b"BusSnapshotAck":
+            payload = amp.loads_admin(data)[1]
+            result = self._snapshot_waiters.pop(payload.get("snapshot_id"), None)
+            if result is not None:
+                result.succeed()
+        elif cmdkey == b"BusStopping":
+            self._draining = True
+        elif cmdkey == b"MsgPortal2Server":
+            if self._handshake.state == "ready" and not self._draining:
+                self._on_frame(cmdkey, data)
+        elif self._handshake.state in ("ready", "stopping"):
             self._on_frame(cmdkey, data)
 
     def _tick(self):
         """Own one cancellable heartbeat timer per running transport."""
         if self._transport._stop.is_set():
             return
-        self._handshake.tick()
+        if self._transport.online:
+            self._handshake.tick()
         self._tick_handle = clock.call_later(0.5, self._tick)
 
     def _unavailable(self):
-        """Close readiness while retaining live socket and runtime state."""
+        """Close readiness and invalidate queued work without rebuilding sessions."""
+        self._published_ready = False
+        self._transport.set_pair(None, ready=False)
+        self._fail_snapshot_waiters("connection generation replaced")
+        if self._transport.online:
+            self._transport.fail("peer synchronization lost")
+
+    def _fail_snapshot_waiters(self, reason):
+        """Settle application waiters independently from intentional stopping."""
+        waiters, self._snapshot_waiters = self._snapshot_waiters, {}
+        for result in waiters.values():
+            result.fail(TransportUnavailable(reason))
+
+    def _transport_failed(self, reason):
+        """Apply immediate transport failure to peer readiness and waiters."""
+        self._published_ready = False
+        self._fail_snapshot_waiters(reason)
+        self._handshake.disconnect()
+        logger.log_warn(f"redis bus unavailable: {reason}; interrupted work may have run")
+        if self._role == "portal":
+            for session in list(evennia.PORTAL_SESSION_HANDLER.values()):
+                evennia.PORTAL_SESSION_HANDLER.bus_unavailable_notice(session)
+
+    def _transport_recovered(self):
+        """Start only fresh discovery after Redis and writer capacity recover."""
+        if self._handshake.state != "stopping":
+            self._handshake.tick()
+
+    def _publish_control(self, key, payload):
+        """Publish current-generation transport control through ordinary FIFO."""
+        return self._transport.publish(
+            self._send_stream,
+            key,
+            amp.dumps_admin((0, payload)),
+            pair=self._handshake.pair,
+        )
+
+    def acknowledge_snapshot(self, snapshot_id):
+        """Confirm Portal application of a current-generation final snapshot."""
+        return self._publish_control(b"BusSnapshotAck", {"snapshot_id": snapshot_id})
+
+    def begin_shutdown(self):
+        """Close input while allowing teardown before final synchronization."""
+        if self._handshake.state != "stopping":
+            self._draining = True
+            self._handshake.state = "stopping"
+            self._publish_control(b"BusStopping", {})
+
+    async def sync_sessions(self, sessiondata):
+        """Wait for final Portal application within the shared shutdown deadline."""
+        import asyncio
+        from uuid import uuid4
+
+        if self._snapshot_waiters:
+            raise TransportUnavailable("final session synchronization already pending")
+        if self._shutdown_deadline is None:
+            self._shutdown_deadline = time.monotonic() + 5.0
+        deadline = self._shutdown_deadline
+        snapshot_id = uuid4().hex
+        sessiondata = {
+            sid: {
+                **data,
+                "_socket_id": self._sessions.records[sid]["_socket_id"],
+                "_portal_flags": self._sessions.records[sid].get("protocol_flags", {}),
+            }
+            for sid, data in sessiondata.items()
+            if sid in self._sessions.records
+        }
+        result = PublicationResult()
+        self._snapshot_waiters[snapshot_id] = result
+        try:
+            publication = self.send_AdminServer2Portal(
+                amp.DUMMYSESSION,
+                operation=amp.SSYNC,
+                sessiondata=sessiondata,
+                snapshot_id=snapshot_id,
+                clean=False,
+            )
+            publication.addErrback(result.fail)
+            async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                await result
+        finally:
+            self._snapshot_waiters.pop(snapshot_id, None)
+            if not result._future.done():
+                result.fail(TransportUnavailable("final snapshot wait ended without confirmation"))
 
     def _snapshot(self):
         """Return Portal state; unused by the Server role."""
@@ -393,11 +204,30 @@ class _RedisBusMixin:
         """Apply Server state; unused by the Server role."""
 
     def callRemote(self, command, **kwargs):
+        """Return admission and publication status without automatic retransmission."""
         cmdkey = command.key
         if isinstance(cmdkey, str):
             cmdkey = cmdkey.encode()
-        self._transport.publish(self._send_stream, cmdkey, kwargs.get("packed_data"))
-        return IMMEDIATE_RESULT
+        packed = kwargs.get("packed_data")
+        allowed = self.ready
+        if (
+            self._role == "server"
+            and not allowed
+            and self._handshake.state in ("synchronizing", "stopping", "ready")
+        ):
+            allowed = cmdkey == b"MsgServer2Portal"
+            if cmdkey == b"AdminServer2Portal":
+                operation = amp.loads_admin(packed)[1].get("operation")
+                allowed = operation in (
+                    amp.SLOGIN,
+                    amp.SSYNC,
+                    amp.SDISCONN,
+                    amp.SDISCONNALL,
+                    amp.SCONN,
+                )
+        if not allowed:
+            return PublicationResult.rejected(TransportUnavailable("peer is not ready"))
+        return self._transport.publish(self._send_stream, cmdkey, packed, pair=self._handshake.pair)
 
     def _on_frame(self, cmdkey, data):
         raise NotImplementedError
@@ -420,6 +250,7 @@ class _RedisBusMixin:
         self._handshake.disconnect()
         try:
             self._transport.stop()
+            self._transport.settle_failure()
         except Exception:
             logger.log_trace("redis bus: stop")
 
@@ -508,6 +339,8 @@ class RedisServerBus(_RedisBusMixin):
 
     def _apply_snapshot(self, payload):
         """Restore once at process start; reconcile surviving sessions later."""
+        self._published_ready = False
+        self._transport.set_pair(self._handshake.pair, ready=False)
         sessions = payload["sessions"]
         portal_id = self._handshake.pair[0][0]
         handler = self._sessions.handler
@@ -540,6 +373,9 @@ class RedisServerBus(_RedisBusMixin):
 
     def _ready(self):
         """Refresh each current session only after final confirmation is sent."""
+        self._published_ready = True
+        self._draining = False
+        self._transport.set_pair(self._handshake.pair, ready=True)
         for session in list(self._sessions.handler.values()):
             try:
                 session.at_transport_reconnect()
@@ -567,6 +403,8 @@ class RedisPortalBus(_RedisBusMixin):
 
     def _snapshot(self):
         """Capture current socket membership and its local revision."""
+        self._published_ready = False
+        self._transport.set_pair(self._handshake.pair, ready=False)
         handler = evennia.PORTAL_SESSION_HANDLER
         return handler.bus_revision, {
             "sessions": handler.get_bus_sync_data(),
@@ -582,6 +420,10 @@ class RedisPortalBus(_RedisBusMixin):
 
     def _ready(self):
         """Fire launcher readiness callbacks only after session application."""
+        self._published_ready = True
+        self._draining = False
+        self.factory.portal._lifecycle_unconfirmed = False
+        self._transport.set_pair(self._handshake.pair, ready=True)
         self.factory.server_connection = self
         evennia.PORTAL_SESSION_HANDLER.at_server_connection()
         server_process = self._handshake.pair[1][0]

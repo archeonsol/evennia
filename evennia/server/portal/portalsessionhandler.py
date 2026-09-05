@@ -102,6 +102,26 @@ class PortalSessionHandler(SessionHandler):
             if session is not None and session._bus_socket_id == socket_id:
                 self.server_disconnect(session)
 
+    def apply_final_bus_state(self, sessions):
+        """Save final Server state without overwriting newer socket negotiation."""
+        for sid, data in sessions.items():
+            session = self.get(sid)
+            if session is None or session._bus_socket_id != data.get("_socket_id"):
+                continue
+            baseline = data.get("_portal_flags", {})
+            flags = dict(data.get("protocol_flags", {}))
+            flags.update(
+                {
+                    key: value
+                    for key, value in session.protocol_flags.items()
+                    if key not in baseline or value != baseline[key]
+                }
+            )
+            clean = {key: value for key, value in data.items() if not key.startswith("_")}
+            clean["protocol_flags"] = flags
+            session.load_sync_data(clean)
+            session._bus_confirmed = True
+
     def at_server_connection(self):
         """
         Called when the Portal establishes connection with the Server.
@@ -192,10 +212,10 @@ class PortalSessionHandler(SessionHandler):
             sessdata = session.get_sync_data()
 
             self[session.sessid] = session
-            session.server_connected = True
-            evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
+            result = evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
                 session, operation=PCONN, sessiondata=sessdata
             )
+            session.server_connected = bool(getattr(result, "admitted", True))
 
     def sync(self, session):
         """
@@ -213,7 +233,9 @@ class PortalSessionHandler(SessionHandler):
             # once to the server - if so we must re-sync woth the server, otherwise
             # we skip this step.
             sessdata = session.get_sync_data()
-            if evennia.EVENNIA_PORTAL_SERVICE.server_amp:
+            if evennia.EVENNIA_PORTAL_SERVICE.server_amp and getattr(
+                evennia.EVENNIA_PORTAL_SERVICE.server_amp, "ready", True
+            ):
                 # we only send sessdata that should not have changed
                 # at the server level at this point
                 sessdata = dict(
@@ -288,9 +310,12 @@ class PortalSessionHandler(SessionHandler):
         # inform Server; wait until finished sending before we continue
         # removing all the sessions.
 
-        evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
+        result = evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
             DUMMYSESSION, operation=PDISCONNALL
-        ).addCallback(_callback, self)
+        )
+        result.addCallback(_callback, self)
+        result.addErrback(_callback, self)
+        return result
 
     def server_connect(self, protocol_path="", config=dict()):
         """
@@ -439,6 +464,25 @@ class PortalSessionHandler(SessionHandler):
         for session in self.values():
             self.data_out(session, text=[[message], {}])
 
+    def bus_unavailable_notice(self, session):
+        """Report unavailable or uncertain input locally, at most once per five seconds."""
+        now = time.monotonic()
+        if now - getattr(session, "_bus_notice_at", -float("inf")) < 5:
+            return
+        session._bus_notice_at = now
+        self.data_out(
+            session,
+            text=[
+                [
+                    _(
+                        "Connection to the game is unavailable. "
+                        "Interrupted actions may have run. Please wait for reconnection."
+                    )
+                ],
+                {},
+            ],
+        )
+
     def data_in(self, session, **kwargs):
         """
         Called by portal sessions for relaying data coming
@@ -492,11 +536,19 @@ class PortalSessionHandler(SessionHandler):
                 self.sync(session)
             link = evennia.EVENNIA_PORTAL_SERVICE.server_amp
             if not link or not getattr(link, "ready", True):
+                if any(
+                    key not in ("azaban_hello", "editor_client", "narrative_client")
+                    for key in kwargs
+                ):
+                    self.bus_unavailable_notice(session)
                 return
 
             # relay data to Server
+            result = link.send_MsgPortal2Server(session, **kwargs)
+            if not getattr(result, "admitted", True):
+                self.bus_unavailable_notice(session)
+                return
             session.cmd_last = now
-            evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_MsgPortal2Server(session, **kwargs)
 
             # eventual local echo (text input only)
             if "text" in kwargs and session.protocol_flags.get("LOCALECHO", False):
