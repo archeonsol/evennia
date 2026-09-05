@@ -25,6 +25,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.227: Engine stability fixes
+
+### Jobs and persistence
+
+- [Redis job retries](evennia/jobs/queue.py) conditionally move the exact leased
+  entry in one Lua script. Replacement serialization and key validation precede
+  writes; destination append precedes source removal. Repeating a completed move
+  does not duplicate a unique source entry, including after a lost reply.
+- [Scheduled attribute flushing](evennia/server/engine_systems.py) counts returned
+  undurable rows toward the existing consecutive failure alerts. Mixed batches
+  count once; clean and durably spooled batches reset the streak.
+
+### Transport and tests
+
+- [Redis bus stop](evennia/server/redis_bus.py) uses one three-second wait budget
+  without inserting a sentinel into a full queue. Worker and client cleanup
+  ownership prevent restart while old threads survive. Stop rejects further
+  publication; an explicit completed restart discards unsent local frames.
+- Bus and reload fixtures own scheduled work through setup and cleanup. Azaban
+  reload coverage checks the render envelope and text node body.
+- Validation: 157 affected engine tests pass without pending-task or coroutine
+  warnings. Regression tests cover lost retry replies, failure escalation,
+  blocked shutdown, cleanup ownership, and setup handshake dispatch.
+
+### Migration notes
+
+- Redis job connections require EVAL plus TYPE, LRANGE, LPUSH, and LREM permission
+  on the processing and destination keys. Script isolation does not provide
+  rollback after a partial runtime error or exactly-once handler effects.
+- The existing fakeredis dependency now includes its Lua extra. Install engine
+  dependencies normally to obtain the test runtime.
+- Bus stop is a cooperative abort, not a delivery drain. In-flight writes and
+  callback handoffs can finish. No production shutdown caller was added, and
+  retained Redis stream recovery behavior is unchanged.
+- No database migration or game API change is required. Real Redis ACL and
+  memory-pressure behavior were not exercised by these tests.
+
 ## 6.0.0+underspire.226 — Emit to a room reaches the room
 
 ### Actions
