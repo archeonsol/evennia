@@ -8,7 +8,6 @@ session-handler contract that keeps live Portal sockets across ``@reload``.
 import time
 from unittest.mock import MagicMock, patch
 
-import fakeredis
 from django.test import TestCase, override_settings
 
 import evennia
@@ -19,28 +18,21 @@ from evennia.server.portal.service import EvenniaPortalService
 from evennia.server.redis_bus import RedisPortalBus, RedisServerBus
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
-from evennia.server.tests.test_redis_bus import _BUS_SETTINGS, _drain_bus, _sync_call_from_thread
+from evennia.server.tests.test_redis_bus import (
+    _BUS_SETTINGS,
+    _BusTestResources,
+    _drain_bus,
+    _sync_call_from_thread,
+)
 
 
 @override_settings(**_BUS_SETTINGS)
 @patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
 class TestRedisReloadSurvival(TestCase):
     def setUp(self):
-        self.fake_redis = fakeredis.FakeRedis(decode_responses=False)
-        self.redis_patcher = patch("redis.Redis.from_url", return_value=self.fake_redis)
-        self.redis_patcher.start()
-
-        # This test overwrites process-global evennia services/handlers. Restore
-        # them so later tests (e.g. test_server.TestInitHooks reads
-        # evennia.EVENNIA_SERVER_SERVICE) don't inherit this test's mocks.
-        _globals = (
-            "EVENNIA_SERVER_SERVICE",
-            "SERVER_SESSION_HANDLER",
-            "EVENNIA_PORTAL_SERVICE",
-            "PORTAL_SESSION_HANDLER",
-        )
-        _saved = {name: getattr(evennia, name, None) for name in _globals}
-        self.addCleanup(lambda: [setattr(evennia, n, v) for n, v in _saved.items()])
+        self.resources = _BusTestResources()
+        self.addCleanup(self.resources.close)
+        self.fake_redis = self.resources.fake
 
         self.server = EvenniaServerService()
         self.server.run_initial_setup = MagicMock()
@@ -71,22 +63,16 @@ class TestRedisReloadSurvival(TestCase):
 
         self.amp_factory = amp_server.AMPServerFactory(self.portal)
         self.server_bus = RedisServerBus(self.server)
+        self.resources.buses.append(self.server_bus)
         self.server.portal_bus = self.server_bus
         self.portal_bus = RedisPortalBus(self.portal, factory=self.amp_factory)
+        self.resources.buses.append(self.portal_bus)
         self.portal.server_bus = self.portal_bus
         self.amp_factory.server_connection = self.portal_bus
 
         self.server_bus.start_bus()
         self.portal_bus.start_bus()
         _drain_bus()
-
-    def tearDown(self):
-        try:
-            self.server_bus.stop_bus()
-            self.portal_bus.stop_bus()
-        except Exception:
-            pass
-        self.redis_patcher.stop()
 
     def test_portal_ws_session_stays_connected_through_reload_admin(self):
         """SRELOAD admin op must not tear down Portal-side protocol transports."""
@@ -148,7 +134,13 @@ class TestRedisReloadSurvival(TestCase):
         outbound.clear()
         evennia.PORTAL_SESSION_HANDLER.data_out(ws, text=[["after reload"], {}])
         self.assertEqual(len(outbound), 1)
-        self.assertIn(b"after reload", outbound[0])
+        self.assertIsInstance(outbound[0], dict)
+        self.assertEqual(outbound[0]["t"], "render")
+        self.assertEqual(len(outbound[0]["nodes"]), 1)
+        node = outbound[0]["nodes"][0]
+        self.assertEqual(node["schema"], "render.v1")
+        self.assertEqual(node["kind"], "text")
+        self.assertEqual(node["body"], "after reload")
 
     def test_server_start_psync_triggers_portal_handshake(self):
         """Server ``start_bus`` PSYNC must reach Portal and fire ``at_server_connection``."""

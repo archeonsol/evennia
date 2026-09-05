@@ -4,10 +4,12 @@ Integration tests for the redis Streams Portal<->Server bus (plain XADD/XREAD).
 Uses fakeredis so CI does not need a live redis daemon.
 """
 
+import asyncio
 import os
 import subprocess
 import sys
 import time
+from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 import fakeredis
@@ -26,6 +28,7 @@ from evennia.server.redis_bus import (
 )
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
+from evennia.utils import clock
 
 _BUS_SETTINGS = {
     "SERVER_PORTAL_BUS": "redis",
@@ -45,27 +48,83 @@ def _drain_bus(seconds=0.15):
     time.sleep(seconds)
 
 
-@override_settings(**_BUS_SETTINGS)
-@patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
-class TestRedisBus(TestCase):
-    def setUp(self):
-        self.fake_redis = fakeredis.FakeRedis(decode_responses=False)
-        self.redis_patcher = patch("redis.Redis.from_url", return_value=self.fake_redis)
-        self.redis_patcher.start()
+class _BusTestResources:
+    """Own one synchronous bus fixture's globals, scheduling, and Redis patch."""
 
-        # This test overwrites process-global evennia services/handlers. Restore
-        # them so later tests don't inherit this test's instances/mocks.
-        _globals = (
+    def __init__(self):
+        """Acquire patches with cleanup registered before service construction."""
+        self.stack = ExitStack()
+        self.buses = []
+        self.handles = []
+        self.loop = asyncio.new_event_loop()
+        names = (
             "EVENNIA_SERVER_SERVICE",
             "SERVER_SESSION_HANDLER",
             "EVENNIA_PORTAL_SERVICE",
             "PORTAL_SESSION_HANDLER",
         )
-        _saved = {name: getattr(evennia, name, None) for name in _globals}
-        self.addCleanup(lambda: [setattr(evennia, n, v) for n, v in _saved.items()])
+        saved = {name: getattr(evennia, name) for name in names}
+        self.stack.enter_context(patch.multiple(evennia, **saved))
+        self.fake = fakeredis.FakeRedis(decode_responses=False)
+        self.stack.callback(self.fake.close)
+        self.stack.enter_context(patch("redis.Redis.from_url", return_value=self.fake))
+        self.stack.enter_context(patch.object(clock, "_get_loop", return_value=self.loop))
+        self.stack.enter_context(patch.object(clock, "_pending_when_running", []))
+        call_later = clock.call_later
+
+        def schedule(*args, **kwargs):
+            """Track real cancellable timer handles owned by this fixture."""
+            handle = call_later(*args, **kwargs)
+            self.handles.append(handle)
+            return handle
+
+        self.stack.enter_context(patch.object(clock, "call_later", side_effect=schedule))
+        self.stack.callback(self._settle)
+
+    def close(self):
+        """Release scheduling before patches and service globals are restored."""
+        self.stack.close()
+
+    def _settle(self):
+        """Stop all readers before driving cancellation on the private loop."""
+        errors = []
+        for bus in self.buses:
+            try:
+                bus._transport.stop()
+                for name in ("_writer", "_reader", "_cleanup"):
+                    worker = getattr(bus._transport, name)
+                    if worker is not None and worker.is_alive():
+                        raise AssertionError(f"bus fixture left {name} running")
+            except Exception as error:
+                errors.append(error)
+        for handle in self.handles:
+            handle.cancel()
+        try:
+            tasks = list(asyncio.all_tasks(self.loop))
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                results = self.loop.run_until_complete(
+                    asyncio.gather(*tasks, return_exceptions=True)
+                )
+                errors.extend(result for result in results if isinstance(result, Exception))
+        finally:
+            self.loop.close()
+        if errors:
+            raise ExceptionGroup("bus fixture cleanup failed", errors)
+
+
+@override_settings(**_BUS_SETTINGS)
+@patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
+class TestRedisBus(TestCase):
+    def setUp(self):
+        self.resources = _BusTestResources()
+        self.addCleanup(self.resources.close)
+        self.fake_redis = self.resources.fake
 
         self.server = EvenniaServerService()
         self.server.run_initial_setup = MagicMock()
+        self.server.run_init_hooks = MagicMock()
         evennia.EVENNIA_SERVER_SERVICE = self.server
         evennia.SERVER_SESSION_HANDLER = ServerSessionHandler()
         evennia.SERVER_SESSION_HANDLER.data_in = MagicMock()
@@ -90,8 +149,10 @@ class TestRedisBus(TestCase):
 
         self.amp_factory = amp_server.AMPServerFactory(self.portal)
         self.server_bus = RedisServerBus(self.server)
+        self.resources.buses.append(self.server_bus)
         self.server.portal_bus = self.server_bus
         self.portal_bus = RedisPortalBus(self.portal, factory=self.amp_factory)
+        self.resources.buses.append(self.portal_bus)
         self.portal.server_bus = self.portal_bus
         self.amp_factory.server_connection = self.portal_bus
 
@@ -103,17 +164,6 @@ class TestRedisBus(TestCase):
         self.portal_bus.start_bus()
         time.sleep(0.05)
         self.server_bus.start_bus()
-
-    def tearDown(self):
-        try:
-            self.server_bus.stop_bus()
-        except Exception:
-            pass
-        try:
-            self.portal_bus.stop_bus()
-        except Exception:
-            pass
-        self.redis_patcher.stop()
 
     def test_stream_topology(self):
         prefix = _BUS_SETTINGS["REDIS_BUS_PREFIX"]
@@ -138,6 +188,7 @@ class TestRedisBus(TestCase):
         _drain_bus()
         self.assertIsNotNone(self.portal.server_process_id)
         evennia.PORTAL_SESSION_HANDLER.at_server_connection.assert_called()
+        self.server.run_init_hooks.assert_called_once_with("shutdown")
 
     def test_admin_pdisconnall(self):
         self.portal_bus.send_AdminPortal2Server(amp.DUMMYSESSION, operation=amp.PDISCONNALL)
@@ -656,3 +707,116 @@ class TestBoundedTransportStop(SimpleTestCase):
         self.assertLessEqual(joins[0][1], 0.05)
         with self.assertRaises(RuntimeError):
             self.transport.start()
+
+
+class TestBusFixtureCleanup(SimpleTestCase):
+    """Fixture cleanup owns its callbacks without touching ambient work."""
+
+    def test_cleanup_cancels_owned_work_before_restoring_globals(self):
+        """Only the fixture coroutine sees cancellation; its timer never fires."""
+        original = evennia.SERVER_SESSION_HANDLER
+        pending = [(MagicMock(), (), {})]
+        ambient = asyncio.new_event_loop()
+        ambient_task = ambient.create_task(asyncio.sleep(100))
+        observed = []
+        with patch.object(clock, "_pending_when_running", pending):
+            resources = _BusTestResources()
+            self.addCleanup(resources.close)
+            try:
+                owned = object()
+                evennia.SERVER_SESSION_HANDLER = owned
+                handle = clock.call_later(0, lambda: observed.append("timer"))
+
+                async def waiting():
+                    """Observe which globals are active during cancellation."""
+                    try:
+                        await asyncio.sleep(100)
+                    finally:
+                        observed.append(evennia.SERVER_SESSION_HANDLER)
+
+                task = resources.loop.create_task(waiting())
+                # The scheduling loop stays stopped while reader threads exist.
+                handle.cancel()
+                resources.loop.run_until_complete(asyncio.sleep(0))
+                uncanceled = clock.call_later(0, lambda: observed.append("late timer"))
+                resources.close()
+                self.assertTrue(task.cancelled())
+                self.assertTrue(uncanceled.cancelled())
+                self.assertEqual(observed, [owned])
+                self.assertIs(evennia.SERVER_SESSION_HANDLER, original)
+                self.assertIs(clock._pending_when_running, pending)
+                self.assertEqual(len(pending), 1)
+                pending[0][0].assert_not_called()
+                self.assertFalse(ambient_task.done())
+            finally:
+                resources.close()
+                ambient_task.cancel()
+                ambient.run_until_complete(asyncio.gather(ambient_task, return_exceptions=True))
+                ambient.close()
+
+    def test_stop_failure_does_not_skip_other_cleanup(self):
+        """Stop failures stay visible while other resources and globals restore."""
+        original_get_loop = clock._get_loop
+        original_handler = evennia.SERVER_SESSION_HANDLER
+        resources = _BusTestResources()
+        evennia.SERVER_SESSION_HANDLER = object()
+        first, second = MagicMock(), MagicMock()
+        first._transport.stop.side_effect = RuntimeError("stop failed")
+        for name in ("_writer", "_reader", "_cleanup"):
+            setattr(second._transport, name, None)
+        resources.buses.extend([first, second])
+        with self.assertRaises(ExceptionGroup) as caught:
+            resources.close()
+        self.assertIn("stop failed", str(caught.exception.exceptions[0]))
+        second._transport.stop.assert_called_once()
+        self.assertTrue(resources.loop.is_closed())
+        self.assertIs(clock._get_loop, original_get_loop)
+        self.assertIs(evennia.SERVER_SESSION_HANDLER, original_handler)
+
+    def test_coroutine_cleanup_error_is_reported(self):
+        """Cancellation must not hide a failure raised by coroutine cleanup."""
+        original = clock._get_loop
+        resources = _BusTestResources()
+
+        async def failing_cleanup():
+            """Fail during cancellation rather than silently returning an error."""
+            try:
+                await asyncio.sleep(100)
+            finally:
+                raise RuntimeError("cleanup failed")
+
+        resources.loop.create_task(failing_cleanup())
+        resources.loop.run_until_complete(asyncio.sleep(0))
+        with self.assertRaises(ExceptionGroup) as caught:
+            resources.close()
+        self.assertIn("cleanup failed", str(caught.exception.exceptions[0]))
+        self.assertIs(clock._get_loop, original)
+        self.assertTrue(resources.loop.is_closed())
+
+    def test_setup_failure_still_releases_registered_resources(self):
+        """An exception after resource acquisition cannot leak fixture globals."""
+        from unittest import TestResult
+
+        original = evennia.SERVER_SESSION_HANDLER
+
+        class BrokenFixture(SimpleTestCase):
+            """Model a fixture that fails during service construction."""
+
+            def setUp(self):
+                """Register cleanup before changing process state."""
+                self.resources = _BusTestResources()
+                self.addCleanup(self.resources.close)
+                evennia.SERVER_SESSION_HANDLER = object()
+                raise RuntimeError("setup failed")
+
+            def runTest(self):
+                """Fail if the runner incorrectly enters the test body."""
+                raise AssertionError("setup should prevent the test body")
+
+        fixture = BrokenFixture()
+        result = TestResult()
+        fixture.run(result)
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("setup failed", result.errors[0][1])
+        self.assertIs(evennia.SERVER_SESSION_HANDLER, original)
+        self.assertTrue(fixture.resources.loop.is_closed())
