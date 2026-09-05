@@ -70,6 +70,7 @@ class _BusTestResources:
         self.stack.enter_context(patch("redis.Redis.from_url", return_value=self.fake))
         self.stack.enter_context(patch.object(clock, "_get_loop", return_value=self.loop))
         self.stack.enter_context(patch.object(clock, "_pending_when_running", []))
+        self.stack.enter_context(patch.object(clock, "call_from_thread", _sync_call_from_thread))
         call_later = clock.call_later
 
         def schedule(*args, **kwargs):
@@ -88,22 +89,24 @@ class _BusTestResources:
     def _settle(self):
         """Stop all readers before driving cancellation on the private loop."""
         errors = []
+        survivors = False
         for bus in self.buses:
             try:
                 bus._transport.stop()
-                for name in ("_writer", "_reader", "_cleanup"):
-                    worker = getattr(bus._transport, name)
-                    if worker is not None and worker.is_alive():
-                        raise AssertionError(f"bus fixture left {name} running")
             except Exception as error:
                 errors.append(error)
+            for name in ("_writer", "_reader", "_cleanup"):
+                worker = getattr(bus._transport, name)
+                if worker is not None and worker.is_alive():
+                    survivors = True
+                    errors.append(AssertionError(f"bus fixture left {name} running"))
         for handle in self.handles:
             handle.cancel()
         try:
             tasks = list(asyncio.all_tasks(self.loop))
             for task in tasks:
                 task.cancel()
-            if tasks:
+            if tasks and not survivors:
                 results = self.loop.run_until_complete(
                     asyncio.gather(*tasks, return_exceptions=True)
                 )
@@ -115,7 +118,6 @@ class _BusTestResources:
 
 
 @override_settings(**_BUS_SETTINGS)
-@patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
 class TestRedisBus(TestCase):
     def setUp(self):
         self.resources = _BusTestResources()
@@ -763,6 +765,7 @@ class TestBusFixtureCleanup(SimpleTestCase):
         first, second = MagicMock(), MagicMock()
         first._transport.stop.side_effect = RuntimeError("stop failed")
         for name in ("_writer", "_reader", "_cleanup"):
+            setattr(first._transport, name, None)
             setattr(second._transport, name, None)
         resources.buses.extend([first, second])
         with self.assertRaises(ExceptionGroup) as caught:
@@ -820,3 +823,37 @@ class TestBusFixtureCleanup(SimpleTestCase):
         self.assertIn("setup failed", result.errors[0][1])
         self.assertIs(evennia.SERVER_SESSION_HANDLER, original)
         self.assertTrue(fixture.resources.loop.is_closed())
+
+    def test_surviving_reader_prevents_driving_private_loop(self):
+        """A terminal stop failure must not race the reader against loop cleanup."""
+        import threading
+        from types import SimpleNamespace
+
+        resources = _BusTestResources()
+        release = threading.Event()
+        reader = threading.Thread(target=release.wait, daemon=True)
+        reader.start()
+        resources.buses.append(
+            SimpleNamespace(
+                _transport=SimpleNamespace(
+                    stop=MagicMock(),
+                    _reader=reader,
+                    _writer=None,
+                    _cleanup=None,
+                )
+            )
+        )
+        task = resources.loop.create_task(asyncio.sleep(100))
+        try:
+            with (
+                patch.object(resources.loop, "run_until_complete") as drive,
+                patch.object(resources.loop, "close"),
+            ):
+                with self.assertRaises(ExceptionGroup):
+                    resources.close()
+                drive.assert_not_called()
+        finally:
+            release.set()
+            reader.join(1)
+            resources.loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
+            resources.loop.close()

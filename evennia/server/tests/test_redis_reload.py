@@ -22,12 +22,10 @@ from evennia.server.tests.test_redis_bus import (
     _BUS_SETTINGS,
     _BusTestResources,
     _drain_bus,
-    _sync_call_from_thread,
 )
 
 
 @override_settings(**_BUS_SETTINGS)
-@patch("evennia.utils.clock.call_from_thread", _sync_call_from_thread)
 class TestRedisReloadSurvival(TestCase):
     def setUp(self):
         self.resources = _BusTestResources()
@@ -73,6 +71,10 @@ class TestRedisReloadSurvival(TestCase):
         self.server_bus.start_bus()
         self.portal_bus.start_bus()
         _drain_bus()
+
+    def test_initial_handshake_completed_during_setup(self):
+        """The initial PSYNC must dispatch before the test body starts."""
+        self.server.run_init_hooks.assert_called_once_with("shutdown")
 
     def test_portal_ws_session_stays_connected_through_reload_admin(self):
         """SRELOAD admin op must not tear down Portal-side protocol transports."""

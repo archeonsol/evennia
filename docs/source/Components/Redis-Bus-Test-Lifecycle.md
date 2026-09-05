@@ -6,7 +6,9 @@ Portal and Server processes.
 
 `_BusTestResources` owns each fixture's service globals, Redis patch, private
 asyncio loop, pending startup callback list, and delayed callback handles.
-The private loop stays stopped while reader threads can schedule work.
+The synchronous handoff patch covers setup, test execution, and cleanup. The
+private loop stays stopped while reader threads can schedule work. If a worker
+survives stop, cleanup reports failure and does not drive that loop.
 
 Cleanup stops both transports and verifies their workers exited before settling
 scheduled work. It cancels owned timers and tasks, waits for task cancellation,
