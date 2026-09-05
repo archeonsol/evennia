@@ -1,5 +1,5 @@
 ```{eval-rst}
-evennia.server.redis\_transport 
+evennia.server.redis\_transport
 ======================================
 
 .. automodule:: evennia.server.redis_transport

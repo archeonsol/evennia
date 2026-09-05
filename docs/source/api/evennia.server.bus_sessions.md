@@ -1,5 +1,5 @@
 ```{eval-rst}
-evennia.server.bus\_sessions 
+evennia.server.bus\_sessions
 ===================================
 
 .. automodule:: evennia.server.bus_sessions
