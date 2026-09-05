@@ -2,11 +2,16 @@
 Tests for whitelisted job queue.
 """
 
+import json
 import sys
 import types
 from unittest import mock
 
-from django.test import override_settings
+import django_redis
+import fakeredis
+from django.test import SimpleTestCase, override_settings
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import ResponseError
 
 from evennia.jobs import queue
 from evennia.jobs.queue import enqueue_job, process_pending_jobs, register_job_type
@@ -255,3 +260,219 @@ class TestRedisBackoff(BaseEvenniaTest):
 
             conn.lpush.side_effect = None
             self.assertIsNotNone(enqueue_job("backoff_sample", {"n": 2}))
+
+
+@override_settings(JOB_QUEUE_ENABLED=True, JOB_QUEUE_BACKEND="redis")
+class TestRedisJobTransitions(SimpleTestCase):
+    """Execute the retry script against Redis-compatible lists and Lua."""
+
+    def setUp(self):
+        """Give each test isolated queue storage and registry entries."""
+        super().setUp()
+        self.redis = fakeredis.FakeRedis()
+        self.addCleanup(self.redis.close)
+        connection = mock.patch.object(
+            django_redis, "get_redis_connection", return_value=self.redis
+        )
+        connection.start()
+        self.addCleanup(connection.stop)
+        registry = mock.patch.object(
+            queue,
+            "_REGISTRY",
+            {
+                "sample": "evennia.jobs.tests._sample_job",
+                "boom": "evennia.jobs.tests._raising_job",
+            },
+        )
+        registry.start()
+        self.addCleanup(registry.stop)
+        self.pending, self.processing, self.dead = queue._redis_keys()
+
+    def _lease(self, *, max_attempts=3, job_type="sample"):
+        """Enqueue and lease a real serialized record through production APIs."""
+        job_id = enqueue_job(job_type, {"value": "preserve me"}, max_attempts=max_attempts)
+        self.assertIsNotNone(job_id)
+        record = queue._dequeue_redis()
+        self.assertEqual(record["id"], job_id)
+        self.assertEqual(record["attempts"], 1)
+        return record
+
+    def _destination(self, max_attempts):
+        """Return the destination for a first leased attempt."""
+        return self.dead if max_attempts == 1 else self.pending
+
+    def test_retry_and_dead_letter_move_one_original(self):
+        """Both destinations receive the leased attempt with its payload intact."""
+        for max_attempts in (1, 3):
+            with self.subTest(max_attempts=max_attempts):
+                self.redis.flushall()
+                record = self._lease(max_attempts=max_attempts)
+                with mock.patch.object(queue.logger, "log_err") as log:
+                    queue._retry_or_dead_redis(record)
+                self.assertEqual(self.redis.llen(self.processing), 0)
+                rows = self.redis.lrange(self._destination(max_attempts), 0, -1)
+                self.assertEqual(len(rows), 1)
+                replacement = json.loads(rows[0])
+                self.assertEqual(replacement["id"], record["id"])
+                self.assertEqual(replacement["payload"], record["payload"])
+                self.assertEqual(replacement["attempts"], 1)
+                self.assertNotIn("_raw", replacement)
+                self.assertEqual(log.call_count, int(max_attempts == 1))
+
+    def test_missing_original_does_not_publish_or_log_dead_letter(self):
+        """A completed or already transitioned lease does not create new work."""
+        for max_attempts in (1, 3):
+            with self.subTest(max_attempts=max_attempts):
+                record = self._lease(max_attempts=max_attempts)
+                queue._complete_redis(record)
+                with mock.patch.object(queue.logger, "log_err") as log:
+                    queue._retry_or_dead_redis(record)
+                self.assertEqual(self.redis.llen(self._destination(max_attempts)), 0)
+                log.assert_not_called()
+
+    def test_repeated_transition_does_not_duplicate(self):
+        """Repeating the same attempt token is a no-op after a successful move."""
+        for max_attempts in (1, 3):
+            with self.subTest(max_attempts=max_attempts):
+                self.redis.flushall()
+                record = self._lease(max_attempts=max_attempts)
+                with mock.patch.object(queue.logger, "log_err") as log:
+                    queue._retry_or_dead_redis(record)
+                    queue._retry_or_dead_redis(record)
+                self.assertEqual(self.redis.llen(self._destination(max_attempts)), 1)
+                self.assertEqual(self.redis.llen(self.processing), 0)
+                self.assertEqual(log.call_count, int(max_attempts == 1))
+
+    def test_old_transition_cannot_consume_new_attempt(self):
+        """The replacement's serialized attempt is distinct from the old token."""
+        record = self._lease()
+        queue._retry_or_dead_redis(record)
+        newer = queue._dequeue_redis()
+        self.assertEqual(newer["attempts"], 2)
+        queue._retry_or_dead_redis(record)
+        self.assertEqual(self.redis.lrange(self.processing, 0, -1), [newer["_raw"].encode()])
+        self.assertEqual(self.redis.llen(self.pending), 0)
+
+    def test_lost_reply_after_commit_is_safe_to_repeat(self):
+        """Execute production Lua before hiding its successful response."""
+        for max_attempts in (1, 3):
+            with self.subTest(max_attempts=max_attempts):
+                self.redis.flushall()
+                record = self._lease(max_attempts=max_attempts)
+                original_eval = self.redis.eval
+
+                def commit_then_lose_reply(*args, **kwargs):
+                    """Commit the transition before simulating a transport failure."""
+                    original_eval(*args, **kwargs)
+                    raise RedisConnectionError("reply lost after commit")
+
+                with (
+                    mock.patch.object(self.redis, "eval", side_effect=commit_then_lose_reply),
+                    mock.patch.object(queue.logger, "log_trace") as log,
+                ):
+                    queue._retry_or_dead_redis(record)
+                log.assert_called_once()
+                queue._retry_or_dead_redis(record)
+                self.assertEqual(self.redis.llen(self.processing), 0)
+                self.assertEqual(self.redis.llen(self._destination(max_attempts)), 1)
+
+    def test_unexecuted_or_denied_script_retains_original(self):
+        """Failure before script execution leaves the original recoverable."""
+        for error in (RedisConnectionError("unavailable"), ResponseError("NOPERM EVAL")):
+            with self.subTest(error=error):
+                self.redis.flushall()
+                record = self._lease()
+                with (
+                    mock.patch.object(self.redis, "eval", side_effect=error),
+                    mock.patch.object(queue.logger, "log_trace") as log,
+                ):
+                    queue._retry_or_dead_redis(record)
+                self.assertEqual(
+                    self.redis.lrange(self.processing, 0, -1), [record["_raw"].encode()]
+                )
+                self.assertEqual(self.redis.llen(self.pending), 0)
+                log.assert_called_once()
+
+    def test_wrong_key_types_do_not_mutate_storage(self):
+        """Source and destination type errors remain visible before any write."""
+        for key_kind in ("source", "destination"):
+            with self.subTest(key_kind=key_kind):
+                self.redis.flushall()
+                record = self._lease()
+                bad_key = self.processing if key_kind == "source" else self.pending
+                self.redis.set(bad_key, b"invalid queue")
+                with mock.patch.object(queue.logger, "log_trace") as log:
+                    queue._retry_or_dead_redis(record)
+                self.assertEqual(self.redis.get(bad_key), b"invalid queue")
+                if key_kind == "destination":
+                    self.assertEqual(
+                        self.redis.lrange(self.processing, 0, -1), [record["_raw"].encode()]
+                    )
+                else:
+                    self.assertEqual(self.redis.llen(self.pending), 0)
+                log.assert_called_once()
+
+    def test_equal_keys_do_not_replace_original(self):
+        """A source cannot also be the transition destination."""
+        record = self._lease()
+        with (
+            mock.patch.object(
+                queue, "_redis_keys", return_value=(self.processing, self.processing, self.dead)
+            ),
+            mock.patch.object(queue.logger, "log_trace") as log,
+        ):
+            queue._retry_or_dead_redis(record)
+        self.assertEqual(self.redis.lrange(self.processing, 0, -1), [record["_raw"].encode()])
+        log.assert_called_once()
+
+    def test_invalid_record_fails_before_mutation(self):
+        """Invalid tokens and serialization errors cannot remove the source."""
+        for mutation in ("missing_raw", "invalid_raw", "invalid_payload"):
+            with self.subTest(mutation=mutation):
+                self.redis.flushall()
+                record = self._lease()
+                original = record["_raw"].encode()
+                if mutation == "missing_raw":
+                    del record["_raw"]
+                elif mutation == "invalid_raw":
+                    record["_raw"] = []
+                else:
+                    record["payload"] = object()
+                with mock.patch.object(queue.logger, "log_trace") as log:
+                    queue._retry_or_dead_redis(record)
+                self.assertEqual(self.redis.lrange(self.processing, 0, -1), [original])
+                self.assertEqual(self.redis.llen(self.pending), 0)
+                log.assert_called_once()
+
+    def test_duplicate_source_moves_only_one_occurrence(self):
+        """Pre-existing duplicates are conserved, not silently deduplicated."""
+        record = self._lease()
+        self.redis.lpush(self.processing, record["_raw"])
+        self.redis.rpush(self.processing, b"unrelated")
+        queue._retry_or_dead_redis(record)
+        self.assertEqual(
+            self.redis.lrange(self.processing, 0, -1), [record["_raw"].encode(), b"unrelated"]
+        )
+        self.assertEqual(self.redis.llen(self.pending), 1)
+
+    def test_retry_preserves_fifo_order(self):
+        """A retried job goes behind existing pending jobs."""
+        record = self._lease()
+        self.redis.lpush(self.pending, b"first", b"second")
+        queue._retry_or_dead_redis(record)
+        self.assertEqual(self.redis.rpop(self.pending), b"first")
+        self.assertEqual(self.redis.rpop(self.pending), b"second")
+        self.assertEqual(json.loads(self.redis.rpop(self.pending))["id"], record["id"])
+
+    def test_handler_failure_retries_with_next_lease_attempt(self):
+        """The complete dispatch path increments attempts only when leasing."""
+        job_id = enqueue_job("boom", {"n": 1}, max_attempts=3)
+        with (
+            mock.patch.object(queue.logger, "log_trace"),
+            mock.patch.object(queue.logger, "log_err"),
+        ):
+            self.assertEqual(process_pending_jobs(max_jobs=1), 1)
+        retried = queue._dequeue_redis()
+        self.assertEqual(retried["id"], job_id)
+        self.assertEqual(retried["attempts"], 2)
+        self.assertEqual(retried["payload"], {"n": 1})

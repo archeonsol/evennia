@@ -94,7 +94,7 @@ dependencies = [
   "mock >= 4.0.3",
   "anything ==0.2.1",
   "parameterized == 0.9.0",
-  "fakeredis >= 2.21",
+  "fakeredis[lua] >= 2.21",
   "ruff == 0.15.20"
 ]
 

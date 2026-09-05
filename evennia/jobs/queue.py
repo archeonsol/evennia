@@ -427,7 +427,33 @@ def _complete_redis(record: dict) -> None:
         logger.log_trace("job_queue: redis complete failed")
 
 
+_REDIS_RETRY_OR_DEAD = """
+if KEYS[1] == KEYS[2] then
+    return redis.error_reply('job queue source and destination must differ')
+end
+for _, key in ipairs(KEYS) do
+    local kind = redis.call('TYPE', key).ok
+    if kind ~= 'none' and kind ~= 'list' then
+        return redis.error_reply('job queue keys must contain lists')
+    end
+end
+for _, raw in ipairs(redis.call('LRANGE', KEYS[1], 0, -1)) do
+    if raw == ARGV[1] then
+        redis.call('LPUSH', KEYS[2], ARGV[2])
+        redis.call('LREM', KEYS[1], 1, ARGV[1])
+        return 1
+    end
+end
+return 0
+"""
+
+
 def _retry_or_dead_redis(record: dict) -> None:
+    """Move an exact leased entry to its retry or dead-letter destination.
+
+    Args:
+        record: Leased job containing its original serialized ``_raw`` token.
+    """
     try:
         from django_redis import get_redis_connection
 
@@ -435,21 +461,20 @@ def _retry_or_dead_redis(record: dict) -> None:
         key, processing, dead = _redis_keys()
         r = get_redis_connection(alias)
         raw = record.get("_raw")
-        if raw is not None:
-            r.lrem(processing, 1, raw)
+        if not isinstance(raw, str) or not raw:
+            raise ValueError("job queue retry requires the original serialized record")
         attempts = int(record.get("attempts", 1))
         max_attempts = int(record.get("max_attempts", _max_attempts()))
         payload = {k: v for k, v in record.items() if k != "_raw"}
         payload["attempts"] = attempts
         blob = json.dumps(payload, separators=(",", ":"))
-        if attempts >= max_attempts:
-            r.lpush(dead, blob)  # dead-letter
+        destination = dead if attempts >= max_attempts else key
+        # Append first so a failed destination write leaves the original recoverable.
+        moved = r.eval(_REDIS_RETRY_OR_DEAD, 2, processing, destination, raw, blob)
+        if moved == 1 and attempts >= max_attempts:
             logger.log_err(
                 "job_queue: job %s dead-lettered after %d attempts" % (record.get("id"), attempts)
             )
-        else:
-            # Redis lists have no delay; requeue immediately for another attempt.
-            r.lpush(key, blob)
     except Exception:
         logger.log_trace("job_queue: redis retry/dead failed")
 
