@@ -41,9 +41,9 @@ def _run_flush(ctx):
     """
     Body of the `flush-attributes` system: drain the write-behind cache.
 
-    Failures are handled here (not left to driver isolation) so consecutive
-    failures can escalate: three in a row means the write-behind cache is not
-    persisting and phantom data may be served from the L2 cache until TTL.
+    Returned undurable rows and exceptions share one failure streak.
+    Durably spooled rows count as success. Exceptions can also originate in
+    monitoring helpers, so the critical alert refers to the preceding errors.
     Past the threshold the CRITICAL line repeats only every
     `_CRITICAL_REPEAT_EVERY` failures to avoid flooding.
 
@@ -57,20 +57,24 @@ def _run_flush(ctx):
         stats = _flush_all_dirty()
         maybe_log_flush_metrics(stats, _flush_fire_count)
         maybe_warn_pending_dirty(stats, _flush_fire_count)
-        _consecutive_flush_failures = 0
+        if stats["failed"] <= 0:
+            _consecutive_flush_failures = 0
+            return
+        detail = f"{stats['failed']} undurable rows"
     except Exception:
-        _consecutive_flush_failures += 1
         logger.log_trace("flush-attributes system")
+        detail = "exception; see traceback"
+    _consecutive_flush_failures += 1
+    logger.log_err(
+        f"flush-attributes failed (consecutive failure #{_consecutive_flush_failures}): {detail}"
+    )
+    failures_past_threshold = _consecutive_flush_failures - _CRITICAL_THRESHOLD
+    if failures_past_threshold >= 0 and (failures_past_threshold % _CRITICAL_REPEAT_EVERY == 0):
         logger.log_err(
-            f"flush-attributes failed (consecutive failure #{_consecutive_flush_failures})"
+            f"CRITICAL: attribute flush has failed "
+            f"{_consecutive_flush_failures} consecutive fires; inspect preceding errors "
+            "for persistence or monitoring failures."
         )
-        failures_past_threshold = _consecutive_flush_failures - _CRITICAL_THRESHOLD
-        if failures_past_threshold >= 0 and (failures_past_threshold % _CRITICAL_REPEAT_EVERY == 0):
-            logger.log_err(
-                f"CRITICAL: attribute flush has failed "
-                f"{_consecutive_flush_failures} consecutive fires; the "
-                "write-behind cache is not persisting to the database."
-            )
 
 
 def register_systems():

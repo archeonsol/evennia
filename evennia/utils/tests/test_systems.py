@@ -845,14 +845,21 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
     @override_settings(ATTRIBUTE_FLUSH_INTERVAL=30)
     def test_fires_on_cadence_and_flushes(self):
         engine_systems = self._register_flush()
-        with patch.object(
-            engine_systems, "_flush_all_dirty", return_value={"backends": 1, "total": 2}
-        ) as flush:
+        with (
+            patch.object(
+                engine_systems,
+                "_flush_all_dirty",
+                return_value={"backends": 1, "total": 2, "failed": 0},
+            ) as flush,
+            patch.object(engine_systems, "logger") as mock_logger,
+        ):
             self.clock.set(0.0)
             self.driver.tick()  # prime
             self.clock.set(30.0)
             self.driver.tick()  # fire
         flush.assert_called_once()
+        mock_logger.log_err.assert_not_called()
+        mock_logger.log_trace.assert_not_called()
 
     @override_settings(ATTRIBUTE_FLUSH_INTERVAL=30)
     def test_flush_failure_is_isolated_and_escalates(self):
@@ -873,7 +880,7 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
         ctx = systems.SystemContext(now=0.0, dt=30.0)
         boom = RuntimeError("pg down")
         # two failures, a success, then two failures: never 3 consecutive
-        sequence = [boom, boom, {"backends": 0, "total": 0}, boom, boom]
+        sequence = [boom, boom, {"backends": 0, "total": 0, "failed": 0}, boom, boom]
         with patch.object(engine_systems, "_flush_all_dirty", side_effect=sequence):
             with patch.object(engine_systems, "logger") as mock_logger:
                 for _ in sequence:
