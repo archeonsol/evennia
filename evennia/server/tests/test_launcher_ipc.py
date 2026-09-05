@@ -1,7 +1,7 @@
 """Tests for LauncherSession event-driven status waits."""
 
 import struct
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 
@@ -75,6 +75,30 @@ class DecodeFramesTest(SimpleTestCase):
 
 
 class LauncherSessionWaitTest(SimpleTestCase):
+    def test_query_status_preserves_coalesced_response(self):
+        """A pushed status must not consume the query response beside it."""
+        status = [True, True, 1, 2, {}, {}]
+        session = LauncherSession("127.0.0.1", 4006)
+        session._sock = Mock()
+        session._sock.recv.side_effect = [
+            _encode_frame({"type": "status_push", "status": status})
+            + _encode_frame({"type": "status", "status": status}),
+            TimeoutError("no more frames"),
+        ]
+        self.assertEqual(session.query_status(), status)
+        session._sock.recv.assert_called_once()
+
+    def test_status_timeout_past_deadline_returns_without_sleeping(self):
+        """An expired status query must not turn its deadline into an exception."""
+        session = LauncherSession("127.0.0.1", 4006)
+        with (
+            patch.object(session, "query_status", side_effect=TimeoutError),
+            patch("evennia.server.launcher_ipc.time.monotonic", side_effect=[0, 0, 2, 2]),
+            patch("evennia.server.launcher_ipc.time.sleep") as sleep,
+        ):
+            self.assertIsNone(session.wait_for_state(timeout=1))
+        sleep.assert_not_called()
+
     def test_state_matches_respects_desired_flags(self):
         session = LauncherSession("127.0.0.1", 4006)
         status = [True, False, 1, None, {}, {}]

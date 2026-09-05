@@ -30,6 +30,7 @@ import json
 import socket
 import struct
 import time
+from collections import deque
 from typing import Any
 
 from evennia.utils import clock, logger
@@ -220,6 +221,7 @@ class LauncherSession:
         self.timeout = timeout
         self._sock: socket.socket | None = None
         self._buffer = bytearray()
+        self._frames = deque()
 
     def connect(self):
         self._sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
@@ -232,17 +234,22 @@ class LauncherSession:
             except OSError:
                 pass
             self._sock = None
+        self._buffer.clear()
+        self._frames.clear()
 
     def _read_frame(self) -> dict:
         assert self._sock is not None
         while True:
+            if self._frames:
+                return self._frames.popleft()
             try:
                 frames, self._buffer = _decode_frames(self._buffer)
             except LauncherIPCFrameError as exc:
                 logger.log_trace("launcher IPC: corrupt frame stream on read")
                 raise ConnectionError("launcher IPC frame error") from exc
             if frames:
-                return frames[0]
+                self._frames.extend(frames)
+                continue
             chunk = self._sock.recv(4096)
             if not chunk:
                 raise ConnectionError("launcher IPC connection closed")
@@ -330,7 +337,10 @@ class LauncherSession:
             try:
                 status = self.query_status()
             except (TimeoutError, OSError, ConnectionError):
-                time.sleep(min(poll_interval, deadline - time.monotonic()))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                time.sleep(min(poll_interval, remaining))
                 continue
             if self._state_matches(status, portal_running, server_running):
                 return status
