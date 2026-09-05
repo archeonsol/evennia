@@ -26,3 +26,32 @@ The Azaban reload test verifies connection survival, session synchronization,
 capability preservation, and an outbound `render` envelope containing one
 `render.v1` text node with the expected body. Generated node IDs and incidental
 HTML are outside that assertion.
+
+## Real Redis fault tests
+
+Set `EVENNIA_REDIS_SERVER` to a local Redis executable to opt into these modules:
+
+- `evennia.server.tests.test_redis_transport_live`: real socket reply loss for
+  actions and lifecycle requests, count/byte saturation, bounded stop, and trimming.
+- `evennia.server.tests.test_redis_bus_processes`: actual bus and handshake in
+  separate spawned processes, startup ordering, process death, reconnect, retained
+  session state, stale input, and final snapshot application acknowledgment.
+- `evennia.server.tests.test_bus_cutover`: the exact operator maintenance block,
+  the previous reader after rollback, atomic job transitions with lost replies,
+  unrelated-state preservation, and forced child cleanup.
+
+Every suite starts a test-owned Redis instance with persistence disabled. It uses
+an isolated endpoint and process handles for cleanup, so it needs no configured
+Redis service. Local socket permissions are required. The cutover suite also needs
+the `underspire.227` git tag to inspect the previous reader implementation.
+
+The TCP proxy consumes a real successful XADD reply before closing the client's
+socket. An independent Redis client checks the committed stream contents. The job
+test injects an exception after successful real Lua execution and independently
+checks the destination list. These distinguish publication uncertainty from
+command completion and from job side-effect guarantees.
+
+The spawned peers use actual transport, scheduling, handshake, and IPC with small
+observable session handlers. They do not run the full application bootstrap or
+establish production capacity. Engine session/lifecycle tests and downstream game
+tests provide the corresponding application coverage.

@@ -46,3 +46,6 @@ scene, editor, and UI state refresh through the session recovery hook.
 
 Final shutdown synchronization has its own application acknowledgment and shared
 deadline. See [shutdown](Redis-Bus-Shutdown.md).
+
+Mixed bus versions are unsupported. Use the [cutover and rollback
+procedure](Redis-Bus-Cutover.md) with both processes stopped.
