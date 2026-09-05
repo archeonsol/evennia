@@ -48,6 +48,21 @@ make tests=evennia.commands.tests.test_command test  # specific test file
 
 The Makefile creates `.test_game_dir/`, runs `evennia migrate`, then `evennia test --keepdb`.
 
+## Parallel workers
+
+`evennia test --parallel 4 evennia` uses the engine's parallel suite. Each worker
+first lets Django select its database clone, then initializes the Server API
+before importing test modules. The worker result class clears row identity caches
+after each transaction rollback, just as the serial runner does. Games that need
+a persistent scheduling loop can subclass `EvenniaParallelTestSuite` and extend
+its `init_worker` callback after the engine `initialize_worker` function returns.
+
+Spawned workers must receive an importable Django settings module. The launcher's
+`--settings settings.py` shorthand is unsuitable for parallel runs. A game using
+that shorthand can supply `server/conf` on PYTHONPATH and use `--settings settings`
+instead. Keep a leading game-directory PYTHONPATH entry because the launcher
+replaces that first search-path entry with the engine root.
+
 ## Test Base Classes
 
 All in `evennia/utils/test_resources.py`:
