@@ -41,6 +41,8 @@ _DATA = b"d"
 # contract); one log per stall episode keeps a real outage visible without
 # flooding.
 _MAX_QUEUE = 10000
+_STOP_TIMEOUT = 3.0
+_QUEUE_WAIT = 0.1
 
 
 def _bus_url():
@@ -68,6 +70,8 @@ class _RedisTransport:
         self._writer = None
         self._reader = None
         self._stop = threading.Event()
+        self._admission_lock = threading.Lock()
+        self._cleanup = None
         # Consumer-group identity for the read stream. The group's last-delivered
         # cursor lives on the redis server, so it survives a Server reload — that
         # is what stops the old ``$`` reader from skipping frames written during
@@ -90,11 +94,25 @@ class _RedisTransport:
             logger.log_trace("redis bus: xgroup_create error")
 
     def start(self):
-        if self._reader is not None and self._reader.is_alive():
-            return
+        """Start a fresh worker pair, rejecting overlap with prior workers.
+
+        Returns:
+            bool: Whether a fresh pair was started.
+
+        Raises:
+            RuntimeError: Old workers or cleanup still own the transport.
+        """
+        writer_alive = self._writer is not None and self._writer.is_alive()
+        reader_alive = self._reader is not None and self._reader.is_alive()
+        cleanup_alive = self._cleanup is not None and self._cleanup.is_alive()
+        if writer_alive or reader_alive or cleanup_alive:
+            if writer_alive and reader_alive and not self._stop.is_set() and not cleanup_alive:
+                return False
+            raise RuntimeError("redis bus: previous workers or cleanup still running")
         import redis
 
         self._client = redis.Redis.from_url(self._url)
+        self._cleanup = None
         try:
             self._client.ping()
         except redis.exceptions.RedisError as err:
@@ -107,9 +125,13 @@ class _RedisTransport:
                 "process for launcher retry." % (self._url, err)
             )
             clock.stop_loop()
-            return
+            return False
         self._ensure_group()
-        self._stop.clear()
+        with self._admission_lock:
+            if self._stop.is_set():
+                self._q = queue.Queue(maxsize=_MAX_QUEUE)
+                self._queue_full_logged = False
+            self._stop.clear()
         self._writer = threading.Thread(
             target=self._writer_loop, name="redis-bus-writer", daemon=True
         )
@@ -118,42 +140,65 @@ class _RedisTransport:
         )
         self._writer.start()
         self._reader.start()
+        return True
+
+    def _close_after_workers(self, workers, client):
+        """Close the captured client only after its captured workers exit."""
+        for worker in workers:
+            if worker is not None:
+                worker.join()
+        try:
+            if client is not None:
+                client.close()
+        except Exception:
+            logger.log_trace("redis bus: client cleanup failed")
 
     def stop(self):
-        self._stop.set()
-        self._q.put(None)
-        for t in (self._writer, self._reader):
-            if t is not None:
-                t.join(timeout=3)
-        # Only drop handles for threads that actually exited. A thread wedged in
-        # a blocking redis call ignores _stop and outlives the join; keeping its
-        # handle lets a later start() see it via is_alive() and skip spawning a
-        # duplicate rather than orphaning a live reader/writer.
-        if self._writer is not None and self._writer.is_alive():
-            logger.log_warn("redis bus: writer thread did not stop within 3s; leaving it running")
-        else:
-            self._writer = None
-        if self._reader is not None and self._reader.is_alive():
-            logger.log_warn("redis bus: reader thread did not stop within 3s; leaving it running")
-        else:
-            self._reader = None
-        try:
-            if self._client is not None:
-                self._client.close()
-        except Exception:
-            pass
+        """Abort local transport work within one bounded wait for worker cleanup."""
+        deadline = time.monotonic() + _STOP_TIMEOUT
+        with self._admission_lock:
+            self._stop.set()
+        if self._cleanup is None and any(
+            item is not None for item in (self._writer, self._reader, self._client)
+        ):
+            self._cleanup = threading.Thread(
+                target=self._close_after_workers,
+                args=((self._writer, self._reader), self._client),
+                name="redis-bus-cleanup",
+                daemon=True,
+            )
+            self._cleanup.start()
+        if self._cleanup is not None:
+            self._cleanup.join(timeout=max(0, deadline - time.monotonic()))
+        for name in ("_writer", "_reader", "_cleanup"):
+            worker = getattr(self, name)
+            if worker is not None and worker.is_alive():
+                logger.log_warn(
+                    f"redis bus: {name[1:]} still running after shutdown wait; restart blocked"
+                )
+            elif name != "_cleanup":
+                setattr(self, name, None)
 
     def publish(self, stream, cmdkey, data):
-        try:
-            self._q.put_nowait((stream, cmdkey, data))
-            self._queue_full_logged = False
-        except queue.Full:
-            if not self._queue_full_logged:
+        """Admit a frame unless explicitly stopped; retain the overflow policy.
+
+        Raises:
+            RuntimeError: The transport has been stopped.
+        """
+        warn_full = False
+        with self._admission_lock:
+            if self._stop.is_set():
+                raise RuntimeError("redis bus: publication rejected after stop")
+            try:
+                self._q.put_nowait((stream, cmdkey, data))
+                self._queue_full_logged = False
+            except queue.Full:
+                warn_full = not self._queue_full_logged
                 self._queue_full_logged = True
-                logger.log_err(
-                    "redis bus: publish queue full (%d); dropping frames until it drains"
-                    % _MAX_QUEUE
-                )
+        if warn_full:
+            logger.log_err(
+                "redis bus: publish queue full (%d); dropping frames until it drains" % _MAX_QUEUE
+            )
 
     @staticmethod
     def _is_control(cmdkey):
@@ -178,17 +223,23 @@ class _RedisTransport:
                 return True
             except Exception:
                 logger.log_trace("redis bus: xadd attempt %d failed" % (i + 1))
-                time.sleep(min(0.5, 0.05 * (2**i)))
+                if self._stop.wait(min(0.5, 0.05 * (2**i))):
+                    return False
         return False
 
     def _writer_loop(self):
         while not self._stop.is_set():
-            item = self._q.get()
-            if item is None:
+            try:
+                item = self._q.get(timeout=_QUEUE_WAIT)
+            except queue.Empty:
+                continue
+            if self._stop.is_set() or item is None:
                 break
             stream, cmdkey, data = item
             if self._xadd_with_retry(stream, cmdkey, data):
                 continue
+            if self._stop.is_set():
+                break
             # Persistent failure: a control frame is not replaceable output — do
             # not silently drop it. Re-queue it (best effort) and escalate; a
             # data frame follows the best-effort contract and is dropped loudly.
@@ -226,6 +277,8 @@ class _RedisTransport:
     def _drain_pending(self):
         """Reclaim this consumer's un-acked frames from a prior crash (delivered
         but never acked), redelivered by reading the group at id ``0``."""
+        if self._stop.is_set():
+            return
         try:
             resp = self._client.xreadgroup(
                 self._group, self._consumer, {self._read_stream: "0"}, count=256
@@ -235,6 +288,8 @@ class _RedisTransport:
             return
         for _stream, entries in resp or []:
             for entry_id, fields in entries:
+                if self._stop.is_set():
+                    return
                 self._dispatch(entry_id, fields)
 
     def _reader_loop(self):
@@ -260,6 +315,8 @@ class _RedisTransport:
                 continue
             for _stream, entries in resp:
                 for entry_id, fields in entries:
+                    if self._stop.is_set():
+                        return
                     self._dispatch(entry_id, fields)
 
 
@@ -282,7 +339,7 @@ class _RedisBusMixin:
         raise NotImplementedError
 
     def start_bus(self):
-        self._transport.start()
+        return self._transport.start()
 
     def stop_bus(self):
         try:
@@ -357,7 +414,8 @@ class RedisServerBus(_RedisBusMixin):
         return ipc_handlers_server.data_to_portal(self, command, sessid, **kwargs)
 
     def start_bus(self):
-        _RedisBusMixin.start_bus(self)
+        if not _RedisBusMixin.start_bus(self):
+            return
         info_dict = self.factory.server.get_info_dict()
         self.send_AdminServer2Portal(
             amp.DUMMYSESSION, operation=amp.PSYNC, spid=os.getpid(), info_dict=info_dict

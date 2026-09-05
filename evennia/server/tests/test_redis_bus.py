@@ -398,3 +398,261 @@ class PidAliveTest(SimpleTestCase):
         proc = subprocess.Popen([sys.executable, "-c", ""])
         proc.wait()  # child exits and is reaped, so its pid is truly gone
         self.assertFalse(redis_bus._pid_alive(proc.pid))
+
+
+class TestBoundedTransportStop(SimpleTestCase):
+    """Real workers exercise the bounded stop and cleanup ownership contract."""
+
+    def setUp(self):
+        """Isolate transport resources and release workers before restoring patches."""
+        import threading
+
+        self.threading = threading
+        self.transport = _RedisTransport("test:stop", MagicMock())
+        self.transport._client = MagicMock()
+        self.releases = []
+        self.workers = []
+        budget = patch.object(redis_bus, "_STOP_TIMEOUT", 0.05, create=True)
+        budget.start()
+        self.addCleanup(budget.stop)
+        logs = patch.object(redis_bus, "logger")
+        self.logs = logs.start()
+        self.addCleanup(logs.stop)
+        self.addCleanup(self._release)
+
+    def _release(self):
+        """Release controlled calls and the original implementation's queue wait."""
+        self.transport._stop.set()
+        for event in self.releases:
+            event.set()
+        while not self.transport._q.empty():
+            self.transport._q.get_nowait()
+        self.transport._q.put_nowait(None)
+        for worker in self.workers:
+            worker.join(2)
+        cleanup = getattr(self.transport, "_cleanup", None)
+        if cleanup is not None:
+            cleanup.join(2)
+
+    def _block(self):
+        """Return a controllable blocking operation and entry/release events."""
+        entered, release = self.threading.Event(), self.threading.Event()
+        self.releases.append(release)
+
+        def block(*args, **kwargs):
+            """Signal entry and wait for test release."""
+            entered.set()
+            release.wait(5)
+
+        return block, entered, release
+
+    def _worker(self, target):
+        """Retain a real daemon for cleanup."""
+        worker = self.threading.Thread(target=target, daemon=True)
+        self.workers.append(worker)
+        worker.start()
+        return worker
+
+    def _bounded_stop(self):
+        """Use an outer watchdog to detect hangs in the original code."""
+        worker = self._worker(self.transport.stop)
+        worker.join(0.5)
+        self.assertFalse(worker.is_alive(), "stop exceeded its shared budget")
+
+    def test_full_queue_blocked_workers_and_cleanup_ownership(self):
+        """Stop uses one deadline and closes only after both workers exit."""
+        self.transport._q = redis_bus.queue.Queue(maxsize=1)
+        self.transport.publish("s", b"Msg", b"old")
+        for name in ("_writer", "_reader"):
+            block, entered, release = self._block()
+            setattr(self.transport, name, self._worker(block))
+            self.assertTrue(entered.wait(1))
+        client = self.transport._client
+        self._bounded_stop()
+        cleanup = self.transport._cleanup
+        self._bounded_stop()
+        self.assertIs(self.transport._cleanup, cleanup)
+        client.close.assert_not_called()
+        with self.assertRaises(RuntimeError):
+            self.transport.start()
+        with self.assertRaises(RuntimeError):
+            self.transport.publish("s", b"Msg", b"new")
+        self.releases[0].set()
+        self.transport._writer.join(1)
+        client.close.assert_not_called()
+        self.releases[1].set()
+        cleanup.join(1)
+        self.assertFalse(cleanup.is_alive())
+        self.transport.stop()
+        client.close.assert_called_once()
+
+    def test_writer_only_survivor_rejects_restart(self):
+        """A surviving writer cannot be orphaned when its reader has exited."""
+        import redis
+
+        block, entered, release = self._block()
+        self.transport._writer = self._worker(block)
+        self.assertTrue(entered.wait(1))
+        self.transport._stop.set()
+        with patch.object(redis.Redis, "from_url") as factory:
+            with self.assertRaises(RuntimeError):
+                self.transport.start()
+        factory.assert_not_called()
+
+    def test_blocked_close_is_bounded_and_prevents_restart(self):
+        """Client close is owned by one retained cleanup worker."""
+        block, entered, release = self._block()
+        self.transport._client.close.side_effect = block
+        self._bounded_stop()
+        self.assertTrue(entered.wait(1))
+        cleanup = self.transport._cleanup
+        self._bounded_stop()
+        self.assertIs(self.transport._cleanup, cleanup)
+        with self.assertRaises(RuntimeError):
+            self.transport.start()
+        release.set()
+        cleanup.join(1)
+        self.transport._client.close.assert_called_once()
+
+    def test_close_errors_are_visible(self):
+        """Cleanup exceptions must be logged."""
+        self.transport._client.close.side_effect = RuntimeError("close failed")
+        self.transport.stop()
+        self.logs.log_trace.assert_called_once()
+
+    def test_idle_writer_exits_without_sentinel(self):
+        """An empty queue does not trap the writer after stop."""
+        worker = self._worker(self.transport._writer_loop)
+        self.transport._stop.set()
+        worker.join(0.5)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(self.transport._q.empty())
+
+    def test_stop_during_pending_and_normal_reads(self):
+        """Reads released after stop cannot dispatch their returned batches."""
+        for pending in (True, False):
+            with self.subTest(pending=pending):
+                self.transport._stop.clear()
+                block, entered, release = self._block()
+
+                def read(*args, **kwargs):
+                    """Hold the response until stop has been requested."""
+                    block()
+                    return [("s", [(b"1-0", {b"c": b"Msg", b"d": b"body"})])]
+
+                self.transport._client.xreadgroup.side_effect = read
+                with patch.object(self.transport, "_dispatch") as dispatch:
+                    if pending:
+                        worker = self._worker(self.transport._drain_pending)
+                    else:
+                        with patch.object(self.transport, "_drain_pending"):
+                            worker = self._worker(self.transport._reader_loop)
+                            self.assertTrue(entered.wait(1))
+                    self.assertTrue(entered.wait(1))
+                    self.transport._stop.set()
+                    release.set()
+                    worker.join(1)
+                    self.assertFalse(worker.is_alive())
+                    dispatch.assert_not_called()
+
+    def test_retry_wait_is_interruptible_without_control_requeue(self):
+        """Stop interrupts backoff without another write or queued retry."""
+        entered = self.threading.Event()
+        original_wait = self.transport._stop.wait
+
+        def wait(delay):
+            """Expose the event wait without relying on backoff timing."""
+            entered.set()
+            return original_wait(5)
+
+        self.transport._client.xadd.side_effect = RuntimeError("offline")
+        self.transport.publish("s", b"AdminX", b"body")
+        with patch.object(self.transport._stop, "wait", side_effect=wait):
+            worker = self._worker(self.transport._writer_loop)
+            try:
+                self.assertTrue(entered.wait(1))
+            finally:
+                self.transport._stop.set()
+                worker.join(0.5)
+        self.assertFalse(worker.is_alive())
+        self.transport._client.xadd.assert_called_once()
+        self.assertTrue(self.transport._q.empty())
+
+    def test_restart_discards_stale_work_and_preserves_old_client(self):
+        """Fresh workers publish fresh work without old cleanup touching their client."""
+        import redis
+
+        old = self.transport._client
+        self.transport.publish("s", b"Msg", b"stale")
+        self.transport.stop()
+        fresh = fakeredis.FakeRedis()
+        with patch.object(redis.Redis, "from_url", return_value=fresh):
+            self.assertTrue(self.transport.start())
+        self.workers.extend([self.transport._writer, self.transport._reader])
+        try:
+            self.assertFalse(self.transport.start())
+            self.transport.publish("out", b"Msg", b"fresh")
+            deadline = time.monotonic() + 1
+            while fresh.xlen("out") == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual([row[1][b"d"] for row in fresh.xrange("out")], [b"fresh"])
+            self.assertEqual(fresh.xlen("s"), 0)
+            old.close.assert_called_once()
+        finally:
+            self.transport.stop()
+
+    def test_server_setup_only_after_fresh_success(self):
+        """Duplicate and rejected starts do not rerun PSYNC or initial setup."""
+        bus = RedisServerBus(MagicMock())
+        with patch.object(bus, "send_AdminServer2Portal") as send:
+            for outcome in (False, RuntimeError("survivor"), True):
+                with self.subTest(outcome=outcome):
+                    with patch.object(bus._transport, "start", side_effect=[outcome]):
+                        if isinstance(outcome, Exception):
+                            with self.assertRaises(RuntimeError):
+                                bus.start_bus()
+                        else:
+                            bus.start_bus()
+                    self.assertEqual(send.call_count, int(outcome is True))
+                    self.assertEqual(
+                        bus.factory.server.run_initial_setup.call_count, int(outcome is True)
+                    )
+
+    def test_failed_restart_client_is_cleaned_up(self):
+        """A failed restart gives its newly created client its own cleanup."""
+        import redis
+
+        self.transport.stop()
+        failed = MagicMock()
+        failed.ping.side_effect = redis.exceptions.ConnectionError("offline")
+        with (
+            patch.object(redis.Redis, "from_url", return_value=failed),
+            patch.object(redis_bus.clock, "stop_loop"),
+        ):
+            self.assertFalse(self.transport.start())
+        self.transport.stop()
+        failed.close.assert_called_once()
+
+    def test_stopping_caller_joins_only_cleanup_with_remaining_budget(self):
+        """Both workers consume a single caller-side join budget."""
+        block, entered, release = self._block()
+        self.transport._reader = self._worker(block)
+        self.assertTrue(entered.wait(1))
+        caller = self.threading.get_ident()
+        joins = []
+        original_join = self.threading.Thread.join
+
+        def join(worker, timeout=None):
+            """Record only waits performed by the stopping caller."""
+            if self.threading.get_ident() == caller:
+                joins.append((worker, timeout))
+            return original_join(worker, timeout)
+
+        with patch.object(self.threading.Thread, "join", join):
+            self.transport.stop()
+        self.assertEqual(len(joins), 1)
+        self.assertIs(joins[0][0], self.transport._cleanup)
+        self.assertGreaterEqual(joins[0][1], 0)
+        self.assertLessEqual(joins[0][1], 0.05)
+        with self.assertRaises(RuntimeError):
+            self.transport.start()
