@@ -25,6 +25,31 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.230: Require security-patched DRF
+
+### Security
+
+- Require `djangorestframework>=3.17.2,<3.18` for core and game dependencies.
+  Regenerate the lockfile with DRF 3.17.2. This excludes versions affected by
+  CVE-2026-73228 (request body size enforcement) and CVE-2026-73229
+  (AdminRenderer data disclosure). See the
+  [upstream release notes](https://www.django-rest-framework.org/community/release-notes/#3172).
+- Matching game requirements and the CI installation override use the same
+  patched range. Upgrade the installed dependency with the coordinated release;
+  an engine source checkout alone cannot replace an installed vulnerable wheel.
+
+### Validation
+
+- The game's `pip-audit -r requirements.txt` passes with no known vulnerabilities
+  using Python 3.12. Combined engine and game dependency resolution selects
+  Django 6.0.6 and DRF 3.17.2.
+- With DRF 3.17.2, 69 engine API tests, 213 game API/Matrix tests, and three
+  OpenAPI, ReDoc, and oversized JSON smoke checks pass.
+- Game API groups run separately to avoid shared throttle cache exhaustion.
+  The combined selection reproduced the same ten HTTP 429 failures with both
+  DRF 3.16.1 and 3.17.2. No application throttle behavior changed.
+
+
 ## 6.0.0+underspire.229: Await game shutdown cleanup
 
 ### Shutdown
