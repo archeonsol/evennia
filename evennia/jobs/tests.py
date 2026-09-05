@@ -269,6 +269,11 @@ class TestRedisJobTransitions(SimpleTestCase):
     def setUp(self):
         """Give each test isolated queue storage and registry entries."""
         super().setUp()
+        availability = mock.patch.multiple(
+            queue, _redis_seen_alive=False, _redis_down_count=0, _redis_last_down_log=0.0
+        )
+        availability.start()
+        self.addCleanup(availability.stop)
         self.redis = fakeredis.FakeRedis()
         self.addCleanup(self.redis.close)
         connection = mock.patch.object(
