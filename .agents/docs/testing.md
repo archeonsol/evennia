@@ -2,6 +2,11 @@
 
 ## Running Tests
 
+`EvenniaTestMixin.setup_session` disables moderation session capture only while
+creating its synthetic login, preventing background database writes from racing
+fixture setup. Capture during the test body follows the configured
+`MODERATION_SESSION_CAPTURE_ENABLED` setting.
+
 Tests require a temporary game directory with migrations applied. Tests use Django's test runner, not pytest.
 
 ### Using `uv run` (preferred)

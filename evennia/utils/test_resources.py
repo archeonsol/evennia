@@ -279,6 +279,7 @@ class EvenniaTestMixin:
                 return
         self.script = create.create_script(script_typeclass, key="Script")
 
+    @override_settings(MODERATION_SESSION_CAPTURE_ENABLED=False)
     def setup_session(self):
         dummysession = ServerSession()
         dummysession.init_session("telnet", ("localhost", "testmode"), evennia.SESSION_HANDLER)
