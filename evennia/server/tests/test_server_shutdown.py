@@ -47,7 +47,7 @@ class ServerShutdownDelayTest(SimpleTestCase):
 class FinalSessionSyncOrderingTest(SimpleTestCase):
     """Late shutdown changes reach Portal before the process can stop."""
 
-    def exercise_shutdown(self, mode, fail_snapshot=False):
+    def exercise_shutdown(self, mode, fail_snapshot=False, configured_stop_hooks=False):
         """Run the real shutdown body with an explicitly delayed Portal ACK."""
         from evennia.server import service as service_module
         from evennia.server.bus_result import TransportUnavailable
@@ -63,16 +63,34 @@ class FinalSessionSyncOrderingTest(SimpleTestCase):
         service.at_server_reload_stop = MagicMock(side_effect=lambda: order.append("reload_stop"))
         service.at_server_cold_stop = MagicMock(side_effect=lambda: order.append("cold_stop"))
 
-        def stop_hook():
-            state["hook"] = "final"
-            order.append("stop_hook")
+        if configured_stop_hooks:
+
+            async def async_stop_hook():
+                await asyncio.sleep(0)
+                state["hook"] = "async"
+                order.append("async_stop_hook")
+
+            def sync_stop_hook():
+                state["hook"] = "final"
+                order.append("sync_stop_hook")
+
+            service.start_stop_modules = [
+                MagicMock(at_server_stop=async_stop_hook),
+                MagicMock(at_server_stop=sync_stop_hook),
+            ]
+        else:
+
+            def stop_hook():
+                state["hook"] = "final"
+                order.append("stop_hook")
+
+            service.at_server_stop = stop_hook
 
         async def drain_web():
             await asyncio.sleep(0)
             state["web"] = "drained"
             order.append("web_drain")
 
-        service.at_server_stop = stop_hook
         service.web_root = MagicMock()
         service.web_root.empty_threadpool = drain_web
 
@@ -109,7 +127,12 @@ class FinalSessionSyncOrderingTest(SimpleTestCase):
                 try:
                     await asyncio.wait_for(sent.wait(), 1)
                     self.assertEqual(snapshots, [{"hook": "final", "web": "drained"}])
-                    self.assertLess(order.index("stop_hook"), order.index("snapshot"))
+                    stop_event = "sync_stop_hook" if configured_stop_hooks else "stop_hook"
+                    self.assertLess(order.index(stop_event), order.index("snapshot"))
+                    if configured_stop_hooks:
+                        self.assertLess(
+                            order.index("async_stop_hook"), order.index("sync_stop_hook")
+                        )
                     self.assertLess(order.index("web_drain"), order.index("snapshot"))
                     self.assertFalse(task.done())
                     schedule.assert_not_called()
@@ -140,6 +163,9 @@ class FinalSessionSyncOrderingTest(SimpleTestCase):
         for mode in ("reload", "reset"):
             with self.subTest(mode=mode):
                 self.exercise_shutdown(mode, fail_snapshot=True)
+
+    def test_configured_stop_hooks_are_awaited_in_order_before_snapshot(self):
+        self.exercise_shutdown("reload", configured_stop_hooks=True)
 
 
 class ServerShutdownRequestTest(SimpleTestCase):

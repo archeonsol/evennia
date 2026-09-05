@@ -1,17 +1,22 @@
 # Redis bus cutover and rollback
 
 This transport change requires a coordinated Portal and Server upgrade. Mixed
-versions are unsupported. Schedule a maintenance window and stop both processes
-through the deployment's service manager. Verify that both process IDs have
-exited and disable any supervisor that would restart them during maintenance.
-Keep the configured Redis instance running.
+versions are unsupported. Use the normal game deployment workflow, which stops
+the service, replaces the engine and game revisions together, and then starts the
+service. Keep the configured Redis instance running.
 
 Record the installed engine and game revisions before changing them. Upgrade
 both together. Preserve Redis stream contents, job lists, browser resume state,
 and unrelated consumer groups. The bus starts from a fresh stream tail and
 reconciles current sessions; it does not recover retained player actions.
 
-## Scoped group maintenance
+Release `underspire.228` uses explicit `XREAD` stream positions and ignores the
+consumer groups from `underspire.227`. Removing those groups is optional
+housekeeping after upgrade; it is not an upgrade prerequisite. Rollback to
+`underspire.227` does require recreating its expected groups at the current
+stream tails.
+
+## Optional group cleanup and required rollback maintenance
 
 Use the installed Python environment containing redis-py. Set these environment
 variables explicitly from the deployment's configuration:
@@ -22,9 +27,11 @@ variables explicitly from the deployment's configuration:
 * `REDIS_BUS_MAINTENANCE`: `upgrade` or `rollback`.
 * `REDIS_BUS_PEERS_STOPPED`: `yes`, only after verifying both processes stopped.
 
-Run this Python block while both processes remain stopped. It operates on
-`PREFIX:s2p` and each `PREFIX:p2s:WORKER`. The obsolete group name is the complete
-stream key followed by `:grp`, as used by release `underspire.227`.
+For optional upgrade cleanup, run this Python block after the service has stopped
+and before it starts. For rollback, run it after restoring both revisions and
+before starting the service. It operates on `PREFIX:s2p` and each
+`PREFIX:p2s:WORKER`. The obsolete group name is the complete stream key followed
+by `:grp`, as used by release `underspire.227`.
 
 ```python
 import os
@@ -67,16 +74,18 @@ old pending list or delivery cursor. Other groups on the same stream survive.
 
 ## Upgrade
 
-Install the coordinated engine and game revisions, run the block in `upgrade`
-mode, and start both processes. Check confirmed bus readiness and successful
-session reconciliation before admitting players. Check a fresh client connection,
-authentication, ordinary input/output, and capability negotiation. PID liveness
-alone does not establish readiness.
+Run the normal game deployment workflow so it stops the service, installs the
+coordinated engine and game revisions, and starts the service. The block in
+`upgrade` mode may be run while the service is stopped to remove obsolete group
+metadata, but the new transport does not require it. Check confirmed bus readiness
+and successful session reconciliation before admitting players. Check a fresh
+client connection, authentication, ordinary input/output, and capability
+negotiation. PID liveness alone does not establish readiness.
 
 ## Rollback
 
-Stop both processes again and restore the recorded compatible engine and game
-revisions. Run the block in `rollback` mode immediately before starting them.
+Stop the service and restore the recorded compatible engine and game revisions.
+Run the block in `rollback` mode immediately before starting the service.
 Creating the expected old groups at the current tails is required: the old
 transport otherwise creates absent groups at `0` and can deliver retained input.
 Never preserve an old expected group's pending entries or cursor during rollback.

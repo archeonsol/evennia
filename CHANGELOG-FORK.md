@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.229: Await game shutdown cleanup
+
+### Shutdown
+
+- [Server shutdown](evennia/server/service.py) awaits configured game
+  `at_server_stop` hooks in order before final session synchronization and loop
+  teardown. Existing synchronous configured hooks and service overrides remain
+  supported. Code calling the service's default `at_server_stop()` directly must
+  await its result.
+- The matching game drains its ordered combat Redis mirror before the loop
+  closes, preserving accepted instance saves and deletes during clean restart.
+  The five-second drain logs an unclean transition on timeout and leaves the
+  active worker uncancelled. This does not bound Redis I/O or total process exit.
+
+### Deployment
+
+- The normal game deployment already stops the service, installs the coordinated
+  engine and game revisions, and starts the service. Obsolete Redis consumer
+  group removal is optional on upgrade. Rolling back to the group-based reader
+  still requires group recreation at current stream tails. See
+  [cutover and rollback](docs/source/Components/Redis-Bus-Cutover.md).
+
+### Validation
+
+- Thirty-eight engine shutdown, service, bus, and reload regressions pass.
+- Twenty-five game mirror, combat state, turn, and heap scheduler tests pass,
+  including a real worker regression for queued instance save/delete ordering,
+  failure handling, timeout, admission closure, and game stop-hook integration.
+- A fresh Sol adversarial review found no remaining blocker. Full suites passed
+  on `.228`; these focused regressions validate the subsequent shutdown change.
+
+
 ## 6.0.0+underspire.228: Confirm and bound bus recovery
 
 ### Session recovery
