@@ -688,7 +688,7 @@ class EvenniaServerService(MultiService):
             logger.log_trace(f"Error saving OnDemandHandler state: {err}")
 
         # always called, also for a reload
-        self.at_server_stop()
+        await clock.maybe_await(self.at_server_stop())
 
         if hasattr(self, "web_root"):  # not set very first start
             await self.web_root.empty_threadpool()
@@ -755,13 +755,15 @@ class EvenniaServerService(MultiService):
         """
         self._call_start_stop("at_server_start")
 
-    def at_server_stop(self):
+    async def at_server_stop(self):
         """
         This is called just before a server is shut down, regardless
         of it is fore a reload, reset or shutdown.
 
         """
-        self._call_start_stop("at_server_stop")
+        for mod in self.start_stop_modules:
+            if hook := getattr(mod, "at_server_stop", None):
+                await clock.maybe_await(hook())
 
     def at_server_reload_start(self):
         """

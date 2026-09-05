@@ -3,15 +3,21 @@
 ## Intentional Server stop
 
 Reload and reset close player admission before cleanup. Current-generation output
-and control traffic retain FIFO ordering. After stop hooks and the web worker drain,
-Server sends its final session snapshot and waits for Portal to acknowledge
-application. Redis publication alone does not confirm session preservation.
+and control traffic retain FIFO ordering. Configured game `at_server_stop` hooks
+may return awaitables, and Server awaits them before the web worker drain and final
+session snapshot. In the configured game, this includes a combat Redis mirror
+drain with its own five-second wait. A timeout logs an unclean transition and
+leaves the active worker to finish; it does not cancel that worker. Server then
+sends its final session snapshot and waits for Portal to acknowledge application.
+Redis publication alone does not confirm session preservation.
 
 The synchronization budget is five seconds from final snapshot creation, including
 queued publication and application acknowledgment. Earlier cleanup hooks do not
-consume that budget. Failure or timeout logs an unclean transition and continues shutdown.
-The bus remains able to answer current-peer heartbeats during this drain. It cannot
-accept a new session reconciliation while stopping.
+consume that budget. The cleanup hooks, web worker drain, final synchronization,
+and transport shutdown do not share one five-second process deadline. Failure or
+timeout logs an unclean transition and continues shutdown. The bus remains able
+to answer current-peer heartbeats during this drain. It cannot accept a new
+session reconciliation while stopping.
 
 Portal applies final state only to matching socket incarnations. Protocol flags
 negotiated since the Server's last snapshot remain authoritative. New sockets are
