@@ -25,6 +25,27 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.231: Preserve launcher status responses
+
+### Launcher
+
+- Preserve every decoded IPC frame when a socket read contains multiple
+  responses. A status push arriving with a query response no longer discards
+  the response and leaves the launcher waiting until a socket timeout.
+- Return normally when a timed-out status query exhausts its wait deadline.
+  The retry path no longer calls `sleep()` with a negative duration and aborts
+  the outer startup wait early.
+
+### Tests
+
+- Regression tests reproduce coalesced status response loss and deadline
+  overrun. Both failed before the fix; all 49 launcher tests pass on Python
+  3.12 and 3.13.
+
+### Migration
+
+- No database migration or settings changes required.
+
 ## 6.0.0+underspire.230: Require security-patched DRF
 
 ### Security
