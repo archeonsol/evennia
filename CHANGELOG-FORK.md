@@ -25,6 +25,48 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.233: Preserve identity and output through recovery
+
+### Narrative
+
+- Derive sender attribution from the subject's resolved visible reference,
+  regardless of its semantic role. Omit attribution when the subject is not
+  referenced. Movement and combat cannot expose a stable hidden handle across
+  disguise changes. See [plan resolution](evennia/narrative/plan.py).
+- Accept narrative bodies up to the RenderNode limit of 128 KiB in
+  [Azaban output](evennia/server/portal/wire_formats/azaban.py). Valid output
+  above 8 KiB no longer disappears; incoming limits remain unchanged.
+- Preserve per-viewer formatting for mixed entity and literal mappings in
+  [room messages](evennia/objects/mixins/messaging.py).
+- Coalesce only contiguous text with matching options in the
+  [output buffer](evennia/server/sessionhandler.py), preserving narrative,
+  text, and OOB order.
+
+### Recovery and database ownership
+
+- Repair the browser authentication stamp during authoritative session
+  recovery without repeating login hooks. The idempotent
+  [auth synchronization hook](evennia/server/session.py) preserves a newer
+  browser login when its nonce differs.
+- Keep retained WebSocket replay buffers current after socket loss, preserving
+  the original 90-second deadline, 400-frame capacity, and account binding.
+  A replaced socket cannot update another socket's stash.
+- Run native WebSocket receive and disconnect callbacks in owned database
+  scopes so Django connections close when each callback returns. See the
+  [WebSocket transport](evennia/server/portal/webclient.py).
+
+### Validation and migration
+
+- The broad engine regression run passed 229 tests; a final boundary run
+  passed 67 tests, with overlapping coverage. A real WebSocket handshake
+  against an isolated SQLite session database confirmed callback connection
+  cleanup. No live PostgreSQL instance was exercised.
+- Custom Portal protocols can implement `Session.at_auth_sync` to mirror
+  authoritative authentication into protocol-owned client state. It must be
+  idempotent and must not repeat login or character initialization. See
+  [bus recovery](docs/source/Components/Redis-Bus-Recovery.md).
+- No database migration, dependency change, or settings change is required.
+
 ## 6.0.0+underspire.232: Keep password hashing off the game loop
 
 ### Login
