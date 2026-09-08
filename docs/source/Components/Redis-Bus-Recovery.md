@@ -38,6 +38,9 @@ the socket's initial authentication.
 
 Server sends current authentication back only for matching socket incarnations.
 This update does not invoke Portal login hooks or disconnect unrelated sockets.
+It calls the idempotent `Session.at_auth_sync` hook to mirror authoritative auth
+into protocol-owned client state. WebSocket sessions use it to repair the browser
+login stamp after a missed login notification, without repeating login hooks.
 Ordinary PCONN handling also confirms Server application so those sockets can be
 restored during a later process reload.
 

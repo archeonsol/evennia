@@ -92,23 +92,25 @@ def _wants_server_html(protocol_flags):
     return not caps.get("rendersMarkup")
 
 
-def _within_limits(obj, depth=0):
+def _within_limits(obj, depth=0, *, max_string=_MAX_STRING):
     """True if a decoded payload respects the structural safety limits."""
     if depth > _MAX_DEPTH:
         return False
     if isinstance(obj, str):
-        return len(obj) <= _MAX_STRING
+        return len(obj) <= max_string
     if isinstance(obj, dict):
         if len(obj) > _MAX_ITEMS:
             return False
         return all(
-            isinstance(k, str) and len(k) <= _MAX_STRING and _within_limits(v, depth + 1)
+            isinstance(k, str)
+            and len(k) <= max_string
+            and _within_limits(v, depth + 1, max_string=max_string)
             for k, v in obj.items()
         )
     if isinstance(obj, (list, tuple)):
         if len(obj) > _MAX_ITEMS:
             return False
-        return all(_within_limits(v, depth + 1) for v in obj)
+        return all(_within_limits(v, depth + 1, max_string=max_string) for v in obj)
     return True
 
 
@@ -264,7 +266,13 @@ class AzabanFormat(WireFormat):
                 nodes = raw
             if not all(isinstance(node, dict) for node in nodes):
                 return None
-            if _contains_raw_identity(nodes) or not _within_limits(nodes):
+            from evennia.narrative.rendernode import MAX_BODY_CHARS
+
+            if (
+                len(nodes) > _MAX_ITEMS
+                or not all(_within_limits(node, max_string=MAX_BODY_CHARS) for node in nodes)
+                or _contains_raw_identity(nodes)
+            ):
                 logger.log_warn("azaban: rejected unsafe narrative payload")
                 return None
             attach_html = _wants_server_html(protocol_flags)

@@ -7,9 +7,13 @@ These exercise ``WebSocketClient`` methods against a bare instance rather than a
 live connection — the logic under test is framing and buffering, not I/O.
 """
 
+import asyncio
 import json
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
+
+from django.db import connections
 
 from evennia.server.portal import webclient as webclient_mod
 from evennia.server.portal.webclient import BATCH_MAX_FRAMES, RESUME_STASH_MAX, WebSocketClient
@@ -179,6 +183,151 @@ class TestResumeHandshake(TestCase):
             t.resume_token = f"tok{n}"
             t._stash_for_resume()
         self.assertLessEqual(len(webclient_mod._RESUME_STASH), RESUME_STASH_MAX)
+
+    def test_reconnect_replays_output_after_socket_loss(self):
+        """A retained Portal session keeps recording during its grace window."""
+        old = self._disconnected()
+        old.sendMessage = Mock()
+        old.sendEncoded({"t": "render", "n": 3})
+        fresh = _Transport(uid=7)
+        fresh._handle_client_hello({"resume": {"token": "tok", "last_seq": 3}})
+        self.assertEqual([e["n"] for e in _frames(fresh) if e["t"] == "render"], [3])
+        self.assertEqual(_frames(fresh)[-1]["s"], 5)
+        old.sendEncoded({"t": "render", "n": 4})
+        self.assertNotIn("tok", webclient_mod._RESUME_STASH)
+        self.assertEqual(fresh.out_seq, 5)
+
+    def test_retained_output_keeps_capacity_and_original_deadline(self):
+        """New output cannot extend retention or grow the bounded replay buffer."""
+        old = self._disconnected()
+        deadline = webclient_mod._RESUME_STASH["tok"]["deadline"]
+        for n in range(webclient_mod.RESUME_BUFFER_MAX + 5):
+            old.sendEncoded({"t": "render", "n": n})
+        stash = webclient_mod._RESUME_STASH["tok"]
+        self.assertEqual(stash["deadline"], deadline)
+        self.assertEqual(len(stash["frames"]), webclient_mod.RESUME_BUFFER_MAX)
+        self.assertEqual(stash["last_seq"], old.out_seq)
+
+    def test_old_socket_cannot_update_a_replacement_stash(self):
+        """Reuse of a token does not join two sockets' replay streams."""
+        old = self._disconnected()
+        replacement = self._disconnected()
+        old.sendEncoded({"t": "render", "n": "stale"})
+        stash = webclient_mod._RESUME_STASH["tok"]
+        self.assertEqual(stash["last_seq"], replacement.out_seq)
+        self.assertNotIn("stale", str(stash["frames"]))
+
+    def test_retained_output_cannot_revive_an_expired_stash(self):
+        """The reconnect grace period ends even if the Server keeps sending."""
+        old = self._disconnected()
+        deadline = webclient_mod._RESUME_STASH["tok"]["deadline"]
+        with patch.object(webclient_mod.time, "time", return_value=deadline + 1):
+            old.sendEncoded({"t": "render", "n": "too late"})
+            fresh = _Transport(uid=7)
+            fresh._handle_client_hello({"resume": {"token": "tok", "last_seq": 0}})
+        self.assertFalse(_frames(fresh)[-1]["resumed"])
+        self.assertEqual([e for e in _frames(fresh) if e["t"] == "render"], [])
+
+
+class TestRecoveryBrowserAuth(TestCase):
+    """Authoritative recovery repairs browser auth without replaying login."""
+
+    def test_recovery_persists_missing_login_stamp_once(self):
+        """A lost login notification must not prevent the next auto-login."""
+        from evennia.server.portal.portalsessionhandler import PortalSessionHandler
+
+        browser = {"webclient_authenticated_nonce": 0}
+        store = Mock(wraps=browser)
+        store.save = Mock()
+        store.get = browser.get
+        store.__setitem__ = Mock(side_effect=browser.__setitem__)
+        client = _Transport(uid=None)
+        handler = PortalSessionHandler()
+        client.init_session("websocket", "127.0.0.1", handler)
+        client.sessid = 1
+        handler[1] = client
+        handler._ensure_bus_socket(client)
+        client.get_client_session = Mock(return_value=store)
+        client.at_login = Mock()
+        payload = {
+            "sessions": {1: {"_socket_id": client._bus_socket_id, "uid": 42, "logged_in": True}},
+            "closed": {},
+        }
+        handler.apply_bus_state(payload)
+        self.assertEqual(browser.get("webclient_authenticated_uid"), 42)
+        handler.apply_bus_state(payload)
+        store.save.assert_called_once()
+        client.at_login.assert_not_called()
+
+    def test_recovery_preserves_a_newer_browser_login(self):
+        """A retained socket cannot replace another login's browser stamp."""
+        store = Mock()
+        store.get.side_effect = {
+            "webclient_authenticated_nonce": 8,
+            "webclient_authenticated_uid": 99,
+        }.get
+        store.__setitem__ = Mock()
+        client = _Transport(uid=42)
+        client.nonce = 7
+        client.logged_in = True
+        client.get_client_session = Mock(return_value=store)
+        client.at_auth_sync()
+        store.__setitem__.assert_not_called()
+        store.save.assert_not_called()
+
+    def test_recovered_logout_clears_its_own_browser_stamp(self):
+        """An authoritative logout does not leave a reusable login stamp."""
+        store = Mock()
+        store.get.side_effect = {
+            "webclient_authenticated_nonce": 7,
+            "webclient_authenticated_uid": 42,
+        }.get
+        store.__setitem__ = Mock()
+        client = _Transport(uid=None)
+        client.nonce = 7
+        client.logged_in = False
+        client.get_client_session = Mock(return_value=store)
+        client.at_auth_sync()
+        store.__setitem__.assert_called_once_with("webclient_authenticated_uid", None)
+        store.save.assert_called_once()
+
+
+class TestNativeCallbackDatabaseScope(TestCase):
+    """Native protocol callbacks own and close their database wrappers."""
+
+    def test_callbacks_detach_inherited_wrapper_and_close_on_failure(self):
+        """Both receive and disconnect release their scope even on errors."""
+        from evennia.server.portal.webclient import AsyncioWebSocketProtocol
+
+        async def exercise():
+            """Run under asyncio's ContextVar-backed Django storage."""
+            parent = connections["default"]
+            observed = []
+            closed = []
+
+            def callback(*args):
+                """Open a wrapper and simulate a failing protocol hook."""
+                observed.append(connections["default"])
+                raise ValueError("protocol failure")
+
+            protocol = AsyncioWebSocketProtocol(None)
+            protocol.ws = SimpleNamespace(dataReceived=callback, connectionLost=callback)
+            with patch.object(
+                connections, "close_all", side_effect=lambda: closed.append(connections["default"])
+            ):
+                for method, arg in (
+                    (protocol.data_received, b"data"),
+                    (protocol.connection_lost, None),
+                ):
+                    with self.assertRaisesRegex(ValueError, "protocol failure"):
+                        method(arg)
+            self.assertEqual(closed, observed)
+            self.assertEqual(len(observed), 2)
+            self.assertIsNot(observed[0], observed[1])
+            self.assertTrue(all(wrapper is not parent for wrapper in observed))
+            self.assertIs(connections["default"], parent)
+
+        asyncio.run(exercise())
 
 
 class TestBatching(TestCase):

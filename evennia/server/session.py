@@ -136,6 +136,13 @@ class Session:
             else:
                 setattr(self, propname, value)
 
+    def at_auth_sync(self):
+        """Idempotently mirror recovered auth into protocol-owned client state.
+
+        Recovery calls this after applying authoritative session fields. This
+        hook must not repeat login or character initialization.
+        """
+
     def at_sync(self):
         """
         Called after a session has been fully synced (including

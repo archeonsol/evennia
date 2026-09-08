@@ -48,6 +48,7 @@ from evennia.server.portal.ws_protocol import (
     HandshakeDenied,
     WSProtocolBase,
 )
+from evennia.utils import clock
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
@@ -609,11 +610,12 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         return True
 
     def _stash_for_resume(self):
+        """Retain a bounded replay window owned by this socket."""
         token = getattr(self, "resume_token", None)
         buf = getattr(self, "out_buffer", None)
         if token and buf:
-            _RESUME_STASH[token] = {
-                "frames": list(buf),
+            self._resume_stash = _RESUME_STASH[token] = {
+                "frames": deque(buf, maxlen=RESUME_BUFFER_MAX),
                 "last_seq": getattr(self, "out_seq", 0),
                 "deadline": time.time() + RESUME_GRACE_SECONDS,
                 "uid": getattr(self, "uid", None),
@@ -715,6 +717,14 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if buf is None:
             buf = self.out_buffer = deque(maxlen=RESUME_BUFFER_MAX)
         buf.append((self.out_seq, line))
+        stash = _RESUME_STASH.get(getattr(self, "resume_token", None))
+        if (
+            stash is not None
+            and stash is getattr(self, "_resume_stash", None)
+            and stash["uid"] == getattr(self, "uid", None)
+        ):
+            stash["frames"].append((self.out_seq, line))
+            stash["last_seq"] = self.out_seq
         return line
 
     def sendLine(self, line):
@@ -837,9 +847,19 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             self.disconnect(reason="Browser already closed.")
 
     def at_login(self):
+        """Persist normal login through the same browser auth mirror as recovery."""
+        self.at_auth_sync()
+
+    def at_auth_sync(self):
+        """Repair the browser login stamp without replaying login hooks."""
         csession = self.get_client_session()
-        if csession:
-            csession["webclient_authenticated_uid"] = self.uid
+        uid = self.uid if self.logged_in else None
+        if (
+            csession
+            and csession.get("webclient_authenticated_nonce", 0) == self.nonce
+            and csession.get("webclient_authenticated_uid") != uid
+        ):
+            csession["webclient_authenticated_uid"] = uid
             csession.save()
 
     def data_in(self, **kwargs):
@@ -1023,8 +1043,12 @@ class AsyncioWebSocketProtocol(asyncio.Protocol):
         # server role: onConnect/onOpen fire once the client's upgrade arrives
 
     def data_received(self, data):
-        self.ws.dataReceived(data)
+        """Run handshake and frame callbacks in an owned database scope."""
+        clock.run_callback(self.ws.dataReceived, data, _task_kind="system")
 
     def connection_lost(self, exc):
+        """Release database state opened by protocol disconnect hooks."""
         if self.ws is not None:
-            self.ws.connectionLost(str(exc) if exc else None)
+            clock.run_callback(
+                self.ws.connectionLost, str(exc) if exc else None, _task_kind="system"
+            )

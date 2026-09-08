@@ -93,6 +93,7 @@ class PortalSessionHandler(SessionHandler):
                 session.load_sync_data(
                     {key: value for key, value in data.items() if key != "_socket_id"}
                 )
+                session.at_auth_sync()
                 session.server_connected = True
                 session._bus_confirmed = True
                 if session in _CONNECTION_QUEUE:

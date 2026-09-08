@@ -841,8 +841,8 @@ class ServerSessionHandler(SessionHandler):
     def _flush_outbuf(self, uid):
         """Drain the per-session output buffer.
 
-        Pure-text messages are coalesced into a single AMP frame (the batcher's
-        whole reason to exist). Any message carrying non-text kwargs (OOB, GMCP,
+        Contiguous text messages with matching options are coalesced. Any
+        message carrying non-text kwargs (OOB, GMCP,
         prompt, options, etc.) ships as its own frame to preserve the
         pre-batcher one-frame-per-call semantics; merging those last-wins
         silently drops concurrent payloads to the same key.
@@ -856,36 +856,39 @@ class ServerSessionHandler(SessionHandler):
 
         text_parts = []
         text_options = {}
-        standalone_frames = []
+        frames = []
+
+        def flush_text():
+            """Append the current text run before the next distinct frame."""
+            joined = "\n".join(p for p in text_parts if p)
+            if joined:
+                frames.append({"text": (joined, text_options) if text_options else joined})
+            text_parts.clear()
 
         for msg in msgs:
             if any(k != "text" for k in msg):
                 # mixed or non-text payload: preserve atomically as its own frame
-                standalone_frames.append(dict(msg))
+                flush_text()
+                text_options = {}
+                frames.append(dict(msg))
                 continue
             v = msg.get("text")
+            options = {}
             if isinstance(v, tuple) and len(v) >= 1:
-                text_parts.append(v[0])
-                if len(v) >= 2 and isinstance(v[1], dict) and not text_options:
-                    text_options = v[1]
-            elif v is not None:
+                if len(v) >= 2 and isinstance(v[1], dict):
+                    options = v[1]
+                v = v[0]
+            if v is not None:
+                if options != text_options:
+                    flush_text()
+                text_options = options
                 text_parts.append(str(v))
+
+        flush_text()
 
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
 
-        if text_parts:
-            joined = "\n".join(p for p in text_parts if p)
-            if joined:
-                frame = {"text": (joined, text_options) if text_options else joined}
-                frame = self.clean_senddata(session, frame)
-                # Capture the normalized frame handed to the Portal, after
-                # inline functions and batching. Protocols render it
-                # differently, but these are the words the client receives.
-                if _watch.WATCHES:
-                    _watch.tap(session, "out", frame)
-                bus.send_MsgServer2Portal(session, **frame)
-
-        for frame in standalone_frames:
+        for frame in frames:
             frame = self.clean_senddata(session, frame)
             if _watch.WATCHES:
                 _watch.tap(session, "out", frame)

@@ -152,6 +152,30 @@ class TestResolution(PlanTestCase):
         self.assertIsNone(node.from_handle)
         self.assertEqual(node.body, "Kade leans against the wall.")
 
+    def test_subject_handle_tracks_the_resolved_reference_for_any_role(self):
+        """Changing perceived identity rotates attribution for every producer."""
+        for role in ("emitter", "mover", "attacker", "speaker"):
+            with self.subTest(role=role):
+                viewer = _Viewer("Ana")
+                event = RenderPlan(
+                    kind="test",
+                    subject_id=1,
+                    blocks=(Line(spans=(CharRef(char_id=1, role=role),)),),
+                )
+                stranger = resolve(event, viewer)
+                viewer.knows.add(1)
+                recognized = resolve(event, viewer)
+                self.assertEqual(stranger.from_handle, stranger.refs[0].handle)
+                self.assertEqual(recognized.from_handle, recognized.refs[0].handle)
+                self.assertNotEqual(stranger.from_handle, recognized.from_handle)
+
+    def test_unreferenced_subject_has_no_public_attribution(self):
+        """An event's private source cannot create a hidden identity channel."""
+        event = text_plan("A noise nearby.", subject_id=1)
+        node = resolve(event, _Viewer("Ana"))
+        self.assertEqual(node.refs, ())
+        self.assertIsNone(node.from_handle)
+
     def test_plan_has_no_body_to_bake_a_name_into(self):
         self.assertFalse(hasattr(self._plan(), "body"))
 

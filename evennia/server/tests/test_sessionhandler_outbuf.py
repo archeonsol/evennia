@@ -51,3 +51,60 @@ class TestDisconnectFlushesOutbuf(TestCase):
         self.assertNotIn(1, self.handler._outbuf)
         bus = mock_evennia.EVENNIA_SERVER_SERVICE.portal_bus
         self.assertTrue(bus.send_MsgServer2Portal.called)
+
+
+class TestOutputOrder(TestCase):
+    """Coalescing preserves order and the options of each text run."""
+
+    def _flush(self, messages):
+        """Return frames emitted by the real buffer drain."""
+        handler = ServerSessionHandler()
+        session = _session()
+        handler[1] = session
+        handler._outbuf[1] = messages
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(handler, "clean_senddata", side_effect=lambda session, frame: frame),
+        ):
+            handler._flush_outbuf(1)
+        return [
+            call.kwargs
+            for call in engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2Portal.call_args_list
+        ]
+
+    def test_text_runs_stay_between_standalone_frames(self):
+        """Narrative and OOB must not be overtaken by later text."""
+        frames = self._flush(
+            [
+                {"narrative": {"body": "first"}},
+                {"text": "second"},
+                {"text": "third"},
+                {"channel_msg": "fourth"},
+                {"text": "fifth"},
+            ]
+        )
+        self.assertEqual(
+            frames,
+            [
+                {"narrative": {"body": "first"}},
+                {"text": "second\nthird"},
+                {"channel_msg": "fourth"},
+                {"text": "fifth"},
+            ],
+        )
+
+    def test_different_text_options_are_not_merged(self):
+        """Prompt styling cannot bleed into a following plain message."""
+        self.assertEqual(
+            self._flush(
+                [
+                    {"text": ("one", {"type": "notice"})},
+                    {"text": ("two", {"type": "notice"})},
+                    {"text": "three"},
+                ]
+            ),
+            [
+                {"text": ("one\ntwo", {"type": "notice"})},
+                {"text": "three"},
+            ],
+        )

@@ -423,27 +423,18 @@ def resolve(
             entity = _entity(entity_id)
             if entity is None:
                 continue
+            handle = handle_for(viewer, entity, label)
+            if entity_id == plan.subject_id and from_handle is None:
+                from_handle = handle
             built.append(
                 EntityRef(
-                    handle=handle_for(viewer, entity, label),
+                    handle=handle,
                     label=label,
                     kind=kind or "entity",
                     role=role or "target",
                 )
             )
         refs = tuple(built)
-        if plan.subject_id is not None:
-            subject = _entity(plan.subject_id)
-            if subject is not None:
-                label = next(
-                    (
-                        value
-                        for entity_id, _k, role, value in collected
-                        if entity_id == plan.subject_id and role == "emitter"
-                    ),
-                    "",
-                )
-                from_handle = handle_for(viewer, subject, label)
 
     return RenderNode(
         kind=plan.kind,

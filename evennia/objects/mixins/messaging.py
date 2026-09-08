@@ -393,7 +393,7 @@ class MessagingMixin:
             # unrelated text node per recipient. This gives relays, cameras,
             # accessibility and forensic sinks the same source object even
             # when the authoring API was the old string facade.
-            if isinstance(inmessage, str):
+            if isinstance(inmessage, str) and "{" not in inmessage and "}" not in inmessage:
                 from evennia.narrative.plan import deliver_to, text_plan
 
                 msg_type = str(outkwargs.get("type") or "text")

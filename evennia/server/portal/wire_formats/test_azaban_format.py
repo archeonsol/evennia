@@ -66,6 +66,44 @@ class TestAzabanFormat(unittest.TestCase):
         node = {"kind": "emote", "body": "hi", "refs": [{"char_id": 7}]}
         self.assertIsNone(self.fmt.encode_default("narrative", node))
 
+    def test_narrative_accepts_render_node_body_limit(self):
+        """Outbound narrative supports the same body sizes as text output."""
+        from evennia.narrative.rendernode import MAX_BODY_CHARS, text_node
+
+        for size in (8192, 8193, MAX_BODY_CHARS):
+            with self.subTest(size=size):
+                node = text_node("a" * size).payload()
+                env = self._env(self.fmt.encode_default("narrative", node))
+                self.assertEqual(env["nodes"][0]["body"], node["body"])
+
+    def test_narrative_accepts_bounded_node_metadata(self):
+        """The wire envelope does not consume the node's metadata depth budget."""
+        from evennia.narrative.rendernode import RenderNode
+
+        metadata = "value"
+        for _ in range(7):
+            metadata = {"nested": metadata}
+        node = RenderNode(kind="text", msg_type="text", body="hi", metadata=metadata)
+        env = self._env(self.fmt.encode_default("narrative", node.payload()))
+        self.assertEqual(env["nodes"][0]["metadata"], metadata)
+
+    def test_outgoing_narrative_limits_remain_bounded(self):
+        """Oversized and excessively nested output is still rejected."""
+        from evennia.narrative.rendernode import MAX_BODY_CHARS
+
+        self.assertIsNone(
+            self.fmt.encode_default("narrative", {"body": "a" * (MAX_BODY_CHARS + 1)})
+        )
+        nested = "value"
+        for _ in range(12):
+            nested = {"nested": nested}
+        self.assertIsNone(self.fmt.encode_default("narrative", {"metadata": nested}))
+
+    def test_incoming_strings_keep_the_smaller_limit(self):
+        """Allowing long server output does not raise the input limit."""
+        frame = json.dumps({"t": "cmd", "line": "a" * 8193}).encode()
+        self.assertIsNone(self.fmt.decode_incoming(frame, False))
+
     def test_patch_envelope(self):
         env = self._env(
             self.fmt.encode_default(
