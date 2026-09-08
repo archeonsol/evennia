@@ -12,10 +12,12 @@ from django.conf import settings
 from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.utils import clock, logger
 
-MAX_ENTRIES = 256
+MAX_ENTRIES = 1024
 MAX_BYTES = 32 * 1024 * 1024
-DATA_ENTRIES = 224
+DATA_ENTRIES = 992
 DATA_BYTES = 24 * 1024 * 1024
+OUTGOING_WARN_THRESHOLD = 200
+OUTGOING_WARN_INTERVAL = 60.0
 MAX_FRAME_BYTES = 8 * 1024 * 1024
 STOP_TIMEOUT = 3.0
 WAIT = 0.1
@@ -67,6 +69,7 @@ class RedisTransport:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._outgoing = {}
+        self._next_outgoing_warning = 0.0
         self._ordinary = deque()
         self._handshakes = deque()
         self._incoming = deque()
@@ -187,6 +190,7 @@ class RedisTransport:
             stream, command, data, encode_pair(pair), self._fence, handshake, PublicationResult()
         )
         reason = None
+        warning = None
         with self._condition:
             if self._stop.is_set() or not self.online:
                 reason = "transport unavailable"
@@ -204,6 +208,18 @@ class RedisTransport:
                     self._outgoing[self._next_id] = frame
                     (self._handshakes if handshake else self._ordinary).append(self._next_id)
                     self._condition.notify_all()
+                    count += 1
+                    size += frame.size
+                if count > OUTGOING_WARN_THRESHOLD:
+                    now = time.monotonic()
+                    if now >= self._next_outgoing_warning:
+                        self._next_outgoing_warning = now + OUTGOING_WARN_INTERVAL
+                        warning = (
+                            f"redis bus: outgoing queue pressure stream={stream} "
+                            f"pending={count} bytes={size} data_limit={DATA_ENTRIES}"
+                        )
+        if warning:
+            logger.log_warn(warning)
         if reason:
             if control and self.online:
                 self.fail(reason)

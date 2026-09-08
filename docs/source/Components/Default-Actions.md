@@ -23,6 +23,30 @@ retired.
 (`@scripts`, `@script`). Scripts are storage-only: listing, lookup, creation,
 attachment, and deletion are supported; timer controls are not.
 
+## Login
+
+`await evennia.actions.default.unloggedin.login_session(session, name, password)`
+is the shared operation for the `connect` action, legacy connect command, and
+login inputfunc. It admits one pending attempt per live session and checks the
+session identity again before attaching an account. Synchronous inputfuncs start
+it through `evennia.utils.clock.run_coroutine`.
+
+The operation calls `Account.aauthenticate`. The default implementation retains
+ban checks, login throttling, logging, and failed-login hooks on the game loop.
+Games overriding `Account.authenticate` must also implement `aauthenticate` for
+custom authentication policy used by live connections. A sync-only override
+raises `ImproperlyConfigured` rather than bypassing that policy. The synchronous
+method remains available to synchronous callers.
+
+The shipped Django backend implements `aauthenticate` with password verification
+and hash upgrades in the bounded engine worker pool. Workers receive password
+strings only. Account loading and hooks remain on the owner, and the stored
+password and active status are rechecked after verification. Custom Django
+backends must provide an owner-safe async implementation; Django's default
+sync-to-async adapter can move typeclass work into a worker. Subclasses of the
+shipped backend that override only synchronous authentication are refused until
+they also implement the async policy.
+
 ## Activities
 
 `evennia.actions.Activity` drives sustained work through generator yields. Each

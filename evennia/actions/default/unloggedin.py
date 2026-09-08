@@ -56,12 +56,12 @@ __all__ = [
 ]
 
 
-def login_session(session, name, password):
+async def login_session(session, name, password):
     """Authenticate ``name``/``password`` and log ``session`` in on success.
 
     The shared engine login operation behind the ``connect`` verb and the
     web/REST ``login`` inputfunc, so both reach an account through the same
-    path. ``Account.authenticate`` handles its own throttling. Authentication
+    path. ``Account.aauthenticate`` handles its own throttling. Authentication
     errors are messaged to the session.
 
     Args:
@@ -72,15 +72,26 @@ def login_session(session, name, password):
     Returns:
         account (Account or None): the account on success, else ``None``.
     """
-    Account = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
-    account, errors = Account.authenticate(
-        username=name, password=password, ip=session.address, session=session
-    )
-    if account:
-        session.sessionhandler.login(session, account)
-        return account
-    session.msg("|R%s|n" % "\n".join(errors))
-    return None
+    if session.logged_in or session.sessionhandler.get(session.sessid) is not session:
+        return None
+    if getattr(session, "_login_pending", False):
+        session.msg("A login attempt is already in progress.")
+        return None
+    session._login_pending = True
+    try:
+        Account = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
+        account, errors = await Account.aauthenticate(
+            username=name, password=password, ip=session.address, session=session
+        )
+        if session.logged_in or session.sessionhandler.get(session.sessid) is not session:
+            return None
+        if account:
+            session.sessionhandler.login(session, account)
+            return account
+        session.msg("|R%s|n" % "\n".join(errors))
+        return None
+    finally:
+        session._login_pending = False
 
 
 @dataclass
@@ -164,7 +175,7 @@ class SessionLoginRules:
     # --- connect -----------------------------------------------------------------
 
     @rule(Connect, phase="carry_out")
-    def carry_out_connect(self, action, actor):
+    async def carry_out_connect(self, action, actor):
         if not self._is_unlogged(actor):
             return SKIP
         session = self
@@ -184,7 +195,7 @@ class SessionLoginRules:
             session.msg("\n\r Usage (without <>): connect <name> <password>")
             return CLAIM
 
-        login_session(session, parts[0], parts[1])
+        await login_session(session, parts[0], parts[1])
         return CLAIM
 
     # --- create ------------------------------------------------------------------

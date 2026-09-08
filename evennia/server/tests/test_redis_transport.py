@@ -88,6 +88,39 @@ class TestRedisTransport(SimpleTestCase):
             self.pump(lambda: self.transport.outgoing_count == 0)
             self.assertTrue(self.transport.publish("out", b"Msg", b"new").admitted)
 
+    def test_outgoing_burst_preserves_control_reserve(self):
+        """Admit a 25-by-25 burst and retain 32 control slots at the data limit."""
+        self.transport.online = True
+        with patch.object(transport_module.logger, "log_warn"):
+            for _ in range(625):
+                self.assertTrue(self.transport.publish("out", b"Msg", b"a").admitted)
+            self.assertEqual(self.transport.outgoing_count, 625)
+            for _ in range(992 - 625):
+                self.assertTrue(self.transport.publish("out", b"Msg", b"a").admitted)
+            self.assertFalse(self.transport.publish("out", b"Msg", b"a").admitted)
+            self.assertTrue(self.transport.online)
+            for _ in range(32):
+                self.assertTrue(self.transport.publish("out", b"Admin", b"a").admitted)
+            self.assertEqual(self.transport.outgoing_count, 1024)
+            self.assertFalse(self.transport.publish("out", b"Admin", b"a").admitted)
+        self.assertFalse(self.transport.online)
+
+    def test_incoming_burst_preserves_control_reserve(self):
+        """Receive the same burst and reserve before callbacks get a loop turn."""
+        self.transport.online = True
+        for _ in range(625):
+            self.transport._admit_incoming({b"c": b"Msg", b"d": b"a"})
+        self.assertEqual(len(self.transport._incoming), 625)
+        for _ in range(992 - 625):
+            self.transport._admit_incoming({b"c": b"Msg", b"d": b"a"})
+        self.assertEqual(len(self.transport._incoming), 992)
+        for _ in range(32):
+            self.transport._admit_incoming({b"c": b"Admin", b"d": b"a"})
+        self.assertEqual(len(self.transport._incoming), 1024)
+        self.assertTrue(self.transport.online)
+        self.transport._admit_incoming({b"c": b"Admin", b"d": b"a"})
+        self.assertFalse(self.transport.online)
+
     def test_control_saturation_can_recover(self):
         """Recovery needs no slot in the failed queue."""
         self.transport.start()

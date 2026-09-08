@@ -15,8 +15,8 @@ separate contracts and remain supported.
 
 ## Capacity
 
-Each direction is bounded by 256 entries and 32 MiB of encoded bytes. Ordinary data
-admission stops at 224 entries or 24 MiB, reserving capacity for control/state.
+Each direction is bounded by 1,024 entries and 32 MiB of encoded bytes. Ordinary data
+admission stops at 992 entries or 24 MiB, reserving 32 entries and 8 MiB for control/state.
 A single payload may not exceed 8 MiB. A representative 4,096-session snapshot with
 WebSocket capabilities and terminal dimensions uses about 2.5 MiB.
 
@@ -26,6 +26,11 @@ one additional decoded frame can exist while admission checks its size. One queu
 loop drain processes at most 32 frames per turn. Mandatory control saturation fails
 the generation, settles old work, and waits for connectivity and writer availability
 before recovery. Player saturation rejects locally without evicting earlier work.
+
+Publishing while outgoing occupancy exceeds 200 entries logs an
+`outgoing queue pressure` warning with the stream, pending entry count, encoded
+bytes, and ordinary data limit. Warnings are limited to once per 60 seconds per
+transport, including when occupancy drops and rebounds during that interval.
 
 Healthy ordinary traffic is FIFO. A reserved handshake lane can pass startup output
 held until final readiness publication. Lifecycle requests cannot use this lane.

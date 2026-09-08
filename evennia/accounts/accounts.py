@@ -17,7 +17,7 @@ import typing
 from random import getrandbits
 
 from django.conf import settings
-from django.contrib.auth import authenticate, password_validation
+from django.contrib.auth import aauthenticate, authenticate, password_validation
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db.models import Q
 from django.utils import timezone
@@ -1244,18 +1244,48 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             errors (list): Error messages of any failures.
 
         """
-        errors = []
-        if ip:
-            ip = str(ip)
+        ip = str(ip) if ip else ""
+        errors = cls._authentication_errors(username, ip)
+        if errors:
+            return None, errors
+        account = authenticate(username=username, password=password)
+        return cls._authentication_result(account, username, ip, kwargs.get("session"))
 
-        # See if authentication is currently being throttled
+    @classmethod
+    async def aauthenticate(cls, username, password, ip="", **kwargs):
+        """Authenticate without blocking the game loop on password hashing.
+
+        Async authentication backends must keep typeclass access on the owner.
+        Games customizing login policy can override this alongside authenticate.
+        """
+        if (
+            cls.authenticate.__func__ is not DefaultAccount.authenticate.__func__
+            and cls.aauthenticate.__func__ is DefaultAccount.aauthenticate.__func__
+        ):
+            raise ImproperlyConfigured(
+                f"{cls.__name__} must implement aauthenticate for its custom authentication policy."
+            )
+        ip = str(ip) if ip else ""
+        errors = cls._authentication_errors(username, ip)
+        if errors:
+            return None, errors
+        account = await aauthenticate(username=username, password=password)
+        errors = cls._authentication_errors(username, ip)
+        if errors:
+            return None, errors
+        return cls._authentication_result(account, username, ip, kwargs.get("session"))
+
+    @classmethod
+    def _authentication_errors(cls, username, ip):
+        """Apply the same ban and throttle policy before either authentication path."""
+        errors = []
         if ip and LOGIN_THROTTLE.check(ip):
             errors.append(_("Too many login failures; please try again in a few minutes."))
 
             # With throttle active, do not log continued hits-- it is a
             # waste of storage and can be abused to make your logs harder to
             # read and/or fill up your disk.
-            return None, errors
+            return errors
 
         # Check IP and/or name bans
         banned = cls.is_banned(username=username, ip=ip)
@@ -1269,10 +1299,12 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
             )
             logger.log_sec(f"Authentication Denied (Banned): {username} (IP: {ip}).")
             LOGIN_THROTTLE.update(ip, "Too many sightings of banned artifact.")
-            return None, errors
+        return errors
 
-        # Authenticate and get Account object
-        account = authenticate(username=username, password=password)
+    @classmethod
+    def _authentication_result(cls, account, username, ip, session):
+        """Record an authentication verdict and run failure hooks on the owner."""
+        errors = []
         if not account:
             # User-facing message
             errors.append(_("Username and/or password is incorrect."))
@@ -1285,7 +1317,6 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 LOGIN_THROTTLE.update(ip, _("Too many authentication failures."))
 
             # Try to call post-failure hook
-            session = kwargs.get("session", None)
             if session:
                 account = AccountDB.objects.get_account_from_name(username)
                 if account:

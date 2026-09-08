@@ -25,6 +25,55 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.232: Keep password hashing off the game loop
+
+### Login
+
+- Run direct game password verification and hash upgrades in the bounded engine
+  worker pool. Account loading, login policy, and hooks stay on the game loop.
+  The connect action, legacy connect command, and login inputfunc share the
+  [async login operation](evennia/actions/default/unloggedin.py).
+- Admit one pending login per session. Recheck session identity, the stored
+  password, active status, bans, and throttles before completing authentication.
+  Disconnected or replaced sessions cannot inherit a worker result.
+- Preserve synchronous authentication for existing synchronous callers. Refuse
+  sync-only custom authentication overrides on the async path so custom policy
+  cannot be bypassed.
+
+### Transport
+
+- Log outgoing queue pressure above 200 pending frames, including stream,
+  pending count, encoded bytes, and ordinary data capacity. Warnings are limited
+  to once per minute per transport.
+- Increase incoming and outgoing capacity to 1,024 entries, with ordinary data
+  limited to 992 entries and 32 slots reserved for control/state. This admits
+  a burst of 25 broadcasts to 25 recipients before callbacks settle. Encoded byte
+  limits, the 32-frame drain batch, and saturation behavior remain unchanged.
+  See [bus delivery](docs/source/Components/Redis-Bus-Delivery.md).
+
+### Performance and tests
+
+- A local Python 3.13 sample of 25 synchronous Argon2 verifications took 1.39
+  seconds. Offloading removes that hashing time from the game loop; it does not
+  reduce the hashing work. A regression holds verification pending and proves
+  unrelated loop work continues before authentication completes.
+- All 125 selected authentication, login action/input, legacy connect, and Redis
+  transport tests pass. Coverage includes stale credentials, revoked access,
+  disconnected sessions, duplicate attempts, legacy hash upgrades, and queue
+  warning thresholds and rate limits.
+- All 60 transport and bus tests pass after the capacity increase, including
+  625-frame bursts in both directions and the 32-slot control reserve.
+
+### Migration
+
+- Await `login_session(session, name, password)`. Synchronous input handlers
+  must schedule it through `evennia.utils.clock.run_coroutine`.
+- Custom Account classes and subclasses of the shipped authentication backend
+  that override `authenticate` must also implement `aauthenticate` for live
+  login policy. Custom async backends must keep typeclass work on the IO owner.
+  See the [login contract](docs/source/Components/Default-Actions.md#login).
+- No database migration, dependency change, or settings change is required.
+
 ## 6.0.0+underspire.231: Preserve launcher status responses
 
 ### Launcher

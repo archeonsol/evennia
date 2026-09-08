@@ -7,6 +7,7 @@ are faked through the module's ``class_from_module`` seam, and the ``create``
 confirmation drives the engine's generator suspension.
 """
 
+import asyncio
 import sys
 import unittest
 from unittest import mock
@@ -34,6 +35,13 @@ engine_mod = sys.modules["evennia.actions.engine"]
 class LoginSession(SessionLoginRules, FakeSession):
     """Provider fixture: an unlogged session carrying the login rules."""
 
+    def __init__(self):
+        """Represent a live unauthenticated connection in its session handler."""
+        super().__init__()
+        self.sessid = 1
+        self.logged_in = False
+        self.sessionhandler.get = lambda sessid: self if sessid == self.sessid else None
+
 
 class _FakeAccountCls:
     """Stand-in account typeclass: records authenticate/create calls."""
@@ -56,6 +64,11 @@ class _FakeAccountCls:
     def authenticate(cls, username=None, password=None, ip=None, session=None):
         cls.auth_calls.append({"username": username, "password": password})
         return cls.auth_result
+
+    @classmethod
+    async def aauthenticate(cls, **kwargs):
+        """Return the fake verdict through the asynchronous account API."""
+        return cls.authenticate(**kwargs)
 
     @classmethod
     def normalize_username(cls, name):
@@ -91,6 +104,12 @@ def _patched_dispatch(session, actor, action):
     with mock.patch.object(
         unloggedin_module, "class_from_module", side_effect=_fake_class_from_module
     ):
+        if isinstance(action, Connect):
+            from evennia.actions.context import ActionContext
+            from evennia.actions.engine import RuleEngine
+
+            context = ActionContext(providers=[session], actor=actor, raw_string="")
+            return asyncio.run(RuleEngine().dispatch(action, actor, context))
         return dispatch(action, actor, [session])
 
 
@@ -158,7 +177,7 @@ class TestLoginSession(unittest.TestCase):
         with mock.patch.object(
             unloggedin_module, "class_from_module", side_effect=_fake_class_from_module
         ):
-            return unloggedin_module.login_session(session, name, password)
+            return asyncio.run(unloggedin_module.login_session(session, name, password))
 
     def test_success_logs_in_and_returns_account(self):
         session = LoginSession()

@@ -348,8 +348,9 @@ def login(session, *args, **kwargs):
     """
     if not session.logged_in and "name" in kwargs and "password" in kwargs:
         from evennia.actions.default.unloggedin import login_session
+        from evennia.utils import clock
 
-        login_session(session, kwargs["name"], kwargs["password"])
+        return clock.run_coroutine(login_session(session, kwargs["name"], kwargs["password"]))
 
 
 _gettable = {
