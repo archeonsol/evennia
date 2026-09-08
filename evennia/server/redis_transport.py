@@ -12,9 +12,9 @@ from django.conf import settings
 from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.utils import clock, logger
 
-MAX_ENTRIES = 256
+MAX_ENTRIES = 1024
 MAX_BYTES = 32 * 1024 * 1024
-DATA_ENTRIES = 224
+DATA_ENTRIES = 992
 DATA_BYTES = 24 * 1024 * 1024
 OUTGOING_WARN_THRESHOLD = 200
 OUTGOING_WARN_INTERVAL = 60.0

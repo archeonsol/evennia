@@ -15,8 +15,8 @@ separate contracts and remain supported.
 
 ## Capacity
 
-Each direction is bounded by 256 entries and 32 MiB of encoded bytes. Ordinary data
-admission stops at 224 entries or 24 MiB, reserving capacity for control/state.
+Each direction is bounded by 1,024 entries and 32 MiB of encoded bytes. Ordinary data
+admission stops at 992 entries or 24 MiB, reserving 32 entries and 8 MiB for control/state.
 A single payload may not exceed 8 MiB. A representative 4,096-session snapshot with
 WebSocket capabilities and terminal dimensions uses about 2.5 MiB.
 

@@ -343,7 +343,7 @@ class TestRedisTransportQueueWarning(SimpleTestCase):
 
     def test_rate_limit_preserves_capacity_rejection(self):
         """A full queue still rejects, with pressure warnings at most once a minute."""
-        self._publish(224)
+        self._publish(redis_transport.DATA_ENTRIES)
         self.warning.assert_called_once()
         self.now = 69.0
         self.assertFalse(self._publish()[0].admitted)
@@ -351,7 +351,7 @@ class TestRedisTransportQueueWarning(SimpleTestCase):
         self.now = 70.0
         self.assertFalse(self._publish()[0].admitted)
         self.assertEqual(self.warning.call_count, 2)
-        self.assertEqual(self.transport.outgoing_count, 224)
+        self.assertEqual(self.transport.outgoing_count, redis_transport.DATA_ENTRIES)
 
     def test_drain_and_rebound_respect_warning_cooldown(self):
         """Repeated threshold crossings cannot flood the log."""
