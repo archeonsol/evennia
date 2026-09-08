@@ -27,6 +27,11 @@ loop drain processes at most 32 frames per turn. Mandatory control saturation fa
 the generation, settles old work, and waits for connectivity and writer availability
 before recovery. Player saturation rejects locally without evicting earlier work.
 
+Publishing while outgoing occupancy exceeds 200 entries logs an
+`outgoing queue pressure` warning with the stream, pending entry count, encoded
+bytes, and ordinary data limit. Warnings are limited to once per 60 seconds per
+transport, including when occupancy drops and rebounds during that interval.
+
 Healthy ordinary traffic is FIFO. A reserved handshake lane can pass startup output
 held until final readiness publication. Lifecycle requests cannot use this lane.
 

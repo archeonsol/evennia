@@ -308,6 +308,65 @@ class TestRedisBusSerdeLimits(SimpleTestCase):
 
 
 @override_settings(**_BUS_SETTINGS)
+class TestRedisTransportQueueWarning(SimpleTestCase):
+    """Warn about outgoing pressure without changing admission or flooding logs."""
+
+    def setUp(self):
+        """Use a transport with no workers so occupancy is deterministic."""
+        self.transport = redis_transport.RedisTransport("incoming", lambda *_: None)
+        self.transport.online = True
+        self.now = 10.0
+        timer = patch.object(redis_transport.time, "monotonic", side_effect=lambda: self.now)
+        warning = patch.object(redis_transport.logger, "log_warn")
+        timer.start()
+        self.warning = warning.start()
+        self.addCleanup(timer.stop)
+        self.addCleanup(warning.stop)
+
+    def _publish(self, count=1):
+        """Publish small ordinary frames to the named outgoing stream."""
+        return [
+            self.transport.publish("outgoing", b"MsgServer2Portal", b"{}") for _ in range(count)
+        ]
+
+    def test_warns_only_above_200(self):
+        """The 201st admitted frame produces a warning with stream and occupancy."""
+        self._publish(200)
+        self.warning.assert_not_called()
+        result = self._publish()[0]
+        self.assertTrue(result.admitted)
+        self.warning.assert_called_once()
+        message = self.warning.call_args.args[0]
+        self.assertIn("stream=outgoing", message)
+        self.assertIn("pending=201", message)
+        self.assertIn(f"bytes={self.transport.outgoing_bytes}", message)
+
+    def test_rate_limit_preserves_capacity_rejection(self):
+        """A full queue still rejects, with pressure warnings at most once a minute."""
+        self._publish(224)
+        self.warning.assert_called_once()
+        self.now = 69.0
+        self.assertFalse(self._publish()[0].admitted)
+        self.warning.assert_called_once()
+        self.now = 70.0
+        self.assertFalse(self._publish()[0].admitted)
+        self.assertEqual(self.warning.call_count, 2)
+        self.assertEqual(self.transport.outgoing_count, 224)
+
+    def test_drain_and_rebound_respect_warning_cooldown(self):
+        """Repeated threshold crossings cannot flood the log."""
+        self._publish(201)
+        for key in list(self.transport._outgoing):
+            self.transport._complete(key, self.transport._fence, b"1-0", None)
+        self.now = 20.0
+        self._publish(201)
+        self.warning.assert_called_once()
+        self.now = 70.0
+        self._publish()
+        self.assertEqual(self.warning.call_count, 2)
+
+
+@override_settings(**_BUS_SETTINGS)
 class TestRedisTransportBootFailFast(SimpleTestCase):
     """Boot ping failure fails fast: log fatal, stop the loop, no reader thread."""
 
