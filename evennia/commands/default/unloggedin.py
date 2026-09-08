@@ -77,7 +77,7 @@ class CmdUnconnectedConnect(COMMAND_DEFAULT_CLASS):
     authorization = "public"
     arg_regex = r"\s.*?|$"
 
-    def func(self):
+    async def func(self):
         """
         Uses the Django admin api. Note that unlogged-in commands
         have a unique position in that their func() receives
@@ -112,17 +112,10 @@ class CmdUnconnectedConnect(COMMAND_DEFAULT_CLASS):
             session.msg("\n\r Usage (without <>): connect <name> <password>")
             return
 
-        # Get account class
-        Account = class_from_module(settings.BASE_ACCOUNT_TYPECLASS)
+        from evennia.actions.default.unloggedin import login_session
 
         name, password = parts
-        account, errors = Account.authenticate(
-            username=name, password=password, ip=address, session=session
-        )
-        if account:
-            session.sessionhandler.login(session, account)
-        else:
-            session.msg("|R%s|n" % "\n".join(errors))
+        await login_session(session, name, password)
 
 
 class CmdUnconnectedCreate(COMMAND_DEFAULT_CLASS):
