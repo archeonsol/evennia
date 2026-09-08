@@ -18,6 +18,27 @@ describe("pipeToHtml matches server parse_html", () => {
 });
 
 describe("pipeToHtml escaping", () => {
+  it("serializes backslashes before escaping command attributes", () => {
+    expect(pipeToHtml('|lcsay \\"hi"|lt"click"|le')).toBe(
+      '<a id="mxplink" href="#" onclick="Evennia.msg(&quot;text&quot;,[&quot;say \\\\\\&quot;hi\\&quot;&quot;],{});return false;">"click"</a>',
+    );
+  });
+
+  it.each([
+    ["|#f00red|n", '<span class="" style="color: #ff0000;">red</span>'],
+    ["|#Ff0000red|n", '<span class="" style="color: #ff0000;">red</span>'],
+    ["|[#0f0green|n", '<span class="" style="background-color: #00ff00;">green</span>'],
+    ["|[#0000FFblue|n", '<span class="" style="background-color: #0000ff;">blue</span>'],
+    ["|#1234text|n", '<span class="" style="color: #112233;">4text</span>'],
+    ["|#1234567text|n", '<span class="" style="color: #123456;">7text</span>'],
+    ["||#f00 literal", "|#f00 literal"],
+    ["|#12no|n", "|#12no"],
+    ["|[#xyzno|n", "|[#xyzno"],
+    ["|#f00red|nplain", '<span class="" style="color: #ff0000;">red</span>plain'],
+  ])("renders hex markup %s", (src, html) => {
+    expect(pipeToHtml(src)).toBe(html);
+  });
+
   it("escapes html-significant characters in text", () => {
     expect(pipeToHtml("<script>")).toBe("&lt;script&gt;");
   });

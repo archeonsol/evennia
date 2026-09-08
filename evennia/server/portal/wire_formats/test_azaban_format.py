@@ -23,6 +23,69 @@ class TestAzabanFormat(unittest.TestCase):
 
     # -- outgoing ----------------------------------------------------------
 
+    def test_effective_display_options_on_both_output_paths(self):
+        """Server transformations override client rendering and stale HTML."""
+        cases = [
+            ("nocolor", "|rred|n", {}, "red"),
+            ("screenreader", "|rred|n +---+", {}, "red "),
+            ("raw", "|r<b>|n", {}, "|r&lt;b&gt;|n"),
+            ("raw", "<b>raw</b>", {"client_raw": True}, "<b>raw</b>"),
+            ("nocolor", "|r|n", {}, ""),
+        ]
+        for renders_markup in (False, True):
+            for option, body, extra, expected in cases:
+                for session_default in (False, True):
+                    flags = {"AZABAN_CAPS": {"rendersMarkup": renders_markup}}
+                    options = dict(extra)
+                    if session_default:
+                        flags[option.upper()] = True
+                    else:
+                        options[option] = True
+                    payload = {"body": body, "html": "stale"}
+                    for path in ("text", "narrative"):
+                        with self.subTest(
+                            path=path,
+                            option=option,
+                            default=session_default,
+                            caps=renders_markup,
+                            body=body,
+                        ):
+                            result = (
+                                self.fmt.encode_text(body, protocol_flags=flags, options=options)
+                                if path == "text"
+                                else self.fmt.encode_default(
+                                    "narrative", payload, protocol_flags=flags, options=options
+                                )
+                            )
+                            self.assertEqual(self._env(result)["nodes"][0].get("html"), expected)
+                    self.assertEqual(payload, {"body": body, "html": "stale"})
+
+    def test_false_overrides_session_display_options(self):
+        """Explicit false options allow normal markup in the same session."""
+        flags = {
+            "RAW": True,
+            "NOCOLOR": True,
+            "SCREENREADER": True,
+            "AZABAN_CAPS": {"rendersMarkup": True},
+        }
+        options = {"raw": False, "nocolor": False, "screenreader": False}
+        payload = {"body": "|rred|n +---+"}
+        for result in (
+            self.fmt.encode_text(payload["body"], protocol_flags=flags, options=options),
+            self.fmt.encode_default("narrative", payload, protocol_flags=flags, options=options),
+        ):
+            self.assertNotIn("html", self._env(result)["nodes"][0])
+        self.assertNotIn("html", payload)
+
+    def test_narrative_options_do_not_leak_to_next_recipient(self):
+        """One payload can serve colored and colorless recipients."""
+        payload = {"body": "|rred|n"}
+        plain = self._env(self.fmt.encode_default("narrative", payload, options={"nocolor": True}))
+        colored = self._env(self.fmt.encode_default("narrative", payload))
+        self.assertEqual(plain["nodes"][0]["html"], "red")
+        self.assertEqual(colored["nodes"][0]["html"], '<span class="color-009">red</span>')
+        self.assertEqual(payload, {"body": "|rred|n"})
+
     def test_text_is_html_envelope(self):
         env = self._env(self.fmt.encode_text("|rhi|n"))
         self.assertEqual(env["t"], "render")

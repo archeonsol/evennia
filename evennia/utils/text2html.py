@@ -8,8 +8,10 @@ snippet #577349 on http://code.activestate.com.
 (extensively modified by Griatch 2010)
 """
 
+import json
 import re
 from html import escape as html_escape
+from html import unescape as html_unescape
 
 from .ansi import *
 from .hex_colors import HexColors
@@ -188,13 +190,12 @@ class TextToHTMLparser(object):
             text (str): Processed text.
 
         """
-        cmd, text = [grp.replace('"', "\\&quot;") for grp in match.groups()]
-        val = (
-            r"""<a id="mxplink" href="#" """
-            """onclick="Evennia.msg(&quot;text&quot;,[&quot;{cmd}&quot;],{{}});"""
-            """return false;">{text}</a>""".format(cmd=cmd, text=text)
-        )
-        return val
+        cmd, text = match.groups()
+        # Undo the text pass before applying JavaScript and attribute escaping.
+        argument = json.dumps(html_unescape(cmd), ensure_ascii=False)
+        handler = html_escape(f'Evennia.msg("text",[{argument}],{{}});return false;', quote=False)
+        handler = handler.replace('"', "&quot;")
+        return f'<a id="mxplink" href="#" onclick="{handler}">{text}</a>'
 
     def sub_mxp_urls(self, match):
         """

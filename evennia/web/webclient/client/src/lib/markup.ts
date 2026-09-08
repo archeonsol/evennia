@@ -250,7 +250,7 @@ function ansiTokens(code: string): Token[] | null {
 // hands back a literal for anything out of range. Matching loosely and rejecting
 // late is the same output as never matching, and keeps the ranges in one place.
 const TOKEN =
-  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
+  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[?#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
 
 function tokenize(text: string): Token[] {
   const out: Token[] = [];
@@ -307,6 +307,10 @@ function tokenize(text: string): Token[] {
       out.push({ kind: "raw", value: RAW_ANSI[code] });
     } else if (WHITESPACE[code] !== undefined) {
       out.push({ kind: "text", value: WHITESPACE[code] });
+    } else if (code.startsWith("|#") || code.startsWith("|[#")) {
+      const digits = code.slice(code.indexOf("#") + 1).toLowerCase();
+      const hex = "#" + (digits.length === 3 ? [...digits].map((digit) => digit + digit).join("") : digits);
+      out.push({ kind: code[1] === "[" ? "tcbg" : "tcfg", hex });
     } else if (code.startsWith("|[=")) {
       out.push({ kind: "bg", index: greyIndex(code[3]) });
     } else if (code.startsWith("|=")) {
@@ -361,9 +365,12 @@ function escLinkGroup(group: string): string {
 function substituteLinks(intermediate: string): string {
   let out = intermediate.replace(
     /\|lc([\s\S]*?)\|lt([\s\S]*?)\|le/g,
-    (_all, cmd: string, body: string) =>
-      `<a id="mxplink" href="#" onclick="Evennia.msg(&quot;text&quot;,` +
-      `[&quot;${escLinkGroup(cmd)}&quot;],{});return false;">${escLinkGroup(body)}</a>`,
+    (_all, cmd: string, body: string) => {
+      // Undo only the entities emitted by subText, in one pass.
+      const command = cmd.replace(/&(amp|lt|gt);/g, (_, entity: string) => ({ amp: "&", lt: "<", gt: ">" })[entity]!);
+      const handler = escAttr(`Evennia.msg("text",[${JSON.stringify(command)}],{});return false;`);
+      return `<a id="mxplink" href="#" onclick="${handler}">${body}</a>`;
+    },
   );
   out = out.replace(
     /\|lu([\s\S]*?)\|lt([\s\S]*?)\|le/g,

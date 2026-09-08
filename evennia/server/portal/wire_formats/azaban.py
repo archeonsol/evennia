@@ -24,7 +24,7 @@ session by the ``azaban_hello`` inputfunc:
 
     rendersNodes    the shell renders RenderNode trees (sets CLIENT_NARRATIVE)
     rendersMarkup   the shell parses Evennia markup itself, so the server omits
-                    the parsed ``html`` alongside each node body
+                    parsed ``html`` unless display options require a transform
     batching        the shell understands ``{"t": "batch", "frames": [...]}``,
                     letting the transport coalesce a burst into one frame
 
@@ -90,6 +90,15 @@ def _wants_server_html(protocol_flags):
     if not isinstance(caps, dict):
         return True
     return not caps.get("rendersMarkup")
+
+
+def _display_options(protocol_flags, options):
+    """Resolve per-message display options over session defaults."""
+    flags = protocol_flags or {}
+    return {
+        key: options.get(key, flags.get(key.upper(), False))
+        for key in ("raw", "nocolor", "screenreader")
+    }
 
 
 def _within_limits(obj, depth=0, *, max_string=_MAX_STRING):
@@ -188,11 +197,12 @@ class AzabanFormat(WireFormat):
     # -- outgoing (server -> client) ---------------------------------------
 
     def _html(self, text, protocol_flags, options):
-        flags = protocol_flags or {}
-        raw = options.get("raw", flags.get("RAW", False))
+        """Render HTML with the effective session and message transformations."""
+        display = _display_options(protocol_flags, options)
+        raw = display["raw"]
         client_raw = options.get("client_raw", False)
-        nocolor = options.get("nocolor", flags.get("NOCOLOR", False))
-        screenreader = options.get("screenreader", flags.get("SCREENREADER", False))
+        nocolor = display["nocolor"]
+        screenreader = display["screenreader"]
         if screenreader:
             text = parse_ansi(text, strip_ansi=True, xterm256=False, mxp=False)
             text = _RE_SCREENREADER_REGEX.sub("", text)
@@ -208,7 +218,6 @@ class AzabanFormat(WireFormat):
         if not args or args[0] is None:
             return None
         options = kwargs.pop("options", {}) or {}
-        html = self._html(args[0], protocol_flags, options)
         kind = kwargs.get("type") or options.get("type")
         # Azaban is the structured client protocol: even a legacy string becomes
         # a render.v1 text node here. Other wire formats continue receiving the
@@ -216,8 +225,10 @@ class AzabanFormat(WireFormat):
         from evennia.narrative.rendernode import text_node
 
         node = text_node(str(args[0]), msg_type=str(kind or "text")).payload()
-        if _wants_server_html(protocol_flags):
-            node["html"] = html
+        if _wants_server_html(protocol_flags) or any(
+            _display_options(protocol_flags, options).values()
+        ):
+            node["html"] = self._html(args[0], protocol_flags, options)
         return _frame({"t": "render", "nodes": [node]})
 
     def encode_prompt(self, *args, protocol_flags=None, **kwargs):
@@ -255,10 +266,8 @@ class AzabanFormat(WireFormat):
             # R1 structured narrative. deliver_node sends a list of RenderNode
             # payload dicts, but the outbound path may spread it, so args can be
             # (payload,) OR ([payload],). Normalise to a list of dicts. Add a
-            # server-parsed `html` per node (its `body` carries Evennia markup) so
-            # the shell renders colour immediately; refs/spans drive interactivity.
-            from evennia.utils.text2html import parse_html
-
+            # Display options require authoritative HTML even for a client
+            # that normally parses the node's markup itself.
             raw = list(args)
             if len(raw) == 1 and isinstance(raw[0], list):
                 nodes = raw[0]
@@ -276,14 +285,13 @@ class AzabanFormat(WireFormat):
                 logger.log_warn("azaban: rejected unsafe narrative payload")
                 return None
             attach_html = _wants_server_html(protocol_flags)
+            options = kwargs.get("options") or {}
+            transform = any(_display_options(protocol_flags, options).values())
             safe_nodes = []
             for original in nodes:
                 node = dict(original)
-                if attach_html and node.get("body") and "html" not in node:
-                    try:
-                        node["html"] = parse_html(node["body"])
-                    except Exception:
-                        pass
+                if transform or (attach_html and "html" not in node):
+                    node["html"] = self._html(node.get("body", ""), protocol_flags, options)
                 safe_nodes.append(node)
             return _frame({"t": "render", "nodes": safe_nodes})
         if cmdname == "patch":

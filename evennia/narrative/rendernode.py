@@ -186,7 +186,7 @@ class Section:
             "key": self.key[:64],
             "title": self.title[:4096],
             "style": self.style[:64],
-            "children": [_block_payload(child) for child in self.children[:MAX_BLOCKS]],
+            "children": [_block_payload(child) for child in self.children],
         }
 
 
@@ -205,7 +205,7 @@ class ListBlock:
         return {
             "type": "list",
             "ordered": bool(self.ordered),
-            "items": [str(item)[:4096] for item in self.items[:MAX_BLOCKS]],
+            "items": [str(item)[:4096] for item in self.items],
             "style": self.style[:64],
         }
 
@@ -235,6 +235,21 @@ def _block_payload(block: Any) -> dict:
     else:
         raise TypeError(f"unsupported render block {type(block).__name__}")
     return _primitive(data)
+
+
+def _validate_block_counts(blocks):
+    """Reject excess blocks and list items before serialization can lose them."""
+    count = 0
+    pending = list(blocks)
+    while pending:
+        block = pending.pop()
+        count += 1
+        if count > MAX_BLOCKS:
+            raise ValueError("RenderNode has too many blocks")
+        if isinstance(block, Section):
+            pending.extend(block.children)
+        elif isinstance(block, ListBlock) and len(block.items) > MAX_BLOCKS:
+            raise ValueError("RenderNode list has too many items")
 
 
 def _coerce_ref(ref: EntityRef | Mapping) -> EntityRef:
@@ -281,8 +296,7 @@ class RenderNode:
         if len(refs) > MAX_REFS:
             raise ValueError("RenderNode has too many entity references")
         blocks = tuple(self.blocks)
-        if len(blocks) > MAX_BLOCKS:
-            raise ValueError("RenderNode has too many blocks")
+        _validate_block_counts(blocks)
         if blocks and self.body != flatten_blocks(blocks, self.sep):
             raise ValueError("RenderNode body must be derived from its blocks")
         spans = None if self.spans is None else tuple(tuple(segment) for segment in self.spans)
