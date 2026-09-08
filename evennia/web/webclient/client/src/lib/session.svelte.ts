@@ -3,11 +3,12 @@
 import { triggers } from "./triggers.svelte";
 import { routing } from "./routing.svelte";
 import { categorize, type LogCat } from "./logcats";
+import { htmlToText } from "./text";
 
 export interface LogLine {
   id: number;
   html: string;
-  text: string; // tag-stripped, for search
+  text: string; // plain text for search, triggers and transcripts
   type: string;
   cat: LogCat; // lens category, resolved once at append (see below)
   ts: number; // epoch ms, for the timestamp gutter
@@ -20,17 +21,13 @@ const MAX_LINES = 5000;
 const TRIM_BLOCK = 500;
 let nextId = 0;
 
-function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, "");
-}
-
 class GameSession {
   lines = $state<LogLine[]>([]);
   prompt = $state<string>("");
 
   /** Append a pre-rendered (already HTML-safe) line to the scrollback. */
   append(html: string, type = "text"): void {
-    const text = stripTags(html);
+    const text = htmlToText(html);
     // Client triggers: gag drops the line; highlights colour keywords. Media
     // lines are exempt (they carry embed markup, not prose).
     if (type !== "media") {

@@ -25,6 +25,56 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.234: Preserve display text and client options
+
+### Markup and webclient
+
+- Serialize command strings before HTML attribute escaping in the
+  [server parser](evennia/utils/text2html.py) and
+  [client parser](evennia/web/webclient/client/src/lib/markup.ts). Backslashes,
+  quotes, and entities remain command data; quoted labels display without
+  extra backslashes.
+- Render short and long hexadecimal foreground and background pipe colors
+  in the client parser, including resets and literal pipe escaping.
+- Honor per-message and session raw, colorless, and screenreader options on
+  both text and narrative paths in
+  [Azaban output](evennia/server/portal/wire_formats/azaban.py). Transformed
+  HTML remains authoritative for clients that parse markup, including empty
+  output, without mutating a payload shared by multiple recipients.
+- Remove guessed name decoration from
+  [log rendering](evennia/web/webclient/client/src/lib/render.ts), preventing
+  substring and replacement-token corruption. Structured references and room
+  panel occupants remain available.
+- Use inert DOM parsing for
+  [plain text](evennia/web/webclient/client/src/lib/text.ts), preserving
+  decoded entities, explicit breaks, block boundaries, and preformatted text.
+  Search, transcripts, triggers, and routing receive the same projection.
+- Reveal complete graphemes across styled text nodes in the
+  [typewriter](evennia/web/webclient/client/src/lib/typewriter.ts). Disabling
+  animation restores active output immediately. Browsers without
+  `Intl.Segmenter` display complete lines immediately.
+
+### Narrative bounds
+
+- Reject direct [RenderNode](evennia/narrative/rendernode.py) trees above
+  the existing 256-block total or 256-item list limit. Accepted collections
+  survive serialization in full. Iterative validation also rejects deep
+  oversized trees before Python's recursion limit.
+
+### Validation and migration
+
+- All 270 selected engine tests passed. A subsequent node and plan run
+  passed 54 tests, including the added deep-nesting regression; coverage
+  overlaps. All 517 client tests, 32 actual-browser checks, Svelte checks,
+  browser-test type checks, and the shell build passed.
+- Run the browser checks by opening `tests/display.html` on the client Vite
+  development server. They exercise production helpers without a game
+  connection or an additional test dependency.
+- Ship the included rebuilt shell with the Python parser changes. Direct
+  RenderNode producers exceeding collection limits must split their output;
+  those inputs raise `ValueError` instead of losing entries on the wire.
+- No database migration, dependency change, or runtime setting is required.
+
 ## 6.0.0+underspire.233: Preserve identity and output through recovery
 
 ### Narrative

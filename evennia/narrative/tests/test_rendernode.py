@@ -10,12 +10,15 @@ from dataclasses import FrozenInstanceError
 
 from evennia.narrative.rendernode import (
     CLIENT_NARRATIVE_FLAG,
+    MAX_BLOCKS,
     EntityRef,
     Line,
+    ListBlock,
     Paragraph,
     RenderNode,
     Section,
     deliver_node,
+    flatten_blocks,
 )
 
 
@@ -131,6 +134,49 @@ class TestDeliverNode(unittest.TestCase):
 
 
 class TestRenderNodePayload(unittest.TestCase):
+    def test_deep_block_chain_rejects_before_recursion_limit(self):
+        """An oversized chain produces the same bounded error as a wide tree."""
+        block = Line("x")
+        for _ in range(1500):
+            block = Section("nested", children=(block,))
+        with self.assertRaisesRegex(ValueError, "too many blocks"):
+            RenderNode(kind="look", msg_type="look", body="x", blocks=(block,))
+
+    def test_recursive_block_limits(self):
+        """Count section containers and children across sibling branches."""
+        for total in (MAX_BLOCKS, MAX_BLOCKS + 1):
+            blocks = (
+                Section("a", children=(Line("a"),)),
+                Section("b", children=tuple(Line("b") for _ in range(total - 3))),
+            )
+            body = flatten_blocks(blocks)
+            if total > MAX_BLOCKS:
+                with self.assertRaisesRegex(ValueError, "too many blocks"):
+                    RenderNode(kind="look", msg_type="look", body=body, blocks=blocks)
+            else:
+                node = RenderNode(kind="look", msg_type="look", body=body, blocks=blocks)
+                payload = node.payload()
+                texts = [
+                    child["text"] for section in payload["blocks"] for child in section["children"]
+                ]
+                self.assertEqual("\n".join(texts), body)
+
+    def test_list_item_limits(self):
+        """Accepted list items all survive serialization."""
+        for size in (MAX_BLOCKS, MAX_BLOCKS + 1):
+            items = tuple(str(i) for i in range(size))
+            blocks = (Section("list", children=(ListBlock(items),)),)
+            if size > MAX_BLOCKS:
+                with self.assertRaisesRegex(ValueError, "too many items"):
+                    RenderNode(
+                        kind="look", msg_type="look", body=flatten_blocks(blocks), blocks=blocks
+                    )
+            else:
+                node = RenderNode(
+                    kind="look", msg_type="look", body=flatten_blocks(blocks), blocks=blocks
+                )
+                self.assertEqual(node.payload()["blocks"][0]["children"][0]["items"], list(items))
+
     def test_node_is_immutable_and_defensively_copies_inputs(self):
         refs = [{"name": "Kade", "handle": "e1"}]
         node = RenderNode(kind="emote", msg_type="pose", body="b", refs=refs)

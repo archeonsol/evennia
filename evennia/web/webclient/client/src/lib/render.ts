@@ -37,23 +37,8 @@ interface RenderBlock {
   children?: RenderBlock[];
 }
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
-// Wrap occurrences of `name` in the *text* portions of `html` (never inside a
-// tag) with a clickable char-ref span.
-function wrapName(html: string, name: string, handle: string | undefined): string {
-  const re = new RegExp(escapeRe(name), "g");
-  const open = `<span class="entity-ref" data-entity-handle="${escapeAttr(handle ?? "")}" data-name="${escapeAttr(name)}">`;
-  return html.replace(/(<[^>]+>)|([^<]+)/g, (_m, tag, text) => {
-    if (tag) return tag;
-    return text.replace(re, `${open}${name}</span>`);
-  });
 }
 
 // Node bodies and block text carry Evennia markup, so they go through
@@ -78,14 +63,5 @@ function blockHtml(block: RenderBlock): string {
 export function renderNodeHtml(node: NodePayload): string {
   // Server HTML is the byte-parity/color anchor while surfaces migrate. A node
   // without it can still render natively from semantic blocks.
-  let html = String(node.html ?? ((node.blocks?.length ?? 0) > 0 ? node.blocks!.map(blockHtml).join("") : pipeToHtml(node.body ?? "")));
-  // Longest names first so a longer sdesc isn't clobbered by a shorter substring.
-  const refs = [...(node.refs ?? [])]
-    .filter((r) => r && (r.label || r.name))
-    .sort((a, b) => ((b.label ?? b.name)!.length ?? 0) - ((a.label ?? a.name)!.length ?? 0));
-  for (const ref of refs) {
-    const label = ref.label ?? ref.name!;
-    html = wrapName(html, label, ref.handle);
-  }
-  return html;
+  return String(node.html ?? ((node.blocks?.length ?? 0) > 0 ? node.blocks!.map(blockHtml).join("") : pipeToHtml(node.body ?? "")));
 }

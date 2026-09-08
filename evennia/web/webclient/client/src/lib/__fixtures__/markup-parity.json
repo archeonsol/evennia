@@ -244,6 +244,78 @@
     "html": "<span class=\"color-164\">mid</span>"
   },
   {
+    "src": "|#f00text|n",
+    "html": "<span class=\"\" style=\"color: #ff0000;\">text</span>"
+  },
+  {
+    "src": "|#Ff0000text|n",
+    "html": "<span class=\"\" style=\"color: #ff0000;\">text</span>"
+  },
+  {
+    "src": "|#0f0text|n",
+    "html": "<span class=\"\" style=\"color: #00ff00;\">text</span>"
+  },
+  {
+    "src": "|#0000FFtext|n",
+    "html": "<span class=\"\" style=\"color: #0000ff;\">text</span>"
+  },
+  {
+    "src": "|#1234text|n",
+    "html": "<span class=\"\" style=\"color: #112233;\">4text</span>"
+  },
+  {
+    "src": "|#1234567text|n",
+    "html": "<span class=\"\" style=\"color: #123456;\">7text</span>"
+  },
+  {
+    "src": "|#12text|n",
+    "html": "|#12text"
+  },
+  {
+    "src": "|#xyztext|n",
+    "html": "|#xyztext"
+  },
+  {
+    "src": "|[#f00text|n",
+    "html": "<span class=\"\" style=\"background-color: #ff0000;\">text</span>"
+  },
+  {
+    "src": "|[#Ff0000text|n",
+    "html": "<span class=\"\" style=\"background-color: #ff0000;\">text</span>"
+  },
+  {
+    "src": "|[#0f0text|n",
+    "html": "<span class=\"\" style=\"background-color: #00ff00;\">text</span>"
+  },
+  {
+    "src": "|[#0000FFtext|n",
+    "html": "<span class=\"\" style=\"background-color: #0000ff;\">text</span>"
+  },
+  {
+    "src": "|[#1234text|n",
+    "html": "<span class=\"\" style=\"background-color: #112233;\">4text</span>"
+  },
+  {
+    "src": "|[#1234567text|n",
+    "html": "<span class=\"\" style=\"background-color: #123456;\">7text</span>"
+  },
+  {
+    "src": "|[#12text|n",
+    "html": "|[#12text"
+  },
+  {
+    "src": "|[#xyztext|n",
+    "html": "|[#xyztext"
+  },
+  {
+    "src": "||#f00 literal",
+    "html": "|#f00 literal"
+  },
+  {
+    "src": "|#f00red|nplain",
+    "html": "<span class=\"\" style=\"color: #ff0000;\">red</span>plain"
+  },
+  {
     "src": "|=agrey|n",
     "html": "<span class=\"color-016\">grey</span>"
   },
@@ -526,6 +598,26 @@
   {
     "src": "|lcsay \"hi\"|ltquoted|le",
     "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say \\&quot;hi\\&quot;&quot;],{});return false;\">quoted</a>"
+  },
+  {
+    "src": "|lcsay \\\"hello\"|ltquoted|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say \\\\\\&quot;hello\\&quot;&quot;],{});return false;\">quoted</a>"
+  },
+  {
+    "src": "|lclook C:\\rooms\\|ltquoted|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look C:\\\\rooms\\\\&quot;],{});return false;\">quoted</a>"
+  },
+  {
+    "src": "|lcsay <&> &quot;|ltquoted|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say &lt;&amp;&gt; &amp;quot;&quot;],{});return false;\">quoted</a>"
+  },
+  {
+    "src": "|lcsay caf\u00e9 \ud83d\ude00|ltquoted|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;say caf\u00e9 \ud83d\ude00&quot;],{});return false;\">quoted</a>"
+  },
+  {
+    "src": "|lclook|lt\"click\"|le",
+    "html": "<a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">\"click\"</a>"
   },
   {
     "src": "|lcsay <b>|lt<b>bold</b>|le",

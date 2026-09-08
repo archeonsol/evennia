@@ -53,6 +53,12 @@ def cases() -> list[str]:
                 out.append(f"|{r}{g}{b}rgb|n")
                 out.append(f"|[{r}{g}{b}rgb|n")
     out += [f"|{c}0{c}mid|n" for c in "1234"]
+    for prefix in ("|#", "|[#"):
+        out += [
+            f"{prefix}{digits}text|n"
+            for digits in ("f00", "Ff0000", "0f0", "0000FF", "1234", "1234567", "12", "xyz")
+        ]
+    out += ["||#f00 literal", "|#f00red|nplain"]
     # Greyscale ramp, foreground and background.
     out += [f"|={ch}grey|n" for ch in string.ascii_lowercase]
     out += [f"|[={ch}grey|n" for ch in string.ascii_lowercase]
@@ -84,10 +90,13 @@ def cases() -> list[str]:
         # Colour spanning across a link, and colour only inside one.
         "|r|lclook|ltred link|le|n",
         "|lclook|lt|gcoloured|n|le",
-        # Quotes and HTML metacharacters in both halves: the server escapes the
-        # groups in its text pass and then turns `"` into a backslashed entity,
-        # which is not what it does to `"` in ordinary text.
+        # Command strings survive JavaScript serialization and HTML decoding.
         '|lcsay "hi"|ltquoted|le',
+        '|lcsay \\"hello"|ltquoted|le',
+        "|lclook C:\\rooms\\|ltquoted|le",
+        "|lcsay <&> &quot;|ltquoted|le",
+        "|lcsay café 😀|ltquoted|le",
+        '|lclook|lt"click"|le',
         "|lcsay <b>|lt<b>bold</b>|le",
         "|lcsay a & b|lta & b|le",
         # Degenerate: empty halves, and markers that never complete.

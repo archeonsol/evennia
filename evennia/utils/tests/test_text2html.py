@@ -1,6 +1,8 @@
 """Tests for text2html"""
 
+import json
 import unittest
+from html.parser import HTMLParser
 
 import mock
 from django.test import SimpleTestCase
@@ -8,7 +10,34 @@ from django.test import SimpleTestCase
 from evennia.utils import ansi, text2html
 
 
+class _LinkParser(HTMLParser):
+    """Read the handler after the browser's HTML entity decoding step."""
+
+    def handle_starttag(self, tag, attrs):
+        """Capture the generated command attribute."""
+        if tag == "a":
+            self.handler = dict(attrs)["onclick"]
+
+
 class TestText2Html(SimpleTestCase):
+    def test_command_link_roundtrip(self):
+        """Command punctuation remains data in one serialized string argument."""
+        for command in (
+            'say "hello"',
+            'say \\"hello"',
+            "look C:\\rooms\\",
+            "say <&> &quot;",
+            "say café 😀",
+        ):
+            with self.subTest(command=command):
+                parser = _LinkParser()
+                parser.feed(text2html.parse_html(f"|lc{command}|ltclick|le"))
+                prefix = 'Evennia.msg("text",['
+                suffix = "],{});return false;"
+                self.assertTrue(parser.handler.startswith(prefix))
+                self.assertTrue(parser.handler.endswith(suffix))
+                self.assertEqual(json.loads(parser.handler[len(prefix) : -len(suffix)]), command)
+
     def test_format_styles(self):
         parser = text2html.HTML_PARSER
         self.assertEqual("foo", parser.format_styles("foo"))
