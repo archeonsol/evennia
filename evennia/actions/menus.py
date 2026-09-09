@@ -546,11 +546,15 @@ class DisambiguationState(StateProvider):
         target_field="target",
         pending_raw=None,
         ambiguous_name=None,
+        choice_resolver=None,
     ):
         self.candidates = list(candidates)
-        # Two resolution styles:
+        # Three resolution styles:
         #   * pending_action — patch its target field and REDIRECT (engine-native;
         #     the resolve_disambiguation before-rule below).
+        #   * choice_resolver — turn the selected dynamic candidate directly into
+        #     an action (exit/channel/etc. resolvers whose parse cannot be replayed
+        #     through Actor.search).
         #   * pending_raw + ambiguous_name — the cmdhandler bridge resolves the
         #     choice itself, stashes a search override, and replays pending_raw
         #     (used when AmbiguousTarget is raised mid-parse, before any action
@@ -559,6 +563,7 @@ class DisambiguationState(StateProvider):
         self.target_field = target_field
         self.pending_raw = pending_raw
         self.ambiguous_name = ambiguous_name
+        self.choice_resolver = choice_resolver
 
     def prompt(self, looker=None):
         """The disambiguation menu text ("1-ball, 2-ball, …").

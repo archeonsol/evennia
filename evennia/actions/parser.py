@@ -61,7 +61,8 @@ class DynamicVerbResolver(Protocol):
     * return a populated :class:`Action` to claim the input;
     * return ``None`` to decline (the next resolver, then ``_nomatch``, is tried);
     * raise :class:`AmbiguousTarget` to trigger disambiguation (e.g. two exits
-      both named "door").
+      both named "door"). Since no action exists yet, pass a ``choice_resolver``
+      that turns the selected candidate into the action to dispatch.
 
     Resolvers keep the engine game-agnostic: the *exit* resolver lives game-side
     and is registered onto the shared parser when the movement package imports,

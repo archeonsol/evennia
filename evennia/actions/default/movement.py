@@ -152,7 +152,15 @@ def exit_resolver(stripped, actor):
     if not matches:
         return None
     if len(matches) > 1:
-        raise AmbiguousTarget(matches, stripped)
+
+        def resolve_choice(choice):
+            """Build a move only while the selected exit is still local."""
+            current = _exits_in(getattr(actor, "location", None))
+            if choice not in current or token not in _exit_names(choice):
+                return None
+            return Move(exit=choice, direction=(choice.key or "away").strip())
+
+        raise AmbiguousTarget(matches, stripped, choice_resolver=resolve_choice)
 
     exit_obj = matches[0]
     return Move(exit=exit_obj, direction=(exit_obj.key or "away").strip())

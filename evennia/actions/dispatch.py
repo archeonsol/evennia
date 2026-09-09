@@ -26,7 +26,8 @@ Routing rules (Phase 4, before any game verb is ported):
 :class:`AmbiguousTarget` raised mid-parse installs a
 :class:`~evennia.actions.menus.DisambiguationState` (carrying the raw line) and
 sends the choice prompt; the player's next line is resolved here (a search
-override is stashed and the original line replayed), not inside the engine.
+override replays search-driven parsing, while a dynamic resolver supplies an
+action factory for its chosen candidate), not inside the engine.
 
 Signals (``on_command_pre`` / ``on_command_post`` / ``on_command_error``) fire
 around engine dispatch so existing receivers keep working across both paths;
@@ -175,8 +176,9 @@ async def try_action_dispatch(
     if actor is None:
         actor = Actor.from_caller(called_by, session, callertype=callertype)
 
-    # 1) An active disambiguation resolves the choice here (the original line is
-    #    replayed with a search override; see Actor.search).
+    # 1) An active disambiguation resolves the choice here. Search-driven
+    #    ambiguity replays the original line with an Actor.search override;
+    #    dynamic resolvers turn the selected candidate directly into an action.
     disambig = _active_disambiguation(actor)
     if disambig is not None and disambig.pending_raw is not None:
         trace = await _resolve_disambiguation(
@@ -193,6 +195,7 @@ async def try_action_dispatch(
                 exc.candidates,
                 pending_raw=raw_string,
                 ambiguous_name=exc.original_raw,
+                choice_resolver=exc.choice_resolver,
             )
         )
         actor.msg(_format_disambiguation(exc.candidates, looker=getattr(actor, "character", None)))
@@ -227,6 +230,11 @@ async def try_action_dispatch(
         if stripped == CMD_LOGINSTART:
             action = LoginStartAction()
 
+    return await _dispatch_action(action, actor, raw_string, session, engine, callertype)
+
+
+async def _dispatch_action(action, actor, raw_string, session, engine, callertype=None):
+    """Dispatch one parsed action and apply fail-closed fallback feedback."""
     trace = await _dispatch_with_signals(
         action, actor, raw_string, session, engine, callertype=callertype
     )
@@ -307,6 +315,19 @@ async def _resolve_disambiguation(
     if choice is None:
         actor.msg("Invalid choice. Cancelled.")
         return None
+    if state.choice_resolver is not None:
+        action = state.choice_resolver(choice)
+        if action is None:
+            actor.msg("That choice is no longer available.")
+            return None
+        return await _dispatch_action(
+            action,
+            actor,
+            state.pending_raw,
+            session,
+            engine,
+            callertype,
+        )
     actor.set_search_override(state.ambiguous_name, choice)
     trace = await try_action_dispatch(
         called_by,
