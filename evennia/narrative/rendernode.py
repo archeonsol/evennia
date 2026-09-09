@@ -9,6 +9,7 @@ serialize those identifiers.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field, replace
@@ -40,11 +41,22 @@ MAX_BODY_CHARS = 128 * 1024
 MAX_REFS = 256
 MAX_BLOCKS = 256
 MAX_METADATA_ITEMS = 64
+MAX_TAG_CHARS = 64
+MAX_HANDLE_CHARS = 128
+MAX_SEPARATOR_CHARS = 4096
 _FORBIDDEN_WIRE_KEYS = frozenset({"char_id", "from_id", "referent_id", "object_id"})
 
 
+def _validate_text(value, name, limit=MAX_BODY_CHARS):
+    """Reject a non-string or excess characters at the owning field."""
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    if len(value) > limit:
+        raise ValueError(f"{name} exceeds {limit} characters")
+
+
 def _primitive(value: Any, *, depth: int = 0) -> Any:
-    """Return a bounded JSON-safe copy of ``value``.
+    """Return a validated, lossless JSON-safe copy of metadata.
 
     Raises:
         TypeError: If ``value`` contains a live object or unsupported type.
@@ -53,13 +65,18 @@ def _primitive(value: Any, *, depth: int = 0) -> Any:
     if depth > 8:
         raise ValueError("render metadata exceeds maximum depth")
     if value is None or isinstance(value, (bool, int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("render metadata requires finite numbers")
         return value
     if isinstance(value, str):
-        return value[:MAX_BODY_CHARS]
+        _validate_text(value, "metadata string")
+        return value
     if isinstance(value, Mapping):
         if len(value) > MAX_METADATA_ITEMS:
             raise ValueError("render mapping exceeds item limit")
-        return {str(key)[:128]: _primitive(item, depth=depth + 1) for key, item in value.items()}
+        for key in value:
+            _validate_text(key, "metadata key", MAX_HANDLE_CHARS)
+        return {key: _primitive(item, depth=depth + 1) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         if len(value) > MAX_BLOCKS:
             raise ValueError("render collection exceeds item limit")
@@ -103,18 +120,28 @@ class EntityRef:
     role: str = "target"
 
     def __post_init__(self):
-        object.__setattr__(self, "affordances", tuple(str(item) for item in self.affordances))
+        """Validate reference text before it can be issued to a viewer."""
+        _validate_text(self.handle, "reference handle", MAX_HANDLE_CHARS)
+        _validate_text(self.label, "reference label")
+        _validate_text(self.kind, "reference kind", MAX_TAG_CHARS)
+        _validate_text(self.role, "reference role", MAX_TAG_CHARS)
+        affordances = tuple(self.affordances)
+        if len(affordances) > 32:
+            raise ValueError("reference has too many affordances")
+        for item in affordances:
+            _validate_text(item, "reference affordance", MAX_TAG_CHARS)
+        object.__setattr__(self, "affordances", affordances)
 
     def payload(self) -> dict:
         """Return the public wire representation."""
         return {
-            "handle": self.handle[:128],
-            "label": self.label[:4096],
-            "name": self.label[:4096],  # compatibility for the current shell
-            "kind": self.kind[:64],
+            "handle": self.handle,
+            "label": self.label,
+            "name": self.label,  # compatibility for the current shell
+            "kind": self.kind,
             "recognized": bool(self.recognized),
-            "affordances": [str(item)[:64] for item in self.affordances[:32]],
-            "role": self.role[:64],
+            "affordances": list(self.affordances),
+            "role": self.role,
         }
 
 
@@ -134,11 +161,15 @@ class Line:
     spans: tuple[Any, ...] | None = None
 
     def __post_init__(self):
+        """Validate text and freeze the canonical spans."""
+        _validate_text(self.text, "line text")
+        _validate_text(self.style, "line style", MAX_TAG_CHARS)
         if self.spans is not None:
             object.__setattr__(self, "spans", tuple(self.spans))
 
     def payload(self) -> dict:
-        return {"type": "line", "text": self.text[:MAX_BODY_CHARS], "style": self.style[:64]}
+        """Return the public block without altering its fields."""
+        return {"type": "line", "text": self.text, "style": self.style}
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,14 +181,18 @@ class Paragraph:
     spans: tuple[Any, ...] | None = None
 
     def __post_init__(self):
+        """Validate text and freeze the canonical spans."""
+        _validate_text(self.text, "paragraph text")
+        _validate_text(self.style, "paragraph style", MAX_TAG_CHARS)
         if self.spans is not None:
             object.__setattr__(self, "spans", tuple(self.spans))
 
     def payload(self) -> dict:
+        """Return the public block without altering its fields."""
         return {
             "type": "paragraph",
-            "text": self.text[:MAX_BODY_CHARS],
-            "style": self.style[:64],
+            "text": self.text,
+            "style": self.style,
         }
 
 
@@ -178,14 +213,21 @@ class Section:
     sep: str = "\n"
 
     def __post_init__(self):
+        """Validate section fields and freeze the ordered children."""
+        _validate_text(self.key, "section key", MAX_TAG_CHARS)
+        _validate_text(self.title, "section title")
+        _validate_text(self.style, "section style", MAX_TAG_CHARS)
+        _validate_text(self.sep, "section separator", MAX_SEPARATOR_CHARS)
         object.__setattr__(self, "children", tuple(self.children))
 
     def payload(self) -> dict:
+        """Return the public block without altering its fields."""
         return {
             "type": "section",
-            "key": self.key[:64],
-            "title": self.title[:4096],
-            "style": self.style[:64],
+            "key": self.key,
+            "title": self.title,
+            "style": self.style,
+            "sep": self.sep,
             "children": [_block_payload(child) for child in self.children],
         }
 
@@ -199,14 +241,20 @@ class ListBlock:
     style: str = ""
 
     def __post_init__(self):
-        object.__setattr__(self, "items", tuple(str(item) for item in self.items))
+        """Validate display items before freezing their order."""
+        items = tuple(self.items)
+        for item in items:
+            _validate_text(item, "list item")
+        _validate_text(self.style, "list style", MAX_TAG_CHARS)
+        object.__setattr__(self, "items", items)
 
     def payload(self) -> dict:
+        """Return the public block without altering its fields."""
         return {
             "type": "list",
             "ordered": bool(self.ordered),
-            "items": [str(item)[:4096] for item in self.items],
-            "style": self.style[:64],
+            "items": list(self.items),
+            "style": self.style,
         }
 
 
@@ -218,27 +266,35 @@ class SystemBlock:
     level: str = "info"
     code: str = ""
 
+    def __post_init__(self):
+        """Validate system text and machine classification fields."""
+        _validate_text(self.text, "system text")
+        _validate_text(self.level, "system level", 32)
+        _validate_text(self.code, "system code", MAX_HANDLE_CHARS)
+
     def payload(self) -> dict:
+        """Return the public block without altering its fields."""
         return {
             "type": "system",
-            "text": self.text[:MAX_BODY_CHARS],
-            "level": self.level[:32],
-            "code": self.code[:128],
+            "text": self.text,
+            "level": self.level,
+            "code": self.code,
         }
 
 
 def _block_payload(block: Any) -> dict:
+    """Serialize a validated block independently of metadata limits."""
     if hasattr(block, "payload"):
         data = block.payload()
     elif isinstance(block, str):
         data = Line(block).payload()
     else:
         raise TypeError(f"unsupported render block {type(block).__name__}")
-    return _primitive(data)
+    return data
 
 
-def _validate_block_counts(blocks):
-    """Reject excess blocks and list items before serialization can lose them."""
+def _validate_blocks(blocks, *, allow_strings=True):
+    """Bound the complete block tree identically before and after resolution."""
     count = 0
     pending = list(blocks)
     while pending:
@@ -248,8 +304,38 @@ def _validate_block_counts(blocks):
             raise ValueError("RenderNode has too many blocks")
         if isinstance(block, Section):
             pending.extend(block.children)
-        elif isinstance(block, ListBlock) and len(block.items) > MAX_BLOCKS:
-            raise ValueError("RenderNode list has too many items")
+        elif isinstance(block, ListBlock):
+            if len(block.items) > MAX_BLOCKS:
+                raise ValueError("render list has too many items")
+        elif isinstance(block, (Line, Paragraph)):
+            if block.spans is not None:
+                _validate_spans(block.spans)
+        elif isinstance(block, str) and allow_strings:
+            _validate_text(block, "block text")
+        elif not isinstance(block, SystemBlock):
+            raise TypeError(f"unsupported render block {type(block).__name__}")
+
+
+def _validate_spans(spans):
+    """Validate each flat span record before resolution or public delivery."""
+    from evennia.narrative.render import span_to_dict
+
+    if len(spans) > MAX_REFS:
+        raise ValueError("render segment has too many spans")
+    for span in spans:
+        for name, value in span_to_dict(span).items():
+            if isinstance(value, str):
+                limit = (
+                    MAX_TAG_CHARS
+                    if name in {"_", "kind", "role", "form", "lang", "channel"}
+                    else MAX_BODY_CHARS
+                )
+                _validate_text(value, f"span {name}", limit)
+            elif isinstance(value, float):
+                if not math.isfinite(value):
+                    raise ValueError(f"span {name} requires a finite number")
+            elif value is not None and not isinstance(value, (bool, int)):
+                raise TypeError(f"span {name} must be a JSON scalar")
 
 
 def _coerce_ref(ref: EntityRef | Mapping) -> EntityRef:
@@ -288,18 +374,30 @@ class RenderNode:
     schema: str = RENDER_SCHEMA
 
     def __post_init__(self):
-        if not self.kind or len(self.kind) > 64:
-            raise ValueError("RenderNode kind must contain 1-64 characters")
-        if len(self.body) > MAX_BODY_CHARS:
-            raise ValueError("RenderNode body exceeds maximum length")
+        """Validate resolved content before any client receives it."""
+        for name in ("kind", "msg_type", "schema"):
+            _validate_text(getattr(self, name), name, MAX_TAG_CHARS)
+        for name in ("node_id", "correlation_id"):
+            _validate_text(getattr(self, name), name, MAX_HANDLE_CHARS)
+        if self.from_handle is not None:
+            _validate_text(self.from_handle, "from_handle", MAX_HANDLE_CHARS)
+        _validate_text(self.sep, "separator", MAX_SEPARATOR_CHARS)
+        if not self.kind or not self.msg_type:
+            raise ValueError("RenderNode kind and msg_type must not be empty")
+        _validate_text(self.body, "RenderNode body")
         refs = tuple(_coerce_ref(ref) for ref in self.refs)
         if len(refs) > MAX_REFS:
             raise ValueError("RenderNode has too many entity references")
         blocks = tuple(self.blocks)
-        _validate_block_counts(blocks)
+        _validate_blocks(blocks)
         if blocks and self.body != flatten_blocks(blocks, self.sep):
             raise ValueError("RenderNode body must be derived from its blocks")
         spans = None if self.spans is None else tuple(tuple(segment) for segment in self.spans)
+        if spans is not None:
+            if len(spans) > MAX_BLOCKS:
+                raise ValueError("RenderNode has too many span segments")
+            for segment in spans:
+                _validate_spans(segment)
         metadata = _deep_freeze(_primitive(dict(self.metadata)))
         object.__setattr__(self, "refs", refs)
         object.__setattr__(self, "blocks", blocks)
@@ -355,7 +453,7 @@ class RenderNode:
         the structured blocks/body remain available and metadata notes the
         redaction. Use :meth:`storage_payload` for trusted server-side replay.
         """
-        metadata = dict(self.metadata)
+        metadata = _primitive(self.metadata)
         data = {
             "schema": self.schema,
             "node_id": self.node_id,
@@ -378,7 +476,7 @@ class RenderNode:
                 data["metadata"] = {**metadata, "structure_redacted": True}
             else:
                 data["spans"] = serialized
-        return _primitive(data)
+        return data
 
     def storage_payload(self) -> dict:
         """Return a trusted server-side payload retaining invariant spans."""

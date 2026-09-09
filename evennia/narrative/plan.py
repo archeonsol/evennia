@@ -40,9 +40,9 @@ from evennia.narrative.render import (
     ViewerContext,
 )
 from evennia.narrative.rendernode import (
-    MAX_BLOCKS,
-    MAX_BODY_CHARS,
-    MAX_REFS,
+    MAX_HANDLE_CHARS,
+    MAX_SEPARATOR_CHARS,
+    MAX_TAG_CHARS,
     EntityRef,
     Line,
     ListBlock,
@@ -52,6 +52,8 @@ from evennia.narrative.rendernode import (
     SystemBlock,
     _deep_freeze,
     _primitive,
+    _validate_blocks,
+    _validate_text,
     flatten_blocks,
 )
 
@@ -167,14 +169,16 @@ class RenderPlan:
     plan_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def __post_init__(self):
-        if not self.kind or len(self.kind) > 64:
-            raise ValueError("RenderPlan kind must contain 1-64 characters")
-        if not self.msg_type or len(self.msg_type) > 64:
-            raise ValueError("RenderPlan msg_type must contain 1-64 characters")
-        if len(self.sep) > 4096:
-            raise ValueError("RenderPlan separator is too long")
+        """Validate canonical fields and structure before viewer resolution."""
+        for name in ("kind", "msg_type"):
+            _validate_text(getattr(self, name), name, MAX_TAG_CHARS)
+        for name in ("plan_id", "correlation_id"):
+            _validate_text(getattr(self, name), name, MAX_HANDLE_CHARS)
+        _validate_text(self.sep, "separator", MAX_SEPARATOR_CHARS)
+        if not self.kind or not self.msg_type:
+            raise ValueError("RenderPlan kind and msg_type must not be empty")
         blocks = tuple(self.blocks)
-        _validate_plan_blocks(blocks)
+        _validate_blocks(blocks, allow_strings=False)
         object.__setattr__(self, "blocks", blocks)
         object.__setattr__(
             self,
@@ -247,40 +251,6 @@ def _walk_spans(blocks):
         else:
             for span in getattr(block, "spans", None) or ():
                 yield span
-
-
-def _validate_plan_blocks(blocks):
-    """Validate the full canonical tree before any viewer resolves it."""
-    count = 0
-    for block in blocks:
-        count += 1
-        if count > MAX_BLOCKS:
-            raise ValueError("RenderPlan has too many blocks")
-        if isinstance(block, Section):
-            if len(block.title) > MAX_BODY_CHARS or len(block.sep) > 4096:
-                raise ValueError("RenderPlan section text is too long")
-            count += _validate_plan_blocks(block.children)
-            if count > MAX_BLOCKS:
-                raise ValueError("RenderPlan has too many blocks")
-            continue
-        if isinstance(block, ListBlock):
-            if len(block.items) > MAX_BLOCKS:
-                raise ValueError("RenderPlan list has too many items")
-            if any(len(item) > MAX_BODY_CHARS for item in block.items):
-                raise ValueError("RenderPlan list item is too long")
-            continue
-        if isinstance(block, SystemBlock):
-            if len(block.text) > MAX_BODY_CHARS:
-                raise ValueError("RenderPlan system block is too long")
-            continue
-        if not isinstance(block, (Line, Paragraph)):
-            raise TypeError(f"unsupported RenderPlan block {type(block).__name__}")
-        if len(block.text) > MAX_BODY_CHARS:
-            raise ValueError("RenderPlan text block is too long")
-        spans = block.spans
-        if spans is not None and len(spans) > MAX_REFS:
-            raise ValueError("RenderPlan block has too many spans")
-    return count
 
 
 def _block_storage(block, span_to_dict):

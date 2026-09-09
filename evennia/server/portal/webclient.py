@@ -82,6 +82,45 @@ _RESUME_STASH = {}
 #: Never hold more than this many frames before forcing a flush.
 BATCH_MAX_FRAMES = 64
 
+_DEFAULT_MAX_OUTGOING_BYTES = 32 * 1024 * 1024
+_DEFAULT_BATCH_BYTES = 1024 * 1024
+_DEFAULT_RESUME_BYTES = 32 * 1024 * 1024
+_DEFAULT_RESUME_STASH_BYTES = 128 * 1024 * 1024
+
+
+def _setting_bytes(name, default):
+    """Read a positive byte limit from settings."""
+    value = getattr(settings, name, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"settings.{name} must be a positive integer")
+    return value
+
+
+def _frame_bytes(frame):
+    """Return the serialized UTF-8 size of an outbound frame."""
+    if isinstance(frame, dict):
+        frame = json.dumps(frame)
+    if isinstance(frame, str):
+        frame = frame.encode("utf-8")
+    return len(frame)
+
+
+def _check_outgoing_size(frame):
+    """Reject a frame beyond the configured atomic WebSocket limit."""
+    size = _frame_bytes(frame)
+    limit = _setting_bytes("WEBSOCKET_MAX_OUTGOING_BYTES", _DEFAULT_MAX_OUTGOING_BYTES)
+    if size > limit:
+        raise ValueError(f"outgoing WebSocket frame is {size} bytes; limit is {limit}")
+
+
+def _trim_replay_frames(frames):
+    """Evict oldest complete frames until count and byte limits both hold."""
+    limit = _setting_bytes("WEBSOCKET_RESUME_BYTES", _DEFAULT_RESUME_BYTES)
+    total = sum(len(frame) for _, frame in frames)
+    while len(frames) > RESUME_BUFFER_MAX or total > limit:
+        _, frame = frames.popleft()
+        total -= len(frame)
+
 
 def _prune_resume_stash():
     """Drop expired stashes, then enforce the total cap oldest-deadline-first."""
@@ -94,6 +133,14 @@ def _prune_resume_stash():
             :overflow
         ]:
             _RESUME_STASH.pop(tok, None)
+    byte_limit = _setting_bytes("WEBSOCKET_RESUME_STASH_BYTES", _DEFAULT_RESUME_STASH_BYTES)
+    total = sum(len(frame) for stash in _RESUME_STASH.values() for _, frame in stash["frames"])
+    if total > byte_limit:
+        for token, stash in sorted(_RESUME_STASH.items(), key=lambda item: item[1]["deadline"]):
+            total -= sum(len(frame) for _, frame in stash["frames"])
+            _RESUME_STASH.pop(token, None)
+            if total <= byte_limit:
+                break
 
 
 # CLOSE_NORMAL (1000) / GOING_AWAY (1001) are imported from ws_protocol.
@@ -599,7 +646,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # Continue the seq counter across the gap and replay what the client
         # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
         self.out_seq = stash["last_seq"]
-        self.out_buffer = deque(stash["frames"], maxlen=RESUME_BUFFER_MAX)
+        self.out_buffer = deque(stash["frames"])
         last_seen = int(resume.get("last_seq") or 0)
         for seq, frame in list(self.out_buffer):
             if seq > last_seen:
@@ -614,8 +661,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         token = getattr(self, "resume_token", None)
         buf = getattr(self, "out_buffer", None)
         if token and buf:
+            frames = deque(buf)
+            _trim_replay_frames(frames)
             self._resume_stash = _RESUME_STASH[token] = {
-                "frames": deque(buf, maxlen=RESUME_BUFFER_MAX),
+                "frames": frames,
                 "last_seq": getattr(self, "out_seq", 0),
                 "deadline": time.time() + RESUME_GRACE_SECONDS,
                 "uid": getattr(self, "uid", None),
@@ -710,13 +759,18 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 return frame
             if not isinstance(obj, dict):
                 return frame
-        self.out_seq = getattr(self, "out_seq", 0) + 1
-        obj["s"] = self.out_seq
-        line = json.dumps(obj)
+        next_seq = getattr(self, "out_seq", 0) + 1
+        obj = dict(obj)
+        obj["s"] = next_seq
+        # ASCII escaping makes replay string length equal its encoded byte size.
+        line = json.dumps(obj, ensure_ascii=True)
+        _check_outgoing_size(line)
+        self.out_seq = next_seq
         buf = getattr(self, "out_buffer", None)
         if buf is None:
-            buf = self.out_buffer = deque(maxlen=RESUME_BUFFER_MAX)
+            buf = self.out_buffer = deque()
         buf.append((self.out_seq, line))
+        _trim_replay_frames(buf)
         stash = _RESUME_STASH.get(getattr(self, "resume_token", None))
         if (
             stash is not None
@@ -724,7 +778,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             and stash["uid"] == getattr(self, "uid", None)
         ):
             stash["frames"].append((self.out_seq, line))
+            _trim_replay_frames(stash["frames"])
             stash["last_seq"] = self.out_seq
+            _prune_resume_stash()
         return line
 
     def sendLine(self, line):
@@ -736,7 +792,11 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 envelope and serialized once, after stamping.
 
         """
+        if getattr(self, "_batch_pending", None):
+            self._serialize_stamped(line, getattr(self, "out_seq", 0) + 2)
+            self._flush_batch()
         line = self._stamp_and_buffer(line)
+        _check_outgoing_size(line)
         try:
             return self.sendMessage(line.encode())
         except Disconnected:
@@ -776,6 +836,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if isinstance(data, dict):
             # Not resume-capable, or binary: still has to reach the wire as bytes.
             data = json.dumps(data).encode("utf-8")
+        elif isinstance(data, str):
+            data = data.encode("utf-8")
+        _check_outgoing_size(data)
         try:
             return self.sendMessage(data, isBinary=is_binary)
         except Disconnected:
@@ -803,7 +866,38 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         buf = getattr(self, "_batch_pending", None)
         if buf is None:
             buf = self._batch_pending = []
-        buf.append(frame)
+        current_seq = getattr(self, "out_seq", 0)
+        target = min(
+            _setting_bytes("WEBSOCKET_BATCH_BYTES", _DEFAULT_BATCH_BYTES),
+            _setting_bytes("WEBSOCKET_MAX_OUTGOING_BYTES", _DEFAULT_MAX_OUTGOING_BYTES),
+        )
+        try:
+            member = frame if isinstance(frame, dict) else json.loads(frame)
+            if not isinstance(member, dict):
+                raise TypeError
+        except (json.JSONDecodeError, TypeError, ValueError):
+            self._serialize_stamped(frame, current_seq + (2 if buf else 1))
+            if buf:
+                self._flush_batch()
+            self._batch_pending = [frame]
+            return self._flush_batch()
+
+        candidate = [*buf, member]
+        payload = candidate[0] if len(candidate) == 1 else {"t": "batch", "frames": candidate}
+        stamped = dict(payload)
+        stamped["s"] = current_seq + 1
+        if len(candidate) <= BATCH_MAX_FRAMES and _frame_bytes(stamped) <= target:
+            self._serialize_stamped(payload, current_seq + 1)
+            buf.append(member)
+        else:
+            future_seq = current_seq + (2 if buf else 1)
+            serialized = self._serialize_stamped(member, future_seq)
+            if buf:
+                self._flush_batch()
+            if _frame_bytes(serialized) > target:
+                self._batch_pending = [member]
+                return self._flush_batch()
+            buf = self._batch_pending = [member]
         if len(buf) >= BATCH_MAX_FRAMES:
             return self._flush_batch()
         if not getattr(self, "_batch_scheduled", False):
@@ -816,35 +910,68 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 return self._flush_batch()
 
     def _flush_batch(self):
-        """Send everything queued this iteration as one envelope."""
+        """Send queued envelopes in ordered, byte-bounded groups."""
         self._batch_scheduled = False
         buf = getattr(self, "_batch_pending", None)
         if not buf:
             return
         self._batch_pending = []
-        if len(buf) == 1:
-            # A lone frame gains nothing from the wrapper.
-            payload = buf[0]
-        else:
-            try:
-                payload = {
-                    "t": "batch",
-                    "frames": [f if isinstance(f, dict) else json.loads(f) for f in buf],
-                }
-            except (json.JSONDecodeError, TypeError, ValueError):
-                # Malformed member: fall back to sending them individually so a
-                # single bad frame cannot swallow the whole burst.
-                for frame in buf:
-                    try:
-                        self.sendMessage(self._stamp_and_buffer(frame).encode("utf-8"))
-                    except Disconnected:
-                        self.disconnect(reason="Browser already closed.")
-                        return
-                return
         try:
-            return self.sendMessage(self._stamp_and_buffer(payload).encode("utf-8"))
-        except Disconnected:
-            self.disconnect(reason="Browser already closed.")
+            members = [frame if isinstance(frame, dict) else json.loads(frame) for frame in buf]
+            if not all(isinstance(frame, dict) for frame in members):
+                raise TypeError
+        except (json.JSONDecodeError, TypeError, ValueError):
+            members = None
+        if members is None:
+            payloads = buf
+        else:
+            payloads = []
+            group = []
+            target = min(
+                _setting_bytes("WEBSOCKET_BATCH_BYTES", _DEFAULT_BATCH_BYTES),
+                _setting_bytes("WEBSOCKET_MAX_OUTGOING_BYTES", _DEFAULT_MAX_OUTGOING_BYTES),
+            )
+            for member in members:
+                candidate = [*group, member]
+                payload = (
+                    candidate[0] if len(candidate) == 1 else {"t": "batch", "frames": candidate}
+                )
+                stamped = dict(payload)
+                stamped["s"] = getattr(self, "out_seq", 0) + len(payloads) + 1
+                size = _frame_bytes(stamped)
+                if group and size > target:
+                    payloads.append(
+                        group[0] if len(group) == 1 else {"t": "batch", "frames": group}
+                    )
+                    group = [member]
+                else:
+                    group = candidate
+            if group:
+                payloads.append(group[0] if len(group) == 1 else {"t": "batch", "frames": group})
+        for payload in payloads:
+            try:
+                self.sendMessage(self._stamp_and_buffer(payload).encode("utf-8"))
+            except Disconnected:
+                self.disconnect(reason="Browser already closed.")
+                return
+
+    def _serialize_stamped(self, frame, seq):
+        """Serialize one JSON envelope with a prospective sequence stamp."""
+        obj = frame
+        if not isinstance(obj, dict):
+            try:
+                obj = json.loads(frame)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                _check_outgoing_size(frame)
+                return frame
+            if not isinstance(obj, dict):
+                _check_outgoing_size(frame)
+                return frame
+        obj = dict(obj)
+        obj["s"] = seq
+        line = json.dumps(obj)
+        _check_outgoing_size(line)
+        return line
 
     def at_login(self):
         """Persist normal login through the same browser auth mirror as recovery."""

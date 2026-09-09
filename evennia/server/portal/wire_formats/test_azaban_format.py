@@ -150,6 +150,24 @@ class TestAzabanFormat(unittest.TestCase):
         env = self._env(self.fmt.encode_default("narrative", node.payload()))
         self.assertEqual(env["nodes"][0]["metadata"], metadata)
 
+    def test_outgoing_blocks_do_not_use_incoming_depth_limit(self):
+        """Valid render trees can be deeper than untrusted command payloads."""
+        from evennia.narrative.rendernode import Line, RenderNode, Section
+
+        block = Line("end")
+        for _ in range(12):
+            block = Section("s", children=(block,))
+        node = RenderNode(kind="test", msg_type="text", body="end", blocks=(block,))
+        env = self._env(self.fmt.encode_default("narrative", node.payload()))
+        self.assertEqual(env["nodes"][0]["blocks"], node.payload()["blocks"])
+
+    def test_scene_text_does_not_use_incoming_string_limit(self):
+        """A room description retains its text in the outgoing scene."""
+        text = "🙂" * 8193
+        ops = [{"op": "set", "path": "/room/desc", "value": text}]
+        env = self._env(self.fmt.encode_default("patch", ops=ops))
+        self.assertEqual(env["ops"], ops)
+
     def test_outgoing_narrative_limits_remain_bounded(self):
         """Oversized and excessively nested output is still rejected."""
         from evennia.narrative.rendernode import MAX_BODY_CHARS
