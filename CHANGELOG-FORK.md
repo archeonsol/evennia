@@ -25,6 +25,62 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.235: Separate field limits from transport capacity
+
+### Narrative
+
+- Validate display text and machine identifiers when constructing
+  [narrative records](evennia/narrative/rendernode.py). Section titles, list
+  items, and reference labels retain their accepted text through serialization.
+  All display fields use the existing 131,072-character ceiling; the complete
+  resolved body must also fit it.
+- Share block and span validation between
+  [RenderPlan](evennia/narrative/plan.py) and RenderNode. Validate authored
+  fields before resolution and expanded fields afterward. Accepted block
+  nesting no longer consumes the metadata depth budget.
+- Reject oversized metadata strings, keys, and non-finite numbers during
+  construction. Metadata keeps its existing per-container count and depth
+  limits; serialization neither clips keys nor merges their values.
+
+### Transport
+
+- Separate incoming structural checks from outgoing scenes and narrative in
+  [Azaban](evennia/server/portal/wire_formats/azaban.py). Room descriptions
+  no longer inherit the incoming 8,192-character string limit. Incoming byte
+  limits apply during [fragment accumulation](evennia/server/portal/ws_protocol.py)
+  and again before JSON decoding.
+- Bound [WebSocket output](evennia/server/portal/webclient.py), pending batches,
+  and replay storage using encoded bytes. Oversized complete messages raise
+  before sending or changing sequence and replay state. Batches divide between
+  whole envelopes, and direct protocol replies drain prior queued output.
+- Keep replay's existing count, expiry, and account-ownership rules. Evict
+  oldest complete frames under per-session pressure and oldest-deadline stashes
+  under global pressure. Replay remains best effort when data has been evicted.
+- Synthetic sizing of a maximum-length emoji body plus its text block produces
+  about 3 MiB of JSON, or 4.5 MiB with HTML. A 64-message burst previously could
+  form a 192 MiB batch. The byte target sends those complete messages separately
+  and bounds retained replay data without reducing their text.
+
+### Migration and validation
+
+- Producers that relied on serializer clipping must validate their fields or
+  divide large content into complete messages. Machine tags and styles allow
+  64 characters; handles and record identifiers allow 128; separators allow
+  4,096; system levels allow 32. Reference affordances allow 32 entries of 64
+  characters. List items require strings. Metadata requires string
+  keys and finite numbers. Invalid values raise at construction.
+- Optional settings are measured in bytes: `AZABAN_MAX_INCOMING_BYTES` defaults
+  to 64 KiB; `WEBSOCKET_MAX_OUTGOING_BYTES` to 32 MiB;
+  `WEBSOCKET_BATCH_BYTES` to 1 MiB; `WEBSOCKET_RESUME_BYTES` to 32 MiB per
+  session; `WEBSOCKET_RESUME_STASH_BYTES` to 128 MiB globally. A legal complete
+  message above the batch target travels alone. Valid individual fields can
+  still exceed the aggregate transport capacity.
+- All 338 selected engine tests and 64 downstream game tests passed. Coverage
+  includes field boundaries, viewer expansion, Unicode byte accounting,
+  fragmented input, batch admission and ordering, sequence rollover, and replay
+  ownership and eviction. Formatting and agent-context checks passed.
+- No database migration, dependency update, or client rebuild is required.
+
 ## 6.0.0+underspire.234: Preserve display text and client options
 
 ### Markup and webclient

@@ -194,6 +194,11 @@ class AzabanFormat(WireFormat):
     #: buffer them for replay after a reconnect.
     supports_resume = True
 
+    @property
+    def max_incoming_bytes(self):
+        """Return the byte budget shared by reassembly and JSON decoding."""
+        return int(getattr(settings, "AZABAN_MAX_INCOMING_BYTES", _MAX_FRAME_BYTES))
+
     # -- outgoing (server -> client) ---------------------------------------
 
     def _html(self, text, protocol_flags, options):
@@ -275,13 +280,16 @@ class AzabanFormat(WireFormat):
                 nodes = raw
             if not all(isinstance(node, dict) for node in nodes):
                 return None
-            from evennia.narrative.rendernode import MAX_BODY_CHARS
+            from evennia.narrative.rendernode import _primitive, _validate_text
 
-            if (
-                len(nodes) > _MAX_ITEMS
-                or not all(_within_limits(node, max_string=MAX_BODY_CHARS) for node in nodes)
-                or _contains_raw_identity(nodes)
-            ):
+            try:
+                for node in nodes:
+                    _validate_text(node.get("body", ""), "narrative body")
+                    _primitive(node.get("metadata", {}))
+            except (ValueError, TypeError):
+                logger.log_trace("azaban: invalid narrative fields")
+                return None
+            if _contains_raw_identity(nodes):
                 logger.log_warn("azaban: rejected unsafe narrative payload")
                 return None
             attach_html = _wants_server_html(protocol_flags)
@@ -306,11 +314,7 @@ class AzabanFormat(WireFormat):
             # new added here must be viewer-scoped and safe to put on the wire.
             ops = kwargs.get("ops", [])
             meta = kwargs.get("meta", {})
-            if (
-                not isinstance(meta, dict)
-                or _contains_raw_identity((ops, meta))
-                or not _within_limits((ops, meta))
-            ):
+            if not isinstance(meta, dict) or _contains_raw_identity((ops, meta)):
                 logger.log_warn("azaban: rejected unsafe scene patch")
                 return None
             return _frame(
@@ -330,7 +334,7 @@ class AzabanFormat(WireFormat):
         # Structural guard: cap the raw frame before parsing so a hostile client
         # cannot force a huge allocation, then bound the decoded shape.
         raw = bytes(payload) if not isinstance(payload, (bytes, bytearray)) else payload
-        if len(raw) > _MAX_FRAME_BYTES:
+        if len(raw) > self.max_incoming_bytes:
             logger.log_warn("azaban: dropping oversized incoming frame (%d bytes)" % len(raw))
             return None
         try:

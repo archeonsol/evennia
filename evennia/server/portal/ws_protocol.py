@@ -101,6 +101,7 @@ class _WSCore:
         self._ws_closed = False  # close frame sent/received
         self._closed_notified = False  # onClose fired exactly once
         self._msg_parts = []  # fragments of the message being received
+        self._msg_bytes = 0
         self._msg_is_binary = False
         # Continue cooperative init into the session mixin.
         super().__init__(*args, **kwargs)
@@ -163,6 +164,16 @@ class _WSCore:
         return True
 
     def _collect_message(self, event):
+        """Accumulate a message within the selected codec's byte budget."""
+        limit = getattr(getattr(self, "wire_format", None), "max_incoming_bytes", None)
+        size = len(event.data.encode("utf-8")) if isinstance(event.data, str) else len(event.data)
+        self._msg_bytes += size
+        if limit is not None and self._msg_bytes > limit:
+            self._msg_parts.clear()
+            self._msg_bytes = 0
+            self.sendClose(1009, "Message exceeds transport capacity")
+            self._lose_connection()
+            return
         # A message may arrive as several frames; the first frame fixes the type.
         if not self._msg_parts:
             self._msg_is_binary = isinstance(event, BytesMessage)
@@ -175,6 +186,7 @@ class _WSCore:
             # Match autobahn: onMessage always receives bytes + an isBinary flag.
             payload = "".join(self._msg_parts).encode("utf-8")
         self._msg_parts = []
+        self._msg_bytes = 0
         try:
             self.onMessage(payload, self._msg_is_binary)
         except Exception:
