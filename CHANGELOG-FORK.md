@@ -25,6 +25,32 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.236: Complete dynamic target choices
+
+### Actions
+
+- [`AmbiguousTarget`](evennia/actions/exceptions.py) accepts an optional
+  candidate-to-action resolver for ambiguity discovered before an action exists.
+  The [dispatch bridge](evennia/actions/dispatch.py) executes that resolved action
+  directly instead of replaying parsing through an unrelated search override.
+- The [default movement resolver](evennia/actions/default/movement.py) uses the
+  new path for same-named exits and revalidates that the chosen exit is still in
+  the actor's room before dispatch. A numbered choice now moves through the
+  selected exit instead of reopening the same prompt.
+
+### Tests
+
+- Resolver and dispatch regressions cover successful numbered choices and exits
+  that disappear before a choice is made. All 442 engine action tests pass.
+
+### Migration
+
+- Existing `AmbiguousTarget(candidates, original_raw)` callers remain compatible.
+  Dynamic verb resolvers that can produce ambiguous candidates should pass
+  `choice_resolver`; search-driven action parsing continues to use replay.
+- Games adopting this behavior must pin the engine to `underspire.236` or newer.
+  No database migration or settings change is required.
+
 ## 6.0.0+underspire.235: Separate field limits from transport capacity
 
 ### Narrative

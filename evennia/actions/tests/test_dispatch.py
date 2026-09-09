@@ -432,6 +432,30 @@ class TestDisambiguation(unittest.TestCase):
         self.assertEqual(len(c2.kicked), 1)
         self.assertEqual(len(c1.kicked), 0)
 
+    def test_valid_choice_resolves_dynamic_verb_without_reprompting(self):
+        c1, c2 = RuleTarget("in"), RuleTarget("in")
+
+        def resolver(stripped, actor):
+            if stripped != "in":
+                return None
+            raise AmbiguousTarget(
+                candidates=[c1, c2],
+                original_raw=stripped,
+                choice_resolver=lambda choice: Kick(target=choice),
+            )
+
+        self.parser.add_resolver(resolver)
+        self.assertIsNone(_dispatch(self.actor, "in", self.parser))
+        self.char.messages.clear()
+
+        trace = _dispatch(self.actor, "2", self.parser)
+
+        self.assertEqual(trace.outcome, "succeeded")
+        self.assertFalse(self.actor.has_state(DisambiguationState))
+        self.assertEqual(len(c2.kicked), 1)
+        self.assertEqual(len(c1.kicked), 0)
+        self.assertNotIn("Which one did you mean?", "\n".join(self.char.messages))
+
     def test_invalid_choice_cancels(self):
         c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
         self.actor.enter_state(

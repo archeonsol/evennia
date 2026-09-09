@@ -34,12 +34,18 @@ class ParseError(ActionError):
 
 
 class AmbiguousTarget(ActionError):
-    """Raised by ``actor.search()`` / an action's ``parse`` when a target string
-    matches multiple candidates. The dispatch loop catches it, installs a
-    ``DisambiguationState``, and prompts the actor — instead of the legacy
-    inline "1-ball or 2-ball?" print-and-return-None behavior."""
+    """Raised when a target string matches multiple candidates.
 
-    def __init__(self, candidates, original_raw=""):
+    Args:
+        candidates (iterable): Candidate objects shown to the actor.
+        original_raw (str): Ambiguous target text.
+        choice_resolver (callable, optional): Convert one selected candidate
+            into an action, or return ``None`` when that candidate expired.
+            Search-driven ambiguity omits this and uses replay instead.
+    """
+
+    def __init__(self, candidates, original_raw="", choice_resolver=None):
         self.candidates = list(candidates)
         self.original_raw = original_raw
+        self.choice_resolver = choice_resolver
         super().__init__(f"ambiguous target {original_raw!r}: {len(self.candidates)} candidates")
