@@ -76,8 +76,17 @@ class TestRedisReloadSurvival(TestCase):
         self.portal.server_bus = self.portal_bus
         self.amp_factory.server_connection = self.portal_bus
 
-        self.server_bus.start_bus()
+        # Match production lifecycle, as the bus fixture in test_redis_bus does:
+        # the Portal subscribes to s2p before the Server boots and announces
+        # itself. Starting the server bus first publishes into a stream no
+        # reader is on yet, and the ``$`` cursor skips it, so discovery never
+        # completes inside the drain budget.
         self.portal_bus.start_bus()
+        time.sleep(0.05)
+        self.server_bus.start_bus()
+        self.portal_bus._handshake._pending = None
+        self.portal_bus._handshake._last_probe = -float("inf")
+        self.portal_bus._handshake.tick()
         _drain_bus()
         self.assertTrue(self.server_bus.ready, repr(self.server_bus.last_sync_error))
         self.assertTrue(self.portal_bus.ready, repr(self.portal_bus.last_sync_error))
