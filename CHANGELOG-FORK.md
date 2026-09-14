@@ -25,6 +25,33 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.238: Restore redis reload test coverage
+
+### Tests
+
+- [`TestRedisReloadSurvival`](evennia/server/tests/test_redis_reload.py) starts
+  its bus pair in production order. It previously started the Server bus before
+  the Portal bus and asserted readiness after a single drain; the Server
+  announces itself as soon as it starts, so it published into `s2p` before the
+  Portal reader existed and that reader's `$` cursor skipped past the
+  announcement. Discovery never completed, and all 8 tests in the module failed
+  in `setUp` with `server_bus.ready` false and `last_sync_error` None -- no
+  error, just a handshake that never happened. The bus fixture in
+  [`test_redis_bus`](evennia/server/tests/test_redis_bus.py) already ordered
+  this correctly and documented why; the reload fixture now mirrors it, starting
+  the Portal bus first, letting its reader reach the first blocking `xread`,
+  then starting the Server bus and forcing one probe.
+- The module runs in 30.8s where it previously took 23.9s to fail, so reload
+  survival, PSYNC reattachment and transport-outage recovery are actually
+  exercised again rather than skipped by a fixture that never reached the
+  test bodies.
+
+### Migration
+
+- Test-only. No engine, settings, database or API change. Games pinned to
+  `underspire.237` behave identically; upgrade only to get the restored
+  coverage when running the engine suite.
+
 ## 6.0.0+underspire.237: Repair launcher lifecycle and bot reconnection
 
 ### Engine
