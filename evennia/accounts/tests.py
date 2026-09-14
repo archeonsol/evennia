@@ -1221,3 +1221,26 @@ class TestDefaultAccountEv(BaseEvenniaTest):
 
     def test_msg(self):
         self.account.msg
+
+
+class TestBotAuthorizationPolicies(TestCase):
+    """Bot policies must be class attributes, not prose in the docstring."""
+
+    def test_bot_is_exempt_from_idle_timeout(self):
+        """Bots hold an idle connection by design and must not be kicked."""
+        from evennia.accounts.bots import Bot
+
+        self.assertIsInstance(Bot.authorization_policies["noidletimeout"], Always)
+
+    def test_bot_refuses_direct_messaging(self):
+        """A bot relays its own protocol and takes no `msg` from players."""
+        from evennia.accounts.bots import Bot
+        from evennia.authorization.policy import Never
+
+        self.assertIsInstance(Bot.authorization_policies["msg"], Never)
+
+    def test_bot_policies_are_not_trapped_in_the_docstring(self):
+        """Policy source inside the docstring silently disables every policy."""
+        from evennia.accounts.bots import Bot
+
+        self.assertNotIn("authorization_policies", Bot.__doc__ or "")

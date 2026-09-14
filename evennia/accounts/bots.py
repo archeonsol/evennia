@@ -52,6 +52,11 @@ class BotStarter(DefaultScript):
 
 class Bot(DefaultAccount):
     """
+    A Bot will start itself when the server starts (it will generally
+    not do so on a reload - that will be handled by the normal Portal
+    session resync)
+
+    """
 
     from evennia.authorization.policy import Always, Never, RequiresCapability
 
@@ -64,11 +69,6 @@ class Bot(DefaultAccount):
         "msg": Never(),
         "noidletimeout": Always(),
     }
-    A Bot will start itself when the server starts (it will generally
-    not do so on a reload - that will be handled by the normal Portal
-    session resync)
-
-    """
 
     def basetype_setup(self):
         """
