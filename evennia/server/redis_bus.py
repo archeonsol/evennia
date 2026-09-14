@@ -376,6 +376,12 @@ class RedisServerBus(_RedisBusMixin):
         self._published_ready = True
         self._draining = False
         self._transport.set_pair(self._handshake.pair, ready=True)
+        try:
+            # bots start from run_init_hooks, before this generation settled;
+            # a request discarded with the previous one has no other retry.
+            self._sessions.handler.retry_pending_bot_sessions()
+        except Exception:
+            logger.log_trace("redis bus: bot session retry failed")
         for session in list(self._sessions.handler.values()):
             try:
                 session.at_transport_reconnect()

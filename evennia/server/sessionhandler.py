@@ -325,6 +325,9 @@ class ServerSessionHandler(SessionHandler):
         self.portal_start_time = 0.0
         # per-session outbound message buffer for batching (sessid -> [kwargs, ...])
         self._outbuf = {}
+        # bot connect requests awaiting confirmed publication (see
+        # retry_pending_bot_sessions)
+        self._pending_bot_sessions = {}
 
     def _run_cmd_login(self, session):
         """
@@ -469,6 +472,11 @@ class ServerSessionHandler(SessionHandler):
             configdict (dict): This dict will be used to configure
                 the bot (this depends on the bot protocol).
 
+        Returns:
+            PublicationResult: Admission and publication status of the request.
+                Publication is not application: a request that does not land is
+                re-sent by `retry_pending_bot_sessions`.
+
         Examples:
             start_bot_session("evennia.server.portal.irc.IRCClient",
                               {"uid":1,  "botname":"evbot", "channel":"#evennia",
@@ -481,9 +489,57 @@ class ServerSessionHandler(SessionHandler):
             the Server.
 
         """
-        evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
+        key = (protocol_path, configdict.get("uid"))
+        self._pending_bot_sessions[key] = (protocol_path, dict(configdict))
+        return self._publish_bot_session(key)
+
+    def _publish_bot_session(self, key):
+        """Publish one queued bot request and clear it once it lands.
+
+        Args:
+            key (tuple): `(protocol_path, uid)` identifying the request.
+
+        Returns:
+            PublicationResult: Admission and publication status of the frame.
+
+        """
+        protocol_path, configdict = self._pending_bot_sessions[key]
+        result = evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
             DUMMYSESSION, operation=amp.SCONN, protocol_path=protocol_path, config=configdict
         )
+        result.addCallback(lambda _entry_id: self._pending_bot_sessions.pop(key, None))
+        return result
+
+    def _bot_session_live(self, uid):
+        """Report whether a bot account already holds a Server session.
+
+        Args:
+            uid (int): Account id the bot connects as.
+
+        Returns:
+            bool: True when a session for that account is already registered.
+
+        """
+        return uid is not None and any(session.uid == uid for session in self.values())
+
+    def retry_pending_bot_sessions(self):
+        """Re-request bot sessions whose frame never reached the Portal.
+
+        A bot starts from `run_init_hooks`, which runs while the bus is still
+        negotiating its generation. A generation change in that window discards
+        the queued frame ("connection generation replaced") and nothing retries
+        it, so the bot stays dead until the next Server start. The Server bus
+        calls this once it is ready.
+
+        Requests are dropped rather than re-sent when the bot already holds a
+        session, so a reconnect that beat the retry is not connected twice.
+
+        """
+        for key in list(self._pending_bot_sessions):
+            if self._bot_session_live(key[1]):
+                self._pending_bot_sessions.pop(key, None)
+                continue
+            self._publish_bot_session(key)
 
     def portal_restart_server(self):
         """
