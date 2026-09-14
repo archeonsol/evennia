@@ -25,6 +25,65 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.237: Repair launcher lifecycle and bot reconnection
+
+### Engine
+
+- [`launcher_handlers`](evennia/server/portal/launcher_handlers.py) publishes
+  lifecycle operations over the Portal's Redis bus instead of the
+  `_launcher_amp_protocol` stub. That protocol is never connected to a Server,
+  and its `broadcast` fans out over `factory.broadcasts`, which stays empty
+  because redis is the only Portal<->Server bus. Every `evennia reload`,
+  `reset` and `shutdown` therefore resolved to an immediately-successful empty
+  `DeferredList`: the Portal recorded `server_restart_mode` as applied, the
+  Server was never told anything, and the launcher timed out waiting on a
+  process that had no reason to exit. In-game `@reload` was unaffected, because
+  it already arrives on the bus. Spawning the Server process, launcher status
+  pushes and the factory connect callbacks stay on the protocol, which shares
+  its factory with the bus.
+- [`ServerSessionHandler.start_bot_session`](evennia/server/sessionhandler.py)
+  keeps each bot connect request until its frame is published, and
+  `retry_pending_bot_sessions` re-sends whatever did not land. Bots start from
+  `run_init_hooks`, which the Server bus runs while the handshake is still
+  synchronizing; `callRemote` deliberately admits `SCONN` in that window, but a
+  peer generation turning over before the transport settles rejects the queued
+  frame with `connection generation replaced`. The only observer was an errback
+  that logs, and `BotStarter` is a one-shot script, so the bot stayed dead until
+  the next Server start. [`RedisServerBus._ready`](evennia/server/redis_bus.py)
+  drives the retry, so a request rides the next confirmed generation. A request
+  is dropped rather than re-sent when the bot already holds a session, so a
+  reconnect that beat the retry does not connect the bot twice.
+- [`Bot.authorization_policies`](evennia/accounts/bots.py) is a class attribute
+  again. `b9e13e675` replaced the runtime lockstring in `basetype_setup`, which
+  carried `noidletimeout:true()`, with a policy dict that landed inside the
+  class docstring. Import line and all, it has never been evaluated: every bot
+  has since inherited `DefaultAccount`'s
+  `noidletimeout: RequiresCapability("engine.world.build")`, which bots do not
+  hold, so `process_idle_timeouts` disconnected them on each `IDLE_TIMEOUT`
+  sweep. `msg` was likewise `Always()` instead of `Never()`.
+
+### Tests
+
+- [`test_launcher_lifecycle`](evennia/server/tests/test_launcher_lifecycle.py)
+  asserts each launcher lifecycle operation reaches the bus transport carrying
+  the right admin operation, that a rejected frame records no restart mode, and
+  that a cold start still spawns the Server process locally.
+- [`test_bus_lifecycle_validation`](evennia/server/tests/test_bus_lifecycle_validation.py)
+  covers bot request republication after a discarded generation, suppression
+  after a successful publication or a live session, and the bus readiness
+  transition that drives the retry.
+- [`accounts.tests`](evennia/accounts/tests.py) pins the Bot policies as class
+  attributes and fails if policy source returns to the docstring.
+
+### Migration
+
+- No settings, database or API change. `start_bot_session` now returns the
+  `PublicationResult` it previously discarded; every in-tree caller ignores it.
+- Games on `underspire.236` or older should expect that bots were
+  idle-disconnected about every `IDLE_TIMEOUT` seconds, and that launcher
+  `reload`/`reset`/`shutdown` silently applied nothing while reporting a
+  restart mode. Both are fixed by upgrading, with no game-side change.
+
 ## 6.0.0+underspire.236: Complete dynamic target choices
 
 ### Actions
