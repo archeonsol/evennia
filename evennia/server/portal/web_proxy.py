@@ -145,8 +145,14 @@ class ReverseProxy:
         fwd_headers = self._request_headers(request, peer_ip)
         target = request.target.decode("latin1")
         response_started = False
+        client = self._client
+        if client is None:
+            # Shutdown closed the upstream while this accepted connection was
+            # still being served; there is nothing left to forward to.
+            await self._send_error(conn, writer, 503, b"Service Unavailable")
+            return False
         try:
-            async with self._client.stream(
+            async with client.stream(
                 request.method.decode("latin1"),
                 target,
                 headers=fwd_headers,

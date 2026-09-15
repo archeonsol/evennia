@@ -104,3 +104,18 @@ class TestReverseProxyStreaming(IsolatedAsyncioTestCase):
         finally:
             upstream.release.set()
             await forwarding
+
+    async def test_closed_client_answers_503_without_raising(self):
+        """A request racing shutdown must not use the already-closed upstream."""
+        proxy = ReverseProxy("127.0.0.1", 4005)
+        proxy._client = None
+        writer = _Writer()
+        conn = h11.Connection(h11.SERVER)
+        conn.receive_data(b"GET / HTTP/1.1\r\nHost: game\r\n\r\n")
+        request = conn.next_event()
+        self.assertIsInstance(conn.next_event(), h11.EndOfMessage)
+
+        forwarded = await proxy._forward_and_respond(conn, writer, request, b"", None)
+
+        self.assertFalse(forwarded)
+        self.assertIn(b"HTTP/1.1 503", b"".join(writer.writes))
