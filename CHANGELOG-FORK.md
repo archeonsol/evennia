@@ -25,6 +25,45 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.240: Quiet Portal and bus recovery logs
+
+### Engine
+
+- **Launcher IPC polls hold one connection.** `wait_until_state`
+  ([`launcher_ipc.py`](evennia/server/launcher_ipc.py)) reopened its
+  `LauncherSession` after every poll that did not yet match the desired
+  state, so a Server cold start opened roughly one TCP connection per
+  second -- each logged as "Launcher IPC connected from 127.0.0.1" -- and
+  threw away the status push the Portal sends on connect. The wait now
+  keeps one channel for the whole wait and reopens only after a failed
+  connect or exchange.
+- **Requests racing Portal shutdown get a 503.** `ReverseProxy.stop()`
+  closes the listener, then nulls `_client`; a connection accepted before
+  the listener closed could reach `_forward_and_respond` afterwards and
+  raise `AttributeError: 'NoneType' object has no attribute 'stream'`
+  ([`web_proxy.py`](evennia/server/portal/web_proxy.py)), logged as a
+  traceback on every Portal stop. The upstream reference is captured up
+  front, and a missing one answers `503 Service Unavailable`.
+- **One warning per bus outage, plus recovery.** The handshake lease
+  fails every ~4s while the peer is away (correct fencing), so a single
+  Server restart re-logged "redis bus unavailable: peer synchronization
+  lost; interrupted work may have run" each cycle. The bus
+  ([`redis_bus.py`](evennia/server/redis_bus.py)) now warns once per
+  outage and logs "redis bus: peer synchronization restored" when
+  readiness returns; player-facing notices are unchanged.
+
+### Tests
+
+- `test_launcher_ipc`: one connect across failed polls, reconnect after a
+  broken exchange.
+- `test_web_proxy_streaming`: no upstream client returns False and
+  answers 503.
+- `test_bus_recovery`: repeated failures warn once; recovery reports once.
+
+No migration: no settings, API or wire-format changes.
+
+---
+
 ## 6.0.0+underspire.239: Repair webclient glyph alignment, buffer clear and tab scroll
 
 ### Webclient
