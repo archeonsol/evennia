@@ -205,3 +205,21 @@ class TestRecoveryEntrypoints(TestCase):
                 self.server_bus.start_bus()
         start.assert_not_called()
         self.service.run_initial_setup.assert_called_once()
+
+
+class TestPeerOutageLogging(TestCase):
+    """A peer outage warns once, and readiness recovery is reported once."""
+
+    def test_repeated_failures_log_once_and_recovery_is_reported(self):
+        """Each failed handshake cycle must not repeat the same outage warning."""
+        bus = RedisServerBus(SimpleNamespace())
+        with (
+            patch("evennia.server.redis_bus.logger.log_warn") as warn,
+            patch("evennia.server.redis_bus.logger.log_info") as info,
+        ):
+            bus._transport_failed("peer synchronization lost")
+            bus._transport_failed("peer synchronization lost")
+            bus._peer_ready()
+        warn.assert_called_once()
+        info.assert_called_once()
+        self.assertIn("peer synchronization restored", info.call_args.args[0])

@@ -38,6 +38,7 @@ class _RedisBusMixin:
         )
         self._published_ready = False
         self._draining = False
+        self._sync_failure_logged = False
         self._snapshot_waiters = {}
         self._shutdown_deadline = None
         self._tick_handle = None
@@ -49,7 +50,7 @@ class _RedisBusMixin:
             apply=self._apply_snapshot,
             state_snapshot=self._state_snapshot,
             apply_state=self._apply_state,
-            on_ready=self._ready,
+            on_ready=self._peer_ready,
             on_unavailable=self._unavailable,
         )
 
@@ -121,10 +122,22 @@ class _RedisBusMixin:
         self._published_ready = False
         self._fail_snapshot_waiters(reason)
         self._handshake.disconnect()
-        logger.log_warn(f"redis bus unavailable: {reason}; interrupted work may have run")
+        if not self._sync_failure_logged:
+            # One warning per outage: a peer restart re-fences the transport on
+            # every failed handshake cycle, which is the same outage, not new
+            # work lost.
+            self._sync_failure_logged = True
+            logger.log_warn(f"redis bus unavailable: {reason}; interrupted work may have run")
         if self._role == "portal":
             for session in list(evennia.PORTAL_SESSION_HANDLER.values()):
                 evennia.PORTAL_SESSION_HANDLER.bus_unavailable_notice(session)
+
+    def _peer_ready(self):
+        """Report an outage's end once readings resume, then run role readiness."""
+        if self._sync_failure_logged:
+            self._sync_failure_logged = False
+            logger.log_info("redis bus: peer synchronization restored")
+        self._ready()
 
     def _transport_recovered(self):
         """Start only fresh discovery after Redis and writer capacity recover."""
