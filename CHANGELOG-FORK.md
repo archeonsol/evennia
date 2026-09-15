@@ -25,6 +25,64 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.239: Repair webclient glyph alignment, buffer clear and tab scroll
+
+### Webclient
+
+- **Rule-glyph fallback.** Google's `css2` subsets ship every monospace the
+  shell offers as Latin only; of the seven, just Fira Code carries
+  U+2500-259F, the range the game draws its frames, rules and tables from (a
+  single U+2500 is ~50k of the ~61k non-Latin characters in game content).
+  With any other font selected, every rule fell through to an OS monospace at
+  that font's advance, tearing the column by 8.4% (IBM Plex Mono, JetBrains
+  Mono), 10.2% (Space Mono) or 37.5% (VT323); Share Tech Mono missed by 1.8%
+  and so looked right, which is why players reported exactly three of the
+  seven. A 16KB DejaVu Sans Mono subset
+  ([`glyph-fallback.css`](evennia/web/webclient/client/src/styles/glyph-fallback.css),
+  [`shell-glyphs.woff2`](evennia/web/webclient/client/src/styles/shell-glyphs.woff2))
+  now backs every stack, declared once per cell width with `size-adjust`
+  scaling it onto that width exactly; primaries that already carry the glyphs
+  keep their own. Measured tear afterwards is 0% on all seven.
+- **Clear buffer survives refresh.** The portal keeps a replay window of every
+  frame it has sent, and a reloaded page presents no cursor, so the whole
+  window replayed into a log the player had just cleared. A portal-local
+  `resume_reset` frame ([`webclient.py`](evennia/server/portal/webclient.py))
+  now drops the window, which is the half that makes the clear survive.
+- **Tab scroll.** dockview hides an inactive panel rather than destroying it,
+  and a hidden element's `scrollTop` resets to 0; nothing put it back, so
+  switching tabs and back showed the top of the buffer. A `ResizeObserver` in
+  [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)
+  restores the reading position on the way back -- the bottom if pinned, the
+  exact offset otherwise.
+- **Routing.** Routes now move as well as copy
+  ([`routing.svelte.ts`](evennia/web/webclient/client/src/lib/routing.svelte.ts)).
+  A move-route takes the line out of the terminal entirely, and moved lines
+  are nowhere else, so feed tabs carry unread counts. The label field names a
+  tab inside the Feeds panel, and the hint now says so.
+- **Log export.** The buffer saves as standalone HTML (palette resolved
+  against the live document, scripts and inline handlers stripped) or as ANSI
+  (styling put back as SGR escapes), alongside the existing text
+  ([`transcript.ts`](evennia/web/webclient/client/src/lib/transcript.ts)).
+  Both walk the DOM rather than the HTML string, so MXP links that nest inside
+  and across style spans keep their effective style.
+- Keyboard SFX gain is a slider; the old fixed level is its 50%.
+- vite `base` is relative, or the font asset emits a root-absolute URL that
+  404s under `STATIC_URL`; vitest loads the svelte plugin (so rune-backed
+  stores are constructible in a test at all) and processes CSS (so the palette
+  parity test can read the generated stylesheet).
+
+### Tests
+
+- 529 node tests pass (13 new), 50 in the browser harness (16 new), and 54
+  portal transport tests (5 new).
+
+### Migration
+
+- Portal and webclient only. No settings, database or API change.
+- **Deploy must run `evennia collectstatic`**: `shell.woff2` is a new static
+  asset. This is a portal change, so production needs a full service restart,
+  and downstream games should bump `EVENNIA_REF` to `underspire.239`.
+
 ## 6.0.0+underspire.238: Restore redis reload test coverage
 
 ### Tests
