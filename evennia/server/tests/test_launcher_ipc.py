@@ -194,6 +194,32 @@ class LauncherSessionWaitTest(SimpleTestCase):
             status = wait_until_state("127.0.0.1", 4006, deadline=1.0, poll_interval=0.01)
         self.assertEqual(status, [True, False, 1, None, {}, {}])
 
+    @patch.object(
+        LauncherSession,
+        "wait_for_state",
+        side_effect=[None, [True, True, 1, 2, {}, {}]],
+    )
+    @patch.object(LauncherSession, "connect")
+    def test_wait_until_state_reuses_one_connection_across_polls(self, mock_connect, _mock_wait):
+        """An unsuccessful poll must not reconnect the control channel."""
+        with patch("evennia.server.launcher_ipc.time.sleep"):
+            status = wait_until_state("127.0.0.1", 4006, deadline=1.0, poll_interval=0.01)
+        self.assertEqual(status, [True, True, 1, 2, {}, {}])
+        mock_connect.assert_called_once()
+
+    @patch.object(
+        LauncherSession,
+        "wait_for_state",
+        side_effect=[ConnectionError("channel broke"), [True, True, 1, 2, {}, {}]],
+    )
+    @patch.object(LauncherSession, "connect")
+    def test_wait_until_state_reconnects_after_a_failed_exchange(self, mock_connect, _mock_wait):
+        """A broken exchange must reopen the control channel before polling again."""
+        with patch("evennia.server.launcher_ipc.time.sleep"):
+            status = wait_until_state("127.0.0.1", 4006, deadline=1.0, poll_interval=0.01)
+        self.assertEqual(status, [True, True, 1, 2, {}, {}])
+        self.assertEqual(mock_connect.call_count, 2)
+
     def test_start_launcher_server_binds_before_run_forever(self):
         import asyncio
         from unittest.mock import MagicMock

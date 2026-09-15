@@ -403,21 +403,30 @@ def wait_until_state(
     deadline: float = COLD_START_DEADLINE,
     poll_interval: float = 0.5,
 ) -> list | None:
-    """Retry connect + status query until state matches or *deadline* elapses."""
+    """Retry status queries until state matches or *deadline* elapses.
+
+    One control connection is kept for the whole wait and only reopened after
+    a failed connect or exchange. Reconnecting per poll made the Portal log a
+    connection per attempted poll (and reset socket timeouts) through every
+    cold start; the Portal pushes status when a client connects, so keeping
+    the channel open also lets a state change arrive as soon as it happens.
+    """
     end = time.monotonic() + deadline
     session = LauncherSession(host, port)
+    connected = False
     while time.monotonic() < end:
         remaining = end - time.monotonic()
-        try:
-            session.connect()
-        except (OSError, ConnectionError, TimeoutError):
-            if portal_running is False:
-                # Portal IPC listener is gone — portal has exited.
-                return [False, False, None, None, {}, {}]
-            session.close()
-            session = LauncherSession(host, port)
-            time.sleep(min(poll_interval, remaining))
-            continue
+        if not connected:
+            try:
+                session.connect()
+                connected = True
+            except (OSError, ConnectionError, TimeoutError):
+                session.close()
+                if portal_running is False:
+                    # Portal IPC listener is gone — portal has exited.
+                    return [False, False, None, None, {}, {}]
+                time.sleep(min(poll_interval, remaining))
+                continue
         try:
             status = session.wait_for_state(
                 portal_running=portal_running,
@@ -425,12 +434,13 @@ def wait_until_state(
                 timeout=min(poll_interval, remaining),
                 poll_interval=poll_interval,
             )
-            if status is not None:
-                return status
         except (TimeoutError, OSError, ConnectionError, RuntimeError):
-            pass
-        session.close()
-        session = LauncherSession(host, port)
+            session.close()
+            connected = False
+            time.sleep(min(poll_interval, remaining))
+            continue
+        if status is not None:
+            return status
         time.sleep(min(poll_interval, remaining))
     return None
 
