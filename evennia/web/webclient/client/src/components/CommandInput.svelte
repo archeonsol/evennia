@@ -97,7 +97,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (settings.keyboardSfx && e.key.length === 1) playKey();
+    if (settings.keyboardSfx && e.key.length === 1) playKey(settings.keyboardVolume);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
       e.preventDefault();
       rSearch = true;

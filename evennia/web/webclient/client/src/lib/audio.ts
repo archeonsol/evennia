@@ -39,7 +39,21 @@ export function playMention(): void {
   }
 }
 
-export function playKey(): void {
+//: Peak gain of the keyboard click at the volume slider's 100%. The old fixed
+//: level, 0.035, sat at what is now 50 - players wanted room to go louder, and
+//: a click much past this starts to clip against the game audio.
+const KEY_PEAK_GAIN = 0.07;
+
+/**
+ * Play the keyboard click.
+ *
+ * `volume` is the settings slider, 0-100. At 0 nothing is scheduled at all:
+ * exponentialRampToValueAtTime cannot ramp from silence, so a zero-gain click
+ * would be a ramp from 0, which is undefined.
+ */
+export function playKey(volume = 50): void {
+  const level = (Math.min(100, Math.max(0, volume)) / 100) * KEY_PEAK_GAIN;
+  if (level <= 0) return;
   const ac = context();
   if (!ac) return;
   try {
@@ -48,7 +62,7 @@ export function playKey(): void {
     const gain = ac.createGain();
     osc.type = "square";
     osc.frequency.value = 180 + Math.random() * 70;
-    gain.gain.setValueAtTime(0.035, now);
+    gain.gain.setValueAtTime(level, now);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
     osc.connect(gain);
     gain.connect(ac.destination);

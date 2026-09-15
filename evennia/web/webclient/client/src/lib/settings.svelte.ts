@@ -35,14 +35,20 @@ const CUSTOM_DEFAULTS: Record<string, string> = {
   alert: "#e5484d",
 };
 
+// Every stack names its width-matched "Shell Glyphs" face straight after its
+// primary. The primary covers Latin; the fallback covers the box-drawing, block
+// and arrow ranges the primary's webfont subset drops, at that primary's exact
+// advance. Drop the fallback and the game's tables tear - see
+// styles/glyph-fallback.css, which also carries the size-adjust maths. A new
+// entry here needs a face for its advance/em, not whichever one looks closest.
 export const FONTS: { id: string; label: string; stack: string }[] = [
-  { id: "plex", label: "IBM Plex Mono", stack: '"IBM Plex Mono", ui-monospace, monospace' },
-  { id: "jetbrains", label: "JetBrains Mono", stack: '"JetBrains Mono", ui-monospace, monospace' },
-  { id: "fira", label: "Fira Code", stack: '"Fira Code", ui-monospace, monospace' },
-  { id: "space", label: "Space Mono", stack: '"Space Mono", ui-monospace, monospace' },
-  { id: "sharetech", label: "Share Tech Mono", stack: '"Share Tech Mono", ui-monospace, monospace' },
-  { id: "vt323", label: "VT323 - Retro", stack: '"VT323", ui-monospace, monospace' },
-  { id: "system", label: "System Mono", stack: 'ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace' },
+  { id: "plex", label: "IBM Plex Mono", stack: '"IBM Plex Mono", "Shell Glyphs 600", ui-monospace, monospace' },
+  { id: "jetbrains", label: "JetBrains Mono", stack: '"JetBrains Mono", "Shell Glyphs 600", ui-monospace, monospace' },
+  { id: "fira", label: "Fira Code", stack: '"Fira Code", "Shell Glyphs 600", ui-monospace, monospace' },
+  { id: "space", label: "Space Mono", stack: '"Space Mono", "Shell Glyphs 612", ui-monospace, monospace' },
+  { id: "sharetech", label: "Share Tech Mono", stack: '"Share Tech Mono", "Shell Glyphs 540", ui-monospace, monospace' },
+  { id: "vt323", label: "VT323 - Retro", stack: '"VT323", "Shell Glyphs 400", ui-monospace, monospace' },
+  { id: "system", label: "System Mono", stack: 'ui-monospace, "Cascadia Mono", Menlo, Consolas, "Shell Glyphs", monospace' },
 ];
 
 export const EMBER_THEMES: { id: string; label: string; colors: string[] }[] = [
@@ -70,6 +76,7 @@ interface Persisted {
   emberTheme: string;
   emberIntensity: number; // 0..100
   keyboardSfx: boolean;
+  keyboardVolume: number; // 0..100 (%) of the click's reference level
   music: boolean;
   typewriterMs: number; // per-line reveal duration; 0 = off
   sceneStrip: boolean;
@@ -96,6 +103,7 @@ const DEFAULTS: Persisted = {
   emberTheme: "ash",
   emberIntensity: 45,
   keyboardSfx: false,
+  keyboardVolume: 50,
   music: true,
   typewriterMs: 275,
   sceneStrip: true,
@@ -116,6 +124,7 @@ const RANGES = {
   vignetteIntensity: [0, 100],
   emberIntensity: [0, 100],
   typewriterMs: [0, 1500],
+  keyboardVolume: [0, 100],
 } as const;
 
 function load(): Persisted {
@@ -147,6 +156,7 @@ class Settings {
   emberTheme = $state(DEFAULTS.emberTheme);
   emberIntensity = $state(DEFAULTS.emberIntensity);
   keyboardSfx = $state(DEFAULTS.keyboardSfx);
+  keyboardVolume = $state(DEFAULTS.keyboardVolume);
   music = $state(DEFAULTS.music);
   typewriterMs = $state(DEFAULTS.typewriterMs);
   sceneStrip = $state(DEFAULTS.sceneStrip);

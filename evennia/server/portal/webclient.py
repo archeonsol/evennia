@@ -617,6 +617,26 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         # the client can assign (not max) its cursor from it.
         self.sendLine({"t": "hello", "protocol": "azaban.v1", "resumed": resumed})
 
+    def _reset_resume_buffer(self):
+        """Drop the replay window this socket is holding.
+
+        The client's "clear buffer" only empties its own scrollback array. The
+        portal keeps every frame it has sent, and a page reload asks to resume
+        from seq 0 - a fresh page has no cursor to present - so the whole window
+        replayed straight back into the log the player had just cleared, and the
+        clear looked like it had silently undone itself. Clearing here is what
+        makes it stick.
+
+        """
+        buf = getattr(self, "out_buffer", None)
+        if buf is not None:
+            buf.clear()
+        # The live stash (if one is bound) mirrors the same frames; its last_seq
+        # is left alone so the counter still runs on across a reconnect.
+        stash = _RESUME_STASH.get(getattr(self, "resume_token", None))
+        if stash is not None and stash is getattr(self, "_resume_stash", None):
+            stash["frames"].clear()
+
     def _handle_resume(self, resume):
         """On reconnect: bind the resume token and replay any missed frames.
 
@@ -721,6 +741,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 raw = None
             if isinstance(raw, dict) and raw.get("t") == "hello":
                 self._handle_client_hello(raw)
+            elif isinstance(raw, dict) and raw.get("t") == "resume_reset":
+                # Client-side scrollback wipe. Portal-local, like `hello`: the
+                # server has no say in what this browser keeps on screen.
+                self._reset_resume_buffer()
 
         if self.wire_format:
             kwargs = self.wire_format.decode_incoming(

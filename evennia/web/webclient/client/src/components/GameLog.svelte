@@ -4,12 +4,27 @@
   import { keybinds } from "../lib/keybinds.svelte";
   import { typewriter, markBacklog } from "../lib/typewriter";
   import { settings } from "../lib/settings.svelte";
+  import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
   import { onMount } from "svelte";
+
+  //: What each download format is for, in the order the menu offers them.
+  //: HTML leads because it is the only one that keeps the colours *and* opens
+  //: anywhere; .txt is last because it is the one that throws them away.
+  const SAVE_FORMATS: { id: TranscriptFormat; label: string; hint: string }[] = [
+    { id: "html", label: "HTML", hint: "colours, opens in a browser" },
+    { id: "ansi", label: "ANSI", hint: "colour codes, for a terminal or MUD client" },
+    { id: "txt", label: "Text", hint: "plain, no colour" },
+  ];
 
   let el = $state<HTMLDivElement | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
   let pinned = $state(true);
   let matchPos = $state(0);
+  // Scroll position across a panel hide; see the ResizeObserver below.
+  let savedTop = 0;
+  let hidden = false;
+  let saveOpen = $state(false);
+  let saveEl = $state<HTMLDivElement | null>(null);
 
   // Freeze the existing backlog so only lines that arrive after mount type in.
   onMount(() => markBacklog(session.lines.at(-1)?.id ?? -1));
@@ -68,9 +83,34 @@
   });
 
   function onScroll() {
-    if (!el) return;
+    if (!el || !el.clientHeight) return; // a hide zeroes scrollTop; not a real scroll
+    savedTop = el.scrollTop;
     pinned = el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
   }
+
+  // Restore the reading position when the panel comes back.
+  //
+  // dockview hides an inactive panel rather than destroying it, and a hidden
+  // element's scrollTop is reset to 0. Nothing puts it back on the way in: the
+  // autoscroll effect only runs when the line count changes, so switching to
+  // another tab and back left the log showing the top of a 5000-line buffer.
+  // A zero-height box is the hide; the next non-zero one is the return.
+  $effect(() => {
+    const node = el;
+    if (!node) return;
+    const ro = new ResizeObserver(() => {
+      if (!node.clientHeight) {
+        hidden = true;
+        return;
+      }
+      if (!hidden) return;
+      hidden = false;
+      node.scrollTop = pinned ? node.scrollHeight : savedTop;
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  });
+
   function step(d: number) {
     const n = matchIds.length;
     if (n) matchPos = (matchPos + d + n) % n;
@@ -79,10 +119,20 @@
     if (keybinds.match(e, "search")) {
       e.preventDefault();
       logview.searchOpen = true;
-    } else if (e.key === "Escape" && logview.searchOpen) {
-      logview.searchOpen = false;
+    } else if (e.key === "Escape") {
+      if (saveOpen) saveOpen = false;
+      else if (logview.searchOpen) logview.searchOpen = false;
     }
   }
+
+  // Anything outside the menu dismisses it. The listener is on the window in
+  // the capture phase so a click on some other panel closes it too, not just
+  // one that happens to land in the log.
+  function onGlobalPointer(e: PointerEvent) {
+    if (!saveOpen) return;
+    if (!(e.target instanceof Node) || !saveEl?.contains(e.target)) saveOpen = false;
+  }
+
   function onSearchKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -94,19 +144,23 @@
   function clearBuffer() {
     if (session.lines.length && confirm("Clear the scrollback buffer?")) session.clear();
   }
-  function downloadLog() {
-    const blob = new Blob([session.transcript()], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+  function downloadLog(format: TranscriptFormat) {
+    saveOpen = false;
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const file = buildTranscript(session.lines, format, {
+      timestamps: logview.timestamps,
+      title: `Underspire log ${stamp}`,
+    });
+    const url = URL.createObjectURL(new Blob([file.body], { type: file.mime }));
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `underspire-log-${stamp}.txt`;
+    a.download = `underspire-log-${stamp}.${file.ext}`;
     a.click();
     URL.revokeObjectURL(url);
   }
 </script>
 
-<svelte:window onkeydown={onGlobalKey} />
+<svelte:window onkeydown={onGlobalKey} onpointerdowncapture={onGlobalPointer} />
 
 <div class="log-wrap">
   <div class="log-bar">
@@ -122,7 +176,19 @@
     </div>
     <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)} title="timestamps">⏱</button>
     <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)} title="search (Ctrl-F)">⌕</button>
-    <button class="tool" onclick={downloadLog} title="download log" aria-label="download log">⭳</button>
+    <div class="save" bind:this={saveEl}>
+      <button class="tool" class:on={saveOpen} onclick={() => (saveOpen = !saveOpen)}
+        title="save log" aria-label="save log" aria-expanded={saveOpen}>⭳</button>
+      {#if saveOpen}
+        <div class="save-menu" role="menu">
+          {#each SAVE_FORMATS as f}
+            <button role="menuitem" onclick={() => downloadLog(f.id)}>
+              <span class="fmt">{f.label}</span><span class="fmt-hint">{f.hint}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
     <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">⌫</button>
   </div>
 
@@ -186,6 +252,21 @@
     font-family: inherit; font-size: 0.8rem; padding: 0 6px; cursor: pointer;
   }
   .tool:hover, .tool.on { color: var(--accent-bright); border-color: var(--accent); }
+
+  .save { position: relative; display: flex; }
+  .save-menu {
+    position: absolute; top: calc(100% + 3px); right: 0; z-index: 20;
+    display: flex; flex-direction: column; min-width: 15em;
+    background: var(--bg-deep); border: 1px solid var(--accent);
+  }
+  .save-menu button {
+    display: flex; align-items: baseline; gap: 7px; text-align: left;
+    background: none; border: none; color: var(--fg-dim);
+    font-family: inherit; font-size: 0.72rem; padding: 5px 9px; cursor: pointer;
+  }
+  .save-menu button:hover { background: var(--bg-elev); color: var(--accent-bright); }
+  .fmt { letter-spacing: 0.12em; text-transform: uppercase; flex: 0 0 3.2em; }
+  .fmt-hint { color: var(--fg-faint); font-size: 0.66rem; }
 
   .search {
     display: flex; align-items: center; gap: 6px;

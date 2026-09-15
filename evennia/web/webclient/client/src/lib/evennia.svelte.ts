@@ -152,6 +152,17 @@ class AzabanConnection {
     });
   }
 
+  /**
+   * Tell the portal to drop its replay window for this connection.
+   *
+   * Frames the portal has already sent are replayed on the next handshake, and
+   * a reloaded page presents no cursor - so without this a cleared scrollback
+   * came straight back on refresh.
+   */
+  dropReplayBuffer(): void {
+    this.sendEnvelope({ t: "resume_reset" });
+  }
+
   close(): void {
     this.manualClose = true;
     this.sendEnvelope({ t: "websocket_close" });

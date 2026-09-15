@@ -1,5 +1,6 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
+import "./styles/glyph-fallback.css";
 import "./styles/themes.css";
 import "./styles/shell.css";
 import "./styles/ansi-palette.css";

@@ -242,6 +242,49 @@ class TestResumeHandshake(TestCase):
         self.assertEqual([e for e in envs if e["t"] == "render"], [])
         self.assertFalse(envs[-1]["resumed"])
 
+    def test_resume_reset_empties_the_replay_window(self):
+        t = _Transport(uid=7)
+        for i in range(3):
+            t.sendEncoded({"t": "render", "n": i})
+        t._reset_resume_buffer()
+        self.assertEqual(len(t.out_buffer), 0)
+
+    def test_resume_reset_leaves_nothing_for_the_next_reconnect_to_replay(self):
+        # The symptom the reset exists for: a reloaded page presents no cursor,
+        # so anything still buffered comes back into the log the player just
+        # cleared.
+        t = self._disconnected()
+        t._reset_resume_buffer()
+        t._stash_for_resume()
+        fresh = _Transport(uid=7)
+        fresh._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 0}})
+        self.assertEqual([e for e in _frames(fresh) if e["t"] == "render"], [])
+
+    def test_resume_reset_empties_a_bound_stash_but_keeps_its_cursor(self):
+        t = self._disconnected()
+        t._reset_resume_buffer()
+        stash = webclient_mod._RESUME_STASH["tok"]
+        self.assertEqual(len(stash["frames"]), 0)
+        self.assertEqual(stash["last_seq"], 3)
+
+    def test_resume_reset_does_not_clear_a_stash_this_socket_does_not_own(self):
+        self._disconnected(uid=7, token="tok")
+        other = _Transport(uid=9)
+        other.resume_token = "tok"
+        other._reset_resume_buffer()
+        self.assertEqual(len(webclient_mod._RESUME_STASH["tok"]["frames"]), 3)
+
+    def test_resume_reset_is_handled_at_the_portal_and_not_forwarded(self):
+        # The server has no say in what a browser keeps on screen, so the frame
+        # must never reach an inputfunc.
+        t = _Transport(uid=7)
+        t.sendEncoded({"t": "render", "n": 0})
+        t.wire_format.decode_incoming.return_value = None
+        t.data_in = Mock()
+        t.onMessage(json.dumps({"t": "resume_reset"}).encode("utf-8"), False)
+        self.assertEqual(len(t.out_buffer), 0)
+        t.data_in.assert_not_called()
+
     def test_stash_survives_a_rejected_claim_being_consumed(self):
         # A wrong-uid claim pops the stash; that is fine (the owner's own
         # reconnect brings a fresh buffer) but it must not leak frames.

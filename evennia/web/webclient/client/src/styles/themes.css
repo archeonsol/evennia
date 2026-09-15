@@ -7,8 +7,11 @@
    (ansi-palette.css) is separate. */
 
 :root {
+  /* Pre-settings default; the store overwrites it with the chosen FONTS stack.
+     "Shell Glyphs" trails the local fonts here for the same reason it does
+     there - see styles/glyph-fallback.css. */
   --font-mono: "Cascadia Mono", "JetBrains Mono", ui-monospace, "SFMono-Regular",
-    Menlo, Consolas, monospace;
+    Menlo, Consolas, "Shell Glyphs", monospace;
   --shell-font-size: 15px;
   --bracket: 9px;      /* corner-tick arm length */
   --hair: 1px;

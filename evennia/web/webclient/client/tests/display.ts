@@ -1,4 +1,5 @@
 import { pipeToHtml } from "../src/lib/markup";
+import { buildTranscript, htmlToAnsi } from "../src/lib/transcript";
 import { session } from "../src/lib/session.svelte";
 import { triggers } from "../src/lib/triggers.svelte";
 import { routing } from "../src/lib/routing.svelte";
@@ -50,7 +51,7 @@ test("downstream consumers share the same plain text", () => {
   const seen: string[] = [];
   triggers.shouldGag = (text) => { seen.push(text); return false; };
   triggers.runActions = (text) => { seen.push(text); };
-  routing.process = (_html, text) => { seen.push(text); };
+  routing.process = (_html, text) => { seen.push(text); return false; };
   try {
     session.clear();
     session.append("R&amp;D<br>next");
@@ -179,5 +180,86 @@ try {
   window.requestAnimationFrame = request;
   window.cancelAnimationFrame = cancel;
 }
+
+// --- transcript export ---------------------------------------------------
+const E = "\u001b[";
+const ansiCases: [string, string][] = [
+  ["plain", "plain"],
+  ['<span class="color-009">red</span>', E + "38;5;9m" + "red" + E + "0m"],
+  ['<span class="bgcolor-021">on blue</span>', E + "48;5;21m" + "on blue" + E + "0m"],
+  [
+    '<span class="underline blink color-011">loud</span>',
+    E + "4;5;38;5;11m" + "loud" + E + "0m",
+  ],
+  [
+    '<span class="color-009">red</span> bare',
+    E + "38;5;9m" + "red" + E + "0m" + " bare",
+  ],
+  // Truecolor rides as an inline style and must win over the palette class.
+  [
+    '<span class="color-009" style="color: #102030;">tc</span>',
+    E + "38;2;16;32;48m" + "tc" + E + "0m",
+  ],
+  // A link inherits the run it sits inside rather than resetting it.
+  [
+    '<span class="color-010"><a href="#">click</a></span>',
+    E + "38;5;10m" + "click" + E + "0m",
+  ],
+  // Two runs in a row: the second must reset before restating, or the first
+  // run's attributes accumulate onto it.
+  [
+    '<span class="color-009">a</span><span class="bgcolor-021">b</span>',
+    E + "38;5;9m" + "a" + E + "0m" + E + "48;5;21m" + "b" + E + "0m",
+  ],
+  ['<span class="">a</span><br><span class="">b</span>', "a\nb"],
+  ['<span class="">empty</span>', "empty"],
+];
+for (const [html, expected] of ansiCases) {
+  test(`ansi ${html}`, () => equal(htmlToAnsi(html), expected));
+}
+test("ansi output opens a run without a leading reset and always closes it", () => {
+  const out = htmlToAnsi('<span class="color-009">red</span>');
+  equal(out.startsWith(E + "38;5;9m"), true);
+  equal(out.endsWith(E + "0m"), true);
+});
+test("ansi output leaves unstyled text with no escapes at all", () => {
+  equal(htmlToAnsi("<span class=\"\">bare</span> text"), "bare text");
+});
+
+const line = (html: string, text: string, ts = 0) => ({
+  id: 0, html, text, type: "text", cat: "system" as const, ts,
+});
+test("txt export matches the plain-text projection", () => {
+  const lines = [line('<span class="color-009">red</span>', "red"), line("plain", "plain")];
+  const file = buildTranscript(lines as never, "txt");
+  equal(file.body, "red\nplain");
+  equal(file.ext, "txt");
+});
+test("html export keeps the colour class and drops the script", () => {
+  const lines = [line('<span class="color-009">red</span><script>alert(1)</script>', "red")];
+  const file = buildTranscript(lines as never, "html");
+  equal(file.ext, "html");
+  equal(file.body.includes('class="color-009"'), true);
+  equal(file.body.includes("alert(1)"), false);
+  // The palette is resolved from the live document, so the rule must be real.
+  equal(/\.color-009\{color:[^}]+\}/.test(file.body), true);
+});
+test("html export strips inline handlers and javascript: urls", () => {
+  const lines = [line('<a href="javascript:alert(1)" onclick="alert(2)">x</a>', "x")];
+  const body = buildTranscript(lines as never, "html").body;
+  equal(body.includes("onclick"), false);
+  equal(body.includes("javascript:"), false);
+  equal(body.includes(">x</a>"), true);
+});
+test("timestamps are opt-in, and the gutter carries no colour", () => {
+  const lines = [line('<span class="color-009">red</span>', "red", Date.UTC(2020, 0, 1, 12, 0, 0))];
+  equal(buildTranscript(lines as never, "txt").body, "red");
+  const stamped = buildTranscript(lines as never, "txt", { timestamps: true }).body;
+  equal(/^\d\d:\d\d:\d\d red$/.test(stamped), true);
+  const ansi = buildTranscript(lines as never, "ansi", { timestamps: true }).body;
+  equal(ansi.startsWith(E), false);
+});
+
+
 document.getElementById("results")!.textContent = results.join("\n");
 document.title = `${results.filter((line) => line.startsWith("FAIL")).length} failures: Display regressions`;

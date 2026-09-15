@@ -8,6 +8,10 @@ import { resolve } from "node:path";
 // shell dual-routed alongside the Golden Layout client, which it has replaced.
 export default defineConfig({
   plugins: [svelte()],
+  // Assets referenced from shell.css (the box-drawing fallback woff2) resolve
+  // next to it. The default base is "/", which would point them at the site
+  // root rather than STATIC_URL/webclient/shell/, and the font would 404.
+  base: "./",
   build: {
     outDir: resolve(__dirname, "../../static/webclient/shell"),
     emptyOutDir: true,

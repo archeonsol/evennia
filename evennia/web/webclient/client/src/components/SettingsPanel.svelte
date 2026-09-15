@@ -165,6 +165,7 @@
     {:else if view === "audio"}
       {@render toggle("Room music", "music")}
       {@render toggle("Keyboard sound FX", "keyboardSfx")}
+      {@render slider("Keyboard FX volume", "keyboardVolume", 0, 100, 5, (v) => `${v}%`)}
     {:else if view === "notify"}
       <button class="row toggle" onclick={onDesktopToggle}>
         <span>Desktop notifications</span>
@@ -294,12 +295,18 @@
       </div>
       <button class="add-rule" onclick={() => triggers.addAction()}>+ action</button>
 
-      <div class="grp">Routing <span class="hint">copy matching lines to a Feeds tab</span></div>
+      <div class="grp">Routing <span class="hint">file matching lines into a tab in the Feeds panel</span></div>
       <div class="rules">
         {#each routing.routes as r, i}
           <div class="rule">
             <input class="r-cmd" placeholder="text or /regex/" bind:value={r.pattern} oninput={() => routing.sync()} />
-            <input class="r-label" placeholder="tab" bind:value={r.label} oninput={() => routing.sync()} />
+            <input class="r-label" placeholder="feed tab" bind:value={r.label} oninput={() => routing.sync()} />
+            <button
+              class="r-mode"
+              class:on={r.move}
+              onclick={() => routing.toggleMove(i)}
+              title={r.move ? "line goes to the feed only" : "line goes to the feed and the terminal"}
+            >{r.move ? "MOVE" : "COPY"}</button>
             <button class="r-del" onclick={() => routing.remove(i)} aria-label="remove">×</button>
           </div>
         {/each}
@@ -405,6 +412,12 @@
     padding: 4px 4px; cursor: pointer;
   }
   .r-key.cap { border-color: var(--accent); color: var(--accent-bright); }
+  .r-mode {
+    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-faint);
+    font-family: inherit; font-size: 0.6rem; letter-spacing: 0.1em; padding: 0 6px;
+    cursor: pointer; flex: 0 0 auto;
+  }
+  .r-mode.on { color: var(--accent-bright); border-color: var(--accent); }
   .r-del {
     flex: 0 0 auto; background: none; border: 1px solid var(--border-bright); color: var(--fg-faint);
     font-family: inherit; cursor: pointer; padding: 2px 7px; line-height: 1;

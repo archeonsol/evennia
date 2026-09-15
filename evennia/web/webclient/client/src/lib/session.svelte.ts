@@ -1,5 +1,6 @@
 // Reactive game-session state: the scrollback log and the current prompt.
 
+import { connection } from "./evennia.svelte";
 import { triggers } from "./triggers.svelte";
 import { routing } from "./routing.svelte";
 import { categorize, type LogCat } from "./logcats";
@@ -34,7 +35,10 @@ class GameSession {
       if (triggers.shouldGag(text)) return;
       html = triggers.highlight(html);
       triggers.runActions(text);
-      routing.process(html, text);
+      // A move-route takes the line out of the terminal entirely; it lives in
+      // its feed instead. Copy-routes fall through and the line is appended
+      // below as usual.
+      if (routing.process(html, text)) return;
     }
     this.lines.push({
       id: nextId++,
@@ -55,9 +59,16 @@ class GameSession {
     this.prompt = html;
   }
 
-  /** Wipe the scrollback. */
+  /**
+   * Wipe the scrollback, here and in the portal's replay window.
+   *
+   * The window is the half that makes it stick: a reloaded page asks to resume
+   * from seq 0, so anything the portal still holds is replayed into the fresh
+   * log, and a clear that skipped this step undid itself on the next refresh.
+   */
   clear(): void {
     this.lines = [];
+    connection.dropReplayBuffer();
   }
 
   /** Plain-text transcript of the current buffer, for download. */

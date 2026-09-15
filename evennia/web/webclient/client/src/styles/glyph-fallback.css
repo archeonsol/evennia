@@ -1,0 +1,68 @@
+/* Box-drawing / block / arrow fallback.
+
+   Every mono webfont the client offers ships Latin only - Google's css2 subsets
+   drop U+2500-25FF from all of them except Fira Code. The game draws its frames,
+   rules and tables out of exactly those codepoints (a single `─` accounts for
+   ~50k of the ~61k non-Latin characters in game content), so with any other font
+   selected each rule fell through to whatever monospace the OS happened to offer
+   - at *that* font's advance, not the chosen one's. Plex and JetBrains cell at
+   0.600em against a Windows fallback of 0.550em: every table tore by 8% per
+   column. VT323, at 0.400em, tore by 37%.
+
+   The fix is one subset of DejaVu Sans Mono (uniform 0.60205em advance, licence
+   in shell-glyphs.LICENSE.txt) declared once per cell width, with `size-adjust`
+   scaling it onto that width exactly. Stacks list it *after* their primary, so a
+   font that has the glyph (Fira Code, and the local system fonts) keeps its own;
+   only the holes are filled.
+
+   size-adjust = primary advance/em ÷ 0.60205078125. Keep these in step with the
+   FONTS table in lib/settings.svelte.ts - a stack whose advance is not one of
+   these widths needs its own face, not the nearest one. */
+
+@font-face {
+  font-family: "Shell Glyphs 600";
+  src: url("./shell-glyphs.woff2") format("woff2");
+  size-adjust: 99.66%; /* 0.600em: IBM Plex Mono, JetBrains Mono, Fira Code */
+  font-display: swap;
+  unicode-range: U+2190-21FF, U+2200-22FF, U+2500-25FF, U+2605, U+2610-2612,
+    U+266A, U+26A0, U+2713-2717, U+2726;
+}
+
+@font-face {
+  font-family: "Shell Glyphs 612";
+  src: url("./shell-glyphs.woff2") format("woff2");
+  size-adjust: 101.65%; /* 0.612em: Space Mono */
+  font-display: swap;
+  unicode-range: U+2190-21FF, U+2200-22FF, U+2500-25FF, U+2605, U+2610-2612,
+    U+266A, U+26A0, U+2713-2717, U+2726;
+}
+
+@font-face {
+  font-family: "Shell Glyphs 540";
+  src: url("./shell-glyphs.woff2") format("woff2");
+  size-adjust: 89.69%; /* 0.540em: Share Tech Mono */
+  font-display: swap;
+  unicode-range: U+2190-21FF, U+2200-22FF, U+2500-25FF, U+2605, U+2610-2612,
+    U+266A, U+26A0, U+2713-2717, U+2726;
+}
+
+@font-face {
+  font-family: "Shell Glyphs 400";
+  src: url("./shell-glyphs.woff2") format("woff2");
+  size-adjust: 66.44%; /* 0.400em: VT323 */
+  font-display: swap;
+  unicode-range: U+2190-21FF, U+2200-22FF, U+2500-25FF, U+2605, U+2610-2612,
+    U+266A, U+26A0, U+2713-2717, U+2726;
+}
+
+/* Unscaled, for the System Mono stack: `ui-monospace` resolves to a different
+   font per platform (0.586em Consolas, 0.602em Menlo, 0.602em DejaVu), so there
+   is no one ratio to scale to. Those fonts all carry the box-drawing range
+   themselves and win ahead of this; it is here for the odd glyph they lack. */
+@font-face {
+  font-family: "Shell Glyphs";
+  src: url("./shell-glyphs.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+2190-21FF, U+2200-22FF, U+2500-25FF, U+2605, U+2610-2612,
+    U+266A, U+26A0, U+2713-2717, U+2726;
+}
