@@ -184,6 +184,61 @@ def _mock_deferlater(reactor, timedelay, callback, *args, **kwargs):
     return Deferred()
 
 
+#: Every default object `setUp` can build, mapped to what must exist first.
+#: Keys are the attribute names the fixture sets on the test case.
+FIXTURE_DEPENDENCIES = {
+    "account": (),
+    "account2": (),
+    "room1": (),
+    "room2": ("room1",),
+    "exit": ("room1", "room2"),
+    "obj1": ("room1",),
+    "obj2": ("room1",),
+    "char1": ("room1", "account"),
+    "char2": ("room1", "account2"),
+    "script": (),
+    # `login()` puppets `account.db._last_puppet`, which `create_chars` sets, so
+    # a session without char1 would log in an account with nothing to puppet.
+    "session": ("account", "char1"),
+}
+
+ALL_FIXTURES = frozenset(FIXTURE_DEPENDENCIES)
+
+
+def resolve_fixtures(names):
+    """
+    Expand a requested fixture set with everything it depends on.
+
+    Args:
+        names (iterable): Fixture names from `FIXTURE_DEPENDENCIES`.
+
+    Returns:
+        frozenset: `names` plus their transitive dependencies.
+
+    Raises:
+        ValueError: If a name is not a known fixture. Failing here rather than
+            silently ignoring it is the point: a typo would otherwise read as
+            "build nothing" and surface as a missing attribute much later.
+
+    """
+    wanted = set()
+    pending = list(names)
+    while pending:
+        name = pending.pop()
+        if name in wanted:
+            continue
+        try:
+            dependencies = FIXTURE_DEPENDENCIES[name]
+        except KeyError:
+            raise ValueError(
+                f"unknown test fixture {name!r}; valid names are "
+                f"{sorted(FIXTURE_DEPENDENCIES)}"
+            ) from None
+        wanted.add(name)
+        pending.extend(dependencies)
+    return frozenset(wanted)
+
+
 class EvenniaTestMixin:
     """
     Evennia test environment mixin
@@ -196,32 +251,64 @@ class EvenniaTestMixin:
     room_typeclass = DefaultRoom
     script_typeclass = DefaultScript
 
-    def create_accounts(self):
-        self.account = create.create_account(
-            "TestAccount",
-            email="test@test.com",
-            password="testpassword",
-            typeclass=self.account_typeclass,
-        )
-        self.account2 = create.create_account(
-            "TestAccount2",
-            email="test@test.com",
-            password="testpassword",
-            typeclass=self.account_typeclass,
-        )
-        from evennia.authorization.capabilities import capability_registry
-        from evennia.authorization.storage import grant_capabilities, principal_refs
+    #: Which default objects `setUp` builds. The default is everything, which is
+    #: what this fixture has always done. Narrow it in a subclass to skip what
+    #: the tests never touch, and dependencies are pulled in automatically::
+    #:
+    #:     class MyTest(EvenniaTest):
+    #:         evennia_fixtures = {"char1"}   # also builds room1 and account
+    #:
+    #: Two characters, a second account, a second room, an exit, a script and a
+    #: synthetic login are most of what the full fixture costs, and most tests
+    #: use none of them.
+    #:
+    #: Not named `fixtures`: that attribute belongs to Django's `TestCase` and
+    #: names JSON/YAML fixture files to load into the database.
+    evennia_fixtures = ALL_FIXTURES
 
-        # One bulk call, not one transaction per capability: the bundle is 57
-        # capabilities and this runs in the setUp of every fixture-backed test,
-        # which made it the single largest source of test-suite queries.
-        grant_capabilities(
-            principal_refs(self.account)[0],
-            capability_registry.expand_bundle("runtime_operator"),
-            scope_kind="world",
-            scope_key="*",
-            provenance="test_fixture",
-        )
+    def wanted_fixtures(self):
+        """
+        Return the resolved fixture set for this test.
+
+        Returns:
+            frozenset: The fixtures `setUp` decided to build. Outside `setUp`
+                this falls back to every fixture, so a subclass that calls one
+                of the `create_*` methods directly still gets the old
+                build-everything behaviour.
+
+        """
+        return getattr(self, "_resolved_fixtures", ALL_FIXTURES)
+
+    def create_accounts(self):
+        wanted = self.wanted_fixtures()
+        if "account" in wanted:
+            self.account = create.create_account(
+                "TestAccount",
+                email="test@test.com",
+                password="testpassword",
+                typeclass=self.account_typeclass,
+            )
+            from evennia.authorization.capabilities import capability_registry
+            from evennia.authorization.storage import grant_capabilities, principal_refs
+
+            # One bulk call, not one transaction per capability: the bundle is
+            # 57 capabilities and this runs in the setUp of every
+            # fixture-backed test, which made it the single largest source of
+            # test-suite queries.
+            grant_capabilities(
+                principal_refs(self.account)[0],
+                capability_registry.expand_bundle("runtime_operator"),
+                scope_kind="world",
+                scope_key="*",
+                provenance="test_fixture",
+            )
+        if "account2" in wanted:
+            self.account2 = create.create_account(
+                "TestAccount2",
+                email="test@test.com",
+                password="testpassword",
+                typeclass=self.account_typeclass,
+            )
 
     def teardown_accounts(self):
         if hasattr(self, "account"):
@@ -232,38 +319,47 @@ class EvenniaTestMixin:
     # Set up fake prototype module for allowing tests to use named prototypes.
     @override_settings(PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"])
     def create_rooms(self):
-        self.room1 = create.create_object(self.room_typeclass, key="Room", nohome=True)
-        self.room1.db.desc = "room_desc"
-        settings.DEFAULT_HOME = f"#{self.room1.id}"
-
-        self.room2 = create.create_object(self.room_typeclass, key="Room2", home=self.room1)
-        self.exit = create.create_object(
-            self.exit_typeclass,
-            key="out",
-            location=self.room1,
-            destination=self.room2,
-            home=self.room1,
-        )
+        wanted = self.wanted_fixtures()
+        if "room1" in wanted:
+            self.room1 = create.create_object(self.room_typeclass, key="Room", nohome=True)
+            self.room1.db.desc = "room_desc"
+            settings.DEFAULT_HOME = f"#{self.room1.id}"
+        if "room2" in wanted:
+            self.room2 = create.create_object(self.room_typeclass, key="Room2", home=self.room1)
+        if "exit" in wanted:
+            self.exit = create.create_object(
+                self.exit_typeclass,
+                key="out",
+                location=self.room1,
+                destination=self.room2,
+                home=self.room1,
+            )
 
     def create_objs(self):
-        self.obj1 = create.create_object(
-            self.object_typeclass, key="Obj", location=self.room1, home=self.room1
-        )
-        self.obj2 = create.create_object(
-            self.object_typeclass, key="Obj2", location=self.room1, home=self.room1
-        )
+        wanted = self.wanted_fixtures()
+        if "obj1" in wanted:
+            self.obj1 = create.create_object(
+                self.object_typeclass, key="Obj", location=self.room1, home=self.room1
+            )
+        if "obj2" in wanted:
+            self.obj2 = create.create_object(
+                self.object_typeclass, key="Obj2", location=self.room1, home=self.room1
+            )
 
     def create_chars(self):
-        self.char1 = create.create_object(
-            self.character_typeclass, key="Char", location=self.room1, home=self.room1
-        )
-        self.char2 = create.create_object(
-            self.character_typeclass, key="Char2", location=self.room1, home=self.room1
-        )
-        self.char1.account = self.account
-        self.account.db._last_puppet = self.char1
-        self.char2.account = self.account2
-        self.account2.db._last_puppet = self.char2
+        wanted = self.wanted_fixtures()
+        if "char1" in wanted:
+            self.char1 = create.create_object(
+                self.character_typeclass, key="Char", location=self.room1, home=self.room1
+            )
+            self.char1.account = self.account
+            self.account.db._last_puppet = self.char1
+        if "char2" in wanted:
+            self.char2 = create.create_object(
+                self.character_typeclass, key="Char2", location=self.room1, home=self.room1
+            )
+            self.char2.account = self.account2
+            self.account2.db._last_puppet = self.char2
 
     def create_script(self):
         # A game may legitimately define zero script typeclasses, so a
@@ -311,13 +407,23 @@ class EvenniaTestMixin:
         evennia.SESSION_HANDLER.data_out = Mock()
         evennia.SESSION_HANDLER.disconnect = Mock()
 
-        self.create_accounts()
-        self.create_rooms()
-        settings.DEFAULT_HOME = f"#{self.room1.id}"
-        self.create_objs()
-        self.create_chars()
-        self.create_script()
-        self.setup_session()
+        self._resolved_fixtures = resolve_fixtures(self.evennia_fixtures)
+        wanted = self._resolved_fixtures
+
+        if wanted & {"account", "account2"}:
+            self.create_accounts()
+        if wanted & {"room1", "room2", "exit"}:
+            self.create_rooms()
+        if "room1" in wanted:
+            settings.DEFAULT_HOME = f"#{self.room1.id}"
+        if wanted & {"obj1", "obj2"}:
+            self.create_objs()
+        if wanted & {"char1", "char2"}:
+            self.create_chars()
+        if "script" in wanted:
+            self.create_script()
+        if "session" in wanted:
+            self.setup_session()
 
     @override_settings(PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"])
     def tearDown(self):
@@ -337,7 +443,8 @@ class EvenniaTestMixin:
                 "in your test, make sure you also added `super().setUp()`!"
             )
 
-        del evennia.SESSION_HANDLER[self.session.sessid]
+        if hasattr(self, "session"):
+            del evennia.SESSION_HANDLER[self.session.sessid]
         self.teardown_accounts()
         super().tearDown()
 
