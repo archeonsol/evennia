@@ -151,10 +151,17 @@ class ActionRegistry:
         self._trie = None  # lazily built; invalidated on register
         self._symbol_verbs = None  # lazily built; invalidated on register
         self._glued_verbs = None  # explicitly opted-in word-bearing prefixes
-        self._max_phrase_words = 1
-        self._multi_word_starters = frozenset()
+        self._phrase_metadata = None  # lazily built; invalidated on register
 
     def _rebuild_phrase_metadata(self):
+        """Recompute and cache ``(max_phrase_words, multi_word_starters)``.
+
+        Scanning every verb once per ``register`` call made registration
+        quadratic in the verb count: ~630 verbs over ~630 registrations meant
+        ~400k scans at import time, all of them discarded by the next
+        registration. Registration now only invalidates, exactly as it does for
+        the trie, and this runs once on the first read afterwards.
+        """
         max_words = 1
         starters = set()
         for verb in self._by_verb:
@@ -164,8 +171,25 @@ class ActionRegistry:
             max_words = max(max_words, len(parts))
             if len(parts) > 1:
                 starters.add(parts[0])
-        self._max_phrase_words = max_words
-        self._multi_word_starters = frozenset(starters)
+        self._phrase_metadata = (max_words, frozenset(starters))
+        return self._phrase_metadata
+
+    @property
+    def _phrase_metadata_pair(self):
+        metadata = self._phrase_metadata
+        if metadata is None:
+            metadata = self._rebuild_phrase_metadata()
+        return metadata
+
+    @property
+    def _max_phrase_words(self):
+        """Longest registered non-system verb phrase, in words."""
+        return self._phrase_metadata_pair[0]
+
+    @property
+    def _multi_word_starters(self):
+        """First words of every registered multi-word verb phrase."""
+        return self._phrase_metadata_pair[1]
 
     def register(self, action_cls, verbs):
         for verb in verbs:
@@ -188,7 +212,7 @@ class ActionRegistry:
         self._trie = None
         self._symbol_verbs = None
         self._glued_verbs = None
-        self._rebuild_phrase_metadata()
+        self._phrase_metadata = None
         return action_cls
 
     def get(self, verb):
