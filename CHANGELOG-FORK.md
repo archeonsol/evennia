@@ -25,6 +25,88 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.241: Test-suite and boot-path cost
+
+### Performance
+
+- **`inflect` and `pyinflect` import on first use.** Both were imported at
+  module scope: `inflect` from [`object.py`](evennia/objects/object.py) and
+  [`appearance.py`](evennia/objects/mixins/appearance.py), and both from
+  [`emote.py`](evennia/narrative/emote.py). `inflect` drags in `typeguard`
+  (~5.3s) and `pyinflect` imports `spacy` (~3.0s), and every one of those
+  modules loads during `django.setup()`, so ~8s was spent on English grammar
+  helpers by every process that touched the engine: each `migrate`, each
+  `makemigrations --check`, each test process and each parallel test worker.
+  A new [`evennia/utils/inflection.py`](evennia/utils/inflection.py) holds two
+  cached accessors, `inflect_engine()` and `pyinflect_module()`, which import on
+  the first call and cache the result including the missing-dependency case.
+  Measured on the Underspire game directory, `django.setup()` drops from 18.2s
+  to 5.5s and full boot (setup + `evennia._init()` + URL conf) from 23.0s to
+  10.8s.
+  The `_INFLECT` engine in [`object.py`](evennia/objects/object.py) had no
+  remaining callers and is gone rather than made lazy.
+- **Action-registry phrase metadata is rebuilt lazily.**
+  `ActionRegistry.register` ([`registry.py`](evennia/actions/registry.py)) called
+  `_rebuild_phrase_metadata()`, which walks every registered verb, once per
+  registration. Registration was therefore quadratic in the verb count: ~630
+  verbs over ~630 registrations meant ~399k scans at import time, every one of
+  them discarded by the next registration, for ~1.5s per process.
+  `_max_phrase_words` and `_multi_word_starters` are now properties over a
+  cache that `register` invalidates, exactly as the verb trie beside them
+  already did. The rebuild runs once, on the first read after a registration.
+- **`grant_capabilities` grants a whole bundle in one transaction.** New in
+  [`storage.py`](evennia/authorization/storage.py), beside the unchanged
+  `grant_capability`. The single-grant call is six queries (principal
+  `get_or_create`, `SELECT FOR UPDATE`, existing-grant lookup, grant write,
+  audit write, plus the savepoint), so granting a bundle in a loop cost six
+  queries per capability; `runtime_operator` alone is 57 of them. The bulk form
+  takes the principal lock once, looks up all existing grants in one query, and
+  uses `bulk_create`/`bulk_update` plus one `bulk_create` for the audit trail.
+  Semantics are unchanged: every capability is resolved through the registry
+  before anything is written, so an unknown capability rejects the whole call
+  rather than leaving a half-granted principal.
+
+  Note for callers writing their own bulk paths: `bulk_update` reads the
+  attribute instead of calling `pre_save`, so an `auto_now` column such as
+  `AuthorizationGrant.updated_at` stays stale unless it is set explicitly.
+  `grant_capabilities` sets it.
+
+### Tests
+
+- **The standard fixture grants its capability bundle in bulk.**
+  `EvenniaTestMixin.create_accounts`
+  ([`test_resources.py`](evennia/utils/test_resources.py)) looped
+  `grant_capability` over `expand_bundle("runtime_operator")`, which was ~340 of
+  the ~770 queries every fixture-backed test issued, and re-resolved
+  `principal_refs(self.account)[0]` on each pass. It now makes one
+  `grant_capabilities` call.
+
+  On the Underspire suite, where ~6.4k of ~10.5k tests build this fixture and
+  profiling put ~77% of wall time in `setUp`, this change plus two game-side
+  ones (a frozen boot heap, and MD5 password hashing under `TESTING`) took a
+  representative 85-test module from 107.9s to 65.6s.
+- Added `BulkGrantTest`
+  ([`test_storage.py`](evennia/authorization/tests/test_storage.py)) covering
+  parity with the single-grant path, refresh-not-duplicate on re-grant,
+  duplicate collapsing, and that an unknown capability or an unsupported
+  constraint writes nothing.
+- Added [`test_inflection.py`](evennia/utils/tests/test_inflection.py), which
+  checks the accessors and then walks the engine tree asserting that no
+  non-test module imports `inflect` or `pyinflect` at module scope. That import
+  is the whole regression, and it is invisible until someone profiles a boot.
+- Added a registry test that reads the phrase cache, registers a further
+  multi-word verb, and reads again. The previous coverage registered everything
+  before its first read, so a cache that never invalidated would have passed it.
+
+### Migration notes
+
+Nothing to change downstream. `grant_capability` keeps its signature and
+behaviour; `grant_capabilities` is additive. Game code that imported `inflect`
+or `pyinflect` at module scope still works, but re-adds the ~8s to
+`django.setup()`, so route it through `evennia.utils.inflection` instead.
+
+---
+
 ## 6.0.0+underspire.240: Quiet Portal and bus recovery logs
 
 ### Engine

@@ -12,6 +12,7 @@ from evennia.authorization.service import access_check, authorize
 from evennia.authorization.storage import (
     clear_authorization_caches,
     delegate_grant,
+    grant_capabilities,
     grant_capability,
     issue_recovery_grant,
     load_grants,
@@ -23,7 +24,11 @@ from evennia.authorization.storage import (
     set_principal_suspended,
     set_scope_labels,
 )
-from evennia.server.models import AuthorizationAuditEvent, AuthorizationPolicyOverride
+from evennia.server.models import (
+    AuthorizationAuditEvent,
+    AuthorizationGrant,
+    AuthorizationPolicyOverride,
+)
 
 
 class FakePermissions:
@@ -77,6 +82,136 @@ class UnsafeRefResource(FakeResource):
         """Return a reference containing spaces and exceeding key limits."""
 
         return f"help:file:{'unsafe topic ' * 30}"
+
+
+class BulkGrantTest(TestCase):
+    """`grant_capabilities` is `grant_capability` in one transaction."""
+
+    capabilities = ("engine.object.view", "engine.object.edit", "engine.object.move")
+
+    def tearDown(self):
+        """Clear process caches between tests."""
+
+        clear_authorization_caches()
+        super().tearDown()
+
+    def _rows(self, principal_ref="account:1"):
+        return {
+            grant.capability: grant
+            for grant in AuthorizationGrant.objects.filter(
+                principal_ref=principal_ref, revoked_at__isnull=True
+            )
+        }
+
+    def test_bulk_grant_matches_the_single_grant_path(self):
+        grant_capabilities(
+            "account:1",
+            self.capabilities,
+            scope_kind="world",
+            scope_key="*",
+            provenance="bulk",
+        )
+        for capability in self.capabilities:
+            grant_capability(
+                "account:2",
+                capability,
+                scope_kind="world",
+                scope_key="*",
+                provenance="bulk",
+            )
+
+        bulk = self._rows("account:1")
+        singly = self._rows("account:2")
+        self.assertEqual(set(bulk), set(self.capabilities))
+        self.assertEqual(set(bulk), set(singly))
+        for capability in self.capabilities:
+            self.assertEqual(bulk[capability].scope_kind, singly[capability].scope_kind)
+            self.assertEqual(bulk[capability].scope_key, singly[capability].scope_key)
+            self.assertEqual(bulk[capability].provenance, singly[capability].provenance)
+            self.assertEqual(bulk[capability].constraints, singly[capability].constraints)
+            self.assertIsNotNone(bulk[capability].pk)
+            self.assertIsNotNone(bulk[capability].created_at)
+        self.assertEqual(
+            AuthorizationAuditEvent.objects.filter(
+                principal_ref="account:1", kind="grant_created"
+            ).count(),
+            len(self.capabilities),
+        )
+
+    def test_regranting_refreshes_rather_than_duplicates(self):
+        grant_capabilities(
+            "account:1",
+            self.capabilities,
+            scope_kind="world",
+            scope_key="*",
+            provenance="first",
+        )
+        before = self._rows()
+        expires = timezone.now() + timedelta(days=1)
+
+        grant_capabilities(
+            "account:1",
+            self.capabilities,
+            scope_kind="world",
+            scope_key="*",
+            provenance="second",
+            expires_at=expires,
+        )
+
+        after = self._rows()
+        self.assertEqual(set(after), set(self.capabilities))
+        for capability in self.capabilities:
+            self.assertEqual(after[capability].pk, before[capability].pk)
+            self.assertEqual(after[capability].provenance, "second")
+            self.assertEqual(after[capability].expires_at, expires)
+            # bulk_update does not run pre_save, so auto_now only advances
+            # because the caller sets it. A stale updated_at would hide the
+            # refresh from anything that reads grants by recency.
+            self.assertGreater(after[capability].updated_at, before[capability].updated_at)
+
+    def test_duplicate_capabilities_collapse_to_one_grant(self):
+        returned = grant_capabilities(
+            "account:1",
+            ["engine.object.view", "engine.object.view", "engine.object.edit"],
+            scope_kind="world",
+            scope_key="*",
+        )
+
+        self.assertEqual([grant.capability for grant in returned],
+                         ["engine.object.view", "engine.object.edit"])
+        self.assertEqual(len(self._rows()), 2)
+
+    def test_unknown_capability_writes_nothing(self):
+        with self.assertRaises(ValueError):
+            grant_capabilities(
+                "account:1",
+                ["engine.object.view", "engine.object.not_a_capability"],
+                scope_kind="world",
+                scope_key="*",
+            )
+
+        self.assertEqual(self._rows(), {})
+        self.assertFalse(
+            AuthorizationAuditEvent.objects.filter(principal_ref="account:1").exists()
+        )
+
+    def test_unsupported_constraints_are_rejected(self):
+        with self.assertRaises(ValueError):
+            grant_capabilities(
+                "account:1",
+                ["engine.object.view"],
+                scope_kind="world",
+                scope_key="*",
+                constraints={"not_a_constraint": 1},
+            )
+
+        self.assertEqual(self._rows(), {})
+
+    def test_no_capabilities_is_a_no_op(self):
+        self.assertEqual(
+            grant_capabilities("account:1", [], scope_kind="world", scope_key="*"), []
+        )
+        self.assertEqual(self._rows(), {})
 
 
 class AuthorizationStorageTest(TestCase):

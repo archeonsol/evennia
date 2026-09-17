@@ -88,6 +88,31 @@ class TestActionRegistry(unittest.TestCase):
         self.assertIs(vm_go.action_cls, _Go)
         self.assertEqual(vm_go.span, 1)
 
+    def test_phrase_metadata_survives_a_later_registration(self):
+        """Reading the lazy phrase cache must not freeze it against later verbs."""
+
+        reg = ActionRegistry()
+
+        @dataclass
+        class _Go(Action):
+            pass
+
+        @dataclass
+        class _GoShard(Action):
+            pass
+
+        reg.register(_Go, ("go",))
+        # Read first: this is what populates the cache, and a cache that is
+        # only invalidated at build time would keep answering 1 below.
+        self.assertEqual(reg._max_phrase_words, 1)
+        self.assertEqual(reg._multi_word_starters, frozenset())
+
+        reg.register(_GoShard, ("go shard",))
+
+        self.assertEqual(reg._max_phrase_words, 2)
+        self.assertIn("go", reg._multi_word_starters)
+        self.assertEqual(reg.match_tokens(["go", "shard"]).canonical, "go shard")
+
     def test_match_verb_wraps_match_tokens(self):
         reg = ActionRegistry()
         reg.register(_Kick, ("kick",))

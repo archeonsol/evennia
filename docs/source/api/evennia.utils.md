@@ -29,6 +29,7 @@ evennia.utils
    evennia.utils.gametime
    evennia.utils.hex_colors
    evennia.utils.http
+   evennia.utils.inflection
    evennia.utils.logger
    evennia.utils.multimatch
    evennia.utils.optionclasses

@@ -210,16 +210,18 @@ class EvenniaTestMixin:
             typeclass=self.account_typeclass,
         )
         from evennia.authorization.capabilities import capability_registry
-        from evennia.authorization.storage import grant_capability, principal_refs
+        from evennia.authorization.storage import grant_capabilities, principal_refs
 
-        for capability in capability_registry.expand_bundle("runtime_operator"):
-            grant_capability(
-                principal_refs(self.account)[0],
-                capability,
-                scope_kind="world",
-                scope_key="*",
-                provenance="test_fixture",
-            )
+        # One bulk call, not one transaction per capability: the bundle is 57
+        # capabilities and this runs in the setUp of every fixture-backed test,
+        # which made it the single largest source of test-suite queries.
+        grant_capabilities(
+            principal_refs(self.account)[0],
+            capability_registry.expand_bundle("runtime_operator"),
+            scope_kind="world",
+            scope_key="*",
+            provenance="test_fixture",
+        )
 
     def teardown_accounts(self):
         if hasattr(self, "account"):

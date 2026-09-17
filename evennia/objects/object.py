@@ -11,7 +11,6 @@ import time
 import typing
 from collections import defaultdict
 
-import inflect
 from django.conf import settings
 from django.utils.translation import gettext as _
 
@@ -48,8 +47,6 @@ from evennia.utils.utils import (
     to_str,
     variable_from_module,
 )
-
-_INFLECT = inflect.engine()
 
 _ScriptDB = None
 _CMDHANDLER = None

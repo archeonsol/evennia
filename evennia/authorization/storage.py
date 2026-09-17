@@ -319,6 +319,31 @@ def bump_principal_generation(principal_ref: str) -> None:
     _suspension_cache.clear()
 
 
+def _validated_grant_constraints(constraints: dict | None) -> dict:
+    """Return a copy of `constraints`, rejecting anything the engine cannot enforce.
+
+    Args:
+        constraints (dict or None): Caller-supplied grant constraints.
+
+    Returns:
+        dict: A defensive copy, empty when none were given.
+
+    Raises:
+        ValueError: If an unsupported key or a non-scalar value is present.
+
+    """
+    constraints = dict(constraints or {})
+    unknown_constraints = set(constraints) - {"session_id"}
+    if unknown_constraints:
+        raise ValueError(f"unsupported grant constraints: {sorted(unknown_constraints)!r}")
+    if any(
+        value is not None and not isinstance(value, (str, int, float, bool))
+        for value in constraints.values()
+    ):
+        raise ValueError("grant constraints must contain JSON scalar values")
+    return constraints
+
+
 def grant_capability(
     principal_ref: str,
     capability: str,
@@ -335,15 +360,7 @@ def grant_capability(
     """Create or refresh one positive capability grant atomically."""
 
     definition = capability_registry.require(capability)
-    constraints = dict(constraints or {})
-    unknown_constraints = set(constraints) - {"session_id"}
-    if unknown_constraints:
-        raise ValueError(f"unsupported grant constraints: {sorted(unknown_constraints)!r}")
-    if any(
-        value is not None and not isinstance(value, (str, int, float, bool))
-        for value in constraints.values()
-    ):
-        raise ValueError("grant constraints must contain JSON scalar values")
+    constraints = _validated_grant_constraints(constraints)
     with transaction.atomic():
         AuthorizationPrincipalState.objects.get_or_create(principal_ref=principal_ref)
         AuthorizationPrincipalState.objects.select_for_update().get(principal_ref=principal_ref)
@@ -393,6 +410,136 @@ def grant_capability(
         bump_principal_generation(principal_ref)
         transaction.on_commit(lambda: bump_principal_generation(principal_ref))
     return grant
+
+
+def grant_capabilities(
+    principal_ref: str,
+    capabilities,
+    *,
+    scope_kind: str,
+    scope_key: str,
+    expires_at=None,
+    provenance: str = "",
+    actor_ref: str = "",
+    reason: str = "",
+    parent_grant_id: str = "",
+    constraints: dict | None = None,
+):
+    """Create or refresh many capability grants for one principal, atomically.
+
+    Args:
+        principal_ref (str): The principal receiving every grant.
+        capabilities (iterable): Capability keys or aliases. Each is resolved
+            through the registry, and duplicates collapse to a single grant.
+        scope_kind (str): Scope kind shared by all the grants.
+        scope_key (str): Scope key shared by all the grants.
+        expires_at (datetime, optional): Shared expiry, or `None` for none.
+        provenance (str, optional): Shared provenance marker.
+        actor_ref (str, optional): Who performed the grant, for the audit trail.
+        reason (str, optional): Free-text audit reason.
+        parent_grant_id (str, optional): Shared delegation parent.
+        constraints (dict, optional): Shared constraints; see
+            `_validated_grant_constraints`.
+
+    Returns:
+        list: The resulting `AuthorizationGrant` rows, in the order the
+            capabilities resolved, with duplicates removed.
+
+    Notes:
+        Semantically identical to calling `grant_capability` once per
+        capability, but at a fixed query cost rather than six queries each.
+        Granting a whole bundle is the normal case (staff promotion and the
+        test fixtures both do it, and `runtime_operator` alone is 57
+        capabilities), so the loop dominated every caller that used it.
+
+        The registry is consulted for every capability before anything is
+        written, so an unknown capability rejects the whole call instead of
+        leaving a half-granted principal behind.
+
+    """
+    keys = []
+    seen = set()
+    for capability in capabilities:
+        key = capability_registry.require(capability).key
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+    if not keys:
+        return []
+    constraints = _validated_grant_constraints(constraints)
+    with transaction.atomic():
+        AuthorizationPrincipalState.objects.get_or_create(principal_ref=principal_ref)
+        AuthorizationPrincipalState.objects.select_for_update().get(principal_ref=principal_ref)
+        existing = {
+            grant.capability: grant
+            for grant in AuthorizationGrant.objects.filter(
+                principal_ref=principal_ref,
+                capability__in=keys,
+                scope_kind=scope_kind,
+                scope_key=scope_key,
+                revoked_at__isnull=True,
+            )
+        }
+        created = []
+        refreshed = []
+        # bulk_update reads the attribute rather than calling pre_save, so an
+        # auto_now column keeps its old value unless it is set explicitly here.
+        now = timezone.now()
+        for key in keys:
+            grant = existing.get(key)
+            if grant is None:
+                created.append(
+                    AuthorizationGrant(
+                        grant_id=uuid.uuid4().hex,
+                        principal_ref=principal_ref,
+                        capability=key,
+                        scope_kind=scope_kind,
+                        scope_key=scope_key,
+                        expires_at=expires_at,
+                        provenance=provenance,
+                        parent_grant_id=parent_grant_id,
+                        constraints=constraints,
+                    )
+                )
+            else:
+                grant.expires_at = expires_at
+                grant.provenance = provenance
+                grant.parent_grant_id = parent_grant_id
+                grant.constraints = constraints
+                grant.updated_at = now
+                refreshed.append(grant)
+        if created:
+            AuthorizationGrant.objects.bulk_create(created)
+        if refreshed:
+            AuthorizationGrant.objects.bulk_update(
+                refreshed,
+                [
+                    "expires_at",
+                    "provenance",
+                    "parent_grant_id",
+                    "constraints",
+                    "updated_at",
+                ],
+            )
+        AuthorizationAuditEvent.objects.bulk_create(
+            [
+                AuthorizationAuditEvent(
+                    event_id=uuid.uuid4().hex,
+                    kind="grant_created",
+                    principal_ref=principal_ref,
+                    capability=key,
+                    resource_ref=scope_key if scope_kind == "resource" else "",
+                    actor_ref=actor_ref,
+                    reason=reason,
+                )
+                for key in keys
+            ]
+        )
+        bump_principal_generation(principal_ref)
+        transaction.on_commit(lambda: bump_principal_generation(principal_ref))
+    by_key = {grant.capability: grant for grant in created}
+    by_key.update({grant.capability: grant for grant in refreshed})
+    return [by_key[key] for key in keys]
 
 
 def delegate_grant(
