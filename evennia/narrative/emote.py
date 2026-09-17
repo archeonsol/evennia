@@ -22,22 +22,10 @@ try:
 except ImportError:
     yaml = None
 
-try:
-    import pyinflect as _pyinflect
-
-    _PYINFLECT_AVAILABLE = True
-except ImportError:
-    _pyinflect = None
-    _PYINFLECT_AVAILABLE = False
-
-try:
-    import inflect as _inflect_mod
-
-    _INFLECT_ENGINE = _inflect_mod.engine()
-    _INFLECT_AVAILABLE = True
-except ImportError:
-    _INFLECT_ENGINE = None
-    _INFLECT_AVAILABLE = False
+# `pyinflect` and `inflect` are reached through `evennia.utils.inflection`
+# instead of being imported here. Importing them costs ~8s (pyinflect pulls in
+# spacy), and this module is on the import path of `django.setup()`, so that
+# price was paid by every process whether or not it ever rendered an emote.
 
 from .protocols import KeyNameResolver, NameResolver
 
@@ -226,9 +214,12 @@ def _conjugate(word: str) -> str:
     if lower in IRREGULAR_VERBS:
         result = IRREGULAR_VERBS[lower]
         return result.capitalize() if word[0].isupper() else result
-    if _PYINFLECT_AVAILABLE:
+    from evennia.utils.inflection import pyinflect_module
+
+    module = pyinflect_module()
+    if module is not None:
         try:
-            inflected = _pyinflect.getInflection(lower, tag="VBZ")
+            inflected = module.getInflection(lower, tag="VBZ")
             if inflected:
                 result = inflected[0]
                 return result.capitalize() if word[0].isupper() else result
@@ -244,9 +235,12 @@ def _conjugate(word: str) -> str:
 def _possessive(name: str) -> str:
     if not name:
         return name
-    if _INFLECT_AVAILABLE:
+    from evennia.utils.inflection import inflect_engine
+
+    engine = inflect_engine()
+    if engine is not None:
         try:
-            return _INFLECT_ENGINE.possessive(name)
+            return engine.possessive(name)
         except Exception:
             pass
     return name + "'s"

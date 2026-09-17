@@ -2,15 +2,13 @@
 
 from collections import defaultdict
 
-import inflect
 from django.conf import settings
 from django.utils.translation import gettext as _
 
 from evennia.hooks import hook
 from evennia.utils import ansi, logger
+from evennia.utils.inflection import inflect_engine
 from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
-
-_INFLECT = inflect.engine()
 
 
 class AppearanceMixin:
@@ -161,13 +159,17 @@ class AppearanceMixin:
         key = kwargs.get("key", self.get_display_name(looker))
         raw_key = self.name
         key = ansi.ANSIString(key)  # this is needed to allow inflection of colored names
+        # Resolved per call rather than at import: `inflect` costs ~5s to import
+        # and this module loads during `django.setup()`. The engine is cached,
+        # so only the first numbered name in a process pays for it.
+        engine = inflect_engine()
         try:
-            plural = _INFLECT.plural(key, count)
-            plural = "{} {}".format(_INFLECT.number_to_words(count, threshold=12), plural)
+            plural = engine.plural(key, count)
+            plural = "{} {}".format(engine.number_to_words(count, threshold=12), plural)
         except IndexError:
             # this is raised by inflect if the input is not a proper noun
             plural = key
-        singular = _INFLECT.an(key)
+        singular = engine.an(key)
         if not self.aliases.get(plural, category=self.plural_category):
             # we need to wipe any old plurals/an/a in case key changed in the interrim
             self.aliases.clear(category=self.plural_category)
