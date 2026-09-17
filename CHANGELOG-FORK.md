@@ -97,13 +97,43 @@ matching release procedure.
 - Added a registry test that reads the phrase cache, registers a further
   multi-word verb, and reads again. The previous coverage registered everything
   before its first read, so a cache that never invalidated would have passed it.
+- **The standard fixture is declarative.** `EvenniaTestMixin.setUp`
+  ([`test_resources.py`](evennia/utils/test_resources.py)) built two accounts, a
+  capability bundle, two rooms, an exit, two objects, two characters, a script
+  and a synthetic login for every test method. Measured on the Underspire suite,
+  per test: characters 435ms, teardown 262ms, the login 195ms, rooms 168ms,
+  accounts 159ms — and most tests use `room1` and `char1`.
+
+  `evennia_fixtures` names what a class touches, and `resolve_fixtures` pulls in
+  the dependencies, so `{"char1"}` also builds `room1` and `account`:
+
+  ```python
+  class MyTest(EvenniaTest):
+      evennia_fixtures = {"char1", "room2"}
+  ```
+
+  Valid names are the attributes themselves: `account`, `account2`, `room1`,
+  `room2`, `exit`, `obj1`, `obj2`, `char1`, `char2`, `script`, `session`. The
+  default is every fixture, so a class that declares nothing behaves exactly as
+  before and no existing test needs changing. An unknown name raises rather than
+  quietly building nothing, which would otherwise surface much later as a
+  missing attribute inside an unrelated assertion. `tearDown` no longer assumes
+  a session exists.
+
+  It is deliberately not called `fixtures`: that attribute belongs to Django's
+  `TestCase` and names fixture files to load.
+
+  Note for games narrowing their own suites: capability checks that resolve from
+  a character to its account need `session`, because that link is established by
+  the synthetic login rather than by `char.account`.
 
 ### Migration notes
 
 Nothing to change downstream. `grant_capability` keeps its signature and
-behaviour; `grant_capabilities` is additive. Game code that imported `inflect`
-or `pyinflect` at module scope still works, but re-adds the ~8s to
-`django.setup()`, so route it through `evennia.utils.inflection` instead.
+behaviour; `grant_capabilities` is additive; `evennia_fixtures` defaults to the
+full fixture set. Game code that imported `inflect` or `pyinflect` at module
+scope still works, but re-adds the ~8s to `django.setup()`, so route it through
+`evennia.utils.inflection` instead.
 
 ---
 
