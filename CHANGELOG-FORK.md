@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.246: Prompt discovery retry
+
+### Reliability
+
+- **An unanswered discovery probe is re-issued on the heartbeat cadence.**
+  `underspire.245` raised the peer lease, which exposed a coupling: a probe
+  published before the peer's reader subscribed (the `$` cursor) was only
+  retried when the whole lease expired, so recovery latency grew with the
+  lease. A challenge-less pending probe is now re-issued once per heartbeat
+  while the original attempt keeps its lease deadline; a probe that already
+  carries a challenge is an exchange in flight and keeps the full lease.
+
+### Tests
+
+- New `test_unanswered_probe_is_reissued`; the pending-exchange protection test
+  now exercises an exchange that carries a challenge (the true in-flight
+  state) instead of a bare unanswered probe.
+
+### Migration
+
+- None.
+
 ## 6.0.0+underspire.245: Peer lease tolerance
 
 ### Reliability
