@@ -4,6 +4,8 @@ import json
 from unittest import TestCase
 from unittest.mock import patch
 
+from django.test import override_settings
+
 from evennia.narrative.plan import RenderPlan, resolve
 from evennia.narrative.render import (
     CharRef,
@@ -216,6 +218,39 @@ class TestRenderLimits(TestCase):
         for spans in (((TextSpan("x"),) * 257,), ((TextSpan("x"),),) * 257):
             with self.assertRaises(ValueError):
                 RenderNode(kind="test", msg_type="text", body="x", spans=spans)
+
+    def test_span_bound_can_be_raised_for_crowded_scenes(self):
+        """A crowded room can raise the span bound through the setting."""
+        spans = ((TextSpan("x"),) * 257,)
+        with self.assertRaises(ValueError):
+            RenderNode(kind="test", msg_type="text", body="x", spans=spans)
+        with override_settings(RENDER_MAX_REFS=4096):
+            node = RenderNode(kind="test", msg_type="text", body="x", spans=spans)
+        self.assertEqual(len(node.spans[0]), 257)
+
+    def test_text_only_transforms_skip_span_revalidation(self):
+        """map_text/prepend_text trust the already-validated span tree."""
+        node = RenderNode(
+            kind="test",
+            msg_type="text",
+            body="line",
+            blocks=(Line("line", spans=(TextSpan("hello"),)),),
+        )
+        with patch("evennia.narrative.rendernode._validate_spans") as validate:
+            mapped = node.map_text(lambda text: text.upper())
+            prefixed = node.prepend_text("> ")
+        validate.assert_not_called()
+        self.assertEqual(mapped.body, "LINE")
+        self.assertEqual(prefixed.body, "> line")
+
+    def test_unserializable_spans_are_rejected(self):
+        """Validation keeps the serializer contract without building a dict."""
+
+        class BadSpan:
+            """Not one of the known span kinds."""
+
+        with self.assertRaises(TypeError):
+            RenderNode(kind="test", msg_type="text", body="x", spans=((BadSpan(),),))
 
     def test_combined_text_budget_is_checked_after_resolution(self):
         """Individually valid fields must still fit the complete body."""

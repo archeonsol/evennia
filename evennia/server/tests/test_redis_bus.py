@@ -672,22 +672,26 @@ class TestBoundedTransportStop(SimpleTestCase):
         """Failure fences remaining work and stop wakes the waiting writer."""
         called = self.threading.Event()
 
-        def write(*args, **kwargs):
-            """Expose the single publication attempt."""
-            called.set()
-            raise RuntimeError("offline")
+        class FailingPipeline:
+            """Fail the single queued publication attempt."""
 
-        self.transport._client.xadd.side_effect = write
-        result = self.transport.publish("s", b"AdminX", b"body")
-        worker = self._worker(self.transport._writer_loop)
-        self.assertTrue(called.wait(1))
-        self.transport.stop()
-        worker.join(0.5)
-        _drain_bus(0.01)
-        self.assertFalse(worker.is_alive())
-        self.transport._client.xadd.assert_called_once()
-        self.assertFalse(self.transport._ordinary)
-        self.assertIsNotNone(result._future.exception())
+            def xadd(self, *_args, **_kwargs):
+                called.set()
+                raise RuntimeError("offline")
+
+            def execute(self, raise_on_error=False):  # pragma: no cover - xadd fails first
+                return []
+
+        with patch.object(self.transport._client, "pipeline", return_value=FailingPipeline()):
+            result = self.transport.publish("s", b"AdminX", b"body")
+            worker = self._worker(self.transport._writer_loop)
+            self.assertTrue(called.wait(1))
+            self.transport.stop()
+            worker.join(0.5)
+            _drain_bus(0.01)
+            self.assertFalse(worker.is_alive())
+            self.assertFalse(self.transport._ordinary)
+            self.assertIsNotNone(result._future.exception())
 
     def test_restart_discards_stale_work_and_preserves_old_client(self):
         """Fresh workers publish fresh work without old cleanup touching their client."""

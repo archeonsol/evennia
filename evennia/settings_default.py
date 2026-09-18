@@ -250,6 +250,20 @@ SERVER_PORTAL_BUS = "redis"
 REDIS_BUS_URL = "redis://127.0.0.1:6379/1"
 REDIS_BUS_PREFIX = "evennia:bus"
 SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
+# Bus transport caps. None keeps the module default
+# (evennia/server/redis_transport.py); set an int to tune a busy deployment.
+# Ordinary admission reserves headroom for control/handshake frames, and
+# capacity pressure rejects the frame as backpressure instead of failing the
+# transport (see the 100-session load-test note in Redis-Bus-Delivery.md).
+REDIS_BUS_MAX_ENTRIES = None
+REDIS_BUS_MAX_BYTES = None
+REDIS_BUS_DATA_ENTRIES = None
+REDIS_BUS_DATA_BYTES = None
+REDIS_BUS_WRITE_BATCH = None
+# Narrative render bound. None keeps the module default (256 spans per segment
+# and 256 entity references per node). Raise it for very crowded scenes, where
+# a room view carries a span per visible character per detail line.
+RENDER_MAX_REFS = None
 
 # Evennia is synchronous-by-default: game code, hooks, scripts and boot make
 # blocking Django ORM calls on the single event-loop thread. Opt out of Django's

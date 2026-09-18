@@ -643,6 +643,7 @@ _SPAN_KINDS = {
     "sender": SenderRef,
 }
 _KIND_BY_TYPE = {cls: kind for kind, cls in _SPAN_KINDS.items()}
+_SPAN_FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 
 
 def span_to_dict(span) -> dict:
@@ -650,7 +651,11 @@ def span_to_dict(span) -> dict:
     kind = _KIND_BY_TYPE.get(type(span))
     if kind is None:  # pragma: no cover
         raise TypeError(f"Unserializable span: {span!r}")
-    data = {item.name: getattr(span, item.name) for item in fields(span)}
+    names = _SPAN_FIELD_NAMES.get(type(span))
+    if names is None:
+        names = tuple(item.name for item in fields(span))
+        _SPAN_FIELD_NAMES[type(span)] = names
+    data = {name: getattr(span, name) for name in names}
     data["_"] = kind
     return data
 

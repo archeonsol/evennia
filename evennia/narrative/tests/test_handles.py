@@ -23,9 +23,13 @@ def _char(cid):
 class TestEntityHandles(unittest.TestCase):
     def test_handle_is_opaque_not_the_db_id(self):
         v = _Viewer()
-        h = handle_for(v, _char(42), "Kade")
+        # A 12-digit id cannot appear as a substring of a 24-char hex handle by
+        # chance, so this stays deterministic (a bare 42 flaked ~9% of runs).
+        cid = 424242424242
+        h = handle_for(v, _char(cid), "Kade")
         self.assertTrue(h.startswith("e"))
-        self.assertNotIn("42", h)
+        self.assertNotIn(str(cid), h)
+        self.assertNotEqual(h, f"e{cid}")
 
     def test_same_perceived_name_stable_handle(self):
         v = _Viewer()
