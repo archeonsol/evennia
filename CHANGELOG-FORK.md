@@ -25,6 +25,44 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.242: Focus lookups and the web thread
+
+### Performance
+
+- **Focus resolution is idmapper-cache-first.**
+  [`ControlBinding._resolve`](evennia/accounts/models.py) ran an indexed
+  primary-key query for the stack top on every call, and
+  `_select_online_puppets` ([`utils/systems.py`](evennia/utils/systems.py))
+  calls `session.get_puppet()` once per online session for every
+  `online_puppets`-scoped system fire. A 60s `py-spy` profile of the
+  production server (Python 3.14.4) attributed 91 samples (3.4%) to that
+  path. Resolution now checks `get_cached_instance()` first and keeps the
+  indexed query as the miss fallback (eviction, cold lookup, non-IO-owner
+  context), so no new invalidation layer was added: the binding is a
+  `SharedMemoryModel`, so the idmapper already owns identity and invalidation.
+  Reads of the binding's focus stack are unchanged, as are the three-way merge
+  and generation guards. Two new tests in
+  [`accounts/tests.py`](evennia/accounts/tests.py) prove a hit issues no query
+  and a miss still resolves through SQL. Cost scales with online sessions ×
+  puppet-scoped systems, so the win grows with population; on the profiled
+  idle server it removes the per-tick query (the fresh PgBouncer connect it
+  used to force now lands on the next DB user of the tick).
+
+- **The ASGI web thread prefers uvloop when installed.**
+  [`UvicornWebService`](evennia/server/asgi_webserver.py) runs uvicorn in a
+  background thread with its own event loop, separate from the game reactor.
+  `_make_loop()` now returns `uvloop.new_event_loop()` when importable and
+  falls back to `asyncio.new_event_loop()` otherwise (Windows dev, no wheel).
+  Covered by two tests in
+  [`server/tests/test_asgi_webserver.py`](evennia/server/tests/test_asgi_webserver.py).
+  The game reactor's loop is untouched. This is opt-in: install `uvloop` in
+  the environment to activate it.
+
+### Migration
+
+- None. `uvloop` is an optional runtime dependency; without it the web thread
+  behaves exactly as before, and no settings, models, or APIs changed.
+
 ## 6.0.0+underspire.241: Test-suite and boot-path cost
 
 ### Performance
