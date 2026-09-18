@@ -102,6 +102,29 @@ class WriterBatchTest(SimpleTestCase):
             self.assertEqual(transport.outgoing_count, 0)
             self.assertEqual(self.failures, [])
 
+    def test_handshake_frames_are_isolated_from_data_batches(self):
+        transport = self._transport()
+        with patch.multiple(transport_module, WRITE_BATCH_SIZE=4):
+            for _ in range(3):
+                self.assertTrue(transport.publish("output", b"Msg", b"x").admitted)
+            self.assertTrue(transport.publish("output", b"BusProbe", b"h", handshake=True).admitted)
+            first = transport._take_write_batch()
+            self.assertEqual([frame.command for _key, frame, _fields in first], [b"BusProbe"])
+            second = transport._take_write_batch()
+            self.assertEqual(len(second), 3)
+
+    def test_outgoing_bytes_tracks_admission_and_settlement(self):
+        transport = self._transport()
+        self.assertTrue(transport.publish("output", b"Msg", b"x").admitted)
+        after_one = transport.outgoing_bytes
+        self.assertGreater(after_one, 0)
+        self.assertTrue(transport.publish("output", b"Msg", b"x").admitted)
+        self.assertGreater(transport.outgoing_bytes, after_one)
+        transport._write_batch(transport._take_write_batch())
+        self._run_callbacks()
+        self.assertEqual(transport.outgoing_bytes, 0)
+        self.assertEqual(transport.outgoing_count, 0)
+
     def test_capacity_pressure_rejects_without_failing_the_transport(self):
         transport = self._transport()
         with patch.multiple(

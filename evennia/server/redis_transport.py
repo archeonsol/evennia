@@ -83,6 +83,7 @@ class RedisTransport:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._outgoing = {}
+        self._outgoing_bytes = 0
         self._next_outgoing_warning = 0.0
         self._ordinary = deque()
         self._handshakes = deque()
@@ -115,7 +116,7 @@ class RedisTransport:
     def outgoing_bytes(self):
         """Return encoded outgoing bytes still owned by this transport."""
         with self._lock:
-            return sum(frame.size for frame in self._outgoing.values())
+            return self._outgoing_bytes
 
     def set_pair(self, pair, ready=False):
         """Bind ordinary traffic while allowing discovery to pass startup output."""
@@ -138,7 +139,9 @@ class RedisTransport:
             with self._lock:
                 frame = self._outgoing.get(key)
                 if key not in self._writing:
-                    self._outgoing.pop(key, None)
+                    removed = self._outgoing.pop(key, None)
+                    if removed is not None:
+                        self._outgoing_bytes -= removed.size
             if frame is not None:
                 frame.result.fail(TransportUnavailable("connection generation replaced"))
 
@@ -212,7 +215,7 @@ class RedisTransport:
                 reason = "encoded frame exceeds transport limit"
             else:
                 count = len(self._outgoing)
-                size = sum(item.size for item in self._outgoing.values())
+                size = self._outgoing_bytes
                 count_limit = (
                     _bus_limit("REDIS_BUS_MAX_ENTRIES", MAX_ENTRIES)
                     if control
@@ -228,6 +231,7 @@ class RedisTransport:
                 else:
                     self._next_id += 1
                     self._outgoing[self._next_id] = frame
+                    self._outgoing_bytes += frame.size
                     (self._handshakes if handshake else self._ordinary).append(self._next_id)
                     self._condition.notify_all()
                     count += 1
@@ -282,6 +286,7 @@ class RedisTransport:
             self._outgoing = {
                 key: frame for key, frame in self._outgoing.items() if key in self._writing
             }
+            self._outgoing_bytes = sum(frame.size for frame in self._outgoing.values())
         for frame in frames:
             frame.result.fail(error)
         try:
@@ -295,6 +300,8 @@ class RedisTransport:
         """Release one accounted publication on the event loop."""
         with self._lock:
             frame = self._outgoing.pop(key, None)
+            if frame is not None:
+                self._outgoing_bytes -= frame.size
             valid = fence == self._fence and self.online and not self._stop.is_set()
             valid = valid and frame is not None and (frame.handshake or frame.pair == self._pair)
         if frame is None:
@@ -321,8 +328,13 @@ class RedisTransport:
             if not self.online or not (self._handshakes or (self._ready and self._ordinary)):
                 self._condition.wait(WAIT)
                 return batch
+            # Handshake frames go in their own batch: a failed publication must
+            # not take discovery down with a failed data publication.
+            handshake_only = bool(self._handshakes)
             while len(batch) < batch_size:
-                if self._handshakes:
+                if handshake_only:
+                    if not self._handshakes:
+                        break
                     queue = self._handshakes
                 elif self._ready and self._ordinary:
                     queue = self._ordinary

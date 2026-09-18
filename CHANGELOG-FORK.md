@@ -39,8 +39,11 @@ matching release procedure.
   one Redis pipeline per round trip instead of one XADD per frame; the caps are
   settings-tunable and raised (4096 entries / 64 MiB total, 3072 / 48 MiB data;
   previously 1024 / 32 / 992 / 24); and capacity overrun rejects the frame
-  locally without failing the generation. Control saturation still fails the
-  generation for non-capacity reasons. Docs:
+  locally without failing the generation. Byte accounting is O(1) per admission
+  instead of a queue-wide sum (which grew with the raised caps), and handshake
+  frames are published in their own batch, so a failed data publication cannot
+  trip the handshake errback that disconnects the peer. Control saturation still
+  fails the generation for non-capacity reasons. Docs:
   [Redis-Bus-Delivery](docs/source/Components/Redis-Bus-Delivery.md); settings:
   `REDIS_BUS_MAX_ENTRIES`, `REDIS_BUS_MAX_BYTES`, `REDIS_BUS_DATA_ENTRIES`,
   `REDIS_BUS_DATA_BYTES`, `REDIS_BUS_WRITE_BATCH`.
