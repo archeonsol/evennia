@@ -56,17 +56,24 @@ class TestRedisTransport(SimpleTestCase):
         self.assertFalse(self.delivered)
 
     def test_committed_write_reply_loss_never_republishes(self):
-        """Lost XADD replies fail after one committed write."""
+        """Lost pipeline replies fail after one committed batch."""
         self.transport.start()
-        xadd = self.client.xadd
+        real = self.client.pipeline(transaction=False)
         calls = []
 
-        def lost(*args, **kwargs):
-            calls.append(args)
-            xadd(*args, **kwargs)
-            raise ConnectionError("reply lost")
+        class LosingPipeline:
+            """Commit queued commands, then fail the execute call itself."""
 
-        with patch.object(self.client, "xadd", side_effect=lost):
+            def xadd(self, *args, **kwargs):
+                calls.append(args)
+                real.xadd(*args, **kwargs)
+                return self
+
+            def execute(self, raise_on_error=False):
+                real.execute()
+                raise ConnectionError("reply lost")
+
+        with patch.object(self.client, "pipeline", return_value=LosingPipeline()):
             result = self.transport.publish("out", b"Msg", b"action")
             self.pump(lambda: bool(self.failures))
         self.assertEqual(len(calls), 1)
@@ -89,51 +96,69 @@ class TestRedisTransport(SimpleTestCase):
             self.assertTrue(self.transport.publish("out", b"Msg", b"new").admitted)
 
     def test_outgoing_burst_preserves_control_reserve(self):
-        """Admit a 25-by-25 burst and retain 32 control slots at the data limit."""
+        """Data saturation leaves control slots; over-cap control is backpressure."""
         self.transport.online = True
-        with patch.object(transport_module.logger, "log_warn"):
-            for _ in range(625):
-                self.assertTrue(self.transport.publish("out", b"Msg", b"a").admitted)
-            self.assertEqual(self.transport.outgoing_count, 625)
-            for _ in range(992 - 625):
+        with (
+            patch.object(transport_module, "MAX_ENTRIES", 36),
+            patch.object(transport_module, "DATA_ENTRIES", 4),
+            patch.object(transport_module, "MAX_BYTES", 10**9),
+            patch.object(transport_module, "DATA_BYTES", 10**9),
+            patch.object(transport_module.logger, "log_warn"),
+        ):
+            for _ in range(4):
                 self.assertTrue(self.transport.publish("out", b"Msg", b"a").admitted)
             self.assertFalse(self.transport.publish("out", b"Msg", b"a").admitted)
             self.assertTrue(self.transport.online)
             for _ in range(32):
                 self.assertTrue(self.transport.publish("out", b"Admin", b"a").admitted)
-            self.assertEqual(self.transport.outgoing_count, 1024)
+            self.assertEqual(self.transport.outgoing_count, 36)
             self.assertFalse(self.transport.publish("out", b"Admin", b"a").admitted)
-        self.assertFalse(self.transport.online)
+            # Capacity pressure rejects locally instead of failing the transport.
+            self.assertTrue(self.transport.online)
+            self.assertEqual(self.failures, [])
 
     def test_incoming_burst_preserves_control_reserve(self):
         """Receive the same burst and reserve before callbacks get a loop turn."""
         self.transport.online = True
-        for _ in range(625):
-            self.transport._admit_incoming({b"c": b"Msg", b"d": b"a"})
-        self.assertEqual(len(self.transport._incoming), 625)
-        for _ in range(992 - 625):
-            self.transport._admit_incoming({b"c": b"Msg", b"d": b"a"})
-        self.assertEqual(len(self.transport._incoming), 992)
-        for _ in range(32):
+        with (
+            patch.object(transport_module, "MAX_ENTRIES", 36),
+            patch.object(transport_module, "DATA_ENTRIES", 4),
+            patch.object(transport_module, "MAX_BYTES", 10**9),
+            patch.object(transport_module, "DATA_BYTES", 10**9),
+        ):
+            for _ in range(4):
+                self.transport._admit_incoming({b"c": b"Msg", b"d": b"a"})
+            self.assertEqual(len(self.transport._incoming), 4)
+            for _ in range(32):
+                self.transport._admit_incoming({b"c": b"Admin", b"d": b"a"})
+            self.assertEqual(len(self.transport._incoming), 36)
+            self.assertTrue(self.transport.online)
+            # Incoming over-capacity still fails the generation: the loop stalled.
             self.transport._admit_incoming({b"c": b"Admin", b"d": b"a"})
-        self.assertEqual(len(self.transport._incoming), 1024)
-        self.assertTrue(self.transport.online)
-        self.transport._admit_incoming({b"c": b"Admin", b"d": b"a"})
-        self.assertFalse(self.transport.online)
+            self.assertFalse(self.transport.online)
 
     def test_control_saturation_can_recover(self):
-        """Recovery needs no slot in the failed queue."""
-        self.transport.start()
+        """Capacity rejects locally; a real failure still recovers."""
+        self.transport.online = True
         with (
             patch.object(transport_module, "MAX_ENTRIES", 2),
             patch.object(transport_module, "DATA_ENTRIES", 1),
+            patch.object(transport_module, "MAX_BYTES", 10**9),
+            patch.object(transport_module, "DATA_BYTES", 10**9),
         ):
             self.transport.publish("out", b"Admin", b"one")
             self.transport.publish("out", b"Admin", b"two")
             self.assertFalse(self.transport.publish("out", b"Admin", b"three").admitted)
+            self.assertTrue(self.transport.online)
+            self.assertEqual(self.failures, [])
+
+        self.transport.start()
+        with patch.object(transport_module, "MAX_FRAME_BYTES", 1):
+            self.assertFalse(self.transport.publish("out", b"Admin", b"xx").admitted)
             self.assertFalse(self.transport.online)
-            self.pump(lambda: self.transport.online)
+            self.pump(lambda: bool(self.failures))
             self.assertTrue(self.failures)
+            self.pump(lambda: self.transport.online)
             self.assertTrue(self.transport.online)
 
     def test_queued_callback_is_invalidated_before_notification(self):
@@ -280,14 +305,19 @@ class TestRedisTransport(SimpleTestCase):
         entered = threading.Event()
         release = threading.Event()
 
-        def stuck(*_args, **_kwargs):
-            entered.set()
-            release.wait(2)
-            return b"1-0"
+        class StuckPipeline:
+            """Block inside the queued XADD until the test releases it."""
+
+            def xadd(self, *_args, **_kwargs):
+                entered.set()
+                release.wait(2)
+
+            def execute(self, raise_on_error=False):
+                return [b"1-0"]
 
         self.transport.start()
         with (
-            patch.object(self.client, "xadd", side_effect=stuck),
+            patch.object(self.client, "pipeline", return_value=StuckPipeline()),
             patch.object(transport_module, "STOP_TIMEOUT", 0.05),
         ):
             result = self.transport.publish("out", b"Msg", b"action")

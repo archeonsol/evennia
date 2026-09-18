@@ -12,15 +12,29 @@ from django.conf import settings
 from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.utils import clock, logger
 
-MAX_ENTRIES = 1024
-MAX_BYTES = 32 * 1024 * 1024
-DATA_ENTRIES = 992
-DATA_BYTES = 24 * 1024 * 1024
+MAX_ENTRIES = 4096
+MAX_BYTES = 64 * 1024 * 1024
+DATA_ENTRIES = 3072
+DATA_BYTES = 48 * 1024 * 1024
 OUTGOING_WARN_THRESHOLD = 200
 OUTGOING_WARN_INTERVAL = 60.0
 MAX_FRAME_BYTES = 8 * 1024 * 1024
 STOP_TIMEOUT = 3.0
 WAIT = 0.1
+WRITE_BATCH_SIZE = 64
+
+
+def _bus_limit(setting_name, fallback):
+    """Resolve a bus limit: an explicit setting wins, else the module constant.
+
+    Reading the module constant at call time keeps the existing tests' patching
+    of module-level limits authoritative while deployments can tune the caps
+    without a code change.
+    """
+    value = getattr(settings, setting_name, None)
+    if value is None:
+        return int(fallback)
+    return max(1, int(value))
 
 
 def encode_pair(pair):
@@ -77,7 +91,7 @@ class RedisTransport:
         self._incoming_active = 0
         self._drain_scheduled = False
         self._next_id = 0
-        self._writing = None
+        self._writing = set()
         self._fence = 0
         self._origin = uuid4().hex.encode()
         self._sequence = 0
@@ -123,7 +137,7 @@ class RedisTransport:
         for key in keys:
             with self._lock:
                 frame = self._outgoing.get(key)
-                if key != self._writing:
+                if key not in self._writing:
                     self._outgoing.pop(key, None)
             if frame is not None:
                 frame.result.fail(TransportUnavailable("connection generation replaced"))
@@ -199,8 +213,16 @@ class RedisTransport:
             else:
                 count = len(self._outgoing)
                 size = sum(item.size for item in self._outgoing.values())
-                count_limit = MAX_ENTRIES if control else DATA_ENTRIES
-                byte_limit = MAX_BYTES if control else DATA_BYTES
+                count_limit = (
+                    _bus_limit("REDIS_BUS_MAX_ENTRIES", MAX_ENTRIES)
+                    if control
+                    else _bus_limit("REDIS_BUS_DATA_ENTRIES", DATA_ENTRIES)
+                )
+                byte_limit = (
+                    _bus_limit("REDIS_BUS_MAX_BYTES", MAX_BYTES)
+                    if control
+                    else _bus_limit("REDIS_BUS_DATA_BYTES", DATA_BYTES)
+                )
                 if count >= count_limit or size + frame.size > byte_limit:
                     reason = "transport capacity exhausted"
                 else:
@@ -216,12 +238,13 @@ class RedisTransport:
                         self._next_outgoing_warning = now + OUTGOING_WARN_INTERVAL
                         warning = (
                             f"redis bus: outgoing queue pressure stream={stream} "
-                            f"pending={count} bytes={size} data_limit={DATA_ENTRIES}"
+                            f"pending={count} bytes={size} "
+                            f"data_limit={_bus_limit('REDIS_BUS_DATA_ENTRIES', DATA_ENTRIES)}"
                         )
         if warning:
             logger.log_warn(warning)
         if reason:
-            if control and self.online:
+            if control and self.online and reason != "transport capacity exhausted":
                 self.fail(reason)
             return PublicationResult.rejected(TransportUnavailable(reason))
         return frame.result
@@ -257,7 +280,7 @@ class RedisTransport:
                 return
             frames = list(self._outgoing.values())
             self._outgoing = {
-                key: frame for key, frame in self._outgoing.items() if key == self._writing
+                key: frame for key, frame in self._outgoing.items() if key in self._writing
             }
         for frame in frames:
             frame.result.fail(error)
@@ -284,36 +307,74 @@ class RedisTransport:
             frame.result.succeed(entry_id)
 
     def _writer_loop(self):
-        """Publish each selected frame once in actual wire sequence order."""
+        """Publish admitted frames in wire order through batched pipelines."""
         while not self._stop.is_set():
-            with self._condition:
-                if not self.online or not (self._handshakes or (self._ready and self._ordinary)):
-                    self._condition.wait(WAIT)
-                    continue
-                key = (self._handshakes if self._handshakes else self._ordinary).popleft()
+            batch = self._take_write_batch()
+            if batch:
+                self._write_batch(batch)
+
+    def _take_write_batch(self):
+        """Reserve up to one batch of frames for a single Redis round trip."""
+        batch = []
+        batch_size = _bus_limit("REDIS_BUS_WRITE_BATCH", WRITE_BATCH_SIZE)
+        with self._condition:
+            if not self.online or not (self._handshakes or (self._ready and self._ordinary)):
+                self._condition.wait(WAIT)
+                return batch
+            while len(batch) < batch_size:
+                if self._handshakes:
+                    queue = self._handshakes
+                elif self._ready and self._ordinary:
+                    queue = self._ordinary
+                else:
+                    break
+                key = queue.popleft()
                 frame = self._outgoing.get(key)
                 if frame is None or frame.fence != self._fence:
                     continue
-                self._writing = key
+                self._writing.add(key)
                 self._sequence += 1
-                fields = {
-                    b"c": frame.command,
-                    b"d": frame.data,
-                    b"g": frame.pair,
-                    b"o": self._origin,
-                    b"n": str(self._sequence).encode(),
-                }
-            entry_id = error = None
-            try:
-                entry_id = self._client.xadd(frame.stream, fields, maxlen=10000, approximate=True)
-            except Exception as caught:
-                error = caught
-                self.fail("Redis publication failed")
-            finally:
-                with self._condition:
-                    self._writing = None
-                    self._condition.notify_all()
-                clock.call_from_thread(self._complete, key, frame.fence, entry_id, error)
+                batch.append(
+                    (
+                        key,
+                        frame,
+                        {
+                            b"c": frame.command,
+                            b"d": frame.data,
+                            b"g": frame.pair,
+                            b"o": self._origin,
+                            b"n": str(self._sequence).encode(),
+                        },
+                    )
+                )
+            return batch
+
+    def _write_batch(self, batch):
+        """Publish one batch through one pipeline and settle it on the loop."""
+        responses = None
+        try:
+            pipeline = self._client.pipeline(transaction=False)
+            for _key, frame, fields in batch:
+                pipeline.xadd(frame.stream, fields, maxlen=10000, approximate=True)
+            responses = pipeline.execute(raise_on_error=False)
+        except Exception as caught:
+            responses = [caught] * len(batch)
+            self.fail("Redis publication failed")
+        with self._condition:
+            self._writing.difference_update(key for key, _frame, _fields in batch)
+            self._condition.notify_all()
+        completions = []
+        for (key, frame, _fields), response in zip(batch, responses):
+            if isinstance(response, BaseException):
+                completions.append((key, frame.fence, None, response))
+            else:
+                completions.append((key, frame.fence, response, None))
+        clock.call_from_thread(self._complete_many, completions)
+
+    def _complete_many(self, completions):
+        """Settle one published batch on the event loop in publication order."""
+        for key, fence, entry_id, error in completions:
+            self._complete(key, fence, entry_id, error)
 
     def _admit_incoming(self, fields):
         """Bound callback payloads and reject stale negotiated pairs at admission."""
@@ -328,8 +389,16 @@ class RedisTransport:
             if not self.online or (not handshake and fields.get(b"g", b"") != self._pair):
                 return
             control = handshake or command.startswith((b"Admin", b"Bus"))
-            count_limit = MAX_ENTRIES if control else DATA_ENTRIES
-            byte_limit = MAX_BYTES if control else DATA_BYTES
+            count_limit = (
+                _bus_limit("REDIS_BUS_MAX_ENTRIES", MAX_ENTRIES)
+                if control
+                else _bus_limit("REDIS_BUS_DATA_ENTRIES", DATA_ENTRIES)
+            )
+            byte_limit = (
+                _bus_limit("REDIS_BUS_MAX_BYTES", MAX_BYTES)
+                if control
+                else _bus_limit("REDIS_BUS_DATA_BYTES", DATA_BYTES)
+            )
             full = (
                 len(self._incoming) + bool(self._incoming_active) >= count_limit
                 or self._incoming_bytes + size > byte_limit
@@ -378,9 +447,7 @@ class RedisTransport:
     def _recover(self):
         """Reopen only after old work settles and Redis establishes a fresh tail."""
         with self._lock:
-            allowed = (
-                self._failure_delivered and self._writing is None and not self._recover_scheduled
-            )
+            allowed = self._failure_delivered and not self._writing and not self._recover_scheduled
         if not allowed:
             self._stop.wait(WAIT)
             return
