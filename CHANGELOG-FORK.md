@@ -25,6 +25,25 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.248 — Release metadata alignment
+
+### Packaging
+
+- **The four release version sources now agree on `.248`.**
+  [`pyproject.toml`](pyproject.toml), [`evennia/VERSION.txt`](evennia/VERSION.txt),
+  and the generated [`uv.lock`](uv.lock) now identify the same package build as
+  this changelog. This closes the metadata drift left by the `.245`–`.247`
+  release entries; runtime behavior is unchanged from `.247`.
+
+### Migration
+
+- None.
+
+### Tests
+
+- Regenerated `uv.lock` with `uv lock` and verified all four release files carry
+  `6.0.0+underspire.248`.
+
 ## 6.0.0+underspire.247: Tag miss caching
 
 ### Performance
