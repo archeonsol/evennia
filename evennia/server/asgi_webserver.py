@@ -41,7 +41,7 @@ class UvicornWebService(Service):
     def _run(self):
         import asyncio
 
-        loop = asyncio.new_event_loop()
+        loop = self._make_loop()
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self._server.serve())
@@ -49,6 +49,28 @@ class UvicornWebService(Service):
             logger.log_trace("uvicorn serve loop exited")
         finally:
             loop.close()
+
+    @staticmethod
+    def _make_loop():
+        """Build the web thread's event loop, preferring uvloop when available.
+
+        The game reactor owns its own loop; this only affects the uvicorn web
+        thread. uvloop is an optional, drop-in asyncio replacement (Linux/macOS
+        wheels only), so a missing or unsupported install falls back cleanly to
+        the stdlib loop.
+
+        Returns:
+            asyncio.AbstractEventLoop: A fresh, unclosed loop.
+
+        """
+        try:
+            import uvloop
+        except ImportError:
+            import asyncio
+
+            return asyncio.new_event_loop()
+        logger.log_info("ASGI webserver: using the uvloop event loop")
+        return uvloop.new_event_loop()
 
     async def empty_threadpool(self):
         """No-op compatibility hook for graceful shutdown."""
