@@ -74,16 +74,28 @@ class BusHandshake:
         now = self._now()
         if self.state == "ready" and now - self._last_seen >= self.timeout:
             self.disconnect()
-        if self._pending and now - self._pending["at"] >= self.timeout:
-            self.disconnect()
+        if self._pending:
+            started = self._pending.get("first", self._pending["at"])
+            if now - started >= self.timeout:
+                self.disconnect()
         if self._exchange and now - self._exchange["at"] >= self.timeout:
             self.disconnect()
-        if self.role != "portal" or self._pending:
+        if self.role != "portal":
             return
-        if now - self._last_probe < self.heartbeat:
+        if self._pending:
+            # A probe that has not produced an offer yet may have been
+            # published before the peer's reader subscribed; re-issue it on the
+            # heartbeat cadence. A probe that already carries a challenge is an
+            # exchange in flight and keeps its full lease.
+            if self._pending.get("challenge"):
+                return
+            if now - self._pending["at"] < self.heartbeat:
+                return
+        elif now - self._last_probe < self.heartbeat:
             return
         self._last_probe = now
-        self._pending = {"probe": uuid4().hex, "at": now}
+        first = self._pending.get("first", now) if self._pending else now
+        self._pending = {"probe": uuid4().hex, "at": now, "first": first}
         self._send({"kind": "probe", "portal": self.identity, "probe": self._pending["probe"]})
 
     def _matches(self, frame, exchange):

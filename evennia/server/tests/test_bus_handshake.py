@@ -104,12 +104,27 @@ class TestHandshake(TestCase):
     def test_pending_exchange_not_overwritten_by_heartbeat(self):
         """A delayed snapshot has its full deadline to complete."""
         self.peers["portal"].tick()
+        role, probe = self.wire.pop(0)
+        self.peers["server"].receive(probe)
+        role, offer = self.wire.pop(0)
+        self.peers["portal"].receive(offer)
         pending = list(self.wire)
         self.now += 2
         self.peers["portal"].tick()
         self.assertEqual(self.wire, pending)
         self.drain()
         self.assertEqual(self.peers["portal"].state, "ready")
+
+    def test_unanswered_probe_is_reissued(self):
+        """A probe lost before the peer subscribed is retried on cadence."""
+        self.now += 1
+        self.peers["portal"].tick()
+        first = self.wire.pop(0)[1]
+        self.now += 1
+        self.peers["portal"].tick()
+        second = self.wire.pop(0)[1]
+        self.assertEqual(second["kind"], "probe")
+        self.assertNotEqual(second["probe"], first["probe"])
 
     def test_peer_lease_expires(self):
         """A dead peer closes action admission without PID assumptions."""
