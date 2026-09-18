@@ -323,6 +323,10 @@ class TagHandler(object):
         self._objid = obj.id
         self._model = obj.__dbclass__.__name__.lower()
         self._cache = {}
+        # negative hits, keyed like _cache: a miss that is still authoritative
+        # because no tag write has happened since. `_cache_complete` covers the
+        # fully-loaded case; this covers a known-absent key before a full load.
+        self._misscache = {}
         # store category names fully cached
         self._catcache = {}
         # full cache was run on all tags
@@ -372,6 +376,7 @@ class TagHandler(object):
             ): tag
             for tag in tags
         }
+        self._misscache = {}
         self._cache_complete = True
         # the cache is now authoritative; never fall back to a (now stale)
         # in-memory prefetch snapshot after this point
@@ -459,6 +464,9 @@ class TagHandler(object):
             elif settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache_complete:
                 # the full cache is known-complete: a miss means no such tag
                 return []
+            elif settings.TYPECLASS_AGGRESSIVE_CACHE and cachekey in self._misscache:
+                # a previous query found nothing and no write has invalidated it
+                return []
             else:
                 query = {
                     "%s__id" % self._model: self._objid,
@@ -477,6 +485,9 @@ class TagHandler(object):
                     if settings.TYPECLASS_AGGRESSIVE_CACHE:
                         self._cache[cachekey] = tag
                     return [tag]
+                if settings.TYPECLASS_AGGRESSIVE_CACHE:
+                    self._misscache[cachekey] = True
+                return []
         else:
             # only category given (even if it's None) - we can't
             # assume the cache to be complete unless we have queried
@@ -530,6 +541,9 @@ class TagHandler(object):
         cachekey = "%s-%s" % (key, category)
         catkey = "-%s" % category
         self._cache[cachekey] = tag_obj
+        # a write invalidates every negative hit: the tag just added may be a
+        # key another handler path asked for and was told did not exist
+        self._misscache = {}
         # mark that the category cache is no longer up-to-date
         self._catcache.pop(catkey, None)
         self._cache_complete = False
@@ -553,6 +567,7 @@ class TagHandler(object):
             self._cache.pop(cachekey, None)
         else:
             [self._cache.pop(key, None) for key in self._cache if key.endswith(catkey)]
+        self._misscache = {}
         # mark that the category cache is no longer up-to-date
         self._catcache.pop(catkey, None)
         self._cache_complete = False
@@ -564,6 +579,7 @@ class TagHandler(object):
         """
         self._cache_complete = False
         self._cache = {}
+        self._misscache = {}
         self._catcache = {}
         # Discard any stale Django prefetch snapshot. A later
         # prefetch_related() may attach a fresh one to this idmapped instance,
@@ -757,6 +773,7 @@ class TagHandler(object):
             query["tag__db_category"] = category.strip().lower()
         getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query).delete()
         self._cache = {}
+        self._misscache = {}
         self._catcache = {}
         self._cache_complete = False
 

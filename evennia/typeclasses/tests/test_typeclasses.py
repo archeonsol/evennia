@@ -376,6 +376,74 @@ class TestTags(BaseEvenniaTest):
         )
 
 
+class TestTagMissCache(BaseEvenniaTest):
+    """A known-absent tag must not re-query until a write invalidates it.
+
+    ``tags.has`` is on the room-contents and broadcast hot paths, and a
+    negative hit is what the common case asks for (an untagged room, an object
+    without a permission). Each miss used to be one SQL query.
+    """
+
+    def _has_queries(self, key, category=None):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as ctx:
+            for _ in range(5):
+                self.obj1.tags.has(key, category=category)
+        return len(ctx)
+
+    def test_miss_is_remembered_and_free(self):
+        flush_cache()
+        self.obj1.tags.has("absent_tag", category="absent_cat")
+        self.assertEqual(self._has_queries("absent_tag", "absent_cat"), 0)
+
+    def test_add_after_miss_invalidates(self):
+        flush_cache()
+        self.assertFalse(self.obj1.tags.has("later_tag", category="cat"))
+        self.obj1.tags.add("later_tag", category="cat")
+        self.assertTrue(self.obj1.tags.has("later_tag", category="cat"))
+
+    def test_remove_after_hit_invalidates(self):
+        flush_cache()
+        self.obj1.tags.add("gone_tag", category="cat")
+        self.assertTrue(self.obj1.tags.has("gone_tag", category="cat"))
+        self.obj1.tags.remove("gone_tag", category="cat")
+        self.assertFalse(self.obj1.tags.has("gone_tag", category="cat"))
+
+    def test_clear_invalidates(self):
+        flush_cache()
+        self.assertFalse(self.obj1.tags.has("cleared_tag", category="cat"))
+        self.obj1.tags.add("other_tag", category="cat")
+        self.obj1.tags.clear()
+        self.assertFalse(self.obj1.tags.has("other_tag", category="cat"))
+        self.obj1.tags.add("other_tag", category="cat")
+        self.assertTrue(self.obj1.tags.has("other_tag", category="cat"))
+
+    def test_reset_cache_invalidates(self):
+        flush_cache()
+        self.assertFalse(self.obj1.tags.has("reset_tag", category="cat"))
+        self.obj1.tags.add("reset_tag", category="cat")
+        self.obj1.tags.reset_cache()
+        self.assertTrue(self.obj1.tags.has("reset_tag", category="cat"))
+
+    def test_prefetch_then_miss_then_add(self):
+        flush_cache()
+        obj = (
+            self.obj1.__class__.objects.filter(id=self.obj1.id).prefetch_related("db_tags").first()
+        )
+        self.assertFalse(obj.tags.has("prefetched_miss", category="cat"))
+        obj.tags.add("prefetched_miss", category="cat")
+        self.assertTrue(obj.tags.has("prefetched_miss", category="cat"))
+
+    def test_miss_cache_ignored_when_aggressive_cache_off(self):
+        flush_cache()
+        with override_settings(TYPECLASS_AGGRESSIVE_CACHE=False):
+            self.assertFalse(self.obj1.tags.has("no_cache_tag", category="cat"))
+            self.obj1.tags.add("no_cache_tag", category="cat")
+            self.assertTrue(self.obj1.tags.has("no_cache_tag", category="cat"))
+
+
 class TestTagBulkPrefetch(BaseEvenniaTest):
     """
     Efficiency of bulk tag reads: prefetch-aware handler + manager bulk API.
