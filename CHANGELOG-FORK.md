@@ -25,6 +25,29 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.247: Tag miss caching
+
+### Performance
+
+- **`TagHandler` remembers authoritative misses.** `tags.has()` only cached
+  positive hits, so every check for an absent tag — an untagged room on the
+  contents path, a permission an object does not carry — issued a SQL query.
+  During the 100-bot load run this was the single largest share of sampled
+  reactor stalls (159 of 438 stacks, leaf `TagHandler._getcache`). Misses are
+  now remembered in a `_misscache` cleared by `add`, `remove`, `clear`, and
+  `reset_cache`, so a read stays free until a write invalidates it. Reads stay
+  correct with `TYPECLASS_AGGRESSIVE_CACHE` off: the miss cache is ignored
+  entirely in that mode.
+
+### Tests
+
+- Seven new tests cover miss caching, add/remove/clear/reset invalidation,
+  prefetch-then-miss, and the cache-disabled path.
+
+### Migration
+
+- None.
+
 ## 6.0.0+underspire.246: Prompt discovery retry
 
 ### Reliability
