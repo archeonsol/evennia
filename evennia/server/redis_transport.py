@@ -22,6 +22,17 @@ MAX_FRAME_BYTES = 8 * 1024 * 1024
 STOP_TIMEOUT = 3.0
 WAIT = 0.1
 WRITE_BATCH_SIZE = 64
+READ_BATCH = 32
+
+
+def _bus_metrics():
+    """Best-effort bus metrics accessor; never raises on a hot path."""
+    try:
+        from evennia.server import prometheus_metrics
+
+        return prometheus_metrics
+    except Exception:
+        return None
 
 
 def _bus_limit(setting_name, fallback):
@@ -248,6 +259,9 @@ class RedisTransport:
         if warning:
             logger.log_warn(warning)
         if reason:
+            metrics = _bus_metrics()
+            if metrics is not None:
+                metrics.record_bus_reject(reason)
             if control and self.online and reason != "transport capacity exhausted":
                 self.fail(reason)
             return PublicationResult.rejected(TransportUnavailable(reason))
@@ -376,11 +390,19 @@ class RedisTransport:
             self._writing.difference_update(key for key, _frame, _fields in batch)
             self._condition.notify_all()
         completions = []
+        published = 0
         for (key, frame, _fields), response in zip(batch, responses):
             if isinstance(response, BaseException):
                 completions.append((key, frame.fence, None, response))
             else:
                 completions.append((key, frame.fence, response, None))
+                published += 1
+        metrics = _bus_metrics()
+        if metrics is not None:
+            metrics.record_bus_write_batch(len(batch))
+            metrics.observe_bus_queue(len(self._outgoing), self._outgoing_bytes)
+            for _ in range(published):
+                metrics.record_bus_publish()
         clock.call_from_thread(self._complete_many, completions)
 
     def _complete_many(self, completions):
@@ -495,7 +517,11 @@ class RedisTransport:
                 if not self._history_intact():
                     self.fail("transport stream history was trimmed")
                     continue
-                response = self._client.xread({self._read_stream: self._cursor}, count=1, block=250)
+                response = self._client.xread(
+                    {self._read_stream: self._cursor},
+                    count=_bus_limit("REDIS_BUS_READ_BATCH", READ_BATCH),
+                    block=250,
+                )
                 for _stream, entries in response or []:
                     for entry_id, fields in entries:
                         if self._stop.is_set() or not self.online:

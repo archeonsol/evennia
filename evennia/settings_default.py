@@ -260,6 +260,7 @@ REDIS_BUS_MAX_BYTES = None
 REDIS_BUS_DATA_ENTRIES = None
 REDIS_BUS_DATA_BYTES = None
 REDIS_BUS_WRITE_BATCH = None
+REDIS_BUS_READ_BATCH = None
 # Narrative render bound. None keeps the module default (256 spans per segment
 # and 256 entity references per node). Raise it for very crowded scenes, where
 # a room view carries a span per visible character per detail line.

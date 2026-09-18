@@ -125,6 +125,34 @@ class WriterBatchTest(SimpleTestCase):
         self.assertEqual(transport.outgoing_bytes, 0)
         self.assertEqual(transport.outgoing_count, 0)
 
+    def test_publish_flood_rejects_backpressure_without_failing(self):
+        """A queue-full flood rejects locally and settles cleanly once drained."""
+        transport = self._transport()
+        with patch.multiple(
+            transport_module,
+            WRITE_BATCH_SIZE=64,
+            MAX_ENTRIES=128,
+            DATA_ENTRIES=64,
+            MAX_BYTES=10**9,
+            DATA_BYTES=10**9,
+            OUTGOING_WARN_THRESHOLD=10**9,
+        ):
+            admitted = rejected = 0
+            for _ in range(500):
+                if transport.publish("output", b"Msg", b"x" * 32).admitted:
+                    admitted += 1
+                else:
+                    rejected += 1
+            self.assertGreater(admitted, 0)
+            self.assertGreater(rejected, 0)
+            self.assertTrue(transport.online)
+            self.assertEqual(self.failures, [])
+            while transport._ordinary:
+                transport._write_batch(transport._take_write_batch())
+            self._run_callbacks()
+            self.assertEqual(transport.outgoing_count, 0)
+            self.assertEqual(transport.outgoing_bytes, 0)
+
     def test_capacity_pressure_rejects_without_failing_the_transport(self):
         transport = self._transport()
         with patch.multiple(

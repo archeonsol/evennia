@@ -23,9 +23,13 @@ WebSocket capabilities and terminal dimensions uses about 2.5 MiB.
 Outgoing accounting includes in-flight writes and results awaiting loop settlement.
 The writer drains admitted frames in batches of up to 64 through one Redis pipeline, so
 a broadcast fan-out costs one round trip per batch instead of one per frame. Incoming
-accounting includes the active callback. Reads request one frame at a time; one
-additional decoded frame can exist while admission checks its size. One queued loop
-drain processes at most 32 frames per turn.
+accounting includes the active callback. Reads request up to 32 frames per XREAD
+(settings-tunable); one additional decoded frame can exist while admission checks its
+size. One queued loop drain processes at most 32 frames per turn.
+
+Queue depth, retained bytes, published/rejected frame counts, and write-batch sizes are
+exported as `evennia_bus_*` Prometheus metrics so a saturated bus is visible without
+log archaeology.
 
 Capacity pressure is local backpressure, not a transport failure: an over-limit frame
 is rejected (the publisher sees an unavailable result) and the transport stays online,

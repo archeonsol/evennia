@@ -38,6 +38,11 @@ IDMAPPER_FLUSH_BATCHES_TOTAL = None
 IDMAPPER_FLUSH_OBJECTS_TOTAL = None
 IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = None
 IDMAPPER_FLUSH_FAILURES_TOTAL = None
+BUS_OUTGOING_DEPTH = None
+BUS_OUTGOING_BYTES = None
+BUS_PUBLISHED_TOTAL = None
+BUS_REJECTED_TOTAL = None
+BUS_WRITE_BATCH_SIZE = None
 
 _METRICS_READY = False
 
@@ -61,6 +66,8 @@ def _init_metrics() -> bool:
     global IDMAPPER_FLUSH_DURATION_SECONDS, IDMAPPER_FLUSH_BATCHES_TOTAL
     global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
     global IDMAPPER_FLUSH_FAILURES_TOTAL
+    global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
+    global BUS_REJECTED_TOTAL, BUS_WRITE_BATCH_SIZE
 
     if _METRICS_READY:
         return ATTR_FLUSH_TOTAL is not None
@@ -114,6 +121,28 @@ def _init_metrics() -> bool:
     REDIS_ATTR_CACHE_MISS_TOTAL = Counter(
         "evennia_redis_attr_cache_miss_total",
         "Attribute reads that fell through to PG (cache miss or unavailable)",
+    )
+    BUS_OUTGOING_DEPTH = Gauge(
+        "evennia_bus_outgoing_depth",
+        "Frames admitted to the Redis bus outgoing queue",
+    )
+    BUS_OUTGOING_BYTES = Gauge(
+        "evennia_bus_outgoing_bytes",
+        "Encoded bytes retained by the Redis bus outgoing queue",
+    )
+    BUS_PUBLISHED_TOTAL = Counter(
+        "evennia_bus_published_total",
+        "Frames published to Redis by the bus writer",
+    )
+    BUS_REJECTED_TOTAL = Counter(
+        "evennia_bus_rejected_total",
+        "Frames rejected locally before publication",
+        ("reason",),
+    )
+    BUS_WRITE_BATCH_SIZE = Histogram(
+        "evennia_bus_write_batch_size",
+        "Frames per Redis bus write pipeline",
+        buckets=(1, 2, 4, 8, 16, 32, 48, 64, 128),
     )
     RENDER_DELIVERY_TOTAL = Counter(
         "evennia_render_delivery_total",
@@ -257,6 +286,29 @@ def record_redis_attr_cache_miss() -> None:
 def observe_attribute_dirty_pending(pending: int) -> None:
     if _init_metrics() and ATTR_DIRTY_PENDING is not None:
         ATTR_DIRTY_PENDING.set(int(pending))
+
+
+def observe_bus_queue(depth: int, pending_bytes: int) -> None:
+    """Record the bus outgoing queue size once per writer batch."""
+    if _init_metrics() and BUS_OUTGOING_DEPTH is not None:
+        BUS_OUTGOING_DEPTH.set(int(depth))
+    if _init_metrics() and BUS_OUTGOING_BYTES is not None:
+        BUS_OUTGOING_BYTES.set(int(pending_bytes))
+
+
+def record_bus_publish() -> None:
+    if _init_metrics() and BUS_PUBLISHED_TOTAL is not None:
+        BUS_PUBLISHED_TOTAL.inc()
+
+
+def record_bus_reject(reason: str) -> None:
+    if _init_metrics() and BUS_REJECTED_TOTAL is not None:
+        BUS_REJECTED_TOTAL.labels(reason=str(reason or "unknown")[:32]).inc()
+
+
+def record_bus_write_batch(size: int) -> None:
+    if _init_metrics() and BUS_WRITE_BATCH_SIZE is not None:
+        BUS_WRITE_BATCH_SIZE.observe(int(size))
 
 
 def record_render_delivery(mode: str, duration_seconds: float) -> None:
