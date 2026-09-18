@@ -25,6 +25,51 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.243: Bus throughput and crowd rendering
+
+### Performance
+
+- **The Redis bus drains in batches and treats capacity as backpressure.**
+  A 100-session load test (100 bots broadcasting `look`/`say`/movement in one
+  hub) filled the outgoing queue to its data cap; the next handshake frame then
+  hit the shared cap and [`RedisTransport.publish`](evennia/server/redis_transport.py)
+  failed the whole transport. Recovery reset discovery and the session reconcile
+  disconnected every live session — 192 sync-loss cycles in one run, each a
+  player-visible outage. The writer now drains up to 64 admitted frames through
+  one Redis pipeline per round trip instead of one XADD per frame; the caps are
+  settings-tunable and raised (4096 entries / 64 MiB total, 3072 / 48 MiB data;
+  previously 1024 / 32 / 992 / 24); and capacity overrun rejects the frame
+  locally without failing the generation. Control saturation still fails the
+  generation for non-capacity reasons. Docs:
+  [Redis-Bus-Delivery](docs/source/Components/Redis-Bus-Delivery.md); settings:
+  `REDIS_BUS_MAX_ENTRIES`, `REDIS_BUS_MAX_BYTES`, `REDIS_BUS_DATA_ENTRIES`,
+  `REDIS_BUS_DATA_BYTES`, `REDIS_BUS_WRITE_BATCH`.
+
+- **Crowd rendering stops revalidating spans per viewer.**
+  A room view carries a span per visible character per detail line; the
+  renderer validated the full span tree on every viewer transform and walked
+  every serialized span looking for raw identity. Field lists are now cached
+  and validated without a dict per span, `map_text`/`prepend_text` trust the
+  already-validated tree, and the payload check short-circuits per span type
+  (a `CharRef` segment skips span serialization entirely). On a synthetic
+  1,500-span look: trusted transform 0.5-0.9 ms (was ~3.0 ms), payload 1.5 ms
+  (was 8.6 ms). `RENDER_MAX_REFS` (default 256) raises the bound for crowded
+  hubs; Underspire sets 4096.
+
+### Tests
+
+- New [`test_redis_transport_writer.py`](evennia/server/tests/test_redis_transport_writer.py)
+  covers batch order and capacity backpressure; transport and bus lifecycle
+  tests updated to the batched writer.
+- [`test_handles.py`](evennia/narrative/tests/test_handles.py) opacity check
+  made deterministic (a 2-digit id flaked ~9% of runs inside a random hex
+  handle).
+
+### Migration
+
+- None. The new settings default to the previous behavior except the raised
+  bus caps, which are internal limits.
+
 ## 6.0.0+underspire.242: Focus lookups and the web thread
 
 ### Performance
