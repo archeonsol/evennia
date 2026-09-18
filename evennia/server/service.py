@@ -753,6 +753,14 @@ class EvenniaServerService(MultiService):
         how it was shut down.
 
         """
+        # Before the game hooks, and before any player can act: the inflection
+        # accessors import on first use, which is what keeps that cost off
+        # migrations, management commands and test workers. A live server is
+        # the one process that always needs them, and paying for it inside the
+        # first emote would stall the IO thread for seconds.
+        from evennia.utils.inflection import warm as warm_inflection
+
+        warm_inflection()
         self._call_start_stop("at_server_start")
 
     async def at_server_stop(self):

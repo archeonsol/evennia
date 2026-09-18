@@ -16,7 +16,7 @@ import rather than one per call.
 
 from functools import cache
 
-__all__ = ("inflect_engine", "pyinflect_module")
+__all__ = ("inflect_engine", "pyinflect_module", "warm")
 
 
 @cache
@@ -56,3 +56,22 @@ def pyinflect_module():
     except ImportError:
         return None
     return pyinflect
+
+
+def warm():
+    """
+    Pay both import costs now, deliberately.
+
+    Laziness is right for a process that may never render prose: a migration, a
+    management command, a test worker. It is wrong for a live server, which
+    boots once and then serves players. Without this, the first command that
+    rendered a numbered name or conjugated an emote paid ~5s (and another ~3s
+    for `pyinflect`) on the IO thread, stalling whoever happened to act first
+    after a reload.
+
+    Called from the server's own start hook, so the cost lands on the boot
+    path, which is where it was before these accessors became lazy.
+
+    """
+    inflect_engine()
+    pyinflect_module()

@@ -5,7 +5,7 @@ import pathlib
 
 from django.test import TestCase
 
-from evennia.utils.inflection import inflect_engine, pyinflect_module
+from evennia.utils.inflection import inflect_engine, pyinflect_module, warm
 
 # Importing these costs ~8s (pyinflect drags in spacy). Any module-scope import
 # of one of them lands on the critical path of django.setup(), so it is paid by
@@ -71,3 +71,23 @@ class LazyInflectionTest(TestCase):
             "through evennia.utils.inflection; a module-scope import puts ~8s "
             f"back on every django.setup(): {offenders}",
         )
+
+    def test_warm_populates_both_caches(self):
+        warm()
+
+        self.assertIs(inflect_engine(), inflect_engine())
+        self.assertIs(pyinflect_module(), pyinflect_module())
+
+    def test_the_server_start_hook_warms_them(self):
+        """The laziness is only safe because a live server pays up front.
+
+        A server boots once and then serves players, so a first-use import
+        would land inside whichever command happened to render prose first and
+        block the IO thread for ~8s. Asserted against the source rather than by
+        booting a server: the point is that the call site still exists.
+        """
+        service = pathlib.Path(__file__).resolve().parents[2] / "server" / "service.py"
+        source = service.read_text(encoding="utf-8")
+        start_hook = source.split("def at_server_start(self):", 1)[1].split("def ", 1)[0]
+
+        self.assertIn("warm", start_hook, "at_server_start no longer warms the inflection cache")

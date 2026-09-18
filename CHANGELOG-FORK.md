@@ -45,6 +45,15 @@ matching release procedure.
   10.8s.
   The `_INFLECT` engine in [`object.py`](evennia/objects/object.py) had no
   remaining callers and is gone rather than made lazy.
+
+  **A live server warms them at boot.** Laziness is right for a process that
+  may never render prose, and wrong for the one process that always will: a
+  server boots once and then serves players, so a first-use import would land
+  inside whichever command rendered a numbered name or conjugated an emote
+  first and block the IO thread for ~8s. `warm()` is called from
+  `at_server_start` ([`service.py`](evennia/server/service.py)) before the game
+  hooks, which puts the cost back on the boot path where it was. Games do not
+  need to opt in.
 - **Action-registry phrase metadata is rebuilt lazily.**
   `ActionRegistry.register` ([`registry.py`](evennia/actions/registry.py)) called
   `_rebuild_phrase_metadata()`, which walks every registered verb, once per
