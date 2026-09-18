@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import time
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -45,6 +45,16 @@ MAX_TAG_CHARS = 64
 MAX_HANDLE_CHARS = 128
 MAX_SEPARATOR_CHARS = 4096
 _FORBIDDEN_WIRE_KEYS = frozenset({"char_id", "from_id", "referent_id", "object_id"})
+_SPAN_FIELD_NAMES: dict[type, tuple[str, ...]] = {}
+_SPAN_TAG_FIELDS = frozenset({"_", "kind", "role", "form", "lang", "channel"})
+
+
+def _max_refs():
+    """Resolve the span/reference bound: an explicit setting wins, else the constant."""
+    from django.conf import settings
+
+    value = getattr(settings, "RENDER_MAX_REFS", None)
+    return max(1, int(value)) if value is not None else MAX_REFS
 
 
 def _validate_text(value, name, limit=MAX_BODY_CHARS):
@@ -92,6 +102,32 @@ def _contains_forbidden_identity(value: Any) -> bool:
         )
     if isinstance(value, (list, tuple)):
         return any(_contains_forbidden_identity(item) for item in value)
+    return False
+
+
+_FORBIDDEN_BY_TYPE: dict[type, bool] = {}
+
+
+def _spans_contain_forbidden_identity(spans) -> bool:
+    """Whether any span type carries a raw database identity field.
+
+    The per-type answer is cached, so a serialized-tree walk is never needed:
+    a crowd segment of ``CharRef`` spans short-circuits on the first span and
+    the payload skips span serialization entirely.
+    """
+    for segment in spans:
+        for span in segment:
+            span_type = type(span)
+            forbidden = _FORBIDDEN_BY_TYPE.get(span_type)
+            if forbidden is None:
+                names = _SPAN_FIELD_NAMES.get(span_type)
+                if names is None:
+                    names = tuple(item.name for item in fields(span_type))
+                    _SPAN_FIELD_NAMES[span_type] = names
+                forbidden = bool(set(names) & _FORBIDDEN_WIRE_KEYS)
+                _FORBIDDEN_BY_TYPE[span_type] = forbidden
+            if forbidden:
+                return True
     return False
 
 
@@ -317,19 +353,28 @@ def _validate_blocks(blocks, *, allow_strings=True):
 
 
 def _validate_spans(spans):
-    """Validate each flat span record before resolution or public delivery."""
-    from evennia.narrative.render import span_to_dict
+    """Validate each flat span record before resolution or public delivery.
 
-    if len(spans) > MAX_REFS:
+    Field values are read directly from the frozen span dataclass; the field
+    list per span type is cached, so a crowd-sized segment does no per-span
+    ``fields()`` introspection or intermediate dict allocation.
+    """
+    from evennia.narrative.render import _KIND_BY_TYPE
+
+    if len(spans) > _max_refs():
         raise ValueError("render segment has too many spans")
     for span in spans:
-        for name, value in span_to_dict(span).items():
+        span_type = type(span)
+        names = _SPAN_FIELD_NAMES.get(span_type)
+        if names is None:
+            if span_type not in _KIND_BY_TYPE:
+                raise TypeError(f"Unserializable span: {span!r}")
+            names = tuple(item.name for item in fields(span_type))
+            _SPAN_FIELD_NAMES[span_type] = names
+        for name in names:
+            value = getattr(span, name)
             if isinstance(value, str):
-                limit = (
-                    MAX_TAG_CHARS
-                    if name in {"_", "kind", "role", "form", "lang", "channel"}
-                    else MAX_BODY_CHARS
-                )
+                limit = MAX_TAG_CHARS if name in _SPAN_TAG_FIELDS else MAX_BODY_CHARS
                 _validate_text(value, f"span {name}", limit)
             elif isinstance(value, float):
                 if not math.isfinite(value):
@@ -372,9 +417,15 @@ class RenderNode:
     correlation_id: str = ""
     node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     schema: str = RENDER_SCHEMA
+    #: Internal trust flag for :meth:`map_text`/:meth:`prepend_text`: the node
+    #: was built from an already-validated node and only its text changed, so
+    #: the (potentially crowd-sized) span tree does not need re-validation.
+    _validated: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self):
         """Validate resolved content before any client receives it."""
+        if self._validated:
+            return
         for name in ("kind", "msg_type", "schema"):
             _validate_text(getattr(self, name), name, MAX_TAG_CHARS)
         for name in ("node_id", "correlation_id"):
@@ -386,7 +437,7 @@ class RenderNode:
             raise ValueError("RenderNode kind and msg_type must not be empty")
         _validate_text(self.body, "RenderNode body")
         refs = tuple(_coerce_ref(ref) for ref in self.refs)
-        if len(refs) > MAX_REFS:
+        if len(refs) > _max_refs():
             raise ValueError("RenderNode has too many entity references")
         blocks = tuple(self.blocks)
         _validate_blocks(blocks)
@@ -406,7 +457,10 @@ class RenderNode:
 
     def with_refs(self, refs) -> "RenderNode":
         """Return a copy carrying lazily built viewer references."""
-        return replace(self, refs=tuple(refs))
+        coerced = tuple(_coerce_ref(ref) for ref in refs)
+        if len(coerced) > _max_refs():
+            raise ValueError("RenderNode has too many entity references")
+        return replace(self, refs=coerced, _validated=self._validated)
 
     def map_text(self, transform) -> "RenderNode":
         """Transform every visible text leaf and re-derive the flattened body.
@@ -423,9 +477,9 @@ class RenderNode:
             RenderNode: A coherent transformed copy.
         """
         if not self.blocks:
-            return replace(self, body=str(transform(self.body)))
+            return replace(self, body=str(transform(self.body)), _validated=True)
         blocks = tuple(_map_block_text(block, transform) for block in self.blocks)
-        return replace(self, body=flatten_blocks(blocks, self.sep), blocks=blocks)
+        return replace(self, body=flatten_blocks(blocks, self.sep), blocks=blocks, _validated=True)
 
     def prepend_text(self, prefix: str) -> "RenderNode":
         """Prepend text to the first visible leaf and re-derive ``body``."""
@@ -433,7 +487,7 @@ class RenderNode:
         if not prefix:
             return self
         if not self.blocks:
-            return replace(self, body=prefix + self.body)
+            return replace(self, body=prefix + self.body, _validated=True)
         blocks = list(self.blocks)
         for index, block in enumerate(blocks):
             mapped, changed = _prepend_block_text(block, prefix)
@@ -443,7 +497,7 @@ class RenderNode:
         else:
             blocks.insert(0, Line(prefix))
         frozen = tuple(blocks)
-        return replace(self, body=flatten_blocks(frozen, self.sep), blocks=frozen)
+        return replace(self, body=flatten_blocks(frozen, self.sep), blocks=frozen, _validated=True)
 
     def payload(self) -> dict:
         """Return the bounded public wire payload.
@@ -471,11 +525,10 @@ class RenderNode:
         if self.spans is not None:
             from evennia.narrative.render import span_to_dict
 
-            serialized = [[span_to_dict(span) for span in segment] for segment in self.spans]
-            if _contains_forbidden_identity(serialized):
+            if _spans_contain_forbidden_identity(self.spans):
                 data["metadata"] = {**metadata, "structure_redacted": True}
             else:
-                data["spans"] = serialized
+                data["spans"] = [[span_to_dict(span) for span in segment] for segment in self.spans]
         return data
 
     def storage_payload(self) -> dict:
