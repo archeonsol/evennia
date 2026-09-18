@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.244: Bus telemetry and read-ahead
+
+### Performance
+
+- **The bus reader drains up to 32 frames per XREAD.** Reads previously
+  requested a single frame per round trip; a fan-out burst now costs one read
+  per batch. Tunable with `REDIS_BUS_READ_BATCH` (None keeps the module
+  default). Per-frame sequence/origin validation is unchanged, so the
+  fail-closed gap detection still runs for every entry.
+
+### Observability
+
+- **New `evennia_bus_*` Prometheus metrics.** Queue depth and retained bytes
+  (`evennia_bus_outgoing_depth`, `evennia_bus_outgoing_bytes`), published and
+  locally-rejected frame counters (`evennia_bus_published_total`,
+  `evennia_bus_rejected_total{reason}`), and a write-batch histogram
+  (`evennia_bus_write_batch_size`). A saturated or backpressured bus is now
+  visible on the dashboard instead of only in logs.
+
+### Tests
+
+- A publish-flood regression test: a queue-full burst rejects locally, stays
+  online, never fails the transport, and settles to zero frames/bytes once the
+  writer drains. This is the exact shape of the `underspire.243` outage.
+
+### Migration
+
+- None.
+
 ## 6.0.0+underspire.243: Bus throughput and crowd rendering
 
 ### Performance
