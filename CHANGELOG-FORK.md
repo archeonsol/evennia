@@ -25,6 +25,31 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.245: Peer lease tolerance
+
+### Reliability
+
+- **The bus peer lease is configurable (`BUS_HANDSHAKE_TIMEOUT`, default
+  twelve seconds; previously hard-coded at four).** Liveness is answered by
+  once-per-second heartbeats, so a peer whose reactor runs long synchronous
+  game/DB work was declared dead even though the process was alive. During a
+  100-bot run on `underspire.244`, turns of a few seconds produced continuous
+  `peer synchronization lost` / `restored` churn and session reconciliation
+  while both processes were healthy. Real process failure is detected through
+  the Redis connection rather than the lease, so the lease only needs to bound
+  silence, not deliver a prompt verdict.
+- Deployments that prefer the original prompt veto can set
+  `BUS_HANDSHAKE_TIMEOUT = 4.0`.
+
+### Tests
+
+- `test_peer_lease_expires` derives its deadline from the configured lease, and
+  a new `test_timeout_honors_setting` covers the settings override.
+
+### Migration
+
+- None.
+
 ## 6.0.0+underspire.244: Bus telemetry and read-ahead
 
 ### Performance
