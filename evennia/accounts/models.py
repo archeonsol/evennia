@@ -282,15 +282,25 @@ class ControlBinding(SharedMemoryModel):
     @staticmethod
     def _resolve(entry):
         """Resolve a ``[kind, id]`` entry back to a live typeclassed object
-        (``None`` if the row was deleted out from under us)."""
+        (``None`` if the row was deleted out from under us).
+
+        Resolution is cache-first through the idmapper. Focus bodies and the
+        account floor are active, resident rows, and because the binding is a
+        :class:`SharedMemoryModel` every session sees the one shared instance;
+        the idmapper owns invalidation, so no extra caching layer is needed.
+        Only a genuine cache miss (eviction, cold lookup, non-IO-owner context)
+        falls back to the indexed primary-key query.
+        """
         if not entry:
             return None
         kind, pk = entry
         if kind == CONTROL_ACCOUNT:
-            return AccountDB.objects.filter(id=pk).first()
+            cached = AccountDB.get_cached_instance(pk)
+            return cached if cached is not None else AccountDB.objects.filter(id=pk).first()
         from evennia.objects.models import ObjectDB
 
-        return ObjectDB.objects.filter(id=pk).first()
+        cached = ObjectDB.get_cached_instance(pk)
+        return cached if cached is not None else ObjectDB.objects.filter(id=pk).first()
 
     # -- queries ------------------------------------------------------------
     @property

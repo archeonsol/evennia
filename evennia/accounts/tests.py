@@ -9,7 +9,12 @@ from mock import MagicMock, Mock, patch
 
 import evennia
 from evennia.accounts.accounts import AccountSessionHandler, DefaultAccount, DefaultGuest
-from evennia.accounts.models import ControlBinding
+from evennia.accounts.models import (
+    CONTROL_ACCOUNT,
+    CONTROL_OBJECT,
+    AccountDB,
+    ControlBinding,
+)
 from evennia.authorization.policy import Always
 from evennia.authorization.storage import grant_capability
 from evennia.objects.models import ObjectDB
@@ -780,6 +785,42 @@ class TestAccountFocusPushPop(BaseEvenniaTest):
         session.uid = self.account.id
         evennia.SESSION_HANDLER[sessid] = session
         return session
+
+    def test_resolve_prefers_idmapper_cache(self):
+        """Focus resolution must not query when the object is already resident."""
+        ObjectDB.cache_instance(self.char1)
+        AccountDB.cache_instance(self.account)
+        binding = self.session.binding
+
+        with patch.object(
+            ObjectDB.objects, "filter", side_effect=AssertionError("object query issued")
+        ):
+            self.assertIs(binding._resolve([CONTROL_OBJECT, self.char1.id]), self.char1)
+        with patch.object(
+            AccountDB.objects, "filter", side_effect=AssertionError("account query issued")
+        ):
+            self.assertIs(binding._resolve([CONTROL_ACCOUNT, self.account.id]), self.account)
+
+    def test_resolve_falls_back_to_query_on_cache_miss(self):
+        """A cache miss still resolves through the indexed primary-key query."""
+        binding = self.session.binding
+        real_get_cached = ObjectDB.get_cached_instance
+        state = {"missed": False}
+
+        def miss_first(pk):
+            if not state["missed"]:
+                state["missed"] = True
+                return None
+            return real_get_cached(pk)
+
+        with (
+            patch.object(ObjectDB, "get_cached_instance", side_effect=miss_first),
+            patch.object(ObjectDB.objects, "filter", wraps=ObjectDB.objects.filter) as spy,
+        ):
+            resolved = binding._resolve([CONTROL_OBJECT, self.char1.id])
+        self.assertTrue(state["missed"])
+        self.assertIs(resolved, self.char1)
+        self.assertTrue(spy.called)
 
     def test_push_layers_body_and_keeps_identity(self):
         self.account.puppet_object(self.session, self.char2, push=True)
