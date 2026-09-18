@@ -2,6 +2,8 @@
 
 from unittest import TestCase
 
+from django.test import override_settings
+
 from evennia.server.bus_handshake import BusHandshake
 from evennia.server.bus_result import PublicationResult, TransportUnavailable
 
@@ -112,10 +114,25 @@ class TestHandshake(TestCase):
     def test_peer_lease_expires(self):
         """A dead peer closes action admission without PID assumptions."""
         self.connect()
-        self.now += 5
+        self.now += max(peer.timeout for peer in self.peers.values()) + 1
         for peer in self.peers.values():
             peer.tick()
             self.assertNotEqual(peer.state, "ready")
+
+    @override_settings(BUS_HANDSHAKE_TIMEOUT=30)
+    def test_timeout_honors_setting(self):
+        """Deployments can widen the lease for long synchronous turns."""
+        peer = BusHandshake(
+            "portal",
+            send=lambda frame: None,
+            snapshot=lambda: (0, {}),
+            apply=lambda payload: None,
+            state_snapshot=lambda: {},
+            apply_state=lambda payload: None,
+            on_ready=lambda: None,
+            on_unavailable=lambda: None,
+        )
+        self.assertEqual(peer.timeout, 30.0)
 
     def test_delayed_final_ack_cannot_complete_new_exchange(self):
         """Expired confirmation carries no authority over new discovery."""

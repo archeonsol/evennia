@@ -3,6 +3,8 @@
 import time
 from uuid import uuid4
 
+from django.conf import settings
+
 
 class BusHandshake:
     """Negotiate a pair without granting authority to unsolicited discovery.
@@ -29,6 +31,7 @@ class BusHandshake:
     ):
         """Bind peer-specific state operations and a monotonic clock."""
         self.role = role
+        self.timeout = float(getattr(settings, "BUS_HANDSHAKE_TIMEOUT", type(self).timeout))
         self.process = uuid4().hex
         self.epoch = uuid4().hex
         self.state = "disconnected"

@@ -261,6 +261,13 @@ REDIS_BUS_DATA_ENTRIES = None
 REDIS_BUS_DATA_BYTES = None
 REDIS_BUS_WRITE_BATCH = None
 REDIS_BUS_READ_BATCH = None
+# Seconds without a peer heartbeat before the bus handshake declares the peer
+# gone and rebuilds its transport. The original four-second lease was shorter
+# than a healthy reactor can legitimately run synchronous game/DB work, so
+# long turns were misread as dead peers and caused session reconciliation
+# churn. Real process death still fails fast through the Redis connection;
+# this lease only needs to bound silence.
+BUS_HANDSHAKE_TIMEOUT = 12.0
 # Narrative render bound. None keeps the module default (256 spans per segment
 # and 256 entity references per node). Raise it for very crowded scenes, where
 # a room view carries a span per visible character per detail line.
