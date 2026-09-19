@@ -25,6 +25,75 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.250: Off-loop authorization, async movement, load-test telemetry
+
+### Performance
+
+- **Capability checks no longer touch Redis on the action path.**
+  [`authorization/storage.py`](evennia/authorization/storage.py) can prewarm
+  grant, suspension, resource-label, and policy snapshots in the bounded worker
+  pool before rule evaluation, and then require the dispatch to read those local
+  snapshots only (`authorization_snapshot_scope`). Concurrent commands coalesce
+  into one worker batch, so a cold burst (100 bots logging in) shares one
+  refresh per generation window instead of one per command. Shared generation
+  counters still publish cross-process invalidation; a local batch never lowers
+  a generation another batch already observed, and the scope binds to the exact
+  task that entered it so detached runtime roots and child callbacks copied from
+  the dispatch context cannot inherit a requirement their snapshots do not
+  cover. New settings: `AUTHORIZATION_OFFLOOP_SNAPSHOTS` (default `False`, game
+  opt-in) and `AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR` (default `False`).
+- **A snapshot miss degrades to one inline read instead of an error.** A rule
+  may legitimately check a principal or resource outside the prewarmed set.
+  That read now falls back to the ordinary indexed query, increments
+  `evennia_authorization_snapshot_miss_total{kind}`, and logs a bounded warning;
+  setting `AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR = True` restores the strict
+  tripwire for CI. The prewarm retry is bounded at three attempts.
+- **Quell stays authoritative with unflushed attribute state.** The owner-side
+  suppression probe reads the live attribute handler (matching the inline path,
+  including a `@quell` set moments earlier); only when the handler is
+  unavailable does the worker read the stored `db_attrs` row itself, batching by
+  model.
+- **CM1 movement commits the location row off-loop.**
+  [`objects/mixins/movement.py`](evennia/objects/mixins/movement.py) adds
+  `move_to_async`, the live-loop variant of `move_to`: pre-hooks and
+  announcements stay on the owner thread, one optimistic
+  `UPDATE ... WHERE db_location = <expected>` runs in a worker, and the owner
+  adopts the row into the contents caches afterwards. A lost update reports
+  `failed_stage="location_conflict"` instead of overwriting a concurrent move.
+  Veto gates, hook order, announcements, loop detection (same depth-10 give-up
+  as the synchronous setter), and `MoveResult` semantics are unchanged; the
+  CM1 `carry_out_move` rule now awaits it.
+- **Command-completion markers and action-input metrics.**
+  [`commands/cmdhandler.py`](evennia/commands/cmdhandler.py) can emit one
+  out-of-band protocol record (`\x1eEV-COMMAND-DONE outcome=... elapsed_ms=...\x1f`)
+  after the complete action lifecycle, gated by
+  `COMMAND_COMPLETION_MARKERS_ENABLED` (default `False`; normal clients never
+  see it) and only to a real session. `prometheus_metrics` records
+  `evennia_action_input_total`/`_duration_seconds{outcome}` for every typed
+  action and `evennia_authorization_prewarm_total`/`_duration_seconds` for the
+  worker refreshes, so the next load run can separate server time from client
+  silence and watch prewarm cost directly.
+
+### Migration
+
+- None required. `AUTHORIZATION_OFFLOOP_SNAPSHOTS` and
+  `COMMAND_COMPLETION_MARKERS_ENABLED` default off; enabling them only changes
+  where authorization I/O runs and adds the diagnostic marker stream.
+- Rule providers that call `actor.move_to(...)` keep working; only the shipped
+  CM1 traversal rule switched to `move_to_async`. Custom code that overrides
+  `carry_out_move` must keep the async signature if it wraps the base rule.
+
+### Tests
+
+- Engine: 70 authorization tests (task-local scope, miss fallback and strict
+  mode, bounded retry, out-of-order generation installs, live and stored quell
+  resolution, worker coalescing) and 851 actions/commands/objects tests, all
+  passing. The game-side look, staff, movement, teleport, wilderness, and
+  multipuppet suites pass with the off-loop path enabled.
+- The load harness now verifies marker support before driving and drains a late
+  marker after a timeout, so a missing marker setting fails loudly and stale
+  markers cannot be credited to the next command.
+
 ## 6.0.0+underspire.249: Webclient feed routing and refused-login notice
 
 ### Webclient
