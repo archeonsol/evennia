@@ -176,7 +176,7 @@ class TestBoundedIdmapperSweep(SimpleTestCase):
             patch.object(
                 idmapper.clock,
                 "call_later",
-                side_effect=lambda _delay, callback, *args: callback(*args),
+                side_effect=lambda _delay, callback, *args, **kwargs: callback(*args),
             ),
             patch.object(idmapper.logger, "log_trace"),
         ):
@@ -196,7 +196,7 @@ class TestBoundedIdmapperSweep(SimpleTestCase):
         future = concurrent.futures.Future()
         scheduled = []
 
-        def capture(_delay, callback, *args):
+        def capture(_delay, callback, *args, **kwargs):
             scheduled.append((callback, args))
             return type("Handle", (), {"cancel": lambda self: None})()
 
@@ -223,7 +223,7 @@ class TestBoundedIdmapperSweep(SimpleTestCase):
         with patch.object(idmapper.clock, "call_later", return_value=handle) as call_later:
             sweep.schedule()
 
-        call_later.assert_called_once_with(0, sweep._run_scheduled_turn)
+        call_later.assert_called_once_with(0, sweep._run_scheduled_turn, _task_kind="idmapper")
         self.assertIs(sweep.handle, handle)
 
     def test_backing_row_queries_respect_backend_parameter_limit(self):

@@ -230,6 +230,39 @@ class TestGroupedOutput(TestCase):
             self.handler._flush_all_outbuf()
         self.assertEqual(clean.call_count, 2)
 
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=False)
+    def test_unhashable_raw_frame_does_not_abort_the_turn(self):
+        # A set leaf makes the raw-frame key unhashable; the frame must still
+        # ship (grouped alone) instead of dropping the whole turn's output.
+        for session in self.sessions:
+            session.protocol_flags = {"ENCODING": "utf-8"}
+            self.handler._outbuf[session.sessid] = [{"text": "same", "oob": {"names": {"a", "b"}}}]
+        with patch("evennia.server.sessionhandler.evennia") as engine:
+            self.handler._flush_all_outbuf()
+        bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
+        # cleaned frames normalise the set to a list, so they still group
+        bus.send_MsgServer2PortalMany.assert_called_once()
+        bus.send_MsgServer2Portal.assert_not_called()
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=False)
+    def test_unhashable_cleaned_frame_ships_alone(self):
+        # When even the cleaned frame has no safe key (custom cleaner returns
+        # the set unchanged), each session's frame must ship on its own.
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [{"text": "same", "oob": {"names": {"a", "b"}}}]
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(
+                self.handler,
+                "clean_senddata",
+                side_effect=lambda _session, frame: frame,
+            ),
+        ):
+            self.handler._flush_all_outbuf()
+        bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
+        self.assertEqual(bus.send_MsgServer2Portal.call_count, 2)
+        bus.send_MsgServer2PortalMany.assert_not_called()
+
     def test_multicast_rounds_preserve_per_session_order(self):
         for session in self.sessions:
             self.handler._outbuf[session.sessid] = [

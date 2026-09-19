@@ -145,7 +145,9 @@ class BootstrapRunTest(SimpleTestCase):
         # of the bootstrap module's ``evennia`` attribute; patch the real module
         # attributes the local import resolves to.
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
@@ -179,7 +181,9 @@ class BootstrapRunTest(SimpleTestCase):
         service.stopService.side_effect = lambda: order.append("stop")
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
@@ -252,7 +256,9 @@ class BootstrapRunTest(SimpleTestCase):
         loop.run_forever = counted_run_forever
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers", side_effect=install),
             patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
             patch("evennia.server.asyncio_bootstrap._write_pidfile"),
@@ -288,7 +294,9 @@ class BootstrapRunTest(SimpleTestCase):
         service.shutdown.side_effect = RuntimeError("cannot create shutdown task")
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers", side_effect=install),
@@ -321,7 +329,9 @@ class BootstrapRunTest(SimpleTestCase):
         loop.call_soon(loop.stop)
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
             patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
             patch("evennia.server.asyncio_bootstrap._write_pidfile"),
@@ -343,7 +353,9 @@ class BootstrapRunTest(SimpleTestCase):
         service.privilegedStartService.side_effect = RuntimeError("listener failed")
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
@@ -375,7 +387,9 @@ class BootstrapRunTest(SimpleTestCase):
         service.startService.side_effect = RuntimeError("children failed")
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
@@ -415,7 +429,9 @@ class BootstrapRunTest(SimpleTestCase):
             service._shutdown_task = loop.create_task(cleanup())
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
             patch("evennia.server.asyncio_bootstrap._setup_process_logging"),
             patch("evennia.server.asyncio_bootstrap._write_pidfile"),
@@ -439,7 +455,9 @@ class BootstrapRunTest(SimpleTestCase):
         loop.is_closed.return_value = False
 
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),
@@ -473,7 +491,9 @@ class BootstrapRunTest(SimpleTestCase):
         # shadows any patch of the bootstrap module's ``evennia`` attribute, so
         # patch the real module attributes the local import resolves to.
         with (
-            patch("evennia.server.asyncio_bootstrap.asyncio.new_event_loop", return_value=loop),
+            patch(
+                "evennia.server.asyncio_bootstrap.loop_factory.new_process_loop", return_value=loop
+            ),
             patch("evennia.server.asyncio_bootstrap.asyncio.set_event_loop"),
             patch("evennia.server.asyncio_bootstrap.clock.bind_loop"),
             patch("evennia.server.asyncio_bootstrap._install_signal_handlers"),

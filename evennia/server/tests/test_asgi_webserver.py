@@ -30,6 +30,16 @@ class UvicornWebServiceStopTest(SimpleTestCase):
 
 
 class UvicornWebServiceLoopTest(SimpleTestCase):
+    def test_make_loop_delegates_to_shared_factory(self):
+        sentinel = object()
+        with patch(
+            "evennia.server.asgi_webserver.loop_factory.new_process_loop",
+            return_value=sentinel,
+        ) as make_loop:
+            loop = UvicornWebService._make_loop()
+        self.assertIs(loop, sentinel)
+        make_loop.assert_called_once_with()
+
     def test_make_loop_prefers_uvloop_when_installed(self):
         fake_uvloop = MagicMock()
         sentinel = object()
