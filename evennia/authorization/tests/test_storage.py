@@ -313,6 +313,25 @@ class AuthorizationPrewarmTest(TransactionTestCase):
         )
         self.assertEqual(storage_module._shared_generation_cache[cache_key][1], 5)
 
+    @override_settings(AUTHORIZATION_SHARED_INVALIDATION=True)
+    def test_deferred_publish_never_lowers_cached_generation(self):
+        """The deferred path may not drop a higher cached generation."""
+
+        from evennia.authorization import storage as storage_module
+        from evennia.authorization.storage import _generation_cache_key, _publish_generation
+
+        cache_key = _generation_cache_key("resource", "deferred-max")
+        storage_module._shared_generation_cache[cache_key] = (0.0, 5)
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(clock, "is_io_owner", return_value=True),
+            patch.object(defer, "background") as background,
+        ):
+            value = _publish_generation("resource", "deferred-max", 3)
+        self.assertEqual(value, 3)
+        self.assertEqual(storage_module._shared_generation_cache[cache_key][1], 5)
+        background.assert_called_once()
+
     def test_suppression_spec_reads_unflushed_handler_state(self):
         """A quell set moments ago must suppress before the next flush."""
 

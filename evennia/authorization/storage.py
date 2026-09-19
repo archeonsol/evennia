@@ -215,7 +215,11 @@ def _publish_generation(namespace: str, key: str, value: int) -> int:
     if not cached_setting("AUTHORIZATION_SHARED_INVALIDATION", True):
         return value
     cache_key = _generation_cache_key(namespace, key)
-    _shared_generation_cache[cache_key] = (time.monotonic(), value)
+    cached = _shared_generation_cache.get(cache_key)
+    _shared_generation_cache[cache_key] = (
+        time.monotonic(),
+        max(value, cached[1] if cached is not None else value),
+    )
     if invalidation.push_enabled():
         invalidation.start()
     try:
