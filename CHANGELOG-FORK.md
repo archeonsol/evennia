@@ -25,6 +25,54 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.249: Webclient feed routing and refused-login notice
+
+### Webclient
+
+- **Feed tabs track routes live.** `Routing.labels()` read the non-reactive
+  compiled-route cache, so the Feeds panel's `$derived` tab bar computed once
+  at mount: routes added or renamed later got no tab until reload, which read
+  as "the Feeds panel only supports one feed". It now derives from the
+  reactive `routes` ([`routing.svelte.ts`](evennia/web/webclient/client/src/lib/routing.svelte.ts)).
+- **Move-routing acts retroactively.** Routing gated only lines as they
+  arrived, so a move-route added (or toggled) after the fact left every
+  earlier copy in the terminal. `session.append` now records the feed labels
+  each line was filed to; on every route change the scrollback is re-filed,
+  moving claimed lines into their feeds and backfilling any feed they were
+  not already filed to, so a claimed line is never dropped from the game
+  ([`session.svelte.ts`](evennia/web/webclient/client/src/lib/session.svelte.ts)).
+  Media lines stay exempt from pruning, as from routing, and a deleted or
+  renamed route's stale buffer is dropped instead of leaking for the session.
+- Rebuilt `webclient/shell/shell.js` carries the changes.
+
+### Server
+
+- **A refused login now tells the client.** The `at_pre_login` veto closed
+  the socket with no notice, so a resumable shell read the close as a dropped
+  connection and reconnect-looped through the veto forever, re-printing the
+  refusal each cycle. `ServerSessionHandler.login` now sends the `logout` OOB
+  to the vetoing session alone before disconnecting (which flushes it); an
+  account-level send would wrongly reach the account's other live sessions
+  ([`sessionhandler.py`](evennia/server/sessionhandler.py)).
+- The `at_pre_login` docstrings in `accounts.py` and `utils.py` still claimed
+  the hook was not vetoable after the veto contract returned; both now
+  describe the actual behavior.
+
+### Tests
+
+- Four `session.test.ts` cases cover backfill on prune, no double-filing of
+  already-filed lines, filing into a newly claimed feed, and the media
+  exemption; `routing.test.ts` covers label reactivity, per-label filing
+  dedup, claims, buffer drop on route deletion, and sync ordering (540 total
+  vitest). Engine: new `TestLoginVeto` asserts the `logout` frame is sent to
+  the vetoing session before `disconnect`.
+
+### Migration
+
+- None. Game-side vetoes need no change: the engine now emits the client
+  notice. Games that added their own account-level `logout` send on veto
+  should drop it, as it would reach the account's other live tabs.
+
 ## 6.0.0+underspire.248 — Release metadata alignment
 
 ### Packaging
