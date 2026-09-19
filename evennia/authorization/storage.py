@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import timedelta
 from hashlib import sha256
 
@@ -35,6 +38,81 @@ _resource_cache: OrderedDict[str, ResourceSnapshot] = OrderedDict()
 _policy_package_cache: OrderedDict[str, tuple[int, dict[str, object]]] = OrderedDict()
 _suspension_cache: OrderedDict[str, tuple[int, bool, float | None]] = OrderedDict()
 _shared_generation_cache: dict[str, tuple[float, int]] = {}
+_NO_TASK = object()
+_snapshot_scope_owner = contextvars.ContextVar("evennia_authorization_snapshot_owner", default=None)
+_prewarm_task = None
+_prewarm_loop = None
+_pending_prewarm_principals = {}
+_pending_prewarm_resources = {}
+_SNAPSHOT_MISS_WARN_INTERVAL = 60.0
+_snapshot_miss_warned_at: dict[str, float] = {}
+
+
+class AuthorizationSnapshotUnavailable(RuntimeError):
+    """A managed action attempted authorization without a local snapshot."""
+
+
+@contextmanager
+def authorization_snapshot_scope():
+    """Require authorization reads on this task to use local snapshots.
+
+    The scope is bound to the exact task (or the no-task synchronous context)
+    that entered it. Application ContextVars are copied into detached runtime
+    roots and child callbacks (see ``clock._isolated_database_context``), so a
+    scope flag alone would silently propagate the no-I/O requirement into work
+    that outlives the action and lacks its prewarmed snapshots.
+    """
+
+    try:
+        owner = asyncio.current_task()
+    except RuntimeError:
+        owner = None
+    token = _snapshot_scope_owner.set(owner if owner is not None else _NO_TASK)
+    try:
+        yield
+    finally:
+        _snapshot_scope_owner.reset(token)
+
+
+def _snapshot_scope_active() -> bool:
+    """Return whether this exact task is inside an authorization snapshot scope."""
+
+    owner = _snapshot_scope_owner.get()
+    if owner is None:
+        return False
+    try:
+        current = asyncio.current_task()
+    except RuntimeError:
+        current = None
+    if owner is _NO_TASK:
+        return current is None
+    return current is owner
+
+
+def _note_snapshot_miss(kind: str, key: str) -> None:
+    """Record a covered-path miss and warn at a bounded cadence.
+
+    A miss means rule evaluation touched a principal or resource that the
+    prewarm did not cover (or could not refresh). The read falls back to the
+    ordinary inline query unless ``AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR`` asks
+    for the strict tripwire.
+    """
+
+    try:
+        from evennia.server.prometheus_metrics import record_authorization_snapshot_miss
+
+        record_authorization_snapshot_miss(kind)
+    except Exception:
+        pass
+    now = time.monotonic()
+    last = _snapshot_miss_warned_at.get(kind)
+    if last is not None and now - last < _SNAPSHOT_MISS_WARN_INTERVAL:
+        return
+    _snapshot_miss_warned_at[kind] = now
+    logger.log_warn(
+        f"authorization snapshot miss ({kind}): {key}; "
+        "falling back to an inline read for this evaluation"
+    )
 
 
 def _bounded_put(cache: OrderedDict, key, value) -> None:
@@ -67,6 +145,11 @@ def _shared_generation(namespace: str, key: str, local: int) -> int:
     )
     if cached is not None and now - cached[0] < interval:
         return max(local, cached[1])
+    if _snapshot_scope_active():
+        # The action bridge refreshes generations and snapshots before entering
+        # this scope. Never turn an expired poll TTL into reactor-thread Redis
+        # I/O midway through synchronous rule evaluation.
+        return max(local, cached[1] if cached is not None else local)
     try:
         shared = int(cache.get(cache_key, 0) or 0)
     except Exception:
@@ -76,20 +159,35 @@ def _shared_generation(namespace: str, key: str, local: int) -> int:
     return value
 
 
+def _publish_generation_io(cache_key: str) -> int:
+    """Increment one shared counter in a worker-safe callable."""
+
+    cache.add(cache_key, 0, timeout=None)
+    return int(cache.incr(cache_key))
+
+
 def _publish_generation(namespace: str, key: str, value: int) -> int:
     """Publish invalidation without making authorization mutation depend on Redis."""
 
     if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
         return value
     cache_key = _generation_cache_key(namespace, key)
+    _shared_generation_cache[cache_key] = (time.monotonic(), value)
     try:
-        cache.add(cache_key, 0, timeout=None)
-        published = int(cache.incr(cache_key))
+        from evennia.utils import clock, defer
+
+        if clock.loop_running() and clock.is_io_owner():
+            defer.background(_publish_generation_io, cache_key)
+            return value
+    except Exception:
+        logger.log_trace("authorization async invalidation scheduling failed")
+    try:
+        published = _publish_generation_io(cache_key)
     except Exception:
         logger.log_trace("authorization shared invalidation publish failed")
-        published = value
-    _shared_generation_cache[cache_key] = (time.monotonic(), published)
-    return published
+        return value
+    _shared_generation_cache[cache_key] = (time.monotonic(), max(value, published))
+    return max(value, published)
 
 
 def principal_refs(principal) -> tuple[str, ...]:
@@ -158,6 +256,28 @@ _QUELL_DATA = "_d"
 _QUELL_KEY = "_quell"
 
 
+def _authority_source(principal):
+    """Return the object whose attribute document carries the quell flag."""
+
+    if hasattr(type(principal), "puppeteer"):
+        return getattr(principal, "puppeteer", None) or principal
+    return getattr(principal, "account", None) or principal
+
+
+def _document_quell(document) -> bool:
+    """Return the quell flag from a raw JSONB attribute document."""
+
+    if not isinstance(document, dict):
+        return False
+    section = document.get(_QUELL_CATEGORY)
+    if not isinstance(section, dict):
+        return False
+    data = section.get(_QUELL_DATA)
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get(_QUELL_KEY))
+
+
 def _read_quell_document(source) -> bool:
     """Return the quell flag from the principal's stored attribute document.
 
@@ -165,11 +285,11 @@ def _read_quell_document(source) -> bool:
     principal's own row rather than handler state.
 
     Staleness contract: this sees the last flushed document, so a quell set
-    within the current ``ATTRIBUTE_FLUSH_INTERVAL`` (one second by default)
-    may not be visible yet. Acceptable because quell is a voluntary,
-    self-imposed suppression rather than a revocation, and because the
-    alternative -- denying every capability whenever the reader is not the IO
-    owner -- is not fail-closed, it is fail-broken.
+    within the current ``ATTRIBUTE_FLUSH_INTERVAL`` (one second by default) may
+    not be visible yet. Acceptable because quell is a voluntary, self-imposed
+    suppression rather than a revocation, and because the alternative -- denying
+    every capability whenever the reader is not the IO owner -- is not
+    fail-closed, it is fail-broken.
     """
 
     pk = getattr(source, "pk", None)
@@ -179,15 +299,7 @@ def _read_quell_document(source) -> bool:
         row = type(source)._base_manager.filter(pk=pk).values_list("db_attrs", flat=True).first()
     except Exception:  # noqa: BLE001 - a failed read must not deny authority
         return False
-    if not isinstance(row, dict):
-        return False
-    section = row.get(_QUELL_CATEGORY)
-    if not isinstance(section, dict):
-        return False
-    data = section.get(_QUELL_DATA)
-    if not isinstance(data, dict):
-        return False
-    return bool(data.get(_QUELL_KEY))
+    return _document_quell(row)
 
 
 def load_grants(principal) -> GrantSnapshot:
@@ -208,6 +320,12 @@ def load_grants(principal) -> GrantSnapshot:
     ):
         _principal_cache.move_to_end(cache_key)
         return cached
+    if _snapshot_scope_active():
+        if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+            raise AuthorizationSnapshotUnavailable(
+                f"principal snapshot unavailable for {cache_key}"
+            )
+        _note_snapshot_miss("principal", cache_key)
     query = AuthorizationGrant.objects.filter(
         principal_ref__in=refs,
         revoked_at__isnull=True,
@@ -291,6 +409,10 @@ def load_resource(resource) -> ResourceSnapshot:
     if cached is not None and cached.generation == generation:
         _resource_cache.move_to_end(ref)
         return cached
+    if _snapshot_scope_active():
+        if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+            raise AuthorizationSnapshotUnavailable(f"resource snapshot unavailable for {ref}")
+        _note_snapshot_miss("resource", ref)
     labels = _computed_resource_labels(resource, ref)
     labels.update(
         AuthorizationScopeLabel.objects.filter(resource_ref=ref).values_list("label", flat=True)
@@ -675,6 +797,12 @@ def principal_is_suspended(principal) -> bool:
     ):
         _suspension_cache.move_to_end(cache_key)
         return cached[1]
+    if _snapshot_scope_active():
+        if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+            raise AuthorizationSnapshotUnavailable(
+                f"suspension snapshot unavailable for {cache_key}"
+            )
+        _note_snapshot_miss("suspension", cache_key)
     row = (
         AuthorizationPrincipalState.objects.filter(
             principal_ref__in=refs,
@@ -763,6 +891,10 @@ def load_policy(resource, access_type: str):
         _policy_package_cache.move_to_end(ref)
         overrides = cached[1]
     else:
+        if _snapshot_scope_active():
+            if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+                raise AuthorizationSnapshotUnavailable(f"policy snapshot unavailable for {ref}")
+            _note_snapshot_miss("policy", ref)
         overrides = {
             str(operation).lower(): policy_from_data(data)
             for operation, data in AuthorizationPolicyOverride.objects.filter(
@@ -806,11 +938,539 @@ def preload_policy_packages(resources) -> int:
     return len(pending)
 
 
+def _authority_suppressed(principal) -> bool:
+    """Read quell from the live attribute handler without I/O.
+
+    The raw ``db_attrs`` column lags the handler's in-memory document (a quell
+    set moments ago may not be flushed), so the handler is the only source that
+    matches the inline path's immediacy. Falls back to the stored document when
+    the handler cannot be built.
+    """
+
+    source = _authority_source(principal)
+    try:
+        return bool(source.attributes.get("_quell"))
+    except AttributeError:
+        return False
+    except Exception:  # noqa: BLE001 - fall back to the last flushed document
+        return _read_quell_document(source)
+
+
+def _suppression_spec(principal) -> dict:
+    """Describe how quell is resolved, without crossing into the worker.
+
+    The owner thread reads the live handler (matching the inline path exactly,
+    including unflushed quells). Only when the handler is unavailable does the
+    worker read the stored ``db_attrs`` column itself -- plain ORM, no
+    typeclass state -- which reproduces the ``_read_quell_document`` fallback.
+    """
+
+    source = _authority_source(principal)
+    try:
+        return {
+            "known": True,
+            "suppressed": bool(source.attributes.get("_quell")),
+            "label": "",
+            "pk": None,
+        }
+    except Exception:  # noqa: BLE001 - handler unavailable; resolve from the row
+        pass
+    meta = getattr(type(source), "_meta", None)
+    pk = getattr(source, "pk", None)
+    if meta is None or pk is None:
+        # Non-model principals (sessions, test fakes) carry no stored document.
+        return {"known": True, "suppressed": False, "label": "", "pk": None}
+    return {
+        "known": False,
+        "suppressed": False,
+        "label": meta.label_lower,
+        "pk": int(pk),
+    }
+
+
+def _worker_suppression_map(specs) -> dict:
+    """Worker: resolve unresolved quell flags from stored attribute documents."""
+
+    from django.apps import apps
+
+    pending: dict[str, list[tuple[object, int]]] = {}
+    for spec in specs:
+        suppression = spec.get("suppression")
+        if not suppression or suppression["known"] or suppression["pk"] is None:
+            continue
+        pending.setdefault(suppression["label"], []).append((spec["cache_key"], suppression["pk"]))
+    resolved: dict[object, bool] = {}
+    for label, items in pending.items():
+        try:
+            model = apps.get_model(label)
+        except LookupError:
+            continue
+        rows = dict(
+            model._base_manager.filter(pk__in=[pk for _, pk in items]).values_list("pk", "db_attrs")
+        )
+        for cache_key, pk in items:
+            resolved[cache_key] = _document_quell(rows.get(pk))
+    return resolved
+
+
+def _generation_is_fresh(namespace: str, ref: str, now: float) -> tuple[bool, int]:
+    """Return local generation freshness without performing shared-cache I/O."""
+
+    local_map = _principal_generation if namespace == "principal" else _resource_generation
+    local = int(local_map.get(ref, 0))
+    if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
+        return True, local
+    cached = _shared_generation_cache.get(_generation_cache_key(namespace, ref))
+    interval = max(
+        0.1,
+        float(getattr(settings, "AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
+    )
+    if cached is None or now - cached[0] >= interval:
+        return False, local
+    return True, max(local, int(cached[1]))
+
+
+def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bool, dict]:
+    """Build an IO-free snapshot request from owner-thread game objects."""
+
+    now_mono = time.monotonic()
+    now_ts = timezone.now().timestamp()
+    principal_specs = []
+    seen = set()
+    ready = True
+    for principal in principals:
+        if principal is None or id(principal) in seen:
+            continue
+        seen.add(id(principal))
+        refs = principal_refs(principal)
+        cache_key = "|".join(refs) or "anonymous"
+        generations = []
+        generations_fresh = True
+        for ref in refs:
+            fresh, value = _generation_is_fresh("principal", ref, now_mono)
+            generations_fresh = generations_fresh and fresh
+            generations.append(value)
+        generation = max(generations, default=0)
+        grants = _principal_cache.get(cache_key)
+        suspension = _suspension_cache.get(cache_key)
+        grants_valid = bool(
+            grants is not None
+            and grants.generation == generation
+            and (grants.valid_until is None or grants.valid_until > now_ts)
+        )
+        suspension_valid = bool(
+            suspension is not None
+            and suspension[0] == generation
+            and (suspension[2] is None or suspension[2] > now_ts)
+        )
+        ready = ready and generations_fresh and grants_valid and suspension_valid
+        principal_specs.append(
+            {
+                "cache_key": cache_key,
+                "refs": refs,
+                "local_generations": {ref: int(_principal_generation.get(ref, 0)) for ref in refs},
+                "cached_grants_generation": (grants.generation if grants is not None else None),
+                "cached_grants_valid_until": (grants.valid_until if grants is not None else None),
+                "cached_suspension_generation": (suspension[0] if suspension is not None else None),
+                "cached_suspension_valid_until": (
+                    suspension[2] if suspension is not None else None
+                ),
+                "suppression": _suppression_spec(principal) if include_labels else None,
+            }
+        )
+
+    resource_specs = []
+    seen.clear()
+    for resource in resources:
+        if resource is None or id(resource) in seen:
+            continue
+        seen.add(id(resource))
+        try:
+            ref = resource_ref(resource)
+        except Exception:
+            continue
+        fresh, generation = _generation_is_fresh("resource", ref, now_mono)
+        snapshot = _resource_cache.get(ref)
+        policies = _policy_package_cache.get(ref)
+        resource_valid = snapshot is not None and snapshot.generation == generation
+        policy_valid = policies is not None and policies[0] == generation
+        ready = ready and fresh and resource_valid and policy_valid
+        resource_specs.append(
+            {
+                "ref": ref,
+                "local_generation": int(_resource_generation.get(ref, 0)),
+                "cached_resource_generation": (
+                    snapshot.generation if snapshot is not None else None
+                ),
+                "cached_policy_generation": (policies[0] if policies is not None else None),
+                "base_labels": (
+                    tuple(sorted(_computed_resource_labels(resource, ref)))
+                    if include_labels
+                    else ()
+                ),
+            }
+        )
+    return ready, {
+        "principals": principal_specs,
+        "resources": resource_specs,
+        "shared_invalidation": bool(getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True)),
+        "now_ts": now_ts,
+    }
+
+
+def _fetch_authorization_snapshots(request: dict) -> dict:
+    """Worker: refresh generations and load plain authorization rows in batches."""
+
+    now = timezone.now()
+    now_ts = now.timestamp()
+    generation_values = {}
+    generation_updates = []
+    targets = []
+    for spec in request["principals"]:
+        targets.extend(
+            ("principal", ref, local) for ref, local in spec["local_generations"].items()
+        )
+    targets.extend(
+        ("resource", spec["ref"], spec["local_generation"]) for spec in request["resources"]
+    )
+    shared = {}
+    if request["shared_invalidation"] and targets:
+        keys = [_generation_cache_key(namespace, ref) for namespace, ref, _ in targets]
+        try:
+            shared = cache.get_many(keys)
+        except Exception:
+            shared = {}
+    for namespace, ref, local in targets:
+        cache_key = _generation_cache_key(namespace, ref)
+        value = max(int(local), int(shared.get(cache_key, 0) or 0))
+        generation_values[(namespace, ref)] = value
+        generation_updates.append((cache_key, value))
+
+    principal_results = []
+    stale_grant_refs = set()
+    stale_suspension_refs = set()
+    principal_state = []
+    for spec in request["principals"]:
+        generation = max(
+            (generation_values.get(("principal", ref), 0) for ref in spec["refs"]),
+            default=0,
+        )
+        grants_stale = spec["cached_grants_generation"] != generation or (
+            spec["cached_grants_valid_until"] is not None
+            and spec["cached_grants_valid_until"] <= now_ts
+        )
+        suspension_stale = spec["cached_suspension_generation"] != generation or (
+            spec["cached_suspension_valid_until"] is not None
+            and spec["cached_suspension_valid_until"] <= now_ts
+        )
+        if grants_stale:
+            stale_grant_refs.update(spec["refs"])
+        if suspension_stale:
+            stale_suspension_refs.update(spec["refs"])
+        principal_state.append((spec, generation, grants_stale, suspension_stale))
+
+    grant_rows = []
+    if stale_grant_refs:
+        rows = (
+            AuthorizationGrant.objects.filter(
+                principal_ref__in=stale_grant_refs,
+                revoked_at__isnull=True,
+            )
+            .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+            .values(
+                "grant_id",
+                "principal_ref",
+                "capability",
+                "scope_kind",
+                "scope_key",
+                "constraints",
+                "expires_at",
+            )
+        )
+        grant_rows = [
+            {
+                **row,
+                "expires_at": (row["expires_at"].timestamp() if row["expires_at"] else None),
+            }
+            for row in rows
+        ]
+
+    suspension_rows = []
+    if stale_suspension_refs:
+        rows = (
+            AuthorizationPrincipalState.objects.filter(
+                principal_ref__in=stale_suspension_refs,
+                suspended=True,
+            )
+            .filter(models.Q(suspended_until__isnull=True) | models.Q(suspended_until__gt=now))
+            .values("principal_ref", "suspended_until")
+        )
+        suspension_rows = [
+            (
+                row["principal_ref"],
+                row["suspended_until"].timestamp() if row["suspended_until"] else None,
+            )
+            for row in rows
+        ]
+
+    resolved_suppression = _worker_suppression_map(request["principals"])
+    for spec, generation, grants_stale, suspension_stale in principal_state:
+        refs = set(spec["refs"])
+        result = {
+            "cache_key": spec["cache_key"],
+            "generation": generation,
+            "grants_stale": grants_stale,
+            "suspension_stale": suspension_stale,
+        }
+        if grants_stale:
+            suppression = spec.get("suppression") or {}
+            result["grants"] = [row for row in grant_rows if row["principal_ref"] in refs]
+            result["suppressed"] = (
+                bool(suppression.get("suppressed"))
+                if suppression.get("known")
+                else bool(resolved_suppression.get(spec["cache_key"]))
+            )
+        if suspension_stale:
+            expiries = [expiry for ref, expiry in suspension_rows if ref in refs]
+            result["suspended"] = bool(expiries)
+            result["suspended_until"] = None if None in expiries else min(expiries, default=None)
+        principal_results.append(result)
+
+    resource_state = []
+    stale_resource_refs = set()
+    stale_policy_refs = set()
+    for spec in request["resources"]:
+        generation = generation_values.get(("resource", spec["ref"]), 0)
+        resource_stale = spec["cached_resource_generation"] != generation
+        policy_stale = spec["cached_policy_generation"] != generation
+        if resource_stale:
+            stale_resource_refs.add(spec["ref"])
+        if policy_stale:
+            stale_policy_refs.add(spec["ref"])
+        resource_state.append((spec, generation, resource_stale, policy_stale))
+
+    label_rows = []
+    if stale_resource_refs:
+        label_rows = list(
+            AuthorizationScopeLabel.objects.filter(
+                resource_ref__in=stale_resource_refs
+            ).values_list("resource_ref", "label")
+        )
+    policy_rows = []
+    if stale_policy_refs:
+        policy_rows = list(
+            AuthorizationPolicyOverride.objects.filter(
+                resource_ref__in=stale_policy_refs
+            ).values_list("resource_ref", "access_type", "policy")
+        )
+    resource_results = []
+    for spec, generation, resource_stale, policy_stale in resource_state:
+        result = {
+            "ref": spec["ref"],
+            "generation": generation,
+            "resource_stale": resource_stale,
+            "policy_stale": policy_stale,
+        }
+        if resource_stale:
+            result["labels"] = [label for ref, label in label_rows if ref == spec["ref"]]
+            result["base_labels"] = spec["base_labels"]
+        if policy_stale:
+            result["policies"] = [
+                (operation, data) for ref, operation, data in policy_rows if ref == spec["ref"]
+            ]
+        resource_results.append(result)
+    return {
+        "generation_updates": generation_updates,
+        "principals": principal_results,
+        "resources": resource_results,
+    }
+
+
+def _install_authorization_snapshots(result: dict) -> None:
+    """Owner thread: adopt worker primitives into the bounded local caches."""
+
+    refreshed_at = time.monotonic()
+    for cache_key, generation in result["generation_updates"]:
+        # Concurrent prewarms can install out of order; never let an older
+        # in-flight batch lower the generation a newer batch already observed.
+        previous = _shared_generation_cache.get(cache_key)
+        value = int(generation)
+        if previous is not None:
+            value = max(value, int(previous[1]))
+        _shared_generation_cache[cache_key] = (refreshed_at, value)
+    for item in result["principals"]:
+        cache_key = item["cache_key"]
+        generation = int(item["generation"])
+        if item["grants_stale"]:
+            by_capability: dict[str, set[GrantScope]] = {}
+            valid_until = None
+            if not item.get("suppressed"):
+                for grant in item.get("grants", ()):
+                    constraints = dict(grant.get("constraints") or {})
+                    if set(constraints) - {"session_id"} or any(
+                        value is not None and not isinstance(value, (str, int, float, bool))
+                        for value in constraints.values()
+                    ):
+                        logger.log_err(
+                            f"Ignoring malformed authorization grant {grant.get('grant_id')}: "
+                            "invalid constraints"
+                        )
+                        continue
+                    by_capability.setdefault(grant["capability"], set()).add(
+                        GrantScope(
+                            grant["principal_ref"],
+                            grant["scope_kind"],
+                            grant["scope_key"],
+                            tuple(sorted(constraints.items())),
+                        )
+                    )
+                    expiry = grant.get("expires_at")
+                    if expiry is not None:
+                        valid_until = expiry if valid_until is None else min(valid_until, expiry)
+            _bounded_put(
+                _principal_cache,
+                cache_key,
+                GrantSnapshot(
+                    cache_key,
+                    {key: frozenset(values) for key, values in by_capability.items()},
+                    generation,
+                    valid_until,
+                ),
+            )
+        if item["suspension_stale"]:
+            _bounded_put(
+                _suspension_cache,
+                cache_key,
+                (generation, bool(item.get("suspended")), item.get("suspended_until")),
+            )
+    for item in result["resources"]:
+        ref = item["ref"]
+        generation = int(item["generation"])
+        if item["resource_stale"]:
+            labels = set(item.get("base_labels", ()))
+            labels.update(str(label).strip().lower() for label in item.get("labels", ()))
+            _bounded_put(
+                _resource_cache,
+                ref,
+                ResourceSnapshot(ref, ref.split(":", 1)[0], frozenset(labels), generation),
+            )
+        if item["policy_stale"]:
+            overrides = {
+                str(operation).lower(): policy_from_data(data)
+                for operation, data in item.get("policies", ())
+                if data
+            }
+            _bounded_put(_policy_package_cache, ref, (generation, overrides))
+
+
+async def _execute_authorization_prewarm(request: dict) -> bool:
+    """Run one primitive snapshot request and install its result."""
+
+    started = time.perf_counter()
+    try:
+        from evennia.utils import clock, defer
+
+        if clock.loop_running():
+            result = await clock.maybe_await(
+                defer.in_thread(_fetch_authorization_snapshots, request)
+            )
+        else:
+            result = _fetch_authorization_snapshots(request)
+        _install_authorization_snapshots(result)
+        outcome = "refreshed"
+        return True
+    except Exception:
+        outcome = "failed"
+        logger.log_trace("authorization off-loop prewarm failed")
+        return False
+    finally:
+        try:
+            from evennia.server.prometheus_metrics import record_authorization_prewarm
+
+            record_authorization_prewarm(outcome, time.perf_counter() - started)
+        except Exception:
+            pass
+
+
+async def _flush_authorization_prewarm() -> bool:
+    """Coalesce callers from one event-loop turn into one worker batch."""
+
+    global _prewarm_task
+    await asyncio.sleep(0)
+    principals = tuple(_pending_prewarm_principals.values())
+    resources = tuple(_pending_prewarm_resources.values())
+    _pending_prewarm_principals.clear()
+    _pending_prewarm_resources.clear()
+    _, request = _prewarm_request(principals, resources, include_labels=True)
+    try:
+        return await _execute_authorization_prewarm(request)
+    finally:
+        if _prewarm_task is asyncio.current_task():
+            _prewarm_task = None
+
+
+async def prewarm_authorization(principals, resources) -> bool:
+    """Batch-refresh authorization state off the IO owner before rule evaluation."""
+
+    global _prewarm_loop, _prewarm_task
+    if not getattr(settings, "AUTHORIZATION_OFFLOOP_SNAPSHOTS", False):
+        return True
+    principals = tuple(principals)
+    resources = tuple(resources)
+    try:
+        current_task = asyncio.current_task()
+    except RuntimeError:
+        current_task = None
+    if current_task is None:
+        ready, _ = _prewarm_request(principals, resources, include_labels=False)
+        if ready:
+            return True
+        _, request = _prewarm_request(principals, resources, include_labels=True)
+        return await _execute_authorization_prewarm(request)
+    loop = current_task.get_loop()
+    if _prewarm_loop is not loop:
+        _prewarm_loop = loop
+        _prewarm_task = None
+        _pending_prewarm_principals.clear()
+        _pending_prewarm_resources.clear()
+    for _attempt in range(3):
+        ready, _ = _prewarm_request(principals, resources, include_labels=False)
+        if ready:
+            return True
+        for principal in principals:
+            if principal is not None:
+                _pending_prewarm_principals[id(principal)] = principal
+        for resource in resources:
+            if resource is not None:
+                _pending_prewarm_resources[id(resource)] = resource
+        if _prewarm_task is None or _prewarm_task.done():
+            _prewarm_task = loop.create_task(_flush_authorization_prewarm())
+        try:
+            if not await asyncio.shield(_prewarm_task):
+                return False
+        except asyncio.CancelledError:
+            # A reload or test clearing the shared prewarm task must not cancel
+            # the action; only a cancellation of this task itself may propagate.
+            if current_task.cancelling():
+                raise
+            return False
+    return False
+
+
 def clear_authorization_caches() -> None:
     """Clear runtime caches for reloads and deterministic tests."""
 
+    global _prewarm_task
     _principal_cache.clear()
     _resource_cache.clear()
     _policy_package_cache.clear()
     _suspension_cache.clear()
     _shared_generation_cache.clear()
+    _principal_generation.clear()
+    _resource_generation.clear()
+    _pending_prewarm_principals.clear()
+    _pending_prewarm_resources.clear()
+    _snapshot_miss_warned_at.clear()
+    if _prewarm_task is not None and not _prewarm_task.done():
+        _prewarm_task.cancel()
+    _prewarm_task = None

@@ -29,6 +29,11 @@ RENDER_DELIVERY_TOTAL = None
 RENDER_DELIVERY_DURATION_SECONDS = None
 AUTHORIZATION_DECISIONS_TOTAL = None
 AUTHORIZATION_DURATION_SECONDS = None
+AUTHORIZATION_PREWARM_TOTAL = None
+AUTHORIZATION_PREWARM_DURATION_SECONDS = None
+AUTHORIZATION_SNAPSHOT_MISS_TOTAL = None
+ACTION_INPUT_TOTAL = None
+ACTION_INPUT_DURATION_SECONDS = None
 RUNTIME_TASKS_ACTIVE = None
 RUNTIME_TASKS_TOTAL = None
 RUNTIME_DB_SCOPE_CLOSES_TOTAL = None
@@ -61,6 +66,9 @@ def _init_metrics() -> bool:
     global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
     global RENDER_DELIVERY_TOTAL, RENDER_DELIVERY_DURATION_SECONDS
     global AUTHORIZATION_DECISIONS_TOTAL, AUTHORIZATION_DURATION_SECONDS
+    global AUTHORIZATION_PREWARM_TOTAL, AUTHORIZATION_PREWARM_DURATION_SECONDS
+    global AUTHORIZATION_SNAPSHOT_MISS_TOTAL
+    global ACTION_INPUT_TOTAL, ACTION_INPUT_DURATION_SECONDS
     global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
     global RUNTIME_DB_UNMANAGED_TOTAL
     global IDMAPPER_FLUSH_DURATION_SECONDS, IDMAPPER_FLUSH_BATCHES_TOTAL
@@ -165,6 +173,46 @@ def _init_metrics() -> bool:
         "Time spent evaluating one structured authorization decision",
         ("resource_kind",),
         buckets=(0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01),
+    )
+    AUTHORIZATION_PREWARM_TOTAL = Counter(
+        "evennia_authorization_prewarm_total",
+        "Off-loop authorization snapshot prewarms by outcome",
+        ("outcome",),
+    )
+    AUTHORIZATION_PREWARM_DURATION_SECONDS = Histogram(
+        "evennia_authorization_prewarm_duration_seconds",
+        "Time spent awaiting one off-loop authorization snapshot refresh",
+        buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+    )
+    AUTHORIZATION_SNAPSHOT_MISS_TOTAL = Counter(
+        "evennia_authorization_snapshot_miss_total",
+        "Authorization reads that missed the off-loop snapshot and read inline",
+        ("kind",),
+    )
+    ACTION_INPUT_TOTAL = Counter(
+        "evennia_action_input_total",
+        "Complete CM1 input lifecycles by outcome",
+        ("outcome",),
+    )
+    ACTION_INPUT_DURATION_SECONDS = Histogram(
+        "evennia_action_input_duration_seconds",
+        "End-to-end server time for one CM1 input lifecycle",
+        ("outcome",),
+        buckets=(
+            0.0005,
+            0.001,
+            0.0025,
+            0.005,
+            0.01,
+            0.025,
+            0.05,
+            0.1,
+            0.25,
+            0.5,
+            1.0,
+            2.5,
+            5.0,
+        ),
     )
     RUNTIME_TASKS_ACTIVE = Gauge(
         "evennia_runtime_tasks_active",
@@ -338,6 +386,46 @@ def record_authorization_decision(
         AUTHORIZATION_DECISIONS_TOTAL.labels(resource_kind=kind, result=result, reason=reason).inc()
     if AUTHORIZATION_DURATION_SECONDS is not None:
         AUTHORIZATION_DURATION_SECONDS.labels(resource_kind=kind).observe(
+            max(0.0, float(duration_seconds))
+        )
+
+
+def record_authorization_prewarm(outcome: str, duration_seconds: float) -> None:
+    """Record one awaited off-loop authorization refresh."""
+
+    if not _init_metrics():
+        return
+    normalized = outcome if outcome in {"refreshed", "failed"} else "failed"
+    if AUTHORIZATION_PREWARM_TOTAL is not None:
+        AUTHORIZATION_PREWARM_TOTAL.labels(outcome=normalized).inc()
+    if AUTHORIZATION_PREWARM_DURATION_SECONDS is not None:
+        AUTHORIZATION_PREWARM_DURATION_SECONDS.observe(max(0.0, float(duration_seconds)))
+
+
+def record_authorization_snapshot_miss(kind: str) -> None:
+    """Record one authorization read that missed its prewarmed snapshot."""
+
+    if not _init_metrics():
+        return
+    normalized = kind if kind in {"principal", "resource", "suspension", "policy"} else "other"
+    if AUTHORIZATION_SNAPSHOT_MISS_TOTAL is not None:
+        AUTHORIZATION_SNAPSHOT_MISS_TOTAL.labels(kind=normalized).inc()
+
+
+def record_action_input(outcome: str, duration_seconds: float) -> None:
+    """Record one complete typed-action input lifecycle."""
+
+    if not _init_metrics():
+        return
+    normalized = (
+        outcome
+        if outcome in {"succeeded", "blocked", "aborted", "no_rules", "consumed", "error"}
+        else "error"
+    )
+    if ACTION_INPUT_TOTAL is not None:
+        ACTION_INPUT_TOTAL.labels(outcome=normalized).inc()
+    if ACTION_INPUT_DURATION_SECONDS is not None:
+        ACTION_INPUT_DURATION_SECONDS.labels(outcome=normalized).observe(
             max(0.0, float(duration_seconds))
         )
 

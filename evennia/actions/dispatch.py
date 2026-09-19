@@ -37,6 +37,7 @@ dispatch for timing/instrumentation.
 
 import time
 from collections import defaultdict
+from contextlib import nullcontext
 
 from django.utils.translation import gettext as _
 
@@ -387,16 +388,46 @@ async def _dispatch_with_signals(action, actor, raw_string, session, engine, cal
     elif isinstance(action, NoInputAction):
         pass
 
-    for mw in _middlewares:
-        try:
-            mw.before_dispatch(action, actor, context)
-        except Exception:
-            from evennia.utils import logger
+    from django.conf import settings
 
-            logger.log_trace()
+    snapshot_scope = nullcontext()
+    if getattr(settings, "AUTHORIZATION_OFFLOOP_SNAPSHOTS", False):
+        from evennia.authorization.storage import (
+            authorization_snapshot_scope,
+            prewarm_authorization,
+        )
+
+        principals = [
+            getattr(actor, "effective", None),
+            getattr(actor, "character", None),
+            getattr(actor, "account", None),
+            getattr(actor, "session", None),
+        ]
+        location = getattr(actor, "location", None)
+        resources = [*principals, *context.providers, *getattr(action, "targets", ())]
+        if location is not None:
+            resources.append(location)
+            resources.extend(list(getattr(location, "contents", None) or ()))
+        await prewarm_authorization(principals, resources)
+        snapshot_scope = authorization_snapshot_scope()
 
     try:
-        trace = await engine.dispatch(action, actor, context, record_phases=False)
+        with snapshot_scope:
+            for mw in _middlewares:
+                try:
+                    mw.before_dispatch(action, actor, context)
+                except Exception:
+                    from evennia.utils import logger
+
+                    logger.log_trace()
+            trace = await engine.dispatch(action, actor, context, record_phases=False)
+            for mw in _middlewares:
+                try:
+                    mw.after_dispatch(action, actor, context, trace)
+                except Exception:
+                    from evennia.utils import logger
+
+                    logger.log_trace()
     except Exception as exc:
         from traceback import format_exc
 
@@ -410,14 +441,6 @@ async def _dispatch_with_signals(action, actor, raw_string, session, engine, cal
             traceback_text=format_exc(),
         )
         raise
-
-    for mw in _middlewares:
-        try:
-            mw.after_dispatch(action, actor, context, trace)
-        except Exception:
-            from evennia.utils import logger
-
-            logger.log_trace()
 
     on_command_post.send_robust(
         sender=type(action),

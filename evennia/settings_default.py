@@ -768,6 +768,14 @@ AUTHORIZATION_PERMISSION_MIGRATION = {
 # per interval; production should use a shared Redis cache backend.
 AUTHORIZATION_SHARED_INVALIDATION = True
 AUTHORIZATION_GENERATION_POLL_SECONDS = 2.0
+# Games using the async CM1 bridge may prewarm authorization state in a worker
+# and require synchronous rule evaluation to consume only local snapshots.
+# A read that misses the prewarm falls back to an inline query by default so a
+# gap degrades to one slow evaluation instead of a player-visible error; the
+# miss is counted as evennia_authorization_snapshot_miss_total. Set this True
+# in CI to make every covered-path gap fail loudly instead.
+AUTHORIZATION_OFFLOOP_SNAPSHOTS = False
+AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR = False
 # Log attribute flush batch sizes every N fires of the flush-attributes
 # system (0 = off). Uses attribute_metrics.maybe_log_flush_metrics.
 ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60
@@ -808,6 +816,9 @@ LOOK_ATTR_PREFETCH_ENABLED = True
 REACTOR_STALL_WARNING_MS = 200
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
+# Diagnostic protocol record emitted after the complete CM1 input lifecycle.
+# Disabled for ordinary clients; load environments opt in explicitly.
+COMMAND_COMPLETION_MARKERS_ENABLED = False
 # --- Tier 1E: reload / startup scheduling ---
 # Batch cached at_post_load() calls (entities per reactor turn).
 AT_INIT_BATCH_SIZE = 50
