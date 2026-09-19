@@ -84,6 +84,23 @@ def _output_frame_key(value):
     return (type(value).__name__, value)
 
 
+def _safe_frame_key(value):
+    """Return a usable grouping/cache key, or ``None`` when none can be built.
+
+    A structural key can be constructed and still be unhashable (a ``set`` or
+    dict-view leaf, a custom object with a raising ``__hash__``), and raw
+    frames additionally pass through values cleaning would have normalised.
+    Callers must treat ``None`` as "deliver this frame alone" rather than
+    hashing it; one bad frame must never abort a whole flush turn.
+    """
+    try:
+        key = _output_frame_key(value)
+        hash(key)
+    except Exception:
+        return None
+    return key
+
+
 def _contains_bytes(value):
     """Return whether cleaning *value* may depend on a session encoding."""
     if isinstance(value, bytes):
@@ -1010,10 +1027,7 @@ class ServerSessionHandler(SessionHandler):
         cleaner = getattr(self.clean_senddata, "__func__", None)
         if cleaner is not SessionHandler.clean_senddata:
             return None
-        try:
-            return _output_frame_key(frame)
-        except (TypeError, ValueError):
-            return None
+        return _safe_frame_key(frame)
 
     @staticmethod
     def _record_clean_duration(started):
@@ -1074,7 +1088,11 @@ class ServerSessionHandler(SessionHandler):
                         _watch.tap(session, "out", frame)
                     except Exception:
                         log_trace()
-                key = _output_frame_key(frame)
+                key = _safe_frame_key(frame)
+                if key is None:
+                    # No safe equality key: group this frame alone by identity
+                    # so it still ships this turn instead of aborting the rest.
+                    key = ("ungrouped", id(frame))
                 group = groups.get(key)
                 if group is None:
                     groups[key] = (frame, [session])
