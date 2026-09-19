@@ -116,7 +116,8 @@ def _init_metrics() -> bool:
     )
     ATTR_FLUSH_DURATION_SECONDS = Histogram(
         "evennia_attribute_flush_duration_seconds",
-        "Time spent in flush_all_dirty",
+        "Time spent in flush_all_dirty by caller kind",
+        ("source",),
         buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
     )
     LOCATION_CMDSET_CACHE_HIT_TOTAL = Counter(
@@ -328,7 +329,7 @@ def record_attribute_flush(
     if backends and ATTR_FLUSH_BACKENDS_TOTAL is not None:
         ATTR_FLUSH_BACKENDS_TOTAL.inc(backends)
     if duration_seconds is not None and ATTR_FLUSH_DURATION_SECONDS is not None:
-        ATTR_FLUSH_DURATION_SECONDS.observe(duration_seconds)
+        ATTR_FLUSH_DURATION_SECONDS.labels(source=source).observe(max(0.0, float(duration_seconds)))
 
 
 def record_idmapper_flush(
