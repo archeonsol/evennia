@@ -725,6 +725,35 @@ class TestMoveResult(BaseEvenniaTest):
         self.assertIn(self.obj1, self.room1.contents)
         self.assertNotIn(self.obj1, self.room2.contents)
 
+    def test_async_move_rejects_adoption_when_the_row_was_replaced(self):
+        from evennia.utils import clock, defer
+
+        race_room = create.create_object(DefaultObject, key="race-room")
+
+        def raced(worker, *args, **kwargs):
+            changed = worker(*args, **kwargs)
+            # A concurrent owner-thread write lands after our conditional
+            # update: the row no longer holds the destination we set.
+            self.obj1.location = race_room
+            return changed
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=raced),
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=True)).result()
+
+        self.assertFalse(result)
+        self.assertEqual(result.failed_stage, "location_conflict")
+        self.assertIs(self.obj1.location, race_room)
+        self.assertNotIn(self.obj1, self.room2.contents)
+        self.assertEqual(
+            ObjectDB.objects.filter(pk=self.obj1.pk)
+            .values_list("db_location_id", flat=True)
+            .first(),
+            race_room.pk,
+        )
+
     def test_async_move_allows_chains_deeper_than_the_guarded_depth(self):
         """The sync loop guard gives up past depth 10; the async one must too."""
         from evennia.utils import clock, defer

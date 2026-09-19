@@ -419,6 +419,13 @@ class MovementMixin:
             if changed != 1:
                 return False
 
+            # An owner-thread write (pipelined `home`, admin @tel, a script
+            # teleport) can land between the worker's UPDATE and this
+            # resumption; adopting then would point memory and both contents
+            # caches at a destination the row no longer holds.
+            if getattr(self, "db_location_id", None) != source_id:
+                return False
+
             # Resume on the owner thread. Assign the FK descriptor without
             # saving, then reconcile the same caches as ObjectDB.location.
             self.db_location = location
