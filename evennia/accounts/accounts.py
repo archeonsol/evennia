@@ -2540,10 +2540,12 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         Called every time the user logs in, just before the actual
         login-state is set.
 
-        **Not vetoable.** Return value is ignored. Authentication has
-        already succeeded by this point; this hook exists for pre-login
-        side effects (state warming, audit logs), not gating. Block at
-        the authenticate stage if you need to refuse a login.
+        **Vetoable.** A falsy (non-None) return refuses the login: the
+        session handler sends the client-facing ``logout`` OOB to stop
+        resumable clients from reconnect-looping, then disconnects the
+        session. This override is responsible for messaging the human
+        reason (send it immediately; the disconnect flushes the output
+        buffer first). ``None``/``True`` allow the login.
 
         Args:
             **kwargs (dict): Arbitrary, optional arguments for users

@@ -91,9 +91,10 @@ def is_veto(result):
 
     - Command pre-hooks `at_pre_parse` and `at_pre_cmd` use the inverse
       convention (truthy aborts) and predate these rules.
-    - Lifecycle pre-hooks `at_pre_unpuppet` and `at_pre_login` are pure
-      notifications; their return value is ignored. These run during
-      session teardown / login where vetoing would strand state.
+    - Lifecycle pre-hook `at_pre_unpuppet` is a pure notification; its
+      return value is ignored. It runs during session teardown, where
+      vetoing would strand state. `at_pre_login` is vetoable: a falsy
+      return disconnects the session.
 
     Args:
         result: The return value of a pre-hook call.

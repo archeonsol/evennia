@@ -53,6 +53,33 @@ class TestDisconnectFlushesOutbuf(TestCase):
         self.assertTrue(bus.send_MsgServer2Portal.called)
 
 
+class TestLoginVeto(TestCase):
+    """A refused login must tell the resumable shell, not just close the socket.
+
+    Without the ``logout`` OOB the webclient reads the close as a drop and
+    reconnects, re-hitting the veto forever; the send goes to the vetoing
+    session alone so the account's other live sessions are untouched.
+    """
+
+    def test_veto_sends_logout_before_disconnecting(self):
+        handler = ServerSessionHandler()
+        manager = Mock()
+        session = Mock(sessid=1, logged_in=False)
+        session.msg.side_effect = lambda **kw: manager.msg(**kw)
+        account = Mock()
+        account.at_pre_login.return_value = False
+        handler[1] = session
+        with patch.object(
+            handler, "disconnect", side_effect=lambda *a, **kw: manager.disconnect(*a, **kw)
+        ):
+            handler.login(session, account, testmode=True)
+        # The frame must ship while the session can still be flushed.
+        names = [c[0] for c in manager.mock_calls if c[0]]
+        self.assertEqual(names, ["msg", "disconnect"])
+        manager.msg.assert_called_once_with(logout=("login refused",))
+        manager.disconnect.assert_called_once_with(session, reason="Login refused.")
+
+
 class TestOutputOrder(TestCase):
     """Coalescing preserves order and the options of each text run."""
 

@@ -601,6 +601,13 @@ class ServerSessionHandler(SessionHandler):
         # is signaled separately via at_failed_login, so a veto here is a
         # deliberate refusal (banned account, IP block, etc.).
         if is_veto(account.at_pre_login()):
+            # Tell the shell the session ended on purpose: a bare socket
+            # close reads as a dropped connection and a resumable client
+            # reconnects, re-hitting the veto forever. Emitted here, to the
+            # vetoing session alone, because an account-level send would
+            # reach that account's other live sessions too. disconnect()
+            # flushes this frame before the socket closes.
+            session.msg(logout=("login refused",))
             self.disconnect(session, reason="Login refused.")
             # If this was the only session for the account, undo is_connected.
             if not self.sessions_from_account(account):
