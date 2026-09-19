@@ -63,6 +63,8 @@ triggers.init();
 keybinds.init();
 panelPrefs.init();
 routing.init();
+// A route turned to MOVE retroactively claims lines already on screen.
+routing.setOnSync(() => session.pruneMoved());
 notify.init();
 compose.init();
 // The preview is a real (silent) command, so it goes out on the command line
