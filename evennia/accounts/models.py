@@ -137,7 +137,11 @@ class AccountDB(TypedObject, AbstractUser):
         Setter. Allows for self.name = value. Stores as a comma-separated
         string.
         """
-        _SA(self, "db_cmdset_storage", ",".join(str(val).strip() for val in make_iter(value)))
+        _SA(
+            self,
+            "db_cmdset_storage",
+            ",".join(str(val).strip() for val in make_iter(value)),
+        )
         _GA(self, "save")()
 
     # @cmdset_storage.deleter
@@ -326,23 +330,14 @@ class ControlBinding(SharedMemoryModel):
         """True if ``obj`` is a body anywhere in the focus stack."""
         return self._entry_for(obj) in self.db_focus_stack
 
-    # -- DB-authoritative reads (cross-session race guard) ------------------
+    # -- live shared-instance reads (cross-session race guard) --------------
     def current_generation(self):
-        """The generation straight from the DB, so another session's bump on a
-        *different* in-memory instance of this row is seen. ``None`` if the row
-        was deleted. Cheap: a single indexed-PK ``values_list``."""
-        return type(self).objects.filter(pk=self.pk).values_list("db_generation", flat=True).first()
+        """Return the generation from the process-wide idmapper instance."""
+        return self.db_generation if self.pk else None
 
     def live_contains(self, obj):
-        """True if ``obj`` is on the *persisted* stack (re-read from the DB),
-        not just this instance's possibly-stale copy. ``False`` if the row is
-        gone."""
-        fresh = (
-            type(self).objects.filter(pk=self.pk).values_list("db_focus_stack", flat=True).first()
-        )
-        if not fresh:
-            return False
-        return self._entry_for(obj) in fresh
+        """Return whether ``obj`` remains on the live shared focus stack."""
+        return bool(self.pk) and self.contains(obj)
 
     # -- mutations (each bumps generation + saves) --------------------------
     def push(self, body):

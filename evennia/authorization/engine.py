@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping
+
+from evennia.utils.fast_ids import new_runtime_id
 
 from .policy import (
     AllOf,
@@ -73,7 +74,7 @@ class AuthorizationDecision:
     failed_requirements: tuple[str, ...] = ()
     matched_scopes: tuple[str, ...] = ()
     public_reason: str = "Access denied."
-    correlation_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    correlation_id: str = field(default_factory=new_runtime_id)
 
 
 def _matching_scopes(

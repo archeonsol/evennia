@@ -200,6 +200,18 @@ class AuthorizationPrewarmTest(TransactionTestCase):
         self.assertEqual(len(requests[0]["principals"]), 2)
         self.assertEqual(len(requests[0]["resources"]), 2)
 
+    def test_prewarm_metrics_distinguish_wait_from_ready_cache(self):
+        principal = FakePrincipal()
+        resource = FakeResource()
+        clear_authorization_caches()
+
+        with patch("evennia.server.prometheus_metrics.record_authorization_prewarm_wait") as record:
+            self.assertTrue(asyncio.run(prewarm_authorization((principal,), (resource,))))
+            self.assertEqual(record.call_args.args[0], "waited")
+            record.reset_mock()
+            self.assertTrue(asyncio.run(prewarm_authorization((principal,), (resource,))))
+            self.assertEqual(record.call_args.args[0], "ready")
+
     def test_snapshot_miss_falls_back_to_an_inline_read(self):
         """A coverage gap degrades to one slow read instead of an error."""
 

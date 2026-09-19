@@ -32,7 +32,7 @@ def _flush_attr_writes():
     """
     from evennia.typeclasses.attributes import flush_all_dirty
 
-    flush_all_dirty()
+    flush_all_dirty(source="barrier")
 
 
 def _jsonb_match_pks(queryset, key, category=None, value=_UNSET):

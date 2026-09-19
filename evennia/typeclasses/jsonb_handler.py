@@ -95,10 +95,7 @@ from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
 from django.db.models import F, Model, QuerySet
 from twisted.internet.defer import Deferred
 
-from evennia.typeclasses.attribute_context import (
-    current_model_save_scope,
-    model_save_active,
-)
+from evennia.typeclasses.attribute_context import current_model_save_scope, model_save_active
 from evennia.typeclasses.attributes import IAttributeBackend, InMemoryAttribute
 from evennia.typeclasses.jsonb_util import from_jsonb, to_jsonb
 
@@ -258,6 +255,7 @@ class JsonbRowState:
         "dirty_since",
         "flush_failures",
         "generation",
+        "mutation_serial",
         "path_generations",
         "pending_checked",
         "pending_blocked",
@@ -283,6 +281,7 @@ class JsonbRowState:
         self.dirty_since = None
         self.flush_failures = 0
         self.generation = 0
+        self.mutation_serial = 0
         self.path_generations = {}
         self.pending_checked = False
         self.pending_blocked = False
@@ -294,6 +293,7 @@ class JsonbRowState:
 
     def mark_dirty(self):
         """Retain this row strongly until its volatile intent is durable."""
+        self.mutation_serial += 1
         if not self.dirty:
             self.volatile_baseline = deepcopy(self.durable_document)
             self.dirty_since = time.monotonic()
@@ -307,6 +307,16 @@ class JsonbRowState:
         self.flush_failures = 0
         if not _row_has_pending_entries(self.key, strict=False):
             _STRONG_ROW_STATES.pop(self.key, None)
+
+    def mark_head_rewrite(self):
+        """Record an owner-side durable-head rewrite for stale-outcome checks.
+
+        Async flush adoption compares :attr:`mutation_serial` against the
+        snapshot it captured. Every path that rewrites ``durable_document``
+        on the owner thread must call this, or a worker outcome captured
+        earlier could adopt over a newer head and clear its dirtiness.
+        """
+        self.mutation_serial += 1
 
     def dirty_age(self):
         """Return the continuous volatile dirty age in seconds."""
@@ -385,6 +395,31 @@ def discard_jsonb_row_states():
     """Discard process-local JSONB row state during test teardown only."""
     _STRONG_ROW_STATES.clear()
     _ROW_STATES.clear()
+
+
+def attribute_revision(obj):
+    """Return a stable revision for one object's Attribute document.
+
+    View caches can key on this value: it changes whenever the visible
+    document is rewritten or a mutation dirties the row. It is intentionally
+    opaque (a tuple) and process-local.
+
+    Args:
+        obj: A model instance owning a JSONB Attribute row.
+
+    Returns:
+        tuple or None: ``(generation, mutation_serial)``, or ``None`` when the
+        object has no JSONB row state (foreign backend or unavailable
+        handler). Callers must treat ``None`` as "revision unavailable" and
+        skip caching rather than storing it as a revision.
+    """
+    try:
+        state = obj.attributes.backend._row_state
+    except Exception:
+        return None
+    if state is None:
+        return None
+    return state.generation, state.mutation_serial
 
 
 def _mark_row_missing(state, *, register=True):
@@ -563,6 +598,7 @@ def _reconcile_pending_remote(state, remote):
         state.durable_document = deepcopy(remote)
         state.visible_document = deepcopy(visible)
         state.volatile_baseline = deepcopy(remote)
+        state.mark_head_rewrite()
         if visible == remote:
             state.mark_clean()
     else:
@@ -570,6 +606,7 @@ def _reconcile_pending_remote(state, remote):
         state.durable_document = deepcopy(remote)
         state.visible_document = deepcopy(remote)
         state.volatile_baseline = deepcopy(remote)
+        state.mark_head_rewrite()
         state.mark_clean()
     state.pending_checked = True
     try:
@@ -826,6 +863,11 @@ def _resolve_model_save_outcomes(state):
         if scope.status == "rolled_back":
             for name, value in snapshot.items():
                 setattr(state, name, deepcopy(value))
+            # The rollback rewrites the durable head; keep the mutation serial
+            # monotonic (it is not part of the snapshot) so an in-flight async
+            # flush outcome can never adopt over the restored state as if
+            # nothing happened.
+            state.mark_head_rewrite()
             restored = True
     state.model_save_snapshots = list(reversed(remaining))
     if not restored:
@@ -891,6 +933,26 @@ def _three_way_merge(baseline, local, remote):
     if local is _MISSING and remote is _MISSING:
         return _MISSING
     raise JsonbWriteConflict("Attribute document changed concurrently at the same path.")
+
+
+def _apply_local_delta(baseline, local, durable):
+    """Rebase owner-thread edits made after a flush snapshot onto its result."""
+    if _same(local, baseline):
+        return _clone(durable)
+    if baseline is _MISSING and isinstance(local, Mapping) and isinstance(durable, Mapping):
+        baseline = {}
+    if all(isinstance(value, Mapping) for value in (baseline, local, durable)):
+        merged = {}
+        for key in set(baseline) | set(local) | set(durable):
+            value = _apply_local_delta(
+                baseline.get(key, _MISSING),
+                local.get(key, _MISSING),
+                durable.get(key, _MISSING),
+            )
+            if value is not _MISSING:
+                merged[key] = value
+        return merged
+    return _clone(local)
 
 
 def _spool_dir():
@@ -1122,6 +1184,7 @@ def _append_state_delta_locked(state):
     )
     state.durable_document = deepcopy(state.visible_document)
     state.volatile_baseline = deepcopy(state.durable_document)
+    state.mark_head_rewrite()
     state.mark_clean()
     _STRONG_ROW_STATES[state.key] = state
 
@@ -1320,6 +1383,7 @@ def reclaim_spooled_writes():
                     else:
                         state.visible_document = deepcopy(last_committed)
                         state.volatile_baseline = deepcopy(last_committed)
+                    state.mark_head_rewrite()
                     try:
                         _sync_live_backends(state, invalidate=True)
                     except Exception:
@@ -1910,6 +1974,7 @@ class JsonbAttributeBackend(IAttributeBackend):
             state.durable_document = deepcopy(document)
             state.visible_document = deepcopy(document)
             state.volatile_baseline = deepcopy(document)
+            state.mark_head_rewrite()
             state.mark_clean()
             try:
                 _sync_live_backends(state, invalidate=True)
@@ -2087,6 +2152,7 @@ def _persist_row_state_locked(state, *, allow_spool):
         state.durable_document = deepcopy(final)
         state.visible_document = deepcopy(final)
         state.volatile_baseline = deepcopy(final)
+        state.mark_head_rewrite()
         state.mark_clean()
         try:
             _sync_live_backends(state, invalidate=final != local)
@@ -2094,6 +2160,265 @@ def _persist_row_state_locked(state, *, allow_spool):
             _quarantine_cache_sync(state)
             return FlushResult(ok=True, error=AttributePostCommitError([err]))
         return FlushResult(ok=True)
+
+
+@dataclass(frozen=True)
+class _AsyncFlushSnapshot:
+    """Owner-thread capture consumed by the periodic persistence worker."""
+
+    key: tuple
+    alias: str
+    model: type
+    pk: int
+    baseline: dict
+    local: dict
+    durable: dict
+    mutation_serial: int
+    flush_failures: int
+
+
+@dataclass(frozen=True)
+class _AsyncFlushOutcome:
+    """Plain worker result adopted back on the IO owner."""
+
+    key: tuple
+    status: str
+    final: dict | None = None
+    error_type: str = ""
+    error_message: str = ""
+
+
+def _prepare_async_row_flushes():
+    """Capture immutable dirty-row snapshots without handing game state to workers."""
+    _require_io_thread("JSONB asynchronous flush preparation")
+    if protected_mutation_active():
+        raise AttributeUpdateUsageError(
+            "Attribute query barriers may not run inside blocking_update callbacks."
+        )
+
+    snapshots = []
+    failed = 0
+    for state in sorted(dirty_jsonb_row_states(), key=lambda item: item.key):
+        try:
+            _resolve_model_save_outcomes(state)
+            if _has_user_transaction(connections[state.alias]):
+                raise AttributeUpdateUsageError(
+                    "JSONB Attribute persistence requires ownership of the outer transaction."
+                )
+            _ensure_pending_checked(state)
+            if state.pending_blocked:
+                raise AttributeUpdateUnavailable(
+                    "JSONB Attribute state is quarantined until recovery or process restart."
+                )
+        except AttributeUpdateError:
+            failed += 1
+            continue
+        snapshots.append(
+            _AsyncFlushSnapshot(
+                key=state.key,
+                alias=state.alias,
+                model=state.model,
+                pk=state.pk,
+                baseline=deepcopy(state.volatile_baseline),
+                local=deepcopy(state.visible_document),
+                durable=deepcopy(state.durable_document),
+                mutation_serial=state.mutation_serial,
+                flush_failures=state.flush_failures,
+            )
+        )
+    return tuple(snapshots), failed
+
+
+def _persist_row_snapshot_worker(snapshot):
+    """Persist one immutable snapshot; runs in a worker and touches no live object."""
+    try:
+        with _spool_row_lock(snapshot.key):
+            if _list_row_entries(snapshot.key):
+                return _AsyncFlushOutcome(
+                    snapshot.key,
+                    "failed",
+                    error_type="AttributeUpdateUnavailable",
+                    error_message="durable Attribute deltas are pending",
+                )
+            try:
+                with transaction.atomic(using=snapshot.alias):
+                    connection = connections[snapshot.alias]
+                    if connection.vendor not in ("postgresql", "mysql", "sqlite"):
+                        raise AttributeUpdateUnavailable(
+                            f"blocking JSONB updates do not support database vendor "
+                            f"{connection.vendor!r}"
+                        )
+                    manager = snapshot.model._base_manager.using(snapshot.alias)
+                    if connection.vendor == "sqlite":
+                        updated = manager.filter(pk=snapshot.pk).update(db_attrs=F("db_attrs"))
+                        if updated != 1:
+                            return _AsyncFlushOutcome(snapshot.key, "row_missing")
+                    row = (
+                        manager.select_for_update()
+                        .filter(pk=snapshot.pk)
+                        .values("db_attrs")
+                        .first()
+                    )
+                    if row is None:
+                        return _AsyncFlushOutcome(snapshot.key, "row_missing")
+                    remote = row["db_attrs"] or {}
+                    final = _three_way_merge(snapshot.baseline, snapshot.local, remote)
+                    updated = manager.filter(pk=snapshot.pk).update(db_attrs=final)
+                    if updated != 1:
+                        return _AsyncFlushOutcome(snapshot.key, "row_missing")
+            except JsonbWriteConflict as err:
+                return _AsyncFlushOutcome(
+                    snapshot.key,
+                    "conflict",
+                    error_type=type(err).__name__,
+                    error_message=str(err),
+                )
+            except Exception as err:
+                attempts = snapshot.flush_failures + 1
+                if attempts >= JsonbAttributeBackend._FLUSH_FAIL_LIMIT:
+                    try:
+                        _write_spool_payload(
+                            snapshot.key,
+                            "DELTA",
+                            snapshot.durable,
+                            snapshot.local,
+                        )
+                    except Exception as spool_err:
+                        return _AsyncFlushOutcome(
+                            snapshot.key,
+                            "failed",
+                            error_type=type(spool_err).__name__,
+                            error_message=str(spool_err),
+                        )
+                    return _AsyncFlushOutcome(snapshot.key, "spooled", final=snapshot.local)
+                return _AsyncFlushOutcome(
+                    snapshot.key,
+                    "failed",
+                    error_type=type(err).__name__,
+                    error_message=str(err),
+                )
+    except Exception as err:
+        return _AsyncFlushOutcome(
+            snapshot.key,
+            "failed",
+            error_type=type(err).__name__,
+            error_message=str(err),
+        )
+    return _AsyncFlushOutcome(snapshot.key, "ok", final=final)
+
+
+def _persist_row_snapshots_worker(snapshots):
+    """Worker batch entry point returning plain immutable outcomes."""
+    return tuple(_persist_row_snapshot_worker(snapshot) for snapshot in snapshots)
+
+
+def _set_async_durable_head(state, snapshot, durable, *, spooled):
+    """Adopt a worker-confirmed durable head while preserving later live edits.
+
+    A worker outcome can be stale by the time it is adopted: the owner thread
+    kept running and may have committed through a synchronous flush, a
+    protected update, a rollback rebase, a spool replay, or a cache reload.
+    ``mutation_serial`` tracks those writes and the durable-head comparison is
+    a belt-and-braces guard. When the head moved, the older worker result is
+    never adopted over it: the live document is rebased on the newer head and
+    left dirty so the next flush reconciles.
+    """
+    visible_before = deepcopy(state.visible_document)
+    changed_during_flush = state.mutation_serial != snapshot.mutation_serial
+    head_moved = state.durable_document != snapshot.durable
+
+    if head_moved:
+        # A newer owner-side writer advanced the head; keep it.
+        durable = state.durable_document
+    else:
+        state.durable_document = deepcopy(durable)
+        if not spooled:
+            state.committed_document = deepcopy(durable)
+
+    if changed_during_flush or head_moved:
+        visible = _apply_local_delta(snapshot.local, visible_before, durable)
+        state.visible_document = deepcopy(visible)
+        state.volatile_baseline = deepcopy(durable)
+        if head_moved and not spooled:
+            # The worker commit may or may not predate the newer head; force
+            # one reconciling flush so memory and the database cannot diverge.
+            state.dirty = True
+        else:
+            state.dirty = visible != durable
+    else:
+        state.visible_document = deepcopy(durable)
+        state.volatile_baseline = deepcopy(durable)
+        state.dirty = False
+
+    if state.dirty:
+        state.dirty_since = state.dirty_since or time.monotonic()
+        _STRONG_ROW_STATES[state.key] = state
+    elif spooled:
+        _STRONG_ROW_STATES[state.key] = state
+    else:
+        state.mark_clean()
+    state.mark_head_rewrite()
+
+    if state.visible_document != visible_before:
+        try:
+            _sync_live_backends(state, invalidate=True)
+        except Exception:
+            _quarantine_cache_sync(state)
+
+
+def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
+    """Apply worker outcomes on the IO owner and return row-count tallies."""
+    from evennia.utils import logger
+
+    _require_io_thread("JSONB asynchronous flush adoption")
+    by_key = {snapshot.key: snapshot for snapshot in snapshots}
+    flushed = spooled = 0
+    failed = int(preparation_failures)
+    for outcome in outcomes:
+        snapshot = by_key[outcome.key]
+        state = _existing_row_state(outcome.key)
+        if state is None:
+            if outcome.status == "ok":
+                flushed += 1
+            elif outcome.status == "spooled":
+                spooled += 1
+            else:
+                failed += 1
+            continue
+        if outcome.status == "ok":
+            _set_async_durable_head(state, snapshot, outcome.final or {}, spooled=False)
+            flushed += 1
+        elif outcome.status == "spooled":
+            _set_async_durable_head(state, snapshot, outcome.final or {}, spooled=True)
+            spooled += 1
+        elif outcome.status == "row_missing":
+            _mark_row_missing(state)
+            failed += 1
+        elif outcome.status == "conflict":
+            logger.log_warn(
+                f"JsonbAttributeBackend: refusing stale conflicting write for pk={state.pk}."
+            )
+            failed += 1
+        else:
+            if state.dirty and state.durable_document == snapshot.durable:
+                state.flush_failures = max(state.flush_failures, snapshot.flush_failures + 1)
+            logger.log_err(
+                f"JsonbAttributeBackend worker flush failed for pk={state.pk}: "
+                f"{outcome.error_type}: {outcome.error_message}"
+            )
+            failed += 1
+    return {"flushed": flushed, "spooled": spooled, "failed": failed}
+
+
+async def flush_jsonb_rows_async():
+    """Persist dirty JSONB rows off-reactor and adopt results on the IO owner."""
+    from evennia.utils import defer
+
+    snapshots, preparation_failures = _prepare_async_row_flushes()
+    if not snapshots:
+        return {"flushed": 0, "spooled": 0, "failed": preparation_failures}
+    outcomes = await defer.in_thread(_persist_row_snapshots_worker, snapshots)
+    return _adopt_async_row_flushes(snapshots, outcomes, preparation_failures)
 
 
 @dataclass(frozen=True)
@@ -2361,6 +2686,7 @@ def _rebase_after_rollback(state, remote, staged):
     state.durable_document = deepcopy(remote)
     state.visible_document = deepcopy(staged)
     state.volatile_baseline = deepcopy(remote)
+    state.mark_head_rewrite()
     state.dirty = staged != remote
     if state.dirty:
         state.dirty_since = state.dirty_since or time.monotonic()
@@ -2534,6 +2860,7 @@ def blocking_update(backend, mutator, *, locked_fields=()):
                 state.durable_document = deepcopy(final)
                 state.visible_document = deepcopy(final)
                 state.volatile_baseline = deepcopy(final)
+                state.mark_head_rewrite()
                 state.mark_clean()
                 _sync_live_backends(state, invalidate=True)
             except Exception as err:

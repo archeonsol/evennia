@@ -568,6 +568,21 @@ class TestRuntimeCallbackDatabaseScope(_AsyncioLoopMixin, SimpleTestCase):
         self.assertEqual(called, ["done"])
         close_all.assert_called_once_with()
 
+    def test_call_later_records_explicit_task_kind(self):
+        called = []
+
+        async def drive():
+            with patch.object(clock, "_record_runtime_task") as record:
+                clock.call_later(0, called.append, "done", _task_kind="output")
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                return list(record.call_args_list)
+
+        records = self._loop.run_until_complete(drive())
+        self.assertEqual(called, ["done"])
+        self.assertEqual(records[0].args[:2], ("output", "started"))
+        self.assertEqual(records[-1].args[:2], ("output", "completed"))
+
     def test_run_callback_detaches_parent_wrapper(self):
         async def drive():
             parent = connections["default"]

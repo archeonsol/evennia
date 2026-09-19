@@ -13,6 +13,7 @@ from evennia.actions.action import Action, GameObject
 from evennia.actions.actor import Actor
 from evennia.actions.dispatch import (
     ProfilingMiddleware,
+    _authorization_resources,
     clear_middlewares,
     register_middleware,
     try_action_dispatch,
@@ -163,6 +164,19 @@ class TestRouting(unittest.TestCase):
     def test_empty_line_handled_by_engine(self):
         handled = _dispatch(self.actor, "", self.parser)
         self.assertTrue(handled)
+
+    def test_authorization_prewarm_includes_destination_room_contents(self):
+        destination_occupant = object()
+        destination = type("Destination", (), {"contents": [destination_occupant]})()
+        exit_obj = type("Exit", (), {"destination": destination})()
+        action = Kick(target=exit_obj)
+        context = type("Context", (), {"providers": [self.char]})()
+
+        principals, resources = _authorization_resources(action, self.actor, context)
+
+        self.assertIn(self.char, principals)
+        self.assertIn(destination, resources)
+        self.assertIn(destination_occupant, resources)
 
 
 # --- fail-closed feedback (dispatch honesty) ---------------------------------

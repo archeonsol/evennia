@@ -1,5 +1,6 @@
 """Failure escalation for scheduled attribute persistence."""
 
+import asyncio
 from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
@@ -18,7 +19,7 @@ class TestFlushFailureEscalation(SimpleTestCase):
         )
         counters.start()
         self.addCleanup(counters.stop)
-        self.flush = self._patch("_flush_all_dirty")
+        self.flush = self._patch("_flush_all_dirty_async")
         self.metrics = self._patch("maybe_log_flush_metrics")
         self.backlog = self._patch("maybe_warn_pending_dirty")
         self.logger = self._patch("logger")
@@ -52,11 +53,12 @@ class TestFlushFailureEscalation(SimpleTestCase):
                 engine_systems._consecutive_flush_failures = 0
                 self.flush.return_value = stats
                 self.logger.reset_mock()
-                engine_systems._run_flush(None)
+                asyncio.run(engine_systems._run_flush(None))
                 self.assertEqual(engine_systems._consecutive_flush_failures, 1)
                 self.logger.log_err.assert_called_once()
                 self.assertIn(
-                    f"{stats['failed']} undurable rows", self.logger.log_err.call_args.args[0]
+                    f"{stats['failed']} undurable rows",
+                    self.logger.log_err.call_args.args[0],
                 )
                 self.logger.log_trace.assert_not_called()
 
@@ -68,7 +70,7 @@ class TestFlushFailureEscalation(SimpleTestCase):
             self._stats(failed=1),
         ]
         for _ in range(3):
-            engine_systems._run_flush(None)
+            asyncio.run(engine_systems._run_flush(None))
         self.assertEqual(engine_systems._consecutive_flush_failures, 3)
         self.logger.log_trace.assert_called_once()
         criticals = [
@@ -85,7 +87,7 @@ class TestFlushFailureEscalation(SimpleTestCase):
         critical_fires = []
         for fire in range(1, 26):
             self.logger.reset_mock()
-            engine_systems._run_flush(None)
+            asyncio.run(engine_systems._run_flush(None))
             errors = [c.args[0] for c in self.logger.log_err.call_args_list]
             self.assertEqual(sum(not line.startswith("CRITICAL:") for line in errors), 1)
             if any(line.startswith("CRITICAL:") for line in errors):
@@ -94,17 +96,21 @@ class TestFlushFailureEscalation(SimpleTestCase):
 
     def test_durable_and_empty_batches_reset_streak(self):
         """Persisted, spooled, and empty batches all break a failure streak."""
-        for success in (self._stats(persisted=2), self._stats(spooled=2), self._stats()):
+        for success in (
+            self._stats(persisted=2),
+            self._stats(spooled=2),
+            self._stats(),
+        ):
             with self.subTest(success=success):
                 engine_systems._consecutive_flush_failures = 2
                 self.flush.return_value = success
                 self.logger.reset_mock()
-                engine_systems._run_flush(None)
+                asyncio.run(engine_systems._run_flush(None))
                 self.assertEqual(engine_systems._consecutive_flush_failures, 0)
                 self.logger.log_err.assert_not_called()
                 self.logger.log_trace.assert_not_called()
                 self.flush.return_value = self._stats(failed=1)
-                engine_systems._run_flush(None)
+                asyncio.run(engine_systems._run_flush(None))
                 self.assertEqual(engine_systems._consecutive_flush_failures, 1)
                 self.logger.log_err.assert_called_once()
 
@@ -116,7 +122,7 @@ class TestFlushFailureEscalation(SimpleTestCase):
         batches = [self._stats(persisted=1), self._stats(failed=1)]
         self.flush.side_effect = batches
         for _ in batches:
-            engine_systems._run_flush(None)
+            asyncio.run(engine_systems._run_flush(None))
         self.assertEqual(
             observed.mock_calls,
             [
@@ -136,7 +142,7 @@ class TestFlushFailureEscalation(SimpleTestCase):
                 self.flush.return_value = self._stats(persisted=1)
                 self.logger.reset_mock()
                 helper.side_effect = RuntimeError("monitoring failure")
-                engine_systems._run_flush(None)
+                asyncio.run(engine_systems._run_flush(None))
                 helper.side_effect = None
                 self.assertEqual(engine_systems._consecutive_flush_failures, 3)
                 self.logger.log_trace.assert_called_once()

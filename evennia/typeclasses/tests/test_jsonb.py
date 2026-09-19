@@ -30,11 +30,7 @@ from django.test.utils import CaptureQueriesContext
 from twisted.internet.defer import Deferred
 
 from evennia.typeclasses import jsonb_handler
-from evennia.typeclasses.attributes import (
-    AttributeHandler,
-    discard_dirty_backends,
-    flush_all_dirty,
-)
+from evennia.typeclasses.attributes import AttributeHandler, discard_dirty_backends, flush_all_dirty
 from evennia.typeclasses.jsonb_handler import (
     AttributePostCommitError,
     AttributeUpdateConflict,
@@ -603,6 +599,109 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
             type(self.obj1).objects.filter(pk=self.obj1.pk).values_list("db_attrs", flat=True).get()
         )
         self.assertEqual(document["~"]["_d"]["durable"], 7)
+
+    def test_async_snapshot_rebases_edits_made_while_worker_runs(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots, preparation_failures = jsonb_handler._prepare_async_row_flushes()
+        self.assertEqual(preparation_failures, 0)
+        snapshots = tuple(
+            snapshot for snapshot in snapshots if snapshot.key == handler.backend._row_state.key
+        )
+        self.assertEqual(len(snapshots), 1)
+
+        handler.add("later", 2)
+        remote = deepcopy(self.obj1.db_attrs or {})
+        remote.setdefault("~", {}).setdefault("_d", {})["remote"] = 3
+        type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(tallies, {"flushed": 1, "spooled": 0, "failed": 0})
+        self.assertEqual(handler.get("captured"), 1)
+        self.assertEqual(handler.get("later"), 2)
+        self.assertEqual(handler.get("remote"), 3)
+        self.assertTrue(handler.backend._dirty)
+
+        flush_all_dirty()
+        document = (
+            type(self.obj1).objects.filter(pk=self.obj1.pk).values_list("db_attrs", flat=True).get()
+        )
+        self.assertEqual(document["~"]["_d"], {"captured": 1, "later": 2, "remote": 3})
+
+    def _capture_async_snapshot(self, handler):
+        snapshots, preparation_failures = jsonb_handler._prepare_async_row_flushes()
+        self.assertEqual(preparation_failures, 0)
+        snapshots = tuple(
+            snapshot for snapshot in snapshots if snapshot.key == handler.backend._row_state.key
+        )
+        self.assertEqual(len(snapshots), 1)
+        return snapshots
+
+    def _database_attrs(self):
+        return (
+            type(self.obj1).objects.filter(pk=self.obj1.pk).values_list("db_attrs", flat=True).get()
+        )
+
+    def test_async_adoption_does_not_regress_blocking_update_head(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots = self._capture_async_snapshot(handler)
+
+        handler.blocking_update(lambda attrs: attrs.add("protected", 2))
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(tallies, {"flushed": 1, "spooled": 0, "failed": 0})
+        self.assertEqual(handler.get("captured"), 1)
+        self.assertEqual(handler.get("protected"), 2)
+        self.assertTrue(handler.backend._dirty)
+
+        flush_all_dirty()
+        self.assertEqual(self._database_attrs()["~"]["_d"], {"captured": 1, "protected": 2})
+
+    def test_async_adoption_does_not_regress_sync_flush_head(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots = self._capture_async_snapshot(handler)
+
+        handler.add("barrier", 2)
+        flush_all_dirty()
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(handler.get("captured"), 1)
+        self.assertEqual(handler.get("barrier"), 2)
+        self.assertTrue(handler.backend._dirty)
+
+        flush_all_dirty()
+        self.assertEqual(self._database_attrs()["~"]["_d"], {"captured": 1, "barrier": 2})
+
+    def test_async_adoption_keeps_row_strong_when_spool_intent_remains(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots = self._capture_async_snapshot(handler)
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+
+        state = handler.backend._row_state
+        with tempfile.TemporaryDirectory() as spool, override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+            jsonb_handler._write_spool_payload(
+                state.key, "DELTA", state.durable_document, state.visible_document
+            )
+            jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+            self.assertIn(state.key, jsonb_handler._STRONG_ROW_STATES)
+
+    def test_attribute_revision_advances_on_dirtying_and_head_writes(self):
+        baseline = jsonb_handler.attribute_revision(self.obj1)
+        self.assertIsNotNone(baseline)
+
+        self.obj1.attributes.add("revision_probe", 1)
+        dirty = jsonb_handler.attribute_revision(self.obj1)
+        self.assertNotEqual(baseline, dirty)
+
+        self.obj1.attributes.backend.flush_dirty()
+        flushed = jsonb_handler.attribute_revision(self.obj1)
+        self.assertNotEqual(dirty, flushed)
 
     def test_conflicting_handlers_fail_closed_before_cleaning(self):
         first = AttributeHandler(self.obj1, JsonbAttributeBackend)

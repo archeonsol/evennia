@@ -25,6 +25,78 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.252 — Reactor hot-path follow-up
+
+### Performance
+
+- **The one-second Attribute maintenance flush no longer performs PostgreSQL
+  work on the reactor.** [`attributes.py`](evennia/typeclasses/attributes.py)
+  and [`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py) capture immutable
+  dirty-row snapshots on the owner thread, persist them through the bounded
+  worker pool, and reconcile outcomes back on the owner. Run 5 recorded 556
+  flushes and 21.8 seconds of flush wall time over 600 seconds; the game sets
+  `ATTRIBUTE_FLUSH_INTERVAL = 1`, so this moves almost all of that measured
+  database work off the live loop. Query barriers and shutdown remain
+  synchronous because their correctness contract requires durable completion.
+- **Grouped byte-free output now shares base protocol cleaning.**
+  [`sessionhandler.py`](evennia/server/sessionhandler.py) reuses one cleaned
+  result for identical raw frames in the same reactor turn when outgoing
+  FuncParser evaluation is disabled. Byte payloads, enabled inline functions,
+  and custom cleaner overrides remain per session because their result may
+  depend on session state. A homogeneous 100-recipient text broadcast now
+  performs one base clean instead of 100 before the `.251` multicast step.
+- **Hot-path runtime identifiers use a random process prefix plus a monotonic
+  counter.** [`fast_ids.py`](evennia/utils/fast_ids.py) replaces repeated
+  `uuid4()` calls for authorization decisions, narrative plans/nodes, and the
+  downstream multipuppet event seam while preserving opaque, process-unique
+  string IDs.
+- **Authorization and control reads stay local.** Control-generation checks use
+  the idmapper singleton rather than polling durable state, and action prewarm
+  includes a resolved movement destination and its occupants so arrival hooks
+  and the destination look remain inside the local snapshot scope. Dynamic
+  game-defined `destination` and `contents` properties are guarded so a raising
+  property cannot break dispatch.
+
+### JSONB correctness and cache API
+
+- Async adoption now tracks every owner-side durable-head rewrite as well as
+  ordinary dirty mutations. A worker result captured before a blocking update,
+  synchronous barrier, rollback rebase, spool replay, or reload cannot replace
+  the newer head or clear its dirty intent; the live document is rebased and a
+  reconciling flush remains pending. Model-save rollback keeps the serial
+  monotonic, and clean state is released only when no durable spool entry still
+  owns the row.
+- [`attribute_revision`](evennia/typeclasses/jsonb_handler.py) is the public
+  engine contract for game-side view caches. It changes on visible document
+  mutations and durable-head rewrites and returns `None` when no safe revision
+  is available, which tells callers to skip caching rather than risk stale
+  output.
+
+### Observability
+
+- Attribute flush runs now report bounded `tick`, `barrier`, `shutdown`, and
+  `manual` caller labels. Authorization metrics distinguish an already-ready
+  snapshot from an action that awaited refresh. One in 64 render calls samples
+  plan resolution, universal transforms, and output cleaning. Runtime callback
+  counters distinguish output, Redis transport, and idmapper work from the
+  former generic pool.
+
+### Migration
+
+- No database migration. Games importing `attribute_revision` require `.252`
+  or newer; update the engine pin before deploying the corresponding room-cache
+  change. Restart Server and Portal together as required by the `.251` grouped
+  bus protocol.
+
+### Tests
+
+- 443 focused engine tests pass across JSONB durability, authorization,
+  narrative delivery, grouped output, Redis transport, scheduling, actions,
+  runtime IDs, and metrics.
+- 278 downstream game tests pass across room rendering, perception, psychosis,
+  movement, wilderness, and multipuppet relays. All touched Python files pass
+  Ruff format and import checks.
+
 ## 6.0.0+underspire.251: Grouped Portal delivery
 
 ### Performance

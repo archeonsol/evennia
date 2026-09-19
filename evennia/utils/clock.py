@@ -40,9 +40,12 @@ _RUNTIME_TASK_KINDS = frozenset(
         "activity",
         "command",
         "job",
+        "idmapper",
+        "output",
         "service",
         "system",
         "warmup",
+        "transport",
         "generic",
         "test",
     }
@@ -468,7 +471,7 @@ def _log_task_exception_from_exception(exc: BaseException) -> None:
     log_err(f"Unhandled error in scheduled coroutine:\n{_format_exc_traceback(exc)}")
 
 
-def call_later(seconds, fn, *args, **kwargs):
+def call_later(seconds, fn, *args, _task_kind="generic", **kwargs):
     """Schedule ``fn(*args, **kwargs)`` once, ``seconds`` from now.
 
     Returns:
@@ -482,12 +485,12 @@ def call_later(seconds, fn, *args, **kwargs):
         fn,
         args,
         kwargs,
-        "generic",
+        _task_kind,
         context=_isolated_database_context(),
     )
 
 
-def call_from_thread(fn, *args, **kwargs):
+def call_from_thread(fn, *args, _task_kind="generic", **kwargs):
     """Run ``fn`` on the reactor/loop thread from a worker thread (thread-safe)."""
     loop = _get_loop()
     return loop.call_soon_threadsafe(
@@ -495,7 +498,7 @@ def call_from_thread(fn, *args, **kwargs):
         fn,
         args,
         kwargs,
-        "generic",
+        _task_kind,
         context=_isolated_database_context(),
     )
 

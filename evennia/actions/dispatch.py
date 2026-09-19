@@ -38,6 +38,7 @@ dispatch for timing/instrumentation.
 import time
 from collections import defaultdict
 from contextlib import nullcontext
+from inspect import getattr_static
 
 from django.utils.translation import gettext as _
 
@@ -93,6 +94,50 @@ def clear_middlewares():
 def get_middlewares():
     """The current middleware chain (live list)."""
     return _middlewares
+
+
+def _authorization_resources(action, actor, context):
+    """Collect the bounded resource graph needed by one authorization scope.
+
+    Movement resolves an exit before dispatch, but its destination room and
+    occupants are not ordinary source-room providers. Include that one hop so
+    arrival hooks and the automatic destination look do not fall back to live
+    authorization storage reads after the snapshot scope starts.
+    """
+    principals = [
+        getattr(actor, "effective", None),
+        getattr(actor, "character", None),
+        getattr(actor, "account", None),
+        getattr(actor, "session", None),
+    ]
+    resources = [*principals, *context.providers, *getattr(action, "targets", ())]
+    location = getattr(actor, "location", None)
+    if location is not None:
+        resources.append(location)
+        resources.extend(list(getattr(location, "contents", None) or ()))
+
+    initial = tuple(resources)
+    for resource in initial:
+        if resource is None:
+            continue
+        try:
+            getattr_static(resource, "destination")
+        except AttributeError:
+            continue
+        try:
+            destination = getattr(resource, "destination", None)
+        except Exception:
+            # A game-defined destination property must never break dispatch;
+            # it simply does not contribute to the prewarm graph.
+            continue
+        if destination is None:
+            continue
+        resources.append(destination)
+        try:
+            resources.extend(list(getattr(destination, "contents", None) or ()))
+        except Exception:
+            continue
+    return principals, resources
 
 
 class ProfilingMiddleware(DispatchMiddleware):
@@ -183,7 +228,15 @@ async def try_action_dispatch(
     disambig = _active_disambiguation(actor)
     if disambig is not None and disambig.pending_raw is not None:
         trace = await _resolve_disambiguation(
-            called_by, raw_string, session, actor, disambig, engine, parser, callertype, **kwargs
+            called_by,
+            raw_string,
+            session,
+            actor,
+            disambig,
+            engine,
+            parser,
+            callertype,
+            **kwargs,
         )
         return trace
 
@@ -308,7 +361,15 @@ def _fail_closed_fallback(action, actor, trace, raw_string):
 
 
 async def _resolve_disambiguation(
-    called_by, raw_string, session, actor, state, engine, parser, callertype=None, **kwargs
+    called_by,
+    raw_string,
+    session,
+    actor,
+    state,
+    engine,
+    parser,
+    callertype=None,
+    **kwargs,
 ):
     """Resolve a pending disambiguation from the player's choice line."""
     choice = _parse_choice(raw_string, state.candidates, looker=getattr(actor, "character", None))
@@ -351,7 +412,11 @@ async def _dispatch_with_signals(action, actor, raw_string, session, engine, cal
     t0 = time.monotonic()
 
     on_command_pre.send_robust(
-        sender=type(action), cmd=action, caller=caller, session=session, trace_id=trace_id
+        sender=type(action),
+        cmd=action,
+        caller=caller,
+        session=session,
+        trace_id=trace_id,
     )
 
     from .parser import NoMatchAction
@@ -397,17 +462,7 @@ async def _dispatch_with_signals(action, actor, raw_string, session, engine, cal
             prewarm_authorization,
         )
 
-        principals = [
-            getattr(actor, "effective", None),
-            getattr(actor, "character", None),
-            getattr(actor, "account", None),
-            getattr(actor, "session", None),
-        ]
-        location = getattr(actor, "location", None)
-        resources = [*principals, *context.providers, *getattr(action, "targets", ())]
-        if location is not None:
-            resources.append(location)
-            resources.extend(list(getattr(location, "contents", None) or ()))
+        principals, resources = _authorization_resources(action, actor, context)
         await prewarm_authorization(principals, resources)
         snapshot_scope = authorization_snapshot_scope()
 

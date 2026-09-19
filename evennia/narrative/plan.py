@@ -24,7 +24,7 @@ shell session are two renderings of one resolution rather than two pipelines.
 
 from __future__ import annotations
 
-import uuid
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
@@ -56,6 +56,7 @@ from evennia.narrative.rendernode import (
     _validate_text,
     flatten_blocks,
 )
+from evennia.utils.fast_ids import new_runtime_id
 
 __all__ = [
     "RenderPlan",
@@ -77,7 +78,7 @@ _LOOKUP = None
 
 def new_correlation_id() -> str:
     """Return a fresh id tying every viewer's rendering of one event together."""
-    return uuid.uuid4().hex
+    return new_runtime_id()
 
 
 def set_span_resolver(resolver):
@@ -166,7 +167,7 @@ class RenderPlan:
     subject_id: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     correlation_id: str = field(default_factory=new_correlation_id)
-    plan_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    plan_id: str = field(default_factory=new_runtime_id)
 
     def __post_init__(self):
         """Validate canonical fields and structure before viewer resolution."""
@@ -240,7 +241,7 @@ class RenderPlan:
             subject_id=data.get("subject_id"),
             metadata=dict(data.get("metadata") or {}),
             correlation_id=str(data.get("correlation_id") or ""),
-            plan_id=str(data.get("plan_id") or uuid.uuid4().hex),
+            plan_id=str(data.get("plan_id") or new_runtime_id()),
         )
 
 
@@ -266,7 +267,12 @@ def _block_storage(block, span_to_dict):
     if isinstance(block, ListBlock):
         return {"type": "list", "items": list(block.items), "ordered": block.ordered}
     if isinstance(block, SystemBlock):
-        return {"type": "system", "text": block.text, "level": block.level, "code": block.code}
+        return {
+            "type": "system",
+            "text": block.text,
+            "level": block.level,
+            "code": block.code,
+        }
     data = {
         "type": "paragraph" if isinstance(block, Paragraph) else "line",
         "text": getattr(block, "text", ""),
@@ -518,7 +524,14 @@ def deliver(
 
     target = list(sessions) if sessions is not None else _sessions(viewer)
     wants_refs = any(narrative_mode(session) != MODE_OFF for session in target)
+    resolve_started = time.perf_counter()
     node = resolve(plan, viewer, with_refs=wants_refs, extras=extras)
+    try:
+        from evennia.server.prometheus_metrics import record_render_phase
+
+        record_render_phase("resolve", time.perf_counter() - resolve_started)
+    except Exception:
+        pass
     # A game may attach a perspective relay (borrowed sight, remote sensorium)
     # to the perceiving object. Invoke it once at the plan boundary, before
     # protocol fan-out, so text/nodes/both clients cannot duplicate or bypass
@@ -566,6 +579,7 @@ def deliver_resolved(
     from evennia.narrative.pipeline import DROP_DELIVERY, transforms
     from evennia.narrative.rendernode import deliver_node
 
+    transform_started = time.perf_counter()
     ctx = {"from_obj": from_obj, **(context or {})}
     ctx["options"] = options
     if not ctx.get("hooks_applied"):
@@ -601,6 +615,12 @@ def deliver_resolved(
                 from evennia.utils import logger
 
                 logger.log_trace("narrative delivery mirror failed")
+    try:
+        from evennia.server.prometheus_metrics import record_render_phase
+
+        record_render_phase("transform", time.perf_counter() - transform_started)
+    except Exception:
+        pass
     return deliver_node(
         node,
         viewer,

@@ -13,6 +13,7 @@ There are two similar but separate stores of sessions:
 
 """
 
+import time
 from codecs import decode as codecs_decode
 
 from django.conf import settings
@@ -23,13 +24,21 @@ from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.console import watch as _watch
 from evennia.server.portal import amp
 from evennia.server.service_registry import IMMEDIATE_RESULT
-from evennia.server.signals import (SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
-                                    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
-                                    SIGNAL_ACCOUNT_POST_LOGIN,
-                                    SIGNAL_ACCOUNT_POST_LOGOUT)
+from evennia.server.signals import (
+    SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
+    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
+    SIGNAL_ACCOUNT_POST_LOGIN,
+    SIGNAL_ACCOUNT_POST_LOGOUT,
+)
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import (callables_from_module, class_from_module,
-                                 delay, is_iter, is_veto, make_iter)
+from evennia.utils.utils import (
+    callables_from_module,
+    class_from_module,
+    delay,
+    is_iter,
+    is_veto,
+    make_iter,
+)
 
 
 def _send_admin_to_portal(session, **kwargs):
@@ -66,15 +75,24 @@ def _output_frame_key(value):
     if isinstance(value, dict):
         return (
             "dict",
-            tuple(
-                sorted((key, _output_frame_key(item)) for key, item in value.items())
-            ),
+            tuple(sorted((key, _output_frame_key(item)) for key, item in value.items())),
         )
     if isinstance(value, (list, tuple)):
         return ("list", tuple(_output_frame_key(item) for item in value))
     if isinstance(value, float):
         return ("float", repr(value))
     return (type(value).__name__, value)
+
+
+def _contains_bytes(value):
+    """Return whether cleaning *value* may depend on a session encoding."""
+    if isinstance(value, bytes):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_bytes(key) or _contains_bytes(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_bytes(item) for item in value)
+    return False
 
 
 # input handlers
@@ -248,9 +266,7 @@ class SessionHandler(dict):
                     and isinstance(self, ServerSessionHandler)
                 ):
                     # only apply funcparser on the outgoing path (sessionhandler->)
-                    data = _FUNCPARSER.parse(
-                        data, strip=strip_inlinefunc, session=session
-                    )
+                    data = _FUNCPARSER.parse(data, strip=strip_inlinefunc, session=session)
 
                 return str(data)
             elif (
@@ -640,9 +656,7 @@ class ServerSessionHandler(SessionHandler):
 
         nsess = len(self.sessions_from_account(account))
         string = "Logged in: {account} {address} ({nsessions} session(s) total)"
-        string = string.format(
-            account=account, address=session.address, nsessions=nsess
-        )
+        string = string.format(account=account, address=session.address, nsessions=nsess)
         session.log(string)
         session.logged_in = True
         # sync the portal to the session
@@ -693,9 +707,7 @@ class ServerSessionHandler(SessionHandler):
             session.log(string)
 
             if nsess == 0:
-                SIGNAL_ACCOUNT_POST_LAST_LOGOUT.send(
-                    sender=session.account, session=session
-                )
+                SIGNAL_ACCOUNT_POST_LAST_LOGOUT.send(sender=session.account, session=session)
 
         session.at_disconnect(reason)
         SIGNAL_ACCOUNT_POST_LOGOUT.send(sender=session.account, session=session)
@@ -725,9 +737,7 @@ class ServerSessionHandler(SessionHandler):
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
         if bus is not None:
             return bus.sync_sessions(sessdata)
-        return _send_admin_to_portal(
-            DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata
-        )
+        return _send_admin_to_portal(DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata)
 
     def session_portal_sync(self, session):
         """
@@ -791,9 +801,7 @@ class ServerSessionHandler(SessionHandler):
         # mean connecting from the same host would not catch duplicates
         sid = id(curr_session)
         doublet_sessions = [
-            sess
-            for sess in self.values()
-            if sess.logged_in and sess.uid == uid and id(sess) != sid
+            sess for sess in self.values() if sess.logged_in and sess.uid == uid and id(sess) != sid
         ]
 
         for session in doublet_sessions:
@@ -876,11 +884,7 @@ class ServerSessionHandler(SessionHandler):
 
         """
         uid = account.uid
-        return [
-            session
-            for session in self.values()
-            if session.logged_in and session.uid == uid
-        ]
+        return [session for session in self.values() if session.logged_in and session.uid == uid]
 
     def sessions_from_csessid(self, csessid):
         """
@@ -897,9 +901,7 @@ class ServerSessionHandler(SessionHandler):
         if not csessid:
             return []
         return [
-            session
-            for session in self.values()
-            if session.csessid and session.csessid == csessid
+            session for session in self.values() if session.csessid and session.csessid == csessid
         ]
 
     def announce_all(self, message):
@@ -933,7 +935,7 @@ class ServerSessionHandler(SessionHandler):
             self._outbuf_flush_scheduled = True
             from evennia.utils import clock
 
-            clock.call_later(0, self._flush_all_outbuf)
+            clock.call_later(0, self._flush_all_outbuf, _task_kind="output")
 
     def _flush_outbuf(self, uid):
         """Drain one session immediately, such as before disconnect."""
@@ -947,7 +949,7 @@ class ServerSessionHandler(SessionHandler):
                 _watch.tap(session, "out", frame)
             bus.send_MsgServer2Portal(session, **frame)
 
-    def _prepare_outbuf(self, uid):
+    def _prepare_outbuf(self, uid, *, clean=True):
         """Pop, coalesce, and clean one session's buffered output.
 
         Contiguous text messages with matching options are coalesced. Any
@@ -971,9 +973,7 @@ class ServerSessionHandler(SessionHandler):
             """Append the current text run before the next distinct frame."""
             joined = "\n".join(p for p in text_parts if p)
             if joined:
-                frames.append(
-                    {"text": (joined, text_options) if text_options else joined}
-                )
+                frames.append({"text": (joined, text_options) if text_options else joined})
             text_parts.clear()
 
         for msg in msgs:
@@ -996,21 +996,50 @@ class ServerSessionHandler(SessionHandler):
                 text_parts.append(str(v))
 
         flush_text()
-        return session, [self.clean_senddata(session, frame) for frame in frames]
+        if not clean:
+            return session, frames
+        clean_started = time.perf_counter()
+        cleaned = [self.clean_senddata(session, frame) for frame in frames]
+        self._record_clean_duration(clean_started)
+        return session, cleaned
+
+    def _shared_clean_key(self, frame):
+        """Return a turn-local cache key when base cleaning is session independent."""
+        if settings.FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED or _contains_bytes(frame):
+            return None
+        cleaner = getattr(self.clean_senddata, "__func__", None)
+        if cleaner is not SessionHandler.clean_senddata:
+            return None
+        try:
+            return _output_frame_key(frame)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _record_clean_duration(started):
+        """Sample one actual output-cleaning call or batch."""
+        try:
+            from evennia.server.prometheus_metrics import record_render_phase
+
+            record_render_phase("clean", time.perf_counter() - started)
+        except Exception:
+            pass
 
     def _flush_all_outbuf(self):
         """Drain one reactor turn and multicast byte-identical final frames.
 
-        Cleaning remains per session because protocol flags can change the
-        result. Grouping happens afterwards, so viewer-specific names and
-        protocol options can never be shared accidentally. Processing frames
-        in rounds preserves each recipient's original message order.
+        Base cleaning is reused only for byte-free frames while outgoing
+        FuncParser evaluation is disabled. Bytes depend on the session's
+        encoding, inline functions may inspect the session, and custom cleaner
+        overrides have unknown semantics, so those paths remain per session.
+        Grouping happens after cleaning, and frame rounds preserve each
+        recipient's original message order.
         """
         self._outbuf_flush_scheduled = False
         prepared = []
         for uid in list(self._outbuf):
             try:
-                result = self._prepare_outbuf(uid)
+                result = self._prepare_outbuf(uid, clean=False)
             except Exception:
                 log_trace()
                 continue
@@ -1020,13 +1049,26 @@ class ServerSessionHandler(SessionHandler):
             return
 
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
+        clean_cache = {}
         max_frames = max(len(frames) for _session, frames in prepared)
         for index in range(max_frames):
             groups = {}
             for session, frames in prepared:
                 if index >= len(frames):
                     continue
-                frame = frames[index]
+                raw_frame = frames[index]
+                cache_key = self._shared_clean_key(raw_frame)
+                frame = clean_cache.get(cache_key) if cache_key is not None else None
+                if frame is None:
+                    clean_started = time.perf_counter()
+                    try:
+                        frame = self.clean_senddata(session, dict(raw_frame))
+                    except Exception:
+                        log_trace()
+                        continue
+                    self._record_clean_duration(clean_started)
+                    if cache_key is not None:
+                        clean_cache[cache_key] = frame
                 if _watch.WATCHES:
                     try:
                         _watch.tap(session, "out", frame)

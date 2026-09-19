@@ -10,7 +10,9 @@ by a ``logout`` OOB sent immediately before the session is torn down.
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from evennia.server.sessionhandler import ServerSessionHandler
+from django.test import override_settings
+
+from evennia.server.sessionhandler import ServerSessionHandler, SessionHandler
 
 
 def _session(sessid=1):
@@ -93,9 +95,7 @@ class TestOutputOrder(TestCase):
         handler._outbuf[1] = messages
         with (
             patch("evennia.server.sessionhandler.evennia") as engine,
-            patch.object(
-                handler, "clean_senddata", side_effect=lambda session, frame: frame
-            ),
+            patch.object(handler, "clean_senddata", side_effect=lambda session, frame: frame),
         ):
             handler._flush_outbuf(1)
         return [
@@ -154,7 +154,7 @@ class TestGroupedOutput(TestCase):
         with patch("evennia.utils.clock.call_later") as call_later:
             for session in self.sessions:
                 self.handler.data_out(session, text="same")
-        call_later.assert_called_once_with(0, self.handler._flush_all_outbuf)
+        call_later.assert_called_once_with(0, self.handler._flush_all_outbuf, _task_kind="output")
 
     def test_identical_clean_frames_are_multicast(self):
         for session in self.sessions:
@@ -185,6 +185,51 @@ class TestGroupedOutput(TestCase):
         self.assertEqual(bus.send_MsgServer2Portal.call_count, 2)
         bus.send_MsgServer2PortalMany.assert_not_called()
 
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=False)
+    def test_identical_raw_frames_share_base_cleaning(self):
+        for session in self.sessions:
+            session.protocol_flags = {"ENCODING": "utf-8"}
+            self.handler._outbuf[session.sessid] = [{"text": "same"}]
+        original = SessionHandler.clean_senddata
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(SessionHandler, "clean_senddata", autospec=True) as clean,
+        ):
+            clean.side_effect = original
+            self.handler._flush_all_outbuf()
+        self.assertEqual(clean.call_count, 1)
+        engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2PortalMany.assert_called_once()
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=True)
+    def test_inline_parser_keeps_cleaning_per_session(self):
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [{"text": "same"}]
+        with (
+            patch("evennia.server.sessionhandler.evennia"),
+            patch.object(
+                self.handler,
+                "clean_senddata",
+                side_effect=lambda _session, frame: frame,
+            ) as clean,
+        ):
+            self.handler._flush_all_outbuf()
+        self.assertEqual(clean.call_count, 2)
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=False)
+    def test_bytes_keep_cleaning_per_session(self):
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [{"text": b"same"}]
+        with (
+            patch("evennia.server.sessionhandler.evennia"),
+            patch.object(
+                self.handler,
+                "clean_senddata",
+                side_effect=lambda _session, frame: frame,
+            ) as clean,
+        ):
+            self.handler._flush_all_outbuf()
+        self.assertEqual(clean.call_count, 2)
+
     def test_multicast_rounds_preserve_per_session_order(self):
         for session in self.sessions:
             self.handler._outbuf[session.sessid] = [
@@ -200,9 +245,7 @@ class TestGroupedOutput(TestCase):
             ),
         ):
             self.handler._flush_all_outbuf()
-        calls = (
-            engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2PortalMany.call_args_list
-        )
+        calls = engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2PortalMany.call_args_list
         self.assertEqual(
             [call.kwargs["text"] for call in calls],
             ["first", ("second", {"type": "notice"})],
@@ -224,6 +267,4 @@ class TestGroupedOutput(TestCase):
         ):
             self.handler._flush_all_outbuf()
         bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
-        bus.send_MsgServer2Portal.assert_called_once_with(
-            self.sessions[1], text="source"
-        )
+        bus.send_MsgServer2Portal.assert_called_once_with(self.sessions[1], text="source")
