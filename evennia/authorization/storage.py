@@ -1409,12 +1409,25 @@ async def _flush_authorization_prewarm() -> bool:
             _prewarm_task = None
 
 
+def _finish_prewarm_wait(value: bool, outcome: str, started: float) -> bool:
+    """Record one action's critical-path snapshot wait and return its result."""
+
+    try:
+        from evennia.server.prometheus_metrics import record_authorization_prewarm_wait
+
+        record_authorization_prewarm_wait(outcome, time.perf_counter() - started)
+    except Exception:
+        pass
+    return value
+
+
 async def prewarm_authorization(principals, resources) -> bool:
     """Batch-refresh authorization state off the IO owner before rule evaluation."""
 
     global _prewarm_loop, _prewarm_task
     if not getattr(settings, "AUTHORIZATION_OFFLOOP_SNAPSHOTS", False):
         return True
+    started = time.perf_counter()
     principals = tuple(principals)
     resources = tuple(resources)
     try:
@@ -1424,19 +1437,21 @@ async def prewarm_authorization(principals, resources) -> bool:
     if current_task is None:
         ready, _ = _prewarm_request(principals, resources, include_labels=False)
         if ready:
-            return True
+            return _finish_prewarm_wait(True, "ready", started)
         _, request = _prewarm_request(principals, resources, include_labels=True)
-        return await _execute_authorization_prewarm(request)
+        refreshed = await _execute_authorization_prewarm(request)
+        return _finish_prewarm_wait(refreshed, "waited" if refreshed else "failed", started)
     loop = current_task.get_loop()
     if _prewarm_loop is not loop:
         _prewarm_loop = loop
         _prewarm_task = None
         _pending_prewarm_principals.clear()
         _pending_prewarm_resources.clear()
+    waited = False
     for _attempt in range(3):
         ready, _ = _prewarm_request(principals, resources, include_labels=False)
         if ready:
-            return True
+            return _finish_prewarm_wait(True, "waited" if waited else "ready", started)
         for principal in principals:
             if principal is not None:
                 _pending_prewarm_principals[id(principal)] = principal
@@ -1446,15 +1461,16 @@ async def prewarm_authorization(principals, resources) -> bool:
         if _prewarm_task is None or _prewarm_task.done():
             _prewarm_task = loop.create_task(_flush_authorization_prewarm())
         try:
+            waited = True
             if not await asyncio.shield(_prewarm_task):
-                return False
+                return _finish_prewarm_wait(False, "failed", started)
         except asyncio.CancelledError:
             # A reload or test clearing the shared prewarm task must not cancel
             # the action; only a cancellation of this task itself may propagate.
             if current_task.cancelling():
                 raise
-            return False
-    return False
+            return _finish_prewarm_wait(False, "failed", started)
+    return _finish_prewarm_wait(False, "failed", started)
 
 
 def clear_authorization_caches() -> None:

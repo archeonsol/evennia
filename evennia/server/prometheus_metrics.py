@@ -17,6 +17,7 @@ from django.conf import settings
 # Metric objects (None when prometheus_client is unavailable or disabled)
 ATTR_FLUSH_TOTAL = None
 ATTR_FLUSH_BACKENDS_TOTAL = None
+ATTR_FLUSH_RUNS_TOTAL = None
 ATTR_DIRTY_PENDING = None
 ATTR_FLUSH_DURATION_SECONDS = None
 LOCATION_CMDSET_CACHE_HIT_TOTAL = None
@@ -27,10 +28,13 @@ REDIS_ATTR_CACHE_HIT_TOTAL = None
 REDIS_ATTR_CACHE_MISS_TOTAL = None
 RENDER_DELIVERY_TOTAL = None
 RENDER_DELIVERY_DURATION_SECONDS = None
+RENDER_PHASE_DURATION_SECONDS = None
 AUTHORIZATION_DECISIONS_TOTAL = None
 AUTHORIZATION_DURATION_SECONDS = None
 AUTHORIZATION_PREWARM_TOTAL = None
 AUTHORIZATION_PREWARM_DURATION_SECONDS = None
+AUTHORIZATION_PREWARM_WAIT_TOTAL = None
+AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS = None
 AUTHORIZATION_SNAPSHOT_MISS_TOTAL = None
 ACTION_INPUT_TOTAL = None
 ACTION_INPUT_DURATION_SECONDS = None
@@ -50,6 +54,8 @@ BUS_REJECTED_TOTAL = None
 BUS_WRITE_BATCH_SIZE = None
 
 _METRICS_READY = False
+_render_phase_samples = {"resolve": 0, "transform": 0, "clean": 0}
+_RENDER_PHASE_SAMPLE_EVERY = 64
 
 
 def _enabled() -> bool:
@@ -59,14 +65,16 @@ def _enabled() -> bool:
 def _init_metrics() -> bool:
     """Create metrics once on the default Prometheus registry."""
     global _METRICS_READY
-    global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL
+    global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_RUNS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
     global CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL, CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL
     global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
     global RENDER_DELIVERY_TOTAL, RENDER_DELIVERY_DURATION_SECONDS
+    global RENDER_PHASE_DURATION_SECONDS
     global AUTHORIZATION_DECISIONS_TOTAL, AUTHORIZATION_DURATION_SECONDS
     global AUTHORIZATION_PREWARM_TOTAL, AUTHORIZATION_PREWARM_DURATION_SECONDS
+    global AUTHORIZATION_PREWARM_WAIT_TOTAL, AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS
     global AUTHORIZATION_SNAPSHOT_MISS_TOTAL
     global ACTION_INPUT_TOTAL, ACTION_INPUT_DURATION_SECONDS
     global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
@@ -96,6 +104,11 @@ def _init_metrics() -> bool:
     ATTR_FLUSH_BACKENDS_TOTAL = Counter(
         "evennia_attribute_flush_backends_total",
         "Dirty attribute rows flushed via JsonbAttributeBackend",
+    )
+    ATTR_FLUSH_RUNS_TOTAL = Counter(
+        "evennia_attribute_flush_runs_total",
+        "Attribute flush runs by bounded caller kind",
+        ("source",),
     )
     ATTR_DIRTY_PENDING = Gauge(
         "evennia_attribute_dirty_pending",
@@ -163,6 +176,12 @@ def _init_metrics() -> bool:
         ("mode",),
         buckets=(0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1),
     )
+    RENDER_PHASE_DURATION_SECONDS = Histogram(
+        "evennia_render_phase_duration_seconds",
+        "Sampled time in one per-viewer render phase (one in 64 calls)",
+        ("phase",),
+        buckets=(0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025),
+    )
     AUTHORIZATION_DECISIONS_TOTAL = Counter(
         "evennia_authorization_decisions_total",
         "Capability authorization decisions by resource kind and result",
@@ -183,6 +202,32 @@ def _init_metrics() -> bool:
         "evennia_authorization_prewarm_duration_seconds",
         "Time spent awaiting one off-loop authorization snapshot refresh",
         buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+    )
+    AUTHORIZATION_PREWARM_WAIT_TOTAL = Counter(
+        "evennia_authorization_prewarm_wait_total",
+        "Action authorization prewarm calls by cache/wait outcome",
+        ("outcome",),
+    )
+    AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS = Histogram(
+        "evennia_authorization_prewarm_wait_duration_seconds",
+        "Action critical-path time spent checking or awaiting authorization snapshots",
+        ("outcome",),
+        buckets=(
+            0.00005,
+            0.0001,
+            0.00025,
+            0.0005,
+            0.001,
+            0.0025,
+            0.005,
+            0.01,
+            0.025,
+            0.05,
+            0.1,
+            0.25,
+            0.5,
+            1.0,
+        ),
     )
     AUTHORIZATION_SNAPSHOT_MISS_TOTAL = Counter(
         "evennia_authorization_snapshot_miss_total",
@@ -258,7 +303,9 @@ def _init_metrics() -> bool:
     return True
 
 
-def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = None) -> None:
+def record_attribute_flush(
+    stats: dict, *, duration_seconds: Optional[float] = None, source: str = "manual"
+) -> None:
     """
     Update Prometheus counters/gauge/histogram after ``flush_all_dirty``.
     """
@@ -268,6 +315,10 @@ def record_attribute_flush(stats: dict, *, duration_seconds: Optional[float] = N
     total = int(stats.get("total") or 0)
     backends = int(stats.get("backends") or 0)
     pending = int(stats.get("pending") or 0)
+    source = source if source in {"tick", "barrier", "shutdown", "manual"} else "manual"
+
+    if ATTR_FLUSH_RUNS_TOTAL is not None:
+        ATTR_FLUSH_RUNS_TOTAL.labels(source=source).inc()
 
     if ATTR_DIRTY_PENDING is not None:
         ATTR_DIRTY_PENDING.set(pending)
@@ -372,6 +423,20 @@ def record_render_delivery(mode: str, duration_seconds: float) -> None:
         )
 
 
+def record_render_phase(phase: str, duration_seconds: float) -> None:
+    """Sample a bounded render phase without adding a histogram write per delivery."""
+
+    normalized = phase if phase in _render_phase_samples else "transform"
+    count = _render_phase_samples[normalized] + 1
+    _render_phase_samples[normalized] = count
+    if count % _RENDER_PHASE_SAMPLE_EVERY:
+        return
+    if _init_metrics() and RENDER_PHASE_DURATION_SECONDS is not None:
+        RENDER_PHASE_DURATION_SECONDS.labels(phase=normalized).observe(
+            max(0.0, float(duration_seconds))
+        )
+
+
 def record_authorization_decision(
     resource_kind: str, allowed: bool, duration_seconds: float, reason: str = "unknown"
 ) -> None:
@@ -400,6 +465,20 @@ def record_authorization_prewarm(outcome: str, duration_seconds: float) -> None:
         AUTHORIZATION_PREWARM_TOTAL.labels(outcome=normalized).inc()
     if AUTHORIZATION_PREWARM_DURATION_SECONDS is not None:
         AUTHORIZATION_PREWARM_DURATION_SECONDS.observe(max(0.0, float(duration_seconds)))
+
+
+def record_authorization_prewarm_wait(outcome: str, duration_seconds: float) -> None:
+    """Record whether one action found snapshots ready or awaited a refresh."""
+
+    if not _init_metrics():
+        return
+    normalized = outcome if outcome in {"ready", "waited", "failed"} else "failed"
+    if AUTHORIZATION_PREWARM_WAIT_TOTAL is not None:
+        AUTHORIZATION_PREWARM_WAIT_TOTAL.labels(outcome=normalized).inc()
+    if AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS is not None:
+        AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS.labels(outcome=normalized).observe(
+            max(0.0, float(duration_seconds))
+        )
 
 
 def record_authorization_snapshot_miss(kind: str) -> None:

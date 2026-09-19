@@ -204,14 +204,24 @@ class TestEveryCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
 
 class TestEveryTickCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_fires_every_tick(self):
-        register(name="s", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
+        register(
+            name="s",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
         for t in (0.0, 1.0, 2.0):
             self.clock.set(t)
             self.driver.tick()
         self.assertEqual(len(self.fires), 3)
 
     def test_dt_nominal_on_first_fire_then_real(self):
-        register(name="s", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
+        register(
+            name="s",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
         self.clock.set(0.0)
         self.driver.tick()
         self.assertEqual(self.fires[0].dt, systems.TICK_INTERVAL)
@@ -220,7 +230,12 @@ class TestEveryTickCadence(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.assertEqual(self.fires[1].dt, 3.0)
 
     def test_synchronous_system_does_not_spawn_async_root(self):
-        register(name="s", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
+        register(
+            name="s",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
         with patch.object(systems.clock, "run_coroutine") as spawn:
             self.driver.tick()
         spawn.assert_not_called()
@@ -456,7 +471,12 @@ class TestErrorIsolation(_SchedulerTestMixin, BaseEvenniaTestCase):
             raise RuntimeError("kaboom")
 
         register(name="bad", cadence=every_tick(), scope=global_scope(), run=_boom)
-        register(name="good", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
+        register(
+            name="good",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
 
         # capture the live traceback log_trace would format, to prove the log
         # call happens inside the except block (not a bare str(exc))
@@ -540,7 +560,12 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_async_failure_clears_in_flight_and_logs(self):
         pending = self._gate()
-        register(name="slow", cadence=every_tick(), scope=global_scope(), run=lambda ctx: pending)
+        register(
+            name="slow",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=lambda ctx: pending,
+        )
 
         async def scenario():
             self.driver.tick()
@@ -555,7 +580,12 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_skip_escalates_to_error_after_threshold(self):
         pending = self._gate()
-        register(name="slow", cadence=every_tick(), scope=global_scope(), run=lambda ctx: pending)
+        register(
+            name="slow",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=lambda ctx: pending,
+        )
 
         async def scenario():
             self.driver.tick()  # fire; body never completes
@@ -636,12 +666,19 @@ class TestOverlapGuard(_SchedulerTestMixin, BaseEvenniaTestCase):
         self._run(scenario())
 
     def test_sync_raise_in_entity_selection_clears_in_flight(self):
-        register(name="p", cadence=every_tick(), scope=online_puppets(), run=self._recording_run)
+        register(
+            name="p",
+            cadence=every_tick(),
+            scope=online_puppets(),
+            run=self._recording_run,
+        )
 
         async def scenario():
             with (
                 patch.object(
-                    systems, "_select_online_puppets", side_effect=RuntimeError("selector died")
+                    systems,
+                    "_select_online_puppets",
+                    side_effect=RuntimeError("selector died"),
                 ),
                 patch.object(systems, "logger") as mock_logger,
             ):
@@ -663,7 +700,12 @@ class TestRegistry(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_duplicate_name_raises(self):
         register(name="s", cadence=every(5), scope=global_scope(), run=self._recording_run)
         with self.assertRaises(SystemRegistrationError):
-            register(name="s", cadence=every(9), scope=global_scope(), run=self._recording_run)
+            register(
+                name="s",
+                cadence=every(9),
+                scope=global_scope(),
+                run=self._recording_run,
+            )
 
     def test_introspection(self):
         register(name="s", cadence=every(5), scope=global_scope(), run=self._recording_run)
@@ -692,7 +734,12 @@ class TestRegistry(_SchedulerTestMixin, BaseEvenniaTestCase):
 
 class TestScopeSelection(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_global_scope_gets_no_entities(self):
-        register(name="g", cadence=every_tick(), scope=global_scope(), run=self._recording_run)
+        register(
+            name="g",
+            cadence=every_tick(),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
         self.driver.tick()
         ctx = self.fires[0]
         self.assertIsNone(ctx.entities)
@@ -733,7 +780,12 @@ class TestScopeSelection(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_online_puppets_uses_session_handler(self):
         puppets = ["puppet1", "puppet2"]
-        register(name="p", cadence=every_tick(), scope=online_puppets(), run=self._recording_run)
+        register(
+            name="p",
+            cadence=every_tick(),
+            scope=online_puppets(),
+            run=self._recording_run,
+        )
         with patch.object(systems, "_select_online_puppets", return_value=puppets) as sel:
             self.driver.tick()
         sel.assert_called_once()
@@ -789,7 +841,10 @@ class TestDiscovery(_SchedulerTestMixin, BaseEvenniaTestCase):
     def test_registering_module_loads(self):
         def _register():
             register(
-                name="from-module", cadence=every(5), scope=global_scope(), run=lambda ctx: None
+                name="from-module",
+                cadence=every(5),
+                scope=global_scope(),
+                run=lambda ctx: None,
             )
 
         self._fake_module("fake_systems_good", register_fn=_register)
@@ -848,7 +903,7 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
         with (
             patch.object(
                 engine_systems,
-                "_flush_all_dirty",
+                "_flush_all_dirty_async",
                 return_value={"backends": 1, "total": 2, "failed": 0},
             ) as flush,
             patch.object(engine_systems, "logger") as mock_logger,
@@ -866,10 +921,14 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
         engine_systems = self._register_flush()
         system = get_system("flush-attributes")
         ctx = systems.SystemContext(now=0.0, dt=30.0)
-        with patch.object(engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")):
+        with patch.object(
+            engine_systems,
+            "_flush_all_dirty_async",
+            side_effect=RuntimeError("pg down"),
+        ):
             with patch.object(engine_systems, "logger") as mock_logger:
                 for _ in range(3):
-                    system.run(ctx)  # must not raise
+                    asyncio.run(system.run(ctx))  # must not raise
         logged = " ".join(str(c) for c in mock_logger.log_err.call_args_list)
         self.assertIn("CRITICAL", logged)
 
@@ -881,10 +940,10 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
         boom = RuntimeError("pg down")
         # two failures, a success, then two failures: never 3 consecutive
         sequence = [boom, boom, {"backends": 0, "total": 0, "failed": 0}, boom, boom]
-        with patch.object(engine_systems, "_flush_all_dirty", side_effect=sequence):
+        with patch.object(engine_systems, "_flush_all_dirty_async", side_effect=sequence):
             with patch.object(engine_systems, "logger") as mock_logger:
                 for _ in sequence:
-                    system.run(ctx)
+                    asyncio.run(system.run(ctx))
         logged = " ".join(str(c) for c in mock_logger.log_err.call_args_list)
         self.assertNotIn("CRITICAL", logged)
 
@@ -894,10 +953,14 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
         system = get_system("flush-attributes")
         ctx = systems.SystemContext(now=0.0, dt=30.0)
         fires = engine_systems._CRITICAL_THRESHOLD + engine_systems._CRITICAL_REPEAT_EVERY
-        with patch.object(engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")):
+        with patch.object(
+            engine_systems,
+            "_flush_all_dirty_async",
+            side_effect=RuntimeError("pg down"),
+        ):
             with patch.object(engine_systems, "logger") as mock_logger:
                 for _ in range(fires):
-                    system.run(ctx)
+                    asyncio.run(system.run(ctx))
         criticals = [c for c in mock_logger.log_err.call_args_list if "CRITICAL" in str(c)]
         # once at the threshold, once again after the repeat interval
         self.assertEqual(len(criticals), 2)
@@ -905,9 +968,18 @@ class TestFlushAttributesSystem(_SchedulerTestMixin, BaseEvenniaTestCase):
     @override_settings(ATTRIBUTE_FLUSH_INTERVAL=30)
     def test_driver_isolates_flush_failure_from_siblings(self):
         engine_systems = self._register_flush()
-        register(name="sibling", cadence=every(30), scope=global_scope(), run=self._recording_run)
+        register(
+            name="sibling",
+            cadence=every(30),
+            scope=global_scope(),
+            run=self._recording_run,
+        )
         with (
-            patch.object(engine_systems, "_flush_all_dirty", side_effect=RuntimeError("pg down")),
+            patch.object(
+                engine_systems,
+                "_flush_all_dirty_async",
+                side_effect=RuntimeError("pg down"),
+            ),
             patch.object(engine_systems, "logger"),
         ):
             self.clock.set(0.0)

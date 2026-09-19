@@ -8,7 +8,9 @@ overriding `SYSTEM_MODULES`. Game systems never live here — they register
 from game modules declared in `settings.SYSTEM_MODULES`.
 
 The first such system is `flush-attributes`: the write-behind attribute
-flush, recurring work over the engine-owned L1 cache. Its cadence comes from
+flush, recurring work over the engine-owned L1 cache. Database persistence
+runs from immutable snapshots in a worker; adoption returns to the IO owner.
+Its cadence comes from
 `settings.ATTRIBUTE_FLUSH_INTERVAL` (seconds; 0 disables). The query
 barriers (`_flush_attr_writes` in the typeclass/object managers) are
 read-your-writes correctness and stay untouched regardless — they are what
@@ -21,13 +23,11 @@ threshold warning; a final drain also runs in the server shutdown path.
 from django.conf import settings
 
 from evennia.typeclasses.attribute_metrics import maybe_log_flush_metrics, maybe_warn_pending_dirty
-from evennia.typeclasses.attributes import flush_all_dirty as _flush_all_dirty
+from evennia.typeclasses.attributes import flush_all_dirty_async as _flush_all_dirty_async
 from evennia.utils import logger, systems
 
-# Plain module-global ints are safe ONLY because the scheduler's overlap
-# guard serializes flush fires on the reactor (the body is synchronous).
-# Not thread-safe: if the body ever moves off-reactor or goes async, these
-# counters need a rethink.
+# Plain module-global ints are safe because the scheduler's overlap guard
+# serializes async flush fires and all counter mutation runs on the IO owner.
 _consecutive_flush_failures = 0
 _flush_fire_count = 0
 
@@ -37,7 +37,7 @@ _CRITICAL_THRESHOLD = 3
 _CRITICAL_REPEAT_EVERY = 10
 
 
-def _run_flush(ctx):
+async def _run_flush(ctx):
     """
     Body of the `flush-attributes` system: drain the write-behind cache.
 
@@ -54,7 +54,7 @@ def _run_flush(ctx):
     global _consecutive_flush_failures, _flush_fire_count
     _flush_fire_count += 1
     try:
-        stats = _flush_all_dirty()
+        stats = await _flush_all_dirty_async()
         maybe_log_flush_metrics(stats, _flush_fire_count)
         maybe_warn_pending_dirty(stats, _flush_fire_count)
         if stats["failed"] <= 0:

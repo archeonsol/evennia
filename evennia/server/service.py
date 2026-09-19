@@ -666,7 +666,7 @@ class EvenniaServerService(MultiService):
         try:
             from evennia.typeclasses.attributes import flush_all_dirty
 
-            flush_all_dirty()
+            flush_all_dirty(source="shutdown")
         except Exception:
             logger.log_trace("final attribute flush at shutdown")
         try:

@@ -95,7 +95,7 @@ def has_undurable_writes():
     return False
 
 
-def flush_all_dirty():
+def flush_all_dirty(*, source="manual"):
     """
     Flush all pending attribute writes to DB. Called from the tick handler,
     from read-your-writes query barriers, and once at shutdown.
@@ -172,7 +172,62 @@ def flush_all_dirty():
     }
     from evennia.server.prometheus_metrics import record_attribute_flush
 
-    record_attribute_flush(stats, duration_seconds=duration)
+    record_attribute_flush(stats, duration_seconds=duration, source=source)
+    return stats
+
+
+async def flush_all_dirty_async():
+    """Periodic flush variant that moves JSONB database work off the event loop.
+
+    Immutable JSONB row snapshots are captured on the IO owner, persisted by a
+    worker, then reconciled back on the owner. Query barriers and shutdown keep
+    using :func:`flush_all_dirty`, where synchronous completion is part of their
+    contract. Legacy backends retain their synchronous flush behavior; the
+    default and supported production backend is JSONB.
+    """
+    import time
+
+    from evennia.typeclasses.jsonb_handler import (
+        AttributeUpdateUsageError,
+        flush_jsonb_rows_async,
+        protected_mutation_active,
+    )
+
+    pending_stats = count_pending_dirty()
+    t0 = time.perf_counter()
+    if protected_mutation_active():
+        raise AttributeUpdateUsageError(
+            "Attribute query barriers may not run inside blocking_update callbacks."
+        )
+
+    jsonb = await flush_jsonb_rows_async()
+    flushed = int(jsonb["flushed"])
+    spooled = int(jsonb["spooled"])
+    failed = int(jsonb["failed"])
+
+    dirty = [backend for backend in list(_DIRTY_BACKENDS) if backend.pending_count()]
+    for backend in dirty:
+        pending = backend.pending_count()
+        result = backend.flush_dirty()
+        if result is None or getattr(result, "ok", False):
+            flushed += pending
+        elif getattr(result, "spooled", False):
+            spooled += pending
+        else:
+            failed += pending
+
+    duration = time.perf_counter() - t0
+    stats = {
+        "backends": flushed + spooled + failed,
+        "total": flushed + spooled,
+        "pending": pending_stats["pending"],
+        "spooled": spooled,
+        "failed": failed,
+        "oldest_age": pending_stats["oldest_age"],
+    }
+    from evennia.server.prometheus_metrics import record_attribute_flush
+
+    record_attribute_flush(stats, duration_seconds=duration, source="tick")
     return stats
 
 

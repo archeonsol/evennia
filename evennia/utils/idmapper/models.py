@@ -892,7 +892,7 @@ class _CacheFlushSweep:
         """Schedule the next turn through the engine's isolated callback scope."""
         if self.cancelled:
             return
-        self.handle = clock.call_later(0, self._run_scheduled_turn)
+        self.handle = clock.call_later(0, self._run_scheduled_turn, _task_kind="idmapper")
 
     def _run_scheduled_turn(self):
         """Start one automatic turn without blocking the reactor on row I/O."""
@@ -928,7 +928,13 @@ class _CacheFlushSweep:
         if self.cancelled or _ACTIVE_FLUSH_SWEEP is not self:
             return
         try:
-            self.handle = clock.call_later(0, self._resume_query_result, entries, future)
+            self.handle = clock.call_later(
+                0,
+                self._resume_query_result,
+                entries,
+                future,
+                _task_kind="idmapper",
+            )
         except Exception:
             logger.log_trace("idmapper: could not schedule row-query completion")
             self._finish(failed=True)

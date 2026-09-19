@@ -21,8 +21,7 @@ from evennia.server import ipc_schema, redis_bus, redis_transport, session
 from evennia.server.portal import amp, amp_server
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
-from evennia.server.redis_bus import (RedisPortalBus, RedisServerBus,
-                                      _PidTransport, _RedisTransport)
+from evennia.server.redis_bus import RedisPortalBus, RedisServerBus, _PidTransport, _RedisTransport
 from evennia.server.service import EvenniaServerService
 from evennia.server.sessionhandler import ServerSessionHandler
 from evennia.utils import clock
@@ -41,6 +40,7 @@ _ACTIVE_BUSES = []
 
 def _sync_call_from_thread(fn, *args, **kwargs):
     """Queue handoffs for execution on the fixture's main thread."""
+    kwargs.pop("_task_kind", None)
     _FRAME_QUEUE.put((fn, args, kwargs))
 
 
@@ -81,13 +81,9 @@ class _BusTestResources:
         self.fake = fakeredis.FakeRedis(decode_responses=False)
         self.stack.callback(self.fake.close)
         self.stack.enter_context(patch("redis.Redis.from_url", return_value=self.fake))
-        self.stack.enter_context(
-            patch.object(clock, "_get_loop", return_value=self.loop)
-        )
+        self.stack.enter_context(patch.object(clock, "_get_loop", return_value=self.loop))
         self.stack.enter_context(patch.object(clock, "_pending_when_running", []))
-        self.stack.enter_context(
-            patch.object(clock, "call_from_thread", _sync_call_from_thread)
-        )
+        self.stack.enter_context(patch.object(clock, "call_from_thread", _sync_call_from_thread))
         call_later = clock.call_later
 
         def schedule(*args, **kwargs):
@@ -96,9 +92,7 @@ class _BusTestResources:
             self.handles.append(handle)
             return handle
 
-        self.stack.enter_context(
-            patch.object(clock, "call_later", side_effect=schedule)
-        )
+        self.stack.enter_context(patch.object(clock, "call_later", side_effect=schedule))
         self.stack.callback(self._settle)
 
     def close(self):
@@ -136,9 +130,7 @@ class _BusTestResources:
                 results = self.loop.run_until_complete(
                     asyncio.gather(*tasks, return_exceptions=True)
                 )
-                errors.extend(
-                    result for result in results if isinstance(result, Exception)
-                )
+                errors.extend(result for result in results if isinstance(result, Exception))
         finally:
             self.loop.close()
         if errors:
@@ -229,9 +221,7 @@ class TestRedisBus(TestCase):
     def test_msgportal2server_roundtrip(self):
         self.portal_bus.send_MsgPortal2Server(self.portalsession, text={"foo": "bar"})
         _drain_bus()
-        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(
-            self.session, text={"foo": "bar"}
-        )
+        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(self.session, text={"foo": "bar"})
 
     def test_msgserver2portal_roundtrip(self):
         self.server_bus.send_MsgServer2Portal(self.session, text={"hello": "world"})
@@ -265,9 +255,7 @@ class TestRedisBus(TestCase):
         self.server.run_init_hooks.assert_called_once_with("shutdown")
 
     def test_admin_pdisconnall(self):
-        self.portal_bus.send_AdminPortal2Server(
-            amp.DUMMYSESSION, operation=amp.PDISCONNALL
-        )
+        self.portal_bus.send_AdminPortal2Server(amp.DUMMYSESSION, operation=amp.PDISCONNALL)
         _drain_bus()
         evennia.SERVER_SESSION_HANDLER.portal_disconnect_all.assert_called()
 
@@ -288,9 +276,7 @@ class TestRedisBus(TestCase):
         env = ipc_schema.SessionEnvelope(sessid=1, kwargs={"text": [["hi"], {}]})
         wire = env.to_wire()
         self.server_bus._on_frame(b"MsgPortal2Server", wire)
-        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(
-            self.session, text=[["hi"], {}]
-        )
+        evennia.SERVER_SESSION_HANDLER.data_in.assert_called_with(self.session, text=[["hi"], {}])
 
     def test_pid_transport_disconnect(self):
         transport = _PidTransport(self.portal)
@@ -344,9 +330,7 @@ class TestRedisTransportQueueWarning(SimpleTestCase):
         self.transport = redis_transport.RedisTransport("incoming", lambda *_: None)
         self.transport.online = True
         self.now = 10.0
-        timer = patch.object(
-            redis_transport.time, "monotonic", side_effect=lambda: self.now
-        )
+        timer = patch.object(redis_transport.time, "monotonic", side_effect=lambda: self.now)
         warning = patch.object(redis_transport.logger, "log_warn")
         timer.start()
         self.warning = warning.start()
@@ -356,8 +340,7 @@ class TestRedisTransportQueueWarning(SimpleTestCase):
     def _publish(self, count=1):
         """Publish small ordinary frames to the named outgoing stream."""
         return [
-            self.transport.publish("outgoing", b"MsgServer2Portal", b"{}")
-            for _ in range(count)
+            self.transport.publish("outgoing", b"MsgServer2Portal", b"{}") for _ in range(count)
         ]
 
     def test_warns_only_above_200(self):
@@ -502,17 +485,11 @@ class TestRedisTransportForwardCursor(SimpleTestCase):
     def test_fresh_baseline_skips_old_frames_and_keeps_new_frames(self):
         """A frame written after baseline is read by its explicit cursor."""
         received = []
-        transport = _RedisTransport(
-            self.stream, lambda command, data: received.append(data)
-        )
+        transport = _RedisTransport(self.stream, lambda command, data: received.append(data))
         transport._client = self.fake
-        self.fake.xadd(
-            self.stream, {b"c": b"Msg", b"d": b"old", b"o": b"writer", b"n": b"1"}
-        )
+        self.fake.xadd(self.stream, {b"c": b"Msg", b"d": b"old", b"o": b"writer", b"n": b"1"})
         transport._baseline()
-        self.fake.xadd(
-            self.stream, {b"c": b"Msg", b"d": b"new", b"o": b"writer", b"n": b"2"}
-        )
+        self.fake.xadd(self.stream, {b"c": b"Msg", b"d": b"new", b"o": b"writer", b"n": b"2"})
         transport.online = True
         response = self.fake.xread({self.stream: transport._cursor}, count=10)
         for _, entries in response:
@@ -523,9 +500,7 @@ class TestRedisTransportForwardCursor(SimpleTestCase):
 
     def test_baseline_does_not_reclaim_existing_consumer_pending(self):
         """Legacy group pending entries remain unexecuted by new readers."""
-        self.fake.xadd(
-            self.stream, {b"c": b"Msg", b"d": b"old", b"o": b"writer", b"n": b"1"}
-        )
+        self.fake.xadd(self.stream, {b"c": b"Msg", b"d": b"old", b"o": b"writer", b"n": b"1"})
         self.fake.xgroup_create(self.stream, "legacy", id="0")
         self.fake.xreadgroup("legacy", "old-consumer", {self.stream: ">"}, count=1)
         transport = _RedisTransport(self.stream, MagicMock())
@@ -728,14 +703,10 @@ class TestBoundedTransportStop(SimpleTestCase):
                 called.set()
                 raise RuntimeError("offline")
 
-            def execute(
-                self, raise_on_error=False
-            ):  # pragma: no cover - xadd fails first
+            def execute(self, raise_on_error=False):  # pragma: no cover - xadd fails first
                 return []
 
-        with patch.object(
-            self.transport._client, "pipeline", return_value=FailingPipeline()
-        ):
+        with patch.object(self.transport._client, "pipeline", return_value=FailingPipeline()):
             result = self.transport.publish("s", b"AdminX", b"body")
             worker = self._worker(self.transport._writer_loop)
             self.assertTrue(called.wait(1))
@@ -893,9 +864,7 @@ class TestBusFixtureCleanup(SimpleTestCase):
             finally:
                 resources.close()
                 ambient_task.cancel()
-                ambient.run_until_complete(
-                    asyncio.gather(ambient_task, return_exceptions=True)
-                )
+                ambient.run_until_complete(asyncio.gather(ambient_task, return_exceptions=True))
                 ambient.close()
 
     def test_stop_failure_does_not_skip_other_cleanup(self):
@@ -997,7 +966,5 @@ class TestBusFixtureCleanup(SimpleTestCase):
         finally:
             release.set()
             reader.join(1)
-            resources.loop.run_until_complete(
-                asyncio.gather(task, return_exceptions=True)
-            )
+            resources.loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
             resources.loop.close()

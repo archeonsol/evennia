@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import math
 import time
-import uuid
 from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
 from typing import Any, Mapping
+
+from evennia.utils.fast_ids import new_runtime_id
 
 __all__ = [
     "CLIENT_NARRATIVE_FLAG",
@@ -415,7 +416,7 @@ class RenderNode:
     sep: str = "\n"
     metadata: Mapping[str, Any] = field(default_factory=dict)
     correlation_id: str = ""
-    node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    node_id: str = field(default_factory=new_runtime_id)
     schema: str = RENDER_SCHEMA
     #: Internal trust flag for :meth:`map_text`/:meth:`prepend_text`: the node
     #: was built from an already-validated node and only its text changed, so

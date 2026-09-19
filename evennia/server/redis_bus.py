@@ -101,7 +101,7 @@ class _RedisBusMixin:
             return
         if self._transport.online:
             self._handshake.tick()
-        self._tick_handle = clock.call_later(0.5, self._tick)
+        self._tick_handle = clock.call_later(0.5, self._tick, _task_kind="transport")
 
     def _unavailable(self):
         """Close readiness and invalidate queued work without rebuilding sessions."""
@@ -127,9 +127,7 @@ class _RedisBusMixin:
             # every failed handshake cycle, which is the same outage, not new
             # work lost.
             self._sync_failure_logged = True
-            logger.log_warn(
-                f"redis bus unavailable: {reason}; interrupted work may have run"
-            )
+            logger.log_warn(f"redis bus unavailable: {reason}; interrupted work may have run")
         if self._role == "portal":
             for session in list(evennia.PORTAL_SESSION_HANDLER.values()):
                 evennia.PORTAL_SESSION_HANDLER.bus_unavailable_notice(session)
@@ -202,11 +200,7 @@ class _RedisBusMixin:
         finally:
             self._snapshot_waiters.pop(snapshot_id, None)
             if not result._future.done():
-                result.fail(
-                    TransportUnavailable(
-                        "final snapshot wait ended without confirmation"
-                    )
-                )
+                result.fail(TransportUnavailable("final snapshot wait ended without confirmation"))
 
     def _snapshot(self):
         """Return Portal state; unused by the Server role."""
@@ -246,9 +240,7 @@ class _RedisBusMixin:
                 )
         if not allowed:
             return PublicationResult.rejected(TransportUnavailable("peer is not ready"))
-        return self._transport.publish(
-            self._send_stream, cmdkey, packed, pair=self._handshake.pair
-        )
+        return self._transport.publish(self._send_stream, cmdkey, packed, pair=self._handshake.pair)
 
     def _on_frame(self, cmdkey, data):
         raise NotImplementedError
@@ -355,9 +347,7 @@ class RedisServerBus(_RedisBusMixin):
         """Run process setup once, then negotiate session readiness."""
         if not self._initial_setup_done:
             if self._initial_setup_attempted:
-                raise RuntimeError(
-                    "redis bus: initial setup failed; process restart required"
-                )
+                raise RuntimeError("redis bus: initial setup failed; process restart required")
             self._initial_setup_attempted = True
             self.factory.server.run_initial_setup()
             self._initial_setup_done = True
@@ -375,9 +365,7 @@ class RedisServerBus(_RedisBusMixin):
             mode = payload.get("restart_mode") or "shutdown"
             self.factory.server.run_init_hooks(mode)
             restored = {
-                sid: {
-                    key: value for key, value in data.items() if not key.startswith("_")
-                }
+                sid: {key: value for key, value in data.items() if not key.startswith("_")}
                 for sid, data in sessions.items()
                 if data.get("_server_confirmed")
             }

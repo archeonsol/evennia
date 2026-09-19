@@ -341,14 +341,14 @@ class Actor:
         self._gen_at_start = self.binding.db_generation
 
     def focus_still_valid(self) -> bool:
-        """Whether the pinned focus body still belongs on the live (DB) stack.
+        """Whether the pinned focus body still belongs on the live shared stack.
 
-        Cross-session-correct: re-reads the binding's generation/stack from the
-        DB (another session mutates a *different* in-memory instance of the same
-        row). Fast path returns ``True`` when the generation is unchanged. Used
-        by the engine after a suspended rule resumes — ``False`` means the body
-        this dispatch acts for was popped/collapsed away (or the binding row was
-        deleted), so the remainder of the phase must abort."""
+        ``ControlBinding`` is an idmapper singleton, so every local session sees
+        co-session push/pop changes on this same instance without a database
+        poll. The fast path returns ``True`` when its generation is unchanged.
+        Used after a suspended rule resumes; ``False`` aborts the rest of the
+        phase when its pinned body was popped or the binding row was deleted.
+        """
         if self.binding is None or self._focus_snapshot is None:
             return True
         current = self.binding.current_generation()

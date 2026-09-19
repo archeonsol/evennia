@@ -49,6 +49,13 @@ class TestFlushMetrics(TestCase):
         recorded_stats, kwargs = rec.call_args.args[0], rec.call_args.kwargs
         self.assertEqual(recorded_stats["total"], 3)
         self.assertIn("duration_seconds", kwargs)
+        self.assertEqual(kwargs["source"], "manual")
+
+    def test_flush_forwards_bounded_source(self):
+        with patch.object(prometheus_metrics, "record_attribute_flush") as rec:
+            attributes.flush_all_dirty(source="barrier")
+
+        self.assertEqual(rec.call_args.kwargs["source"], "barrier")
 
     def test_metrics_error_is_not_swallowed(self):
         # Deliberate contract: a genuine metrics bug surfaces rather than vanishing.

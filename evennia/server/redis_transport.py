@@ -142,7 +142,7 @@ class RedisTransport:
             self._ordinary = deque(key for key in self._ordinary if key not in stale)
             self._condition.notify_all()
         if stale:
-            clock.call_from_thread(self._reject_stale, stale)
+            clock.call_from_thread(self._reject_stale, stale, _task_kind="transport")
 
     def _reject_stale(self, keys):
         """Settle replaced-generation frames without releasing in-flight bytes."""
@@ -284,7 +284,7 @@ class RedisTransport:
             self._failure_reason = reason
             fence = self._fence
             self._condition.notify_all()
-        clock.call_from_thread(self._deliver_failure, reason, fence)
+        clock.call_from_thread(self._deliver_failure, reason, fence, _task_kind="transport")
 
     def settle_failure(self):
         """Settle a final abort before the event loop exits."""
@@ -403,7 +403,7 @@ class RedisTransport:
             metrics.observe_bus_queue(len(self._outgoing), self._outgoing_bytes)
             for _ in range(published):
                 metrics.record_bus_publish()
-        clock.call_from_thread(self._complete_many, completions)
+        clock.call_from_thread(self._complete_many, completions, _task_kind="transport")
 
     def _complete_many(self, completions):
         """Settle one published batch on the event loop in publication order."""
@@ -445,7 +445,7 @@ class RedisTransport:
         if full:
             self.fail("incoming callback capacity exhausted")
         elif schedule:
-            clock.call_from_thread(self._drain_incoming)
+            clock.call_from_thread(self._drain_incoming, _task_kind="transport")
 
     def _drain_incoming(self):
         """Execute at most 32 FIFO frames per event-loop turn."""
@@ -468,7 +468,7 @@ class RedisTransport:
                 with self._lock:
                     self._incoming_bytes -= size
                     self._incoming_active = 0
-        clock.call_from_thread(self._drain_incoming)
+        clock.call_from_thread(self._drain_incoming, _task_kind="transport")
 
     def _history_intact(self):
         """Detect deletion or trimming before making subsequent frames executable."""
@@ -494,7 +494,7 @@ class RedisTransport:
         with self._lock:
             self._recover_scheduled = True
             fence = self._fence
-        clock.call_from_thread(self._recovered, fence)
+        clock.call_from_thread(self._recovered, fence, _task_kind="transport")
         self._stop.wait(WAIT)
 
     def _recovered(self, fence):

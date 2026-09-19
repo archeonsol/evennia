@@ -223,6 +223,17 @@ class TestFocusRaceGuard(EvenniaTest):
         self.assertEqual(fired, ["work", "after"])
         self.assertEqual(_sync(dd).outcome, "succeeded")
 
+    def test_live_guard_reads_shared_binding_without_queries(self):
+        b, actor, _, _, _ = self._setup()
+        other = ControlBinding.objects.get(pk=b.pk)
+        self.assertIs(other, b)
+        other.push(self.obj1)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(actor.binding.current_generation(), other.db_generation)
+            self.assertTrue(actor.binding.live_contains(self.char1))
+            self.assertTrue(actor.binding.live_contains(self.obj1))
+
     def test_unbound_actor_never_aborts(self):
         fired, d = [], Deferred()
         actor = Actor(session=self.session, account=self.account, character=self.char1)
