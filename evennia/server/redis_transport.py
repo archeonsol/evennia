@@ -261,7 +261,10 @@ class RedisTransport:
         if reason:
             metrics = _bus_metrics()
             if metrics is not None:
-                metrics.record_bus_reject(reason)
+                try:
+                    metrics.record_bus_reject(reason)
+                except Exception as err:
+                    logger.log_warn(f"redis bus: reject telemetry failed: {err}")
             if control and self.online and reason != "transport capacity exhausted":
                 self.fail(reason)
             return PublicationResult.rejected(TransportUnavailable(reason))
@@ -391,19 +394,39 @@ class RedisTransport:
             self._condition.notify_all()
         completions = []
         published = 0
+        failed = 0
+        first_error = None
         for (key, frame, _fields), response in zip(batch, responses):
             if isinstance(response, BaseException):
+                failed += 1
+                if first_error is None:
+                    first_error = response
                 completions.append((key, frame.fence, None, response))
             else:
                 completions.append((key, frame.fence, response, None))
                 published += 1
+        # Settlement is scheduled first: it outranks escalation and telemetry,
+        # neither of which may strand a published batch unsettled.
+        clock.call_from_thread(self._complete_many, completions, _task_kind="transport")
+        if failed:
+            # raise_on_error=False parks per-command failures in the responses;
+            # those frames did not publish, so escalate as the pre-batching
+            # per-command path did.
+            logger.log_warn(
+                f"redis bus: {failed}/{len(batch)} XADD commands failed: {first_error!r}"
+            )
+            self.fail("Redis publication failed")
         metrics = _bus_metrics()
         if metrics is not None:
-            metrics.record_bus_write_batch(len(batch))
-            metrics.observe_bus_queue(len(self._outgoing), self._outgoing_bytes)
-            for _ in range(published):
-                metrics.record_bus_publish()
-        clock.call_from_thread(self._complete_many, completions, _task_kind="transport")
+            try:
+                with self._condition:
+                    depth, size = len(self._outgoing), self._outgoing_bytes
+                metrics.observe_bus_queue(depth, size)
+                metrics.record_bus_write_batch(len(batch))
+                for _ in range(published):
+                    metrics.record_bus_publish()
+            except Exception as err:
+                logger.log_warn(f"redis bus: write telemetry failed: {err}")
 
     def _complete_many(self, completions):
         """Settle one published batch on the event loop in publication order."""

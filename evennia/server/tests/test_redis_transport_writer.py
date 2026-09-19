@@ -42,6 +42,33 @@ class _FakeClient:
         return pipeline
 
 
+class _PartialFailurePipeline(_FakePipeline):
+    """Answer execute() with one per-command error and the rest entry ids."""
+
+    def execute(self, raise_on_error=False):
+        self.executed += 1
+        return [
+            RuntimeError("xadd rejected") if index == 0 else f"{index}-0"
+            for index in range(len(self.calls))
+        ]
+
+
+class _RaisingMetrics:
+    """Telemetry stub whose every hot-path call raises."""
+
+    def record_bus_write_batch(self, size):
+        raise RuntimeError("telemetry down")
+
+    def observe_bus_queue(self, depth, size):
+        raise RuntimeError("telemetry down")
+
+    def record_bus_publish(self):
+        raise RuntimeError("telemetry down")
+
+    def record_bus_reject(self, reason):
+        raise RuntimeError("telemetry down")
+
+
 class WriterBatchTest(SimpleTestCase):
     """One Redis round trip per batch, in wire order, capacity as backpressure."""
 
@@ -172,3 +199,38 @@ class WriterBatchTest(SimpleTestCase):
             )
             self.assertTrue(transport.online)
             self.assertEqual(self.failures, [])
+
+    def test_writer_settles_the_batch_even_when_telemetry_fails(self):
+        """A metrics raise must not strand a published batch unsettled."""
+        transport = self._transport()
+        self.assertTrue(transport.publish("output", b"Msg", b"x").admitted)
+        with patch.object(transport_module, "_bus_metrics", return_value=_RaisingMetrics()):
+            transport._write_batch(transport._take_write_batch())
+        self._run_callbacks()
+        self.assertEqual(transport.outgoing_count, 0)
+        self.assertEqual(transport.outgoing_bytes, 0)
+        self.assertEqual(self.failures, [])
+
+    def test_reject_path_survives_broken_telemetry(self):
+        """The rejection result outranks telemetry bookkeeping."""
+        transport = self._transport()
+        with (
+            patch.multiple(transport_module, DATA_ENTRIES=1, DATA_BYTES=10_000),
+            patch.object(transport_module, "_bus_metrics", return_value=_RaisingMetrics()),
+        ):
+            self.assertTrue(transport.publish("output", b"Msg", b"a").admitted)
+            result = transport.publish("output", b"Msg", b"b")
+        self.assertFalse(result.admitted)
+        self.assertTrue(transport.online)
+
+    def test_per_command_xadd_error_settles_frames_and_fails_transport(self):
+        """A response entry that is an error is a lost publication: escalate."""
+        transport = self._transport()
+        self.assertTrue(transport.publish("output", b"Msg", b"bad").admitted)
+        self.assertTrue(transport.publish("output", b"Msg", b"good").admitted)
+        transport._client.pipeline = lambda transaction=False: _PartialFailurePipeline()
+        transport._write_batch(transport._take_write_batch())
+        self._run_callbacks()
+        self.assertEqual(transport.outgoing_count, 0)
+        self.assertFalse(transport.online)
+        self.assertEqual(len(self.failures), 1)
