@@ -25,6 +25,50 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.251: Grouped Portal delivery
+
+### Performance
+
+- **Byte-identical final output now crosses the Redis bus once per recipient
+  group.** [`sessionhandler.py`](evennia/server/sessionhandler.py) drains all
+  session output for one reactor turn in one callback, performs the existing
+  protocol cleanup separately for every session, and groups only the resulting
+  frames that are exactly equal. The Portal expands each group to its local
+  sockets. A synthetic 100-recipient broadcast therefore schedules one flush
+  callback and publishes one multicast frame instead of 100 callbacks and 100
+  frames. Viewer-specific output remains separate. Groups are capped at 1,024
+  sessions, and payloads over the 8 MiB bus-frame ceiling fall back to ordinary
+  per-session delivery.
+- **This targets the dominant amplification measured in the 100-bot run.** The
+  pre-release baseline completed 18,958 commands but produced 611,761 text
+  deliveries, 633,333 Server-to-Portal frames, 14,084 Redis writer batches, and
+  350,963 generic runtime-task completions. Homogeneous room broadcasts can now
+  approach a 100:1 reduction in bus frames and flush callbacks; the actual
+  reduction depends on how many final viewer renderings are identical.
+
+### Protocol and correctness
+
+- [`amp_serde.py`](evennia/server/amp_serde.py) and
+  [`ipc_schema.py`](evennia/server/ipc_schema.py) add the typed `M1`
+  `MsgServer2PortalMany` envelope. Grouping happens after visibility, naming,
+  narrative transforms, hooks, options, encoding, and outgoing funcparser work,
+  so no viewer-specific value is cached or shared. Round-based grouping
+  preserves each session's message order, watches still observe every logical
+  delivery, disconnect flushes remain immediate, and one broken session cleanup
+  cannot strand output for the others.
+
+### Migration
+
+- No database migration or setting change. This release changes the Redis bus
+  wire protocol, so stop and restart the Server and Portal together; mixed bus
+  versions remain unsupported.
+
+### Tests
+
+- 101 focused serialization, ordering, disconnect, Redis round-trip, recovery,
+  reload, and process-boundary tests pass (six expected skips).
+- The complete `evennia.server` suite passes: 622 tests, 18 expected skips.
+
 ## 6.0.0+underspire.250: Off-loop authorization, async movement, load-test telemetry
 
 ### Performance
