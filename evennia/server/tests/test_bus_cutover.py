@@ -158,7 +158,9 @@ class TestRealRedisCutover(SimpleTestCase):
                 transport._client = self.client
                 transport._ensure_group()
                 with patch.object(
-                    legacy.clock, "call_from_thread", side_effect=lambda fn, *args: fn(*args)
+                    legacy.clock,
+                    "call_from_thread",
+                    side_effect=lambda fn, *args, **kwargs: fn(*args),
                 ):
                     transport._drain_pending()
                     self.assertEqual(delivered, [])

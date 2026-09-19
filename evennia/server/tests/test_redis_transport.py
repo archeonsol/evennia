@@ -28,7 +28,7 @@ class TestRedisTransport(SimpleTestCase):
         clock_patch = patch.object(
             transport_module.clock,
             "call_from_thread",
-            side_effect=lambda fn, *args: self.callbacks.append((fn, args)),
+            side_effect=lambda fn, *args, **kwargs: self.callbacks.append((fn, args)),
         )
         client_patch.start()
         clock_patch.start()

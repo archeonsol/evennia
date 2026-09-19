@@ -35,7 +35,7 @@ class TestLiveRedisTransport(SimpleTestCase):
             patch.object(
                 transport_module.clock,
                 "call_from_thread",
-                side_effect=lambda fn, *args: self.callbacks.put((fn, args)),
+                side_effect=lambda fn, *args, **kwargs: self.callbacks.put((fn, args)),
             )
         )
         self.redis = RedisProcess()
