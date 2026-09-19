@@ -24,6 +24,10 @@ from evennia.utils.utils import make_iter, to_str
 #
 # ------------------------------------------------------------
 
+# Negative tag hits are keyed by arbitrary player-typed text; the per-object
+# miss cache is dropped whole once it reaches this size.
+_TAG_MISSCACHE_LIMIT = 1000
+
 
 class Tag(models.Model):
     """
@@ -486,6 +490,11 @@ class TagHandler(object):
                         self._cache[cachekey] = tag
                     return [tag]
                 if settings.TYPECLASS_AGGRESSIVE_CACHE:
+                    if len(self._misscache) >= _TAG_MISSCACHE_LIMIT:
+                        # Keys are arbitrary player-typed text; past the cap
+                        # drop everything. A dropped entry costs one re-query,
+                        # never a wrong answer.
+                        self._misscache = {}
                     self._misscache[cachekey] = True
                 return []
         else:

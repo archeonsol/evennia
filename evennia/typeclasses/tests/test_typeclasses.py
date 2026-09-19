@@ -443,6 +443,19 @@ class TestTagMissCache(BaseEvenniaTest):
             self.obj1.tags.add("no_cache_tag", category="cat")
             self.assertTrue(self.obj1.tags.has("no_cache_tag", category="cat"))
 
+    def test_misscache_is_bounded(self):
+        """Misses keyed by player-typed text must not grow the dict forever."""
+
+        from evennia.typeclasses import tags as tags_module
+
+        flush_cache()
+        with patch.object(tags_module, "_TAG_MISSCACHE_LIMIT", 8):
+            for index in range(20):
+                self.assertFalse(self.obj1.tags.has(f"typed{index}", category="chat"))
+        self.assertLessEqual(len(self.obj1.tags._misscache), 8)
+        # a dropped entry costs a re-query, never a wrong answer
+        self.assertFalse(self.obj1.tags.has("typed19", category="chat"))
+
 
 class TestTagBulkPrefetch(BaseEvenniaTest):
     """
