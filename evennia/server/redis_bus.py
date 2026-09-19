@@ -144,25 +144,37 @@ class _RedisBusMixin:
         if self._handshake.state != "stopping":
             self._handshake.tick()
 
-    def _publish_control(self, key, payload):
-        """Publish current-generation transport control through ordinary FIFO."""
-        return self._transport.publish(
+    def _publish_control(self, key, payload, *, name):
+        """Publish current-generation transport control through ordinary FIFO.
+
+        A capacity rejection is backpressure, not a transport fault, so it
+        does not fence the bus. But a control frame has no automatic
+        retransmission, so a lost one is logged by its producer rather than
+        discarded; convergence then relies on the handshake/ack deadline, not
+        on this frame (e.g. a dropped final ack times out in sync_sessions).
+        """
+        result = self._transport.publish(
             self._send_stream,
             key,
             amp.dumps_admin((0, payload)),
             pair=self._handshake.pair,
         )
+        if not result.admitted:
+            logger.log_warn(f"redis bus: dropped {name} control frame under transport backpressure")
+        return result
 
     def acknowledge_snapshot(self, snapshot_id):
         """Confirm Portal application of a current-generation final snapshot."""
-        return self._publish_control(b"BusSnapshotAck", {"snapshot_id": snapshot_id})
+        return self._publish_control(
+            b"BusSnapshotAck", {"snapshot_id": snapshot_id}, name="BusSnapshotAck"
+        )
 
     def begin_shutdown(self):
         """Close input while allowing teardown before final synchronization."""
         if self._handshake.state != "stopping":
             self._draining = True
             self._handshake.state = "stopping"
-            self._publish_control(b"BusStopping", {})
+            self._publish_control(b"BusStopping", {}, name="BusStopping")
 
     async def sync_sessions(self, sessiondata):
         """Wait for final Portal application within the shared shutdown deadline."""

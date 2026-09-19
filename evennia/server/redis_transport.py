@@ -22,6 +22,10 @@ MAX_FRAME_BYTES = 8 * 1024 * 1024
 STOP_TIMEOUT = 3.0
 WAIT = 0.1
 WRITE_BATCH_SIZE = 64
+# Rejection reason for an ordinary queue-full publish. It is backpressure, not
+# a transport fault, so it must not fence the bus the way a dead Redis does.
+# Shared by the reject assignment and its check below.
+CAPACITY_EXHAUSTED = "transport capacity exhausted"
 READ_BATCH = 32
 
 
@@ -238,7 +242,7 @@ class RedisTransport:
                     else _bus_limit("REDIS_BUS_DATA_BYTES", DATA_BYTES)
                 )
                 if count >= count_limit or size + frame.size > byte_limit:
-                    reason = "transport capacity exhausted"
+                    reason = CAPACITY_EXHAUSTED
                 else:
                     self._next_id += 1
                     self._outgoing[self._next_id] = frame
@@ -265,7 +269,7 @@ class RedisTransport:
                     metrics.record_bus_reject(reason)
                 except Exception as err:
                     logger.log_warn(f"redis bus: reject telemetry failed: {err}")
-            if control and self.online and reason != "transport capacity exhausted":
+            if control and self.online and reason != CAPACITY_EXHAUSTED:
                 self.fail(reason)
             return PublicationResult.rejected(TransportUnavailable(reason))
         return frame.result
