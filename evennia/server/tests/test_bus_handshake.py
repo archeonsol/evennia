@@ -115,6 +115,37 @@ class TestHandshake(TestCase):
         self.drain()
         self.assertEqual(self.peers["portal"].state, "ready")
 
+    def test_repeated_probes_replace_one_offer(self):
+        """A re-probing portal may not fill the offer table slot by slot."""
+
+        server = self.peers["server"]
+        for _ in range(9):
+            self.now += 1
+            server.receive({"kind": "probe", "portal": ["portal", "a"], "probe": "x1"})
+        self.wire.clear()
+        server.receive({"kind": "probe", "portal": ["portal", "b"], "probe": "x2"})
+        kinds = [frame["kind"] for _role, frame in self.wire]
+        self.assertIn("offer", kinds)
+
+    def test_offer_table_at_capacity_answers_the_probe(self):
+        """At capacity the oldest bound offer yields to a fresh probe."""
+
+        server = self.peers["server"]
+        for index in range(8):
+            self.now += 1
+            server.receive(
+                {"kind": "probe", "portal": ["portal", f"p{index}"], "probe": "p"}
+            )
+        self.wire.clear()
+        self.now += 1
+        server.receive({"kind": "probe", "portal": ["portal", "p8"], "probe": "p"})
+        kinds = [frame["kind"] for _role, frame in self.wire]
+        self.assertIn("offer", kinds)
+        self.assertEqual(len(server._offers), 8)
+        pairs = [tuple(offer["pair"][0]) for offer in server._offers.values()]
+        self.assertNotIn(("portal", "p0"), pairs)
+        self.assertIn(("portal", "p8"), pairs)
+
     def test_unanswered_probe_is_reissued(self):
         """A probe lost before the peer subscribed is retried on cadence."""
         self.now += 1

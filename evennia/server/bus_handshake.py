@@ -48,6 +48,9 @@ class BusHandshake:
         self._last_probe = -self.heartbeat
         self._pending = None
         self._offers = {}
+        # portal identity -> its live challenge; a re-probe replaces its own
+        # offer instead of consuming another slot of the bounded table.
+        self._offer_slots = {}
         self._exchange = None
 
     @property
@@ -64,6 +67,7 @@ class BusHandshake:
         self.epoch = uuid4().hex
         self._pending = self._exchange = None
         self._offers.clear()
+        self._offer_slots.clear()
         self._last_probe = -self.heartbeat
         self._on_unavailable()
 
@@ -143,9 +147,20 @@ class BusHandshake:
                 for key, value in self._offers.items()
                 if self._now() - value["at"] < self.timeout
             }
+            slot = tuple(portal)
+            previous = self._offer_slots.pop(slot, None)
+            if previous is not None:
+                self._offers.pop(previous, None)
             if len(self._offers) >= 8:
-                return
+                # Answering the fresh probe outranks the oldest bound offer;
+                # dropping the probe instead would starve new portals behind
+                # re-probing ones.
+                oldest = min(self._offers, key=lambda key: self._offers[key]["at"])
+                evicted = self._offers.pop(oldest)
+                if self._offer_slots.get(tuple(evicted["pair"][0])) == oldest:
+                    del self._offer_slots[tuple(evicted["pair"][0])]
             self._offers[offer["challenge"]] = offer
+            self._offer_slots[slot] = offer["challenge"]
             self._emit(
                 "offer",
                 offer,
@@ -158,6 +173,8 @@ class BusHandshake:
             if self._now() - offer["at"] >= self.timeout:
                 return
             del self._offers[frame["challenge"]]
+            if self._offer_slots.get(tuple(offer["pair"][0])) == frame["challenge"]:
+                del self._offer_slots[tuple(offer["pair"][0])]
             if kind == "pulse":
                 if self.state in ("ready", "stopping") and self.pair == frame["pair"]:
                     self._last_seen = self._now()
