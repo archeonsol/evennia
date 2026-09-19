@@ -45,6 +45,12 @@ matching release procedure.
   and custom cleaner overrides remain per session because their result may
   depend on session state. A homogeneous 100-recipient text broadcast now
   performs one base clean instead of 100 before the `.251` multicast step.
+- **The process and ASGI web event loops prefer uvloop when it is installed.**
+  [`loop_factory.py`](evennia/utils/loop_factory.py) centralizes the loop choice
+  and is used by the Server/Portal bootstrap, the ASGI web thread, and the
+  headless standalone bootstrap; a missing or unsupported install falls back to
+  the stdlib loop (Windows dev) and each process logs the loop it chose. The
+  game adds `uvloop>=0.21` for non-Windows deploys.
 - **Hot-path runtime identifiers use a random process prefix plus a monotonic
   counter.** [`fast_ids.py`](evennia/utils/fast_ids.py) replaces repeated
   `uuid4()` calls for authorization decisions, narrative plans/nodes, and the
@@ -56,6 +62,14 @@ matching release procedure.
   and the destination look remain inside the local snapshot scope. Dynamic
   game-defined `destination` and `contents` properties are guarded so a raising
   property cannot break dispatch.
+
+### Output delivery
+
+- One frame that cannot produce a hashable equality key no longer aborts a
+  whole flush turn. [`sessionhandler.py`](evennia/server/sessionhandler.py)
+  hash-tests structural keys and falls back to per-frame identity grouping, so
+  the frame ships alone instead of dropping every session's buffered output
+  after the buffers were already popped.
 
 ### JSONB correctness and cache API
 
@@ -74,12 +88,12 @@ matching release procedure.
 
 ### Observability
 
-- Attribute flush runs now report bounded `tick`, `barrier`, `shutdown`, and
-  `manual` caller labels. Authorization metrics distinguish an already-ready
-  snapshot from an action that awaited refresh. One in 64 render calls samples
-  plan resolution, universal transforms, and output cleaning. Runtime callback
-  counters distinguish output, Redis transport, and idmapper work from the
-  former generic pool.
+- Attribute flush runs and their duration histogram now report bounded `tick`,
+  `barrier`, `shutdown`, and `manual` caller labels. Authorization metrics
+  distinguish an already-ready snapshot from an action that awaited refresh.
+  One in 64 render calls samples plan resolution, universal transforms, and
+  output cleaning. Runtime callback counters distinguish output, Redis
+  transport, and idmapper work from the former generic pool.
 
 ### Migration
 
@@ -90,9 +104,11 @@ matching release procedure.
 
 ### Tests
 
-- 443 focused engine tests pass across JSONB durability, authorization,
-  narrative delivery, grouped output, Redis transport, scheduling, actions,
-  runtime IDs, and metrics.
+- Engine sweep green: `evennia.server` + `evennia.utils` 1504 tests (20
+  expected skips), `evennia.typeclasses` + `evennia.actions` 767 tests.
+  Coverage spans JSONB durability, authorization, narrative delivery, grouped
+  output, Redis transport, scheduling, actions, runtime IDs, loop selection,
+  and metrics.
 - 278 downstream game tests pass across room rendering, perception, psychosis,
   movement, wilderness, and multipuppet relays. All touched Python files pass
   Ruff format and import checks.
