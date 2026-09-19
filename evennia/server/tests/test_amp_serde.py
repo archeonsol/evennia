@@ -4,17 +4,14 @@ Tests for secure AMP session serialization.
 
 import pickle
 
-from evennia.server.amp_serde import (
-    pack_admin_message,
-    pack_launcher_args,
-    pack_session_message,
-    pack_status,
-    sanitize_session_kwargs,
-    unpack_admin_message,
-    unpack_launcher_args,
-    unpack_session_message,
-    unpack_status,
-)
+from evennia.server.amp_serde import (pack_admin_message, pack_launcher_args,
+                                      pack_multicast_message,
+                                      pack_session_message, pack_status,
+                                      sanitize_session_kwargs,
+                                      unpack_admin_message,
+                                      unpack_launcher_args,
+                                      unpack_multicast_message,
+                                      unpack_session_message, unpack_status)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -53,6 +50,18 @@ class TestAMPSerde(BaseEvenniaTest):
         wire = pack_session_message(1, {"text": "x" * (65536 * 2)})
         with self.assertRaises(ValueError):
             unpack_session_message(wire)
+
+    def test_multicast_roundtrip_json(self):
+        wire = pack_multicast_message([2, 7], {"text": [["same"], {}]})
+        self.assertTrue(wire.startswith(b"M1"))
+        sessids, out = unpack_multicast_message(wire)
+        self.assertEqual(sessids, [2, 7])
+        self.assertEqual(out, {"text": [["same"], {}]})
+
+    def test_multicast_rejects_duplicate_or_invalid_sessions(self):
+        for sessids in ([], [0], [1, 1]):
+            with self.subTest(sessids=sessids), self.assertRaises(ValueError):
+                pack_multicast_message(sessids, {"text": "x"})
 
     def test_status_roundtrip_json(self):
         # The MsgStatus payload is the get_status() 6-tuple. It packs to a JSON

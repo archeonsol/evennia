@@ -23,21 +23,13 @@ from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.console import watch as _watch
 from evennia.server.portal import amp
 from evennia.server.service_registry import IMMEDIATE_RESULT
-from evennia.server.signals import (
-    SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
-    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
-    SIGNAL_ACCOUNT_POST_LOGIN,
-    SIGNAL_ACCOUNT_POST_LOGOUT,
-)
+from evennia.server.signals import (SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
+                                    SIGNAL_ACCOUNT_POST_LAST_LOGOUT,
+                                    SIGNAL_ACCOUNT_POST_LOGIN,
+                                    SIGNAL_ACCOUNT_POST_LOGOUT)
 from evennia.utils.logger import log_trace
-from evennia.utils.utils import (
-    callables_from_module,
-    class_from_module,
-    delay,
-    is_iter,
-    is_veto,
-    make_iter,
-)
+from evennia.utils.utils import (callables_from_module, class_from_module,
+                                 delay, is_iter, is_veto, make_iter)
 
 
 def _send_admin_to_portal(session, **kwargs):
@@ -67,6 +59,22 @@ DUMMYSESSION = DummySession()
 
 _MODEL_MAP = None
 _FUNCPARSER = None
+
+
+def _output_frame_key(value):
+    """Return a hashable key matching the final JSON meaning of an output frame."""
+    if isinstance(value, dict):
+        return (
+            "dict",
+            tuple(
+                sorted((key, _output_frame_key(item)) for key, item in value.items())
+            ),
+        )
+    if isinstance(value, (list, tuple)):
+        return ("list", tuple(_output_frame_key(item) for item in value))
+    if isinstance(value, float):
+        return ("float", repr(value))
+    return (type(value).__name__, value)
 
 
 # input handlers
@@ -240,7 +248,9 @@ class SessionHandler(dict):
                     and isinstance(self, ServerSessionHandler)
                 ):
                     # only apply funcparser on the outgoing path (sessionhandler->)
-                    data = _FUNCPARSER.parse(data, strip=strip_inlinefunc, session=session)
+                    data = _FUNCPARSER.parse(
+                        data, strip=strip_inlinefunc, session=session
+                    )
 
                 return str(data)
             elif (
@@ -325,6 +335,7 @@ class ServerSessionHandler(SessionHandler):
         self.portal_start_time = 0.0
         # per-session outbound message buffer for batching (sessid -> [kwargs, ...])
         self._outbuf = {}
+        self._outbuf_flush_scheduled = False
         # bot connect requests awaiting confirmed publication (see
         # retry_pending_bot_sessions)
         self._pending_bot_sessions = {}
@@ -505,7 +516,10 @@ class ServerSessionHandler(SessionHandler):
         """
         protocol_path, configdict = self._pending_bot_sessions[key]
         result = evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
-            DUMMYSESSION, operation=amp.SCONN, protocol_path=protocol_path, config=configdict
+            DUMMYSESSION,
+            operation=amp.SCONN,
+            protocol_path=protocol_path,
+            config=configdict,
         )
         result.addCallback(lambda _entry_id: self._pending_bot_sessions.pop(key, None))
         return result
@@ -626,13 +640,17 @@ class ServerSessionHandler(SessionHandler):
 
         nsess = len(self.sessions_from_account(account))
         string = "Logged in: {account} {address} ({nsessions} session(s) total)"
-        string = string.format(account=account, address=session.address, nsessions=nsess)
+        string = string.format(
+            account=account, address=session.address, nsessions=nsess
+        )
         session.log(string)
         session.logged_in = True
         # sync the portal to the session
         if not testmode:
             evennia.EVENNIA_SERVER_SERVICE.portal_bus.send_AdminServer2Portal(
-                session, operation=amp.SLOGIN, sessiondata={"logged_in": True, "uid": session.uid}
+                session,
+                operation=amp.SLOGIN,
+                sessiondata={"logged_in": True, "uid": session.uid},
             )
         account.at_post_login(session=session)
         if nsess < 2:
@@ -667,12 +685,17 @@ class ServerSessionHandler(SessionHandler):
             sreason = " ({})".format(reason) if reason else ""
             string = "Logged out: {account} {address} ({nsessions} sessions(s) remaining){reason}"
             string = string.format(
-                reason=sreason, account=session.account, address=session.address, nsessions=nsess
+                reason=sreason,
+                account=session.account,
+                address=session.address,
+                nsessions=nsess,
             )
             session.log(string)
 
             if nsess == 0:
-                SIGNAL_ACCOUNT_POST_LAST_LOGOUT.send(sender=session.account, session=session)
+                SIGNAL_ACCOUNT_POST_LAST_LOGOUT.send(
+                    sender=session.account, session=session
+                )
 
         session.at_disconnect(reason)
         SIGNAL_ACCOUNT_POST_LOGOUT.send(sender=session.account, session=session)
@@ -702,7 +725,9 @@ class ServerSessionHandler(SessionHandler):
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
         if bus is not None:
             return bus.sync_sessions(sessdata)
-        return _send_admin_to_portal(DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata)
+        return _send_admin_to_portal(
+            DUMMYSESSION, operation=amp.SSYNC, sessiondata=sessdata
+        )
 
     def session_portal_sync(self, session):
         """
@@ -766,7 +791,9 @@ class ServerSessionHandler(SessionHandler):
         # mean connecting from the same host would not catch duplicates
         sid = id(curr_session)
         doublet_sessions = [
-            sess for sess in self.values() if sess.logged_in and sess.uid == uid and id(sess) != sid
+            sess
+            for sess in self.values()
+            if sess.logged_in and sess.uid == uid and id(sess) != sid
         ]
 
         for session in doublet_sessions:
@@ -849,7 +876,11 @@ class ServerSessionHandler(SessionHandler):
 
         """
         uid = account.uid
-        return [session for session in self.values() if session.logged_in and session.uid == uid]
+        return [
+            session
+            for session in self.values()
+            if session.logged_in and session.uid == uid
+        ]
 
     def sessions_from_csessid(self, csessid):
         """
@@ -866,7 +897,9 @@ class ServerSessionHandler(SessionHandler):
         if not csessid:
             return []
         return [
-            session for session in self.values() if session.csessid and session.csessid == csessid
+            session
+            for session in self.values()
+            if session.csessid and session.csessid == csessid
         ]
 
     def announce_all(self, message):
@@ -894,15 +927,28 @@ class ServerSessionHandler(SessionHandler):
             the wire here.
         """
         uid = session.sessid
-        if uid not in self._outbuf:
-            self._outbuf[uid] = []
+        self._outbuf.setdefault(uid, [])
+        self._outbuf[uid].append(kwargs)
+        if not self._outbuf_flush_scheduled:
+            self._outbuf_flush_scheduled = True
             from evennia.utils import clock
 
-            clock.call_later(0, self._flush_outbuf, uid)
-        self._outbuf[uid].append(kwargs)
+            clock.call_later(0, self._flush_all_outbuf)
 
     def _flush_outbuf(self, uid):
-        """Drain the per-session output buffer.
+        """Drain one session immediately, such as before disconnect."""
+        prepared = self._prepare_outbuf(uid)
+        if prepared is None:
+            return
+        session, frames = prepared
+        bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
+        for frame in frames:
+            if _watch.WATCHES:
+                _watch.tap(session, "out", frame)
+            bus.send_MsgServer2Portal(session, **frame)
+
+    def _prepare_outbuf(self, uid):
+        """Pop, coalesce, and clean one session's buffered output.
 
         Contiguous text messages with matching options are coalesced. Any
         message carrying non-text kwargs (OOB, GMCP,
@@ -912,10 +958,10 @@ class ServerSessionHandler(SessionHandler):
         """
         msgs = self._outbuf.pop(uid, None)
         if not msgs:
-            return
+            return None
         session = self.get(uid)
         if session is None:
-            return
+            return None
 
         text_parts = []
         text_options = {}
@@ -925,7 +971,9 @@ class ServerSessionHandler(SessionHandler):
             """Append the current text run before the next distinct frame."""
             joined = "\n".join(p for p in text_parts if p)
             if joined:
-                frames.append({"text": (joined, text_options) if text_options else joined})
+                frames.append(
+                    {"text": (joined, text_options) if text_options else joined}
+                )
             text_parts.clear()
 
         for msg in msgs:
@@ -948,14 +996,58 @@ class ServerSessionHandler(SessionHandler):
                 text_parts.append(str(v))
 
         flush_text()
+        return session, [self.clean_senddata(session, frame) for frame in frames]
+
+    def _flush_all_outbuf(self):
+        """Drain one reactor turn and multicast byte-identical final frames.
+
+        Cleaning remains per session because protocol flags can change the
+        result. Grouping happens afterwards, so viewer-specific names and
+        protocol options can never be shared accidentally. Processing frames
+        in rounds preserves each recipient's original message order.
+        """
+        self._outbuf_flush_scheduled = False
+        prepared = []
+        for uid in list(self._outbuf):
+            try:
+                result = self._prepare_outbuf(uid)
+            except Exception:
+                log_trace()
+                continue
+            if result is not None:
+                prepared.append(result)
+        if not prepared:
+            return
 
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
-
-        for frame in frames:
-            frame = self.clean_senddata(session, frame)
-            if _watch.WATCHES:
-                _watch.tap(session, "out", frame)
-            bus.send_MsgServer2Portal(session, **frame)
+        max_frames = max(len(frames) for _session, frames in prepared)
+        for index in range(max_frames):
+            groups = {}
+            for session, frames in prepared:
+                if index >= len(frames):
+                    continue
+                frame = frames[index]
+                if _watch.WATCHES:
+                    try:
+                        _watch.tap(session, "out", frame)
+                    except Exception:
+                        log_trace()
+                key = _output_frame_key(frame)
+                group = groups.get(key)
+                if group is None:
+                    groups[key] = (frame, [session])
+                else:
+                    group[1].append(session)
+            for frame, sessions in groups.values():
+                try:
+                    if len(sessions) == 1:
+                        bus.send_MsgServer2Portal(sessions[0], **frame)
+                    else:
+                        bus.send_MsgServer2PortalMany(
+                            [session.sessid for session in sessions], **frame
+                        )
+                except Exception:
+                    log_trace()
 
     def get_inputfuncs(self):
         """

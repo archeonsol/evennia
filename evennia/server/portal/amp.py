@@ -41,7 +41,9 @@ SRESET = chr(19)  # server shutdown in reset mode
 NUL = b"\x00"
 NULNUL = b"\x00\x00"
 
-AMP_MAXLEN = amp.MAX_VALUE_LENGTH  # max allowed data length in AMP protocol (cannot be changed)
+AMP_MAXLEN = (
+    amp.MAX_VALUE_LENGTH
+)  # max allowed data length in AMP protocol (cannot be changed)
 
 # amp internal
 ASK = b"_ask"
@@ -125,6 +127,21 @@ def loads_session(data, *, enforce_limits=True):
     from evennia.server.amp_serde import unpack_session_message
 
     return unpack_session_message(data, enforce_limits=enforce_limits)
+
+
+def dumps_multicast(data):
+    """Pack (sessids, kwargs) for grouped Server output."""
+    from evennia.server.amp_serde import pack_multicast_message
+
+    sessids, kwargs = data
+    return pack_multicast_message(sessids, kwargs)
+
+
+def loads_multicast(data):
+    """Unpack grouped Server output."""
+    from evennia.server.amp_serde import unpack_multicast_message
+
+    return unpack_multicast_message(data)
 
 
 def dumps_admin(data):
@@ -267,6 +284,15 @@ class MsgServer2Portal(amp.Command):
     """
 
     key = "MsgServer2Portal"
+    arguments = [(b"packed_data", Compressed())]
+    errors = {Exception: b"EXCEPTION"}
+    response = []
+
+
+class MsgServer2PortalMany(amp.Command):
+    """One identical message addressed to several Portal sessions."""
+
+    key = "MsgServer2PortalMany"
     arguments = [(b"packed_data", Compressed())]
     errors = {Exception: b"EXCEPTION"}
     response = []
@@ -429,7 +455,9 @@ class AMPMultiConnectionProtocol(amp.AMP):
                 super().dataReceived(data)
             except KeyError:
                 _get_logger().log_trace(
-                    "Discarded incoming partial (packed) data (len {})".format(len(data))
+                    "Discarded incoming partial (packed) data (len {})".format(
+                        len(data)
+                    )
                 )
         elif self.multibatches:
             # invalid AMP, but we have a pending multi-batch that is not yet complete
@@ -440,13 +468,18 @@ class AMPMultiConnectionProtocol(amp.AMP):
                 super().dataReceived(data)
             except KeyError:
                 _get_logger().log_trace(
-                    "Discarded incoming multi-batch (packed) data (len {})".format(len(data))
+                    "Discarded incoming multi-batch (packed) data (len {})".format(
+                        len(data)
+                    )
                 )
         else:
             # not an AMP communication, return warning
             self.transport.write(_HTTP_WARNING)
             self.transport.loseConnection()
-            print("HTTP received (the AMP port should not receive http, only AMP!) %s" % data)
+            print(
+                "HTTP received (the AMP port should not receive http, only AMP!) %s"
+                % data
+            )
 
     def makeConnection(self, transport):
         """
@@ -545,7 +578,9 @@ class AMPMultiConnectionProtocol(amp.AMP):
 
         for protcl in self.factory.broadcasts:
             deferreds.append(
-                protcl.callRemote(command, **kwargs).addErrback(self.errback, command.key)
+                protcl.callRemote(command, **kwargs).addErrback(
+                    self.errback, command.key
+                )
             )
 
         return DeferredList(deferreds)

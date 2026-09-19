@@ -94,9 +94,41 @@ class SessionEnvelope(BaseModel):
         return amp_serde.pack_session_message(self.sessid, self.kwargs)
 
     @classmethod
-    def from_wire(cls, data: bytes, *, enforce_limits: bool = True) -> "SessionEnvelope":
-        sessid, kwargs = amp_serde.unpack_session_message(data, enforce_limits=enforce_limits)
+    def from_wire(
+        cls, data: bytes, *, enforce_limits: bool = True
+    ) -> "SessionEnvelope":
+        sessid, kwargs = amp_serde.unpack_session_message(
+            data, enforce_limits=enforce_limits
+        )
         return cls(sessid=sessid, kwargs=kwargs)
+
+
+class MulticastEnvelope(BaseModel):
+    """Trusted Server output shared by several Portal sessions."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sessids: list[int]
+    kwargs: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("sessids")
+    @classmethod
+    def _validate_sessids(cls, value):
+        if not value or any(
+            not isinstance(sessid, int) or sessid <= 0 for sessid in value
+        ):
+            raise ValueError("multicast sessids must be positive ints")
+        if len(set(value)) != len(value):
+            raise ValueError("multicast sessids must be unique")
+        return value
+
+    def to_wire(self) -> bytes:
+        return amp_serde.pack_multicast_message(self.sessids, self.kwargs)
+
+    @classmethod
+    def from_wire(cls, data: bytes) -> "MulticastEnvelope":
+        sessids, kwargs = amp_serde.unpack_multicast_message(data)
+        return cls(sessids=sessids, kwargs=kwargs)
 
 
 class AdminEnvelope(BaseModel):
@@ -137,6 +169,12 @@ def parse_session(data: bytes, *, enforce_limits: bool = True) -> Tuple[int, dic
     """Validate + unpack a session message, returning ``(sessid, kwargs)``."""
     env = SessionEnvelope.from_wire(data, enforce_limits=enforce_limits)
     return env.sessid, env.kwargs
+
+
+def parse_multicast(data: bytes) -> Tuple[list[int], dict]:
+    """Validate and unpack trusted grouped Server output."""
+    env = MulticastEnvelope.from_wire(data)
+    return env.sessids, env.kwargs
 
 
 def parse_admin(data: bytes) -> Tuple[int, str, dict]:
