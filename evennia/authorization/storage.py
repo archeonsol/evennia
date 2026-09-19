@@ -7,6 +7,7 @@ import contextvars
 import re
 import time
 import uuid
+import weakref
 from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import timedelta
@@ -53,10 +54,22 @@ _policy_bundle_cache: tuple[int, int, dict] | None = None
 _policy_bundle_generation = 0
 _NO_TASK = object()
 _snapshot_scope_owner = contextvars.ContextVar("evennia_authorization_snapshot_owner", default=None)
-_prewarm_task = None
-_prewarm_loop = None
-_pending_prewarm_principals = {}
-_pending_prewarm_resources = {}
+
+
+class _PrewarmState:
+    """Coalescing state for one event loop (task plus pending request sets)."""
+
+    __slots__ = ("task", "principals", "resources")
+
+    def __init__(self) -> None:
+        self.task = None
+        self.principals: dict[int, object] = {}
+        self.resources: dict[int, object] = {}
+
+
+# Tests and secondary loops run short-lived event loops; weak keys keep closed
+# loops from leaking their state.
+_prewarm_states: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _SNAPSHOT_MISS_WARN_INTERVAL = 60.0
 _snapshot_miss_warned_at: dict[str, float] = {}
 
@@ -1498,49 +1511,62 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
         if principal is None or id(principal) in seen:
             continue
         seen.add(id(principal))
-        refs = principal_refs(principal)
-        cache_key = "|".join(refs) or "anonymous"
-        generations = []
-        generations_fresh = True
-        for ref in refs:
-            fresh, value = _generation_is_fresh("principal", ref, now_mono)
-            generations_fresh = generations_fresh and fresh
-            generations.append(value)
-        grants = _principal_cache.get(cache_key)
-        if grants is not None:
-            # Group subjects participate in the generation check so a grant
-            # edited on a group invalidates its members' cached snapshots.
-            for ref in grants.group_refs:
+        try:
+            refs = principal_refs(principal)
+            cache_key = "|".join(refs) or "anonymous"
+            generations = []
+            generations_fresh = True
+            for ref in refs:
                 fresh, value = _generation_is_fresh("principal", ref, now_mono)
                 generations_fresh = generations_fresh and fresh
                 generations.append(value)
-        generation = max(generations, default=0)
-        suspension = _suspension_cache.get(cache_key)
-        grants_valid = bool(
-            grants is not None
-            and grants.generation == generation
-            and (grants.valid_until is None or grants.valid_until > now_ts)
-        )
-        suspension_valid = bool(
-            suspension is not None
-            and suspension[0] == generation
-            and (suspension[2] is None or suspension[2] > now_ts)
-        )
-        ready = ready and generations_fresh and grants_valid and suspension_valid
-        principal_specs.append(
-            {
-                "cache_key": cache_key,
-                "refs": refs,
-                "local_generations": {ref: int(_principal_generation.get(ref, 0)) for ref in refs},
-                "cached_grants_generation": (grants.generation if grants is not None else None),
-                "cached_grants_valid_until": (grants.valid_until if grants is not None else None),
-                "cached_suspension_generation": (suspension[0] if suspension is not None else None),
-                "cached_suspension_valid_until": (
-                    suspension[2] if suspension is not None else None
-                ),
-                "suppression": _suppression_spec(principal) if include_labels else None,
-            }
-        )
+            grants = _principal_cache.get(cache_key)
+            if grants is not None:
+                # Group subjects participate in the generation check so a grant
+                # edited on a group invalidates its members' cached snapshots.
+                for ref in grants.group_refs:
+                    fresh, value = _generation_is_fresh("principal", ref, now_mono)
+                    generations_fresh = generations_fresh and fresh
+                    generations.append(value)
+            generation = max(generations, default=0)
+            suspension = _suspension_cache.get(cache_key)
+            grants_valid = bool(
+                grants is not None
+                and grants.generation == generation
+                and (grants.valid_until is None or grants.valid_until > now_ts)
+            )
+            suspension_valid = bool(
+                suspension is not None
+                and suspension[0] == generation
+                and (suspension[2] is None or suspension[2] > now_ts)
+            )
+            ready = ready and generations_fresh and grants_valid and suspension_valid
+            principal_specs.append(
+                {
+                    "cache_key": cache_key,
+                    "refs": refs,
+                    "local_generations": {
+                        ref: int(_principal_generation.get(ref, 0)) for ref in refs
+                    },
+                    "cached_grants_generation": (grants.generation if grants is not None else None),
+                    "cached_grants_valid_until": (
+                        grants.valid_until if grants is not None else None
+                    ),
+                    "cached_suspension_generation": (
+                        suspension[0] if suspension is not None else None
+                    ),
+                    "cached_suspension_valid_until": (
+                        suspension[2] if suspension is not None else None
+                    ),
+                    "suppression": _suppression_spec(principal) if include_labels else None,
+                }
+            )
+        except Exception:
+            # A queued object whose typeclass cannot load must not take the
+            # shared batch (and every other waiter) down; drop it, but never
+            # report the requested set as ready while an item was dropped.
+            logger.log_trace("authorization prewarm dropped a principal")
+            ready = False
 
     resource_specs = []
     seen.clear()
@@ -1550,30 +1576,31 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
         seen.add(id(resource))
         try:
             ref = resource_ref(resource)
+            fresh, generation = _generation_is_fresh("resource", ref, now_mono)
+            snapshot = _resource_cache.get(ref)
+            policies = _policy_package_cache.get(ref)
+            resource_valid = snapshot is not None and snapshot.generation == generation
+            policy_generation = max(generation, _policy_generation())
+            policy_valid = policies is not None and policies[0] == policy_generation
+            ready = ready and fresh and resource_valid and policy_valid
+            resource_specs.append(
+                {
+                    "ref": ref,
+                    "local_generation": int(_resource_generation.get(ref, 0)),
+                    "cached_resource_generation": (
+                        snapshot.generation if snapshot is not None else None
+                    ),
+                    "cached_policy_generation": (policies[0] if policies is not None else None),
+                    "base_labels": (
+                        tuple(sorted(_computed_resource_labels(resource, ref)))
+                        if include_labels
+                        else ()
+                    ),
+                }
+            )
         except Exception:
-            continue
-        fresh, generation = _generation_is_fresh("resource", ref, now_mono)
-        snapshot = _resource_cache.get(ref)
-        policies = _policy_package_cache.get(ref)
-        resource_valid = snapshot is not None and snapshot.generation == generation
-        policy_generation = max(generation, _policy_generation())
-        policy_valid = policies is not None and policies[0] == policy_generation
-        ready = ready and fresh and resource_valid and policy_valid
-        resource_specs.append(
-            {
-                "ref": ref,
-                "local_generation": int(_resource_generation.get(ref, 0)),
-                "cached_resource_generation": (
-                    snapshot.generation if snapshot is not None else None
-                ),
-                "cached_policy_generation": (policies[0] if policies is not None else None),
-                "base_labels": (
-                    tuple(sorted(_computed_resource_labels(resource, ref)))
-                    if include_labels
-                    else ()
-                ),
-            }
-        )
+            logger.log_trace("authorization prewarm dropped a resource")
+            ready = False
     return ready, {
         "principals": principal_specs,
         "resources": resource_specs,
@@ -1915,21 +1942,25 @@ async def _execute_authorization_prewarm(request: dict) -> bool:
             pass
 
 
-async def _flush_authorization_prewarm() -> bool:
-    """Coalesce callers from one event-loop turn into one worker batch."""
+async def _flush_authorization_prewarm(state: _PrewarmState) -> bool:
+    """Coalesce one loop's turn of callers into one worker batch."""
 
-    global _prewarm_task
     await asyncio.sleep(0)
-    principals = tuple(_pending_prewarm_principals.values())
-    resources = tuple(_pending_prewarm_resources.values())
-    _pending_prewarm_principals.clear()
-    _pending_prewarm_resources.clear()
-    _, request = _prewarm_request(principals, resources, include_labels=True)
+    principals = tuple(state.principals.values())
+    resources = tuple(state.resources.values())
+    state.principals.clear()
+    state.resources.clear()
     try:
+        _, request = _prewarm_request(principals, resources, include_labels=True)
         return await _execute_authorization_prewarm(request)
+    except Exception:
+        # The task result is shared by every waiter; a raise here would land
+        # as a foreign exception inside unrelated actions. Report not-ready.
+        logger.log_trace("authorization prewarm flush failed")
+        return False
     finally:
-        if _prewarm_task is asyncio.current_task():
-            _prewarm_task = None
+        if state.task is asyncio.current_task():
+            state.task = None
 
 
 def _finish_prewarm_wait(value: bool, outcome: str, started: float) -> bool:
@@ -1947,7 +1978,6 @@ def _finish_prewarm_wait(value: bool, outcome: str, started: float) -> bool:
 async def prewarm_authorization(principals, resources) -> bool:
     """Batch-refresh authorization state off the IO owner before rule evaluation."""
 
-    global _prewarm_loop, _prewarm_task
     if not getattr(settings, "AUTHORIZATION_OFFLOOP_SNAPSHOTS", False):
         return True
     started = time.perf_counter()
@@ -1964,12 +1994,13 @@ async def prewarm_authorization(principals, resources) -> bool:
         _, request = _prewarm_request(principals, resources, include_labels=True)
         refreshed = await _execute_authorization_prewarm(request)
         return _finish_prewarm_wait(refreshed, "waited" if refreshed else "failed", started)
+    # Coalescing state is per loop: awaiting another loop's task raises
+    # "attached to a different loop", so waiters must only see their own.
     loop = current_task.get_loop()
-    if _prewarm_loop is not loop:
-        _prewarm_loop = loop
-        _prewarm_task = None
-        _pending_prewarm_principals.clear()
-        _pending_prewarm_resources.clear()
+    state = _prewarm_states.get(loop)
+    if state is None:
+        state = _PrewarmState()
+        _prewarm_states[loop] = state
     waited = False
     for _attempt in range(3):
         ready, _ = _prewarm_request(principals, resources, include_labels=False)
@@ -1977,15 +2008,15 @@ async def prewarm_authorization(principals, resources) -> bool:
             return _finish_prewarm_wait(True, "waited" if waited else "ready", started)
         for principal in principals:
             if principal is not None:
-                _pending_prewarm_principals[id(principal)] = principal
+                state.principals[id(principal)] = principal
         for resource in resources:
             if resource is not None:
-                _pending_prewarm_resources[id(resource)] = resource
-        if _prewarm_task is None or _prewarm_task.done():
-            _prewarm_task = loop.create_task(_flush_authorization_prewarm())
+                state.resources[id(resource)] = resource
+        if state.task is None or state.task.done():
+            state.task = loop.create_task(_flush_authorization_prewarm(state))
         try:
             waited = True
-            if not await asyncio.shield(_prewarm_task):
+            if not await asyncio.shield(state.task):
                 return _finish_prewarm_wait(False, "failed", started)
         except asyncio.CancelledError:
             # A reload or test clearing the shared prewarm task must not cancel
@@ -2017,7 +2048,6 @@ async def ensure_authorization(principals, resources) -> bool:
     if ready:
         return True
 
-    global _prewarm_loop, _prewarm_task
     try:
         current_task = asyncio.current_task()
     except RuntimeError:
@@ -2026,22 +2056,23 @@ async def ensure_authorization(principals, resources) -> bool:
         _, request = _prewarm_request(principals, resources, include_labels=True)
         return await _execute_authorization_prewarm(request)
     loop = current_task.get_loop()
-    if _prewarm_loop is not loop:
-        _prewarm_loop = loop
-        _prewarm_task = None
-        _pending_prewarm_principals.clear()
-        _pending_prewarm_resources.clear()
+    # Coalescing state is per loop: awaiting another loop's task raises
+    # "attached to a different loop", so waiters must only see their own.
+    state = _prewarm_states.get(loop)
+    if state is None:
+        state = _PrewarmState()
+        _prewarm_states[loop] = state
     for _attempt in range(2):
         for principal in principals:
             if principal is not None:
-                _pending_prewarm_principals[id(principal)] = principal
+                state.principals[id(principal)] = principal
         for resource in resources:
             if resource is not None:
-                _pending_prewarm_resources[id(resource)] = resource
-        if _prewarm_task is None or _prewarm_task.done():
-            _prewarm_task = loop.create_task(_flush_authorization_prewarm())
+                state.resources[id(resource)] = resource
+        if state.task is None or state.task.done():
+            state.task = loop.create_task(_flush_authorization_prewarm(state))
         try:
-            if not await asyncio.shield(_prewarm_task):
+            if not await asyncio.shield(state.task):
                 return False
         except asyncio.CancelledError:
             # A reload or test clearing the shared task must not cancel the
@@ -2058,7 +2089,7 @@ async def ensure_authorization(principals, resources) -> bool:
 def clear_authorization_caches() -> None:
     """Clear runtime caches for reloads and deterministic tests."""
 
-    global _prewarm_task, _policy_bundle_cache, _policy_bundle_generation
+    global _policy_bundle_cache, _policy_bundle_generation
     _principal_cache.clear()
     _resource_cache.clear()
     _policy_package_cache.clear()
@@ -2068,9 +2099,10 @@ def clear_authorization_caches() -> None:
     _resource_generation.clear()
     _policy_bundle_cache = None
     _policy_bundle_generation = 0
-    _pending_prewarm_principals.clear()
-    _pending_prewarm_resources.clear()
     _snapshot_miss_warned_at.clear()
-    if _prewarm_task is not None and not _prewarm_task.done():
-        _prewarm_task.cancel()
-    _prewarm_task = None
+    for state in list(_prewarm_states.values()):
+        state.principals.clear()
+        state.resources.clear()
+        if state.task is not None and not state.task.done():
+            state.task.cancel()
+        state.task = None

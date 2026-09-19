@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
+from evennia.authorization import invalidation
 from evennia.authorization import service as authorization_service
 from evennia.authorization.legacy_import.migration import migrate_resource
 from evennia.authorization.service import access_check, authorize
@@ -20,6 +21,7 @@ from evennia.authorization.storage import (
     authorization_snapshot_scope,
     clear_authorization_caches,
     delegate_grant,
+    ensure_authorization,
     grant_capabilities,
     grant_capability,
     issue_recovery_grant,
@@ -331,6 +333,120 @@ class AuthorizationPrewarmTest(TransactionTestCase):
         self.assertEqual(value, 3)
         self.assertEqual(storage_module._shared_generation_cache[cache_key][1], 5)
         background.assert_called_once()
+
+    def test_broken_queued_item_does_not_kill_the_shared_prewarm(self):
+        """A typeclass gone at build time is dropped, not raised through waiters."""
+
+        class Broken:
+            """Stand-in for an object whose typeclass cannot load."""
+
+            def __getattr__(self, name):
+                raise RuntimeError("typeclass gone")
+
+        calls = []
+
+        def fetch(request):
+            calls.append(request)
+            return {"generation_updates": [], "principals": [], "resources": []}
+
+        async def run():
+            return await prewarm_authorization((FakePrincipal(pk=9101), Broken()), ())
+
+        with patch(
+            "evennia.authorization.storage._fetch_authorization_snapshots",
+            side_effect=fetch,
+        ):
+            result = asyncio.run(run())
+
+        self.assertIs(result, False)
+        self.assertTrue(calls)
+        for request in calls:
+            self.assertEqual(
+                [spec["cache_key"] for spec in request["principals"]],
+                ["object:9101|entity:9101"],
+            )
+
+    def test_prewarm_coalescing_state_is_per_event_loop(self):
+        """A waiter on one loop must never await a task bound to another."""
+
+        import threading
+
+        b_entered = threading.Event()
+        a_done = threading.Event()
+        b_done = threading.Event()
+        results = {}
+
+        def fetch(request):
+            if any("9102" in spec["cache_key"] for spec in request["principals"]):
+                b_entered.set()
+                a_done.wait(5)
+            else:
+                b_entered.wait(5)
+            return {"generation_updates": [], "principals": [], "resources": []}
+
+        async def runner(pk):
+            return await prewarm_authorization((FakePrincipal(pk=pk),), ())
+
+        def worker(tag, pk, done_event):
+            try:
+                results[tag] = asyncio.run(runner(pk))
+            except BaseException as exc:
+                results[tag] = exc
+            done_event.set()
+
+        with patch(
+            "evennia.authorization.storage._fetch_authorization_snapshots",
+            side_effect=fetch,
+        ):
+            thread_a = threading.Thread(target=worker, args=("a", 9101, a_done), daemon=True)
+            thread_b = threading.Thread(target=worker, args=("b", 9102, b_done), daemon=True)
+            thread_a.start()
+            thread_b.start()
+            thread_a.join(15)
+            thread_b.join(15)
+
+        self.assertEqual(sorted(results), ["a", "b"])
+        for outcome in results.values():
+            self.assertIsInstance(outcome, bool)
+
+    def test_ensure_authorization_coalesces_through_per_loop_state(self):
+        """The push cold-fact path must coalesce like prewarm, on loop-owned state."""
+
+        def fetch(request):
+            return {"generation_updates": [], "principals": [], "resources": []}
+
+        async def run():
+            return await ensure_authorization((FakePrincipal(pk=9103),), ())
+
+        with (
+            patch(
+                "evennia.authorization.storage._fetch_authorization_snapshots",
+                side_effect=fetch,
+            ),
+            patch.object(invalidation, "push_enabled", return_value=True),
+            patch.object(invalidation, "start"),
+        ):
+            result = asyncio.run(run())
+
+        self.assertIsInstance(result, bool)
+
+    def test_broken_queued_resource_is_dropped_and_flips_not_ready(self):
+        """A dropped resource spec may not leave the request reported ready."""
+
+        class Broken:
+            """Stand-in for an object whose typeclass cannot load."""
+
+            def __getattr__(self, name):
+                raise RuntimeError("typeclass gone")
+
+        resource = FakeResource()
+        load_resource(resource)
+        load_policy(resource, "view")
+
+        ready, request = _prewarm_request((), (resource, Broken()), include_labels=False)
+
+        self.assertFalse(ready)
+        self.assertEqual([spec["ref"] for spec in request["resources"]], ["object:42"])
 
     def test_suppression_spec_reads_unflushed_handler_state(self):
         """A quell set moments ago must suppress before the next flush."""
