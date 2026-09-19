@@ -3,7 +3,7 @@
 import threading
 
 from evennia.server.service_registry import Service
-from evennia.utils import logger
+from evennia.utils import logger, loop_factory
 
 
 class UvicornWebService(Service):
@@ -54,23 +54,18 @@ class UvicornWebService(Service):
     def _make_loop():
         """Build the web thread's event loop, preferring uvloop when available.
 
-        The game reactor owns its own loop; this only affects the uvicorn web
-        thread. uvloop is an optional, drop-in asyncio replacement (Linux/macOS
-        wheels only), so a missing or unsupported install falls back cleanly to
-        the stdlib loop.
+        The game loop owns its own event loop; this only affects the uvicorn web
+        thread. Both go through
+        :func:`evennia.utils.loop_factory.new_process_loop`, so game and Web
+        share one loop policy.
 
         Returns:
             asyncio.AbstractEventLoop: A fresh, unclosed loop.
 
         """
-        try:
-            import uvloop
-        except ImportError:
-            import asyncio
-
-            return asyncio.new_event_loop()
-        logger.log_info("ASGI webserver: using the uvloop event loop")
-        return uvloop.new_event_loop()
+        loop = loop_factory.new_process_loop()
+        logger.log_info(f"ASGI webserver event loop: {loop_factory.loop_name(loop)}")
+        return loop
 
     async def empty_threadpool(self):
         """No-op compatibility hook for graceful shutdown."""

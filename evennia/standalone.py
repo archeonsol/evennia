@@ -17,7 +17,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from evennia.utils import clock
+from evennia.utils import clock, loop_factory
 
 
 @dataclass
@@ -68,7 +68,7 @@ def standalone(
 
     evennia._init(portal_mode=portal_mode)
 
-    loop = asyncio.new_event_loop()
+    loop = loop_factory.new_process_loop()
     application = evennia.TWISTED_APPLICATION
     ctx = StandaloneContext(
         loop=loop,

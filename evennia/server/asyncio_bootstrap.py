@@ -13,7 +13,7 @@ import os
 import signal
 import sys
 
-from evennia.utils import clock
+from evennia.utils import clock, loop_factory
 
 
 def _parse_bootstrap_args(argv=None):
@@ -222,7 +222,7 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
     args, _unknown = _parse_bootstrap_args(argv)
     _write_pidfile(args.pidfile)
 
-    loop = asyncio.new_event_loop()
+    loop = loop_factory.new_process_loop()
     asyncio.set_event_loop(loop)
     clock.bind_loop(loop)
     coordinator = _SignalShutdownCoordinator(loop, portal_mode=portal_mode)
@@ -243,6 +243,9 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
 
         if "test" not in sys.argv:
             _setup_process_logging(portal_mode, args.nodaemon)
+            from evennia.utils import logger
+
+            logger.log_info(f"Process event loop: {loop_factory.loop_name(loop)}")
 
         # privilegedStartService registers listeners; startService starts children.
         start_attempted = True

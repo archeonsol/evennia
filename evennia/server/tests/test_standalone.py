@@ -47,7 +47,7 @@ class StandaloneTest(SimpleTestCase):
         evennia.TWISTED_APPLICATION = application
 
         with (
-            patch("evennia.standalone.asyncio.new_event_loop", return_value=loop),
+            patch("evennia.standalone.loop_factory.new_process_loop", return_value=loop),
             patch("evennia.standalone.asyncio.set_event_loop"),
             patch("evennia.standalone.clock.bind_loop") as mock_bind,
         ):
