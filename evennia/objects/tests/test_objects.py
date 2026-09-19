@@ -754,6 +754,34 @@ class TestMoveResult(BaseEvenniaTest):
             race_room.pk,
         )
 
+    def test_conditional_update_noop_verifies_without_writing(self):
+        """A move to the current location may not depend on changed-row counts."""
+
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from evennia.objects.mixins.movement import _conditional_location_update
+
+        meta = ObjectDB._meta
+        args = (
+            "default",
+            meta.db_table,
+            "id",
+            "db_location_id",
+            self.obj1.pk,
+            self.room1.pk,
+            self.room1.pk,
+        )
+        with CaptureQueriesContext(connection) as ctx:
+            changed = _conditional_location_update(*args)
+        self.assertEqual(changed, 1)
+        self.assertFalse(
+            [q for q in ctx.captured_queries if q["sql"].strip().upper().startswith("UPDATE")]
+        )
+        # Once the row no longer holds the expected location it is a real conflict.
+        self.obj1.location = self.room2
+        self.assertEqual(_conditional_location_update(*args), 0)
+
     def test_async_move_allows_chains_deeper_than_the_guarded_depth(self):
         """The sync loop guard gives up past depth 10; the async one must too."""
         from evennia.utils import clock, defer

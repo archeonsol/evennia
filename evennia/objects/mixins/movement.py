@@ -29,6 +29,17 @@ def _conditional_location_update(
         if expected_location_id is None
         else f"{quote(location_column)} = %s"
     )
+    if destination_id == expected_location_id:
+        # MySQL's rowcount counts changed rows, so a no-op write of the same
+        # value returns 0 and reads as a conflict; verify the row instead of
+        # rewriting it, keeping rowcount 0 meaning "genuinely lost".
+        sql = f"SELECT 1 FROM {quote(table)} WHERE {quote(pk_column)} = %s AND {expected_clause}"
+        params = [object_id]
+        if expected_location_id is not None:
+            params.append(expected_location_id)
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            return 1 if cursor.fetchone() is not None else 0
     params = [destination_id, object_id]
     if expected_location_id is not None:
         params.append(expected_location_id)
