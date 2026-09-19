@@ -838,7 +838,9 @@ REACTOR_STALL_WARNING_MS = 200
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # Diagnostic protocol record emitted after the complete CM1 input lifecycle.
-# Disabled for ordinary clients; load environments opt in explicitly.
+# Disabled for ordinary clients; load environments opt in explicitly. The
+# marker completes the session's single in-flight command, so a consumer must
+# not pipeline input (see the contract at the emission site in cmdhandler).
 COMMAND_COMPLETION_MARKERS_ENABLED = False
 # Log rule bodies that suspend a dispatch longer than this (ms; 0 = disabled).
 # A suspended rule holds the command's completion marker open; use it to find

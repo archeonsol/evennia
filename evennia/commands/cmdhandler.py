@@ -952,6 +952,13 @@ async def cmdhandler(
                 except Exception:
                     pass
             if getattr(settings, "COMMAND_COMPLETION_MARKERS_ENABLED", False):
+                # Protocol contract: the marker completes the one command in
+                # flight for this session. The engine does not serialize a
+                # session's input (inputfuncs fires each pipelined line on its
+                # own task) and the marker carries no command id, so a client
+                # that relies on markers must send one command and await its
+                # marker before sending the next. A per-command sequence id
+                # would make markers unambiguous under pipelining.
                 try:
                     marker = (
                         "\x1eEV-COMMAND-DONE "
