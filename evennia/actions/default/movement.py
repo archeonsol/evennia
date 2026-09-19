@@ -316,7 +316,7 @@ class ExitTraversalRules:
         return PASS
 
     @rule(Move, phase="carry_out")
-    def carry_out_move(self, action, actor):
+    async def carry_out_move(self, action, actor):
         """Hand a staggered move to a :attr:`locomotion_class` walk, or perform
         the one ``move_to`` (a Locomotion's own per-step re-dispatch). The
         ``check`` phase already passed every gate."""
@@ -335,7 +335,7 @@ class ExitTraversalRules:
             return CLAIM
 
         action._origin = getattr(caller, "location", None)
-        moved = caller.move_to(dest, quiet=action.quiet, move_type="traverse")
+        moved = await caller.move_to_async(dest, quiet=action.quiet, move_type="traverse")
         action._moved = bool(moved)
         return CLAIM
 

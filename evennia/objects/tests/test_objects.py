@@ -636,6 +636,105 @@ class TestMoveResult(BaseEvenniaTest):
         with patch.object(type(self.obj1), "at_pre_move", return_value=False):
             self.assertEqual(self.obj1.move_to(self.room1), False)
 
+    def test_async_move_commits_row_and_contents_caches(self):
+        from evennia.utils import clock, defer
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=immediate) as offload,
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=True)).result()
+
+        self.assertTrue(result)
+        self.assertEqual(
+            ObjectDB.objects.filter(pk=self.obj1.pk)
+            .values_list("db_location_id", flat=True)
+            .first(),
+            self.room2.pk,
+        )
+        self.assertNotIn(self.obj1, self.room1.contents)
+        self.assertIn(self.obj1, self.room2.contents)
+        self.assertEqual(self.obj1._loaded_location_id, self.room2.pk)
+        worker_args = offload.call_args.args[1:]
+        self.assertTrue(all(not isinstance(value, ObjectDB) for value in worker_args))
+
+    def test_async_move_lost_update_does_not_change_local_state(self):
+        from evennia.utils import clock, defer
+
+        async def conflict(*args, **kwargs):
+            return 0
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=conflict),
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=True)).result()
+
+        self.assertFalse(result)
+        self.assertEqual(result.failed_stage, "location_conflict")
+        self.assertIs(self.obj1.location, self.room1)
+        self.assertIn(self.obj1, self.room1.contents)
+        self.assertNotIn(self.obj1, self.room2.contents)
+
+    def test_async_move_allows_chains_deeper_than_the_guarded_depth(self):
+        """The sync loop guard gives up past depth 10; the async one must too."""
+        from evennia.utils import clock, defer
+
+        parent = self.room1
+        for index in range(12):
+            parent = create.create_object(DefaultObject, key=f"nest{index}", location=parent)
+        destination = parent
+
+        sync_result = self.obj2.move_to(destination, quiet=True)
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=immediate),
+        ):
+            async_result = clock.run_coroutine(
+                self.obj1.move_to_async(destination, quiet=True)
+            ).result()
+
+        self.assertTrue(sync_result)
+        self.assertTrue(async_result)
+        self.assertEqual(self.obj1.location, destination)
+        self.assertEqual(self.obj2.location, destination)
+
+    def test_async_move_result_matches_sync_for_veto_and_missing_destination(self):
+        from evennia.utils import clock, defer
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        def run_async(coro):
+            with (
+                patch.object(clock, "loop_running", return_value=True),
+                patch.object(defer, "in_thread", side_effect=immediate),
+            ):
+                return clock.run_coroutine(coro).result()
+
+        with patch.object(type(self.obj1), "at_pre_move", return_value=False):
+            sync_veto = self.obj1.move_to(self.room2, quiet=True)
+        with patch.object(type(self.obj1), "at_pre_move", return_value=False):
+            async_veto = run_async(self.obj1.move_to_async(self.room2, quiet=True))
+
+        self.assertEqual(sync_veto.committed, async_veto.committed)
+        self.assertEqual(sync_veto.vetoed, async_veto.vetoed)
+        self.assertEqual(sync_veto.failed_stage, async_veto.failed_stage)
+        self.assertFalse(async_veto)
+
+        sync_missing = self.obj1.move_to(None, quiet=True)
+        async_missing = run_async(self.obj1.move_to_async(None, quiet=True))
+        self.assertEqual(sync_missing.committed, async_missing.committed)
+        self.assertEqual(sync_missing.failed_stage, async_missing.failed_stage)
+        self.assertEqual(async_missing.failed_stage, "no_destination")
+
 
 class TestExitCommand(BaseEvenniaTest):
     """Test the ExitCommand class."""

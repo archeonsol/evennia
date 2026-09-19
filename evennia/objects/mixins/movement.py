@@ -1,6 +1,7 @@
 """Movement mixin for DefaultObject."""
 
 from django.conf import settings
+from django.db import connections, router
 from django.utils.translation import gettext as _
 
 from evennia.hooks import hook
@@ -8,6 +9,55 @@ from evennia.objects.models import ObjectDB
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.utils import logger
 from evennia.utils.utils import is_veto, make_iter
+
+
+def _conditional_location_update(
+    database,
+    table,
+    pk_column,
+    location_column,
+    object_id,
+    expected_location_id,
+    destination_id,
+):
+    """Worker-safe optimistic location update using only primitive values."""
+
+    connection = connections[database]
+    quote = connection.ops.quote_name
+    expected_clause = (
+        f"{quote(location_column)} IS NULL"
+        if expected_location_id is None
+        else f"{quote(location_column)} = %s"
+    )
+    params = [destination_id, object_id]
+    if expected_location_id is not None:
+        params.append(expected_location_id)
+    sql = (
+        f"UPDATE {quote(table)} SET {quote(location_column)} = %s "
+        f"WHERE {quote(pk_column)} = %s AND {expected_clause}"
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return int(cursor.rowcount)
+
+
+def _location_chain_has_loop(mover, location) -> bool:
+    """Mirror :meth:`ObjectDB.location`'s loop guard exactly.
+
+    The synchronous setter gives up after ten levels without reporting a loop
+    (a chain deeper than that is treated as legitimate), so the async commit
+    must use the same bound or a deep-but-valid chain would fail only on the
+    async path.
+    """
+
+    current = location
+    for _ in range(11):
+        if current is None:
+            return False
+        if current == mover:
+            return True
+        current = current.db_location
+    return False
 
 
 class MoveResult:
@@ -292,6 +342,207 @@ class MovementMixin:
             hook_errors=hook_errors,
         )
 
+    async def move_to_async(
+        self,
+        destination,
+        quiet=False,
+        emit_to_obj=None,
+        use_destination=True,
+        to_none=False,
+        move_hooks=True,
+        move_type="move",
+        **kwargs,
+    ):
+        """Move while committing the location row outside the event-loop thread.
+
+        This is the CM1/live-loop variant of :meth:`move_to`. Hooks and game
+        state stay on the owner thread. Only one optimistic SQL update runs in
+        a worker; its ``WHERE`` clause prevents concurrent moves from silently
+        overwriting each other.
+
+        Behavior matches :meth:`move_to` for veto gates, announcements, hook
+        order, loop detection, and the ``MoveResult`` truth contract, with two
+        differences: a lost optimistic update reports ``location_conflict``
+        instead of overwriting the row, and the commit happens one worker round
+        trip after ``announce_move_from``. If the owning task is cancelled
+        (reload or terminal teardown) after the worker commits but before the
+        owner adopts the row, the move stands durably; the destination announce
+        and post-hooks may be skipped, and caches rebuild from the row on load.
+        """
+
+        def logerr(string="", err=None):
+            logger.log_trace()
+            self.msg("%s%s" % (string, "" if err is None else " (%s)" % err))
+
+        def logpost(stage, err):
+            logger.log_trace(
+                "move_to_async: post-commit hook %s() raised after the move committed "
+                "(move stands); %s" % (stage, err)
+            )
+
+        async def commit_location(location):
+            """Persist one already validated destination, then adopt it locally."""
+
+            source = self.db_location
+            source_id = getattr(source, "pk", None)
+            destination_id = getattr(location, "pk", None)
+            if location is not None and destination_id is None:
+                raise ValueError("location must be a saved object or None")
+
+            if _location_chain_has_loop(self, location):
+                raise RuntimeError(
+                    "Error: %s.location = %s creates a location loop." % (self.key, location)
+                )
+
+            concrete = self._meta.concrete_model
+            metadata = concrete._meta
+            database = self._state.db or router.db_for_write(concrete, instance=self)
+            worker_args = (
+                database,
+                metadata.db_table,
+                metadata.pk.column,
+                metadata.get_field("db_location").column,
+                self.pk,
+                source_id,
+                destination_id,
+            )
+            from evennia.utils import clock, defer
+
+            if clock.loop_running():
+                changed = await clock.maybe_await(
+                    defer.in_thread(_conditional_location_update, *worker_args)
+                )
+            else:
+                # Django's transaction-bound test harness has no runtime loop;
+                # keep the query on its owning connection there.
+                changed = _conditional_location_update(*worker_args)
+            if changed != 1:
+                return False
+
+            # Resume on the owner thread. Assign the FK descriptor without
+            # saving, then reconcile the same caches as ObjectDB.location.
+            self.db_location = location
+            if source is not None:
+                source.contents_cache.remove(self)
+            if location is not None:
+                location.contents_cache.add(self)
+            self._loaded_location_id = destination_id
+            return True
+
+        errtxt = _("Couldn't perform move ({err}). Contact an admin.")
+        if not emit_to_obj:
+            emit_to_obj = self
+
+        if not destination:
+            if to_none:
+                try:
+                    committed = await commit_location(None)
+                except Exception as err:
+                    logerr(errtxt.format(err="location change"), err)
+                    return MoveResult(committed=False, failed_stage="location")
+                return MoveResult(
+                    committed=committed,
+                    failed_stage=None if committed else "location_conflict",
+                )
+            emit_to_obj.msg(_("The destination doesn't exist."))
+            return MoveResult(committed=False, failed_stage="no_destination")
+        if destination.destination and use_destination:
+            destination = destination.destination
+
+        source_location = self.location
+
+        if move_hooks:
+            try:
+                if is_veto(self.at_pre_move(destination, move_type=move_type, **kwargs)):
+                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_move")
+            except Exception as err:
+                logerr(errtxt.format(err="at_pre_move()"), err)
+                return MoveResult(committed=False, failed_stage="at_pre_move")
+            try:
+                if source_location and is_veto(
+                    source_location.at_pre_leave(self, destination, move_type=move_type, **kwargs)
+                ):
+                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_leave")
+            except Exception as err:
+                logerr(errtxt.format(err="at_pre_leave()"), err)
+                return MoveResult(committed=False, failed_stage="at_pre_leave")
+            try:
+                if destination and is_veto(
+                    destination.at_pre_arrive(self, source_location, move_type=move_type, **kwargs)
+                ):
+                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_arrive")
+            except Exception as err:
+                logerr(errtxt.format(err="at_pre_arrive()"), err)
+                return MoveResult(committed=False, failed_stage="at_pre_arrive")
+
+        if not quiet:
+            try:
+                self.announce_move_from(destination, move_type=move_type, **kwargs)
+            except Exception as err:
+                logerr(errtxt.format(err="announce_move_from()"), err)
+                return MoveResult(committed=False, failed_stage="announce_move_from")
+
+        try:
+            committed = await commit_location(destination)
+        except Exception as err:
+            logerr(errtxt.format(err="location change"), err)
+            return MoveResult(committed=False, failed_stage="location")
+        if not committed:
+            logger.log_warn(
+                "move_to_async: optimistic location update lost for object "
+                f"#{getattr(self, 'pk', None)}"
+            )
+            return MoveResult(committed=False, failed_stage="location_conflict")
+
+        hook_errors = []
+        try:
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+
+            if source_location is not None:
+                bump_cmdset_generation(source_location)
+            if destination is not source_location:
+                bump_cmdset_generation(destination)
+        except Exception:
+            logger.log_trace("move_to_async: cmdset-cache invalidation failed")
+
+        try:
+            from evennia.authorization.storage import bump_resource_generation
+
+            bump_resource_generation(self)
+        except Exception:
+            logger.log_trace("move_to_async: authorization-scope invalidation failed")
+
+        if not quiet:
+            try:
+                self.announce_move_to(source_location, move_type=move_type, **kwargs)
+            except Exception as err:
+                logpost("announce_move_to", err)
+                hook_errors.append(("announce_move_to", err))
+
+        if move_hooks:
+            if source_location:
+                try:
+                    source_location.at_post_leave(self, destination, move_type=move_type, **kwargs)
+                except Exception as err:
+                    logpost("at_post_leave", err)
+                    hook_errors.append(("at_post_leave", err))
+            try:
+                destination.at_post_arrive(self, source_location, move_type=move_type, **kwargs)
+            except Exception as err:
+                logpost("at_post_arrive", err)
+                hook_errors.append(("at_post_arrive", err))
+            try:
+                self.at_post_move(source_location, move_type=move_type, **kwargs)
+            except Exception as err:
+                logpost("at_post_move", err)
+                hook_errors.append(("at_post_move", err))
+
+        return MoveResult(
+            committed=True,
+            failed_stage=hook_errors[0][0] if hook_errors else None,
+            hook_errors=hook_errors,
+        )
+
     def clear_exits(self):
         """
         Destroys all of the exits and any exits pointing to this
@@ -519,7 +770,10 @@ class MovementMixin:
         )
 
         location.msg_contents(
-            (string, {"type": move_type}), exclude=(self,), from_obj=self, mapping=mapping
+            (string, {"type": move_type}),
+            exclude=(self,),
+            from_obj=self,
+            mapping=mapping,
         )
 
     def announce_move_to(self, source_location, msg=None, mapping=None, move_type="move", **kwargs):
@@ -592,7 +846,10 @@ class MovementMixin:
         )
 
         destination.msg_contents(
-            (string, {"type": move_type}), exclude=(self,), from_obj=self, mapping=mapping
+            (string, {"type": move_type}),
+            exclude=(self,),
+            from_obj=self,
+            mapping=mapping,
         )
 
     @hook(

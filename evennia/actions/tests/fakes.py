@@ -150,6 +150,9 @@ class FakeObj:
         self.location = destination
         return True
 
+    async def move_to_async(self, destination, **kwargs):
+        return self.move_to(destination, **kwargs)
+
     def search(self, name, **kwargs):
         return self.search_map.get(name)
 
