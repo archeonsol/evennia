@@ -910,13 +910,57 @@ async def cmdhandler(
     from evennia.actions.dispatch import try_action_dispatch
 
     if cmdobj is None:
+        action_started = time.monotonic()
+        action_session = session
+        if action_session is None and callertype == "session":
+            action_session = called_by
+        trace_started = False
+        outcome = "error"
         try:
-            await try_action_dispatch(
+            if getattr(settings, "COMMAND_TRACE_ENABLED", True):
+                from evennia.utils.command_trace import begin_command_trace
+
+                key = str(raw_string or "").strip().split(" ", 1)[0]
+                begin_command_trace(
+                    caller=called_by,
+                    session=action_session,
+                    raw_string=raw_string,
+                    cmd_key=key,
+                )
+                trace_started = True
+            trace = await try_action_dispatch(
                 called_by, raw_string, session=session, callertype=callertype, **kwargs
             )
+            outcome = getattr(trace, "outcome", None) or "consumed"
         except Exception:
             logger.log_err("User input was: '%s'." % logger.mask_sensitive_input(raw_string))
             _msg_err(called_by, _ERROR_UNTRAPPED, cmdid=cmdid)
+            outcome = "error"
+        finally:
+            elapsed = time.monotonic() - action_started
+            try:
+                from evennia.server.prometheus_metrics import record_action_input
+
+                record_action_input(outcome, elapsed)
+            except Exception:
+                pass
+            if trace_started:
+                try:
+                    from evennia.utils.command_trace import end_command_trace
+
+                    end_command_trace()
+                except Exception:
+                    pass
+            if getattr(settings, "COMMAND_COMPLETION_MARKERS_ENABLED", False):
+                try:
+                    marker = (
+                        "\x1eEV-COMMAND-DONE "
+                        f"outcome={outcome} elapsed_ms={elapsed * 1000.0:.3f}\x1f"
+                    )
+                    if action_session is not None and hasattr(action_session, "msg"):
+                        action_session.msg(marker, options={"raw": True})
+                except Exception:
+                    logger.log_trace("CM1 completion marker delivery failed")
         return
 
     (

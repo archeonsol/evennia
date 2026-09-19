@@ -2681,3 +2681,70 @@ class TestBridgeErrorSurfacing(TwistedTestCase):
         self.assertNotIn("fail", out, "bridge exception escaped as a failed Deferred")
         joined = "\n".join(str(m) for m in called_by.messages)
         self.assertIn("untrapped error", joined.lower())
+
+
+class _MarkerSession:
+    """Capture raw protocol records sent to one input session."""
+
+    def __init__(self, events):
+        self.events = events
+
+    def msg(self, text=None, **kwargs):
+        self.events.append(("msg", text, kwargs))
+
+
+class TestActionCompletionMarker(TwistedTestCase):
+    """The load protocol marks the end of the complete CM1 lifecycle."""
+
+    @override_settings(COMMAND_COMPLETION_MARKERS_ENABLED=True, COMMAND_TRACE_ENABLED=False)
+    def test_success_marker_is_sent_once_after_dispatch(self):
+        events = []
+        called_by = _BridgeErrCaller()
+        session = _MarkerSession(events)
+
+        async def dispatch(*args, **kwargs):
+            events.append(("dispatch",))
+            return type("Trace", (), {"outcome": "succeeded"})()
+
+        with (
+            patch("evennia.actions.dispatch.try_action_dispatch", side_effect=dispatch),
+            patch("evennia.server.prometheus_metrics.record_action_input"),
+        ):
+            d = ensureDeferred(
+                cmdhandler.cmdhandler(called_by, "look", session=session, callertype="object")
+            )
+            failures = []
+            d.addErrback(failures.append)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(events[0], ("dispatch",))
+        markers = [event for event in events if event[0] == "msg"]
+        self.assertEqual(len(markers), 1)
+        self.assertRegex(
+            markers[0][1],
+            r"^\x1eEV-COMMAND-DONE outcome=succeeded elapsed_ms=\d+\.\d{3}\x1f$",
+        )
+        self.assertEqual(markers[0][2]["options"], {"raw": True})
+
+    @override_settings(COMMAND_COMPLETION_MARKERS_ENABLED=True, COMMAND_TRACE_ENABLED=False)
+    def test_error_marker_still_completes_once(self):
+        events = []
+        called_by = _BridgeErrCaller()
+        session = _MarkerSession(events)
+        with (
+            patch(
+                "evennia.actions.dispatch.try_action_dispatch",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("evennia.server.prometheus_metrics.record_action_input"),
+        ):
+            d = ensureDeferred(
+                cmdhandler.cmdhandler(called_by, "look", session=session, callertype="object")
+            )
+            failures = []
+            d.addErrback(failures.append)
+
+        self.assertEqual(failures, [])
+        markers = [event for event in events if event[0] == "msg"]
+        self.assertEqual(len(markers), 1)
+        self.assertIn("outcome=error", markers[0][1])
