@@ -9,6 +9,7 @@ Disable all engine metrics with ``ENGINE_PROMETHEUS_METRICS_ENABLED = False``.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -65,6 +66,7 @@ BUS_REJECTED_TOTAL = None
 BUS_WRITE_BATCH_SIZE = None
 
 _METRICS_READY = False
+_METRICS_LOCK = threading.Lock()
 _render_phase_samples = {"resolve": 0, "transform": 0, "clean": 0}
 _RENDER_PHASE_SAMPLE_EVERY = 64
 
@@ -76,6 +78,22 @@ def _enabled() -> bool:
 def _init_metrics() -> bool:
     """Create metrics once on the default Prometheus registry."""
     global _METRICS_READY
+
+    if _METRICS_READY:
+        return ATTR_FLUSH_TOTAL is not None
+    # The writer thread and the server can reach a metric call at first
+    # contact simultaneously; without the lock both can pass the flag check
+    # and register the same timeseries twice (a registry error) or observe
+    # the flag set before any metric object exists.
+    with _METRICS_LOCK:
+        if _METRICS_READY:
+            return ATTR_FLUSH_TOTAL is not None
+        _METRICS_READY = True
+        return _create_metrics()
+
+
+def _create_metrics() -> bool:
+    """Build every metric on the default registry; caller holds the lock."""
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_RUNS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
@@ -101,10 +119,6 @@ def _init_metrics() -> bool:
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
     global BUS_INCOMING_DEPTH, BUS_INCOMING_BYTES, BUS_INCOMING_WAIT_SECONDS
     global BUS_REJECTED_TOTAL, BUS_WRITE_BATCH_SIZE
-
-    if _METRICS_READY:
-        return ATTR_FLUSH_TOTAL is not None
-    _METRICS_READY = True
 
     if not _enabled():
         return False
