@@ -24,7 +24,16 @@ class TestBusLifecycleAdmission(TestCase):
     def test_startup_output_waits_in_transport_before_ready_publication(self):
         """Asynchronous startup output remains admissible behind final ready."""
         self.assertFalse(self.bus.ready)
-        result = self.bus.callRemote(amp.MsgServer2Portal, packed_data=b"startup output")
+        result = self.bus.callRemote(
+            amp.MsgServer2Portal, packed_data=b"startup output"
+        )
+        self.assertTrue(result.admitted)
+        self.bus._transport.publish.assert_called_once()
+
+    def test_grouped_startup_output_is_also_admitted(self):
+        result = self.bus.callRemote(
+            amp.MsgServer2PortalMany, packed_data=b"startup grouped output"
+        )
         self.assertTrue(result.admitted)
         self.bus._transport.publish.assert_called_once()
 
@@ -66,7 +75,9 @@ class TestBotSessionRecovery(TestCase):
             self.results.append(result)
             return result
 
-        self.service = SimpleNamespace(portal_bus=SimpleNamespace(send_AdminServer2Portal=send))
+        self.service = SimpleNamespace(
+            portal_bus=SimpleNamespace(send_AdminServer2Portal=send)
+        )
 
     def start(self, uid=7):
         """Request one bot session the way a starting Bot account does."""

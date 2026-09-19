@@ -27,6 +27,13 @@ accounting includes the active callback. Reads request up to 32 frames per XREAD
 (settings-tunable); one additional decoded frame can exist while admission checks its
 size. One queued loop drain processes at most 32 frames per turn.
 
+Server output is first cleaned for each session, including protocol-specific parsing.
+Within one reactor turn, byte-identical final frames are then grouped into one multicast
+bus frame and expanded to local sockets by the Portal. Grouping after cleaning preserves
+viewer-specific visibility, names, options, and encodings. Frames are grouped in rounds,
+which preserves each session's original output order. Groups are capped at 1,024 sessions;
+an oversized grouped payload falls back to ordinary per-session frames.
+
 Queue depth, retained bytes, published/rejected frame counts, and write-batch sizes are
 exported as `evennia_bus_*` Prometheus metrics so a saturated bus is visible without
 log archaeology.

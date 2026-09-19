@@ -15,6 +15,17 @@ def receive_server2portal(packed_data):
     return {}
 
 
+def receive_server2portal_many(packed_data):
+    """Expand one trusted grouped output frame to its local sessions."""
+    sessids, kwargs = ipc_schema.parse_multicast(packed_data)
+    handler = evennia.PORTAL_SESSION_HANDLER
+    for sessid in sessids:
+        session = handler.get(sessid, None)
+        if session:
+            handler.data_out(session, **kwargs)
+    return {}
+
+
 def receive_adminserver2portal(link, packed_data):
     """Server -> Portal admin/control plane."""
     link.factory.server_connection = link
@@ -30,7 +41,9 @@ def receive_adminserver2portal(link, packed_data):
     elif operation == amp.SDISCONN:
         session = portal_sessionhandler.get(sessid)
         if session:
-            portal_sessionhandler.server_disconnect(session, reason=kwargs.get("reason"))
+            portal_sessionhandler.server_disconnect(
+                session, reason=kwargs.get("reason")
+            )
 
     elif operation == amp.SDISCONNALL:
         portal_sessionhandler.server_disconnect_all(reason=kwargs.get("reason"))
@@ -39,9 +52,7 @@ def receive_adminserver2portal(link, packed_data):
         mode = (
             "reload"
             if operation == amp.SRELOAD
-            else "reset"
-            if operation == amp.SRESET
-            else "shutdown"
+            else "reset" if operation == amp.SRESET else "shutdown"
         )
         result = link.stop_server(mode=mode)
         if operation == amp.PSHUTD:
@@ -91,7 +102,9 @@ def receive_adminserver2portal(link, packed_data):
 
     elif operation == amp.SSYNC:
         if kwargs.get("confirmed"):
-            portal_sessionhandler.apply_bus_state({"sessions": kwargs["sessiondata"], "closed": {}})
+            portal_sessionhandler.apply_bus_state(
+                {"sessions": kwargs["sessiondata"], "closed": {}}
+            )
             return {}
         if kwargs.get("snapshot_id"):
             portal_sessionhandler.apply_final_bus_state(kwargs["sessiondata"])

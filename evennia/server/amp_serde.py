@@ -7,6 +7,7 @@ non-JSON payload is rejected outright.
 
 Wire formats:
   ``J1`` + UTF-8 JSON  — session messages (MsgPortal2Server / MsgServer2Portal)
+  ``M1`` + UTF-8 JSON  — grouped Server output (MsgServer2PortalMany)
   ``A1`` + UTF-8 JSON  — admin messages  (AdminPortal2Server / AdminServer2Portal)
   ``S1`` + UTF-8 JSON  — status reports  (MsgStatus, Portal -> launcher)
   ``L1`` + UTF-8 JSON  — launcher start args (MsgLauncher2Portal, launcher -> Portal)
@@ -39,6 +40,7 @@ from django.conf import settings
 _PICKLE_REJECT_PREFIXES = (b"\x80", b"(", b"]", b"}")
 
 _SESSION_MAGIC = b"J1"
+_MULTICAST_MAGIC = b"M1"
 
 _SUBJECT_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 
@@ -85,11 +87,17 @@ def sanitize_value(value: Any, *, depth: int = 0, enforce_limits: bool = True) -
     if isinstance(value, list):
         if enforce_limits and len(value) > _MAX_LIST_LEN:
             raise ValueError("AMP session list exceeds max length")
-        return [sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits) for v in value]
+        return [
+            sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits)
+            for v in value
+        ]
     if isinstance(value, tuple):
         if enforce_limits and len(value) > _MAX_LIST_LEN:
             raise ValueError("AMP session tuple exceeds max length")
-        return [sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits) for v in value]
+        return [
+            sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits)
+            for v in value
+        ]
     if isinstance(value, dict):
         if enforce_limits and len(value) > _MAX_DICT_KEYS:
             raise ValueError("AMP session dict exceeds max keys")
@@ -99,7 +107,9 @@ def sanitize_value(value: Any, *, depth: int = 0, enforce_limits: bool = True) -
                 raise TypeError("AMP session dict keys must be str")
             if enforce_limits and len(key) > 128:
                 raise ValueError("AMP session dict key too long")
-            out[key] = sanitize_value(val, depth=depth + 1, enforce_limits=enforce_limits)
+            out[key] = sanitize_value(
+                val, depth=depth + 1, enforce_limits=enforce_limits
+            )
         return out
     raise TypeError(f"unsupported AMP session type: {type(value).__name__}")
 
@@ -115,11 +125,15 @@ def pack_session_message(sessid: int, kwargs: dict) -> bytes:
     if not isinstance(sessid, int) or sessid < 0:
         raise ValueError("sessid must be a non-negative int")
     clean = sanitize_session_kwargs(kwargs, enforce_limits=False)
-    body = json.dumps([sessid, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(
+        [sessid, clean], separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     return _SESSION_MAGIC + body
 
 
-def unpack_session_message(data: bytes, *, enforce_limits: bool = True) -> Tuple[int, dict]:
+def unpack_session_message(
+    data: bytes, *, enforce_limits: bool = True
+) -> Tuple[int, dict]:
     """Unpack session wire bytes to (sessid, kwargs).
 
     ``enforce_limits`` defaults True (the safe choice for untrusted player input
@@ -143,6 +157,47 @@ def unpack_session_message(data: bytes, *, enforce_limits: bool = True) -> Tuple
     if raw[:1] in _PICKLE_REJECT_PREFIXES:
         raise ValueError("refusing non-JSON (pickle-like) AMP session payload")
     raise ValueError("unrecognized AMP session payload format")
+
+
+def pack_multicast_message(sessids: list[int] | tuple[int, ...], kwargs: dict) -> bytes:
+    """Pack one trusted Server output frame for several Portal sessions."""
+    clean_ids = list(sessids)
+    if not clean_ids or any(
+        not isinstance(sessid, int) or sessid <= 0 for sessid in clean_ids
+    ):
+        raise ValueError("multicast sessids must be positive ints")
+    if len(set(clean_ids)) != len(clean_ids):
+        raise ValueError("multicast sessids must be unique")
+    clean = sanitize_session_kwargs(kwargs, enforce_limits=False)
+    body = json.dumps(
+        [clean_ids, clean], separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return _MULTICAST_MAGIC + body
+
+
+def unpack_multicast_message(data: bytes) -> Tuple[list[int], dict]:
+    """Unpack trusted grouped Server output into session ids and one frame."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("packed_data must be bytes")
+    raw = bytes(data)
+    if not raw.startswith(_MULTICAST_MAGIC):
+        if raw[:1] in _PICKLE_REJECT_PREFIXES:
+            raise ValueError("refusing non-JSON (pickle-like) AMP multicast payload")
+        raise ValueError("unrecognized AMP multicast payload format")
+    parsed = json.loads(raw[2:].decode("utf-8"))
+    if not isinstance(parsed, list) or len(parsed) != 2:
+        raise ValueError("invalid AMP multicast JSON envelope")
+    sessids, kwargs = parsed
+    if (
+        not isinstance(sessids, list)
+        or not sessids
+        or any(not isinstance(sessid, int) or sessid <= 0 for sessid in sessids)
+        or len(set(sessids)) != len(sessids)
+    ):
+        raise ValueError("invalid sessids in AMP multicast envelope")
+    if not isinstance(kwargs, dict):
+        raise ValueError("invalid kwargs in AMP multicast envelope")
+    return sessids, sanitize_session_kwargs(kwargs, enforce_limits=False)
 
 
 _ADMIN_MAGIC = b"A1"
@@ -201,9 +256,13 @@ def _sanitize_admin_sessiondata(
             raise TypeError("AMP admin sessiondata dict keys must be str or int")
 
         if isinstance(val, dict):
-            encoded[clean_key] = _sanitize_admin_sessiondata(val, depth=depth + 1, sessid_map=False)
+            encoded[clean_key] = _sanitize_admin_sessiondata(
+                val, depth=depth + 1, sessid_map=False
+            )
         else:
-            encoded[clean_key] = sanitize_value(val, depth=depth + 1, enforce_limits=False)
+            encoded[clean_key] = sanitize_value(
+                val, depth=depth + 1, enforce_limits=False
+            )
     return encoded
 
 
@@ -216,7 +275,9 @@ def _restore_admin_sessiondata(value: dict) -> dict:
             clean_key = int(key[7:])
         else:
             clean_key = key
-        restored[clean_key] = _restore_admin_sessiondata(val) if isinstance(val, dict) else val
+        restored[clean_key] = (
+            _restore_admin_sessiondata(val) if isinstance(val, dict) else val
+        )
     return restored
 
 
@@ -233,7 +294,9 @@ def pack_admin_message(sessid: int, kwargs: dict) -> bytes:
     if not isinstance(sessid, int) or sessid < 0:
         raise ValueError("admin sessid must be a non-negative int")
     clean = _sanitize_admin_kwargs(kwargs)
-    body = json.dumps([sessid, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(
+        [sessid, clean], separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     return _ADMIN_MAGIC + body
 
 

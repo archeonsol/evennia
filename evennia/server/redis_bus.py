@@ -127,7 +127,9 @@ class _RedisBusMixin:
             # every failed handshake cycle, which is the same outage, not new
             # work lost.
             self._sync_failure_logged = True
-            logger.log_warn(f"redis bus unavailable: {reason}; interrupted work may have run")
+            logger.log_warn(
+                f"redis bus unavailable: {reason}; interrupted work may have run"
+            )
         if self._role == "portal":
             for session in list(evennia.PORTAL_SESSION_HANDLER.values()):
                 evennia.PORTAL_SESSION_HANDLER.bus_unavailable_notice(session)
@@ -200,7 +202,11 @@ class _RedisBusMixin:
         finally:
             self._snapshot_waiters.pop(snapshot_id, None)
             if not result._future.done():
-                result.fail(TransportUnavailable("final snapshot wait ended without confirmation"))
+                result.fail(
+                    TransportUnavailable(
+                        "final snapshot wait ended without confirmation"
+                    )
+                )
 
     def _snapshot(self):
         """Return Portal state; unused by the Server role."""
@@ -228,7 +234,7 @@ class _RedisBusMixin:
             and not allowed
             and self._handshake.state in ("synchronizing", "stopping", "ready")
         ):
-            allowed = cmdkey == b"MsgServer2Portal"
+            allowed = cmdkey in (b"MsgServer2Portal", b"MsgServer2PortalMany")
             if cmdkey == b"AdminServer2Portal":
                 operation = amp.loads_admin(packed)[1].get("operation")
                 allowed = operation in (
@@ -240,7 +246,9 @@ class _RedisBusMixin:
                 )
         if not allowed:
             return PublicationResult.rejected(TransportUnavailable("peer is not ready"))
-        return self._transport.publish(self._send_stream, cmdkey, packed, pair=self._handshake.pair)
+        return self._transport.publish(
+            self._send_stream, cmdkey, packed, pair=self._handshake.pair
+        )
 
     def _on_frame(self, cmdkey, data):
         raise NotImplementedError
@@ -332,6 +340,9 @@ class RedisServerBus(_RedisBusMixin):
     def send_MsgServer2Portal(self, session, **kwargs):
         return ipc_handlers_server.send_msgserver2portal(self, session, **kwargs)
 
+    def send_MsgServer2PortalMany(self, sessids, **kwargs):
+        return ipc_handlers_server.send_msgserver2portal_many(self, sessids, **kwargs)
+
     def send_AdminServer2Portal(self, session, operation="", **kwargs):
         return ipc_handlers_server.send_adminserver2portal(
             self, session, operation=operation, **kwargs
@@ -344,7 +355,9 @@ class RedisServerBus(_RedisBusMixin):
         """Run process setup once, then negotiate session readiness."""
         if not self._initial_setup_done:
             if self._initial_setup_attempted:
-                raise RuntimeError("redis bus: initial setup failed; process restart required")
+                raise RuntimeError(
+                    "redis bus: initial setup failed; process restart required"
+                )
             self._initial_setup_attempted = True
             self.factory.server.run_initial_setup()
             self._initial_setup_done = True
@@ -362,7 +375,9 @@ class RedisServerBus(_RedisBusMixin):
             mode = payload.get("restart_mode") or "shutdown"
             self.factory.server.run_init_hooks(mode)
             restored = {
-                sid: {key: value for key, value in data.items() if not key.startswith("_")}
+                sid: {
+                    key: value for key, value in data.items() if not key.startswith("_")
+                }
                 for sid, data in sessions.items()
                 if data.get("_server_confirmed")
             }
@@ -417,6 +432,8 @@ class RedisPortalBus(_RedisBusMixin):
     def _on_frame(self, cmdkey, data):
         if cmdkey == b"MsgServer2Portal":
             ipc_handlers_portal.receive_server2portal(data)
+        elif cmdkey == b"MsgServer2PortalMany":
+            ipc_handlers_portal.receive_server2portal_many(data)
         elif cmdkey == b"AdminServer2Portal":
             ipc_handlers_portal.receive_adminserver2portal(self, data)
 

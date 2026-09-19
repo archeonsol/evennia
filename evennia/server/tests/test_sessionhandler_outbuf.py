@@ -70,7 +70,9 @@ class TestLoginVeto(TestCase):
         account.at_pre_login.return_value = False
         handler[1] = session
         with patch.object(
-            handler, "disconnect", side_effect=lambda *a, **kw: manager.disconnect(*a, **kw)
+            handler,
+            "disconnect",
+            side_effect=lambda *a, **kw: manager.disconnect(*a, **kw),
         ):
             handler.login(session, account, testmode=True)
         # The frame must ship while the session can still be flushed.
@@ -91,7 +93,9 @@ class TestOutputOrder(TestCase):
         handler._outbuf[1] = messages
         with (
             patch("evennia.server.sessionhandler.evennia") as engine,
-            patch.object(handler, "clean_senddata", side_effect=lambda session, frame: frame),
+            patch.object(
+                handler, "clean_senddata", side_effect=lambda session, frame: frame
+            ),
         ):
             handler._flush_outbuf(1)
         return [
@@ -134,4 +138,92 @@ class TestOutputOrder(TestCase):
                 {"text": ("one\ntwo", {"type": "notice"})},
                 {"text": "three"},
             ],
+        )
+
+
+class TestGroupedOutput(TestCase):
+    """Final byte-identical frames share one Server-to-Portal publication."""
+
+    def setUp(self):
+        self.handler = ServerSessionHandler()
+        self.sessions = [_session(1), _session(2)]
+        for session in self.sessions:
+            self.handler[session.sessid] = session
+
+    def test_one_flush_is_scheduled_for_the_reactor_turn(self):
+        with patch("evennia.utils.clock.call_later") as call_later:
+            for session in self.sessions:
+                self.handler.data_out(session, text="same")
+        call_later.assert_called_once_with(0, self.handler._flush_all_outbuf)
+
+    def test_identical_clean_frames_are_multicast(self):
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [{"text": "same"}]
+        normalized = {"text": [["same"], {}]}
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(self.handler, "clean_senddata", return_value=normalized),
+        ):
+            self.handler._flush_all_outbuf()
+        bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
+        bus.send_MsgServer2PortalMany.assert_called_once_with([1, 2], **normalized)
+        bus.send_MsgServer2Portal.assert_not_called()
+
+    def test_grouping_happens_after_session_specific_cleaning(self):
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [{"text": "source"}]
+
+        def clean(session, _frame):
+            return {"text": [[f"for {session.sessid}"], {}]}
+
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(self.handler, "clean_senddata", side_effect=clean),
+        ):
+            self.handler._flush_all_outbuf()
+        bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
+        self.assertEqual(bus.send_MsgServer2Portal.call_count, 2)
+        bus.send_MsgServer2PortalMany.assert_not_called()
+
+    def test_multicast_rounds_preserve_per_session_order(self):
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [
+                {"text": "first"},
+                {"text": ("second", {"type": "notice"})},
+            ]
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(
+                self.handler,
+                "clean_senddata",
+                side_effect=lambda _session, frame: frame,
+            ),
+        ):
+            self.handler._flush_all_outbuf()
+        calls = (
+            engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2PortalMany.call_args_list
+        )
+        self.assertEqual(
+            [call.kwargs["text"] for call in calls],
+            ["first", ("second", {"type": "notice"})],
+        )
+
+    def test_one_broken_session_does_not_strand_the_rest(self):
+        for session in self.sessions:
+            self.handler._outbuf[session.sessid] = [{"text": "source"}]
+
+        def clean(session, frame):
+            if session.sessid == 1:
+                raise ValueError("broken protocol transform")
+            return frame
+
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch("evennia.server.sessionhandler.log_trace"),
+            patch.object(self.handler, "clean_senddata", side_effect=clean),
+        ):
+            self.handler._flush_all_outbuf()
+        bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
+        bus.send_MsgServer2Portal.assert_called_once_with(
+            self.sessions[1], text="source"
         )
