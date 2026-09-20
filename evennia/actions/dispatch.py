@@ -459,11 +459,11 @@ async def _dispatch_with_signals(action, actor, raw_string, session, engine, cal
     if getattr(settings, "AUTHORIZATION_OFFLOOP_SNAPSHOTS", False):
         from evennia.authorization.storage import (
             authorization_snapshot_scope,
-            prewarm_authorization,
+            ensure_authorization,
         )
 
         principals, resources = _authorization_resources(action, actor, context)
-        if await prewarm_authorization(principals, resources):
+        if await ensure_authorization(principals, resources):
             snapshot_scope = authorization_snapshot_scope()
         else:
             # Evaluate through the ordinary read path rather than consume

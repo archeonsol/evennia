@@ -38,6 +38,7 @@ _RUNTIME_TASK_KINDS = frozenset(
     {
         "action",
         "activity",
+        "authz",
         "command",
         "job",
         "idmapper",

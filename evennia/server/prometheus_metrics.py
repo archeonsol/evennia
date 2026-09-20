@@ -38,6 +38,10 @@ AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS = None
 AUTHORIZATION_SNAPSHOT_MISS_TOTAL = None
 AUTHORIZATION_MOVE_INVALIDATION_TOTAL = None
 AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL = None
+AUTHORIZATION_INVALIDATION_EVENTS_TOTAL = None
+AUTHORIZATION_INVALIDATION_RECONCILES_TOTAL = None
+AUTHORIZATION_INVALIDATION_ERRORS_TOTAL = None
+AUTHORIZATION_INVALIDATION_REVISION = None
 ACTION_INPUT_TOTAL = None
 ACTION_INPUT_DURATION_SECONDS = None
 RUNTIME_TASKS_ACTIVE = None
@@ -79,6 +83,8 @@ def _init_metrics() -> bool:
     global AUTHORIZATION_PREWARM_WAIT_TOTAL, AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS
     global AUTHORIZATION_SNAPSHOT_MISS_TOTAL
     global AUTHORIZATION_MOVE_INVALIDATION_TOTAL, AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL
+    global AUTHORIZATION_INVALIDATION_EVENTS_TOTAL, AUTHORIZATION_INVALIDATION_RECONCILES_TOTAL
+    global AUTHORIZATION_INVALIDATION_ERRORS_TOTAL, AUTHORIZATION_INVALIDATION_REVISION
     global ACTION_INPUT_TOTAL, ACTION_INPUT_DURATION_SECONDS
     global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
     global RUNTIME_DB_UNMANAGED_TOTAL
@@ -246,6 +252,23 @@ def _init_metrics() -> bool:
     AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL = Counter(
         "evennia_authorization_snapshot_scope_fallback_total",
         "Dispatches that evaluated without the snapshot scope after an incomplete prewarm",
+    )
+    AUTHORIZATION_INVALIDATION_EVENTS_TOTAL = Counter(
+        "evennia_authorization_invalidation_events_total",
+        "Pushed authorization invalidation events applied locally",
+    )
+    AUTHORIZATION_INVALIDATION_RECONCILES_TOTAL = Counter(
+        "evennia_authorization_invalidation_reconciles_total",
+        "Local authorization cache reconciles by bounded reason",
+        ("reason",),
+    )
+    AUTHORIZATION_INVALIDATION_ERRORS_TOTAL = Counter(
+        "evennia_authorization_invalidation_errors_total",
+        "Authorization invalidation transport errors",
+    )
+    AUTHORIZATION_INVALIDATION_REVISION = Gauge(
+        "evennia_authorization_invalidation_revision",
+        "Last global authorization revision applied by this process",
     )
     ACTION_INPUT_TOTAL = Counter(
         "evennia_action_input_total",
@@ -521,6 +544,43 @@ def record_authorization_snapshot_scope_fallback() -> None:
         return
     if AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL is not None:
         AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL.inc()
+
+
+def record_authorization_invalidation_events(count: int) -> None:
+    """Record locally applied pushed invalidation events."""
+
+    if not _init_metrics():
+        return
+    if AUTHORIZATION_INVALIDATION_EVENTS_TOTAL is not None:
+        AUTHORIZATION_INVALIDATION_EVENTS_TOTAL.inc(max(0, int(count)))
+
+
+def record_authorization_invalidation_reconcile(reason: str) -> None:
+    """Record one local cache reconcile by bounded reason."""
+
+    if not _init_metrics():
+        return
+    normalized = reason if reason in {"startup", "gap", "anti_entropy"} else "anti_entropy"
+    if AUTHORIZATION_INVALIDATION_RECONCILES_TOTAL is not None:
+        AUTHORIZATION_INVALIDATION_RECONCILES_TOTAL.labels(reason=normalized).inc()
+
+
+def record_authorization_invalidation_error() -> None:
+    """Record one invalidation transport error."""
+
+    if not _init_metrics():
+        return
+    if AUTHORIZATION_INVALIDATION_ERRORS_TOTAL is not None:
+        AUTHORIZATION_INVALIDATION_ERRORS_TOTAL.inc()
+
+
+def record_authorization_invalidation_revision(revision: int) -> None:
+    """Record the last applied global invalidation revision."""
+
+    if not _init_metrics():
+        return
+    if AUTHORIZATION_INVALIDATION_REVISION is not None:
+        AUTHORIZATION_INVALIDATION_REVISION.set(max(0, int(revision)))
 
 
 def record_action_input(outcome: str, duration_seconds: float) -> None:

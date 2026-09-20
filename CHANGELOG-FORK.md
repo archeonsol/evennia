@@ -25,6 +25,66 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.254 — Push authorization invalidation
+
+### Performance
+
+- **Authorization invalidation is now push-based over a durable Redis
+  Stream.** [`invalidation.py`](evennia/authorization/invalidation.py) appends
+  one `(revision, namespace, ref, generation)` event per mutation and every
+  authorization process applies events from its own persisted cursor. Warm
+  decisions become local dictionary reads with no Redis polling; grant
+  revocations, suspensions, policy edits, and scope changes propagate across
+  Server and web processes in milliseconds instead of the two-second poll
+  window; Redis traffic scales with actual mutations instead of command
+  volume. Run 7's residual cost was prewarm TTL revalidation over the
+  destination occupant set (18,400 waits, ~245 ms mean); with push enabled
+  readiness no longer expires with a poll TTL, so commands stop waiting on
+  generation polls.
+- **Cold facts cost one coalesced off-loop fetch.**
+  [`ensure_authorization`](evennia/authorization/storage.py) returns
+  immediately when facts are local and otherwise awaits a single shared
+  refresh, with the ordinary inline read as the counted last resort.
+
+### Reliability
+
+- The reader applies generations monotonically and drops affected snapshots.
+  A revision gap, a revision that advanced without an event (failed append or
+  dead reader), or a cursor lost to stream retention reconciles by flushing
+  local facts, which then refill lazily; a slow anti-entropy check bounds
+  staleness as disaster recovery. Baseline reads, cursor persistence, and the
+  anti-entropy checks all run off the reactor, and the reader is stopped on
+  Server/Portal shutdown.
+- Plain pub/sub is deliberately not used (reloads and connection losses
+  discard events) and neither are consumer groups (each process must observe
+  the full invalidation sequence).
+
+### Configuration
+
+- `AUTHORIZATION_PUSH_INVALIDATION` (default `False`) plus
+  `AUTHORIZATION_INVALIDATION_REDIS_ALIAS`, `..._STREAM`, `..._REVISION_KEY`,
+  `..._CURSOR_KEY`, `..._CONSUMER`, `..._MAXLEN`, `..._READ_BLOCK_MS`, and
+  `..._RECONCILE_SECONDS`. The polling path is unchanged when disabled.
+
+### Observability
+
+- `evennia_authorization_invalidation_events_total`,
+  `evennia_authorization_invalidation_reconciles_total{reason}`,
+  `evennia_authorization_invalidation_errors_total`, and
+  `evennia_authorization_invalidation_revision`.
+
+### Tests
+
+- New [`test_invalidation.py`](evennia/authorization/tests/test_invalidation.py)
+  (21 tests): revisioned publish, monotonic apply, snapshot drops, gap
+  reconcile, malformed events, cursor persistence and replay, baseline
+  selection, two-strike anti-entropy, reader thread apply/reconnect,
+  two-process simulation, and the `ensure_authorization` ready/cold/failure
+  paths.
+- Engine sweep green on this change: `evennia.authorization`,
+  `evennia.actions`, `evennia.objects` — 681 tests; `evennia.server` +
+  `evennia.utils` — 1504 tests (20 expected skips).
+
 ## 6.0.0+underspire.253 — Authorization invalidation hot-path fixes
 
 ### Performance

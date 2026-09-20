@@ -678,6 +678,12 @@ class EvenniaServerService(MultiService):
             spool_remaining_dirty()
         except Exception:
             logger.log_trace("forced attribute spool at shutdown")
+        try:
+            from evennia.authorization import invalidation
+
+            invalidation.stop()
+        except Exception:
+            logger.log_trace("authorization invalidation reader stop failed")
 
         # on-demand handler state should always be saved.
         from evennia.scripts.ondemandhandler import ON_DEMAND_HANDLER
