@@ -578,11 +578,10 @@ class LifecycleMixin:
         Called just before beginning to un-connect a puppeting from this
         Account.
 
-        **Not vetoable.** Return value is ignored. Unpuppet runs during
-        session disconnect and server shutdown paths; blocking it would
-        strand state between the engine and the underlying transport.
-        Raise if you genuinely need to abort, but expect the caller's
-        cleanup path to handle the exception.
+        **Vetoable.** A non-None falsy return aborts the detach: the body
+        stays driven and the focus stack is unchanged. The override is
+        responsible for messaging the caller why. `None` / `True` allow
+        the detach.
 
         Args:
             **kwargs: Arbitrary, optional arguments for users overriding

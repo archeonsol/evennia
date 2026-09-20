@@ -2489,15 +2489,17 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         returns="ignored",
         discipline="public",
         fires_from=("DefaultAccount.at_pre_login",),
-        notes="One-shot first-login hook. Fires once via at_pre_login when last_login is unset.",
+        notes="One-shot first-login hook. Fires once during login, after at_pre_login, when the FIRST_LOGIN flag is set.",
     )
     def at_first_login(self, **kwargs):
         """
         Called the very first time this account logs into the game.
-        Note that this is called *before* at_pre_login, so no session
-        is established and usually no character is yet assigned at
-        this point. This hook is intended for account-specific setup
-        like configurations.
+        This runs *after* at_pre_login accepts the login, during
+        sessionhandler login: the session exists but is not yet marked
+        logged-in and no character is puppeted yet. A vetoed login does
+        not consume the first-login flag; the next successful login fires
+        this hook instead. Intended for account-specific setup like
+        configurations.
 
         Args:
             **kwargs (dict): Arbitrary, optional arguments for users
@@ -2680,7 +2682,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         returns="ignored",
         discipline="public",
         fires_from=(),
-        notes="Fires when authentication or at_pre_login rejects a login attempt.",
+        notes="Fires when authentication rejects a login attempt.",
     )
     def at_failed_login(self, session, **kwargs):
         """

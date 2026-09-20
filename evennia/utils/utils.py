@@ -122,8 +122,8 @@ def is_veto(result):
     This is the canonical veto check used by every veto-capable pre-hook
     in the engine (`at_pre_move`, `at_pre_leave`, `at_pre_arrive`,
     `at_pre_traverse`, `at_pre_rename`, `at_pre_get`, `at_pre_drop`,
-    `at_pre_give`, `at_pre_puppet`). Use it at call sites that gate an
-    operation on a hook's return value.
+    `at_pre_give`, `at_pre_puppet`, `at_pre_login`, `at_pre_unpuppet`).
+    Use it at call sites that gate an operation on a hook's return value.
 
     For transform-style pre-hooks (`at_pre_say`, `at_pre_msg`,
     `at_pre_channel_msg`) the analogous helper is `resolve_transform`,
@@ -134,10 +134,6 @@ def is_veto(result):
 
     - Command pre-hooks `at_pre_parse` and `at_pre_cmd` use the inverse
       convention (truthy aborts) and predate these rules.
-    - Lifecycle pre-hook `at_pre_unpuppet` is a pure notification; its
-      return value is ignored. It runs during session teardown, where
-      vetoing would strand state. `at_pre_login` is vetoable: a falsy
-      return disconnects the session.
 
     Args:
         result: The return value of a pre-hook call.
