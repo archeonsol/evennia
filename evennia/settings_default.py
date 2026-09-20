@@ -776,6 +776,27 @@ AUTHORIZATION_GENERATION_POLL_SECONDS = 2.0
 # in CI to make every covered-path gap fail loudly instead.
 AUTHORIZATION_OFFLOOP_SNAPSHOTS = False
 AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR = False
+# Push-based authorization invalidation. When enabled, grant/suspension,
+# scope-label, and policy mutations append (revision, namespace, ref,
+# generation) to one durable Redis Stream and every authorization process
+# applies them from its own persisted cursor, so decisions read local facts
+# without TTL polling and cross-process changes land in milliseconds. A gap, a
+# revision that advanced without an event, or a lost cursor reconciles by
+# flushing local facts; a slow anti-entropy check bounds staleness as disaster
+# recovery. Requires a shared Redis cache backend.
+AUTHORIZATION_PUSH_INVALIDATION = False
+AUTHORIZATION_INVALIDATION_REDIS_ALIAS = "default"
+AUTHORIZATION_INVALIDATION_STREAM = "evennia:authz:invalidation"
+AUTHORIZATION_INVALIDATION_REVISION_KEY = "evennia:authz:revision"
+AUTHORIZATION_INVALIDATION_CURSOR_KEY = "evennia:authz:cursor"
+# Cursor identity; empty derives "server"/"portal"/"standalone" from the
+# running service so reloads resume the same stream position.
+AUTHORIZATION_INVALIDATION_CONSUMER = ""
+# Approximate stream trim; retention only needs to outlive a process restart
+# because a trimmed-away event reconciles instead of silently going missing.
+AUTHORIZATION_INVALIDATION_MAXLEN = 10000
+AUTHORIZATION_INVALIDATION_READ_BLOCK_MS = 1000
+AUTHORIZATION_INVALIDATION_RECONCILE_SECONDS = 5.0
 # Log attribute flush batch sizes every N fires of the flush-attributes
 # system (0 = off). Uses attribute_metrics.maybe_log_flush_metrics.
 ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS = 60

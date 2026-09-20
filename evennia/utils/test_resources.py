@@ -231,8 +231,7 @@ def resolve_fixtures(names):
             dependencies = FIXTURE_DEPENDENCIES[name]
         except KeyError:
             raise ValueError(
-                f"unknown test fixture {name!r}; valid names are "
-                f"{sorted(FIXTURE_DEPENDENCIES)}"
+                f"unknown test fixture {name!r}; valid names are {sorted(FIXTURE_DEPENDENCIES)}"
             ) from None
         wanted.add(name)
         pending.extend(dependencies)
@@ -427,11 +426,13 @@ class EvenniaTestMixin:
 
     @override_settings(PROTOTYPE_MODULES=["evennia.utils.tests.data.prototypes_example"])
     def tearDown(self):
+        from evennia.authorization import invalidation
         from evennia.authorization.storage import clear_authorization_caches
 
         flush_cache()
         discard_dirty_backends()
         clear_authorization_caches()
+        invalidation.stop()
         try:
             evennia.SESSION_HANDLER.data_out = self.backups[0]
             evennia.SESSION_HANDLER.disconnect = self.backups[1]

@@ -531,6 +531,12 @@ class EvenniaPortalService(MultiService):
                     await clock.maybe_await(evennia.PORTAL_SESSION_HANDLER.disconnect_all())
             except Exception:
                 logger.log_trace("portal session disconnect failed")
+            try:
+                from evennia.authorization import invalidation
+
+                invalidation.stop()
+            except Exception:
+                logger.log_trace("authorization invalidation reader stop failed")
             await self._stop_asyncio_resources()
             if self._shutdown_stop_server and self.server_amp is not None:
                 try:

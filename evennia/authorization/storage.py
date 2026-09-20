@@ -25,6 +25,7 @@ from evennia.server.models import (
 )
 from evennia.utils import logger
 
+from . import invalidation
 from .capabilities import capability_registry
 from .engine import GrantScope, GrantSnapshot, ResourceSnapshot
 from .policy import policy_from_data, policy_registry
@@ -132,13 +133,20 @@ def _generation_cache_key(namespace: str, key: str) -> str:
 
 
 def _shared_generation(namespace: str, key: str, local: int) -> int:
-    """Poll a cross-process generation counter under a short local TTL."""
+    """Return the newest generation this process knows for one fact.
+
+    With push invalidation the value is authoritative until an event drops it,
+    so this is a local dictionary read with no TTL and no I/O. Without push it
+    keeps the original bounded Redis polling behavior.
+    """
 
     if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
         return local
     cache_key = _generation_cache_key(namespace, key)
-    now = time.monotonic()
     cached = _shared_generation_cache.get(cache_key)
+    if invalidation.push_enabled():
+        return max(local, cached[1] if cached is not None else 0)
+    now = time.monotonic()
     interval = max(
         0.1,
         float(getattr(settings, "AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
@@ -159,11 +167,16 @@ def _shared_generation(namespace: str, key: str, local: int) -> int:
     return value
 
 
-def _publish_generation_io(cache_key: str) -> int:
-    """Increment one shared counter in a worker-safe callable."""
+def _publish_generation_io(cache_key: str, namespace=None, key=None, value=None) -> int:
+    """Publish one shared counter (and event) in a worker-safe callable."""
 
     cache.add(cache_key, 0, timeout=None)
-    return int(cache.incr(cache_key))
+    published = int(cache.incr(cache_key))
+    if namespace is None or key is None:
+        return published
+    final = max(int(value or 0), published)
+    invalidation.publish_generation(namespace, key, final)
+    return final
 
 
 def _publish_generation(namespace: str, key: str, value: int) -> int:
@@ -173,16 +186,18 @@ def _publish_generation(namespace: str, key: str, value: int) -> int:
         return value
     cache_key = _generation_cache_key(namespace, key)
     _shared_generation_cache[cache_key] = (time.monotonic(), value)
+    if invalidation.push_enabled():
+        invalidation.start()
     try:
         from evennia.utils import clock, defer
 
         if clock.loop_running() and clock.is_io_owner():
-            defer.background(_publish_generation_io, cache_key)
+            defer.background(_publish_generation_io, cache_key, namespace, key, value)
             return value
     except Exception:
         logger.log_trace("authorization async invalidation scheduling failed")
     try:
-        published = _publish_generation_io(cache_key)
+        published = _publish_generation_io(cache_key, namespace, key, value)
     except Exception:
         logger.log_trace("authorization shared invalidation publish failed")
         return value
@@ -1060,6 +1075,10 @@ def _generation_is_fresh(namespace: str, ref: str, now: float) -> tuple[bool, in
     if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
         return True, local
     cached = _shared_generation_cache.get(_generation_cache_key(namespace, ref))
+    if invalidation.push_enabled():
+        # Push invalidation keeps this entry authoritative until an event
+        # drops the snapshot, so readiness no longer expires with a poll TTL.
+        return True, max(local, int(cached[1]) if cached is not None else 0)
     interval = max(
         0.1,
         float(getattr(settings, "AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
@@ -1067,6 +1086,31 @@ def _generation_is_fresh(namespace: str, ref: str, now: float) -> tuple[bool, in
     if cached is None or now - cached[0] >= interval:
         return False, local
     return True, max(local, int(cached[1]))
+
+
+def apply_invalidation_event(namespace: str, ref: str, generation: int) -> None:
+    """Apply one pushed invalidation on the owner thread.
+
+    Generations are applied monotonically and affected snapshots are dropped;
+    the next read refills them. Unknown namespaces are ignored so a newer
+    producer can add fact kinds without breaking older consumers.
+    """
+
+    generation = int(generation)
+    cache_key = _generation_cache_key(namespace, ref)
+    if namespace == "principal":
+        _principal_generation[ref] = max(_principal_generation.get(ref, 0), generation)
+        _principal_cache.clear()
+        _suspension_cache.clear()
+    elif namespace == "resource":
+        _resource_generation[ref] = max(_resource_generation.get(ref, 0), generation)
+        _resource_cache.pop(ref, None)
+        _policy_package_cache.pop(ref, None)
+    else:
+        return
+    previous = _shared_generation_cache.get(cache_key)
+    value = generation if previous is None else max(generation, int(previous[1]))
+    _shared_generation_cache[cache_key] = (time.monotonic(), value)
 
 
 def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bool, dict]:
@@ -1511,6 +1555,64 @@ async def prewarm_authorization(principals, resources) -> bool:
             return _finish_prewarm_wait(False, "failed", started)
     ready, _ = _prewarm_request(principals, resources, include_labels=False)
     return _finish_prewarm_wait(ready, "waited" if ready else "failed", started)
+
+
+async def ensure_authorization(principals, resources) -> bool:
+    """Return whether rule evaluation may use the local snapshot scope.
+
+    With push invalidation, facts stay valid until an invalidation event drops
+    them, so warm decisions return immediately and a genuinely cold fact costs
+    at most one coalesced off-loop fetch. Without push invalidation this
+    preserves the bounded prewarm behavior.
+    """
+
+    if not getattr(settings, "AUTHORIZATION_OFFLOOP_SNAPSHOTS", False):
+        return True
+    if not invalidation.push_enabled():
+        return await prewarm_authorization(principals, resources)
+    invalidation.start()
+    principals = tuple(principals)
+    resources = tuple(resources)
+    ready, _ = _prewarm_request(principals, resources, include_labels=False)
+    if ready:
+        return True
+
+    global _prewarm_loop, _prewarm_task
+    try:
+        current_task = asyncio.current_task()
+    except RuntimeError:
+        current_task = None
+    if current_task is None:
+        _, request = _prewarm_request(principals, resources, include_labels=True)
+        return await _execute_authorization_prewarm(request)
+    loop = current_task.get_loop()
+    if _prewarm_loop is not loop:
+        _prewarm_loop = loop
+        _prewarm_task = None
+        _pending_prewarm_principals.clear()
+        _pending_prewarm_resources.clear()
+    for _attempt in range(2):
+        for principal in principals:
+            if principal is not None:
+                _pending_prewarm_principals[id(principal)] = principal
+        for resource in resources:
+            if resource is not None:
+                _pending_prewarm_resources[id(resource)] = resource
+        if _prewarm_task is None or _prewarm_task.done():
+            _prewarm_task = loop.create_task(_flush_authorization_prewarm())
+        try:
+            if not await asyncio.shield(_prewarm_task):
+                return False
+        except asyncio.CancelledError:
+            # A reload or test clearing the shared task must not cancel the
+            # action; only a cancellation of this task itself may propagate.
+            if current_task.cancelling():
+                raise
+            return False
+        ready, _ = _prewarm_request(principals, resources, include_labels=False)
+        if ready:
+            return True
+    return False
 
 
 def clear_authorization_caches() -> None:
