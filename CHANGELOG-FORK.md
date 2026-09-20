@@ -25,6 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.261 — Bus input-queue observability
+
+### Changes
+
+- **The Redis bus gauges its incoming queue.** Run 13 showed every command
+  waiting ~1.4s end-to-end while per-command work stayed at 1–20ms, with the
+  server process at 77–100% CPU and the portal, Redis and Postgres idle. The one
+  unobserved link was the queue between the stream read and its reactor turn.
+  `evennia_bus_incoming_wait_seconds` now records that wait per frame, and
+  `evennia_bus_incoming_depth` / `evennia_bus_incoming_bytes` gauge what is
+  still queued. On the server this is the portal→server command latency; on the
+  portal it is the server→portal output latency.
+
+### Game-side (same window)
+
+- The load harness validates that bots are actually in the world before
+  driving: a post-login `look` whose reply matches a login/chargen/menu prompt
+  aborts the run (unless `--allow-unready`), so a prompt handler can never be
+  mistaken for game load again.
+
+### Tests
+
+- Redis transport suites — 67 tests OK; harness and sampler tests — 13 OK.
+
 ## 6.0.0+underspire.260 — Run-13 diagnostics and metric honesty
 
 ### Changes
