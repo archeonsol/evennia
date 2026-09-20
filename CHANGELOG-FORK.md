@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.257 — Revert flush commit batching
+
+### Changes
+
+- **Reverts the `.256` flush commit batching.** Production measurement
+  (`bench_attrs flush_batch`, 20 rows) showed no improvement — 25.33ms ±0.38
+  before, 27.62ms ±1.44 after. Per-row commits were never the cost: the
+  per-row `SELECT ... FOR UPDATE` round trip dominates the worker, and the
+  flush fire's ~580ms is prepare/adopt on the reactor (three `deepcopy`s per
+  row plus cache sync), which commit batching does not touch. The worker
+  returns to one transaction per row, restoring per-row partial progress on
+  a batch-level failure.
+- The savepoint-isolation tests added alongside the batching remain as
+  behavior coverage: a missing or conflicting row must not affect the rows
+  persisted in the same worker call.
+
 ## 6.0.0+underspire.256 — Attribute and render hot-path performance
 
 ### Changes

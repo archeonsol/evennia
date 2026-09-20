@@ -691,6 +691,59 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
             jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
             self.assertIn(state.key, jsonb_handler._STRONG_ROW_STATES)
 
+    def test_async_batch_commits_healthy_rows_when_one_row_is_missing(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("batch_ok", 1)
+        snapshots, preparation_failures = jsonb_handler._prepare_async_row_flushes()
+        self.assertEqual(preparation_failures, 0)
+        wanted = {handler.backend._row_state.key}
+        batch = [snapshot for snapshot in snapshots if snapshot.key in wanted]
+        self.assertEqual(len(batch), 1)
+
+        missing_key = (batch[0].alias, "__missing_row__", 2_000_000_000)
+        batch.append(
+            jsonb_handler._AsyncFlushSnapshot(
+                key=missing_key,
+                alias=batch[0].alias,
+                model=batch[0].model,
+                pk=2_000_000_000,
+                baseline={},
+                local={"~": {"_d": {"ghost": to_jsonb(1)}}},
+                durable={},
+                mutation_serial=0,
+                flush_failures=0,
+            )
+        )
+
+        outcomes = jsonb_handler._persist_row_snapshots_worker(tuple(batch))
+
+        statuses = {outcome.key: outcome.status for outcome in outcomes}
+        self.assertEqual(statuses[handler.backend._row_state.key], "ok")
+        self.assertEqual(statuses[missing_key], "row_missing")
+        self.assertEqual(self._database_attrs()["~"]["_d"]["batch_ok"], 1)
+
+    def test_async_batch_isolates_a_conflicting_row(self):
+        handler_ok = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler_ok.add("batch_ok", 1)
+        handler_bad = AttributeHandler(self.obj2, JsonbAttributeBackend)
+        handler_bad.add("contested", 2)
+        snapshots, preparation_failures = jsonb_handler._prepare_async_row_flushes()
+        self.assertEqual(preparation_failures, 0)
+        wanted = {handler_ok.backend._row_state.key, handler_bad.backend._row_state.key}
+        batch = tuple(snapshot for snapshot in snapshots if snapshot.key in wanted)
+        self.assertEqual(len(batch), 2)
+
+        remote = deepcopy(self.obj2.db_attrs or {})
+        remote.setdefault("~", {}).setdefault("_d", {})["contested"] = to_jsonb(999)
+        type(self.obj2).objects.filter(pk=self.obj2.pk).update(db_attrs=remote)
+
+        outcomes = jsonb_handler._persist_row_snapshots_worker(batch)
+
+        statuses = {outcome.key: outcome.status for outcome in outcomes}
+        self.assertEqual(statuses[handler_bad.backend._row_state.key], "conflict")
+        self.assertEqual(statuses[handler_ok.backend._row_state.key], "ok")
+        self.assertEqual(self._database_attrs()["~"]["_d"]["batch_ok"], 1)
+
     def test_attribute_revision_advances_on_dirtying_and_head_writes(self):
         baseline = jsonb_handler.attribute_revision(self.obj1)
         self.assertIsNotNone(baseline)
