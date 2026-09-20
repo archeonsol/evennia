@@ -60,7 +60,7 @@ def _stream_id(value):
     return tuple(int(part) for part in value.split("-"))
 
 
-@dataclass
+@dataclass(slots=True)
 class _Outgoing:
     """One admitted frame, retained through publication callback settlement."""
 

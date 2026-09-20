@@ -256,10 +256,11 @@ class Locomotion(Activity):
                     direction=display,
                     sneak=self.sneak,
                     quiet=self.sneak,
-                    staggered=False,  # this IS the step — move now, don't re-stagger
+                    staggered=False,  # this IS the step �?" move now, don't re-stagger
                 ),
                 actor,
                 context,
+                record_phases=False,
             )
             if getattr(trace, "outcome", None) == "blocked":
                 # A gate refused mid-walk (door closed, combat started, …). The

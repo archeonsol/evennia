@@ -70,15 +70,32 @@ _MODEL_MAP = None
 _FUNCPARSER = None
 
 
-def _output_frame_key(value):
-    """Return a hashable key matching the final JSON meaning of an output frame."""
+class _FrameKeyTooDeep(Exception):
+    """Raised when a frame nests past the grouping-key depth budget."""
+
+
+_MAX_FRAME_KEY_DEPTH = 12
+
+
+def _output_frame_key(value, _depth=0):
+    """Return a hashable key matching the final JSON meaning of an output frame.
+
+    Frames nesting past ``_MAX_FRAME_KEY_DEPTH`` raise instead of producing a
+    truncated key: a truncated key could group two different frames and deliver
+    the wrong one to a session. ``_safe_frame_key`` turns that into "deliver
+    this frame alone".
+    """
+    if _depth > _MAX_FRAME_KEY_DEPTH:
+        raise _FrameKeyTooDeep
     if isinstance(value, dict):
         return (
             "dict",
-            tuple(sorted((key, _output_frame_key(item)) for key, item in value.items())),
+            tuple(
+                sorted((key, _output_frame_key(item, _depth + 1)) for key, item in value.items())
+            ),
         )
     if isinstance(value, (list, tuple)):
-        return ("list", tuple(_output_frame_key(item) for item in value))
+        return ("list", tuple(_output_frame_key(item, _depth + 1) for item in value))
     if isinstance(value, float):
         return ("float", repr(value))
     return (type(value).__name__, value)
@@ -1111,6 +1128,7 @@ class ServerSessionHandler(SessionHandler):
 
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
         clean_cache = {}
+        shareable = len(prepared) > 1
         max_frames = max(len(frames) for _session, frames in prepared)
         for index in range(max_frames):
             groups = {}
@@ -1118,7 +1136,7 @@ class ServerSessionHandler(SessionHandler):
                 if index >= len(frames):
                     continue
                 raw_frame = frames[index]
-                cache_key = self._shared_clean_key(raw_frame)
+                cache_key = self._shared_clean_key(raw_frame) if shareable else None
                 frame = clean_cache.get(cache_key) if cache_key is not None else None
                 if frame is None:
                     clean_started = time.perf_counter()
@@ -1135,7 +1153,10 @@ class ServerSessionHandler(SessionHandler):
                         _watch.tap(session, "out", frame)
                     except Exception:
                         log_trace()
-                key = _safe_frame_key(frame)
+                if shareable:
+                    key = _safe_frame_key(frame)
+                else:
+                    key = None
                 if key is None:
                     # No safe equality key: group this frame alone by identity
                     # so it still ships this turn instead of aborting the rest.

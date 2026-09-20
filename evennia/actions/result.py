@@ -27,7 +27,7 @@ __all__ = [
 ResultKind = Literal["pass", "fail", "skip", "redirect", "claim", "silent_fail"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RuleResult:
     """The value a rule body returns.
 
@@ -85,7 +85,7 @@ def REDIRECT(action) -> RuleResult:
 # ---------------------------------------------------------------------------
 # Trace
 # ---------------------------------------------------------------------------
-@dataclass
+@dataclass(slots=True)
 class PhaseTrace:
     """One rule's contribution within a phase."""
 
@@ -97,7 +97,7 @@ class PhaseTrace:
     elapsed_us: int = 0
 
 
-@dataclass
+@dataclass(slots=True)
 class ActionTrace:
     """The full record of one dispatch. Built by the engine; returned by
     `actor.explain(...)`."""

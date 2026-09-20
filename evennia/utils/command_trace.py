@@ -5,8 +5,23 @@ Per-command trace context for structured logs (session, caller, command, trace i
 from __future__ import annotations
 
 import contextvars
-import uuid
+import itertools
 from typing import Any, Dict, Optional
+
+_TRACE_SEQUENCE = itertools.count(1)
+
+
+def _next_trace_id() -> str:
+    """Return the next process-local trace id.
+
+    A monotonic counter replaces ``uuid4`` on the per-command path: the id only
+    needs to be unique within this process for log correlation, and uuid4 was
+    measurable allocation churn under load. The hex width matches the previous
+    format (16 characters).
+    """
+
+    return f"{next(_TRACE_SEQUENCE):016x}"
+
 
 _trace_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "evennia_command_trace_id", default=None
@@ -43,7 +58,7 @@ def begin_command_trace(
     """
     Start a command-scoped trace. Returns the trace id (16 hex chars).
     """
-    trace_id = uuid.uuid4().hex[:16]
+    trace_id = _next_trace_id()
     _trace_id.set(trace_id)
     meta = {
         "trace_id": trace_id,

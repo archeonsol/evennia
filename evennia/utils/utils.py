@@ -1186,6 +1186,17 @@ def validate_email_address(emailaddress):
 
 
 _CLASS_MRO_PATHS: dict[type, tuple[str, ...]] = {}
+_CLASS_PATHS: dict[type, str] = {}
+
+
+def _class_path(cls) -> str:
+    """Return the module-qualified path for one class, memoized per class."""
+
+    path = _CLASS_PATHS.get(cls)
+    if path is None:
+        path = "%s.%s" % (cls.__module__, cls.__name__)
+        _CLASS_PATHS[cls] = path
+    return path
 
 
 def _class_mro_paths(cls) -> tuple[str, ...]:
@@ -1243,9 +1254,9 @@ def inherits_from(obj, parent):
         parent_path = parent
     elif callable(parent):
         # this is a class
-        parent_path = "%s.%s" % (parent.__module__, parent.__name__)
+        parent_path = _class_path(parent)
     else:
-        parent_path = "%s.%s" % (parent.__class__.__module__, parent.__class__.__name__)
+        parent_path = _class_path(parent.__class__)
     return any(1 for obj_path in obj_paths if obj_path == parent_path)
 
 
