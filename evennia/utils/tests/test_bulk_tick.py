@@ -32,6 +32,8 @@ class TestApplyUncached(BaseEvenniaTest):
     idmapper cannot refresh a deferred field).
     """
 
+    evennia_fixtures = {"obj1"}
+
     def test_writes_back_without_instantiating(self):
         obj_id = self.obj1.id
         ObjectDB.__dbclass__.__instance_cache__.pop(obj_id, None)
@@ -99,6 +101,8 @@ class TestApplyUncached(BaseEvenniaTest):
 class TestBulkThreadGuard(BaseEvenniaTest):
     """Bulk gather/apply must keep explicit IO-thread enforcement under -O."""
 
+    evennia_fixtures = {"obj1"}
+
     def test_uncached_gather_off_io_thread_is_rejected(self):
         errors = []
 
@@ -142,6 +146,8 @@ class TestBulkThreadGuard(BaseEvenniaTest):
 @patch("evennia.utils.bulk_tick._assert_io_thread", lambda where: None)
 class TestCompareAndSet(BaseEvenniaTest):
     """apply() must not overwrite a value changed since gather (CAS)."""
+
+    evennia_fixtures = {"obj1"}
 
     def _snapshot(self, obj_id, l1):
         return {"id": obj_id, "hp": l1.get(_NULL_CAT, {}).get("_d", {}).get("hp")}

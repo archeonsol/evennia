@@ -57,6 +57,8 @@ from evennia.utils.test_resources import BaseEvenniaTest
 
 
 class TestToJsonb(BaseEvenniaTest):
+    evennia_fixtures = frozenset()
+
     def _roundtrip(self, value):
         encoded = to_jsonb(value)
         return from_jsonb(encoded)
@@ -123,6 +125,8 @@ class TestToJsonb(BaseEvenniaTest):
 
 class TestJsonbBackendCRUD(BaseEvenniaTest):
     """Tests using the real JSONB backend wired to obj1 (an ObjectDB)."""
+
+    evennia_fixtures = {"obj1"}
 
     def setUp(self):
         super().setUp()
@@ -233,6 +237,8 @@ class TestJsonbBackendCRUD(BaseEvenniaTest):
 
 class TestBatchAttributeSnapshots(BaseEvenniaTest):
     """Bounded web snapshots preserve canonical JSONB state with one row query."""
+
+    evennia_fixtures = {"obj1"}
 
     def _row(self, key, value):
         from evennia.objects.models import ObjectDB
@@ -461,6 +467,8 @@ class TestBatchAttributeSnapshots(BaseEvenniaTest):
 
 
 class TestJsonbWriteBack(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -502,6 +510,8 @@ class TestJsonbWriteBack(BaseEvenniaTest):
 
 class TestJsonbPersistence(BaseEvenniaTest):
     """Reload the L1 dict from the saved db_attrs and confirm values survive."""
+
+    evennia_fixtures = {"obj1"}
 
     def setUp(self):
         super().setUp()
@@ -553,6 +563,8 @@ class TestJsonbPersistence(BaseEvenniaTest):
 
 class TestRowOwnedPersistence(BaseEvenniaTest):
     """Every handler for one model row shares one conflict-safe document."""
+
+    evennia_fixtures = {"obj1"}
 
     def test_flush_all_dirty_merges_newer_database_edit(self):
         handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
@@ -806,6 +818,8 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
 
 class TestBlockingUpdate(BaseEvenniaTest):
     """Supported protected JSONB Attribute mutation surface."""
+
+    evennia_fixtures = {"obj1", "obj2"}
 
     def setUp(self):
         super().setUp()
@@ -2010,6 +2024,8 @@ class TestSqliteProtectedSerialization(TransactionTestCase):
 class TestDurableIntentOrdering(BaseEvenniaTest):
     """Replayable DELTAs and non-replayable protected witnesses stay distinct."""
 
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
@@ -2159,6 +2175,8 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
 
 
 class TestForceFlushNoop(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def test_force_flush_noop_on_jsonb_backend(self):
         self.obj1.attributes.add("x", 1)
         force_flush(self.obj1)  # must not raise
@@ -2170,6 +2188,8 @@ class TestForceFlushNoop(BaseEvenniaTest):
 
 
 class TestFlushRetry(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -2328,6 +2348,8 @@ class TestFlushRetry(BaseEvenniaTest):
 
 
 class TestThreeWayMerge(BaseEvenniaTest):
+    evennia_fixtures = frozenset()
+
     def test_local_and_remote_deletions_preserve_missing_keys(self):
         baseline = {"a": 1, "b": 2}
         self.assertEqual(_three_way_merge(baseline, {"b": 2}, baseline), {"b": 2})
@@ -2344,6 +2366,8 @@ class TestThreeWayMerge(BaseEvenniaTest):
 
 
 class TestAttrtypeQueryAll(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -2384,6 +2408,8 @@ class TestAttrtypeQueryAll(BaseEvenniaTest):
 
 
 class TestPendingCount(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -2410,6 +2436,8 @@ class TestPendingCount(BaseEvenniaTest):
 
 
 class TestPkCounter(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler

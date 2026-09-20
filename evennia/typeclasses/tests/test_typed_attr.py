@@ -44,6 +44,8 @@ def _obj_with_attrs(test_case):
 
 
 class TestAttrField(BaseEvenniaTest):
+    evennia_fixtures = frozenset()
+
     def test_validate_passes_none_when_nullable(self):
         f = AttrField(int, default=0, nullable=True)
         f.validate("x", None)  # should not raise
@@ -101,6 +103,8 @@ class TestAttrField(BaseEvenniaTest):
 
 
 class TestAttributeBag(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def _bag(self, schema=None):
         return AttributeBag(self.obj1, "test_bag", schema=schema)
 
@@ -213,6 +217,8 @@ class TestAttributeBag(BaseEvenniaTest):
 
 
 class TestTypedAttrConstructor(BaseEvenniaTest):
+    evennia_fixtures = frozenset()
+
     def test_invalid_backend_raises(self):
         with self.assertRaises(ValueError):
             TypedAttr(int, backend="invalid")
@@ -354,10 +360,14 @@ class _TypedAttrBlob:
 
 
 class TestTypedAttrBlob(_TypedAttrBlob, BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     backend = "blob"
 
 
 class TestTypedAttrTypedCol(_TypedAttrBlob, BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     backend = "typed_col"
 
     def _make_descriptor(self, type_=int, **kwargs):
@@ -373,6 +383,8 @@ class TestTypedAttrTypedCol(_TypedAttrBlob, BaseEvenniaTest):
 
 
 class TestTypedAttrBag(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def _descriptor(self, **kwargs):
         td = TypedAttr(backend="bag", **kwargs)
         td.__set_name__(type(self.obj1), "stats")
@@ -436,6 +448,8 @@ class TestTypedAttrBag(BaseEvenniaTest):
 
 
 class TestMigrationOps(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def test_rename_attr_moves_value(self):
         self.obj1.attributes.add("old_key", 42)
         op = RenameAttr("old_key", "new_key")
@@ -491,6 +505,8 @@ class TestMigrationOps(BaseEvenniaTest):
 
 
 class TestApplySchemaMigrations(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def _stamp(self, obj, version):
         obj.attributes.add(_SCHEMA_VERSION_KEY, version, category=_SCHEMA_VERSION_CATEGORY)
 

@@ -270,10 +270,10 @@ class EvenniaTestMixin:
         Return the resolved fixture set for this test.
 
         Returns:
-            frozenset: The fixtures `setUp` decided to build. Outside `setUp`
-                this falls back to every fixture, so a subclass that calls one
-                of the `create_*` methods directly still gets the old
-                build-everything behaviour.
+            frozenset: The fixtures `setUp` decided to build. Only a call
+                before `setUp` has run (when `_resolved_fixtures` is not yet
+                set) falls back to every fixture; once `setUp` has run the
+                narrowed set stays in effect for the whole test.
 
         """
         return getattr(self, "_resolved_fixtures", ALL_FIXTURES)

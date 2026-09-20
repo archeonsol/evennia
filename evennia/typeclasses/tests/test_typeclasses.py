@@ -23,6 +23,8 @@ class DictSubclass(dict):
 
 
 class TestAttributes(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def test_attrhandler(self):
         key = "testattr"
         value = "test attr value "
@@ -115,6 +117,8 @@ class TestAttributes(BaseEvenniaTest):
 
 
 class TestTypedObjectManager(BaseEvenniaTest):
+    evennia_fixtures = {"obj1", "obj2"}
+
     def _manager(self, methodname, *args, **kwargs):
         return list(getattr(self.obj1.__class__.objects, methodname)(*args, **kwargs))
 
@@ -322,6 +326,8 @@ class TestSearchTypeclassFamily(EvenniaTestCase):
 
 
 class TestTags(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def test_has_tag_key_only(self):
         self.obj1.tags.add("tagC")
         self.assertTrue(self.obj1.tags.has("tagC"))
@@ -383,6 +389,8 @@ class TestTagMissCache(BaseEvenniaTest):
     negative hit is what the common case asks for (an untagged room, an object
     without a permission). Each miss used to be one SQL query.
     """
+
+    evennia_fixtures = {"obj1"}
 
     def _has_queries(self, key, category=None):
         from django.db import connection
@@ -465,6 +473,8 @@ class TestTagBulkPrefetch(BaseEvenniaTest):
     loaded with ``prefetch_related('db_tags')`` or primed via the manager,
     instead of firing one query per (object, category).
     """
+
+    evennia_fixtures = {"obj1", "obj2"}
 
     CATS = ["cat_a", "cat_b", "cat_c", "cat_d"]
 
@@ -600,6 +610,8 @@ class TestNickHandler(BaseEvenniaTest):
     Test the nick handler replacement.
 
     """
+
+    evennia_fixtures = {"char1"}
 
     @parameterized.expand(
         [
