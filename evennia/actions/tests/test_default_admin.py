@@ -203,11 +203,11 @@ class TestGrant(unittest.TestCase):
         target = FakeObj(key="bob")
         target.pk = 2
         char.search_map["bob"] = target
-        with mock.patch("evennia.authorization.storage.grant_capability") as grant:
+        with mock.patch("evennia.authorization.storage.grant_capabilities") as grant:
             self._grant(char, actor, "bob = engine.world.build")
         grant.assert_called_once_with(
             "object:2",
-            "engine.world.build",
+            ("engine.world.build",),
             scope_kind="world",
             scope_key="*",
             provenance="action_command",
@@ -215,6 +215,31 @@ class TestGrant(unittest.TestCase):
             reason="action @grant",
         )
         self.assertTrue(any("Granted 1" in message for message in char.messages))
+
+    def test_grants_bundle_in_one_call(self):
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        char.pk = 1
+        target = FakeObj(key="bob")
+        target.pk = 2
+        char.search_map["bob"] = target
+        with (
+            mock.patch(
+                "evennia.authorization.capabilities.capability_registry.expand_bundle",
+                return_value=frozenset({"x.y", "a.b"}),
+            ),
+            mock.patch("evennia.authorization.storage.grant_capabilities") as grant,
+        ):
+            self._grant(char, actor, "bob = bundle:whatever")
+        grant.assert_called_once_with(
+            "object:2",
+            ("a.b", "x.y"),
+            scope_kind="world",
+            scope_key="*",
+            provenance="action_command",
+            actor_ref="object:1",
+            reason="action @grant",
+        )
+        self.assertTrue(any("Granted 2" in message for message in char.messages))
 
     def test_revoke_switch_revokes_a_matching_grant(self):
         char, actor = _setup(capabilities=("engine.runtime.manage",))

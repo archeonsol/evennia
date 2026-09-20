@@ -257,7 +257,7 @@ class CharacterAdminRules:
             return SKIP
         from evennia.authorization.capabilities import capability_registry
         from evennia.authorization.storage import (
-            grant_capability,
+            grant_capabilities,
             principal_refs,
             revoke_grant,
         )
@@ -328,16 +328,15 @@ class CharacterAdminRules:
                 capabilities = capability_registry.expand_bundle(declaration.split(":", 1)[1])
             else:
                 capabilities = (capability_registry.require(declaration).key,)
-            for capability in sorted(capabilities):
-                grant_capability(
-                    principal_ref,
-                    capability,
-                    scope_kind="world",
-                    scope_key="*",
-                    provenance="action_command",
-                    actor_ref=actor_ref,
-                    reason="action @grant",
-                )
+            grant_capabilities(
+                principal_ref,
+                tuple(sorted(capabilities)),
+                scope_kind="world",
+                scope_key="*",
+                provenance="action_command",
+                actor_ref=actor_ref,
+                reason="action @grant",
+            )
             caller.msg(f"Granted {len(capabilities)} capability grant(s) to {obj}.")
         return CLAIM
 
