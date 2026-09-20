@@ -19,7 +19,7 @@ from collections import defaultdict
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import validate_comma_separated_integer_list
-from django.db import models
+from django.db import connections, models, router
 
 from evennia.hooks import hook
 from evennia.objects.manager import ObjectDBManager
@@ -328,56 +328,22 @@ class ObjectDB(TypedObject):
                 except ObjectDoesNotExist:
                     # maybe it is just a name that happens to look like a dbid
                     pass
-        try:
+        # raises RuntimeError with the canonical loop message if invalid
+        self.check_location_loop(self, location)
 
-            def is_loc_loop(loc, depth=0):
-                """Recursively traverse target location, trying to catch a loop."""
-                if depth > 10:
-                    return None
-                elif loc == self:
-                    raise RuntimeError
-                elif loc is None:
-                    raise RuntimeWarning
-                return is_loc_loop(loc.db_location, depth + 1)
+        old_location = self.db_location
 
-            try:
-                is_loc_loop(location)
-            except RuntimeWarning:
-                # we caught an infinite location loop!
-                # (location1 is in location2 which is in location1 ...)
-                pass
+        # this is checked in _db_db_location_post_save below
+        self._safe_contents_update = True
 
-            # if we get to this point we are ready to change location
+        # actually set the field (this will error if location is invalid)
+        self.db_location = location
+        self.save(update_fields=["db_location"])
 
-            old_location = self.db_location
+        # remove the safe flag
+        del self._safe_contents_update
 
-            # this is checked in _db_db_location_post_save below
-            self._safe_contents_update = True
-
-            # actually set the field (this will error if location is invalid)
-            self.db_location = location
-            self.save(update_fields=["db_location"])
-
-            # remove the safe flag
-            del self._safe_contents_update
-
-            # update the contents cache
-            if old_location:
-                old_location.contents_cache.remove(self)
-            if self.db_location:
-                self.db_location.contents_cache.add(self)
-            # keep _loaded_location_id in sync so at_db_location_postsave
-            # has the right baseline if db_location is later saved directly.
-            self._loaded_location_id = self.db_location_id
-
-        except RuntimeError:
-            errmsg = "Error: %s.location = %s creates a location loop." % (self.key, location)
-            raise RuntimeError(errmsg)
-        except Exception:
-            # raising here gives more info for now
-            raise
-            # errmsg = "Error (%s): %s is not a valid location." % (str(e), location)
-            # raise RuntimeError(errmsg)
+        self.reconcile_location_caches(old_location)
         return
 
     def __location_del(self):
@@ -386,6 +352,109 @@ class ObjectDB(TypedObject):
         self.save(update_fields=["db_location"])
 
     location = property(__location_get, __location_set, __location_del)
+
+    @classmethod
+    def check_location_loop(cls, mover, location) -> None:
+        """Raise if placing ``mover`` at ``location`` closes a containment cycle.
+
+        The walk gives up after inspecting eleven nodes, so a chain deeper
+        than that is treated as legitimate; the ``location`` setter and the
+        off-loop move commit share this bound and the error text.
+        """
+
+        current = location
+        for _ in range(11):
+            if current is None:
+                return
+            if current == mover:
+                raise RuntimeError(
+                    "Error: %s.location = %s creates a location loop." % (mover.key, location)
+                )
+            current = current.db_location
+
+    def reconcile_location_caches(self, old_location) -> None:
+        """Move this object between contents caches and retrack its location id.
+
+        Call once after ``db_location`` reflects a committed destination: the
+        sync setter calls it after its save, the off-loop move commit calls it
+        after adopting the worker's row into memory.
+        """
+
+        if old_location:
+            old_location.contents_cache.remove(self)
+        if self.db_location:
+            self.db_location.contents_cache.add(self)
+        # keep _loaded_location_id in sync so at_db_location_postsave
+        # has the right baseline if db_location is later saved directly.
+        self._loaded_location_id = self.db_location_id
+
+    @staticmethod
+    def compare_and_set_location(
+        database,
+        table,
+        pk_column,
+        location_column,
+        object_id,
+        expected_location_id,
+        destination_id,
+    ):
+        """Worker-safe optimistic location update using only primitive values.
+
+        Returns the number of rows settled (0 or 1): 1 means this call's
+        ``expected_location_id -> destination_id`` transition won. Build the
+        arguments on the owner thread with :meth:`location_cas_args`.
+        """
+
+        connection = connections[database]
+        quote = connection.ops.quote_name
+        expected_clause = (
+            f"{quote(location_column)} IS NULL"
+            if expected_location_id is None
+            else f"{quote(location_column)} = %s"
+        )
+        if destination_id == expected_location_id:
+            # MySQL's rowcount counts changed rows, so a no-op write of the same
+            # value returns 0 and reads as a conflict; verify the row instead of
+            # rewriting it, keeping rowcount 0 meaning "genuinely lost".
+            sql = (
+                f"SELECT 1 FROM {quote(table)} WHERE {quote(pk_column)} = %s AND {expected_clause}"
+            )
+            params = [object_id]
+            if expected_location_id is not None:
+                params.append(expected_location_id)
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                return 1 if cursor.fetchone() is not None else 0
+        params = [destination_id, object_id]
+        if expected_location_id is not None:
+            params.append(expected_location_id)
+        sql = (
+            f"UPDATE {quote(table)} SET {quote(location_column)} = %s "
+            f"WHERE {quote(pk_column)} = %s AND {expected_clause}"
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            return int(cursor.rowcount)
+
+    def location_cas_args(self, expected_location_id, destination_id) -> tuple:
+        """Resolve the primitive ``compare_and_set_location`` arguments for this row.
+
+        Runs on the owner thread; the result crosses into a worker verbatim,
+        so it must contain nothing typeclass-shaped.
+        """
+
+        concrete = self._meta.concrete_model
+        metadata = concrete._meta
+        database = self._state.db or router.db_for_write(concrete, instance=self)
+        return (
+            database,
+            metadata.db_table,
+            metadata.pk.column,
+            metadata.get_field("db_location").column,
+            self.pk,
+            expected_location_id,
+            destination_id,
+        )
 
     @classmethod
     def from_db(cls, db, field_names, values):

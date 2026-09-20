@@ -1,7 +1,6 @@
 """Movement mixin for DefaultObject."""
 
 from django.conf import settings
-from django.db import connections, router
 from django.utils.translation import gettext as _
 
 from evennia.hooks import hook
@@ -9,66 +8,6 @@ from evennia.objects.models import ObjectDB
 from evennia.server.signals import SIGNAL_EXIT_TRAVERSED
 from evennia.utils import logger
 from evennia.utils.utils import is_veto, make_iter
-
-
-def _conditional_location_update(
-    database,
-    table,
-    pk_column,
-    location_column,
-    object_id,
-    expected_location_id,
-    destination_id,
-):
-    """Worker-safe optimistic location update using only primitive values."""
-
-    connection = connections[database]
-    quote = connection.ops.quote_name
-    expected_clause = (
-        f"{quote(location_column)} IS NULL"
-        if expected_location_id is None
-        else f"{quote(location_column)} = %s"
-    )
-    if destination_id == expected_location_id:
-        # MySQL's rowcount counts changed rows, so a no-op write of the same
-        # value returns 0 and reads as a conflict; verify the row instead of
-        # rewriting it, keeping rowcount 0 meaning "genuinely lost".
-        sql = f"SELECT 1 FROM {quote(table)} WHERE {quote(pk_column)} = %s AND {expected_clause}"
-        params = [object_id]
-        if expected_location_id is not None:
-            params.append(expected_location_id)
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            return 1 if cursor.fetchone() is not None else 0
-    params = [destination_id, object_id]
-    if expected_location_id is not None:
-        params.append(expected_location_id)
-    sql = (
-        f"UPDATE {quote(table)} SET {quote(location_column)} = %s "
-        f"WHERE {quote(pk_column)} = %s AND {expected_clause}"
-    )
-    with connection.cursor() as cursor:
-        cursor.execute(sql, params)
-        return int(cursor.rowcount)
-
-
-def _location_chain_has_loop(mover, location) -> bool:
-    """Mirror :meth:`ObjectDB.location`'s loop guard exactly.
-
-    The synchronous setter gives up after ten levels without reporting a loop
-    (a chain deeper than that is treated as legitimate), so the async commit
-    must use the same bound or a deep-but-valid chain would fail only on the
-    async path.
-    """
-
-    current = location
-    for _ in range(11):
-        if current is None:
-            return False
-        if current == mover:
-            return True
-        current = current.db_location
-    return False
 
 
 class MoveResult:
@@ -79,9 +18,10 @@ class MoveResult:
     object physically changed location. This is deliberately decoupled from
     hook success. Once the location has been committed, a failure in a
     post-commit hook (``announce_move_to``, ``at_post_leave``,
-    ``at_post_arrive``, ``at_post_move``) is isolated and recorded in
-    :attr:`hook_errors` but does **not** make the result falsy: the move
-    happened, so a caller must not treat it as a failure and retry.
+    ``at_post_arrive``, ``at_post_move``, plus ``announce_move_from`` on the
+    async path, which only announces once the row committed) is isolated and
+    recorded in :attr:`hook_errors` but does **not** make the result falsy:
+    the move happened, so a caller must not treat it as a failure and retry.
 
     A falsy result means the move never happened (a pre-commit veto,
     exception, or a raised ``location`` assignment) and the object is exactly
@@ -132,6 +72,134 @@ class MoveResult:
 
 class MovementMixin:
     """Mixin providing movement-related methods for DefaultObject."""
+
+    def _move_veto_gates(
+        self, destination, source_location, move_hooks, move_type, logerr, errtxt, **kwargs
+    ):
+        """Run the three veto-capable pre-hooks shared by both move drivers.
+
+        Returns a falsy ``MoveResult`` reporting the aborting stage, or
+        ``None`` when every gate lets the move through. The hooks are
+        synchronous owner-thread calls in both drivers.
+        """
+
+        if not move_hooks:
+            return None
+        try:
+            if is_veto(self.at_pre_move(destination, move_type=move_type, **kwargs)):
+                return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_move")
+        except Exception as err:
+            logerr(errtxt.format(err="at_pre_move()"), err)
+            return MoveResult(committed=False, failed_stage="at_pre_move")
+        try:
+            if source_location and is_veto(
+                source_location.at_pre_leave(self, destination, move_type=move_type, **kwargs)
+            ):
+                return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_leave")
+        except Exception as err:
+            logerr(errtxt.format(err="at_pre_leave()"), err)
+            return MoveResult(committed=False, failed_stage="at_pre_leave")
+        try:
+            if destination and is_veto(
+                destination.at_pre_arrive(self, source_location, move_type=move_type, **kwargs)
+            ):
+                return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_arrive")
+        except Exception as err:
+            logerr(errtxt.format(err="at_pre_arrive()"), err)
+            return MoveResult(committed=False, failed_stage="at_pre_arrive")
+        return None
+
+    def _move_finish(
+        self,
+        source_location,
+        destination,
+        quiet,
+        move_hooks,
+        move_type,
+        logpost,
+        announce_leave=False,
+        **kwargs,
+    ):
+        """Run the shared post-commit sequence and build the truthful result.
+
+        Both drivers call this once the location is committed: invalidate the
+        location-keyed caches, optionally fire the leave announce deferred
+        past the commit (the async path; a failure can only be recorded),
+        then announce arrival and fire the post-hooks isolated from each
+        other.
+        """
+
+        hook_errors = []
+
+        # Invalidate the location-cmdset cache for both sides: the set of
+        # commands available in each room depends on what objects are
+        # present, and the cache key is keyed by location generation.
+        try:
+            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
+
+            if source_location is not None:
+                bump_cmdset_generation(source_location)
+            if destination is not source_location:
+                bump_cmdset_generation(destination)
+        except Exception:
+            logger.log_trace("move: cmdset-cache invalidation failed")
+
+        # Only adapters that derive labels from location need movement
+        # invalidation. Stable resource identity, type, authored scopes, and
+        # policies have their own mutation boundaries.
+        try:
+            from evennia.authorization.storage import bump_resource_generation_after_move
+
+            bump_resource_generation_after_move(self)
+        except Exception:
+            logger.log_trace("move: authorization-scope invalidation failed")
+
+        if announce_leave and not quiet:
+            # The row is already committed, so a failed announce cannot undo
+            # the move; it is recorded like any other post-commit failure.
+            try:
+                self.announce_move_from(
+                    destination, origin=source_location, move_type=move_type, **kwargs
+                )
+            except Exception as err:
+                logpost("announce_move_from", err)
+                hook_errors.append(("announce_move_from", err))
+
+        if not quiet:
+            # Tell the new room we are there.
+            try:
+                self.announce_move_to(source_location, move_type=move_type, **kwargs)
+            except Exception as err:
+                logpost("announce_move_to", err)
+                hook_errors.append(("announce_move_to", err))
+
+        if move_hooks:
+            # Post-leave on the source room; object is no longer here.
+            if source_location:
+                try:
+                    source_location.at_post_leave(self, destination, move_type=move_type, **kwargs)
+                except Exception as err:
+                    logpost("at_post_leave", err)
+                    hook_errors.append(("at_post_leave", err))
+            # Post-arrive on the destination; object is now here.
+            try:
+                destination.at_post_arrive(self, source_location, move_type=move_type, **kwargs)
+            except Exception as err:
+                logpost("at_post_arrive", err)
+                hook_errors.append(("at_post_arrive", err))
+            # Execute eventual extra commands on this object after moving it
+            # (usually calling 'look')
+            try:
+                self.at_post_move(source_location, move_type=move_type, **kwargs)
+            except Exception as err:
+                logpost("at_post_move", err)
+                hook_errors.append(("at_post_move", err))
+
+        return MoveResult(
+            committed=True,
+            failed_stage=hook_errors[0][0] if hook_errors else None,
+            hook_errors=hook_errors,
+        )
 
     def move_to(
         self,
@@ -246,32 +314,11 @@ class MovementMixin:
         # only an explicit non-None falsy return aborts the move. None
         # (the implicit return of an override that forgot the explicit
         # `return True`) is treated as "no opinion / allow".
-        if move_hooks:
-            # check if we are okay to move
-            try:
-                if is_veto(self.at_pre_move(destination, move_type=move_type, **kwargs)):
-                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_move")
-            except Exception as err:
-                logerr(errtxt.format(err="at_pre_move()"), err)
-                return MoveResult(committed=False, failed_stage="at_pre_move")
-            # check if source location lets us go
-            try:
-                if source_location and is_veto(
-                    source_location.at_pre_leave(self, destination, move_type=move_type, **kwargs)
-                ):
-                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_leave")
-            except Exception as err:
-                logerr(errtxt.format(err="at_pre_leave()"), err)
-                return MoveResult(committed=False, failed_stage="at_pre_leave")
-            # check if destination accepts us
-            try:
-                if destination and is_veto(
-                    destination.at_pre_arrive(self, source_location, move_type=move_type, **kwargs)
-                ):
-                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_arrive")
-            except Exception as err:
-                logerr(errtxt.format(err="at_pre_arrive()"), err)
-                return MoveResult(committed=False, failed_stage="at_pre_arrive")
+        gated = self._move_veto_gates(
+            destination, source_location, move_hooks, move_type, logerr, errtxt, **kwargs
+        )
+        if gated is not None:
+            return gated
 
         if not quiet:
             # tell the old room we are leaving (still pre-commit: a failure
@@ -291,66 +338,8 @@ class MovementMixin:
             return MoveResult(committed=False, failed_stage="location")
 
         # --- committed past this line; post-commit hooks are isolated ---
-        hook_errors = []
-
-        # Invalidate the location-cmdset cache for both sides: the set of
-        # commands available in each room depends on what objects are
-        # present, and the cache key is keyed by location generation.
-        try:
-            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
-
-            if source_location is not None:
-                bump_cmdset_generation(source_location)
-            if destination is not None and destination is not source_location:
-                bump_cmdset_generation(destination)
-        except Exception:
-            logger.log_trace("move_to: cmdset-cache invalidation failed")
-
-        # Only adapters that derive labels from location need movement
-        # invalidation. Stable resource identity, type, authored scopes, and
-        # policies have their own mutation boundaries.
-        try:
-            from evennia.authorization.storage import bump_resource_generation_after_move
-
-            bump_resource_generation_after_move(self)
-        except Exception:
-            logger.log_trace("move_to: authorization-scope invalidation failed")
-
-        if not quiet:
-            # Tell the new room we are there.
-            try:
-                self.announce_move_to(source_location, move_type=move_type, **kwargs)
-            except Exception as err:
-                logpost("announce_move_to", err)
-                hook_errors.append(("announce_move_to", err))
-
-        if move_hooks:
-            # Post-leave on the source room; object is no longer here.
-            if source_location:
-                try:
-                    source_location.at_post_leave(self, destination, move_type=move_type, **kwargs)
-                except Exception as err:
-                    logpost("at_post_leave", err)
-                    hook_errors.append(("at_post_leave", err))
-            # Post-arrive on the destination; object is now here.
-            try:
-                destination.at_post_arrive(self, source_location, move_type=move_type, **kwargs)
-            except Exception as err:
-                logpost("at_post_arrive", err)
-                hook_errors.append(("at_post_arrive", err))
-
-        # Execute eventual extra commands on this object after moving it
-        # (usually calling 'look')
-        if move_hooks:
-            try:
-                self.at_post_move(source_location, move_type=move_type, **kwargs)
-            except Exception as err:
-                logpost("at_post_move", err)
-                hook_errors.append(("at_post_move", err))
-        return MoveResult(
-            committed=True,
-            failed_stage=hook_errors[0][0] if hook_errors else None,
-            hook_errors=hook_errors,
+        return self._move_finish(
+            source_location, destination, quiet, move_hooks, move_type, logpost, **kwargs
         )
 
     async def move_to_async(
@@ -371,11 +360,15 @@ class MovementMixin:
         a worker; its ``WHERE`` clause prevents concurrent moves from silently
         overwriting each other.
 
-        Behavior matches :meth:`move_to` for veto gates, announcements, hook
-        order, loop detection, and the ``MoveResult`` truth contract, with two
-        differences: a lost optimistic update reports ``location_conflict``
-        instead of overwriting the row, and the commit happens one worker round
-        trip after ``announce_move_from``. If the owning task is cancelled
+        Behavior matches :meth:`move_to` for veto gates, hook order, loop
+        detection, and the ``MoveResult`` truth contract, with three
+        differences around the deferred commit: a lost optimistic update
+        reports ``location_conflict`` without touching memory or sending any
+        message (the mover stays, and the room never hears about a leave that
+        never happened); the leave announce is sent after the commit, with its
+        origin given explicitly, and a failed announce is recorded in
+        ``hook_errors`` instead of aborting; and the commit itself happens one
+        worker round trip after the pre-hooks. If the owning task is cancelled
         (reload or terminal teardown) after the worker commits but before the
         owner adopts the row, the move stands durably; the destination announce
         and post-hooks may be skipped, and caches rebuild from the row on load.
@@ -400,33 +393,19 @@ class MovementMixin:
             if location is not None and destination_id is None:
                 raise ValueError("location must be a saved object or None")
 
-            if _location_chain_has_loop(self, location):
-                raise RuntimeError(
-                    "Error: %s.location = %s creates a location loop." % (self.key, location)
-                )
+            ObjectDB.check_location_loop(self, location)
 
-            concrete = self._meta.concrete_model
-            metadata = concrete._meta
-            database = self._state.db or router.db_for_write(concrete, instance=self)
-            worker_args = (
-                database,
-                metadata.db_table,
-                metadata.pk.column,
-                metadata.get_field("db_location").column,
-                self.pk,
-                source_id,
-                destination_id,
-            )
+            worker_args = self.location_cas_args(source_id, destination_id)
             from evennia.utils import clock, defer
 
             if clock.loop_running():
                 changed = await clock.maybe_await(
-                    defer.in_thread(_conditional_location_update, *worker_args)
+                    defer.in_thread(ObjectDB.compare_and_set_location, *worker_args)
                 )
             else:
                 # Django's transaction-bound test harness has no runtime loop;
                 # keep the query on its owning connection there.
-                changed = _conditional_location_update(*worker_args)
+                changed = ObjectDB.compare_and_set_location(*worker_args)
             if changed != 1:
                 return False
 
@@ -440,11 +419,7 @@ class MovementMixin:
             # Resume on the owner thread. Assign the FK descriptor without
             # saving, then reconcile the same caches as ObjectDB.location.
             self.db_location = location
-            if source is not None:
-                source.contents_cache.remove(self)
-            if location is not None:
-                location.contents_cache.add(self)
-            self._loaded_location_id = destination_id
+            self.reconcile_location_caches(source)
             return True
 
         errtxt = _("Couldn't perform move ({err}). Contact an admin.")
@@ -469,36 +444,11 @@ class MovementMixin:
 
         source_location = self.location
 
-        if move_hooks:
-            try:
-                if is_veto(self.at_pre_move(destination, move_type=move_type, **kwargs)):
-                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_move")
-            except Exception as err:
-                logerr(errtxt.format(err="at_pre_move()"), err)
-                return MoveResult(committed=False, failed_stage="at_pre_move")
-            try:
-                if source_location and is_veto(
-                    source_location.at_pre_leave(self, destination, move_type=move_type, **kwargs)
-                ):
-                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_leave")
-            except Exception as err:
-                logerr(errtxt.format(err="at_pre_leave()"), err)
-                return MoveResult(committed=False, failed_stage="at_pre_leave")
-            try:
-                if destination and is_veto(
-                    destination.at_pre_arrive(self, source_location, move_type=move_type, **kwargs)
-                ):
-                    return MoveResult(committed=False, vetoed=True, failed_stage="at_pre_arrive")
-            except Exception as err:
-                logerr(errtxt.format(err="at_pre_arrive()"), err)
-                return MoveResult(committed=False, failed_stage="at_pre_arrive")
-
-        if not quiet:
-            try:
-                self.announce_move_from(destination, move_type=move_type, **kwargs)
-            except Exception as err:
-                logerr(errtxt.format(err="announce_move_from()"), err)
-                return MoveResult(committed=False, failed_stage="announce_move_from")
+        gated = self._move_veto_gates(
+            destination, source_location, move_hooks, move_type, logerr, errtxt, **kwargs
+        )
+        if gated is not None:
+            return gated
 
         try:
             committed = await commit_location(destination)
@@ -512,53 +462,18 @@ class MovementMixin:
             )
             return MoveResult(committed=False, failed_stage="location_conflict")
 
-        hook_errors = []
-        try:
-            from evennia.commands.location_cmdset_cache import bump_cmdset_generation
-
-            if source_location is not None:
-                bump_cmdset_generation(source_location)
-            if destination is not source_location:
-                bump_cmdset_generation(destination)
-        except Exception:
-            logger.log_trace("move_to_async: cmdset-cache invalidation failed")
-
-        try:
-            from evennia.authorization.storage import bump_resource_generation_after_move
-
-            bump_resource_generation_after_move(self)
-        except Exception:
-            logger.log_trace("move_to_async: authorization-scope invalidation failed")
-
-        if not quiet:
-            try:
-                self.announce_move_to(source_location, move_type=move_type, **kwargs)
-            except Exception as err:
-                logpost("announce_move_to", err)
-                hook_errors.append(("announce_move_to", err))
-
-        if move_hooks:
-            if source_location:
-                try:
-                    source_location.at_post_leave(self, destination, move_type=move_type, **kwargs)
-                except Exception as err:
-                    logpost("at_post_leave", err)
-                    hook_errors.append(("at_post_leave", err))
-            try:
-                destination.at_post_arrive(self, source_location, move_type=move_type, **kwargs)
-            except Exception as err:
-                logpost("at_post_arrive", err)
-                hook_errors.append(("at_post_arrive", err))
-            try:
-                self.at_post_move(source_location, move_type=move_type, **kwargs)
-            except Exception as err:
-                logpost("at_post_move", err)
-                hook_errors.append(("at_post_move", err))
-
-        return MoveResult(
-            committed=True,
-            failed_stage=hook_errors[0][0] if hook_errors else None,
-            hook_errors=hook_errors,
+        # --- committed past this line. The leave announce is deferred to here
+        # (announce_leave) so a lost update above never tells the room the
+        # mover left. ---
+        return self._move_finish(
+            source_location,
+            destination,
+            quiet,
+            move_hooks,
+            move_type,
+            logpost,
+            announce_leave=True,
+            **kwargs,
         )
 
     def clear_exits(self):
@@ -625,7 +540,7 @@ class MovementMixin:
         actor="mover",
         returns="veto",
         discipline="public",
-        fires_from=("MovementMixin.move_to",),
+        fires_from=("MovementMixin.move_to", "MovementMixin.move_to_async"),
         notes="Fires on the mover. Veto aborts: no mover-side or location-side post-hooks fire.",
     )
     def at_pre_move(self, destination, move_type="move", **kwargs):
@@ -671,7 +586,7 @@ class MovementMixin:
         actor="source",
         returns="veto",
         discipline="public",
-        fires_from=("MovementMixin.move_to",),
+        fires_from=("MovementMixin.move_to", "MovementMixin.move_to_async"),
         notes="Fires on the source location. Veto aborts after at_pre_move passes.",
     )
     def at_pre_leave(self, leaving_object, destination, **kwargs):
@@ -704,7 +619,7 @@ class MovementMixin:
         actor="destination",
         returns="veto",
         discipline="public",
-        fires_from=("MovementMixin.move_to",),
+        fires_from=("MovementMixin.move_to", "MovementMixin.move_to_async"),
         notes="Fires on the destination. Veto aborts after at_pre_move and at_pre_leave pass.",
     )
     def at_pre_arrive(self, arriving_object, source_location, **kwargs):
@@ -735,7 +650,9 @@ class MovementMixin:
     # deprecated alias
     at_before_move = at_pre_move
 
-    def announce_move_from(self, destination, msg=None, mapping=None, move_type="move", **kwargs):
+    def announce_move_from(
+        self, destination, msg=None, mapping=None, move_type="move", *, origin=None, **kwargs
+    ):
         """
         Called if the move is to be announced. This is
         called while we are still standing in the old
@@ -749,6 +666,10 @@ class MovementMixin:
                 This is an arbitrary string provided to obj.move_to().
                 Useful for altering messages or altering logic depending
                 on the kind of movement.
+            origin (DefaultObject, keyword-only): The location to announce
+                from. `move_to_async` passes the source room when announcing
+                after its off-loop commit, by which time `self.location` is
+                already the destination. Defaults to `self.location`.
             **kwargs: Arbitrary, optional arguments for users
                 overriding the call (unused by default).
 
@@ -764,14 +685,13 @@ class MovementMixin:
             - `{destination}`: the location of the object after moving.
 
         """
-        if not self.location:
+        location = self.location if origin is None else origin
+        if not location:
             return
         if msg:
             string = msg
         else:
             string = _("{object} is leaving {origin}, heading for {destination}.")
-
-        location = self.location
         exits = [
             o for o in location.contents if o.location is location and o.destination is destination
         ]
@@ -876,7 +796,7 @@ class MovementMixin:
         actor="mover",
         returns="ignored",
         discipline="public",
-        fires_from=("MovementMixin.move_to",),
+        fires_from=("MovementMixin.move_to", "MovementMixin.move_to_async"),
         notes="Fires on the mover after location-side post-hooks.",
     )
     def at_post_move(self, source_location, move_type="move", **kwargs):
@@ -906,7 +826,7 @@ class MovementMixin:
         actor="source",
         returns="ignored",
         discipline="public",
-        fires_from=("MovementMixin.move_to",),
+        fires_from=("MovementMixin.move_to", "MovementMixin.move_to_async"),
         notes="Fires on the source location after the move commits.",
     )
     def at_post_leave(self, moved_obj, target_location, move_type="move", **kwargs):
@@ -937,7 +857,7 @@ class MovementMixin:
         actor="destination",
         returns="ignored",
         discipline="public",
-        fires_from=("MovementMixin.move_to",),
+        fires_from=("MovementMixin.move_to", "MovementMixin.move_to_async"),
         notes="Fires on the destination after the move commits.",
     )
     def at_post_arrive(self, moved_obj, source_location, move_type="move", **kwargs):
