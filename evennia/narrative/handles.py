@@ -34,6 +34,7 @@ _MAX_HANDLES = 512
 HANDLE_TTL_SECONDS = 15 * 60
 _SALT_ATTR = "_entity_handle_salt"
 _MAP_ATTR = "_entity_handles"
+_INDEX_ATTR = "_entity_handle_index"
 
 
 def _salt(viewer) -> bytes:
@@ -59,6 +60,26 @@ def _map(viewer) -> dict | None:
     return m
 
 
+def _index(viewer) -> dict | None:
+    """Return the ``(entity_id, perceived_name) -> handle`` reverse memo.
+
+    Minting a handle is a keyed hash over the viewer salt plus the perceived
+    name; repeated references to the same entity in the same scene recompute
+    that hash every time. The memo is the authoritative lookup keyed on the
+    same inputs that determine the digest, so a rotated perceived name (disguise
+    change, recog change, mask) misses the memo and mints a new handle exactly
+    as before.
+    """
+    ndb = getattr(viewer, "ndb", None)
+    if ndb is None:
+        return None
+    index = getattr(ndb, _INDEX_ATTR, None)
+    if index is None:
+        index = {}
+        setattr(ndb, _INDEX_ATTR, index)
+    return index
+
+
 def handle_for(viewer, char, perceived_name: str) -> str:
     """
     Issue (or reuse) the handle for ``char`` as ``viewer`` currently perceives it.
@@ -77,23 +98,50 @@ def handle_for(viewer, char, perceived_name: str) -> str:
     if m is None:
         return ""
     cid = getattr(char, "id", None)
+    name = str(perceived_name)
+    index = _index(viewer)
+    now = time.monotonic()
+    if index is not None:
+        memo = index.get((cid, name))
+        if memo is not None and memo in m:
+            m[memo]["last_used_at"] = now
+            return memo
     # Include the server-only entity id in the keyed input so two indistinguishable
     # candidates remain independently targetable inside one scene. The salt keeps
     # that id unrecoverable and viewer-specific; the perception token rotates the
     # handle whenever the authorized presentation changes.
     digest = hashlib.blake2s(
-        salt + str(cid).encode("ascii", "replace") + b"\0" + str(perceived_name).encode("utf-8"),
+        salt + str(cid).encode("ascii", "replace") + b"\0" + name.encode("utf-8"),
         digest_size=12,
     )
     handle = "e" + digest.hexdigest()
-    now = time.monotonic()
     if handle not in m and len(m) >= _MAX_HANDLES:
         # bounded: drop the oldest inserted entry (dicts preserve insertion order)
         try:
-            del m[next(iter(m))]
+            oldest = next(iter(m))
+            entry = m[oldest]
+            if index is not None and isinstance(entry, dict):
+                index.pop((entry.get("entity_id"), entry.get("perceived_name")), None)
+            del m[oldest]
         except StopIteration:
             pass
-    m[handle] = {"entity_id": cid, "issued_at": now, "last_used_at": now}
+    m[handle] = {
+        "entity_id": cid,
+        "perceived_name": name,
+        "issued_at": now,
+        "last_used_at": now,
+    }
+    if index is not None:
+        index[(cid, name)] = handle
+    if len(index) > _MAX_HANDLES:
+        # Keep the memo bounded alongside the map: drop entries whose handle the
+        # map no longer holds (the map's insertion-order eviction above already
+        # removed the matching memo entry, so this only catches stragglers).
+        for key, mapped in list(index.items()):
+            if mapped not in m:
+                index.pop(key, None)
+            if len(index) <= _MAX_HANDLES:
+                break
     return handle
 
 

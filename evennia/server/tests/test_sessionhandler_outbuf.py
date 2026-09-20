@@ -140,6 +140,50 @@ class TestOutputOrder(TestCase):
             ],
         )
 
+    def test_contiguous_narrative_frames_share_one_frame(self):
+        """Consecutive node deliveries to one session batch without reordering."""
+        self.assertEqual(
+            self._flush(
+                [
+                    {"narrative": ([{"body": "first"}], {}), "options": None},
+                    {"narrative": ([{"body": "second"}], {}), "options": None},
+                ]
+            ),
+            [{"narrative": ([{"body": "first"}, {"body": "second"}], {}), "options": None}],
+        )
+
+    def test_narrative_runs_do_not_cross_text(self):
+        """A text line between node deliveries must keep its position."""
+        self.assertEqual(
+            self._flush(
+                [
+                    {"narrative": ([{"body": "first"}], {}), "options": None},
+                    {"text": "middle"},
+                    {"narrative": ([{"body": "last"}], {}), "options": None},
+                ]
+            ),
+            [
+                {"narrative": ([{"body": "first"}], {}), "options": None},
+                {"text": "middle"},
+                {"narrative": ([{"body": "last"}], {}), "options": None},
+            ],
+        )
+
+    def test_legacy_dict_narrative_stays_atomic(self):
+        """Non-canonical shapes keep one-frame-per-call semantics."""
+        self.assertEqual(
+            self._flush(
+                [
+                    {"narrative": {"body": "first"}},
+                    {"narrative": {"body": "second"}},
+                ]
+            ),
+            [
+                {"narrative": {"body": "first"}},
+                {"narrative": {"body": "second"}},
+            ],
+        )
+
 
 class TestGroupedOutput(TestCase):
     """Final byte-identical frames share one Server-to-Portal publication."""

@@ -38,3 +38,39 @@ class TestMixedTemplates(TestCase):
         self.assertEqual(
             delivered, ["Kade opens the steel door.", "a stranger opens the steel door."]
         )
+
+    def test_plan_metadata_opt_in_reaches_the_canonical_plan(self):
+        """A producer may mark a broadcast shareable through the outcmd tuple."""
+        viewers = [SimpleNamespace(ndb=SimpleNamespace())]
+        actor = SimpleNamespace(
+            id=42,
+            get_display_name=Mock(return_value="Kade"),
+            is_typeclass=Mock(return_value=True),
+        )
+        room = SimpleNamespace(get_message_recipients=lambda exclude: viewers)
+
+        with patch.object(plan, "deliver_to") as canonical:
+            MessagingMixin.msg_contents(
+                room,
+                ("{name} shrugs.", {"plan_metadata": {"frame_shareable": True}}),
+                mapping={"name": actor},
+            )
+        canonical.assert_called_once()
+        sent = canonical.call_args[0][0]
+        self.assertTrue(sent.metadata.get("frame_shareable"))
+
+    def test_plan_metadata_absent_by_default(self):
+        """Ordinary broadcasts keep the per-viewer identity path."""
+        viewers = [SimpleNamespace(ndb=SimpleNamespace())]
+        actor = SimpleNamespace(
+            id=42,
+            get_display_name=Mock(return_value="Kade"),
+            is_typeclass=Mock(return_value=True),
+        )
+        room = SimpleNamespace(get_message_recipients=lambda exclude: viewers)
+
+        with patch.object(plan, "deliver_to") as canonical:
+            MessagingMixin.msg_contents(room, "{name} shrugs.", mapping={"name": actor})
+        canonical.assert_called_once()
+        sent = canonical.call_args[0][0]
+        self.assertFalse(sent.metadata.get("frame_shareable"))

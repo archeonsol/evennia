@@ -79,3 +79,35 @@ class TestEntityHandles(unittest.TestCase):
             return_value=10.0 + handles.HANDLE_TTL_SECONDS + 1,
         ):
             self.assertIsNone(resolve_handle(v, handle))
+
+    def test_repeated_reference_reuses_memo_without_rehashing(self):
+        from evennia.narrative import handles
+
+        v = _Viewer()
+        calls = []
+        real = handles.hashlib.blake2s
+
+        def counting(*args, **kwargs):
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        with patch.object(handles.hashlib, "blake2s", side_effect=counting):
+            first = handle_for(v, _char(42), "Kade")
+            second = handle_for(v, _char(42), "Kade")
+            rotated = handle_for(v, _char(42), "a hooded figure")
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, rotated)
+        self.assertEqual(len(calls), 2)
+
+    def test_memo_stays_consistent_with_map_eviction(self):
+        from evennia.narrative import handles
+
+        v = _Viewer()
+        for i in range(handles._MAX_HANDLES + 50):
+            handle_for(v, _char(i), "name-%d" % i)
+        # A stale memo entry must never resurrect an evicted handle.
+        for i in range(handles._MAX_HANDLES + 50):
+            handle = handle_for(v, _char(i), "name-%d" % i)
+            self.assertIn(handle, v.ndb._entity_handles)
+        self.assertLessEqual(len(v.ndb._entity_handles), handles._MAX_HANDLES)
+        self.assertLessEqual(len(v.ndb._entity_handle_index), handles._MAX_HANDLES)

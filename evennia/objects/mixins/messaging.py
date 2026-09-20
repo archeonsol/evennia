@@ -60,12 +60,19 @@ def _template_plan(inmessage, mapping, outkwargs, from_obj):
     if position < len(inmessage):
         spans.append(TextSpan(inmessage[position:]))
     sender = make_iter(from_obj)[0] if from_obj else None
+    metadata = {"surface": "msg_contents", "third_person": True}
+    # Producers may opt this broadcast into frame sharing (see
+    # ``evennia.narrative.plan.shared_render``). Reserved ``plan_metadata`` key
+    # keeps the outcmd tuple's other kwargs semantics untouched.
+    plan_metadata = outkwargs.get("plan_metadata")
+    if isinstance(plan_metadata, dict):
+        metadata.update(plan_metadata)
     return RenderPlan(
         kind=str(outkwargs.get("type") or "broadcast"),
         msg_type=str(outkwargs.get("type") or "text"),
         blocks=(Line(spans=tuple(spans)),),
         subject_id=getattr(sender, "id", None),
-        metadata={"surface": "msg_contents", "third_person": True},
+        metadata=metadata,
     )
 
 

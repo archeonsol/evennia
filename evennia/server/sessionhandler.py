@@ -112,6 +112,25 @@ def _contains_bytes(value):
     return False
 
 
+def _narrative_nodes(payload):
+    """Return node dicts from a canonical ``narrative`` arg, or ``None`` to ship atomically.
+
+    ``deliver_node`` sends ``([node, ...], {})``. Contiguous deliveries to the
+    same session can share one frame because the client's narrative outputfunc
+    already accepts a list of nodes. Anything else -- the legacy bare-dict
+    shape, non-dict nodes, extra metadata -- keeps its exact
+    one-frame-per-call semantics rather than being guessed at.
+    """
+    if not isinstance(payload, (list, tuple)) or len(payload) != 2:
+        return None
+    nodes, meta = payload
+    if meta or not isinstance(nodes, (list, tuple)) or not nodes:
+        return None
+    if not all(isinstance(node, dict) for node in nodes):
+        return None
+    return list(nodes)
+
+
 # input handlers
 
 _INPUT_FUNCS = {}
@@ -984,6 +1003,8 @@ class ServerSessionHandler(SessionHandler):
 
         text_parts = []
         text_options = {}
+        narrative_parts = []
+        narrative_options = None
         frames = []
 
         def flush_text():
@@ -993,10 +1014,32 @@ class ServerSessionHandler(SessionHandler):
                 frames.append({"text": (joined, text_options) if text_options else joined})
             text_parts.clear()
 
+        def flush_narrative():
+            """Append one merged node frame for a contiguous narrative run."""
+            nonlocal narrative_options
+            if narrative_parts:
+                frames.append(
+                    {"narrative": (list(narrative_parts), {}), "options": narrative_options}
+                )
+                narrative_parts.clear()
+            narrative_options = None
+
         for msg in msgs:
             if any(k != "text" for k in msg):
+                if set(msg) <= {"narrative", "options"} and "narrative" in msg:
+                    nodes = _narrative_nodes(msg["narrative"])
+                    if nodes is not None:
+                        options = msg.get("options")
+                        if narrative_parts and options != narrative_options:
+                            flush_narrative()
+                        flush_text()
+                        if not narrative_parts:
+                            narrative_options = options
+                        narrative_parts.extend(nodes)
+                        continue
                 # mixed or non-text payload: preserve atomically as its own frame
                 flush_text()
+                flush_narrative()
                 text_options = {}
                 frames.append(dict(msg))
                 continue
@@ -1007,12 +1050,16 @@ class ServerSessionHandler(SessionHandler):
                     options = v[1]
                 v = v[0]
             if v is not None:
+                # A node delivery earlier in the buffer must not be overtaken
+                # by text that follows it.
+                flush_narrative()
                 if options != text_options:
                     flush_text()
                 text_options = options
                 text_parts.append(str(v))
 
         flush_text()
+        flush_narrative()
         if not clean:
             return session, frames
         clean_started = time.perf_counter()

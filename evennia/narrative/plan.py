@@ -344,6 +344,40 @@ def _resolve_blocks(blocks, ctx, resolver, collected):
     return resolved
 
 
+def shared_render(plan: RenderPlan) -> bool:
+    """Whether ``plan`` opts into frame sharing across identical resolutions.
+
+    A plan marked ``metadata["frame_shareable"]`` is one where entity handles
+    are not needed to consume the event (observer chatter, room broadcasts to
+    audiences that cannot act on the references). Such a plan resolves without
+    per-viewer handles and with a node id derived from the resolved content, so
+    two viewers whose perception produces the same body produce the same final
+    frame and the transport can multicast it. Recognition, language, and
+    psychosis still vary the body per viewer, so identities that resolve
+    differently never share -- sharing is strictly post-resolution.
+
+    Producers opt in explicitly; the default path is unchanged.
+    """
+    return bool(plan.metadata.get("frame_shareable"))
+
+
+def _shared_node_id(correlation_id, body) -> str:
+    """Derive a stable node id for a shareable resolution.
+
+    Two viewers with byte-identical bodies for the same canonical event must
+    produce byte-identical frames to be grouped, and ``node_id`` is the last
+    per-delivery uniqueness left in the payload. Deriving it from the event and
+    the resolved body keeps distinct resolutions distinct while identical ones
+    collapse.
+    """
+    import hashlib
+
+    digest = hashlib.blake2s(
+        (str(correlation_id) + "\0" + str(body)).encode("utf-8"), digest_size=10
+    )
+    return "s" + digest.hexdigest()
+
+
 def resolve(
     plan: RenderPlan,
     viewer,
@@ -385,9 +419,10 @@ def resolve(
     blocks = tuple(_resolve_blocks(plan.blocks, ctx, resolver, collected))
     body = flatten_blocks(blocks, plan.sep)
 
+    shared = shared_render(plan)
     refs = ()
     from_handle = None
-    if with_refs and viewer is not None:
+    if with_refs and viewer is not None and not shared:
         from evennia.narrative.handles import handle_for
 
         seen = {}
@@ -422,6 +457,7 @@ def resolve(
         sep=plan.sep,
         metadata=dict(plan.metadata),
         correlation_id=plan.correlation_id,
+        node_id=_shared_node_id(plan.correlation_id, body) if shared else new_runtime_id(),
     )
 
 
@@ -523,7 +559,9 @@ def deliver(
         record_event(plan)
 
     target = list(sessions) if sessions is not None else _sessions(viewer)
-    wants_refs = any(narrative_mode(session) != MODE_OFF for session in target)
+    wants_refs = (not shared_render(plan)) and any(
+        narrative_mode(session) != MODE_OFF for session in target
+    )
     resolve_started = time.perf_counter()
     node = resolve(plan, viewer, with_refs=wants_refs, extras=extras)
     try:

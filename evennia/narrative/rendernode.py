@@ -740,8 +740,16 @@ def deliver_node(
     capable = [session for session in target_sessions if modes[id(session)] != MODE_OFF]
     delivered = node
     # Entity refs are a rich-client wire artifact; a text-only recipient never
-    # sees them, so the (possibly expensive) builder stays lazy.
-    if capable and refs_builder is not None and not node.refs:
+    # sees them, so the (possibly expensive) builder stays lazy. A shareable
+    # node must not gain per-viewer handles after resolution, or identical
+    # resolutions would stop producing identical frames and the transport
+    # grouping silently dies.
+    if (
+        capable
+        and refs_builder is not None
+        and not node.refs
+        and not node.metadata.get("frame_shareable")
+    ):
         delivered = node.with_refs(refs_builder())
     try:
         from evennia.narrative.timeline import record_delivery

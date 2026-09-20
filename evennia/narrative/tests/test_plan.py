@@ -96,6 +96,84 @@ class PlanTestCase(unittest.TestCase):
         self.addCleanup(plan_mod.set_span_resolver, None)
 
 
+class TestFrameSharing(PlanTestCase):
+    """Opt-in frame sharing: identical resolutions must produce identical frames."""
+
+    def _plan(self, shareable):
+        metadata = {"frame_shareable": True} if shareable else {}
+        return RenderPlan(
+            kind="combat",
+            msg_type="text",
+            subject_id=1,
+            blocks=(
+                Line(
+                    spans=(
+                        CharRef(char_id=1, role="attacker"),
+                        TextSpan(" hits "),
+                        CharRef(char_id=2, role="defender"),
+                        TextSpan("."),
+                    )
+                ),
+            ),
+            metadata=metadata,
+        )
+
+    def _node_session(self):
+        return _Session({CLIENT_NARRATIVE_FLAG: True})
+
+    def _payload(self, viewer):
+        return viewer.calls[-1][1]["narrative"][0][0]
+
+    def test_shareable_plan_resolves_without_handles(self):
+        plan = self._plan(True)
+        viewer = _Viewer("Ana", sessions=[self._node_session()], knows=[1, 2])
+        node = resolve(plan, viewer)
+        self.assertEqual(node.refs, ())
+        self.assertIsNone(node.from_handle)
+        self.assertFalse(hasattr(viewer.ndb, "_entity_handles"))
+        self.assertEqual(node.node_id, resolve(plan, viewer).node_id)
+
+    def test_default_plan_keeps_per_viewer_identity(self):
+        plan = self._plan(False)
+        ana = _Viewer("Ana", sessions=[self._node_session()], knows=[1, 2])
+        bo = _Viewer("Bo", sessions=[self._node_session()], knows=[1, 2])
+        ana_node, bo_node = resolve(plan, ana), resolve(plan, bo)
+        self.assertTrue(ana_node.refs)
+        self.assertNotEqual(ana_node.node_id, bo_node.node_id)
+        self.assertNotEqual(ana_node.refs[0].handle, bo_node.refs[0].handle)
+
+    def test_shareable_plan_payloads_identical_for_same_perception(self):
+        plan = self._plan(True)
+        ana = _Viewer("Ana", sessions=[self._node_session()], knows=[1, 2])
+        bo = _Viewer("Bo", sessions=[self._node_session()], knows=[1, 2])
+        deliver(plan, ana)
+        deliver(plan, bo)
+        self.assertEqual(self._payload(ana), self._payload(bo))
+
+    def test_shareable_plan_still_differs_by_recognition(self):
+        plan = self._plan(True)
+        knower = _Viewer("Ana", sessions=[self._node_session()], knows=[1, 2])
+        stranger = _Viewer("Bo", sessions=[self._node_session()])
+        deliver(plan, knower)
+        deliver(plan, stranger)
+        self.assertNotEqual(self._payload(knower), self._payload(stranger))
+
+    def test_shareable_node_ignores_a_refs_builder(self):
+        from evennia.narrative.rendernode import EntityRef, deliver_node
+
+        plan = self._plan(True)
+        viewer = _Viewer("Ana", sessions=[self._node_session()], knows=[1, 2])
+        node = resolve(plan, viewer)
+        deliver_node(
+            node,
+            viewer,
+            refs_builder=lambda: (EntityRef(handle="e" + "0" * 24, label="Kade"),),
+            sessions=[self._node_session()],
+            _transformed=True,
+        )
+        self.assertEqual(self._payload(viewer)["refs"], [])
+
+
 class TestResolution(PlanTestCase):
     def _plan(self):
         return RenderPlan(
