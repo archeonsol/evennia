@@ -50,7 +50,7 @@ from evennia.commands.signals import (
     on_command_pre,
 )
 from evennia.utils import clock, logger, utils
-from evennia.utils.command_trace import get_trace_id
+from evennia.utils.command_trace import command_trace_scope, get_trace_id
 
 __all__ = ("cmdhandler", "InterruptCommand")
 _GA = object.__getattribute__
@@ -385,8 +385,6 @@ class ErrorReported(Exception):
     """
 
     def __init__(self, raw_string):
-        from evennia.utils.command_trace import get_trace_id
-
         self.args = (raw_string,)
         self.raw_string = raw_string
         self.trace_id = get_trace_id()
@@ -754,150 +752,133 @@ async def cmdhandler(
 
         """
         global _COMMAND_NESTING
-        try:
-            from django.conf import settings as _settings
+        with command_trace_scope(
+            caller=caller,
+            session=session,
+            raw_string=unformatted_raw_string,
+            cmd_key=raw_cmdname,
+        ):
+            try:
+                # Assign useful variables to the instance
+                cmd.caller = caller
+                cmd.cmdname = cmdname
+                cmd.raw_cmdname = raw_cmdname
+                cmd.cmdstring = cmdname  # deprecated
+                cmd.args = args
+                cmd.cmdset = cmdset
+                cmd.cmdset_providers = cmdset_providers.copy()
+                cmd.session = session
+                cmd.account = account
+                cmd.raw_string = unformatted_raw_string
+                # cmd.obj  # set via on-object cmdset handler for each command,
+                # since this may be different for every command when
+                # merging multiple cmdsets
 
-            if getattr(_settings, "COMMAND_TRACE_ENABLED", True):
-                from evennia.utils.command_trace import begin_command_trace
+                # AccountCommand normalisation: rewrite caller/account/character
+                # before _testing returns and before at_pre_parse, so all hooks
+                # (and the _testing path) observe consistent state. No-op for
+                # ordinary Command subclasses.
+                _normalize_account_command_caller(cmd, caller, cmdset_providers)
 
-                begin_command_trace(
-                    caller=caller,
-                    session=session,
-                    raw_string=unformatted_raw_string,
-                    cmd_key=raw_cmdname,
-                )
-        except Exception:
-            pass
-        try:
-            # Assign useful variables to the instance
-            cmd.caller = caller
-            cmd.cmdname = cmdname
-            cmd.raw_cmdname = raw_cmdname
-            cmd.cmdstring = cmdname  # deprecated
-            cmd.args = args
-            cmd.cmdset = cmdset
-            cmd.cmdset_providers = cmdset_providers.copy()
-            cmd.session = session
-            cmd.account = account
-            cmd.raw_string = unformatted_raw_string
-            # cmd.obj  # set via on-object cmdset handler for each command,
-            # since this may be different for every command when
-            # merging multiple cmdsets
+                if _testing:
+                    # only return the command instance
+                    return cmd
 
-            # AccountCommand normalisation: rewrite caller/account/character
-            # before _testing returns and before at_pre_parse, so all hooks
-            # (and the _testing path) observe consistent state. No-op for
-            # ordinary Command subclasses.
-            _normalize_account_command_caller(cmd, caller, cmdset_providers)
+                # assign custom kwargs to found cmd object
+                for key, val in kwargs.items():
+                    setattr(cmd, key, val)
 
-            if _testing:
-                # only return the command instance
-                return cmd
+                _COMMAND_NESTING[called_by] += 1
+                if _COMMAND_NESTING[called_by] > _COMMAND_RECURSION_LIMIT:
+                    err = _ERROR_RECURSION_LIMIT.format(
+                        recursion_limit=_COMMAND_RECURSION_LIMIT,
+                        raw_cmdname=raw_cmdname,
+                        cmdclass=cmd.__class__,
+                    )
+                    raise RuntimeError(err)
 
-            # assign custom kwargs to found cmd object
-            for key, val in kwargs.items():
-                setattr(cmd, key, val)
+                # Wall-clock and trace-id captured up front, before at_pre_parse
+                # so on_command_post.elapsed_ms covers the full hook range.
+                # Stashed on cmd for the generator path; _progressive_cmd_run
+                # cannot read the contextvar after end_command_trace() runs.
+                _signal_t0 = time.monotonic()
+                _signal_trace_id = get_trace_id()
+                cmd._signal_t0 = _signal_t0
+                cmd._signal_trace_id = _signal_trace_id
 
-            _COMMAND_NESTING[called_by] += 1
-            if _COMMAND_NESTING[called_by] > _COMMAND_RECURSION_LIMIT:
-                err = _ERROR_RECURSION_LIMIT.format(
-                    recursion_limit=_COMMAND_RECURSION_LIMIT,
-                    raw_cmdname=raw_cmdname,
-                    cmdclass=cmd.__class__,
-                )
-                raise RuntimeError(err)
-
-            # Wall-clock and trace-id captured up front, before at_pre_parse
-            # so on_command_post.elapsed_ms covers the full hook range.
-            # Stashed on cmd for the generator path; _progressive_cmd_run
-            # cannot read the contextvar after end_command_trace() runs.
-            _signal_t0 = time.monotonic()
-            _signal_trace_id = get_trace_id()
-            cmd._signal_t0 = _signal_t0
-            cmd._signal_trace_id = _signal_trace_id
-
-            on_command_pre.send_robust(
-                sender=type(cmd),
-                cmd=cmd,
-                caller=caller,
-                session=session,
-                trace_id=_signal_trace_id,
-            )
-
-            # pre-parse hook (was: at_pre_cmd before 6.0.0+underspire.2)
-            abort = await clock.maybe_await(cmd.at_pre_parse())
-            if abort:
-                # abort sequence
-                return abort
-
-            # Parse and execute
-            await clock.maybe_await(cmd.parse())
-
-            # post-parse, pre-func hook (new in 6.0.0+underspire.2)
-            abort = await clock.maybe_await(cmd.at_pre_cmd())
-            if abort:
-                return abort
-
-            # main command code
-            # (return value is normally None)
-            ret = cmd.func()
-            if isinstance(ret, types.GeneratorType):
-                # cmd.func() is a generator, execute progressively.
-                # _progressive_cmd_run handles at_post_cmd and on_command_post.
-                _progressive_cmd_run(cmd, ret)
-            else:
-                if inspect.iscoroutine(ret):
-                    # async def func(self) — wait for completion before post-hooks.
-                    await ret
-
-                # post-command hook (sync and async paths both land here)
-                await clock.maybe_await(cmd.at_post_cmd())
-
-                on_command_post.send_robust(
+                on_command_pre.send_robust(
                     sender=type(cmd),
                     cmd=cmd,
                     caller=caller,
                     session=session,
                     trace_id=_signal_trace_id,
-                    elapsed_ms=(time.monotonic() - _signal_t0) * 1000.0,
                 )
 
-                if cmd.save_for_next:
-                    # store a reference to this command, possibly
-                    # accessible by the next command.
-                    caller.ndb.last_cmd = copy(cmd)
+                # pre-parse hook (was: at_pre_cmd before 6.0.0+underspire.2)
+                abort = await clock.maybe_await(cmd.at_pre_parse())
+                if abort:
+                    # abort sequence
+                    return abort
+
+                # Parse and execute
+                await clock.maybe_await(cmd.parse())
+
+                # post-parse, pre-func hook (new in 6.0.0+underspire.2)
+                abort = await clock.maybe_await(cmd.at_pre_cmd())
+                if abort:
+                    return abort
+
+                # main command code
+                # (return value is normally None)
+                ret = cmd.func()
+                if isinstance(ret, types.GeneratorType):
+                    # cmd.func() is a generator, execute progressively.
+                    # _progressive_cmd_run handles at_post_cmd and on_command_post.
+                    _progressive_cmd_run(cmd, ret)
                 else:
-                    caller.ndb.last_cmd = None
+                    if inspect.iscoroutine(ret):
+                        # async def func(self) — wait for completion before post-hooks.
+                        await ret
 
-        except InterruptCommand:
-            # Do nothing, clean exit
-            pass
-        except Exception as exc:
-            tb_text = format_exc()
-            on_command_error.send_robust(
-                sender=type(cmd),
-                cmd=cmd,
-                caller=caller,
-                session=session,
-                trace_id=get_trace_id(),
-                exc=exc,
-                traceback_text=tb_text,
-            )
-            _msg_err(caller, _ERROR_UNTRAPPED)
-            raise ErrorReported(cmd.raw_string)
-        finally:
-            _COMMAND_NESTING[called_by] -= 1
-            if _COMMAND_NESTING[called_by] <= 0:
-                _COMMAND_NESTING.pop(called_by, None)
-            try:
-                from django.conf import settings as _settings
+                    # post-command hook (sync and async paths both land here)
+                    await clock.maybe_await(cmd.at_post_cmd())
 
-                if getattr(_settings, "COMMAND_TRACE_ENABLED", True):
-                    from evennia.utils.command_trace import end_command_trace
+                    on_command_post.send_robust(
+                        sender=type(cmd),
+                        cmd=cmd,
+                        caller=caller,
+                        session=session,
+                        trace_id=_signal_trace_id,
+                        elapsed_ms=(time.monotonic() - _signal_t0) * 1000.0,
+                    )
 
-                    end_command_trace()
-            except Exception:
+                    if cmd.save_for_next:
+                        # store a reference to this command, possibly
+                        # accessible by the next command.
+                        caller.ndb.last_cmd = copy(cmd)
+                    else:
+                        caller.ndb.last_cmd = None
+
+            except InterruptCommand:
+                # Do nothing, clean exit
                 pass
+            except Exception as exc:
+                tb_text = format_exc()
+                on_command_error.send_robust(
+                    sender=type(cmd),
+                    cmd=cmd,
+                    caller=caller,
+                    session=session,
+                    trace_id=get_trace_id(),
+                    exc=exc,
+                    traceback_text=tb_text,
+                )
+                _msg_err(caller, _ERROR_UNTRAPPED)
+                raise ErrorReported(cmd.raw_string)
+            finally:
+                _COMMAND_NESTING[called_by] -= 1
+                if _COMMAND_NESTING[called_by] <= 0:
+                    _COMMAND_NESTING.pop(called_by, None)
 
     # Action engine bridge (CM1 Phase 8): all normal player input dispatches
     # through the engine and never merges cmdsets. The legacy cmdset path below
@@ -910,64 +891,29 @@ async def cmdhandler(
     from evennia.actions.dispatch import try_action_dispatch
 
     if cmdobj is None:
-        action_started = time.monotonic()
         action_session = session
         if action_session is None and callertype == "session":
             action_session = called_by
-        trace_started = False
-        outcome = "error"
-        try:
-            if getattr(settings, "COMMAND_TRACE_ENABLED", True):
-                from evennia.utils.command_trace import begin_command_trace
-
-                key = str(raw_string or "").strip().split(" ", 1)[0]
-                begin_command_trace(
-                    caller=called_by,
-                    session=action_session,
-                    raw_string=raw_string,
-                    cmd_key=key,
-                )
-                trace_started = True
-            trace = await try_action_dispatch(
-                called_by, raw_string, session=session, callertype=callertype, **kwargs
-            )
-            outcome = getattr(trace, "outcome", None) or "consumed"
-        except Exception:
-            logger.log_err("User input was: '%s'." % logger.mask_sensitive_input(raw_string))
-            _msg_err(called_by, _ERROR_UNTRAPPED, cmdid=cmdid)
-            outcome = "error"
-        finally:
-            elapsed = time.monotonic() - action_started
+        key = str(raw_string or "").strip().split(" ", 1)[0]
+        scope = command_trace_scope(
+            caller=called_by,
+            session=action_session,
+            raw_string=raw_string,
+            cmd_key=key,
+            metrics=True,
+            markers=True,
+        )
+        # The error report runs inside the scope so the completion marker
+        # stays the final wire write (see command_trace_scope's contract).
+        with scope:
             try:
-                from evennia.server.prometheus_metrics import record_action_input
-
-                record_action_input(outcome, elapsed)
+                trace = await try_action_dispatch(
+                    called_by, raw_string, session=session, callertype=callertype, **kwargs
+                )
+                scope.outcome = getattr(trace, "outcome", None) or "consumed"
             except Exception:
-                pass
-            if trace_started:
-                try:
-                    from evennia.utils.command_trace import end_command_trace
-
-                    end_command_trace()
-                except Exception:
-                    pass
-            if getattr(settings, "COMMAND_COMPLETION_MARKERS_ENABLED", False):
-                # Protocol contract: the marker completes the one command in
-                # flight for this session. The engine does not serialize a
-                # session's input (inputfuncs fires each pipelined line on its
-                # own task) and the marker carries no command id, so a client
-                # that relies on markers must send one command and await its
-                # marker before sending the next. A per-command sequence id
-                # would make markers unambiguous under pipelining.
-                try:
-                    marker = (
-                        "\x1eEV-COMMAND-DONE "
-                        f"outcome={outcome} elapsed_ms={elapsed * 1000.0:.3f}\x1f"
-                    )
-                    if action_session is not None and hasattr(action_session, "msg"):
-                        action_session.msg(marker, options={"raw": True})
-                except Exception:
-                    logger.log_trace("CM1 completion marker delivery failed")
+                logger.log_err("User input was: '%s'." % logger.mask_sensitive_input(raw_string))
+                _msg_err(called_by, _ERROR_UNTRAPPED, cmdid=cmdid)
         return
 
     (

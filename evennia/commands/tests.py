@@ -2748,3 +2748,24 @@ class TestActionCompletionMarker(TwistedTestCase):
         markers = [event for event in events if event[0] == "msg"]
         self.assertEqual(len(markers), 1)
         self.assertIn("outcome=error", markers[0][1])
+
+    @override_settings(COMMAND_COMPLETION_MARKERS_ENABLED=True, COMMAND_TRACE_ENABLED=False)
+    def test_error_marker_is_the_final_wire_write(self):
+        """The marker completes the command: it must follow the error notice."""
+        called_by = _BridgeErrCaller()
+        with (
+            patch(
+                "evennia.actions.dispatch.try_action_dispatch",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("evennia.server.prometheus_metrics.record_action_input"),
+        ):
+            d = ensureDeferred(
+                cmdhandler.cmdhandler(called_by, "look", session=called_by, callertype="object")
+            )
+            failures = []
+            d.addErrback(failures.append)
+
+        self.assertEqual(failures, [])
+        self.assertIn("untrapped error", str(called_by.messages[0]).lower())
+        self.assertIn("EV-COMMAND-DONE", str(called_by.messages[-1]))
