@@ -268,10 +268,13 @@ REDIS_BUS_READ_BATCH = None
 # churn. Real process death still fails fast through the Redis connection;
 # this lease only needs to bound silence.
 BUS_HANDSHAKE_TIMEOUT = 12.0
-# Narrative render bound. None keeps the module default (256 spans per segment
-# and 256 entity references per node). Raise it for very crowded scenes, where
-# a room view carries a span per visible character per detail line.
+# Narrative render bounds. None keeps the module default (256 entity references
+# per node; 256 spans per segment and 256 span segments per node). Raise
+# RENDER_MAX_REFS for reference-heavy nodes and RENDER_MAX_SPANS for very
+# crowded scenes, where a room view carries a span per visible character per
+# detail line.
 RENDER_MAX_REFS = None
+RENDER_MAX_SPANS = None
 
 # Evennia is synchronous-by-default: game code, hooks, scripts and boot make
 # blocking Django ORM calls on the single event-loop thread. Opt out of Django's

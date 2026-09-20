@@ -1,6 +1,7 @@
 """Accepted narrative fields survive resolution and serialization unchanged."""
 
 import json
+from dataclasses import dataclass
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -27,6 +28,7 @@ from evennia.narrative.rendernode import (
     RenderNode,
     Section,
     SystemBlock,
+    flatten_blocks,
 )
 
 
@@ -224,9 +226,49 @@ class TestRenderLimits(TestCase):
         spans = ((TextSpan("x"),) * 257,)
         with self.assertRaises(ValueError):
             RenderNode(kind="test", msg_type="text", body="x", spans=spans)
-        with override_settings(RENDER_MAX_REFS=4096):
+        with override_settings(RENDER_MAX_SPANS=4096):
             node = RenderNode(kind="test", msg_type="text", body="x", spans=spans)
         self.assertEqual(len(node.spans[0]), 257)
+
+    def test_reference_and_span_knobs_are_independent(self):
+        """Raising one budget must not silently lift the other."""
+        refs = tuple(EntityRef(handle=str(i), label="x") for i in range(257))
+        spans = ((TextSpan("x"),) * 257,)
+        with override_settings(RENDER_MAX_SPANS=4096):
+            with self.assertRaisesRegex(ValueError, "too many entity references"):
+                RenderNode(kind="test", msg_type="text", body="x", refs=refs)
+        with override_settings(RENDER_MAX_REFS=4096):
+            with self.assertRaisesRegex(ValueError, "too many spans"):
+                RenderNode(kind="test", msg_type="text", body="x", spans=spans)
+
+    def test_map_text_cannot_exceed_body_budget(self):
+        """A text transform cannot bypass the node body budget."""
+        blocks = (Line("x" * 60_000), Line("y" * 60_000))
+        node = RenderNode(kind="test", msg_type="text", body=flatten_blocks(blocks), blocks=blocks)
+        with self.assertRaisesRegex(ValueError, "RenderNode body exceeds"):
+            node.map_text(lambda text: text + "z" * 55_000)
+
+    def test_prepend_text_cannot_grow_tree_past_block_budget(self):
+        """Inserting a leaf when no block can take the prefix obeys the count."""
+        blocks = (Section("s"),) * MAX_BLOCKS
+        node = RenderNode(kind="test", msg_type="text", body="", blocks=blocks)
+        with self.assertRaisesRegex(ValueError, "too many blocks"):
+            node.prepend_text("x")
+
+    def test_unserializable_span_rejected_on_repeated_construction(self):
+        """The serializer contract is enforced per construction, not per type cache."""
+
+        @dataclass
+        class UnregisteredSpan:
+            """A dataclass span outside the known kinds."""
+
+            text: str
+
+        for _ in range(2):
+            with self.assertRaisesRegex(TypeError, "Unserializable span:"):
+                RenderNode(
+                    kind="test", msg_type="text", body="x", spans=((UnregisteredSpan("x"),),)
+                )
 
     def test_text_only_transforms_skip_span_revalidation(self):
         """map_text/prepend_text trust the already-validated span tree."""
