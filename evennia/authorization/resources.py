@@ -7,13 +7,19 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ResourceAdapter:
-    """Describe how one engine/game resource family participates in authorization."""
+    """Describe how one engine/game resource family participates in authorization.
+
+    ``matches`` and ``reference`` must remain stable while a resource moves.
+    Set ``location_sensitive`` only when ``labels`` derives authorization facts
+    from containment or location state.
+    """
 
     kind: str
     matches: object
     reference: object
     labels: object = lambda resource: ()
     priority: int = 0
+    location_sensitive: bool = False
 
     def __post_init__(self):
         """Validate callables and normalize the resource kind."""
@@ -24,6 +30,7 @@ class ResourceAdapter:
         ):
             raise ValueError("resource adapters require a kind and callable hooks")
         object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "location_sensitive", bool(self.location_sensitive))
 
 
 class ResourceAdapterRegistry:

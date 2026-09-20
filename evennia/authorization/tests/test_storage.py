@@ -272,6 +272,27 @@ class AuthorizationPrewarmTest(TransactionTestCase):
             self.assertFalse(asyncio.run(run()))
         self.assertEqual(len(calls), 3)
 
+    def test_third_refresh_can_satisfy_the_request(self):
+        """Readiness is checked after the final bounded refresh."""
+
+        principal = FakePrincipal()
+        resource = FakeResource()
+        calls = []
+        fetch = _fetch_authorization_snapshots
+
+        def staged_fetch(request):
+            calls.append(request)
+            if len(calls) < 3:
+                return {"generation_updates": [], "principals": [], "resources": []}
+            return fetch(request)
+
+        with patch(
+            "evennia.authorization.storage._fetch_authorization_snapshots",
+            side_effect=staged_fetch,
+        ):
+            self.assertTrue(asyncio.run(prewarm_authorization((principal,), (resource,))))
+        self.assertEqual(len(calls), 3)
+
     def test_install_never_lowers_a_shared_generation(self):
         """Out-of-order batches cannot roll the generation pointer backwards."""
 
@@ -680,3 +701,64 @@ class AuthorizationStorageTest(TestCase):
         with self.assertNumQueries(0):
             self.assertIsNotNone(load_policy(first, "view"))
             self.assertIsNotNone(load_policy(second, "edit"))
+
+
+class MoveInvalidationTest(TestCase):
+    """Move-time invalidation is content-gated and fails safe."""
+
+    def test_stable_adapter_skips_invalidation(self):
+        from evennia.authorization import storage
+        from evennia.authorization.resources import ResourceAdapter
+
+        adapter = ResourceAdapter("stable", lambda resource: True, lambda resource: "stable")
+        with (
+            patch.object(storage.resource_adapters, "for_resource", return_value=adapter),
+            patch.object(storage, "bump_resource_generation") as bump,
+            patch(
+                "evennia.server.prometheus_metrics.record_authorization_move_invalidation"
+            ) as record,
+        ):
+            self.assertFalse(storage.bump_resource_generation_after_move(FakeResource()))
+        bump.assert_not_called()
+        record.assert_called_once_with("skipped")
+
+    def test_location_sensitive_adapter_bumps(self):
+        from evennia.authorization import storage
+        from evennia.authorization.resources import ResourceAdapter
+
+        adapter = ResourceAdapter(
+            "moving",
+            lambda resource: True,
+            lambda resource: "moving",
+            location_sensitive=True,
+        )
+        resource = FakeResource()
+        with (
+            patch.object(storage.resource_adapters, "for_resource", return_value=adapter),
+            patch.object(storage, "bump_resource_generation") as bump,
+            patch(
+                "evennia.server.prometheus_metrics.record_authorization_move_invalidation"
+            ) as record,
+        ):
+            self.assertTrue(storage.bump_resource_generation_after_move(resource))
+        bump.assert_called_once_with(resource)
+        record.assert_called_once_with("bumped")
+
+    def test_adapter_lookup_failure_fails_safe(self):
+        from evennia.authorization import storage
+
+        resource = FakeResource()
+        with (
+            patch.object(
+                storage.resource_adapters, "for_resource", side_effect=RuntimeError("boom")
+            ),
+            patch.object(storage, "bump_resource_generation") as bump,
+            patch.object(storage, "logger") as logger,
+            patch(
+                "evennia.server.prometheus_metrics.record_authorization_move_invalidation"
+            ) as record,
+        ):
+            self.assertTrue(storage.bump_resource_generation_after_move(resource))
+        bump.assert_called_once_with(resource)
+        record.assert_called_once_with("lookup_error")
+        logger.log_trace.assert_called_once()

@@ -604,6 +604,30 @@ class TestMoveResult(BaseEvenniaTest):
         self.assertEqual(result.hook_errors, [])
         self.assertTrue(self.obj1 in self.room2.contents)
 
+    def test_move_invalidates_only_location_sensitive_authorization_labels(self):
+        from evennia.authorization import storage
+        from evennia.authorization.resources import ResourceAdapter
+
+        stable = ResourceAdapter("stable", lambda resource: True, lambda resource: resource.pk)
+        sensitive = ResourceAdapter(
+            "sensitive",
+            lambda resource: True,
+            lambda resource: resource.pk,
+            location_sensitive=True,
+        )
+        with patch.object(storage.resource_adapters, "for_resource", return_value=stable):
+            with patch.object(
+                storage, "bump_resource_generation", wraps=storage.bump_resource_generation
+            ) as bump:
+                self.assertTrue(self.obj1.move_to(self.room2, quiet=True))
+            bump.assert_not_called()
+        with patch.object(storage.resource_adapters, "for_resource", return_value=sensitive):
+            with patch.object(
+                storage, "bump_resource_generation", wraps=storage.bump_resource_generation
+            ) as bump:
+                self.assertTrue(self.obj1.move_to(self.room1, quiet=True))
+            bump.assert_called_once_with(self.obj1)
+
     def test_pre_move_veto_is_falsy_and_uncommitted(self):
         with patch.object(type(self.obj1), "at_pre_move", return_value=False):
             result = self.obj1.move_to(self.room2)
@@ -660,6 +684,28 @@ class TestMoveResult(BaseEvenniaTest):
         self.assertEqual(self.obj1._loaded_location_id, self.room2.pk)
         worker_args = offload.call_args.args[1:]
         self.assertTrue(all(not isinstance(value, ObjectDB) for value in worker_args))
+
+    def test_async_move_uses_location_sensitive_authorization_invalidation(self):
+        from evennia.authorization import storage
+        from evennia.authorization.resources import ResourceAdapter
+        from evennia.utils import clock, defer
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        stable = ResourceAdapter("stable", lambda resource: True, lambda resource: resource.pk)
+        with (
+            patch.object(storage.resource_adapters, "for_resource", return_value=stable),
+            patch.object(
+                storage, "bump_resource_generation", wraps=storage.bump_resource_generation
+            ) as bump,
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=immediate),
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=True)).result()
+
+        self.assertTrue(result)
+        bump.assert_not_called()
 
     def test_async_move_lost_update_does_not_change_local_state(self):
         from evennia.utils import clock, defer

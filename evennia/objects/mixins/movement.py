@@ -295,13 +295,13 @@ class MovementMixin:
         except Exception:
             logger.log_trace("move_to: cmdset-cache invalidation failed")
 
-        # Scope state is cached independently from principal grants. A move can
-        # change derived location/provider labels, so invalidate only the moved
-        # resource side and leave slow-changing grant caches warm.
+        # Only adapters that derive labels from location need movement
+        # invalidation. Stable resource identity, type, authored scopes, and
+        # policies have their own mutation boundaries.
         try:
-            from evennia.authorization.storage import bump_resource_generation
+            from evennia.authorization.storage import bump_resource_generation_after_move
 
-            bump_resource_generation(self)
+            bump_resource_generation_after_move(self)
         except Exception:
             logger.log_trace("move_to: authorization-scope invalidation failed")
 
@@ -506,9 +506,9 @@ class MovementMixin:
             logger.log_trace("move_to_async: cmdset-cache invalidation failed")
 
         try:
-            from evennia.authorization.storage import bump_resource_generation
+            from evennia.authorization.storage import bump_resource_generation_after_move
 
-            bump_resource_generation(self)
+            bump_resource_generation_after_move(self)
         except Exception:
             logger.log_trace("move_to_async: authorization-scope invalidation failed")
 
