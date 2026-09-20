@@ -328,7 +328,10 @@ class TagHandler(object):
         self._model = obj.__dbclass__.__name__.lower()
         self._cache = {}
         # negative hits, keyed like _cache: a miss that is still authoritative
-        # because no tag write has happened since. `_cache_complete` covers the
+        # because no tag write has happened since in this process. Writes by
+        # another process (admin shell, direct ORM) stay invisible until
+        # idmapper eviction or reset_cache, the same accepted idmapper
+        # staleness class as the positive cache. `_cache_complete` covers the
         # fully-loaded case; this covers a known-absent key before a full load.
         self._misscache = {}
         # store category names fully cached
@@ -529,6 +532,46 @@ class TagHandler(object):
                 return tags
         return []
 
+    def _invalidate_after_write(self, catkey):
+        """
+        Discard every cache authority a tag write invalidates.
+
+        A write makes remembered misses, the written category's freshness
+        marker, and the full-cache flag untrustworthy; this is the single
+        place that rule lives. The capacity reset in `_getcache` is a
+        read-path eviction, not a write invalidation, and must not route
+        through here. `_setcache` skips this while
+        TYPECLASS_AGGRESSIVE_CACHE is off; harmless because in that mode the
+        full cache never loads and no entry is ever stored, so the fields
+        keep their empty initial values and stale state is never consulted.
+
+        Args:
+            catkey (str): The `-{category}` key whose category freshness ended.
+
+        """
+        # a write invalidates every negative hit: the tag just added may be a
+        # key another handler path asked for and was told did not exist
+        self._misscache = {}
+        # mark that the category cache is no longer up-to-date
+        self._catcache.pop(catkey, None)
+        self._cache_complete = False
+
+    def _reset_cache_state(self):
+        """
+        Drop every cache authority wholesale.
+
+        Leaves `_prefetch_checked` alone on purpose: `clear` reaches here only
+        after a full load (it is already True) and clearing it would let the
+        prefetch probe reseed deleted tags from the stale snapshot, while
+        `reset_cache` clears it explicitly because it must stay able to
+        consume a fresh prefetch.
+
+        """
+        self._cache = {}
+        self._misscache = {}
+        self._catcache = {}
+        self._cache_complete = False
+
     def _setcache(self, key, category, tag_obj):
         """
         Update cache.
@@ -550,12 +593,7 @@ class TagHandler(object):
         cachekey = "%s-%s" % (key, category)
         catkey = "-%s" % category
         self._cache[cachekey] = tag_obj
-        # a write invalidates every negative hit: the tag just added may be a
-        # key another handler path asked for and was told did not exist
-        self._misscache = {}
-        # mark that the category cache is no longer up-to-date
-        self._catcache.pop(catkey, None)
-        self._cache_complete = False
+        self._invalidate_after_write(catkey)
 
     def _delcache(self, key, category):
         """
@@ -576,20 +614,14 @@ class TagHandler(object):
             self._cache.pop(cachekey, None)
         else:
             [self._cache.pop(key, None) for key in self._cache if key.endswith(catkey)]
-        self._misscache = {}
-        # mark that the category cache is no longer up-to-date
-        self._catcache.pop(catkey, None)
-        self._cache_complete = False
+        self._invalidate_after_write(catkey)
 
     def reset_cache(self):
         """
         Reset the cache from the outside.
 
         """
-        self._cache_complete = False
-        self._cache = {}
-        self._misscache = {}
-        self._catcache = {}
+        self._reset_cache_state()
         # Discard any stale Django prefetch snapshot. A later
         # prefetch_related() may attach a fresh one to this idmapped instance,
         # which _getcache() must remain able to consume.
@@ -781,10 +813,7 @@ class TagHandler(object):
         if category:
             query["tag__db_category"] = category.strip().lower()
         getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query).delete()
-        self._cache = {}
-        self._misscache = {}
-        self._catcache = {}
-        self._cache_complete = False
+        self._reset_cache_state()
 
     def all(self, return_key_and_category=False, return_objs=False):
         """
