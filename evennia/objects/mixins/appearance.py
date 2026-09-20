@@ -1,5 +1,6 @@
 """Appearance mixin for DefaultObject."""
 
+import functools
 from collections import defaultdict
 
 from django.conf import settings
@@ -11,6 +12,26 @@ from evennia.utils.inflection import inflect_engine
 from evennia.utils.utils import compress_whitespace, is_iter, iter_to_str, make_iter
 
 
+def _decision_scoped(func):
+    """Share one authorization decision memo across a render entry point.
+
+    Visibility filtering asks the same access question per object, and again
+    for the search lock; each answer is a full policy evaluation. One memo per
+    render makes the repeated questions free without changing any decision.
+    The import stays inside the wrapper: ``evennia.authorization`` imports the
+    server models, which import this package.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        from evennia.authorization.service import decision_scope
+
+        with decision_scope():
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
 class AppearanceMixin:
     """Mixin providing appearance and look-related methods for DefaultObject."""
 
@@ -20,6 +41,7 @@ class AppearanceMixin:
     has no plausible viewer-aware variation; override on the subclass to swap
     the language-specific connector."""
 
+    @_decision_scoped
     def filter_visible(self, obj_list, looker, **kwargs):
         """
         Filter a list of objects to only include those that are visible to the looker.
@@ -604,6 +626,7 @@ class AppearanceMixin:
         fires_from=(),
         notes="Structured look lifecycle. Returns a RenderNode and fires at_desc on the target.",
     )
+    @_decision_scoped
     def at_look_node(self, target, **kwargs):
         """Perform the authoritative look lifecycle and return a RenderNode."""
         from evennia.narrative.rendernode import RenderNode, text_node

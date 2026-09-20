@@ -83,17 +83,17 @@ def loop_running() -> bool:
 
 
 def is_io_thread() -> bool:
-    """True when the current thread is running the bound process event loop."""
-    loop = get_bound_loop()
-    if loop is None:
+    """True when the current thread is running the bound process event loop.
+
+    A process event loop runs on exactly one thread, and ``bind_loop`` records
+    that thread, so comparing the recorded id is equivalent to asking
+    ``asyncio`` for the running loop — without the per-call ``get_running_loop``
+    probe that attribute reads paid on every access.
+    """
+    loop = _main_loop
+    if loop is None or loop.is_closed():
         return False
-    try:
-        return asyncio.get_running_loop() is loop
-    except RuntimeError:
-        pass
-    if _loop_thread_id is None:
-        return False
-    return threading.get_ident() == _loop_thread_id
+    return _loop_thread_id is not None and threading.get_ident() == _loop_thread_id
 
 
 def is_io_owner() -> bool:
@@ -103,9 +103,10 @@ def is_io_owner() -> bool:
     owner. Once a loop is bound, its recorded thread is authoritative even
     while the loop is stopped for owner-side teardown.
     """
-    if get_bound_loop() is None:
+    loop = _main_loop
+    if loop is None or loop.is_closed():
         return threading.current_thread() is threading.main_thread()
-    return is_io_thread()
+    return _loop_thread_id is not None and threading.get_ident() == _loop_thread_id
 
 
 def get_loop_thread_id() -> int | None:

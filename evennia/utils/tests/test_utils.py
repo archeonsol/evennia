@@ -65,6 +65,23 @@ class TestIsVeto(TestCase):
             self.assertFalse(utils.is_veto(value), f"{value!r} should not veto")
 
 
+class TestCachedSetting(TestCase):
+    """cached_setting memoizes static settings and honors override_settings."""
+
+    def test_value_is_cached_and_override_invalidates(self):
+        from django.test import override_settings
+
+        self.assertTrue(utils.cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True))
+        with override_settings(TYPECLASS_AGGRESSIVE_CACHE=False):
+            self.assertFalse(utils.cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True))
+        self.assertTrue(utils.cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True))
+
+    def test_default_is_returned_when_unset(self):
+        marker = object()
+
+        self.assertIs(utils.cached_setting("_NOT_A_REAL_EVENNIA_SETTING_", marker), marker)
+
+
 class TestInheritsFromMemoization(TestCase):
     """inherits_from memoizes class MRO paths without changing answers."""
 

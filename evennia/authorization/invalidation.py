@@ -36,6 +36,7 @@ import time
 from django.conf import settings
 
 from evennia.utils import logger
+from evennia.utils.utils import cached_setting
 
 __all__ = [
     "applied_revision",
@@ -48,7 +49,7 @@ __all__ = [
 
 
 def _setting(name, default):
-    return getattr(settings, name, default)
+    return cached_setting(name, default)
 
 
 def push_enabled() -> bool:
