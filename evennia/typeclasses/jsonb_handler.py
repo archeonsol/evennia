@@ -98,6 +98,8 @@ from twisted.internet.defer import Deferred
 from evennia.typeclasses.attribute_context import current_model_save_scope, model_save_active
 from evennia.typeclasses.attributes import IAttributeBackend, InMemoryAttribute
 from evennia.typeclasses.jsonb_util import from_jsonb, to_jsonb
+from evennia.utils import clock
+from evennia.utils.utils import cached_setting
 
 __all__ = (
     "JsonbAttributeBackend",
@@ -213,8 +215,6 @@ _MISSING = object()
 
 def _require_io_thread(where):
     """Require the process-owned IO thread, with a pre-bootstrap main-thread fallback."""
-    from evennia.utils import clock
-
     if clock.is_io_owner():
         return
     raise AttributeUpdateUnavailable(f"{where} must run on the Evennia IO thread")
@@ -1592,7 +1592,6 @@ class JsonbAttributeBackend(IAttributeBackend):
             raise AttributeUpdateUsageError(
                 "Use the protected Attribute view while blocking_update() is active."
             )
-        _resolve_model_save_outcomes(self._row_state)
         _ensure_pending_checked(self._row_state)
         if self._row_state.pending_blocked:
             raise AttributeUpdateUnavailable(
@@ -1607,7 +1606,6 @@ class JsonbAttributeBackend(IAttributeBackend):
             raise AttributeUpdateUsageError(
                 "Use the protected Attribute view while blocking_update() is active."
             )
-        _resolve_model_save_outcomes(self._row_state)
         _ensure_pending_checked(self._row_state)
         if self._row_state.pending_blocked:
             raise AttributeUpdateUnavailable(
@@ -1732,7 +1730,7 @@ class JsonbAttributeBackend(IAttributeBackend):
         cachekey = (key, category)
         cachefound = False
         try:
-            attr = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache[cachekey]
+            attr = cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True) and self._cache[cachekey]
             cachefound = True
         except KeyError:
             attr = None
@@ -1741,17 +1739,17 @@ class JsonbAttributeBackend(IAttributeBackend):
             attr = None
             cachefound = False
             del self._cache[cachekey]
-        if cachefound and settings.TYPECLASS_AGGRESSIVE_CACHE:
+        if cachefound and cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
             return [attr] if attr else []
 
         attrs = self.query_key(key, category)
         if attrs:
             attr = attrs[0]
-            if settings.TYPECLASS_AGGRESSIVE_CACHE:
+            if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
                 self._cache[cachekey] = attr
             return [attr] if attr.pk is not None else []
         else:
-            if settings.TYPECLASS_AGGRESSIVE_CACHE:
+            if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
                 self._cache[cachekey] = None
             return []
 

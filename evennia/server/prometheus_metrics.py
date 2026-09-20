@@ -30,6 +30,7 @@ RENDER_DELIVERY_TOTAL = None
 RENDER_DELIVERY_DURATION_SECONDS = None
 RENDER_PHASE_DURATION_SECONDS = None
 AUTHORIZATION_DECISIONS_TOTAL = None
+AUTHORIZATION_DECISION_CACHE_HITS_TOTAL = None
 AUTHORIZATION_DURATION_SECONDS = None
 AUTHORIZATION_PREWARM_TOTAL = None
 AUTHORIZATION_PREWARM_DURATION_SECONDS = None
@@ -79,6 +80,7 @@ def _init_metrics() -> bool:
     global RENDER_DELIVERY_TOTAL, RENDER_DELIVERY_DURATION_SECONDS
     global RENDER_PHASE_DURATION_SECONDS
     global AUTHORIZATION_DECISIONS_TOTAL, AUTHORIZATION_DURATION_SECONDS
+    global AUTHORIZATION_DECISION_CACHE_HITS_TOTAL
     global AUTHORIZATION_PREWARM_TOTAL, AUTHORIZATION_PREWARM_DURATION_SECONDS
     global AUTHORIZATION_PREWARM_WAIT_TOTAL, AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS
     global AUTHORIZATION_SNAPSHOT_MISS_TOTAL
@@ -196,6 +198,10 @@ def _init_metrics() -> bool:
         "evennia_authorization_decisions_total",
         "Capability authorization decisions by resource kind and result",
         ("resource_kind", "result", "reason"),
+    )
+    AUTHORIZATION_DECISION_CACHE_HITS_TOTAL = Counter(
+        "evennia_authorization_decision_cache_hits_total",
+        "Structured authorization decisions served from a render-scoped memo",
     )
     AUTHORIZATION_DURATION_SECONDS = Histogram(
         "evennia_authorization_duration_seconds",
@@ -489,6 +495,15 @@ def record_authorization_decision(
         AUTHORIZATION_DURATION_SECONDS.labels(resource_kind=kind).observe(
             max(0.0, float(duration_seconds))
         )
+
+
+def record_authorization_decision_cache_hit() -> None:
+    """Record one structured authorization decision served from the render memo."""
+
+    if not _init_metrics():
+        return
+    if AUTHORIZATION_DECISION_CACHE_HITS_TOTAL is not None:
+        AUTHORIZATION_DECISION_CACHE_HITS_TOTAL.inc()
 
 
 def record_authorization_prewarm(outcome: str, duration_seconds: float) -> None:

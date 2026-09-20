@@ -35,6 +35,7 @@ import pytz
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.signals import setting_changed
 from django.core.validators import validate_email as django_validate_email
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -57,6 +58,48 @@ _ANSISTRING = None
 _GA = object.__getattribute__
 _SA = object.__setattr__
 _DA = object.__delattr__
+
+_SETTINGS_CACHE: dict[tuple[str, object], object] = {}
+
+
+def _invalidate_settings_cache(**kwargs) -> None:
+    """Drop cached settings when ``override_settings`` changes any value."""
+
+    _SETTINGS_CACHE.clear()
+
+
+setting_changed.connect(_invalidate_settings_cache)
+
+
+def cached_setting(name: str, default=None):
+    """
+    Return a Django setting, cached until the setting changes.
+
+    Hot paths re-read the same static settings on every call. ``settings`` is a
+    ``LazyObject`` whose ``__getattribute__`` measured at ~4% of reactor CPU in
+    a 100-bot profile, so repeated reads of a static flag are pure overhead.
+    Values are cached per ``(name, default)`` and the whole cache is dropped
+    whenever Django sends ``setting_changed``, so ``override_settings`` keeps
+    working unchanged.
+
+    Args:
+        name (str): The setting name.
+        default (any, optional): Value to return when the setting is unset.
+
+    Returns:
+        any: The resolved setting value.
+
+    """
+
+    try:
+        return _SETTINGS_CACHE[(name, default)]
+    except KeyError:
+        value = getattr(settings, name, default)
+        _SETTINGS_CACHE[(name, default)] = value
+        return value
+    except TypeError:
+        # Unhashable default: skip the cache rather than guess a key.
+        return getattr(settings, name, default)
 
 
 def is_veto(result):

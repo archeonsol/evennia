@@ -28,6 +28,7 @@ from evennia.server.models import (
     AuthorizationScopeLabel,
 )
 from evennia.utils import logger
+from evennia.utils.utils import cached_setting
 
 from . import invalidation
 from .capabilities import capability_registry
@@ -136,11 +137,29 @@ def _bounded_put(cache: OrderedDict, key, value) -> None:
         cache.popitem(last=False)
 
 
-def _generation_cache_key(namespace: str, key: str) -> str:
-    """Return a deterministic generation key safe for every Django backend."""
+_GENERATION_KEY_CACHE: dict[tuple[str, str], str] = {}
+_GENERATION_KEY_CACHE_MAX = 4096
 
+
+def _generation_cache_key(namespace: str, key: str) -> str:
+    """Return a deterministic generation key safe for every Django backend.
+
+    The digest is memoized per ``(namespace, key)``: the same fact is looked up
+    on every authorization evaluation, and the sha256 was measurable reactor
+    work in a 100-bot profile. The cache is bounded; clearing on overflow keeps
+    it flat with no LRU bookkeeping on the hot path.
+    """
+
+    cache_key = (namespace, key)
+    cached = _GENERATION_KEY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     digest = sha256(str(key).encode("utf-8")).hexdigest()
-    return f"evennia:authgen:{namespace}:{digest}"
+    result = f"evennia:authgen:{namespace}:{digest}"
+    if len(_GENERATION_KEY_CACHE) >= _GENERATION_KEY_CACHE_MAX:
+        _GENERATION_KEY_CACHE.clear()
+    _GENERATION_KEY_CACHE[cache_key] = result
+    return result
 
 
 def _shared_generation(namespace: str, key: str, local: int) -> int:
@@ -151,7 +170,7 @@ def _shared_generation(namespace: str, key: str, local: int) -> int:
     keeps the original bounded Redis polling behavior.
     """
 
-    if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
+    if not cached_setting("AUTHORIZATION_SHARED_INVALIDATION", True):
         return local
     cache_key = _generation_cache_key(namespace, key)
     cached = _shared_generation_cache.get(cache_key)
@@ -160,7 +179,7 @@ def _shared_generation(namespace: str, key: str, local: int) -> int:
     now = time.monotonic()
     interval = max(
         0.1,
-        float(getattr(settings, "AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
+        float(cached_setting("AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
     )
     if cached is not None and now - cached[0] < interval:
         return max(local, cached[1])
@@ -193,7 +212,7 @@ def _publish_generation_io(cache_key: str, namespace=None, key=None, value=None)
 def _publish_generation(namespace: str, key: str, value: int) -> int:
     """Publish invalidation without making authorization mutation depend on Redis."""
 
-    if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
+    if not cached_setting("AUTHORIZATION_SHARED_INVALIDATION", True):
         return value
     cache_key = _generation_cache_key(namespace, key)
     _shared_generation_cache[cache_key] = (time.monotonic(), value)
@@ -370,7 +389,7 @@ def load_grants(principal) -> GrantSnapshot:
         _principal_cache.move_to_end(cache_key)
         return cached
     if _snapshot_scope_active():
-        if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+        if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
             raise AuthorizationSnapshotUnavailable(
                 f"principal snapshot unavailable for {cache_key}"
             )
@@ -467,7 +486,7 @@ def load_resource(resource) -> ResourceSnapshot:
         _resource_cache.move_to_end(ref)
         return cached
     if _snapshot_scope_active():
-        if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+        if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
             raise AuthorizationSnapshotUnavailable(f"resource snapshot unavailable for {ref}")
         _note_snapshot_miss("resource", ref)
     labels = _computed_resource_labels(resource, ref)
@@ -896,7 +915,7 @@ def principal_is_suspended(principal) -> bool:
         _suspension_cache.move_to_end(cache_key)
         return cached[1]
     if _snapshot_scope_active():
-        if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+        if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
             raise AuthorizationSnapshotUnavailable(
                 f"suspension snapshot unavailable for {cache_key}"
             )
@@ -1273,7 +1292,7 @@ def load_policy(resource, access_type: str):
         overrides = cached[1]
     else:
         if _snapshot_scope_active():
-            if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+            if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
                 raise AuthorizationSnapshotUnavailable(f"policy snapshot unavailable for {ref}")
             _note_snapshot_miss("policy", ref)
         _version, document = active_policy_bundle()
@@ -1417,7 +1436,7 @@ def _generation_is_fresh(namespace: str, ref: str, now: float) -> tuple[bool, in
 
     local_map = _principal_generation if namespace == "principal" else _resource_generation
     local = int(local_map.get(ref, 0))
-    if not getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True):
+    if not cached_setting("AUTHORIZATION_SHARED_INVALIDATION", True):
         return True, local
     cached = _shared_generation_cache.get(_generation_cache_key(namespace, ref))
     if invalidation.push_enabled():
@@ -1426,7 +1445,7 @@ def _generation_is_fresh(namespace: str, ref: str, now: float) -> tuple[bool, in
         return True, max(local, int(cached[1]) if cached is not None else 0)
     interval = max(
         0.1,
-        float(getattr(settings, "AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
+        float(cached_setting("AUTHORIZATION_GENERATION_POLL_SECONDS", 2.0)),
     )
     if cached is None or now - cached[0] >= interval:
         return False, local
@@ -1554,7 +1573,7 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
     return ready, {
         "principals": principal_specs,
         "resources": resource_specs,
-        "shared_invalidation": bool(getattr(settings, "AUTHORIZATION_SHARED_INVALIDATION", True)),
+        "shared_invalidation": bool(cached_setting("AUTHORIZATION_SHARED_INVALIDATION", True)),
         "now_ts": now_ts,
     }
 

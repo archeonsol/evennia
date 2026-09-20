@@ -19,7 +19,7 @@ from django.conf import settings
 from django.utils.encoding import smart_str
 
 from evennia.utils.dbserialize import from_pickle
-from evennia.utils.utils import is_iter, lazy_property, make_iter, to_str
+from evennia.utils.utils import cached_setting, is_iter, lazy_property, make_iter, to_str
 
 # Write-behind cache: backends register here on dirty; flush_all_dirty() drains on each tick.
 _DIRTY_BACKENDS: "weakref.WeakSet" = weakref.WeakSet()
@@ -627,7 +627,7 @@ class IAttributeBackend:
 
     def _full_cache(self):
         """Cache all attributes of this object"""
-        if not settings.TYPECLASS_AGGRESSIVE_CACHE:
+        if not cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
             return
         attrs = self.query_all()
         self._cache = {
@@ -653,7 +653,7 @@ class IAttributeBackend:
         cachekey = (key, category)
         cachefound = False
         try:
-            attr = settings.TYPECLASS_AGGRESSIVE_CACHE and self._cache[cachekey]
+            attr = cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True) and self._cache[cachekey]
             cachefound = True
         except KeyError:
             attr = None
@@ -663,7 +663,7 @@ class IAttributeBackend:
             attr = None
             cachefound = False
             del self._cache[cachekey]
-        if cachefound and settings.TYPECLASS_AGGRESSIVE_CACHE:
+        if cachefound and cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
             if attr:
                 return [attr]  # return cached entity
             else:
@@ -672,14 +672,14 @@ class IAttributeBackend:
             conn = self.query_key(key, category)
             if conn:
                 attr = conn[0].attribute
-                if settings.TYPECLASS_AGGRESSIVE_CACHE:
+                if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
                     self._cache[cachekey] = attr
                 return [attr] if attr.pk else []
             else:
                 # There is no such attribute. We will explicitly save that
                 # in our cache to avoid firing another query if we try to
                 # retrieve that (non-existent) attribute again.
-                if settings.TYPECLASS_AGGRESSIVE_CACHE:
+                if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
                     self._cache[cachekey] = None
                 return []
 
@@ -693,12 +693,12 @@ class IAttributeBackend:
         Returns:
             attrs (list): The discovered Attributes.
         """
-        if settings.TYPECLASS_AGGRESSIVE_CACHE and category in self._catcache:
+        if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True) and category in self._catcache:
             return [attr for ckey, attr in self._cache.items() if ckey[1] == category and attr]
         else:
             # we have to query to make this category up-date in the cache
             attrs = self.query_category(category)
-            if settings.TYPECLASS_AGGRESSIVE_CACHE:
+            if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
                 for attr in attrs:
                     if attr.pk:
                         cachekey = (attr.key, category)
@@ -760,7 +760,7 @@ class IAttributeBackend:
             attr_obj (IAttribute): The newly saved attribute
 
         """
-        if not settings.TYPECLASS_AGGRESSIVE_CACHE:
+        if not cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
             return
         if not key:  # don't allow an empty key in cache
             return
@@ -1024,7 +1024,7 @@ class IAttributeBackend:
         Returns:
             attributes (list of IAttribute)
         """
-        if settings.TYPECLASS_AGGRESSIVE_CACHE:
+        if cached_setting("TYPECLASS_AGGRESSIVE_CACHE", True):
             if not self._cache_complete:
                 self._full_cache()
             return sorted([attr for attr in self._cache.values() if attr], key=lambda o: o.id)
