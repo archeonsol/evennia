@@ -25,6 +25,42 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.260 — Run-13 diagnostics and metric honesty
+
+### Changes
+
+- **Idmapper sweeps report active reactor time.**
+  `evennia_idmapper_flush_duration_seconds` is the sweep's wall span, which
+  includes worker round-trips and scheduling gaps; in the impolite run it read
+  415s and invited a wrong conclusion. A new
+  `evennia_idmapper_flush_active_seconds` histogram records the reactor time
+  actually spent applying turns, and `record_idmapper_flush` documents the
+  distinction. The sweep itself is unchanged: it is pressure-driven and already
+  bounded per turn.
+- **Dispatch diagnostics.** `ACTION_SUSPENSION_WARN_MS` logs the rule body that
+  holds a dispatch open past a threshold (generator and deferred suspensions),
+  and `ACTION_DISPATCH_WARN_MS` logs bridge dispatches split into parse and
+  dispatch. Both default to `0.0` (off); run 13 enables them at 5ms to
+  attribute the fixed per-command wait that a CPU profile cannot see.
+
+### Game-side (same window)
+
+- The metrics sampler records host load, available memory, and the CPU share of
+  server/portal/Redis/Postgres from `/proc` (no new dependency).
+- Harness per-kind latency percentiles pool across shards (already committed).
+
+### Tests
+
+- `evennia.actions` — 497 tests OK; targeted diagnostics/idmapper tests — 112
+  OK; sampler and harness tests — 11 OK.
+
+### Measurement context
+
+Run 12 (impolite, 4 harness shards, 100 bots): server p50 7.4ms / p99 29.8ms,
+portal 5% busy, yet rtt p50 1,105ms with `bus_outgoing_depth` averaging 72.
+The lag is server-side queueing — commands and completion markers wait behind
+the reactor's turns — not portal CPU.
+
 ## 6.0.0+underspire.259 — Allocation churn and output-path stalls
 
 ### Changes

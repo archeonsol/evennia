@@ -44,6 +44,7 @@ from django.utils.translation import gettext as _
 
 from evennia.commands.signals import on_command_error, on_command_post, on_command_pre
 from evennia.utils.command_trace import get_trace_id
+from evennia.utils.utils import cached_setting
 
 from .actor import Actor
 from .context import build_context
@@ -219,6 +220,7 @@ async def try_action_dispatch(
     """
     engine = engine or _default_engine
     parser = parser or _default_parser
+    started = time.monotonic()
     if actor is None:
         actor = Actor.from_caller(called_by, session, callertype=callertype)
 
@@ -284,7 +286,33 @@ async def try_action_dispatch(
         if stripped == CMD_LOGINSTART:
             action = LoginStartAction()
 
-    return await _dispatch_action(action, actor, raw_string, session, engine, callertype)
+    parsed = time.monotonic()
+    trace = await _dispatch_action(action, actor, raw_string, session, engine, callertype)
+    _note_slow_dispatch(raw_string, started, parsed, time.monotonic())
+    return trace
+
+
+def _note_slow_dispatch(raw_string, started, parsed, finished):
+    """Log one slow bridge dispatch when dispatch diagnostics are enabled.
+
+    ``ACTION_DISPATCH_WARN_MS`` (0.0 = off) splits the bridge into parse and
+    dispatch so a fixed per-command wait can be attributed without a profiler:
+    the completion marker measures exactly this span.
+    """
+    threshold = cached_setting("ACTION_DISPATCH_WARN_MS", 0.0)
+    if not threshold:
+        return
+    total_ms = (finished - started) * 1000.0
+    if total_ms < float(threshold):
+        return
+    from evennia.utils import logger
+
+    logger.log_warn(
+        f"action dispatch: {str(raw_string or '')[:60]!r} "
+        f"parse={(parsed - started) * 1000.0:.1f}ms "
+        f"dispatch={(finished - parsed) * 1000.0:.1f}ms "
+        f"total={total_ms:.1f}ms"
+    )
 
 
 async def _dispatch_action(action, actor, raw_string, session, engine, callertype=None):

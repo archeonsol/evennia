@@ -50,6 +50,7 @@ RUNTIME_TASKS_TOTAL = None
 RUNTIME_DB_SCOPE_CLOSES_TOTAL = None
 RUNTIME_DB_UNMANAGED_TOTAL = None
 IDMAPPER_FLUSH_DURATION_SECONDS = None
+IDMAPPER_FLUSH_ACTIVE_SECONDS = None
 IDMAPPER_FLUSH_BATCHES_TOTAL = None
 IDMAPPER_FLUSH_OBJECTS_TOTAL = None
 IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = None
@@ -90,7 +91,8 @@ def _init_metrics() -> bool:
     global ACTION_INPUT_TOTAL, ACTION_INPUT_DURATION_SECONDS
     global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
     global RUNTIME_DB_UNMANAGED_TOTAL
-    global IDMAPPER_FLUSH_DURATION_SECONDS, IDMAPPER_FLUSH_BATCHES_TOTAL
+    global IDMAPPER_FLUSH_DURATION_SECONDS, IDMAPPER_FLUSH_ACTIVE_SECONDS
+    global IDMAPPER_FLUSH_BATCHES_TOTAL
     global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
     global IDMAPPER_FLUSH_FAILURES_TOTAL
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
@@ -325,6 +327,11 @@ def _init_metrics() -> bool:
         "Wall time spent completing one automatic idmapper pressure sweep",
         buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
     )
+    IDMAPPER_FLUSH_ACTIVE_SECONDS = Histogram(
+        "evennia_idmapper_flush_active_seconds",
+        "Reactor time spent applying idmapper sweep turns (excludes worker waits)",
+        buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+    )
     IDMAPPER_FLUSH_BATCHES_TOTAL = Counter(
         "evennia_idmapper_flush_batches_total",
         "Bounded reactor turns used by automatic idmapper pressure sweeps",
@@ -374,13 +381,25 @@ def record_attribute_flush(
 
 
 def record_idmapper_flush(
-    stats: dict, *, duration_seconds: Optional[float] = None, failed: bool = False
+    stats: dict,
+    *,
+    duration_seconds: Optional[float] = None,
+    active_seconds: Optional[float] = None,
+    failed: bool = False,
 ) -> None:
-    """Record one completed or aborted automatic idmapper pressure sweep."""
+    """Record one completed or aborted automatic idmapper pressure sweep.
+
+    ``duration_seconds`` is the sweep's wall span, which includes worker
+    round-trips and scheduling gaps; ``active_seconds`` is the reactor time
+    actually spent applying turns. Compare them before treating a large wall
+    span as CPU.
+    """
     if not stats or not _init_metrics():
         return
     if duration_seconds is not None and IDMAPPER_FLUSH_DURATION_SECONDS is not None:
         IDMAPPER_FLUSH_DURATION_SECONDS.observe(max(0.0, float(duration_seconds)))
+    if active_seconds is not None and IDMAPPER_FLUSH_ACTIVE_SECONDS is not None:
+        IDMAPPER_FLUSH_ACTIVE_SECONDS.observe(max(0.0, float(active_seconds)))
     if IDMAPPER_FLUSH_BATCHES_TOTAL is not None:
         IDMAPPER_FLUSH_BATCHES_TOTAL.inc(int(stats.get("batches") or 0))
     if IDMAPPER_FLUSH_OBJECTS_TOTAL is not None:
