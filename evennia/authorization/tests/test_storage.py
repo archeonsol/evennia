@@ -20,11 +20,13 @@ from evennia.authorization.storage import (
     _worker_suppression_map,
     authorization_snapshot_scope,
     clear_authorization_caches,
+    create_principal_group,
     delegate_grant,
     ensure_authorization,
     grant_capabilities,
     grant_capability,
     issue_recovery_grant,
+    join_principal_group,
     load_grants,
     load_policy,
     load_resource,
@@ -39,6 +41,7 @@ from evennia.server.models import (
     AuthorizationAuditEvent,
     AuthorizationGrant,
     AuthorizationPolicyOverride,
+    AuthorizationScopeLabel,
 )
 from evennia.utils import clock, defer
 
@@ -333,6 +336,73 @@ class AuthorizationPrewarmTest(TransactionTestCase):
         self.assertEqual(value, 3)
         self.assertEqual(storage_module._shared_generation_cache[cache_key][1], 5)
         background.assert_called_once()
+
+    def test_inline_and_prewarm_resource_snapshots_match(self):
+        """Stored labels normalize identically on the inline and install paths."""
+
+        from evennia.authorization import storage as storage_module
+
+        resource = FakeResource()
+        AuthorizationScopeLabel.objects.create(
+            resource_ref="object:42", label=" Mixed-Case ", source="legacy"
+        )
+        try:
+            inline = load_resource(resource)
+            clear_authorization_caches()
+            _, request = _prewarm_request((), (resource,), include_labels=True)
+            _install_authorization_snapshots(_fetch_authorization_snapshots(request))
+            installed = storage_module._resource_cache["object:42"]
+            self.assertEqual(inline.labels, installed.labels)
+        finally:
+            clear_authorization_caches()
+
+    def test_inline_and_prewarm_grant_snapshots_match(self):
+        """Malformed-constraint grants are skipped identically on both paths.
+
+        Group membership must reach the installed snapshot too: an installer
+        that drops group_refs leaves a member's cached snapshot claiming no
+        group subjects, so a later group grant edit cannot invalidate it.
+        """
+
+        from evennia.authorization import storage as storage_module
+
+        principal = FakePrincipal()
+        create_principal_group("r1-eq-helpers")
+        join_principal_group("object:7", "r1-eq-helpers")
+        grant_capability(
+            "object:7",
+            "engine.object.view",
+            scope_kind="world",
+            scope_key="*",
+        )
+        grant_capability(
+            "group:r1-eq-helpers",
+            "engine.object.edit",
+            scope_kind="world",
+            scope_key="*",
+        )
+        AuthorizationGrant.objects.create(
+            grant_id="malformed-constraints",
+            principal_ref="object:7",
+            capability="engine.object.give",
+            scope_kind="world",
+            scope_key="*",
+            constraints={"room": "1"},
+        )
+        try:
+            inline = load_grants(principal)
+            clear_authorization_caches()
+            _, request = _prewarm_request((principal,), (), include_labels=True)
+            _install_authorization_snapshots(_fetch_authorization_snapshots(request))
+            installed = storage_module._principal_cache["object:7|entity:7"]
+            self.assertEqual(inline.by_capability, installed.by_capability)
+            self.assertEqual(
+                set(inline.by_capability), {"engine.object.view", "engine.object.edit"}
+            )
+            self.assertEqual(inline.group_refs, installed.group_refs)
+            self.assertEqual(inline.group_refs, frozenset({"group:r1-eq-helpers"}))
+        finally:
+            clear_authorization_caches()
 
     def test_broken_queued_item_does_not_kill_the_shared_prewarm(self):
         """A typeclass gone at build time is dropped, not raised through waiters."""

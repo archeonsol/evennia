@@ -24,7 +24,12 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from evennia.authorization.storage import _read_quell_document, load_grants
+from evennia.authorization.storage import (
+    _read_quell_document,
+    clear_authorization_caches,
+    grant_capability,
+    load_grants,
+)
 from evennia.typeclasses.jsonb_handler import AttributeUpdateUnavailable
 
 #: The stored shape of a set quell flag: default category, data section, key.
@@ -83,11 +88,24 @@ class TestOffThread(QuellTestCase):
 
     def test_load_grants_reads_the_stored_quell_instead(self):
         # The fallback must not make a suppressed principal look
-        # authoritative, so the flag still has to be seen.
+        # authoritative, so the flag still has to be seen. The live grant
+        # makes suppression observable: without the quell, the capability
+        # must be present, and with it, empty.
+        grant_capability(
+            f"account:{self.account.pk}",
+            "engine.object.view",
+            scope_kind="world",
+            scope_key="*",
+        )
+        clear_authorization_caches()
+        self.assertIn("engine.object.view", load_grants(self.account).by_capability)
         self.store_quell()
         self.assertTrue(_read_quell_document(self.account))
+        clear_authorization_caches()
         with self.handler_unavailable():
-            self.assertIsNotNone(load_grants(self.account))
+            snapshot = load_grants(self.account)
+        self.assertEqual(dict(snapshot.by_capability), {})
+        clear_authorization_caches()
 
     # Deliberately no test writes an attribute here. Attribute state is held in
     # a process-wide cache keyed by primary key, so a write inside a rolled-back

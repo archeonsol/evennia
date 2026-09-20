@@ -141,6 +141,28 @@ def _note_snapshot_miss(kind: str, key: str) -> None:
     )
 
 
+def _require_snapshot_or_miss(kind: str, key: str) -> None:
+    """Apply the snapshot-miss policy at the single read chokepoint.
+
+    Inside an active snapshot scope, a covered read that missed its local
+    snapshot is either a strict tripwire
+    (``AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR``) or a bounded warning followed by
+    the ordinary inline fallback.
+    """
+
+    if not _snapshot_scope_active():
+        return
+    if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
+        raise AuthorizationSnapshotUnavailable(f"{kind} snapshot unavailable for {key}")
+    _note_snapshot_miss(kind, key)
+
+
+def _snapshot_is_valid(generation, valid_until, current_generation: int, now_ts: float) -> bool:
+    """Return whether a cached snapshot is current and unexpired at ``now_ts``."""
+
+    return generation == current_generation and (valid_until is None or valid_until > now_ts)
+
+
 def _bounded_put(cache: OrderedDict, key, value) -> None:
     """Store one LRU entry under the global hard bound."""
 
@@ -281,6 +303,12 @@ def principal_refs(principal) -> tuple[str, ...]:
     return tuple(dict.fromkeys(refs))
 
 
+def _principal_cache_key(refs: tuple[str, ...]) -> str:
+    """Return the shared cache key for one principal's reference set."""
+
+    return "|".join(refs) or "anonymous"
+
+
 def resource_ref(resource) -> str:
     """Return a canonical generic reference for an authorization resource."""
 
@@ -379,11 +407,58 @@ def _principal_group_refs(refs) -> tuple[str, ...]:
     )
 
 
+def _grant_snapshot(
+    cache_key, rows, generation: int, suppressed: bool, group_refs=()
+) -> GrantSnapshot:
+    """Build one grant snapshot from grant-row mappings.
+
+    Rows carry ``grant_id``, ``principal_ref``, ``capability``, ``scope_kind``,
+    ``scope_key``, ``constraints``, and ``expires_at`` (a datetime or epoch
+    seconds). Both the inline loader and the prewarm installer feed rows
+    through here, so constraint validation and expiry selection cannot drift
+    between the two paths.
+    """
+
+    by_capability: dict[str, set[GrantScope]] = {}
+    valid_until = None
+    if not suppressed:
+        for grant in rows:
+            constraints = dict(grant.get("constraints") or {})
+            if set(constraints) - grant_constraint_keys() or any(
+                value is not None and not isinstance(value, (str, int, float, bool))
+                for value in constraints.values()
+            ):
+                logger.log_err(
+                    f"Ignoring malformed authorization grant {grant.get('grant_id')}: "
+                    "invalid constraints"
+                )
+                continue
+            by_capability.setdefault(grant["capability"], set()).add(
+                GrantScope(
+                    grant["principal_ref"],
+                    grant["scope_kind"],
+                    grant["scope_key"],
+                    tuple(sorted(constraints.items())),
+                )
+            )
+            expires_at = grant.get("expires_at")
+            if expires_at is not None:
+                expiry = expires_at.timestamp() if hasattr(expires_at, "timestamp") else expires_at
+                valid_until = expiry if valid_until is None else min(valid_until, expiry)
+    return GrantSnapshot(
+        cache_key,
+        {key: frozenset(values) for key, values in by_capability.items()},
+        generation,
+        valid_until,
+        frozenset(group_refs),
+    )
+
+
 def load_grants(principal) -> GrantSnapshot:
     """Load or return cached positive grants for a principal."""
 
     refs = principal_refs(principal)
-    cache_key = "|".join(refs) or "anonymous"
+    cache_key = _principal_cache_key(refs)
     cached = _principal_cache.get(cache_key)
     # Group subjects are part of the generation check so a grant edited on a
     # group invalidates every member's cached snapshot.
@@ -398,19 +473,12 @@ def load_grants(principal) -> GrantSnapshot:
         default=0,
     )
     now = timezone.now()
-    if (
-        cached is not None
-        and cached.generation == generation
-        and (cached.valid_until is None or cached.valid_until > now.timestamp())
+    if cached is not None and _snapshot_is_valid(
+        cached.generation, cached.valid_until, generation, now.timestamp()
     ):
         _principal_cache.move_to_end(cache_key)
         return cached
-    if _snapshot_scope_active():
-        if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
-            raise AuthorizationSnapshotUnavailable(
-                f"principal snapshot unavailable for {cache_key}"
-            )
-        _note_snapshot_miss("principal", cache_key)
+    _require_snapshot_or_miss("principal", cache_key)
     group_refs = _principal_group_refs(refs)
     if group_refs:
         group_generations = [
@@ -422,59 +490,20 @@ def load_grants(principal) -> GrantSnapshot:
         principal_ref__in=[*refs, *group_refs],
         revoked_at__isnull=True,
     ).filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
-    by_capability: dict[str, set[GrantScope]] = {}
-    if hasattr(type(principal), "puppeteer"):
-        authority_source = getattr(principal, "puppeteer", None) or principal
-    else:
-        authority_source = getattr(principal, "account", None) or principal
-    try:
-        authority_suppressed = bool(authority_source.attributes.get("_quell"))
-    except AttributeError:
-        authority_suppressed = False
-    except Exception:  # noqa: BLE001 - the handler is IO-owner-only
-        # Off the IO thread, building or reading the attribute handler raises.
-        # That exception used to travel into has_capability's blanket except
-        # and become "holds no capabilities at all", so every authorization
-        # decision made from a worker thread failed for a reason unrelated to
-        # authorization. Read the stored document instead.
-        authority_suppressed = _read_quell_document(authority_source)
-    valid_until = None
-    for grant in query.only(
-        "principal_ref",
-        "capability",
-        "scope_kind",
-        "scope_key",
-        "constraints",
-        "expires_at",
-    ):
-        if authority_suppressed:
-            continue
-        constraints = dict(grant.constraints or {})
-        if set(constraints) - grant_constraint_keys() or any(
-            value is not None and not isinstance(value, (str, int, float, bool))
-            for value in constraints.values()
-        ):
-            logger.log_err(
-                f"Ignoring malformed authorization grant {grant.grant_id}: invalid constraints"
-            )
-            continue
-        by_capability.setdefault(grant.capability, set()).add(
-            GrantScope(
-                grant.principal_ref,
-                grant.scope_kind,
-                grant.scope_key,
-                tuple(sorted(constraints.items())),
-            )
-        )
-        if grant.expires_at is not None:
-            expiry = grant.expires_at.timestamp()
-            valid_until = expiry if valid_until is None else min(valid_until, expiry)
-    snapshot = GrantSnapshot(
+    snapshot = _grant_snapshot(
         cache_key,
-        {key: frozenset(values) for key, values in by_capability.items()},
+        query.values(
+            "grant_id",
+            "principal_ref",
+            "capability",
+            "scope_kind",
+            "scope_key",
+            "constraints",
+            "expires_at",
+        ),
         generation,
-        valid_until,
-        frozenset(group_refs),
+        _authority_suppressed(principal),
+        group_refs,
     )
     _bounded_put(_principal_cache, cache_key, snapshot)
     return snapshot
@@ -493,6 +522,19 @@ def _computed_resource_labels(resource, ref: str) -> set[str]:
     return labels
 
 
+def _resource_snapshot(ref, base_labels, db_labels, generation: int) -> ResourceSnapshot:
+    """Build one resource snapshot from computed and stored labels.
+
+    Stored labels normalize like :func:`set_scope_labels` writes them, so the
+    snapshot is identical whether the inline loader or the prewarm installer
+    produced it.
+    """
+
+    labels = set(base_labels)
+    labels.update(str(label).strip().lower() for label in db_labels)
+    return ResourceSnapshot(ref, ref.split(":", 1)[0], frozenset(labels), generation)
+
+
 def load_resource(resource) -> ResourceSnapshot:
     """Load or return cached materialized labels for a resource."""
 
@@ -502,15 +544,13 @@ def load_resource(resource) -> ResourceSnapshot:
     if cached is not None and cached.generation == generation:
         _resource_cache.move_to_end(ref)
         return cached
-    if _snapshot_scope_active():
-        if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
-            raise AuthorizationSnapshotUnavailable(f"resource snapshot unavailable for {ref}")
-        _note_snapshot_miss("resource", ref)
-    labels = _computed_resource_labels(resource, ref)
-    labels.update(
-        AuthorizationScopeLabel.objects.filter(resource_ref=ref).values_list("label", flat=True)
+    _require_snapshot_or_miss("resource", ref)
+    snapshot = _resource_snapshot(
+        ref,
+        _computed_resource_labels(resource, ref),
+        AuthorizationScopeLabel.objects.filter(resource_ref=ref).values_list("label", flat=True),
+        generation,
     )
-    snapshot = ResourceSnapshot(ref, ref.split(":", 1)[0], frozenset(labels), generation)
     _bounded_put(_resource_cache, ref, snapshot)
     return snapshot
 
@@ -910,7 +950,7 @@ def principal_is_suspended(principal) -> bool:
     """Return active universal suspension state for a principal."""
 
     refs = principal_refs(principal)
-    cache_key = "|".join(refs) or "anonymous"
+    cache_key = _principal_cache_key(refs)
     grants = _principal_cache.get(cache_key)
     generation_refs = list(refs)
     if grants is not None:
@@ -924,19 +964,10 @@ def principal_is_suspended(principal) -> bool:
     )
     cached = _suspension_cache.get(cache_key)
     now = timezone.now()
-    if (
-        cached is not None
-        and cached[0] == generation
-        and (cached[2] is None or cached[2] > now.timestamp())
-    ):
+    if cached is not None and _snapshot_is_valid(cached[0], cached[2], generation, now.timestamp()):
         _suspension_cache.move_to_end(cache_key)
         return cached[1]
-    if _snapshot_scope_active():
-        if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
-            raise AuthorizationSnapshotUnavailable(
-                f"suspension snapshot unavailable for {cache_key}"
-            )
-        _note_snapshot_miss("suspension", cache_key)
+    _require_snapshot_or_miss("suspension", cache_key)
     row = (
         AuthorizationPrincipalState.objects.filter(
             principal_ref__in=refs,
@@ -1009,6 +1040,12 @@ def set_scope_labels(resource, labels, *, source: str = "authored") -> None:
 
 
 _GROUP_REF_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+
+
+def _policy_overrides(rows) -> dict:
+    """Build one resource's operation→policy overrides from raw ``(operation, data)`` rows."""
+
+    return {str(operation).lower(): policy_from_data(data) for operation, data in rows if data}
 
 
 def _normalize_group_ref(group_ref: str) -> str:
@@ -1308,10 +1345,7 @@ def load_policy(resource, access_type: str):
         _policy_package_cache.move_to_end(ref)
         overrides = cached[1]
     else:
-        if _snapshot_scope_active():
-            if cached_setting("AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
-                raise AuthorizationSnapshotUnavailable(f"policy snapshot unavailable for {ref}")
-            _note_snapshot_miss("policy", ref)
+        _require_snapshot_or_miss("policy", ref)
         _version, document = active_policy_bundle()
         bundle_overrides = _bundle_overrides(document, ref)
         if bundle_overrides is None:
@@ -1320,9 +1354,7 @@ def load_policy(resource, access_type: str):
             )
         else:
             rows = bundle_overrides.items()
-        overrides = {
-            str(operation).lower(): policy_from_data(data) for operation, data in rows if data
-        }
+        overrides = _policy_overrides(rows)
         _bounded_put(_policy_package_cache, ref, (generation, overrides))
     if access_key in overrides:
         return overrides[access_key]
@@ -1366,9 +1398,7 @@ def preload_policy_packages(resources) -> int:
             )
         else:
             source = (document.get(ref) or {}).items()
-        overrides = {
-            str(operation).lower(): policy_from_data(data) for operation, data in source if data
-        }
+        overrides = _policy_overrides(source)
         _bounded_put(_policy_package_cache, ref, (generation, overrides))
     return len(pending)
 
@@ -1513,7 +1543,7 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
         seen.add(id(principal))
         try:
             refs = principal_refs(principal)
-            cache_key = "|".join(refs) or "anonymous"
+            cache_key = _principal_cache_key(refs)
             generations = []
             generations_fresh = True
             for ref in refs:
@@ -1530,15 +1560,17 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
                     generations.append(value)
             generation = max(generations, default=0)
             suspension = _suspension_cache.get(cache_key)
-            grants_valid = bool(
-                grants is not None
-                and grants.generation == generation
-                and (grants.valid_until is None or grants.valid_until > now_ts)
+            grants_valid = _snapshot_is_valid(
+                grants.generation if grants is not None else None,
+                grants.valid_until if grants is not None else None,
+                generation,
+                now_ts,
             )
-            suspension_valid = bool(
-                suspension is not None
-                and suspension[0] == generation
-                and (suspension[2] is None or suspension[2] > now_ts)
+            suspension_valid = _snapshot_is_valid(
+                suspension[0] if suspension is not None else None,
+                suspension[2] if suspension is not None else None,
+                generation,
+                now_ts,
             )
             ready = ready and generations_fresh and grants_valid and suspension_valid
             principal_specs.append(
@@ -1647,13 +1679,17 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
             (generation_values.get(("principal", ref), 0) for ref in spec["refs"]),
             default=0,
         )
-        grants_stale = spec["cached_grants_generation"] != generation or (
-            spec["cached_grants_valid_until"] is not None
-            and spec["cached_grants_valid_until"] <= now_ts
+        grants_stale = not _snapshot_is_valid(
+            spec["cached_grants_generation"],
+            spec["cached_grants_valid_until"],
+            generation,
+            now_ts,
         )
-        suspension_stale = spec["cached_suspension_generation"] != generation or (
-            spec["cached_suspension_valid_until"] is not None
-            and spec["cached_suspension_valid_until"] <= now_ts
+        suspension_stale = not _snapshot_is_valid(
+            spec["cached_suspension_generation"],
+            spec["cached_suspension_valid_until"],
+            generation,
+            now_ts,
         )
         if grants_stale:
             stale_grant_refs.update(spec["refs"])
@@ -1847,40 +1883,15 @@ def _install_authorization_snapshots(result: dict) -> None:
         cache_key = item["cache_key"]
         generation = int(item["generation"])
         if item["grants_stale"]:
-            by_capability: dict[str, set[GrantScope]] = {}
-            valid_until = None
-            if not item.get("suppressed"):
-                for grant in item.get("grants", ()):
-                    constraints = dict(grant.get("constraints") or {})
-                    if set(constraints) - grant_constraint_keys() or any(
-                        value is not None and not isinstance(value, (str, int, float, bool))
-                        for value in constraints.values()
-                    ):
-                        logger.log_err(
-                            f"Ignoring malformed authorization grant {grant.get('grant_id')}: "
-                            "invalid constraints"
-                        )
-                        continue
-                    by_capability.setdefault(grant["capability"], set()).add(
-                        GrantScope(
-                            grant["principal_ref"],
-                            grant["scope_kind"],
-                            grant["scope_key"],
-                            tuple(sorted(constraints.items())),
-                        )
-                    )
-                    expiry = grant.get("expires_at")
-                    if expiry is not None:
-                        valid_until = expiry if valid_until is None else min(valid_until, expiry)
             _bounded_put(
                 _principal_cache,
                 cache_key,
-                GrantSnapshot(
+                _grant_snapshot(
                     cache_key,
-                    {key: frozenset(values) for key, values in by_capability.items()},
+                    item.get("grants", ()),
                     generation,
-                    valid_until,
-                    frozenset(item.get("group_refs", ())),
+                    bool(item.get("suppressed")),
+                    item.get("group_refs", ()),
                 ),
             )
         if item["suspension_stale"]:
@@ -1893,23 +1904,21 @@ def _install_authorization_snapshots(result: dict) -> None:
         ref = item["ref"]
         generation = int(item["generation"])
         if item["resource_stale"]:
-            labels = set(item.get("base_labels", ()))
-            labels.update(str(label).strip().lower() for label in item.get("labels", ()))
             _bounded_put(
                 _resource_cache,
                 ref,
-                ResourceSnapshot(ref, ref.split(":", 1)[0], frozenset(labels), generation),
+                _resource_snapshot(
+                    ref, item.get("base_labels", ()), item.get("labels", ()), generation
+                ),
             )
         if item["policy_stale"]:
-            overrides = {
-                str(operation).lower(): policy_from_data(data)
-                for operation, data in item.get("policies", ())
-                if data
-            }
             _bounded_put(
                 _policy_package_cache,
                 ref,
-                (int(item.get("policy_generation", generation)), overrides),
+                (
+                    int(item.get("policy_generation", generation)),
+                    _policy_overrides(item.get("policies", ())),
+                ),
             )
 
 
