@@ -84,6 +84,43 @@ class TestLoginVeto(TestCase):
         manager.disconnect.assert_called_once_with(session, reason="Login refused.")
 
 
+class TestDuplicateKick(TestCase):
+    """A MODE 0 duplicate kick must tell the resumable shell too.
+
+    Without the ``logout`` OOB the kicked webclient reads the close as a drop,
+    auto-reconnects, and browser-session auto-login re-hits the kick, so the
+    two tabs ping-pong the duplicate disconnect forever.
+    """
+
+    def test_kick_sends_logout_before_disconnecting_each_doublet(self):
+        handler = ServerSessionHandler()
+        manager = Mock()
+        doublet = Mock(sessid=2, uid=1, logged_in=True)
+        curr = Mock(sessid=3, uid=1, logged_in=True)
+        logged_out = Mock(sessid=4, uid=1, logged_in=False)
+        other = Mock(sessid=5, uid=2, logged_in=True)
+        for session in (doublet, curr, logged_out, other):
+            handler[session.sessid] = session
+        for session in (doublet, curr, logged_out, other):
+            session.msg.side_effect = lambda manager=manager, **kw: manager.msg(**kw)
+        with patch.object(
+            handler,
+            "disconnect",
+            side_effect=lambda *a, **kw: manager.disconnect(*a, **kw),
+        ):
+            handler.disconnect_duplicate_sessions(curr)
+        names = [c[0] for c in manager.mock_calls if c[0]]
+        self.assertEqual(names, ["msg", "disconnect"])
+        manager.msg.assert_called_once_with(logout=("logged in from elsewhere",))
+        args, kwargs = manager.disconnect.call_args
+        self.assertEqual(args[0], doublet)
+        self.assertIn("elsewhere", "".join(map(str, args[1:])) + str(kwargs.get("reason", "")))
+        doublet.msg.assert_called_once_with(logout=("logged in from elsewhere",))
+        curr.msg.assert_not_called()
+        logged_out.msg.assert_not_called()
+        other.msg.assert_not_called()
+
+
 class TestOutputOrder(TestCase):
     """Coalescing preserves order and the options of each text run."""
 

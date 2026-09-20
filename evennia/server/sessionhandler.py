@@ -858,6 +858,10 @@ class ServerSessionHandler(SessionHandler):
         ]
 
         for session in doublet_sessions:
+            # A bare close reads as a drop: the resumable shell reconnects and
+            # browser-session auto-login re-hits this kick. The logout OOB
+            # stops the reconnect; disconnect flushes it before closing.
+            session.msg(logout=("logged in from elsewhere",))
             self.disconnect(session, reason)
 
     def account_count(self):
