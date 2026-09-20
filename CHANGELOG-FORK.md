@@ -25,6 +25,56 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.253 — Authorization invalidation hot-path fixes
+
+### Performance
+
+- **Movement no longer invalidates authorization facts that did not change.**
+  [`ResourceAdapter`](evennia/authorization/resources.py) gains
+  `location_sensitive` (default `False`), and
+  [`bump_resource_generation_after_move`](evennia/authorization/storage.py)
+  invalidates only when a matching adapter derives labels from location.
+  Run 6 recorded 4,157 moves whose unconditional resource bumps kept the
+  prewarm barrier refetching occupant snapshots it already had; with this
+  game's empty adapter registry those labels are stable, so the churn
+  disappears. Adapter lookup failures fail safe by invalidating.
+- **Destination prewarm expands only resolved action targets.**
+  [`_authorization_resources`](evennia/actions/dispatch.py) previously scanned
+  every provider for a `destination`, so ordinary `say`, `inventory`, and
+  `who` commands warmed every exit in the source room, every adjacent room,
+  and their occupants. Only a resolved target (the `Move` exit, a
+  `GameObject`-typed action field) expands now; arrival hooks and the
+  automatic destination look stay snapshot-only.
+
+### Correctness
+
+- **Prewarm completion is authoritative.**
+  [`prewarm_authorization`](evennia/authorization/storage.py) checks readiness
+  after the final bounded refresh instead of returning `False`
+  unconditionally, and [`dispatch`](evennia/actions/dispatch.py) enters the
+  snapshot scope only when prewarm succeeds. On failure the command evaluates
+  through the ordinary read path rather than consuming possibly stale
+  snapshots.
+
+### Observability
+
+- New counters `evennia_authorization_move_invalidation_total{outcome}` and
+  `evennia_authorization_snapshot_scope_fallback_total`. Run 6's prewarm
+  traffic (213 `ready`, 11,804 `waited`, 2,890 `failed`) should collapse to
+  ready-dominated with fallbacks at zero; these metrics prove it.
+
+### Migration
+
+- No database migration or setting change. Games with resource adapters whose
+  labels derive from location or containment must set
+  `location_sensitive=True` (see
+  [Authorization](docs/source/Components/Authorization.md)).
+
+### Tests
+
+- Engine sweep green: `evennia.authorization`, `evennia.actions`,
+  `evennia.objects`, and `evennia.server` — 1291 tests (18 expected skips).
+
 ## 6.0.0+underspire.252 — Reactor hot-path follow-up
 
 ### Performance
