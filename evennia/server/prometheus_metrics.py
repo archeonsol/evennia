@@ -506,9 +506,10 @@ def record_bus_incoming_wait(seconds: float) -> None:
         BUS_INCOMING_WAIT_SECONDS.observe(max(0.0, float(seconds)))
 
 
-def record_bus_publish() -> None:
+def record_bus_publish(count: int = 1) -> None:
+    """Count published bus frames in one increment."""
     if _init_metrics() and BUS_PUBLISHED_TOTAL is not None:
-        BUS_PUBLISHED_TOTAL.inc()
+        BUS_PUBLISHED_TOTAL.inc(count)
 
 
 def record_bus_reject(reason: str) -> None:

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from django.conf import settings
 
+from evennia.server import prometheus_metrics
 from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.utils import clock, logger
 
@@ -19,6 +20,8 @@ DATA_BYTES = 48 * 1024 * 1024
 OUTGOING_WARN_THRESHOLD = 200
 OUTGOING_WARN_INTERVAL = 60.0
 MAX_FRAME_BYTES = 8 * 1024 * 1024
+STREAM_MAXLEN = 10000
+MULTICAST_MAX_SESSIDS = 1024
 STOP_TIMEOUT = 3.0
 WAIT = 0.1
 WRITE_BATCH_SIZE = 64
@@ -29,27 +32,57 @@ CAPACITY_EXHAUSTED = "transport capacity exhausted"
 READ_BATCH = 32
 
 
-def _bus_metrics():
-    """Best-effort bus metrics accessor; never raises on a hot path."""
-    try:
-        from evennia.server import prometheus_metrics
-
-        return prometheus_metrics
-    except Exception:
-        return None
-
-
 def _bus_limit(setting_name, fallback):
-    """Resolve a bus limit: an explicit setting wins, else the module constant.
-
-    Reading the module constant at call time keeps the existing tests' patching
-    of module-level limits authoritative while deployments can tune the caps
-    without a code change.
-    """
+    """Resolve one bus limit: an explicit setting wins, else the module constant."""
     value = getattr(settings, setting_name, None)
     if value is None:
         return int(fallback)
     return max(1, int(value))
+
+
+@dataclass(frozen=True)
+class BusLimits:
+    """All bus caps for one operation, resolved from settings or constants."""
+
+    max_entries: int
+    max_bytes: int
+    data_entries: int
+    data_bytes: int
+    write_batch: int
+    read_batch: int
+    frame_bytes: int
+    stream_maxlen: int
+    multicast_chunk: int
+    warn_threshold: int
+    warn_interval: float
+
+    def limit_pair(self, control):
+        """Return the count and byte caps for one traffic class."""
+        if control:
+            return self.max_entries, self.max_bytes
+        return self.data_entries, self.data_bytes
+
+
+def resolve_limits():
+    """Resolve every bus cap once into one object.
+
+    Reading the module constants at call time keeps tests' patching of
+    module-level limits authoritative while deployments tune the six
+    settings-backed caps without a code change.
+    """
+    return BusLimits(
+        max_entries=_bus_limit("REDIS_BUS_MAX_ENTRIES", MAX_ENTRIES),
+        max_bytes=_bus_limit("REDIS_BUS_MAX_BYTES", MAX_BYTES),
+        data_entries=_bus_limit("REDIS_BUS_DATA_ENTRIES", DATA_ENTRIES),
+        data_bytes=_bus_limit("REDIS_BUS_DATA_BYTES", DATA_BYTES),
+        write_batch=_bus_limit("REDIS_BUS_WRITE_BATCH", WRITE_BATCH_SIZE),
+        read_batch=_bus_limit("REDIS_BUS_READ_BATCH", READ_BATCH),
+        frame_bytes=int(MAX_FRAME_BYTES),
+        stream_maxlen=int(STREAM_MAXLEN),
+        multicast_chunk=int(MULTICAST_MAX_SESSIDS),
+        warn_threshold=int(OUTGOING_WARN_THRESHOLD),
+        warn_interval=float(OUTGOING_WARN_INTERVAL),
+    )
 
 
 def encode_pair(pair):
@@ -224,23 +257,15 @@ class RedisTransport:
         reason = None
         warning = None
         with self._condition:
+            limits = resolve_limits()
             if self._stop.is_set() or not self.online:
                 reason = "transport unavailable"
-            elif len(data) > MAX_FRAME_BYTES:
+            elif len(data) > limits.frame_bytes:
                 reason = "encoded frame exceeds transport limit"
             else:
                 count = len(self._outgoing)
                 size = self._outgoing_bytes
-                count_limit = (
-                    _bus_limit("REDIS_BUS_MAX_ENTRIES", MAX_ENTRIES)
-                    if control
-                    else _bus_limit("REDIS_BUS_DATA_ENTRIES", DATA_ENTRIES)
-                )
-                byte_limit = (
-                    _bus_limit("REDIS_BUS_MAX_BYTES", MAX_BYTES)
-                    if control
-                    else _bus_limit("REDIS_BUS_DATA_BYTES", DATA_BYTES)
-                )
+                count_limit, byte_limit = limits.limit_pair(control)
                 if count >= count_limit or size + frame.size > byte_limit:
                     reason = CAPACITY_EXHAUSTED
                 else:
@@ -251,24 +276,22 @@ class RedisTransport:
                     self._condition.notify_all()
                     count += 1
                     size += frame.size
-                if count > OUTGOING_WARN_THRESHOLD:
+                if count > limits.warn_threshold:
                     now = time.monotonic()
                     if now >= self._next_outgoing_warning:
-                        self._next_outgoing_warning = now + OUTGOING_WARN_INTERVAL
+                        self._next_outgoing_warning = now + limits.warn_interval
                         warning = (
                             f"redis bus: outgoing queue pressure stream={stream} "
                             f"pending={count} bytes={size} "
-                            f"data_limit={_bus_limit('REDIS_BUS_DATA_ENTRIES', DATA_ENTRIES)}"
+                            f"data_limit={limits.data_entries}"
                         )
         if warning:
             logger.log_warn(warning)
         if reason:
-            metrics = _bus_metrics()
-            if metrics is not None:
-                try:
-                    metrics.record_bus_reject(reason)
-                except Exception as err:
-                    logger.log_warn(f"redis bus: reject telemetry failed: {err}")
+            try:
+                prometheus_metrics.record_bus_reject(reason)
+            except Exception as err:
+                logger.log_warn(f"redis bus: reject telemetry failed: {err}")
             if control and self.online and reason != CAPACITY_EXHAUSTED:
                 self.fail(reason)
             return PublicationResult.rejected(TransportUnavailable(reason))
@@ -344,7 +367,7 @@ class RedisTransport:
     def _take_write_batch(self):
         """Reserve up to one batch of frames for a single Redis round trip."""
         batch = []
-        batch_size = _bus_limit("REDIS_BUS_WRITE_BATCH", WRITE_BATCH_SIZE)
+        batch_size = resolve_limits().write_batch
         with self._condition:
             if not self.online or not (self._handshakes or (self._ready and self._ordinary)):
                 self._condition.wait(WAIT)
@@ -385,10 +408,11 @@ class RedisTransport:
     def _write_batch(self, batch):
         """Publish one batch through one pipeline and settle it on the loop."""
         responses = None
+        limits = resolve_limits()
         try:
             pipeline = self._client.pipeline(transaction=False)
             for _key, frame, fields in batch:
-                pipeline.xadd(frame.stream, fields, maxlen=10000, approximate=True)
+                pipeline.xadd(frame.stream, fields, maxlen=limits.stream_maxlen, approximate=True)
             responses = pipeline.execute(raise_on_error=False)
         except Exception as caught:
             responses = [caught] * len(batch)
@@ -420,17 +444,14 @@ class RedisTransport:
                 f"redis bus: {failed}/{len(batch)} XADD commands failed: {first_error!r}"
             )
             self.fail("Redis publication failed")
-        metrics = _bus_metrics()
-        if metrics is not None:
-            try:
-                with self._condition:
-                    depth, size = len(self._outgoing), self._outgoing_bytes
-                metrics.observe_bus_queue(depth, size)
-                metrics.record_bus_write_batch(len(batch))
-                for _ in range(published):
-                    metrics.record_bus_publish()
-            except Exception as err:
-                logger.log_warn(f"redis bus: write telemetry failed: {err}")
+        try:
+            with self._condition:
+                depth, size = len(self._outgoing), self._outgoing_bytes
+            prometheus_metrics.observe_bus_queue(depth, size)
+            prometheus_metrics.record_bus_write_batch(len(batch))
+            prometheus_metrics.record_bus_publish(published)
+        except Exception as err:
+            logger.log_warn(f"redis bus: write telemetry failed: {err}")
 
     def _complete_many(self, completions):
         """Settle one published batch on the event loop in publication order."""
@@ -439,8 +460,9 @@ class RedisTransport:
 
     def _admit_incoming(self, fields):
         """Bound callback payloads and reject stale negotiated pairs at admission."""
+        limits = resolve_limits()
         command, data = fields.get(b"c"), fields.get(b"d")
-        if command is None or data is None or len(data) > MAX_FRAME_BYTES:
+        if command is None or data is None or len(data) > limits.frame_bytes:
             self.fail("invalid or oversized stream payload")
             return
         handshake = command == b"BusHandshake"
@@ -450,16 +472,7 @@ class RedisTransport:
             if not self.online or (not handshake and fields.get(b"g", b"") != self._pair):
                 return
             control = handshake or command.startswith((b"Admin", b"Bus"))
-            count_limit = (
-                _bus_limit("REDIS_BUS_MAX_ENTRIES", MAX_ENTRIES)
-                if control
-                else _bus_limit("REDIS_BUS_DATA_ENTRIES", DATA_ENTRIES)
-            )
-            byte_limit = (
-                _bus_limit("REDIS_BUS_MAX_BYTES", MAX_BYTES)
-                if control
-                else _bus_limit("REDIS_BUS_DATA_BYTES", DATA_BYTES)
-            )
+            count_limit, byte_limit = limits.limit_pair(control)
             full = (
                 len(self._incoming) + bool(self._incoming_active) >= count_limit
                 or self._incoming_bytes + size > byte_limit
@@ -491,7 +504,6 @@ class RedisTransport:
         server→portal output latency seen from the portal), the gap a saturated
         reactor opens without showing up in any per-command timer.
         """
-        metrics = _bus_metrics()
         for _ in range(32):
             with self._lock:
                 if not self._incoming:
@@ -503,9 +515,11 @@ class RedisTransport:
                 valid = valid and (command == b"BusHandshake" or pair == self._pair)
                 depth = len(self._incoming) + bool(self._incoming_active)
                 pending_bytes = self._incoming_bytes
-            if metrics is not None:
-                metrics.observe_bus_incoming_queue(depth, pending_bytes)
-                metrics.record_bus_incoming_wait(time.monotonic() - admitted_at)
+            try:
+                prometheus_metrics.observe_bus_incoming_queue(depth, pending_bytes)
+                prometheus_metrics.record_bus_incoming_wait(time.monotonic() - admitted_at)
+            except Exception as err:
+                logger.log_warn(f"redis bus: incoming telemetry failed: {err}")
             try:
                 if valid:
                     self._on_frame(command, data)
@@ -567,7 +581,7 @@ class RedisTransport:
                     continue
                 response = self._client.xread(
                     {self._read_stream: self._cursor},
-                    count=_bus_limit("REDIS_BUS_READ_BATCH", READ_BATCH),
+                    count=resolve_limits().read_batch,
                     block=250,
                 )
                 for _stream, entries in response or []:

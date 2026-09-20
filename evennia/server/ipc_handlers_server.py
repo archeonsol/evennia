@@ -89,14 +89,17 @@ def send_msgserver2portal(link, session, **kwargs):
 
 def send_msgserver2portal_many(link, sessids, **kwargs):
     """Publish one final output frame for several Portal sessions."""
-    from evennia.server.redis_transport import MAX_FRAME_BYTES
+    from evennia.server import redis_transport
 
+    limits = redis_transport.resolve_limits()
     results = []
     sessids = list(sessids)
-    for start in range(0, len(sessids), 1024):
-        chunk = sessids[start : start + 1024]
+    for start in range(0, len(sessids), limits.multicast_chunk):
+        chunk = sessids[start : start + limits.multicast_chunk]
         packed = amp.dumps_multicast((chunk, kwargs))
-        if len(packed) > MAX_FRAME_BYTES:
+        if len(packed) > limits.frame_bytes:
+            # The transport's own admission would reject this chunk; delivering
+            # it per session degrades grouping instead of dropping the output.
             results.extend(
                 data_to_portal(link, amp.MsgServer2Portal, sessid, **kwargs) for sessid in chunk
             )
