@@ -1142,6 +1142,33 @@ def validate_email_address(emailaddress):
         return True
 
 
+_CLASS_MRO_PATHS: dict[type, tuple[str, ...]] = {}
+
+
+def _class_mro_paths(cls) -> tuple[str, ...]:
+    """
+    Return the module-qualified path tuple for one class MRO.
+
+    The MRO of a class is immutable for the lifetime of the class object, so
+    this is a pure memoization with no invalidation story: a redefined class
+    is a new key. It keeps `inherits_from` off the string-formatting and MRO
+    walk on repeat calls (the function is called per visible object in look
+    rendering).
+
+    Args:
+        cls (type): The class whose MRO paths to return.
+
+    Returns:
+        tuple: Module-qualified ``"module.Class"`` paths, closest first.
+
+    """
+    paths = _CLASS_MRO_PATHS.get(cls)
+    if paths is None:
+        paths = tuple("%s.%s" % (mod.__module__, mod.__name__) for mod in cls.mro())
+        _CLASS_MRO_PATHS[cls] = paths
+    return paths
+
+
 def inherits_from(obj, parent):
     """
     Takes an object and tries to determine if it inherits at *any*
@@ -1164,9 +1191,9 @@ def inherits_from(obj, parent):
 
     if callable(obj):
         # this is a class
-        obj_paths = ["%s.%s" % (mod.__module__, mod.__name__) for mod in obj.mro()]
+        obj_paths = _class_mro_paths(obj)
     else:
-        obj_paths = ["%s.%s" % (mod.__module__, mod.__name__) for mod in obj.__class__.mro()]
+        obj_paths = _class_mro_paths(obj.__class__)
 
     if isinstance(parent, str):
         # a given string path, for direct matching

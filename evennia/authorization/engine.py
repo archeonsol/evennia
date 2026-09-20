@@ -248,6 +248,34 @@ def _setting_enabled(context, params):
 register_predicate_provider("setting.enabled", _setting_enabled)
 
 
+def _controller_ref(obj):
+    """Return the controlling account and its pk for one object, without FK loads.
+
+    The live puppeteer comes from in-memory session state; the durable owner is
+    read from the foreign-key id column so an unloaded ``.account`` never
+    fetches the related row. Duck-typed principals without the id column (test
+    doubles, account objects) keep the historical attribute lookups.
+
+    Args:
+        obj (any): The principal or protected resource to resolve.
+
+    Returns:
+        tuple: ``(account_or_none, pk_or_none)``.
+
+    """
+
+    account = getattr(obj, "puppeteer", None)
+    if account is not None:
+        return account, getattr(account, "pk", None)
+    if "account" in obj.__class__.__module__.lower():
+        return obj, getattr(obj, "pk", None)
+    owner_pk = getattr(obj, "db_account_id", None)
+    if owner_pk is not None:
+        return None, owner_pk
+    account = getattr(obj, "account", None)
+    return account, getattr(account, "pk", None)
+
+
 def _principal_controls_resource(context, params):
     """Return whether the principal is the resource's active controller."""
 
@@ -255,19 +283,11 @@ def _principal_controls_resource(context, params):
     resource = context.resource
     if principal is resource:
         return True
-    principal_account = (
-        getattr(principal, "puppeteer", None)
-        or getattr(principal, "account", None)
-        or (principal if "account" in principal.__class__.__module__.lower() else None)
-    )
-    resource_account = getattr(resource, "puppeteer", None) or getattr(resource, "account", None)
-    if principal_account is None or resource_account is None:
-        return False
-    principal_account_pk = getattr(principal_account, "pk", None)
-    resource_account_pk = getattr(resource_account, "pk", None)
-    if principal_account_pk is not None and resource_account_pk is not None:
-        return principal_account_pk == resource_account_pk
-    return principal_account is resource_account
+    principal_account, principal_pk = _controller_ref(principal)
+    resource_account, resource_pk = _controller_ref(resource)
+    if principal_pk is None or resource_pk is None:
+        return principal_account is not None and principal_account is resource_account
+    return principal_pk == resource_pk
 
 
 register_predicate_provider("principal.controls_resource", _principal_controls_resource)

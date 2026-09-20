@@ -65,6 +65,30 @@ class TestIsVeto(TestCase):
             self.assertFalse(utils.is_veto(value), f"{value!r} should not veto")
 
 
+class TestInheritsFromMemoization(TestCase):
+    """inherits_from memoizes class MRO paths without changing answers."""
+
+    def test_repeat_calls_keep_their_answers(self):
+        class Parent:
+            pass
+
+        class Child(Parent):
+            pass
+
+        self.assertTrue(utils.inherits_from(Child(), Parent))
+        self.assertTrue(utils.inherits_from(Child(), Parent))
+        self.assertFalse(utils.inherits_from(Parent(), Child))
+        self.assertTrue(utils.inherits_from(Child(), "evennia.utils.tests.test_utils.Parent"))
+
+    def test_cache_is_keyed_by_the_class_object(self):
+        class Marker:
+            pass
+
+        utils.inherits_from(Marker(), object)
+
+        self.assertIn(Marker, utils._CLASS_MRO_PATHS)
+
+
 class TestResolveTransform(TestCase):
     """resolve_transform: None falls back to original; other values pass through."""
 
