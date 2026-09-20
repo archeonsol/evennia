@@ -606,5 +606,74 @@ class TestGatedSuggestions(unittest.TestCase):
         self.assertEqual(res.action.suggestions, [])
 
 
+class TestPrefixSuggestions(unittest.TestCase):
+    """An ambiguous prefix offers the candidates the player was abbreviating,
+    ranked by the parser's own abbreviation confidence (shortest verb first),
+    before falling back to fuzzy edit-distance matches."""
+
+    def test_ambiguous_prefix_offers_candidates(self):
+        res = _phrase_parser().parse("jac", _actor())
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertIn("jack in", res.action.suggestions)
+        self.assertIn("jackin", res.action.suggestions)
+        self.assertEqual(len(res.action.suggestions), 3)
+
+    def test_candidates_rank_shortest_first(self):
+        res = _phrase_parser().parse("gra", _actor())
+        # Prefix candidates lead (shortest first); fuzzy matches top up the limit.
+        self.assertEqual(res.action.suggestions[:2], ["grapple", "grapple throw"])
+
+    def test_single_char_token_prefers_prefix_candidates(self):
+        # "s" is ambiguous across word verbs and must offer them, not the
+        # one-character symbol aliases.
+        reg = ActionRegistry()
+        reg.register(Speak, ("say", '"', "'"))
+        reg.register(Emit, (".", ","))
+        reg.register(Punch, ("sit",))
+        res = ActionParser(registry=reg).parse("s", _actor())
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertEqual(res.action.suggestions, ["say", "sit"])
+
+    def test_single_char_garbage_yields_no_suggestions(self):
+        res = ActionParser(registry=_symbol_registry()).parse("z", _actor())
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertEqual(res.action.suggestions, [])
+
+    def test_prefix_suggestions_are_capped(self):
+        @dataclass
+        class _Any(Action):
+            pass
+
+        reg = ActionRegistry()
+        reg.register(_Any, ("aa", "ab", "ac", "ad", "ae"))
+        res = ActionParser(registry=reg).parse("a", _actor())
+        self.assertEqual(res.action.suggestions, ["aa", "ab", "ac"])
+
+    def test_prefix_and_fuzzy_are_deduplicated(self):
+        @dataclass
+        class _Loom(Action):
+            pass
+
+        @dataclass
+        class _Lookat(Action):
+            pass
+
+        reg = ActionRegistry()
+        reg.register(Look, ("look",))
+        reg.register(_Loom, ("loom",))
+        reg.register(_Lookat, ("lookat",))
+        res = ActionParser(registry=reg).parse("loo", _actor())
+        self.assertEqual(res.action.suggestions, ["look", "loom", "lookat"])
+
+    def test_gated_prefix_candidate_hidden_from_ungated_actor(self):
+        res = _gated_parser().parse("@", _gated_actor(perms=("Player",)))
+        self.assertIsInstance(res.action, NoMatchAction)
+        self.assertNotIn("@dig", res.action.suggestions)
+
+    def test_gated_prefix_candidate_shown_when_gate_passes(self):
+        res = _gated_parser().parse("@", _gated_actor(perms=("engine.world.build",)))
+        self.assertIn("@dig", res.action.suggestions)
+
+
 if __name__ == "__main__":
     unittest.main()

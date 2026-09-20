@@ -69,6 +69,14 @@ def _reference_suggest(reg, token, max_dist=2, limit=3, reachable=None):
     return out
 
 
+def _effective_max_dist(token, max_dist):
+    """The registry's documented bound: a token cannot be corrected by more
+    edits than it has characters (``len(token) - 1``), for ``max_dist > 0``."""
+    if max_dist > 0:
+        return min(max_dist, len(token) - 1)
+    return max_dist
+
+
 def _parity_filter(verb, _cls):
     """Deterministic reachable filter for parity runs."""
     return sum(ord(ch) for ch in verb) % 3 != 0
@@ -128,7 +136,8 @@ class TestSuggestVerbsParity(unittest.TestCase):
             for limit in (1, 3, 5):
                 for reachable in (None, _parity_filter):
                     for token in self.tokens:
-                        expected = _reference_suggest(self.reg, token, max_dist, limit, reachable)
+                        effective = _effective_max_dist(token, max_dist)
+                        expected = _reference_suggest(self.reg, token, effective, limit, reachable)
                         got = self.reg.suggest_verbs(
                             token, max_dist=max_dist, limit=limit, reachable=reachable
                         )
@@ -143,12 +152,22 @@ class TestSuggestVerbsParity(unittest.TestCase):
         self.assertNotIn("__noinput__", out)
         self.assertNotIn("__nomatch__", out)
 
-    def test_empty_token_matches_reference(self):
+    def test_empty_token_yields_no_suggestions(self):
         for max_dist in (0, 1, 2, 3, 4):
-            self.assertEqual(
-                self.reg.suggest_verbs("", max_dist=max_dist),
-                _reference_suggest(self.reg, "", max_dist),
-            )
+            self.assertEqual(self.reg.suggest_verbs("", max_dist=max_dist), [])
+
+    def test_short_token_distance_cap(self):
+        reg = ActionRegistry()
+        reg.register(_Verb, ("b", "ab", "abc"))
+        # One character carries no information to correct: cap = len - 1 = 0,
+        # so unrelated one-character verbs are never suggested.
+        self.assertEqual(reg.suggest_verbs("a"), [])
+        # Two characters admit exactly one edit.
+        out = reg.suggest_verbs("ab")
+        self.assertIn("b", out)
+        self.assertIn("abc", out)
+        # An explicit larger bound is still capped by the token length.
+        self.assertEqual(reg.suggest_verbs("a", max_dist=5), [])
 
     def test_limit_zero_and_negative_match_reference(self):
         for limit in (0, -1):

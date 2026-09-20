@@ -13,6 +13,7 @@ re-merge (the Gate 1 "cache-free" decision is about the *cross-object* merge tha
 cmdsets did; this is a tiny per-class index, not that).
 """
 
+from collections import deque
 from dataclasses import dataclass
 
 from .exceptions import RuleConflict
@@ -146,13 +147,40 @@ class VerbTrie:
         return node
 
     def _leaves(self, node):
-        """All ``(verb, cls)`` reachable at or below ``node``."""
+        """All ``(verb, cls)`` reachable at or below ``node``.
+
+        Iterative depth-first walk (recursion paid a function call per node on
+        a wide single-character subtree); the order of the returned leaves is
+        unspecified.
+        """
         out = []
-        if node["verb"] is not None:
-            out.append((node["verb"], node["cls"]))
-        for child in node["children"].values():
-            out.extend(self._leaves(child))
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if current["verb"] is not None:
+                out.append((current["verb"], current["cls"]))
+            stack.extend(current["children"].values())
         return out
+
+    def iter_leaves_ranked(self, token: str):
+        """Yield ``(verb, cls)`` leaves under ``token`` in rank order.
+
+        Rank is the parser's abbreviation confidence — shortest verb first,
+        lexicographic within a length — produced by a breadth-first walk with
+        each node's children visited in sorted order. The walk is lazy, so a
+        caller that stops after a few results never materializes a wide
+        subtree (a one-character prefix can cover dozens of verbs).
+        """
+        node = self._descend(token)
+        if node is None:
+            return
+        queue = deque([node])
+        while queue:
+            current = queue.popleft()
+            if current["verb"] is not None:
+                yield current["verb"], current["cls"]
+            for char in sorted(current["children"]):
+                queue.append(current["children"][char])
 
     def match(self, token: str):
         """Resolve ``token`` to ``(verb, action_cls, confidence)``.
@@ -198,7 +226,11 @@ class VerbTrie:
         return out
 
     def prefix_candidates(self, token: str):
-        """All verbs that have ``token`` as a prefix (for disambiguation msgs)."""
+        """All verbs that have ``token`` as a prefix.
+
+        The parser uses this to offer the candidates a player was abbreviating
+        when an ambiguous prefix fails to resolve.
+        """
         node = self._descend(token)
         if node is None:
             return []
@@ -469,9 +501,16 @@ class ActionRegistry:
         :data:`_SUGGEST_INDEX_MAX_DIST` fall back to the exact linear scan,
         because index size grows as ``O(V * L**max_dist)``.
 
+        The effective bound is also capped at ``len(token) - 1`` when
+        ``max_dist > 0``: a token cannot be corrected by more edits than it has
+        characters, so one-character input never pulls in unrelated
+        one-character verbs (aliases and punctuation syntax) and two-character
+        input admits a single edit. Longer tokens are unaffected.
+
         Args:
             token (str): the mistyped verb.
-            max_dist (int): maximum edit distance to consider.
+            max_dist (int): maximum edit distance to consider (upper bound;
+                the effective bound is also capped by the token length).
             limit (int): maximum number of suggestions returned.
             reachable (callable, optional): ``(verb, action_cls) -> bool``
                 filter applied *during* the closest-first walk, so a rejected
@@ -481,6 +520,8 @@ class ActionRegistry:
                 dispatch boundary).
         """
         token = token.lower()
+        if max_dist > 0:
+            max_dist = min(max_dist, len(token) - 1)
         scored = []
         if max_dist >= 0:
             if max_dist <= _SUGGEST_INDEX_MAX_DIST:

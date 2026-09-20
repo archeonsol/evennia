@@ -341,6 +341,26 @@ class TestVerbTrieLeafScan(unittest.TestCase):
     def test_prefix_candidates_still_returns_all(self):
         self.assertEqual(sorted(self._trie().prefix_candidates("loo")), ["look", "lookat"])
 
+    def test_ranked_iteration_shortest_first_then_lexicographic(self):
+        trie = VerbTrie()
+        for verb in ("dice", "don", "deck", "do", "d"):
+            trie.insert(verb, _Kick)
+        self.assertEqual(
+            [verb for verb, _ in trie.iter_leaves_ranked("d")],
+            ["d", "do", "don", "deck", "dice"],
+        )
+        self.assertEqual(list(trie.iter_leaves_ranked("zz")), [])
+
+    def test_ranked_iteration_handles_multiword(self):
+        trie = VerbTrie()
+        trie.insert("go", _Kick)
+        trie.insert("go shard", _Look)
+        trie.insert("gossip", _Look)
+        self.assertEqual(
+            [verb for verb, _ in trie.iter_leaves_ranked("g")],
+            ["go", "gossip", "go shard"],
+        )
+
 
 class TestNoSpacePrefixCache(unittest.TestCase):
     """The combined symbol+glued verb tuple is cached but must invalidate on

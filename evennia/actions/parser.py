@@ -44,6 +44,9 @@ __all__ = [
     "DynamicVerbResolver",
 ]
 
+#: Maximum suggestions offered on a no-match (prefix candidates + fuzzy).
+_SUGGESTION_LIMIT = 3
+
 
 @runtime_checkable
 class DynamicVerbResolver(Protocol):
@@ -294,17 +297,58 @@ class ActionParser:
             confidence=confidence,
         )
 
+    def _prefix_suggestions(self, verb, actor):
+        """Ambiguous-prefix candidates for ``verb``, ranked by abbreviation
+        confidence (shortest verb first, matching ``len(token) / len(verb)``).
+
+        A unique prefix already resolves in :meth:`parse`; when a prefix is
+        ambiguous the parser holds the candidate set the player was
+        abbreviating, so that set leads the suggestions. Gated verbs are
+        filtered by the same fail-closed reachability check as fuzzy matches.
+        """
+        if not verb:
+            return []
+        out = []
+        if actor is None:
+            for candidate, _cls in self._registry.trie.iter_leaves_ranked(verb):
+                out.append(candidate)
+                if len(out) >= _SUGGESTION_LIMIT:
+                    break
+            return out
+        for candidate, action_cls in self._registry.trie.iter_leaves_ranked(verb):
+            if action_cls is not None and _verb_reachable(action_cls, actor):
+                out.append(candidate)
+                if len(out) >= _SUGGESTION_LIMIT:
+                    break
+        return out
+
     def _nomatch(self, raw_string, verb, actor=None, error=""):
         """Build a :class:`NoMatchAction` ParseResult with fuzzy suggestions.
 
-        Suggestions are filtered through :func:`_verb_reachable` so a typo
-        never offers back a verb the actor has no non-gated path to — the
+        Suggestions lead with the ambiguous-prefix candidate set (what the
+        player was abbreviating), topped up with edit-distance near misses.
+        Both are filtered through :func:`_verb_reachable` so a typo never
+        offers back a verb the actor has no non-gated path to — the
         suggestion side of the dispatch bridge's fail-closed boundary (a fully
         permission-gated verb must be indistinguishable from one that does not
         exist).
         """
-        reachable = (lambda _v, cls: _verb_reachable(cls, actor)) if actor is not None else None
-        suggestions = self._registry.suggest_verbs(verb, reachable=reachable) if verb else []
+        suggestions = self._prefix_suggestions(verb, actor)
+        if verb and len(suggestions) < _SUGGESTION_LIMIT:
+            reachable = (lambda _v, cls: _verb_reachable(cls, actor)) if actor is not None else None
+            seen = set(suggestions)
+            fuzzy = self._registry.suggest_verbs(
+                verb,
+                limit=_SUGGESTION_LIMIT + len(seen),
+                reachable=reachable,
+            )
+            for candidate in fuzzy:
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                suggestions.append(candidate)
+                if len(suggestions) >= _SUGGESTION_LIMIT:
+                    break
         nomatch = NoMatchAction(raw_string=raw_string, suggestions=suggestions, error=error)
         nomatch._raw_string = raw_string
         return ParseResult(
