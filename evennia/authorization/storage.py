@@ -629,9 +629,9 @@ def _validated_grant_constraints(constraints: dict | None) -> dict:
     return validate_grant_constraints(constraints)
 
 
-def grant_capability(
+def _apply_grants(
     principal_ref: str,
-    capability: str,
+    keys: list[str],
     *,
     scope_kind: str,
     scope_key: str,
@@ -641,121 +641,21 @@ def grant_capability(
     reason: str = "",
     parent_grant_id: str = "",
     constraints: dict | None = None,
-):
-    """Create or refresh one positive capability grant atomically."""
+) -> list:
+    """Write grants for one principal: lock, upsert, audit, and double bump.
 
-    definition = capability_registry.require(capability)
+    ``keys`` are registry-resolved capability keys, already deduplicated.
+    Registry validation happens before this point, so the write either covers
+    every key or nothing.
+    """
+
+    if not keys:
+        return []
     constraints = _validated_grant_constraints(constraints)
     if principal_ref.startswith("group:"):
         group_ref = principal_ref.split(":", 1)[1]
         if not AuthorizationPrincipalGroup.objects.filter(group_ref=group_ref).exists():
             raise ValueError(f"unknown authorization group {group_ref!r}")
-    with transaction.atomic():
-        AuthorizationPrincipalState.objects.get_or_create(principal_ref=principal_ref)
-        AuthorizationPrincipalState.objects.select_for_update().get(principal_ref=principal_ref)
-        existing = AuthorizationGrant.objects.filter(
-            principal_ref=principal_ref,
-            capability=definition.key,
-            scope_kind=scope_kind,
-            scope_key=scope_key,
-            revoked_at__isnull=True,
-        ).first()
-        if existing is None:
-            grant = AuthorizationGrant.objects.create(
-                grant_id=uuid.uuid4().hex,
-                principal_ref=principal_ref,
-                capability=definition.key,
-                scope_kind=scope_kind,
-                scope_key=scope_key,
-                expires_at=expires_at,
-                provenance=provenance,
-                parent_grant_id=parent_grant_id,
-                constraints=constraints,
-            )
-        else:
-            grant = existing
-            grant.expires_at = expires_at
-            grant.provenance = provenance
-            grant.parent_grant_id = parent_grant_id
-            grant.constraints = constraints
-            grant.save(
-                update_fields=[
-                    "expires_at",
-                    "provenance",
-                    "parent_grant_id",
-                    "constraints",
-                    "updated_at",
-                ]
-            )
-        AuthorizationAuditEvent.objects.create(
-            event_id=uuid.uuid4().hex,
-            kind="grant_created",
-            principal_ref=principal_ref,
-            capability=definition.key,
-            resource_ref=scope_key if scope_kind == "resource" else "",
-            actor_ref=actor_ref,
-            reason=reason,
-        )
-        bump_principal_generation(principal_ref)
-        transaction.on_commit(lambda: bump_principal_generation(principal_ref))
-    return grant
-
-
-def grant_capabilities(
-    principal_ref: str,
-    capabilities,
-    *,
-    scope_kind: str,
-    scope_key: str,
-    expires_at=None,
-    provenance: str = "",
-    actor_ref: str = "",
-    reason: str = "",
-    parent_grant_id: str = "",
-    constraints: dict | None = None,
-):
-    """Create or refresh many capability grants for one principal, atomically.
-
-    Args:
-        principal_ref (str): The principal receiving every grant.
-        capabilities (iterable): Capability keys or aliases. Each is resolved
-            through the registry, and duplicates collapse to a single grant.
-        scope_kind (str): Scope kind shared by all the grants.
-        scope_key (str): Scope key shared by all the grants.
-        expires_at (datetime, optional): Shared expiry, or `None` for none.
-        provenance (str, optional): Shared provenance marker.
-        actor_ref (str, optional): Who performed the grant, for the audit trail.
-        reason (str, optional): Free-text audit reason.
-        parent_grant_id (str, optional): Shared delegation parent.
-        constraints (dict, optional): Shared constraints; see
-            `_validated_grant_constraints`.
-
-    Returns:
-        list: The resulting `AuthorizationGrant` rows, in the order the
-            capabilities resolved, with duplicates removed.
-
-    Notes:
-        Semantically identical to calling `grant_capability` once per
-        capability, but at a fixed query cost rather than six queries each.
-        Granting a whole bundle is the normal case (staff promotion and the
-        test fixtures both do it, and `runtime_operator` alone is 57
-        capabilities), so the loop dominated every caller that used it.
-
-        The registry is consulted for every capability before anything is
-        written, so an unknown capability rejects the whole call instead of
-        leaving a half-granted principal behind.
-
-    """
-    keys = []
-    seen = set()
-    for capability in capabilities:
-        key = capability_registry.require(capability).key
-        if key not in seen:
-            seen.add(key)
-            keys.append(key)
-    if not keys:
-        return []
-    constraints = _validated_grant_constraints(constraints)
     with transaction.atomic():
         AuthorizationPrincipalState.objects.get_or_create(principal_ref=principal_ref)
         AuthorizationPrincipalState.objects.select_for_update().get(principal_ref=principal_ref)
@@ -829,6 +729,102 @@ def grant_capabilities(
     by_key = {grant.capability: grant for grant in created}
     by_key.update({grant.capability: grant for grant in refreshed})
     return [by_key[key] for key in keys]
+
+
+def grant_capability(
+    principal_ref: str,
+    capability: str,
+    *,
+    scope_kind: str,
+    scope_key: str,
+    expires_at=None,
+    provenance: str = "",
+    actor_ref: str = "",
+    reason: str = "",
+    parent_grant_id: str = "",
+    constraints: dict | None = None,
+):
+    """Create or refresh one positive capability grant atomically."""
+
+    definition = capability_registry.require(capability)
+    return _apply_grants(
+        principal_ref,
+        [definition.key],
+        scope_kind=scope_kind,
+        scope_key=scope_key,
+        expires_at=expires_at,
+        provenance=provenance,
+        actor_ref=actor_ref,
+        reason=reason,
+        parent_grant_id=parent_grant_id,
+        constraints=constraints,
+    )[0]
+
+
+def grant_capabilities(
+    principal_ref: str,
+    capabilities,
+    *,
+    scope_kind: str,
+    scope_key: str,
+    expires_at=None,
+    provenance: str = "",
+    actor_ref: str = "",
+    reason: str = "",
+    parent_grant_id: str = "",
+    constraints: dict | None = None,
+):
+    """Create or refresh many capability grants for one principal, atomically.
+
+    Args:
+        principal_ref (str): The principal receiving every grant.
+        capabilities (iterable): Capability keys or aliases. Each is resolved
+            through the registry, and duplicates collapse to a single grant.
+        scope_kind (str): Scope kind shared by all the grants.
+        scope_key (str): Scope key shared by all the grants.
+        expires_at (datetime, optional): Shared expiry, or `None` for none.
+        provenance (str, optional): Shared provenance marker.
+        actor_ref (str, optional): Who performed the grant, for the audit trail.
+        reason (str, optional): Free-text audit reason.
+        parent_grant_id (str, optional): Shared delegation parent.
+        constraints (dict, optional): Shared constraints; see
+            `_validated_grant_constraints`.
+
+    Returns:
+        list: The resulting `AuthorizationGrant` rows, in the order the
+            capabilities resolved, with duplicates removed.
+
+    Notes:
+        Semantically identical to calling `grant_capability` once per
+        capability, but at a fixed query cost rather than six queries each.
+        Granting a whole bundle is the normal case (staff promotion and the
+        test fixtures both do it, and `runtime_operator` alone is 57
+        capabilities), so the loop dominated every caller that used it.
+
+        The registry is consulted for every capability before anything is
+        written, so an unknown capability rejects the whole call instead of
+        leaving a half-granted principal behind.
+
+    """
+    keys = []
+    seen = set()
+    for capability in capabilities:
+        key = capability_registry.require(capability).key
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return _apply_grants(
+        principal_ref,
+        keys,
+        scope_kind=scope_kind,
+        scope_key=scope_key,
+        expires_at=expires_at,
+        provenance=provenance,
+        actor_ref=actor_ref,
+        reason=reason,
+        parent_grant_id=parent_grant_id,
+        constraints=constraints,
+    )
 
 
 def delegate_grant(

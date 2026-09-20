@@ -712,6 +712,38 @@ class BulkGrantTest(TestCase):
         self.assertEqual(grant_capabilities("account:1", [], scope_kind="world", scope_key="*"), [])
         self.assertEqual(self._rows(), {})
 
+    def test_unknown_group_principal_is_rejected_by_both_entry_points(self):
+        """The shared write path must not create grants on a missing group."""
+
+        with self.assertRaises(ValueError):
+            grant_capability(
+                "group:missing-r2", "engine.object.view", scope_kind="world", scope_key="*"
+            )
+        with self.assertRaises(ValueError):
+            grant_capabilities(
+                "group:missing-r2",
+                ["engine.object.view"],
+                scope_kind="world",
+                scope_key="*",
+            )
+
+        self.assertEqual(self._rows("group:missing-r2"), {})
+        self.assertFalse(
+            AuthorizationAuditEvent.objects.filter(principal_ref="group:missing-r2").exists()
+        )
+
+    def test_one_bundle_call_bumps_principal_generation_once(self):
+        """One write call is one generation bump, whatever the capability count."""
+
+        from evennia.authorization import storage as storage_module
+
+        grant_capabilities("account:1", self.capabilities, scope_kind="world", scope_key="*")
+        first = storage_module._principal_generation["account:1"]
+        grant_capabilities("account:1", self.capabilities, scope_kind="world", scope_key="*")
+        second = storage_module._principal_generation["account:1"]
+
+        self.assertEqual(second, first + 1)
+
 
 class AuthorizationStorageTest(TestCase):
     """Persistent grants and materialized labels remain independently cached."""
