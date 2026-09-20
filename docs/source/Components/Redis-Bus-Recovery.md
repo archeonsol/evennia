@@ -8,10 +8,14 @@ Portal initiates discovery with a fresh challenge. Server answers with its own
 challenge and the process and transport identities of both peers. A snapshot,
 application acknowledgment, reciprocal confirmation, and final Server state
 complete the exchange. Portal admits input only after that final state is applied.
-Discovery alone cannot replace a ready generation. Pending exchanges and peer
-leases use `BUS_HANDSHAKE_TIMEOUT` (default twelve seconds; the original lease
-was four seconds, which misread long-but-healthy synchronous turns as a dead
-peer). Healthy peers exchange heartbeats once per second.
+Discovery alone cannot replace a ready generation. Peer leases and the bound on
+a handshake attempt use `BUS_HANDSHAKE_TIMEOUT` (default twelve seconds; the
+original lease was four seconds, which misread long-but-healthy synchronous
+turns as a dead peer). Offer acceptance, snapshot confirmation, and pending
+discovery frames use the separate replay bound `BUS_HANDSHAKE_STALENESS`
+(default four seconds, capped at the lease): widening the lease for long turns
+does not widen the window in which stale challenges and delayed acks are
+honored. Healthy peers exchange heartbeats once per second.
 
 A Portal membership revision covers socket and negotiation changes. Portal checks
 it again before applying final Server state. If it changed during synchronization,

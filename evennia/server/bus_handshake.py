@@ -14,6 +14,7 @@ class BusHandshake:
     """
 
     timeout = 12.0
+    staleness = 4.0
     heartbeat = 1.0
 
     def __init__(
@@ -35,6 +36,18 @@ class BusHandshake:
         # disconnects on the first tick.
         self.timeout = resolve_setting(
             "BUS_HANDSHAKE_TIMEOUT", type(self).timeout, cast=float, minimum=type(self).heartbeat
+        )
+        # The replay bound must not exceed the handshake budget: tick bounds
+        # the handshake attempt by the lease, so an exchange accepted above
+        # this ceiling would be disconnected by the bound it was accepted under.
+        self.staleness = min(
+            resolve_setting(
+                "BUS_HANDSHAKE_STALENESS",
+                type(self).staleness,
+                cast=float,
+                minimum=type(self).heartbeat,
+            ),
+            self.timeout,
         )
         self.process = uuid4().hex
         self.epoch = uuid4().hex
@@ -146,6 +159,9 @@ class BusHandshake:
                 "pair": [portal, self.identity],
                 "at": self._now(),
             }
+            # Retention follows the lease, not the replay bound: a liveness
+            # pulse must still find its offer after a long peer turn. State
+            # authority is gated per-kind at acceptance instead.
             self._offers = {
                 key: value
                 for key, value in self._offers.items()
@@ -174,7 +190,10 @@ class BusHandshake:
             offer = self._offers.get(frame.get("challenge"))
             if not self._matches(frame, offer):
                 return
-            if self._now() - offer["at"] >= self.timeout:
+            # A pulse is a liveness answer: its age is bounded by the lease.
+            # A snapshot rewrites session state, so only the replay bound applies.
+            deadline = self.timeout if kind == "pulse" else self.staleness
+            if self._now() - offer["at"] >= deadline:
                 return
             del self._offers[frame["challenge"]]
             if self._offer_slots.get(tuple(offer["pair"][0])) == frame["challenge"]:
@@ -190,7 +209,7 @@ class BusHandshake:
             self._apply(frame["payload"])
             self._emit("applied", frame)
         elif kind == "confirm" and self._matches(frame, self._exchange):
-            if self._now() - self._exchange["at"] >= self.timeout:
+            if self._now() - self._exchange["at"] >= self.staleness:
                 return
             self._exchange = None
             self.state = "ready"
@@ -213,9 +232,9 @@ class BusHandshake:
         pending = self._pending
         if not pending or frame.get("probe") != pending["probe"]:
             return
-        if self._now() - pending["at"] >= self.timeout:
-            return
         if kind == "offer":
+            if self._now() - pending["at"] >= self.staleness:
+                return
             pair = frame.get("pair")
             if not isinstance(pair, list) or len(pair) != 2 or pair[0] != self.identity:
                 return
@@ -231,9 +250,12 @@ class BusHandshake:
         elif not self._matches(frame, pending):
             return
         elif kind == "pulse_ack" and self.state == "ready":
+            # A pulse_ack is the answer to a liveness pulse; late is fine.
             self._last_seen = self._now()
             self._pending = None
         elif kind in ("applied", "ready"):
+            if self._now() - pending["at"] >= self.staleness:
+                return
             if self._snapshot()[0] != pending.get("revision"):
                 self.disconnect()
                 return

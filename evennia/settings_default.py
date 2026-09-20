@@ -270,7 +270,17 @@ REDIS_BUS_READ_BATCH = None
 # churn. Real process death still fails fast through the Redis connection;
 # this lease only needs to bound silence. None keeps the code default lease
 # (BusHandshake.timeout); values below the 1-second heartbeat are floored to it.
+# Widening this governs liveness and handshake-attempt recovery only; the
+# replay/staleness defenses are bounded by BUS_HANDSHAKE_STALENESS.
 BUS_HANDSHAKE_TIMEOUT = 12.0
+# Seconds a handshake offer, snapshot confirmation, or pending discovery frame
+# stays acceptable: the replay bound on session-state authority. Deliberately
+# separate from the liveness lease above: widening the lease to tolerate long
+# synchronous turns must not widen the window in which stale challenges and
+# delayed final acks are accepted. None keeps the code default of four seconds
+# (BusHandshake.staleness, the original lease value); values are floored at the
+# 1-second heartbeat and capped at BUS_HANDSHAKE_TIMEOUT.
+BUS_HANDSHAKE_STALENESS = None
 # Narrative render bounds. None keeps the module default (256 entity references
 # per node; 256 spans per segment and 256 span segments per node). Raise
 # RENDER_MAX_REFS for reference-heavy nodes and RENDER_MAX_SPANS for very

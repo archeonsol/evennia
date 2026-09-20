@@ -20,17 +20,21 @@ class TestHandshake(TestCase):
         self.ready = []
         self.peers = {}
         for role in ("portal", "server"):
-            self.peers[role] = BusHandshake(
-                role,
-                send=lambda frame, role=role: self.wire.append((role, frame)),
-                snapshot=lambda: (self.revision, {"sessions": {}}),
-                apply=lambda payload: self.applied.append(payload),
-                state_snapshot=lambda: {"auth": "current"},
-                apply_state=lambda payload: None,
-                on_ready=lambda role=role: self.ready.append(role),
-                on_unavailable=lambda: None,
-                now=lambda: self.now,
-            )
+            self.peers[role] = self._peer(role)
+
+    def _peer(self, role):
+        """Build one peer wired to the shared fake clock and wire."""
+        return BusHandshake(
+            role,
+            send=lambda frame, role=role: self.wire.append((role, frame)),
+            snapshot=lambda: (self.revision, {"sessions": {}}),
+            apply=lambda payload: self.applied.append(payload),
+            state_snapshot=lambda: {"auth": "current"},
+            apply_state=lambda payload: None,
+            on_ready=lambda role=role: self.ready.append(role),
+            on_unavailable=lambda: None,
+            now=lambda: self.now,
+        )
 
     def drain(self):
         """Deliver all emitted frames in publication order."""
@@ -102,7 +106,7 @@ class TestHandshake(TestCase):
         self.assertEqual(self.peers["portal"].state, "ready")
 
     def test_pending_exchange_not_overwritten_by_heartbeat(self):
-        """A delayed snapshot has its full deadline to complete."""
+        """A delayed snapshot has its full staleness deadline to complete."""
         self.peers["portal"].tick()
         role, probe = self.wire.pop(0)
         self.peers["server"].receive(probe)
@@ -131,11 +135,10 @@ class TestHandshake(TestCase):
         """At capacity the oldest bound offer yields to a fresh probe."""
 
         server = self.peers["server"]
+        self.now += 1
         for index in range(8):
-            self.now += 1
             server.receive({"kind": "probe", "portal": ["portal", f"p{index}"], "probe": "p"})
         self.wire.clear()
-        self.now += 1
         server.receive({"kind": "probe", "portal": ["portal", "p8"], "probe": "p"})
         kinds = [frame["kind"] for _role, frame in self.wire]
         self.assertIn("offer", kinds)
@@ -293,3 +296,148 @@ class TestHandshake(TestCase):
         self.assertEqual(server.pair, pair)
         self.assertEqual(len(self.applied), 1)
         self.assertNotEqual(self.peers["portal"].state, "ready")
+
+
+class TestExchangeStaleness(TestCase):
+    """The staleness bound, not the liveness lease, gates replay defenses."""
+
+    def setUp(self):
+        self.now = 0
+        self.wire = []
+        self.applied = []
+        self.ready = []
+        self.peers = {}
+        for role in ("portal", "server"):
+            peer = self._peer(role)
+            peer.timeout = 12.0
+            peer.staleness = 4.0
+            self.peers[role] = peer
+
+    def drain(self):
+        """Deliver all emitted frames in publication order."""
+        for _ in range(30):
+            if not self.wire:
+                return
+            role, frame = self.wire.pop(0)
+            self.peers["server" if role == "portal" else "portal"].receive(frame)
+        self.fail("handshake did not converge")
+
+    def _bind_offer(self, at):
+        """Bind a server-side offer for a portal identity, dated ``at``."""
+        server = self.peers["server"]
+        portal = ["portal", "a"]
+        offer = {
+            "probe": "p1",
+            "challenge": "c1",
+            "pair": [portal, server.identity],
+            "at": at,
+        }
+        server._offers["c1"] = offer
+        server._offer_slots[tuple(portal)] = "c1"
+        return offer
+
+    def test_staleness_defaults_below_the_lease(self):
+        """The replay bound keeps the pre-split four-second value."""
+        peer = self._peer("portal")
+        self.assertEqual(peer.timeout, 12.0)
+        self.assertEqual(peer.staleness, 4.0)
+
+    @override_settings(BUS_HANDSHAKE_STALENESS=6.0)
+    def test_staleness_honors_setting(self):
+        """Deployments can widen the replay bound independently of the lease."""
+        peer = self._peer("portal")
+        self.assertEqual(peer.staleness, 6.0)
+        self.assertEqual(peer.timeout, 12.0)
+
+    @override_settings(BUS_HANDSHAKE_TIMEOUT=2.0)
+    def test_staleness_is_ceiled_by_the_lease(self):
+        """A bound above the handshake budget would accept then kill exchanges."""
+        peer = self._peer("portal")
+        self.assertEqual(peer.staleness, 2.0)
+
+    @override_settings(BUS_HANDSHAKE_STALENESS=0)
+    def test_staleness_floor_keeps_the_bound_above_the_heartbeat(self):
+        """A zero bound would reject every re-issued offer."""
+        peer = self._peer("portal")
+        self.assertEqual(peer.staleness, BusHandshake.heartbeat)
+
+    def test_old_snapshot_cannot_rewrite_sessions(self):
+        """A snapshot older than the bound carries no state authority."""
+        self._bind_offer(self.now)
+        self.now += 6
+        self.peers["server"].receive(
+            {
+                "kind": "snapshot",
+                "probe": "p1",
+                "challenge": "c1",
+                "pair": [["portal", "a"], self.peers["server"].identity],
+                "payload": {"sessions": {}},
+            }
+        )
+        self.assertEqual(self.applied, [])
+        self.assertEqual(self.peers["server"].state, "disconnected")
+
+    def test_delayed_pulse_keeps_liveness_credit(self):
+        """A heartbeat answer older than the bound still refreshes the lease."""
+        self._bind_offer(self.now)
+        self.now += 6
+        server = self.peers["server"]
+        server.state = "ready"
+        server.pair = [["portal", "a"], server.identity]
+        server._last_seen = self.now - 6
+        self.peers["server"].receive(
+            {
+                "kind": "pulse",
+                "probe": "p1",
+                "challenge": "c1",
+                "pair": [["portal", "a"], server.identity],
+            }
+        )
+        self.assertEqual(server._last_seen, self.now)
+        self.assertEqual(self.wire[-1][1]["kind"], "pulse_ack")
+
+    def test_late_confirm_is_refused_at_the_bound(self):
+        """Confirmation beyond the bound cannot complete the exchange."""
+        offer = self._bind_offer(self.now)
+        self.peers["server"].state = "synchronizing"
+        self.peers["server"]._exchange = offer
+        self.now += 6
+        self.peers["server"].receive(
+            {
+                "kind": "confirm",
+                "probe": "p1",
+                "challenge": "c1",
+                "pair": offer["pair"],
+            }
+        )
+        self.assertEqual(self.peers["server"].state, "synchronizing")
+        self.assertEqual(self.ready, [])
+
+    def test_stale_offer_answer_is_refused(self):
+        """A portal rejects an offer answer past the bound, then re-discovers."""
+        portal = self.peers["portal"]
+        portal.tick()
+        _role, probe = self.wire.pop(0)
+        self.peers["server"].receive(probe)
+        _role, offer = self.wire.pop(0)
+        self.now += 6
+        portal.receive(offer)
+        self.assertNotEqual(portal.state, "ready")
+        self.now += 1
+        portal.tick()
+        self.drain()
+        self.assertEqual(portal.state, "ready")
+
+    def _peer(self, role):
+        """Build one peer wired to this suite's fake clock and wire."""
+        return BusHandshake(
+            role,
+            send=lambda frame, role=role: self.wire.append((role, frame)),
+            snapshot=lambda: (0, {"sessions": {}}),
+            apply=lambda payload: self.applied.append(payload),
+            state_snapshot=lambda: {"auth": "current"},
+            apply_state=lambda payload: None,
+            on_ready=lambda role=role: self.ready.append(role),
+            on_unavailable=lambda: None,
+            now=lambda: self.now,
+        )
