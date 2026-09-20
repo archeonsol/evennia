@@ -213,12 +213,16 @@ class AuthorizationPrewarmTest(TransactionTestCase):
             self.assertEqual(record.call_args.args[0], "ready")
 
     def test_snapshot_miss_falls_back_to_an_inline_read(self):
-        """A coverage gap degrades to one slow read instead of an error."""
+        """A coverage gap degrades to indexed reads instead of an error.
+
+        The inline fallback is one membership lookup plus one grants query;
+        group membership is loaded with the principal snapshot.
+        """
 
         principal = FakePrincipal()
         with override_settings(AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR=False):
             clear_authorization_caches()
-            with authorization_snapshot_scope(), self.assertNumQueries(1):
+            with authorization_snapshot_scope(), self.assertNumQueries(2):
                 snapshot = load_grants(principal)
         self.assertEqual(dict(snapshot.by_capability), {})
 
@@ -661,7 +665,9 @@ class AuthorizationStorageTest(TestCase):
         migrate_resource(resource, source="view:all();edit:none()")
         clear_authorization_caches()
 
-        with self.assertNumQueries(1):
+        # The cold package load probes the active policy bundle (opt-in) and
+        # reads override rows once; every later operation is local.
+        with self.assertNumQueries(2):
             self.assertIsNotNone(load_policy(resource, "view"))
             self.assertIsNotNone(load_policy(resource, "edit"))
             self.assertIsNone(load_policy(resource, "missing"))
@@ -696,7 +702,8 @@ class AuthorizationStorageTest(TestCase):
         migrate_resource(second, source="edit:none()")
         clear_authorization_caches()
 
-        with self.assertNumQueries(1):
+        # One bundle-version probe plus one batched override query.
+        with self.assertNumQueries(2):
             self.assertEqual(preload_policy_packages((first, second)), 2)
         with self.assertNumQueries(0):
             self.assertIsNotNone(load_policy(first, "view"))

@@ -13,6 +13,51 @@ from .capabilities import capability_registry, normalize_capability
 
 POLICY_SCHEMA = "auth.policy.v1"
 _PREDICATE_PROVIDERS: dict[str, object] = {}
+_GRANT_CONSTRAINTS: dict[str, object] = {}
+
+
+class AuthorizationPurityError(RuntimeError):
+    """A predicate or constraint performed I/O inside rule evaluation."""
+
+
+def pure_call(fn, args, *, label: str):
+    """Invoke a purity-constrained callable and reject reactor-thread I/O.
+
+    Predicates and grant constraints run synchronously inside rule evaluation,
+    which the snapshot scope promises is I/O-free. Django query execution is
+    intercepted here; the configured ``AUTHORIZATION_PREDICATE_PURITY`` mode
+    decides whether a violation raises (``error``) or is logged (``log``).
+    """
+
+    from contextlib import ExitStack
+
+    from django.conf import settings
+    from django.db import connections
+
+    from evennia.utils import logger
+
+    mode = str(getattr(settings, "AUTHORIZATION_PREDICATE_PURITY", "log")).lower()
+    if mode not in {"log", "error"}:
+        mode = "log"
+    queries = []
+
+    def _wrapper(execute, sql, params, many, context):
+        queries.append(sql)
+        return execute(sql, params, many, context)
+
+    with ExitStack() as stack:
+        for connection in connections.all():
+            stack.enter_context(connection.execute_wrapper(_wrapper))
+        result = fn(*args)
+    if queries:
+        message = (
+            f"authorization {label} performed {len(queries)} database "
+            "queries during evaluation; predicates and constraints must be pure"
+        )
+        if mode == "error":
+            raise AuthorizationPurityError(message)
+        logger.log_warn(message)
+    return result
 
 
 def _primitive_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -353,11 +398,13 @@ def policy_from_data(data: Mapping[str, Any], _depth: int = 0) -> Policy:
 
 
 def register_predicate_provider(key: str, provider) -> None:
-    """Register a synchronous contextual predicate provider."""
+    """Register a synchronous, pure contextual predicate provider."""
 
     normalized = str(key or "").strip().lower()
     if not normalized or not callable(provider):
         raise ValueError("predicate providers require a key and callable")
+    if _is_lazy_callable(provider):
+        raise ValueError(f"predicate provider {normalized!r} must be a synchronous function")
     existing = _PREDICATE_PROVIDERS.get(normalized)
     if existing is not None and existing is not provider:
         raise ValueError(f"predicate provider {normalized!r} is already registered")
@@ -371,3 +418,70 @@ def get_predicate_provider(key: str):
         return _PREDICATE_PROVIDERS[key]
     except KeyError as err:
         raise ValueError(f"unknown authorization predicate {key!r}") from err
+
+
+def _is_lazy_callable(value) -> bool:
+    """Return whether a callable would defer work past synchronous evaluation."""
+
+    import inspect
+
+    return bool(
+        inspect.iscoroutinefunction(value)
+        or inspect.isgeneratorfunction(value)
+        or inspect.isasyncgenfunction(value)
+    )
+
+
+def register_grant_constraint(key: str, evaluator, *, validate=None) -> None:
+    """Register a pure, declarative grant-constraint evaluator.
+
+    Args:
+        key (str): Constraint name as it appears in grant ``constraints``.
+        evaluator (callable): ``(context, resource, value) -> bool``.
+        validate (callable, optional): ``(value) -> None`` raising on a
+            malformed value. Constraints without one accept JSON scalars.
+
+    """
+
+    normalized = str(key or "").strip().lower()
+    if not normalized or not callable(evaluator):
+        raise ValueError("grant constraints require a key and callable")
+    if _is_lazy_callable(evaluator) or (validate is not None and _is_lazy_callable(validate)):
+        raise ValueError(f"grant constraint {normalized!r} must be synchronous")
+    existing = _GRANT_CONSTRAINTS.get(normalized)
+    if existing is not None and existing != (evaluator, validate):
+        raise ValueError(f"grant constraint {normalized!r} is already registered")
+    _GRANT_CONSTRAINTS[normalized] = (evaluator, validate)
+
+
+def get_grant_constraint(key: str):
+    """Return ``(evaluator, validate)`` or fail closed."""
+
+    try:
+        return _GRANT_CONSTRAINTS[key]
+    except KeyError as err:
+        raise ValueError(f"unknown grant constraint {key!r}") from err
+
+
+def grant_constraint_keys() -> frozenset[str]:
+    """Return the registered constraint names."""
+
+    return frozenset(_GRANT_CONSTRAINTS)
+
+
+def validate_grant_constraints(constraints: Mapping[str, Any] | None) -> dict:
+    """Validate one grant's constraints against the registry, fail closed."""
+
+    constraints = dict(constraints or {})
+    if len(constraints) > 8:
+        raise ValueError("grant constraints exceed 8 entries")
+    for key, value in constraints.items():
+        normalized = str(key).strip().lower()
+        if normalized != key:
+            raise ValueError("grant constraint keys must be lowercase")
+        evaluator, validator = get_grant_constraint(normalized)
+        if validator is not None:
+            validator(value)
+        elif value is not None and not isinstance(value, (str, int, float, bool)):
+            raise ValueError("grant constraints must contain JSON scalar values")
+    return constraints
