@@ -25,6 +25,40 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.256 — Attribute and render hot-path performance
+
+### Changes
+
+- **`inherits_from` memoizes class MRO paths.**
+  [`utils.py`](evennia/utils/utils.py) rebuilt module-qualified path strings
+  by walking `__class__.mro()` on every call, and the helper runs per visible
+  object in look rendering (`filter_visible`). Path tuples are now cached per
+  class object. The mapping is immutable for a class's lifetime, so there is
+  no invalidation story: a redefined class is a new key.
+- **The write-behind flush worker commits once per batch.**
+  [`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py) opened one
+  transaction per dirty row in the async worker, paying commit latency per
+  row. Snapshots sharing a database alias now commit together; each row's
+  atomic block nests as a savepoint, so a single failed row rolls back alone
+  while the batch keeps one commit. This is what the write-behind design
+  promises and what the `bench_attrs flush_batch` scenario measures on
+  production (20 rows).
+- **`principal.controls_resource` is pure again.**
+  [`engine.py`](evennia/authorization/engine.py) read `.account` on unloaded
+  objects, fetching the related account row on every evaluation — caught by
+  the predicate purity guard in `log` mode. It now resolves the live
+  puppeteer and the `db_account_id` foreign-key column, falling back to
+  attribute lookups only for duck-typed principals.
+
+### Tests
+
+- Engine sweep green: `evennia.utils.tests.test_utils`,
+  `evennia.authorization.tests.test_engine`,
+  `evennia.typeclasses.tests.test_jsonb`,
+  `evennia.typeclasses.tests.test_attribute_metrics`,
+  `evennia.server.tests.test_engine_systems` — 286 tests.
+- New: `inherits_from` memoization coverage in `test_utils.py`.
+
 ## 6.0.0+underspire.255 — Authorization model hardening
 
 ### Features
