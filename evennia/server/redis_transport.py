@@ -438,7 +438,16 @@ class RedisTransport:
                 or self._incoming_bytes + size > byte_limit
             )
             if not full:
-                self._incoming.append((self._fence, command, data, fields.get(b"g", b""), size))
+                self._incoming.append(
+                    (
+                        self._fence,
+                        command,
+                        data,
+                        fields.get(b"g", b""),
+                        size,
+                        time.monotonic(),
+                    )
+                )
                 self._incoming_bytes += size
                 if not self._drain_scheduled:
                     self._drain_scheduled = schedule = True
@@ -448,16 +457,28 @@ class RedisTransport:
             clock.call_from_thread(self._drain_incoming, _task_kind="transport")
 
     def _drain_incoming(self):
-        """Execute at most 32 FIFO frames per event-loop turn."""
+        """Execute at most 32 FIFO frames per event-loop turn.
+
+        Records how long each frame waited between the stream read and this
+        reactor turn: that wait is the portal→server command latency (and the
+        server→portal output latency seen from the portal), the gap a saturated
+        reactor opens without showing up in any per-command timer.
+        """
+        metrics = _bus_metrics()
         for _ in range(32):
             with self._lock:
                 if not self._incoming:
                     self._drain_scheduled = False
                     return
-                fence, command, data, pair, size = self._incoming.popleft()
+                fence, command, data, pair, size, admitted_at = self._incoming.popleft()
                 self._incoming_active = size
                 valid = self.online and fence == self._fence and not self._stop.is_set()
                 valid = valid and (command == b"BusHandshake" or pair == self._pair)
+                depth = len(self._incoming) + bool(self._incoming_active)
+                pending_bytes = self._incoming_bytes
+            if metrics is not None:
+                metrics.observe_bus_incoming_queue(depth, pending_bytes)
+                metrics.record_bus_incoming_wait(time.monotonic() - admitted_at)
             try:
                 if valid:
                     self._on_frame(command, data)

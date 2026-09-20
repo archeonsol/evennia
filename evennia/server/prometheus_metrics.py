@@ -57,6 +57,9 @@ IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = None
 IDMAPPER_FLUSH_FAILURES_TOTAL = None
 BUS_OUTGOING_DEPTH = None
 BUS_OUTGOING_BYTES = None
+BUS_INCOMING_DEPTH = None
+BUS_INCOMING_BYTES = None
+BUS_INCOMING_WAIT_SECONDS = None
 BUS_PUBLISHED_TOTAL = None
 BUS_REJECTED_TOTAL = None
 BUS_WRITE_BATCH_SIZE = None
@@ -96,6 +99,7 @@ def _init_metrics() -> bool:
     global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
     global IDMAPPER_FLUSH_FAILURES_TOTAL
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
+    global BUS_INCOMING_DEPTH, BUS_INCOMING_BYTES, BUS_INCOMING_WAIT_SECONDS
     global BUS_REJECTED_TOTAL, BUS_WRITE_BATCH_SIZE
 
     if _METRICS_READY:
@@ -164,6 +168,19 @@ def _init_metrics() -> bool:
     BUS_OUTGOING_BYTES = Gauge(
         "evennia_bus_outgoing_bytes",
         "Encoded bytes retained by the Redis bus outgoing queue",
+    )
+    BUS_INCOMING_DEPTH = Gauge(
+        "evennia_bus_incoming_depth",
+        "Frames waiting in the Redis bus incoming queue for a reactor turn",
+    )
+    BUS_INCOMING_BYTES = Gauge(
+        "evennia_bus_incoming_bytes",
+        "Encoded bytes waiting in the Redis bus incoming queue",
+    )
+    BUS_INCOMING_WAIT_SECONDS = Histogram(
+        "evennia_bus_incoming_wait_seconds",
+        "Time a bus frame waited between stream read and reactor application",
+        buckets=(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
     )
     BUS_PUBLISHED_TOTAL = Counter(
         "evennia_bus_published_total",
@@ -454,6 +471,25 @@ def observe_bus_queue(depth: int, pending_bytes: int) -> None:
         BUS_OUTGOING_DEPTH.set(int(depth))
     if _init_metrics() and BUS_OUTGOING_BYTES is not None:
         BUS_OUTGOING_BYTES.set(int(pending_bytes))
+
+
+def observe_bus_incoming_queue(depth: int, pending_bytes: int) -> None:
+    """Record the bus incoming queue size once per drain turn."""
+    if _init_metrics() and BUS_INCOMING_DEPTH is not None:
+        BUS_INCOMING_DEPTH.set(int(depth))
+    if _init_metrics() and BUS_INCOMING_BYTES is not None:
+        BUS_INCOMING_BYTES.set(int(pending_bytes))
+
+
+def record_bus_incoming_wait(seconds: float) -> None:
+    """Record how long one incoming frame waited for its reactor turn.
+
+    This is the portal→server command latency (and the server→portal output
+    latency from the portal's side): the gap a saturated reactor opens between
+    reading a frame and applying it.
+    """
+    if _init_metrics() and BUS_INCOMING_WAIT_SECONDS is not None:
+        BUS_INCOMING_WAIT_SECONDS.observe(max(0.0, float(seconds)))
 
 
 def record_bus_publish() -> None:
