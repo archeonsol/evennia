@@ -6,14 +6,17 @@ fake world objects, asserting player-visible messages, nick-handler effects,
 movement, and the ``requires=`` gates.
 """
 
+import asyncio
 import sys
 import unittest
 from unittest import mock
 
 from twisted.internet.defer import Deferred
 
+from evennia.actions.context import ActionContext
 from evennia.actions.default import general as general_module
 from evennia.actions.default.general import CharacterGeneralRules, Home, Nick, SetHelp
+from evennia.actions.engine import RuleEngine
 from evennia.actions.tests.fakes import FakeChar, FakeObj, dispatch, make_actor
 from evennia.authorization.policy import Always, RequiresCapability
 from evennia.typeclasses.attributes import NickTemplateInvalid
@@ -191,7 +194,8 @@ class TestNick(unittest.TestCase):
 class TestHome(unittest.TestCase):
     def _home(self, char, actor, raw=""):
         action = Home.parse(raw, actor, verb="home")
-        return dispatch(action, actor, [char])
+        context = ActionContext(providers=[char], actor=actor, raw_string="")
+        return asyncio.run(RuleEngine().dispatch(action, actor, context))
 
     def test_no_home(self):
         char, actor = _setup(capabilities=("engine.world.build",))
@@ -213,7 +217,9 @@ class TestHome(unittest.TestCase):
         plaza = FakeObj(key="plaza")
         char.home = cottage
         char.location = plaza
+        char.move_to_async = mock.AsyncMock(side_effect=lambda dest, **kw: char.move_to(dest, **kw))
         self._home(char, actor)
+        char.move_to_async.assert_awaited_once_with(cottage, move_type="teleport")
         self.assertEqual(char.location, cottage)
         self.assertEqual(char.moves[-1][1].get("move_type"), "teleport")
         self.assertTrue(any("no place like home" in m for m in char.messages))
