@@ -252,6 +252,8 @@ REDIS_BUS_PREFIX = "evennia:bus"
 SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
 # Bus transport caps. None keeps the module default
 # (evennia/server/redis_transport.py); set an int to tune a busy deployment.
+# Explicit values are cast to int and floored at 1
+# (evennia.utils.utils.resolve_setting, the convention for engine tunables).
 # Ordinary admission reserves headroom for control/handshake frames, and
 # capacity pressure rejects the frame as backpressure instead of failing the
 # transport (see the 100-session load-test note in Redis-Bus-Delivery.md).
@@ -266,7 +268,8 @@ REDIS_BUS_READ_BATCH = None
 # than a healthy reactor can legitimately run synchronous game/DB work, so
 # long turns were misread as dead peers and caused session reconciliation
 # churn. Real process death still fails fast through the Redis connection;
-# this lease only needs to bound silence.
+# this lease only needs to bound silence. None keeps the code default lease
+# (BusHandshake.timeout); values below the 1-second heartbeat are floored to it.
 BUS_HANDSHAKE_TIMEOUT = 12.0
 # Narrative render bounds. None keeps the module default (256 entity references
 # per node; 256 spans per segment and 256 span segments per node). Raise

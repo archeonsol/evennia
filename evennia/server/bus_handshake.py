@@ -3,7 +3,7 @@
 import time
 from uuid import uuid4
 
-from django.conf import settings
+from evennia.utils.utils import resolve_setting
 
 
 class BusHandshake:
@@ -13,7 +13,7 @@ class BusHandshake:
     random challenges; lifecycle requests never enter this state machine.
     """
 
-    timeout = 4.0
+    timeout = 12.0
     heartbeat = 1.0
 
     def __init__(
@@ -31,7 +31,11 @@ class BusHandshake:
     ):
         """Bind peer-specific state operations and a monotonic clock."""
         self.role = role
-        self.timeout = float(getattr(settings, "BUS_HANDSHAKE_TIMEOUT", type(self).timeout))
+        # The lease must outlast one probe cadence; below it a healthy peer
+        # disconnects on the first tick.
+        self.timeout = resolve_setting(
+            "BUS_HANDSHAKE_TIMEOUT", type(self).timeout, cast=float, minimum=type(self).heartbeat
+        )
         self.process = uuid4().hex
         self.epoch = uuid4().hex
         self.state = "disconnected"

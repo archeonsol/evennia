@@ -210,6 +210,29 @@ def is_iter(obj):
         return False
 
 
+def resolve_setting(name, default, *, cast=int, minimum=None):
+    """Read one engine setting: unset or None means the code default.
+
+    Args:
+        name (str): Setting attribute to read.
+        default: Value used when the setting is unset or None.
+        cast (callable, optional): Cast applied to both the default and an
+            explicit value. Defaults to ``int``.
+        minimum (number, optional): Floor applied after the cast. A tuned
+            setting can then never disable the bound it configures.
+
+    Returns:
+        The cast (and floored) setting or default value.
+    """
+    value = getattr(settings, name, None)
+    if value is None:
+        value = default
+    value = cast(value)
+    if minimum is not None:
+        value = max(value, cast(minimum))
+    return value
+
+
 def make_iter(obj):
     """
     Makes sure that the object is always iterable.

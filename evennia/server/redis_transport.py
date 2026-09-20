@@ -12,6 +12,7 @@ from django.conf import settings
 from evennia.server import prometheus_metrics
 from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.utils import clock, logger
+from evennia.utils.utils import resolve_setting
 
 MAX_ENTRIES = 4096
 MAX_BYTES = 64 * 1024 * 1024
@@ -33,11 +34,8 @@ READ_BATCH = 32
 
 
 def _bus_limit(setting_name, fallback):
-    """Resolve one bus limit: an explicit setting wins, else the module constant."""
-    value = getattr(settings, setting_name, None)
-    if value is None:
-        return int(fallback)
-    return max(1, int(value))
+    """Resolve one bus cap: a positive int via the shared settings convention."""
+    return resolve_setting(setting_name, fallback, cast=int, minimum=1)
 
 
 @dataclass(frozen=True)

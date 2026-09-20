@@ -178,6 +178,21 @@ class TestHandshake(TestCase):
         )
         self.assertEqual(peer.timeout, 30.0)
 
+    @override_settings(BUS_HANDSHAKE_TIMEOUT=0)
+    def test_timeout_floor_keeps_the_lease_above_the_heartbeat(self):
+        """A zero lease would disconnect a healthy peer on the first tick."""
+        peer = BusHandshake(
+            "portal",
+            send=lambda frame: None,
+            snapshot=lambda: (0, {}),
+            apply=lambda payload: None,
+            state_snapshot=lambda: {},
+            apply_state=lambda payload: None,
+            on_ready=lambda: None,
+            on_unavailable=lambda: None,
+        )
+        self.assertEqual(peer.timeout, BusHandshake.heartbeat)
+
     def test_delayed_final_ack_cannot_complete_new_exchange(self):
         """Expired confirmation carries no authority over new discovery."""
         self.peers["portal"].tick()
