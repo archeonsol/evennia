@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from evennia.actions.action import Action, action
 from evennia.actions.exceptions import RuleConflict
 from evennia.actions.predicate import HasCapability
-from evennia.actions.registry import ActionRegistry, RuleRegistry
+from evennia.actions.registry import ActionRegistry, RuleRegistry, VerbTrie
 from evennia.actions.result import CLAIM, FAIL, PASS
 from evennia.actions.rule import PHASES, RuleSpec, rule
 
@@ -313,6 +313,50 @@ class TestSuggestVerbs(unittest.TestCase):
         reg = self._registry()
         reg.register(_Kick, ("__cast__",))
         self.assertNotIn("__cast__", reg.suggest_verbs("__cast__"))
+
+
+class TestVerbTrieLeafScan(unittest.TestCase):
+    """``match`` only needs to know whether a prefix lands on exactly one verb;
+    ``prefix_candidates`` must still report every verb under a prefix."""
+
+    def _trie(self):
+        trie = VerbTrie()
+        trie.insert("look", _Look)
+        trie.insert("lookat", _Kick)
+        trie.insert("mast", _Kick)
+        return trie
+
+    def test_exact_landing_wins_over_longer_verb(self):
+        self.assertEqual(self._trie().match("look"), ("look", _Look, 1.0))
+
+    def test_unique_prefix_resolves(self):
+        self.assertEqual(self._trie().match("mas"), ("mast", _Kick, 3 / 4))
+
+    def test_ambiguous_prefix_returns_none(self):
+        self.assertIsNone(self._trie().match("loo"))
+
+    def test_missing_prefix_returns_none(self):
+        self.assertIsNone(self._trie().match("zzz"))
+
+    def test_prefix_candidates_still_returns_all(self):
+        self.assertEqual(sorted(self._trie().prefix_candidates("loo")), ["look", "lookat"])
+
+
+class TestNoSpacePrefixCache(unittest.TestCase):
+    """The combined symbol+glued verb tuple is cached but must invalidate on
+    every registration, mirroring the trie / phrase-metadata caches."""
+
+    def test_cached_identity(self):
+        reg = ActionRegistry()
+        reg.register(_Kick, ("kick",))
+        first = reg.no_space_prefix_verbs
+        self.assertIs(first, reg.no_space_prefix_verbs)
+
+    def test_invalidated_on_register(self):
+        reg = ActionRegistry()
+        self.assertEqual(reg.no_space_prefix_verbs, ())
+        reg.register(_Kick, ("!",))
+        self.assertEqual(reg.no_space_prefix_verbs, ("!",))
 
 
 class TestPhasesConstant(unittest.TestCase):

@@ -68,6 +68,56 @@ def _has_default(f) -> bool:
     return f.default is not MISSING or f.default_factory is not MISSING
 
 
+#: Compiled per-class parse schemas: ``(field_name, kind, literal_options,
+#: has_default, is_last)`` rows in declaration order. Built lazily on the first
+#: successful ``parse`` and reused for every later parse of the class. A class
+#: whose type hints cannot be resolved is never cached — it may resolve later
+#: (forward references), so the fallback stays per-call exactly as before.
+_PARSE_SCHEMA_CACHE: dict = {}
+
+
+def _schema_from_hints(cls, hints) -> tuple:
+    """Build the parse-schema rows for ``cls`` from resolved type hints.
+
+    ``hints`` may be empty to reproduce the historical fallback (each field's
+    raw ``f.type``), which is what the original implementation did when
+    ``get_type_hints`` raised.
+
+    Args:
+        cls (type): the :class:`Action` subclass.
+        hints (dict): ``{field_name: annotation}`` from ``get_type_hints``.
+
+    Returns:
+        tuple: ``(name, kind, options, has_default, is_last)`` rows, where
+        ``kind`` is ``"literal" | "obj" | "int" | "str"``.
+    """
+    rows = []
+    init_fields = [f for f in dataclass_fields(cls) if f.init and f.name != "block_reason"]
+    last_i = len(init_fields) - 1
+    for i, f in enumerate(init_fields):
+        annotation = hints.get(f.name, f.type)
+        options = _literal_options(annotation)
+        if options is not None:
+            kind = "literal"
+        elif _is_gameobject(annotation):
+            kind = "obj"
+        elif annotation is int:
+            kind = "int"
+        else:
+            kind = "str"
+        rows.append((f.name, kind, options, _has_default(f), i == last_i))
+    return tuple(rows)
+
+
+def _compile_parse_schema(cls):
+    """Resolve and compile ``cls``'s parse schema, or ``None`` on hint failure."""
+    try:
+        hints = get_type_hints(cls)
+    except Exception:
+        return None
+    return _schema_from_hints(cls, hints)
+
+
 @dataclass
 class Action:
     """Base for all typed actions. Also the catch-all action type for rules that
@@ -122,6 +172,11 @@ class Action:
         A required field (no default) with no token left raises
         :class:`ParseError`. Override this classmethod for bespoke syntax.
 
+        The field schema (annotation kind, ``Literal`` options, greedy last
+        field, defaults) is compiled once per class and reused; classes whose
+        type hints cannot be resolved fall back to the original per-call
+        resolution. Parsing behavior is unchanged either way.
+
         Args:
             raw_args (str): everything after the verb (and switches).
             actor: the acting entity; must expose ``search(name)``.
@@ -139,52 +194,50 @@ class Action:
             ParseError: malformed or missing required arguments.
             AmbiguousTarget: ``actor.search`` matched multiple objects.
         """
+        schema = _PARSE_SCHEMA_CACHE.get(cls)
+        if schema is None:
+            schema = _compile_parse_schema(cls)
+            if schema is not None:
+                _PARSE_SCHEMA_CACHE[cls] = schema
+            else:
+                schema = _schema_from_hints(cls, {})
+
         tokens = raw_args.split() if raw_args else []
         switches = list(switches)
-        try:
-            hints = get_type_hints(cls)
-        except Exception:
-            hints = {}
-
-        init_fields = [f for f in dataclass_fields(cls) if f.init and f.name != "block_reason"]
         values = {}
         idx = 0
-        last_i = len(init_fields) - 1
 
-        for i, f in enumerate(init_fields):
-            annotation = hints.get(f.name, f.type)
-            literal_opts = _literal_options(annotation)
-
+        for name, kind, options, has_default, is_last in schema:
             # Literal: a matching switch wins, else the next positional token.
-            if literal_opts is not None:
+            if kind == "literal":
                 chosen = None
                 for sw in list(switches):
-                    if sw in literal_opts:
+                    if sw in options:
                         chosen = sw
                         switches.remove(sw)
                         break
                 if chosen is None and idx < len(tokens):
                     tok = tokens[idx]
                     idx += 1
-                    if tok not in literal_opts:
+                    if tok not in options:
                         raise ParseError(
-                            f"'{tok}' is not a valid option for {f.name} "
-                            f"(choose from: {', '.join(map(str, literal_opts))})."
+                            f"'{tok}' is not a valid option for {name} "
+                            f"(choose from: {', '.join(map(str, options))})."
                         )
                     chosen = tok
                 if chosen is None:
-                    if _has_default(f):
+                    if has_default:
                         continue
                     raise ParseError(
-                        f"Missing required {f.name} (one of: {', '.join(map(str, literal_opts))})."
+                        f"Missing required {name} (one of: {', '.join(map(str, options))})."
                     )
-                values[f.name] = chosen
+                values[name] = chosen
                 continue
 
             # GameObject: resolve via actor.search.
-            if _is_gameobject(annotation):
+            if kind == "obj":
                 if idx >= len(tokens):
-                    if _has_default(f):
+                    if has_default:
                         continue
                     raise ParseError(f"{cls._verb_label()} what?")
                 tok = tokens[idx]
@@ -192,33 +245,33 @@ class Action:
                 found = actor.search(tok)
                 if found is None:
                     raise ParseError(f"You don't see '{tok}' here.")
-                values[f.name] = found
+                values[name] = found
                 continue
 
             # int
-            if annotation is int:
+            if kind == "int":
                 if idx >= len(tokens):
-                    if _has_default(f):
+                    if has_default:
                         continue
-                    raise ParseError(f"Missing a number for {f.name}.")
+                    raise ParseError(f"Missing a number for {name}.")
                 tok = tokens[idx]
                 idx += 1
                 try:
-                    values[f.name] = int(tok)
+                    values[name] = int(tok)
                 except ValueError:
                     raise ParseError(f"'{tok}' is not a number.")
                 continue
 
             # str / fallback. The last init field is greedy.
             if idx >= len(tokens):
-                if _has_default(f):
+                if has_default:
                     continue
-                raise ParseError(f"Missing required {f.name}.")
-            if i == last_i:
-                values[f.name] = " ".join(tokens[idx:])
+                raise ParseError(f"Missing required {name}.")
+            if is_last:
+                values[name] = " ".join(tokens[idx:])
                 idx = len(tokens)
             else:
-                values[f.name] = tokens[idx]
+                values[name] = tokens[idx]
                 idx += 1
 
         return cls(**values)

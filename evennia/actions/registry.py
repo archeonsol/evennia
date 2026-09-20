@@ -56,6 +56,62 @@ def levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+#: Largest distance a deletion index is built for. Beyond this the registry
+#: falls back to the exact linear scan (the index grows as O(V * L**max_dist)).
+_SUGGEST_INDEX_MAX_DIST = 3
+
+
+def _deletion_variants(word: str, max_dist: int) -> set:
+    """Every string reachable from ``word`` by at most ``max_dist`` deletions.
+
+    The SymSpell candidate property: when the edit distance between two words
+    is at most ``max_dist``, their deletion-variant sets intersect. Building the
+    index from the dictionary side and probing it from the query side therefore
+    yields a superset of all words within ``max_dist``, which is then verified
+    with an exact (banded) edit distance.
+    """
+    variants = {word}
+    for _ in range(max_dist):
+        expanded = set()
+        for current in variants:
+            for i in range(len(current)):
+                expanded.add(current[:i] + current[i + 1 :])
+        variants |= expanded
+    return variants
+
+
+def _banded_levenshtein(a: str, b: str, max_dist: int) -> int:
+    """Exact edit distance with an early exit once a row exceeds ``max_dist``.
+
+    Returns the true distance when it is ``<= max_dist``; otherwise returns an
+    arbitrary value greater than ``max_dist`` (callers only compare against the
+    bound). Rows whose minimum exceeds the bound cannot lead to a result within
+    it, so the computation stops there (Ukkonen cutoff).
+    """
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if abs(la - lb) > max_dist:
+        return max_dist + 1
+    prev = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        row_min = i
+        for j, cb in enumerate(b, 1):
+            value = min(
+                prev[j] + 1,
+                cur[j - 1] + 1,
+                prev[j - 1] + (ca != cb),
+            )
+            cur.append(value)
+            if value < row_min:
+                row_min = value
+        if row_min > max_dist:
+            return max_dist + 1
+        prev = cur
+    return prev[-1]
+
+
 class VerbTrie:
     """A character-keyed trie of verb strings → ``Action`` subclass.
 
@@ -116,11 +172,30 @@ class VerbTrie:
             # exact landing — but a longer verb may also extend it; an exact
             # hit still wins outright.
             return (node["verb"], node["cls"], 1.0)
-        leaves = self._leaves(node)
+        leaves = self._first_leaves(node, 2)
         if len(leaves) == 1:
             verb, cls = leaves[0]
             return (verb, cls, len(token) / len(verb))
         return None
+
+    def _first_leaves(self, node, cap):
+        """Up to ``cap`` ``(verb, cls)`` leaves at or below ``node``.
+
+        Abandons the walk once ``cap`` leaves are found, so an ambiguous prefix
+        does not materialize an entire subtree the way :meth:`_leaves` does.
+        Only the leaf *count* (against ``cap``) matters to callers; the order
+        of the returned leaves is unspecified.
+        """
+        out = []
+        stack = [node]
+        while stack and len(out) < cap:
+            current = stack.pop()
+            if current["verb"] is not None:
+                out.append((current["verb"], current["cls"]))
+                if len(out) >= cap:
+                    break
+            stack.extend(current["children"].values())
+        return out
 
     def prefix_candidates(self, token: str):
         """All verbs that have ``token`` as a prefix (for disambiguation msgs)."""
@@ -151,7 +226,9 @@ class ActionRegistry:
         self._trie = None  # lazily built; invalidated on register
         self._symbol_verbs = None  # lazily built; invalidated on register
         self._glued_verbs = None  # explicitly opted-in word-bearing prefixes
+        self._no_space_prefix = None  # combined symbol+glued tuple; invalidated on register
         self._phrase_metadata = None  # lazily built; invalidated on register
+        self._suggest_indexes = {}  # max_dist -> SymSpell deletion index; cleared on register
 
     def _rebuild_phrase_metadata(self):
         """Recompute and cache ``(max_phrase_words, multi_word_starters)``.
@@ -212,7 +289,9 @@ class ActionRegistry:
         self._trie = None
         self._symbol_verbs = None
         self._glued_verbs = None
+        self._no_space_prefix = None
         self._phrase_metadata = None
+        self._suggest_indexes.clear()
         return action_cls
 
     def get(self, verb):
@@ -336,17 +415,59 @@ class ActionRegistry:
 
     @property
     def no_space_prefix_verbs(self):
-        """All aliases eligible to consume glued argument text."""
-        found = list(self.symbol_verbs)
-        for verb in self.glued_verbs:
-            if verb not in found:
-                found.append(verb)
-        found.sort(key=len, reverse=True)
-        return tuple(found)
+        """All aliases eligible to consume glued argument text.
+
+        Cached (a tuple) and invalidated on ``register``: the parser reads this
+        on every trie-miss input, and rebuilding the merged list per call was
+        pure allocation.
+        """
+        if self._no_space_prefix is None:
+            found = list(self.symbol_verbs)
+            for verb in self.glued_verbs:
+                if verb not in found:
+                    found.append(verb)
+            found.sort(key=len, reverse=True)
+            self._no_space_prefix = tuple(found)
+        return self._no_space_prefix
+
+    def _suggest_index(self, max_dist: int) -> dict:
+        """Lazily build (and cache) the deletion index for ``max_dist``."""
+        index = self._suggest_indexes.get(max_dist)
+        if index is None:
+            index = {}
+            for verb in self._by_verb:
+                if _is_system_verb(verb):
+                    continue
+                for variant in _deletion_variants(verb, max_dist):
+                    index.setdefault(variant, []).append(verb)
+            self._suggest_indexes[max_dist] = index
+        return index
+
+    def _suggest_candidates(self, token: str, max_dist: int) -> list:
+        """Dictionary words whose deletion variants intersect ``token``'s.
+
+        A superset of the words within ``max_dist`` of ``token`` (the SymSpell
+        property); the caller verifies each candidate with an exact distance.
+        """
+        index = self._suggest_index(max_dist)
+        candidates = []
+        seen = set()
+        for variant in _deletion_variants(token, max_dist):
+            for verb in index.get(variant, ()):
+                if verb not in seen:
+                    seen.add(verb)
+                    candidates.append(verb)
+        return candidates
 
     def suggest_verbs(self, token: str, max_dist: int = 2, limit: int = 3, reachable=None):
         """Return up to ``limit`` registered verbs within edit distance
         ``max_dist`` of ``token``, closest first (for "did you mean…" output).
+
+        Candidates come from a SymSpell-style deletion index (built lazily per
+        ``max_dist`` and invalidated on ``register``), so a typo costs roughly
+        O(candidates) instead of a full scan over every verb. Distances beyond
+        :data:`_SUGGEST_INDEX_MAX_DIST` fall back to the exact linear scan,
+        because index size grows as ``O(V * L**max_dist)``.
 
         Args:
             token (str): the mistyped verb.
@@ -361,13 +482,16 @@ class ActionRegistry:
         """
         token = token.lower()
         scored = []
-        for verb in self._by_verb:
-            if _is_system_verb(verb):
-                continue
-            dist = levenshtein(token, verb)
-            if dist <= max_dist:
-                scored.append((dist, verb))
-        scored.sort(key=lambda pair: (pair[0], pair[1]))
+        if max_dist >= 0:
+            if max_dist <= _SUGGEST_INDEX_MAX_DIST:
+                candidates = self._suggest_candidates(token, max_dist)
+            else:
+                candidates = (verb for verb in self._by_verb if not _is_system_verb(verb))
+            for verb in candidates:
+                dist = _banded_levenshtein(token, verb, max_dist)
+                if dist <= max_dist:
+                    scored.append((dist, verb))
+            scored.sort(key=lambda pair: (pair[0], pair[1]))
         if reachable is None:
             return [verb for _, verb in scored[:limit]]
         out = []

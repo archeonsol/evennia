@@ -483,7 +483,15 @@ class RuleEngine:
         suspended = False
         try:
             raw = self._fire(provider, spec, action, actor)
-            if inspect.isgenerator(raw):
+            # Fast path: a plain ``RuleResult`` or ``None`` (the overwhelmingly
+            # common shapes) is final without probing for generator/awaitable —
+            # ``inspect.isawaitable`` is the single most expensive per-rule
+            # check, and a sync room should never pay it.
+            if isinstance(raw, RuleResult):
+                result = raw
+            elif raw is None:
+                result = PASS
+            elif inspect.isgenerator(raw):
                 suspended = True
                 final = await _drive_generator(raw, actor)
                 result = self._coerce_final(final)
@@ -492,7 +500,7 @@ class RuleEngine:
                 final = await clock.maybe_await(raw)
                 result = self._coerce_final(final)
             else:
-                result = self._coerce_final(raw)
+                result = PASS
         except Exception as exc:  # noqa: BLE001 - a buggy rule must not kill the phase
             from evennia.utils import logger
 

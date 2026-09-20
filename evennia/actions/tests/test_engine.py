@@ -481,6 +481,55 @@ class TestOutcomeAndProviderOrder(unittest.TestCase):
         self.assertTrue(d.called)
 
 
+class _SyncResults:
+    """carry_out/report bodies returning ``None`` or a ``RuleResult``."""
+
+    @rule(Kick, phase="carry_out", priority=10)
+    def none_result(self, action, actor):
+        return None
+
+    @rule(Kick, phase="report", priority=10)
+    def pass_result(self, action, actor):
+        return PASS
+
+
+class _DeferredResult:
+    """carry_out body returning an already-fired Deferred."""
+
+    @rule(Kick, phase="carry_out", priority=10)
+    def deferred_result(self, action, actor):
+        return succeed(CLAIM)
+
+
+class TestEvalFastPath(unittest.TestCase):
+    """A rule body returning ``None`` or a ``RuleResult`` must not pay the
+    awaitable probe; only genuinely async-shaped returns are inspected."""
+
+    def _counting_probe(self):
+        calls = []
+        real = engine_mod._is_deferred
+
+        def counting(raw):
+            calls.append(raw)
+            return real(raw)
+
+        return calls, mock.patch.object(engine_mod, "_is_deferred", side_effect=counting)
+
+    def test_sync_results_skip_awaitable_probe(self):
+        calls, patcher = self._counting_probe()
+        with patcher:
+            trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(_SyncResults())))
+        self.assertEqual(trace.outcome, "succeeded")
+        self.assertEqual(calls, [])
+
+    def test_deferred_result_still_probed(self):
+        calls, patcher = self._counting_probe()
+        with patcher:
+            trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(_DeferredResult())))
+        self.assertEqual(trace.outcome, "succeeded")
+        self.assertEqual(len(calls), 1)
+
+
 # --- 1g: deferred / interactive driving -------------------------------------
 class TestInteractiveRule(unittest.TestCase):
     def _auto_answer(self, answer):
