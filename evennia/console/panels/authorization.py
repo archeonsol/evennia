@@ -70,14 +70,10 @@ class AuthorizationPanel(Panel):
 
         queryset = model._base_manager.all()
         principal = str(params.get("principal") or "").strip()
-        if principal and any(
-            f.name == "principal_ref" for f in model._meta.concrete_fields
-        ):
+        if principal and any(f.name == "principal_ref" for f in model._meta.concrete_fields):
             queryset = queryset.filter(principal_ref=principal)
         capability = str(params.get("capability") or "").strip()
-        if capability and any(
-            f.name == "capability" for f in model._meta.concrete_fields
-        ):
+        if capability and any(f.name == "capability" for f in model._meta.concrete_fields):
             queryset = queryset.filter(capability=capability)
 
         fields = [field.name for field in model._meta.concrete_fields]
@@ -126,8 +122,7 @@ class AuthorizationPanel(Panel):
                     "category": definition.category,
                     "status": definition.status,
                     "default_visible": (
-                        definition.status == "active"
-                        and not definition.key.startswith("engine.")
+                        definition.status == "active" and not definition.key.startswith("engine.")
                     ),
                 }
                 for definition in capability_registry.definitions()
@@ -149,8 +144,7 @@ class AuthorizationPanel(Panel):
                     "category": definition.category,
                     "status": definition.status,
                     "default_visible": (
-                        definition.status == "active"
-                        and definition.category != "Engine operations"
+                        definition.status == "active" and definition.category != "Engine operations"
                     ),
                 }
                 for definition in capability_registry.bundle_definitions()

@@ -54,9 +54,7 @@ def apply_postgres_engine_defaults(databases: Dict[str, Any]) -> Dict[str, Any]:
     out = deepcopy(databases)
     conn_max_age = int(getattr(settings, "ENGINE_DATABASE_CONN_MAX_AGE", 600) or 0)
     health_checks = bool(getattr(settings, "ENGINE_DATABASE_CONN_HEALTH_CHECKS", True))
-    transaction_pooling = bool(
-        getattr(settings, "ENGINE_DATABASE_TRANSACTION_POOLING", False)
-    )
+    transaction_pooling = bool(getattr(settings, "ENGINE_DATABASE_TRANSACTION_POOLING", False))
 
     for alias, cfg in out.items():
         if not isinstance(cfg, dict):
@@ -74,9 +72,7 @@ def apply_postgres_engine_defaults(databases: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def build_read_replica_entry(
-    primary: Dict[str, Any], *, name: str = "replica"
-) -> Dict[str, Any]:
+def build_read_replica_entry(primary: Dict[str, Any], *, name: str = "replica") -> Dict[str, Any]:
     """
     Clone primary config for a read replica alias (website, logs, analytics only).
 
@@ -107,9 +103,7 @@ def _apply_engine_pg_session_init(sender, connection, **kwargs):
 
     stmts = []
     if connection.alias == "default":
-        timeout_ms = int(
-            getattr(settings, "ENGINE_DATABASE_STATEMENT_TIMEOUT_MS", 30000) or 0
-        )
+        timeout_ms = int(getattr(settings, "ENGINE_DATABASE_STATEMENT_TIMEOUT_MS", 30000) or 0)
         if timeout_ms > 0:
             stmts.append("SET statement_timeout = %d" % timeout_ms)
     if connection.alias in _READ_REPLICA_ALIASES:

@@ -4,14 +4,19 @@ Tests for secure AMP session serialization.
 
 import pickle
 
-from evennia.server.amp_serde import (pack_admin_message, pack_launcher_args,
-                                      pack_multicast_message,
-                                      pack_session_message, pack_status,
-                                      sanitize_session_kwargs,
-                                      unpack_admin_message,
-                                      unpack_launcher_args,
-                                      unpack_multicast_message,
-                                      unpack_session_message, unpack_status)
+from evennia.server.amp_serde import (
+    pack_admin_message,
+    pack_launcher_args,
+    pack_multicast_message,
+    pack_session_message,
+    pack_status,
+    sanitize_session_kwargs,
+    unpack_admin_message,
+    unpack_launcher_args,
+    unpack_multicast_message,
+    unpack_session_message,
+    unpack_status,
+)
 from evennia.utils.test_resources import BaseEvenniaTest
 
 

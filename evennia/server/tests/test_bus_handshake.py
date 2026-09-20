@@ -133,9 +133,7 @@ class TestHandshake(TestCase):
         server = self.peers["server"]
         for index in range(8):
             self.now += 1
-            server.receive(
-                {"kind": "probe", "portal": ["portal", f"p{index}"], "probe": "p"}
-            )
+            server.receive({"kind": "probe", "portal": ["portal", f"p{index}"], "probe": "p"})
         self.wire.clear()
         self.now += 1
         server.receive({"kind": "probe", "portal": ["portal", "p8"], "probe": "p"})

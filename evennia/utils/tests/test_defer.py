@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from django.db import connections
 from django.test import SimpleTestCase
+
 from evennia.utils import clock, defer
 
 _DRAIN_TIMEOUT = 5.0

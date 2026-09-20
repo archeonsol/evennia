@@ -20,9 +20,7 @@ class ResolveFixturesTest(SimpleTestCase):
     def test_dependencies_are_pulled_in(self):
         self.assertEqual(resolve_fixtures({"char1"}), {"char1", "room1", "account"})
         self.assertEqual(resolve_fixtures({"exit"}), {"exit", "room1", "room2"})
-        self.assertEqual(
-            resolve_fixtures({"session"}), {"session", "account", "char1", "room1"}
-        )
+        self.assertEqual(resolve_fixtures({"session"}), {"session", "account", "char1", "room1"})
 
     def test_independent_fixtures_pull_in_nothing(self):
         self.assertEqual(resolve_fixtures({"script"}), {"script"})

@@ -5,10 +5,11 @@ Test the main server component
 
 from unittest import TestCase
 
-import evennia
 from django.test import override_settings
-from evennia.server import service
 from mock import DEFAULT, MagicMock, call, patch
+
+import evennia
+from evennia.server import service
 
 
 class TestServer(TestCase):

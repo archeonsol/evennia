@@ -161,9 +161,7 @@ class ReverseProxy:
                 out_headers = self._response_headers(upstream)
                 await self._write(
                     writer,
-                    conn.send(
-                        h11.Response(status_code=upstream.status_code, headers=out_headers)
-                    ),
+                    conn.send(h11.Response(status_code=upstream.status_code, headers=out_headers)),
                 )
                 response_started = True
 
