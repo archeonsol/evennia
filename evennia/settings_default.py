@@ -840,6 +840,13 @@ COMMAND_TRACE_ENABLED = True
 # Diagnostic protocol record emitted after the complete CM1 input lifecycle.
 # Disabled for ordinary clients; load environments opt in explicitly.
 COMMAND_COMPLETION_MARKERS_ENABLED = False
+# Log rule bodies that suspend a dispatch longer than this (ms; 0 = disabled).
+# A suspended rule holds the command's completion marker open; use it to find
+# which body owns a fixed per-command wait.
+ACTION_SUSPENSION_WARN_MS = 0.0
+# Log bridge dispatches slower than this, split into parse and dispatch (ms;
+# 0 = disabled). Measures exactly the span the completion marker reports.
+ACTION_DISPATCH_WARN_MS = 0.0
 # --- Tier 1E: reload / startup scheduling ---
 # Batch cached at_post_load() calls (entities per reactor turn).
 AT_INIT_BATCH_SIZE = 50

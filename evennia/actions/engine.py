@@ -65,8 +65,10 @@ effectively synchronous — the machinery cost is paid only when a rule defers.
 """
 
 import inspect
+import time
 
 from evennia.utils import clock
+from evennia.utils.utils import cached_setting
 
 from .context import ActionContext
 from .exceptions import ActionError
@@ -493,11 +495,17 @@ class RuleEngine:
                 result = PASS
             elif inspect.isgenerator(raw):
                 suspended = True
+                started = time.monotonic()
                 final = await _drive_generator(raw, actor)
+                self._note_suspension(
+                    provider, spec, phase, time.monotonic() - started, "generator"
+                )
                 result = self._coerce_final(final)
             elif _is_deferred(raw):
                 suspended = True
+                started = time.monotonic()
                 final = await clock.maybe_await(raw)
+                self._note_suspension(provider, spec, phase, time.monotonic() - started, "deferred")
                 result = self._coerce_final(final)
             else:
                 result = PASS
@@ -510,6 +518,26 @@ class RuleEngine:
             return PASS, suspended
         self._record(trace, phase, provider, spec, result)
         return result, suspended
+
+    @staticmethod
+    def _note_suspension(provider, spec, phase, seconds, kind):
+        """Log a slow rule suspension when dispatch diagnostics are enabled.
+
+        Set ``ACTION_SUSPENSION_WARN_MS`` to a positive millisecond threshold
+        to find which rule bodies hold a command's completion open (a suspended
+        rule keeps the whole dispatch waiting, and the completion marker with
+        it). Disabled at 0.0 so production pays only two ``time.monotonic``
+        calls per suspension.
+        """
+        threshold = cached_setting("ACTION_SUSPENSION_WARN_MS", 0.0)
+        if not threshold or seconds * 1000.0 < float(threshold):
+            return
+        from evennia.utils import logger
+
+        logger.log_warn(
+            f"action suspension: {kind} {type(provider).__name__}.{spec.rule_name} "
+            f"phase={phase} waited {seconds * 1000.0:.1f}ms"
+        )
 
     @staticmethod
     def _fire(provider, spec, action, actor):

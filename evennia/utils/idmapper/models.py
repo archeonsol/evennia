@@ -791,6 +791,7 @@ class _CacheFlushSweep:
         self.handle = None
         self.query_future = None
         self.started_at = time.monotonic()
+        self.active_seconds = 0.0
         self.stats = {
             "batches": 0,
             "objects": 0,
@@ -871,6 +872,7 @@ class _CacheFlushSweep:
                 entry_cache[key] = obj
                 self.stats["retained"] += 1
 
+        self.active_seconds += time.monotonic() - turn_started
         return self._current_cache() is not None
 
     def run_turn(self):
@@ -967,7 +969,12 @@ class _CacheFlushSweep:
             try:
                 from evennia.server.prometheus_metrics import record_idmapper_flush
 
-                record_idmapper_flush(self.stats, duration_seconds=duration, failed=failed)
+                record_idmapper_flush(
+                    self.stats,
+                    duration_seconds=duration,
+                    active_seconds=self.active_seconds,
+                    failed=failed,
+                )
             except Exception:
                 logger.log_trace("idmapper: could not record cache-flush metrics")
         finally:
