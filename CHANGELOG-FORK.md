@@ -25,6 +25,52 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.259 — Allocation churn and output-path stalls
+
+### Changes
+
+- **Hot dataclasses use slots.** `RuleResult`, `PhaseTrace`, `ActionTrace` and
+  the bus `_Outgoing` frame are instantiated per rule, per dispatch and per
+  published frame. py-spy labelled their generated `__init__` as
+  `<string>:2` (dataclasses compile it under that filename) at ~5% of reactor
+  CPU, and the same churn showed up as weakref/GC stalls. `slots=True` removes
+  the per-instance dict and the GC traversal that came with it.
+- **Movement activity dispatches stop recording phase traces.** `walk`-driven
+  `Move` dispatches used `engine.dispatch` with the default
+  `record_phases=True`, building a `PhaseTrace` per fired rule with no
+  consumer; the production bridge already passes `record_phases=False`.
+- **Command trace ids are a monotonic counter** instead of `uuid4().hex` per
+  command, keeping the 16-character format for log correlation.
+- **`inherits_from` memoizes the parent path** as well as the MRO path list.
+- **Output flush bounds frame grouping.** Single-session turns skip the
+  structural grouping key entirely (there is nothing to share), and the key
+  builder raises past a depth budget instead of producing a truncated key that
+  could group two different frames; that frame then ships alone.
+
+### Game-side (same release window)
+
+- Freight lifts resolve dbrefs through the idmapper with one indexed query as
+  fallback, replacing `search_object("#id")` at six sites.
+- The load harness gains `--processes N` sharding with pooled percentile
+  merging, so one Python process is no longer the bottleneck under spam load.
+
+### Measurement
+
+Run 11 (100 bots, think 0.2–0.5s, 38,169 commands): server p50 9.6 / p95 20.4
+/ p99 26.1ms, 0 errors, 0 timeouts — but end-to-end rtt p50 was 1,177ms with
+`bus_outgoing_depth` peaking at 157 (normal ~5). The queueing is in the
+server→bus→portal→socket path and in the single-process test client, not the
+reactor; run 12 profiles the portal and shards the harness.
+
+### Tests
+
+- Engine sweeps green on an isolated test database: `evennia.authorization`,
+  `evennia.actions`, `evennia.objects` — 733 tests; `evennia.typeclasses`,
+  `evennia.utils`, `evennia.server` — 1822 tests (20 skips).
+- Game: freight suites 45 tests OK; harness completion tests 4 OK. One
+  pre-existing courier failure (`test_move_action_steps_toward_shop`)
+  reproduces with these changes stashed and is not from this release.
+
 ## 6.0.0+underspire.258 — Action parser and authorization hot paths
 
 ### Changes
