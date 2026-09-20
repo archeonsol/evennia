@@ -432,6 +432,45 @@ def bump_resource_generation(resource) -> None:
     _policy_package_cache.pop(ref, None)
 
 
+def _note_move_invalidation(outcome: str) -> None:
+    """Record one move-invalidation decision without touching the hot path."""
+
+    try:
+        from evennia.server.prometheus_metrics import record_authorization_move_invalidation
+
+        record_authorization_move_invalidation(outcome)
+    except Exception:
+        pass
+
+
+def bump_resource_generation_after_move(resource) -> bool:
+    """Invalidate moved-resource facts only for location-derived adapter labels.
+
+    An adapter lookup failure fails safe by invalidating: over-invalidation
+    costs one refetch, while a missed location-derived label change would serve
+    a stale snapshot.
+
+    Returns:
+        bool: Whether invalidation ran (location-sensitive or lookup failed).
+
+    """
+
+    try:
+        adapter = resource_adapters.for_resource(resource)
+        location_sensitive = adapter is not None and adapter.location_sensitive
+    except Exception:
+        logger.log_trace("authorization move invalidation adapter lookup failed")
+        location_sensitive = True
+        _note_move_invalidation("lookup_error")
+    else:
+        if not location_sensitive:
+            _note_move_invalidation("skipped")
+            return False
+        _note_move_invalidation("bumped")
+    bump_resource_generation(resource)
+    return True
+
+
 def bump_principal_generation(principal_ref: str) -> None:
     """Invalidate grant snapshots affected by a principal mutation."""
 
@@ -1470,7 +1509,8 @@ async def prewarm_authorization(principals, resources) -> bool:
             if current_task.cancelling():
                 raise
             return _finish_prewarm_wait(False, "failed", started)
-    return _finish_prewarm_wait(False, "failed", started)
+    ready, _ = _prewarm_request(principals, resources, include_labels=False)
+    return _finish_prewarm_wait(ready, "waited" if ready else "failed", started)
 
 
 def clear_authorization_caches() -> None:

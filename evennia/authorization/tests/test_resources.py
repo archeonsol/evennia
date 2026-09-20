@@ -23,3 +23,15 @@ class ResourceAdapterTest(SimpleTestCase):
         adapter = registry.for_resource(resource)
         self.assertEqual(adapter.reference(resource), "AV-42")
         self.assertEqual(tuple(adapter.labels(resource)), ("fleet:civic",))
+
+    def test_location_sensitive_labels_are_explicit(self):
+        stable = ResourceAdapter("stable", lambda resource: True, lambda resource: "stable")
+        moving = ResourceAdapter(
+            "moving",
+            lambda resource: True,
+            lambda resource: "moving",
+            location_sensitive=True,
+        )
+
+        self.assertFalse(stable.location_sensitive)
+        self.assertTrue(moving.location_sensitive)

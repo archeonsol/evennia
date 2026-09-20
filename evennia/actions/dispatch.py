@@ -99,10 +99,10 @@ def get_middlewares():
 def _authorization_resources(action, actor, context):
     """Collect the bounded resource graph needed by one authorization scope.
 
-    Movement resolves an exit before dispatch, but its destination room and
-    occupants are not ordinary source-room providers. Include that one hop so
-    arrival hooks and the automatic destination look do not fall back to live
-    authorization storage reads after the snapshot scope starts.
+    Movement resolves its exit as an action target before dispatch. Include
+    that target's destination and occupants so arrival hooks and the automatic
+    destination look stay snapshot-only. Other source-room exits are providers,
+    not targets, and must not pull every adjacent room into unrelated commands.
     """
     principals = [
         getattr(actor, "effective", None),
@@ -110,14 +110,14 @@ def _authorization_resources(action, actor, context):
         getattr(actor, "account", None),
         getattr(actor, "session", None),
     ]
-    resources = [*principals, *context.providers, *getattr(action, "targets", ())]
+    targets = tuple(getattr(action, "targets", ()) or ())
+    resources = [*principals, *context.providers, *targets]
     location = getattr(actor, "location", None)
     if location is not None:
         resources.append(location)
         resources.extend(list(getattr(location, "contents", None) or ()))
 
-    initial = tuple(resources)
-    for resource in initial:
+    for resource in targets:
         if resource is None:
             continue
         try:
@@ -463,8 +463,19 @@ async def _dispatch_with_signals(action, actor, raw_string, session, engine, cal
         )
 
         principals, resources = _authorization_resources(action, actor, context)
-        await prewarm_authorization(principals, resources)
-        snapshot_scope = authorization_snapshot_scope()
+        if await prewarm_authorization(principals, resources):
+            snapshot_scope = authorization_snapshot_scope()
+        else:
+            # Evaluate through the ordinary read path rather than consume
+            # possibly stale snapshots.
+            try:
+                from evennia.server.prometheus_metrics import (
+                    record_authorization_snapshot_scope_fallback,
+                )
+
+                record_authorization_snapshot_scope_fallback()
+            except Exception:
+                pass
 
     try:
         with snapshot_scope:

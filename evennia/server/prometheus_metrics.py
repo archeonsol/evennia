@@ -36,6 +36,8 @@ AUTHORIZATION_PREWARM_DURATION_SECONDS = None
 AUTHORIZATION_PREWARM_WAIT_TOTAL = None
 AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS = None
 AUTHORIZATION_SNAPSHOT_MISS_TOTAL = None
+AUTHORIZATION_MOVE_INVALIDATION_TOTAL = None
+AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL = None
 ACTION_INPUT_TOTAL = None
 ACTION_INPUT_DURATION_SECONDS = None
 RUNTIME_TASKS_ACTIVE = None
@@ -76,6 +78,7 @@ def _init_metrics() -> bool:
     global AUTHORIZATION_PREWARM_TOTAL, AUTHORIZATION_PREWARM_DURATION_SECONDS
     global AUTHORIZATION_PREWARM_WAIT_TOTAL, AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS
     global AUTHORIZATION_SNAPSHOT_MISS_TOTAL
+    global AUTHORIZATION_MOVE_INVALIDATION_TOTAL, AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL
     global ACTION_INPUT_TOTAL, ACTION_INPUT_DURATION_SECONDS
     global RUNTIME_TASKS_ACTIVE, RUNTIME_TASKS_TOTAL, RUNTIME_DB_SCOPE_CLOSES_TOTAL
     global RUNTIME_DB_UNMANAGED_TOTAL
@@ -234,6 +237,15 @@ def _init_metrics() -> bool:
         "evennia_authorization_snapshot_miss_total",
         "Authorization reads that missed the off-loop snapshot and read inline",
         ("kind",),
+    )
+    AUTHORIZATION_MOVE_INVALIDATION_TOTAL = Counter(
+        "evennia_authorization_move_invalidation_total",
+        "Moved-resource authorization invalidations by outcome",
+        ("outcome",),
+    )
+    AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL = Counter(
+        "evennia_authorization_snapshot_scope_fallback_total",
+        "Dispatches that evaluated without the snapshot scope after an incomplete prewarm",
     )
     ACTION_INPUT_TOTAL = Counter(
         "evennia_action_input_total",
@@ -490,6 +502,25 @@ def record_authorization_snapshot_miss(kind: str) -> None:
     normalized = kind if kind in {"principal", "resource", "suspension", "policy"} else "other"
     if AUTHORIZATION_SNAPSHOT_MISS_TOTAL is not None:
         AUTHORIZATION_SNAPSHOT_MISS_TOTAL.labels(kind=normalized).inc()
+
+
+def record_authorization_move_invalidation(outcome: str) -> None:
+    """Record one moved-resource invalidation decision."""
+
+    if not _init_metrics():
+        return
+    normalized = outcome if outcome in {"bumped", "skipped", "lookup_error"} else "lookup_error"
+    if AUTHORIZATION_MOVE_INVALIDATION_TOTAL is not None:
+        AUTHORIZATION_MOVE_INVALIDATION_TOTAL.labels(outcome=normalized).inc()
+
+
+def record_authorization_snapshot_scope_fallback() -> None:
+    """Record one dispatch that ran without the authorization snapshot scope."""
+
+    if not _init_metrics():
+        return
+    if AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL is not None:
+        AUTHORIZATION_SNAPSHOT_SCOPE_FALLBACK_TOTAL.inc()
 
 
 def record_action_input(outcome: str, duration_seconds: float) -> None:

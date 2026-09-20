@@ -66,6 +66,12 @@ Missing operations fail closed. `default=True` cannot manufacture authority.
 matches any resource carrying that label. Creating an object does not grant
 authority and there is no implicit creator ownership.
 
+Resource adapters may derive additional labels from game objects. Adapter
+references and matching must remain stable across movement. An adapter whose
+labels depend on location declares ``location_sensitive=True``; only those
+resources invalidate their authorization snapshot after moving. Authored scope
+labels and instance policies invalidate at their own mutation boundaries.
+
 ## Commands and actions
 
 Commands declare `authorization = "public"`, `"disabled"`, or a capability.

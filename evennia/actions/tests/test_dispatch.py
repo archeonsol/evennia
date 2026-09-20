@@ -7,7 +7,11 @@ touching the real cmdhandler (the shim there is a thin call into this module).
 """
 
 import unittest
+from contextlib import nullcontext
 from dataclasses import dataclass
+from unittest import mock
+
+from django.test import override_settings
 
 from evennia.actions.action import Action, GameObject
 from evennia.actions.actor import Actor
@@ -169,14 +173,42 @@ class TestRouting(unittest.TestCase):
         destination_occupant = object()
         destination = type("Destination", (), {"contents": [destination_occupant]})()
         exit_obj = type("Exit", (), {"destination": destination})()
+        unrelated_occupant = object()
+        unrelated_destination = type(
+            "UnrelatedDestination", (), {"contents": [unrelated_occupant]}
+        )()
+        unrelated_exit = type("UnrelatedExit", (), {"destination": unrelated_destination})()
         action = Kick(target=exit_obj)
-        context = type("Context", (), {"providers": [self.char]})()
+        context = type("Context", (), {"providers": [self.char, unrelated_exit]})()
 
         principals, resources = _authorization_resources(action, self.actor, context)
 
         self.assertIn(self.char, principals)
         self.assertIn(destination, resources)
         self.assertIn(destination_occupant, resources)
+        self.assertNotIn(unrelated_destination, resources)
+        self.assertNotIn(unrelated_occupant, resources)
+
+    @override_settings(AUTHORIZATION_OFFLOOP_SNAPSHOTS=True)
+    def test_failed_authorization_prewarm_uses_inline_fallback(self):
+        from evennia.authorization import storage
+
+        goblin = RuleTarget("goblin")
+        self.char._search_hook = lambda name: goblin
+        with (
+            mock.patch.object(storage, "prewarm_authorization", return_value=False),
+            mock.patch.object(
+                storage, "authorization_snapshot_scope", return_value=nullcontext()
+            ) as snapshot_scope,
+            mock.patch(
+                "evennia.server.prometheus_metrics.record_authorization_snapshot_scope_fallback"
+            ) as fallback,
+        ):
+            trace = _dispatch(self.actor, "kick goblin", self.parser)
+
+        self.assertEqual(trace.outcome, "succeeded")
+        snapshot_scope.assert_not_called()
+        fallback.assert_called_once()
 
 
 # --- fail-closed feedback (dispatch honesty) ---------------------------------
