@@ -25,6 +25,63 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.255 — Authorization model hardening
+
+### Features
+
+- **Principal groups as grant subjects.**
+  [`AuthorizationPrincipalGroup`](evennia/server/models.py) and
+  [`AuthorizationGroupMembership`](evennia/server/models.py) add named,
+  exact-membership sets; grants may target `group:<ref>`. Membership lives in
+  the principal snapshot, so joining or leaving is one principal event and a
+  grant edited on a group invalidates every member's snapshot without
+  fan-out. Groups are provisioning conveniences over the flat capability
+  evaluator: no rank thresholds, no transitivity, and rank stays data.
+  Group mutations are audited; deleting a group revokes its grants so a
+  recreated ref cannot resurrect authority.
+- **Compiled policy bundles.**
+  [`AuthorizationPolicyBundle`](evennia/server/models.py) compiles instance
+  policy overrides into a versioned document. Activating a bundle is one
+  atomic policy release (or rollback) and bumps a policy generation that
+  clears every compiled package cache in every process. Bundles are opt-in:
+  without an active bundle, live override rows remain authoritative exactly
+  as before.
+- **Grant constraint registry.**
+  [`policy.py`](evennia/authorization/policy.py) replaces the `session_id`
+  special case with a pure, engine-agnostic registry: `session_id`, `online`,
+  `time_window` (server-local), and `requires_label`. Constraints are
+  validated at write time and fail closed at read.
+- **Predicate purity enforcement.** Predicate registration rejects
+  async/generator providers, and a Django query guard plus
+  `AUTHORIZATION_PREDICATE_PURITY` (`log` default, `error` for CI) catches
+  predicates and constraints that perform I/O during evaluation.
+
+### Behavior changes
+
+- A cold principal snapshot now reads group membership plus grants (two
+  indexed queries) and stores `group_refs` in `GrantSnapshot`.
+- A cold policy load probes the active bundle before reading override rows
+  (two indexed queries, then local).
+- `time_window` constraints use server-local wall-clock time.
+- Engine defaults are unchanged: push invalidation, bundles, and `error`
+  purity mode are all opt-in.
+
+### Migration
+
+- New migration
+  [`0012_authorization_groups_and_policy_bundle`](evennia/server/migrations/0012_authorization_groups_and_policy_bundle.py).
+  No setting changes are required; existing grants, labels, and overrides
+  keep working untouched.
+
+### Tests
+
+- Engine sweep green: `evennia.authorization`, `evennia.actions`,
+  `evennia.objects` — 705 tests; `evennia.server` + `evennia.utils` — 1504
+  tests (20 expected skips).
+- New: 17 model-hardening tests (groups, bundles, constraints, purity) and 4
+  hypothesis property/fuzz suites (policy serde round-trip, composition
+  laws, malformed-data fail-closed, constraint validation totality).
+
 ## 6.0.0+underspire.254 — Push authorization invalidation
 
 ### Performance

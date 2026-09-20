@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -19,7 +20,10 @@ from django.utils import timezone
 from evennia.server.models import (
     AuthorizationAuditEvent,
     AuthorizationGrant,
+    AuthorizationGroupMembership,
+    AuthorizationPolicyBundle,
     AuthorizationPolicyOverride,
+    AuthorizationPrincipalGroup,
     AuthorizationPrincipalState,
     AuthorizationScopeLabel,
 )
@@ -28,7 +32,12 @@ from evennia.utils import logger
 from . import invalidation
 from .capabilities import capability_registry
 from .engine import GrantScope, GrantSnapshot, ResourceSnapshot
-from .policy import policy_from_data, policy_registry
+from .policy import (
+    grant_constraint_keys,
+    policy_from_data,
+    policy_registry,
+    validate_grant_constraints,
+)
 from .resources import resource_adapters
 
 _MAX_CACHE = 20_000
@@ -39,6 +48,8 @@ _resource_cache: OrderedDict[str, ResourceSnapshot] = OrderedDict()
 _policy_package_cache: OrderedDict[str, tuple[int, dict[str, object]]] = OrderedDict()
 _suspension_cache: OrderedDict[str, tuple[int, bool, float | None]] = OrderedDict()
 _shared_generation_cache: dict[str, tuple[float, int]] = {}
+_policy_bundle_cache: tuple[int, int, dict] | None = None
+_policy_bundle_generation = 0
 _NO_TASK = object()
 _snapshot_scope_owner = contextvars.ContextVar("evennia_authorization_snapshot_owner", default=None)
 _prewarm_task = None
@@ -317,16 +328,39 @@ def _read_quell_document(source) -> bool:
     return _document_quell(row)
 
 
+def _principal_group_refs(refs) -> tuple[str, ...]:
+    """Return the ``group:<ref>`` grant subjects one principal belongs to."""
+
+    if not refs:
+        return ()
+    return tuple(
+        sorted(
+            f"group:{group_ref}"
+            for group_ref in AuthorizationGroupMembership.objects.filter(
+                principal_ref__in=refs
+            ).values_list("group_ref", flat=True)
+        )
+    )
+
+
 def load_grants(principal) -> GrantSnapshot:
     """Load or return cached positive grants for a principal."""
 
     refs = principal_refs(principal)
     cache_key = "|".join(refs) or "anonymous"
+    cached = _principal_cache.get(cache_key)
+    # Group subjects are part of the generation check so a grant edited on a
+    # group invalidates every member's cached snapshot.
+    generation_refs = list(refs)
+    if cached is not None:
+        generation_refs.extend(cached.group_refs)
     generation = max(
-        (_shared_generation("principal", ref, _principal_generation.get(ref, 0)) for ref in refs),
+        (
+            _shared_generation("principal", ref, _principal_generation.get(ref, 0))
+            for ref in generation_refs
+        ),
         default=0,
     )
-    cached = _principal_cache.get(cache_key)
     now = timezone.now()
     if (
         cached is not None
@@ -341,8 +375,15 @@ def load_grants(principal) -> GrantSnapshot:
                 f"principal snapshot unavailable for {cache_key}"
             )
         _note_snapshot_miss("principal", cache_key)
+    group_refs = _principal_group_refs(refs)
+    if group_refs:
+        group_generations = [
+            _shared_generation("principal", ref, _principal_generation.get(ref, 0))
+            for ref in group_refs
+        ]
+        generation = max([generation, *group_generations])
     query = AuthorizationGrant.objects.filter(
-        principal_ref__in=refs,
+        principal_ref__in=[*refs, *group_refs],
         revoked_at__isnull=True,
     ).filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
     by_capability: dict[str, set[GrantScope]] = {}
@@ -373,7 +414,7 @@ def load_grants(principal) -> GrantSnapshot:
         if authority_suppressed:
             continue
         constraints = dict(grant.constraints or {})
-        if set(constraints) - {"session_id"} or any(
+        if set(constraints) - grant_constraint_keys() or any(
             value is not None and not isinstance(value, (str, int, float, bool))
             for value in constraints.values()
         ):
@@ -397,6 +438,7 @@ def load_grants(principal) -> GrantSnapshot:
         {key: frozenset(values) for key, values in by_capability.items()},
         generation,
         valid_until,
+        frozenset(group_refs),
     )
     _bounded_put(_principal_cache, cache_key, snapshot)
     return snapshot
@@ -508,16 +550,7 @@ def _validated_grant_constraints(constraints: dict | None) -> dict:
         ValueError: If an unsupported key or a non-scalar value is present.
 
     """
-    constraints = dict(constraints or {})
-    unknown_constraints = set(constraints) - {"session_id"}
-    if unknown_constraints:
-        raise ValueError(f"unsupported grant constraints: {sorted(unknown_constraints)!r}")
-    if any(
-        value is not None and not isinstance(value, (str, int, float, bool))
-        for value in constraints.values()
-    ):
-        raise ValueError("grant constraints must contain JSON scalar values")
-    return constraints
+    return validate_grant_constraints(constraints)
 
 
 def grant_capability(
@@ -537,6 +570,10 @@ def grant_capability(
 
     definition = capability_registry.require(capability)
     constraints = _validated_grant_constraints(constraints)
+    if principal_ref.startswith("group:"):
+        group_ref = principal_ref.split(":", 1)[1]
+        if not AuthorizationPrincipalGroup.objects.filter(group_ref=group_ref).exists():
+            raise ValueError(f"unknown authorization group {group_ref!r}")
     with transaction.atomic():
         AuthorizationPrincipalState.objects.get_or_create(principal_ref=principal_ref)
         AuthorizationPrincipalState.objects.select_for_update().get(principal_ref=principal_ref)
@@ -838,8 +875,15 @@ def principal_is_suspended(principal) -> bool:
 
     refs = principal_refs(principal)
     cache_key = "|".join(refs) or "anonymous"
+    grants = _principal_cache.get(cache_key)
+    generation_refs = list(refs)
+    if grants is not None:
+        generation_refs.extend(grants.group_refs)
     generation = max(
-        (_shared_generation("principal", ref, _principal_generation.get(ref, 0)) for ref in refs),
+        (
+            _shared_generation("principal", ref, _principal_generation.get(ref, 0))
+            for ref in generation_refs
+        ),
         default=0,
     )
     cached = _suspension_cache.get(cache_key)
@@ -928,18 +972,301 @@ def set_scope_labels(resource, labels, *, source: str = "authored") -> None:
         transaction.on_commit(lambda: bump_resource_generation(resource))
 
 
-def load_policy(resource, access_type: str):
-    """Load one policy from a generation-aware, resource-wide package.
+_GROUP_REF_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
-    One cold indexed query loads every instance override for the resource.
-    Missing operations are negative-cached with that package and resolve only
-    against immutable registry templates, so steady-state checks perform no
-    authorization SQL.
+
+def _normalize_group_ref(group_ref: str) -> str:
+    """Normalize and validate one group reference."""
+
+    normalized = str(group_ref or "").strip().lower()
+    if not _GROUP_REF_RE.match(normalized):
+        raise ValueError(f"invalid authorization group reference {group_ref!r}")
+    return normalized
+
+
+def create_principal_group(
+    group_ref: str,
+    *,
+    label: str = "",
+    category: str = "",
+    metadata: dict | None = None,
+    actor_ref: str = "",
+    reason: str = "",
+):
+    """Create or refresh one principal group."""
+
+    normalized = _normalize_group_ref(group_ref)
+    with transaction.atomic():
+        group, _created = AuthorizationPrincipalGroup.objects.update_or_create(
+            group_ref=normalized,
+            defaults={
+                "label": str(label or ""),
+                "category": str(category or "").strip().lower(),
+                "metadata": dict(metadata or {}),
+            },
+        )
+        AuthorizationAuditEvent.objects.create(
+            event_id=uuid.uuid4().hex,
+            kind="group_created",
+            principal_ref=f"group:{normalized}",
+            actor_ref=actor_ref,
+            reason=reason,
+        )
+    return group
+
+
+def delete_principal_group(group_ref: str, *, actor_ref: str = "", reason: str = "") -> int:
+    """Delete one group, its memberships, and its grants; return member count."""
+
+    normalized = _normalize_group_ref(group_ref)
+    with transaction.atomic():
+        members = list(
+            AuthorizationGroupMembership.objects.filter(group_ref=normalized).values_list(
+                "principal_ref", flat=True
+            )
+        )
+        AuthorizationGroupMembership.objects.filter(group_ref=normalized).delete()
+        AuthorizationPrincipalGroup.objects.filter(group_ref=normalized).delete()
+        # Group-targeted grants are revoked so a later group with the same ref
+        # cannot resurrect authority that was deliberately removed.
+        AuthorizationGrant.objects.filter(
+            principal_ref=f"group:{normalized}", revoked_at__isnull=True
+        ).update(revoked_at=timezone.now())
+        AuthorizationAuditEvent.objects.create(
+            event_id=uuid.uuid4().hex,
+            kind="group_deleted",
+            principal_ref=f"group:{normalized}",
+            actor_ref=actor_ref,
+            reason=reason,
+            data={"members": len(members)},
+        )
+        for member in members:
+            bump_principal_generation(member)
+        transaction.on_commit(lambda: [bump_principal_generation(member) for member in members])
+    return len(members)
+
+
+def join_principal_group(
+    principal_ref: str,
+    group_ref: str,
+    *,
+    provenance: str = "",
+    actor_ref: str = "",
+    reason: str = "",
+) -> bool:
+    """Add one principal to a group and invalidate its grant snapshot."""
+
+    normalized = _normalize_group_ref(group_ref)
+    if not AuthorizationPrincipalGroup.objects.filter(group_ref=normalized).exists():
+        raise ValueError(f"unknown authorization group {group_ref!r}")
+    with transaction.atomic():
+        _membership, created = AuthorizationGroupMembership.objects.get_or_create(
+            group_ref=normalized,
+            principal_ref=principal_ref,
+            defaults={"provenance": provenance},
+        )
+        if created:
+            AuthorizationAuditEvent.objects.create(
+                event_id=uuid.uuid4().hex,
+                kind="group_joined",
+                principal_ref=principal_ref,
+                resource_ref=f"group:{normalized}",
+                actor_ref=actor_ref,
+                reason=reason,
+            )
+            bump_principal_generation(principal_ref)
+            transaction.on_commit(lambda: bump_principal_generation(principal_ref))
+    return created
+
+
+def leave_principal_group(
+    principal_ref: str, group_ref: str, *, actor_ref: str = "", reason: str = ""
+) -> bool:
+    """Remove one principal from a group and invalidate its grant snapshot."""
+
+    normalized = _normalize_group_ref(group_ref)
+    with transaction.atomic():
+        deleted, _detail = AuthorizationGroupMembership.objects.filter(
+            group_ref=normalized, principal_ref=principal_ref
+        ).delete()
+        if deleted:
+            AuthorizationAuditEvent.objects.create(
+                event_id=uuid.uuid4().hex,
+                kind="group_left",
+                principal_ref=principal_ref,
+                resource_ref=f"group:{normalized}",
+                actor_ref=actor_ref,
+                reason=reason,
+            )
+            bump_principal_generation(principal_ref)
+            transaction.on_commit(lambda: bump_principal_generation(principal_ref))
+    return bool(deleted)
+
+
+def principal_groups(principal_ref: str) -> tuple[str, ...]:
+    """Return the bare group refs one principal belongs to."""
+
+    return tuple(
+        sorted(
+            AuthorizationGroupMembership.objects.filter(principal_ref=principal_ref).values_list(
+                "group_ref", flat=True
+            )
+        )
+    )
+
+
+def _policy_generation() -> int:
+    """Return the active policy-bundle generation."""
+
+    return _shared_generation("policy", "*", _policy_bundle_generation)
+
+
+def active_policy_bundle() -> tuple[int, dict | None]:
+    """Return the active compiled policy document, cached by generation.
+
+    Bundles are opt-in: while no bundle is active this returns
+    ``(0, None)`` and callers read live ``AuthorizationPolicyOverride`` rows,
+    exactly as before. Once a bundle is activated it is authoritative for
+    instance policies until another bundle (or none) is activated.
+
+    Returns:
+        tuple: ``(version, document)`` where ``document`` maps
+        ``resource_ref -> {access_type: policy_data}``, or ``None`` when no
+        bundle is active. Registry templates remain code and need no rows.
+
+    """
+
+    global _policy_bundle_cache
+    generation = _policy_generation()
+    cached = _policy_bundle_cache
+    if cached is not None and cached[0] == generation:
+        return cached[1], cached[2]
+    row = (
+        AuthorizationPolicyBundle.objects.filter(active=True)
+        .order_by("-version")
+        .values_list("version", "document")
+        .first()
+    )
+    if row is None:
+        version, document = 0, None
+    else:
+        version, document = row[0], row[1] or {}
+    _policy_bundle_cache = (generation, version, document)
+    return version, document
+
+
+def _bundle_overrides(document, ref: str) -> dict[str, dict] | None:
+    """Return one resource's bundle overrides, or ``None`` for table mode."""
+
+    if document is None:
+        return None
+    return document.get(ref) or {}
+
+
+def compile_policy_bundle(
+    *,
+    provenance: str = "",
+    actor_ref: str = "",
+    reason: str = "",
+    activate: bool = True,
+) -> int:
+    """Compile every instance policy override into a new bundle version.
+
+    The compiled document is validated with the same fail-closed compiler the
+    evaluator uses, so a malformed policy can never reach a live bundle.
+
+    Returns:
+        int: The new bundle version.
+
+    """
+
+    document: dict[str, dict[str, dict]] = {}
+    rows = AuthorizationPolicyOverride.objects.exclude(policy={}).values_list(
+        "resource_ref", "access_type", "policy"
+    )
+    for resource_ref_value, access_type, policy_data in rows:
+        if not policy_data:
+            continue
+        # Fail closed: a bundle that cannot compile is never activated.
+        policy_from_data(policy_data)
+        document.setdefault(resource_ref_value, {})[str(access_type).lower()] = policy_data
+    with transaction.atomic():
+        latest = (
+            AuthorizationPolicyBundle.objects.order_by("-version")
+            .values_list("version", flat=True)
+            .first()
+        )
+        version = int(latest or 0) + 1
+        AuthorizationPolicyBundle.objects.create(
+            version=version,
+            document=document,
+            active=False,
+            provenance=provenance,
+        )
+        AuthorizationAuditEvent.objects.create(
+            event_id=uuid.uuid4().hex,
+            kind="policy_bundle_compiled",
+            actor_ref=actor_ref,
+            reason=reason,
+            data={"version": version, "resources": len(document)},
+        )
+        if activate:
+            _activate_policy_bundle_locked(version, actor_ref=actor_ref, reason=reason)
+    return version
+
+
+def activate_policy_bundle(version: int, *, actor_ref: str = "", reason: str = "") -> bool:
+    """Atomically switch evaluation to one compiled bundle version."""
+
+    with transaction.atomic():
+        if not AuthorizationPolicyBundle.objects.filter(version=int(version)).exists():
+            raise ValueError(f"unknown authorization policy bundle {version!r}")
+        _activate_policy_bundle_locked(int(version), actor_ref=actor_ref, reason=reason)
+    return True
+
+
+def _activate_policy_bundle_locked(version: int, *, actor_ref: str, reason: str) -> None:
+    """Owner transaction: switch the active flag and publish the generation."""
+
+    AuthorizationPolicyBundle.objects.exclude(version=version).filter(active=True).update(
+        active=False
+    )
+    AuthorizationPolicyBundle.objects.filter(version=version).update(active=True)
+    AuthorizationAuditEvent.objects.create(
+        event_id=uuid.uuid4().hex,
+        kind="policy_bundle_activated",
+        actor_ref=actor_ref,
+        reason=reason,
+        data={"version": version},
+    )
+    _bump_policy_generation()
+    transaction.on_commit(_bump_policy_generation)
+
+
+def _bump_policy_generation() -> None:
+    """Invalidate every process's policy packages and bundle cache."""
+
+    global _policy_bundle_generation, _policy_bundle_cache
+    _policy_bundle_generation += 1
+    _policy_bundle_generation = _publish_generation("policy", "*", _policy_bundle_generation)
+    _policy_package_cache.clear()
+    _policy_bundle_cache = None
+
+
+def load_policy(resource, access_type: str):
+    """Load one policy from the active bundle and registry defaults.
+
+    Instance overrides come from the active compiled bundle; missing
+    operations resolve against immutable registry templates, so steady-state
+    checks perform no authorization SQL.
     """
 
     ref = resource_ref(resource)
     access_key = str(access_type).lower()
-    generation = _shared_generation("resource", ref, _resource_generation.get(ref, 0))
+    generation = max(
+        _shared_generation("resource", ref, _resource_generation.get(ref, 0)),
+        _policy_generation(),
+    )
     cached = _policy_package_cache.get(ref)
     if cached is not None and cached[0] == generation:
         _policy_package_cache.move_to_end(ref)
@@ -949,12 +1276,16 @@ def load_policy(resource, access_type: str):
             if getattr(settings, "AUTHORIZATION_SNAPSHOT_MISS_IS_ERROR", False):
                 raise AuthorizationSnapshotUnavailable(f"policy snapshot unavailable for {ref}")
             _note_snapshot_miss("policy", ref)
+        _version, document = active_policy_bundle()
+        bundle_overrides = _bundle_overrides(document, ref)
+        if bundle_overrides is None:
+            rows = AuthorizationPolicyOverride.objects.filter(resource_ref=ref).values_list(
+                "access_type", "policy"
+            )
+        else:
+            rows = bundle_overrides.items()
         overrides = {
-            str(operation).lower(): policy_from_data(data)
-            for operation, data in AuthorizationPolicyOverride.objects.filter(
-                resource_ref=ref
-            ).values_list("access_type", "policy")
-            if data
+            str(operation).lower(): policy_from_data(data) for operation, data in rows if data
         }
         _bounded_put(_policy_package_cache, ref, (generation, overrides))
     if access_key in overrides:
@@ -965,30 +1296,44 @@ def load_policy(resource, access_type: str):
 def preload_policy_packages(resources) -> int:
     """Batch-warm instance policy packages for a bounded resource collection.
 
-    Command-set warmup uses this to replace one cold query per command class
-    with one indexed ``resource_ref__in`` query. Existing generation-valid
-    packages are skipped. Registry defaults remain immutable and need no rows.
+    Command-set warmup uses this to replace one cold per-command lookup with
+    one read of the active compiled bundle. Existing generation-valid packages
+    are skipped. Registry defaults remain immutable and need no rows.
     """
 
     by_ref = {resource_ref(resource): resource for resource in resources}
+    policy_generation = _policy_generation()
     pending: dict[str, int] = {}
     for ref in by_ref:
-        generation = _shared_generation("resource", ref, _resource_generation.get(ref, 0))
+        generation = max(
+            _shared_generation("resource", ref, _resource_generation.get(ref, 0)),
+            policy_generation,
+        )
         cached = _policy_package_cache.get(ref)
         if cached is None or cached[0] != generation:
             pending[ref] = generation
     if not pending:
         return 0
 
-    grouped: dict[str, dict[str, object]] = {ref: {} for ref in pending}
-    rows = AuthorizationPolicyOverride.objects.filter(resource_ref__in=pending).values_list(
-        "resource_ref", "access_type", "policy"
-    )
-    for ref, operation, data in rows:
-        if data:
-            grouped[ref][str(operation).lower()] = policy_from_data(data)
+    _version, document = active_policy_bundle()
+    table_rows = None
+    if document is None:
+        table_rows = list(
+            AuthorizationPolicyOverride.objects.filter(resource_ref__in=pending).values_list(
+                "resource_ref", "access_type", "policy"
+            )
+        )
     for ref, generation in pending.items():
-        _bounded_put(_policy_package_cache, ref, (generation, grouped[ref]))
+        if document is None:
+            source = (
+                (operation, data) for row_ref, operation, data in table_rows if row_ref == ref
+            )
+        else:
+            source = (document.get(ref) or {}).items()
+        overrides = {
+            str(operation).lower(): policy_from_data(data) for operation, data in source if data
+        }
+        _bounded_put(_policy_package_cache, ref, (generation, overrides))
     return len(pending)
 
 
@@ -1096,6 +1441,7 @@ def apply_invalidation_event(namespace: str, ref: str, generation: int) -> None:
     producer can add fact kinds without breaking older consumers.
     """
 
+    global _policy_bundle_cache
     generation = int(generation)
     cache_key = _generation_cache_key(namespace, ref)
     if namespace == "principal":
@@ -1106,6 +1452,10 @@ def apply_invalidation_event(namespace: str, ref: str, generation: int) -> None:
         _resource_generation[ref] = max(_resource_generation.get(ref, 0), generation)
         _resource_cache.pop(ref, None)
         _policy_package_cache.pop(ref, None)
+    elif namespace == "policy":
+        # One activation invalidates every compiled policy package at once.
+        _policy_bundle_cache = None
+        _policy_package_cache.clear()
     else:
         return
     previous = _shared_generation_cache.get(cache_key)
@@ -1133,8 +1483,15 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
             fresh, value = _generation_is_fresh("principal", ref, now_mono)
             generations_fresh = generations_fresh and fresh
             generations.append(value)
-        generation = max(generations, default=0)
         grants = _principal_cache.get(cache_key)
+        if grants is not None:
+            # Group subjects participate in the generation check so a grant
+            # edited on a group invalidates its members' cached snapshots.
+            for ref in grants.group_refs:
+                fresh, value = _generation_is_fresh("principal", ref, now_mono)
+                generations_fresh = generations_fresh and fresh
+                generations.append(value)
+        generation = max(generations, default=0)
         suspension = _suspension_cache.get(cache_key)
         grants_valid = bool(
             grants is not None
@@ -1176,7 +1533,8 @@ def _prewarm_request(principals, resources, *, include_labels: bool) -> tuple[bo
         snapshot = _resource_cache.get(ref)
         policies = _policy_package_cache.get(ref)
         resource_valid = snapshot is not None and snapshot.generation == generation
-        policy_valid = policies is not None and policies[0] == generation
+        policy_generation = max(generation, _policy_generation())
+        policy_valid = policies is not None and policies[0] == policy_generation
         ready = ready and fresh and resource_valid and policy_valid
         resource_specs.append(
             {
@@ -1216,6 +1574,7 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
     targets.extend(
         ("resource", spec["ref"], spec["local_generation"]) for spec in request["resources"]
     )
+    targets.append(("policy", "*", _policy_bundle_generation))
     shared = {}
     if request["shared_invalidation"] and targets:
         keys = [_generation_cache_key(namespace, ref) for namespace, ref, _ in targets]
@@ -1252,11 +1611,34 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
             stale_suspension_refs.update(spec["refs"])
         principal_state.append((spec, generation, grants_stale, suspension_stale))
 
-    grant_rows = []
+    group_map: dict[str, set[str]] = {}
+    group_refs_all: set[str] = set()
     if stale_grant_refs:
+        for group_ref, principal_ref in AuthorizationGroupMembership.objects.filter(
+            principal_ref__in=stale_grant_refs
+        ).values_list("group_ref", "principal_ref"):
+            group_map.setdefault(principal_ref, set()).add(f"group:{group_ref}")
+        group_refs_all = {ref for refs in group_map.values() for ref in refs}
+    if group_refs_all:
+        group_keys = [_generation_cache_key("principal", ref) for ref in group_refs_all]
+        try:
+            group_shared = cache.get_many(group_keys)
+        except Exception:
+            group_shared = {}
+        for ref in group_refs_all:
+            key = _generation_cache_key("principal", ref)
+            value = max(
+                int(_principal_generation.get(ref, 0)),
+                int(group_shared.get(key, 0) or 0),
+            )
+            generation_values[("principal", ref)] = value
+            generation_updates.append((key, value))
+
+    grant_rows = []
+    if stale_grant_refs or group_refs_all:
         rows = (
             AuthorizationGrant.objects.filter(
-                principal_ref__in=stale_grant_refs,
+                principal_ref__in=stale_grant_refs | group_refs_all,
                 revoked_at__isnull=True,
             )
             .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
@@ -1298,7 +1680,19 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
 
     resolved_suppression = _worker_suppression_map(request["principals"])
     for spec, generation, grants_stale, suspension_stale in principal_state:
-        refs = set(spec["refs"])
+        spec_group_refs = (
+            set().union(*(group_map.get(ref, set()) for ref in spec["refs"]))
+            if grants_stale and group_map
+            else set()
+        )
+        if spec_group_refs:
+            generation = max(
+                [
+                    generation,
+                    *(generation_values.get(("principal", ref), 0) for ref in spec_group_refs),
+                ]
+            )
+        refs = set(spec["refs"]) | spec_group_refs
         result = {
             "cache_key": spec["cache_key"],
             "generation": generation,
@@ -1307,6 +1701,7 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
         }
         if grants_stale:
             suppression = spec.get("suppression") or {}
+            result["group_refs"] = tuple(sorted(spec_group_refs))
             result["grants"] = [row for row in grant_rows if row["principal_ref"] in refs]
             result["suppressed"] = (
                 bool(suppression.get("suppressed"))
@@ -1322,15 +1717,17 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
     resource_state = []
     stale_resource_refs = set()
     stale_policy_refs = set()
+    policy_generation = int(generation_values.get(("policy", "*"), 0))
     for spec in request["resources"]:
         generation = generation_values.get(("resource", spec["ref"]), 0)
         resource_stale = spec["cached_resource_generation"] != generation
-        policy_stale = spec["cached_policy_generation"] != generation
+        package_generation = max(generation, policy_generation)
+        policy_stale = spec["cached_policy_generation"] != package_generation
         if resource_stale:
             stale_resource_refs.add(spec["ref"])
         if policy_stale:
             stale_policy_refs.add(spec["ref"])
-        resource_state.append((spec, generation, resource_stale, policy_stale))
+        resource_state.append((spec, generation, package_generation, resource_stale, policy_stale))
 
     label_rows = []
     if stale_resource_refs:
@@ -1341,16 +1738,31 @@ def _fetch_authorization_snapshots(request: dict) -> dict:
         )
     policy_rows = []
     if stale_policy_refs:
-        policy_rows = list(
-            AuthorizationPolicyOverride.objects.filter(
-                resource_ref__in=stale_policy_refs
-            ).values_list("resource_ref", "access_type", "policy")
+        bundle_row = (
+            AuthorizationPolicyBundle.objects.filter(active=True)
+            .order_by("-version")
+            .values_list("document", flat=True)
+            .first()
         )
+        if bundle_row is None:
+            # Bundles are opt-in; without one, live override rows stay authoritative.
+            policy_rows = list(
+                AuthorizationPolicyOverride.objects.filter(
+                    resource_ref__in=stale_policy_refs
+                ).values_list("resource_ref", "access_type", "policy")
+            )
+        else:
+            bundle_document = bundle_row or {}
+            for ref in stale_policy_refs:
+                for operation, data in (bundle_document.get(ref) or {}).items():
+                    if data:
+                        policy_rows.append((ref, operation, data))
     resource_results = []
-    for spec, generation, resource_stale, policy_stale in resource_state:
+    for spec, generation, package_generation, resource_stale, policy_stale in resource_state:
         result = {
             "ref": spec["ref"],
             "generation": generation,
+            "policy_generation": package_generation,
             "resource_stale": resource_stale,
             "policy_stale": policy_stale,
         }
@@ -1390,7 +1802,7 @@ def _install_authorization_snapshots(result: dict) -> None:
             if not item.get("suppressed"):
                 for grant in item.get("grants", ()):
                     constraints = dict(grant.get("constraints") or {})
-                    if set(constraints) - {"session_id"} or any(
+                    if set(constraints) - grant_constraint_keys() or any(
                         value is not None and not isinstance(value, (str, int, float, bool))
                         for value in constraints.values()
                     ):
@@ -1418,6 +1830,7 @@ def _install_authorization_snapshots(result: dict) -> None:
                     {key: frozenset(values) for key, values in by_capability.items()},
                     generation,
                     valid_until,
+                    frozenset(item.get("group_refs", ())),
                 ),
             )
         if item["suspension_stale"]:
@@ -1443,7 +1856,11 @@ def _install_authorization_snapshots(result: dict) -> None:
                 for operation, data in item.get("policies", ())
                 if data
             }
-            _bounded_put(_policy_package_cache, ref, (generation, overrides))
+            _bounded_put(
+                _policy_package_cache,
+                ref,
+                (int(item.get("policy_generation", generation)), overrides),
+            )
 
 
 async def _execute_authorization_prewarm(request: dict) -> bool:
@@ -1618,7 +2035,7 @@ async def ensure_authorization(principals, resources) -> bool:
 def clear_authorization_caches() -> None:
     """Clear runtime caches for reloads and deterministic tests."""
 
-    global _prewarm_task
+    global _prewarm_task, _policy_bundle_cache, _policy_bundle_generation
     _principal_cache.clear()
     _resource_cache.clear()
     _policy_package_cache.clear()
@@ -1626,6 +2043,8 @@ def clear_authorization_caches() -> None:
     _shared_generation_cache.clear()
     _principal_generation.clear()
     _resource_generation.clear()
+    _policy_bundle_cache = None
+    _policy_bundle_generation = 0
     _pending_prewarm_principals.clear()
     _pending_prewarm_resources.clear()
     _snapshot_miss_warned_at.clear()

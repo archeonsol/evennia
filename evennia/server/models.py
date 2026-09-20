@@ -254,6 +254,74 @@ class AuthorizationPrincipalState(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 
+class AuthorizationPrincipalGroup(models.Model):
+    """A named set of principals usable as one grant subject.
+
+    Groups are provisioning conveniences over the flat capability evaluator:
+    they hold no permissions themselves, grants target ``group:<group_ref>``,
+    and membership is exact (no rank thresholds, no transitivity).
+    """
+
+    group_ref = models.CharField(max_length=128, unique=True)
+    label = models.CharField(max_length=255, blank=True, default="")
+    category = models.CharField(max_length=64, blank=True, default="")
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Declare bounded category lookup."""
+
+        indexes = [
+            models.Index(fields=["category", "group_ref"], name="authgroup_category_idx"),
+        ]
+
+
+class AuthorizationGroupMembership(models.Model):
+    """Exact membership of one principal in one authorization group."""
+
+    group_ref = models.CharField(max_length=128)
+    principal_ref = models.CharField(max_length=128)
+    provenance = models.CharField(max_length=128, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Declare one membership per pair and reverse lookup."""
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group_ref", "principal_ref"],
+                name="authgroup_membership_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["principal_ref"], name="authgroup_principal_idx"),
+            models.Index(fields=["group_ref"], name="authgroup_group_idx"),
+        ]
+
+
+class AuthorizationPolicyBundle(models.Model):
+    """One compiled, versioned instance-policy document.
+
+    Activating a bundle is the atomic policy release: evaluation reads the
+    active document, and activation bumps the global policy generation so every
+    process drops its policy caches at once.
+    """
+
+    version = models.PositiveIntegerField(unique=True)
+    document = models.JSONField(default=dict)
+    active = models.BooleanField(default=False)
+    provenance = models.CharField(max_length=128, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Declare the single-active lookup."""
+
+        indexes = [
+            models.Index(fields=["active", "-version"], name="authbundle_active_idx"),
+        ]
+
+
 class AuthorizationAuditEvent(models.Model):
     """Append-only audit record for sensitive authorization mutations."""
 

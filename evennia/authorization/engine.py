@@ -16,7 +16,10 @@ from .policy import (
     Policy,
     PredicateRequirement,
     RequiresCapability,
+    get_grant_constraint,
     get_predicate_provider,
+    pure_call,
+    register_grant_constraint,
     register_predicate_provider,
 )
 
@@ -33,12 +36,18 @@ class GrantScope:
 
 @dataclass(frozen=True, slots=True)
 class GrantSnapshot:
-    """Slow-changing positive grants for one principal."""
+    """Slow-changing positive grants for one principal.
+
+    ``group_refs`` are the ``group:<ref>`` grant subjects this principal
+    currently belongs to. They are part of the generation check so a grant
+    edited on a group invalidates every member's cached snapshot.
+    """
 
     principal_ref: str
     by_capability: Mapping[str, frozenset[tuple[str, ...]]]
     generation: int
     valid_until: float | None = None
+    group_refs: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,11 +115,24 @@ def _matching_scopes(
         ):
             continue
         constraints = dict(constraints)
-        required_session = constraints.get("session_id")
-        if required_session is not None and str(getattr(context.session, "sessid", "")) != str(
-            required_session
-        ):
-            continue
+        if constraints:
+            constraint_ok = True
+            for constraint_key, value in constraints.items():
+                try:
+                    evaluator, _validator = get_grant_constraint(constraint_key)
+                except ValueError:
+                    # Unregistered constraint (older or foreign row): fail closed.
+                    constraint_ok = False
+                    break
+                if not pure_call(
+                    evaluator,
+                    (context, resource, value),
+                    label=f"constraint {constraint_key!r}",
+                ):
+                    constraint_ok = False
+                    break
+            if not constraint_ok:
+                continue
         if kind == "world" and key == "*":
             matched.append("world:*")
         elif kind == "resource" and key == resource.resource_ref:
@@ -146,7 +168,13 @@ def _evaluate_node(
         memo_key = (policy.key, tuple(sorted(policy.params.items())))
         if memo_key not in context.memo:
             provider = get_predicate_provider(policy.key)
-            context.memo[memo_key] = bool(provider(context, policy.params))
+            context.memo[memo_key] = bool(
+                pure_call(
+                    provider,
+                    (context, policy.params),
+                    label=f"predicate {policy.key!r}",
+                )
+            )
         passed = context.memo[memo_key]
         return passed, (() if passed else (f"predicate:{policy.key}",)), (), ""
     if isinstance(policy, AllOf):
@@ -270,3 +298,82 @@ def _principal_is_message_participant(context, params):
 
 
 register_predicate_provider("principal.message_participant", _principal_is_message_participant)
+
+
+# ---------------------------------------------------------------------------
+# Built-in grant constraints (pure, declarative, engine-agnostic)
+# ---------------------------------------------------------------------------
+
+
+def _validate_session_id(value):
+    if not isinstance(value, (str, int)) or isinstance(value, bool):
+        raise ValueError("session_id constraint must be a string or integer")
+
+
+def _constraint_session_id(context, resource, value):
+    """Require the acting session to be the named session."""
+
+    return str(getattr(context.session, "sessid", "")) == str(value)
+
+
+def _validate_online(value):
+    if not isinstance(value, bool):
+        raise ValueError("online constraint must be a boolean")
+
+
+def _constraint_online(context, resource, value):
+    """Require the principal to be online (or explicitly offline)."""
+
+    return bool(context.session) is value
+
+
+def _validate_time_window(value):
+    if not isinstance(value, str):
+        raise ValueError("time_window constraint must be 'HH:MM-HH:MM'")
+    try:
+        start, end = value.split("-", 1)
+        _parse_clock(start.strip())
+        _parse_clock(end.strip())
+    except ValueError as err:
+        raise ValueError("time_window constraint must be 'HH:MM-HH:MM'") from err
+
+
+def _parse_clock(value):
+    from datetime import time as _time
+
+    hour, minute = value.split(":", 1)
+    return _time(int(hour), int(minute))
+
+
+def _constraint_time_window(context, resource, value):
+    """Require local wall-clock time to fall inside the window."""
+
+    from datetime import datetime
+
+    start, end = value.split("-", 1)
+    now = datetime.now().time()
+    start_time = _parse_clock(start.strip())
+    end_time = _parse_clock(end.strip())
+    if start_time <= end_time:
+        return start_time <= now <= end_time
+    # Overnight window (e.g. 22:00-06:00) wraps midnight.
+    return now >= start_time or now <= end_time
+
+
+def _validate_requires_label(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("requires_label constraint must be a non-empty string")
+
+
+def _constraint_requires_label(context, resource, value):
+    """Require the protected resource to carry the named label."""
+
+    return value.strip().lower() in resource.labels
+
+
+register_grant_constraint("session_id", _constraint_session_id, validate=_validate_session_id)
+register_grant_constraint("online", _constraint_online, validate=_validate_online)
+register_grant_constraint("time_window", _constraint_time_window, validate=_validate_time_window)
+register_grant_constraint(
+    "requires_label", _constraint_requires_label, validate=_validate_requires_label
+)
