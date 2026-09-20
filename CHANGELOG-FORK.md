@@ -25,6 +25,58 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.258 — Action parser and authorization hot paths
+
+### Changes
+
+- **Verb suggestions serve from a deletion index.** `suggest_verbs` uses a
+  SymSpell-style deletion index (lazy per max distance, invalidated on
+  register) verified with a banded edit distance; the exact linear scan
+  remains for distances past the index cap. On the live 1130-verb registry a
+  typo dropped from ~19–38ms to 12–300µs with identical results. `Action.parse`
+  compiles each class's field schema once instead of re-resolving type hints
+  per call, and `RuleEngine` skips the awaitable probe for `RuleResult` and
+  `None` — the two dominant rule shapes. The trie walk abandons the leaf scan
+  at two leaves, and the combined no-space-prefix verb tuple is cached.
+- **Attribute read path.** `_require_io_thread` no longer imports
+  `evennia.utils.clock` on every call — the import machinery ran on every
+  attribute read (py-spy: 5% of reactor CPU, including `importlib` frames).
+  The read and mutation guards resolve deferred model-save outcomes once
+  instead of twice, and `is_io_thread`/`is_io_owner` read the bound loop once
+  and compare the recorded owner thread instead of probing asyncio per call.
+- **Static settings are cached.** `cached_setting` memoizes a setting value
+  and drops the cache when Django sends `setting_changed`, so
+  `override_settings` behaves exactly as before. Applied to
+  `TYPECLASS_AGGRESSIVE_CACHE` (read on every attribute access) and the
+  authorization invalidation/snapshot settings.
+- **`_generation_cache_key` memoizes its sha256** per `(namespace, key)`;
+  the same fact is looked up on every authorization evaluation.
+- **Render-scoped authorization memo.** `decision_scope()` caches
+  `authorize()` and `has_capability()` answers for the duration of one render;
+  `at_look_node` and `filter_visible` (engine and game) share the scope, so
+  per-object visibility filtering stops re-evaluating identical questions.
+  Entries pin their principal and resource, so a recycled `id()` can never
+  alias; a scope closes on exit and closed scopes are ignored, so async tasks
+  cannot inherit a dead memo. `evennia_authorization_decision_cache_hits_total`
+  exposes the saving; the decision counters now measure evaluations rather
+  than checks.
+
+### Measurement
+
+py-spy on the 100-bot run (540s, `MainThread` 383s busy) attributed reactor
+CPU to: Django LazyObject settings reads 4.3%, verb suggestions 4.1%, JSONB
+read-path guards ~5%, and per-object authorization inside visibility filtering
+4–5%, plus ORM on the reactor 1.7%.
+
+### Tests
+
+- Engine sweeps green: `evennia.authorization`, `evennia.actions`,
+  `evennia.objects` — 733 tests; `evennia.typeclasses`, `evennia.utils`,
+  `evennia.server` — 1822 tests (20 skips).
+- New: render-scope memoization tests (`test_service_scope.py`), cached-setting
+  override coverage, and the existing override tests for
+  `TYPECLASS_AGGRESSIVE_CACHE` still pass.
+
 ## 6.0.0+underspire.257 — Revert flush commit batching
 
 ### Changes
