@@ -4,7 +4,15 @@
 
 <div class="scrim">
   <div class="quit framed">
-    <div class="mark glow-text" aria-hidden="true">⏻</div>
+    <!-- Power mark as SVG: U+23FB sits outside the shell-glyph fallback range,
+         so the Latin-only webfont stacks render it as a missing-glyph box. -->
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <path
+          d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"
+        />
+      </svg>
+    </div>
     <h2 class="glow-text">DISCONNECTED</h2>
     <p class="sub">You have left Underspire.</p>
     <div class="acts">
@@ -26,7 +34,9 @@
     background: var(--bg-elev); color: var(--fg); font-family: var(--font-mono);
     text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
   }
-  .mark { font-size: 2.4rem; color: var(--accent-bright); line-height: 1; }
+  .mark { display: flex; color: var(--accent-bright); line-height: 1; }
+  .mark svg { display: block; width: 2.4rem; height: 2.4rem; fill: currentColor; }
+  :global(html[data-glow]) .mark svg { filter: drop-shadow(0 0 6px var(--glow)); }
   h2 { margin: 0.3rem 0 0; color: var(--accent-bright); letter-spacing: 0.32em; font-size: 1rem; }
   .sub { margin: 0; color: var(--fg-dim); font-size: 0.8rem; }
   .acts { display: flex; gap: 10px; margin: 1rem 0 0.4rem; }
