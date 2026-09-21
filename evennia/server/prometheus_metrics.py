@@ -92,6 +92,22 @@ def _init_metrics() -> bool:
         return _create_metrics()
 
 
+def best_effort(label: str, recorder, *args, **kwargs) -> None:
+    """Call one metric recorder; a telemetry failure logs and continues.
+
+    Telemetry runs on hot game paths (output cleaning, rendering, caches);
+    a broken recorder must never break the caller, and must never vanish
+    silently either.
+    """
+
+    try:
+        recorder(*args, **kwargs)
+    except Exception as err:
+        from evennia.utils import logger
+
+        logger.log_warn(f"prometheus: {label} telemetry failed: {err}")
+
+
 def _create_metrics() -> bool:
     """Build every metric on the default registry; caller holds the lock."""
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_RUNS_TOTAL

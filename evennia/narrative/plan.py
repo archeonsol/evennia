@@ -564,12 +564,11 @@ def deliver(
     )
     resolve_started = time.perf_counter()
     node = resolve(plan, viewer, with_refs=wants_refs, extras=extras)
-    try:
-        from evennia.server.prometheus_metrics import record_render_phase
+    from evennia.server.prometheus_metrics import best_effort, record_render_phase
 
-        record_render_phase("resolve", time.perf_counter() - resolve_started)
-    except Exception:
-        pass
+    best_effort(
+        "render resolve", record_render_phase, "resolve", time.perf_counter() - resolve_started
+    )
     # A game may attach a perspective relay (borrowed sight, remote sensorium)
     # to the perceiving object. Invoke it once at the plan boundary, before
     # protocol fan-out, so text/nodes/both clients cannot duplicate or bypass
@@ -653,12 +652,14 @@ def deliver_resolved(
                 from evennia.utils import logger
 
                 logger.log_trace("narrative delivery mirror failed")
-    try:
-        from evennia.server.prometheus_metrics import record_render_phase
+    from evennia.server.prometheus_metrics import best_effort, record_render_phase
 
-        record_render_phase("transform", time.perf_counter() - transform_started)
-    except Exception:
-        pass
+    best_effort(
+        "render transform",
+        record_render_phase,
+        "transform",
+        time.perf_counter() - transform_started,
+    )
     return deliver_node(
         node,
         viewer,

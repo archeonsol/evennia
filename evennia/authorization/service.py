@@ -106,17 +106,16 @@ def authorize(
     def finish(decision):
         """Record low-cardinality timing and return the decision."""
 
-        try:
-            from evennia.server.prometheus_metrics import record_authorization_decision
+        from evennia.server.prometheus_metrics import best_effort, record_authorization_decision
 
-            record_authorization_decision(
-                resource_snapshot.resource_kind,
-                decision.allowed,
-                time.perf_counter() - started,
-                decision.reason_code,
-            )
-        except Exception:
-            pass
+        best_effort(
+            "authorization decision",
+            record_authorization_decision,
+            resource_snapshot.resource_kind,
+            decision.allowed,
+            time.perf_counter() - started,
+            decision.reason_code,
+        )
         if cache_key is not None:
             scope[cache_key] = (principal, resource, decision)
         return decision

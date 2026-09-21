@@ -124,12 +124,9 @@ def _note_snapshot_miss(kind: str, key: str) -> None:
     for the strict tripwire.
     """
 
-    try:
-        from evennia.server.prometheus_metrics import record_authorization_snapshot_miss
+    from evennia.server.prometheus_metrics import best_effort, record_authorization_snapshot_miss
 
-        record_authorization_snapshot_miss(kind)
-    except Exception:
-        pass
+    best_effort("authorization snapshot miss", record_authorization_snapshot_miss, kind)
     now = time.monotonic()
     last = _snapshot_miss_warned_at.get(kind)
     if last is not None and now - last < _SNAPSHOT_MISS_WARN_INTERVAL:
@@ -1939,12 +1936,14 @@ async def _execute_authorization_prewarm(request: dict) -> bool:
         logger.log_trace("authorization off-loop prewarm failed")
         return False
     finally:
-        try:
-            from evennia.server.prometheus_metrics import record_authorization_prewarm
+        from evennia.server.prometheus_metrics import best_effort, record_authorization_prewarm
 
-            record_authorization_prewarm(outcome, time.perf_counter() - started)
-        except Exception:
-            pass
+        best_effort(
+            "authorization prewarm",
+            record_authorization_prewarm,
+            outcome,
+            time.perf_counter() - started,
+        )
 
 
 async def _flush_authorization_prewarm(state: _PrewarmState) -> bool:
@@ -1971,12 +1970,14 @@ async def _flush_authorization_prewarm(state: _PrewarmState) -> bool:
 def _finish_prewarm_wait(value: bool, outcome: str, started: float) -> bool:
     """Record one action's critical-path snapshot wait and return its result."""
 
-    try:
-        from evennia.server.prometheus_metrics import record_authorization_prewarm_wait
+    from evennia.server.prometheus_metrics import best_effort, record_authorization_prewarm_wait
 
-        record_authorization_prewarm_wait(outcome, time.perf_counter() - started)
-    except Exception:
-        pass
+    best_effort(
+        "authorization prewarm wait",
+        record_authorization_prewarm_wait,
+        outcome,
+        time.perf_counter() - started,
+    )
     return value
 
 

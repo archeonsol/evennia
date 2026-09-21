@@ -823,9 +823,6 @@ def _text_metadata(node: RenderNode) -> dict:
 
 def _record_delivery_metric(mode: str, started: float) -> None:
     """Record optional engine metrics without coupling delivery to Prometheus."""
-    try:
-        from evennia.server.prometheus_metrics import record_render_delivery
+    from evennia.server.prometheus_metrics import best_effort, record_render_delivery
 
-        record_render_delivery(mode, time.perf_counter() - started)
-    except Exception:
-        pass
+    best_effort("render delivery", record_render_delivery, mode, time.perf_counter() - started)
