@@ -25,7 +25,11 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.263 — Bus reject label closed set
+## 6.0.0+underspire.263 — Fleet-review burndown: correctness, consolidation, closed-set metrics
+
+Forty-seven findings from the engine perf-sweep fleet review (run-20260919),
+burned down over 35 commits and rebased onto `.262`. Every commit landed with
+a red-first falsifier test; the surviving tests are the regression net.
 
 ### Observability
 
@@ -38,6 +42,137 @@ matching release procedure.
   emitted truncated to 32 characters (trailing space), and any other string
   created ad-hoc series. Out-of-set values now collapse to `unknown`; queries
   matching the old truncated value need updating.
+- **Telemetry failures are logged, not swallowed.** Every metrics call on a
+  hot path now goes through `best_effort()`
+  ([`prometheus_metrics.py`](evennia/server/prometheus_metrics.py)) or a
+  scoped `except` with `log_trace`, replacing bare `except Exception: pass`
+  in authorization, sessionhandler, clock, narrative, and the server services.
+  A broken recorder is now visible instead of silently blinding dashboards.
+- **Bus publish counter batches.** `record_bus_publish(count)` takes the
+  batch's published-frame count in one increment instead of one call per
+  frame.
+
+### Redis bus and transport
+
+- **Group output is capability-gated (rollout-safe).** `send_MsgServer2PortalMany`
+  on the server bus ([`redis_bus.py`](evennia/server/redis_bus.py)) falls back
+  to per-session `MsgServer2Portal` frames unless the Portal declared the
+  `MsgServer2PortalMany` capability in its handshake snapshot. A new server
+  paired with an old Portal degrades to one frame per session; no rollout
+  window drops output. An unexpected frame command now logs and renegotiates
+  the transport instead of being dropped silently.
+- **Handshake offers are keyed by portal identity.** Offers from distinct
+  portal processes can no longer overwrite each other's in-flight challenge
+  ([`bus_handshake.py`](evennia/server/bus_handshake.py)).
+- **`BUS_HANDSHAKE_STALENESS` is a new setting.** Replay/staleness defenses
+  (challenge acceptance, delayed final acks) are bounded by this knob, default
+  4s; `BUS_HANDSHAKE_TIMEOUT` now governs only the liveness lease. Games that
+  widened `BUS_HANDSHAKE_TIMEOUT` to tolerate long synchronous turns keep
+  their lease; the replay window stops widening with it. The value is floored
+  at the 1s heartbeat and capped at `BUS_HANDSHAKE_TIMEOUT`.
+- **Writer hardening.** A published batch settles before telemetry is sampled
+  (broken metrics can no longer abort settlement), per-command `XADD` error
+  responses escalate via `fail()` with a warning like the pre-batching path
+  did, and transport caps resolve once into a `BusLimits` object instead of
+  per-publish settings lookups.
+- **Settings resolution convention.** Engine tunables (bus caps, render
+  bounds, authz flags) resolve through `cached_setting()` once per use site
+  with a documented resolution order, replacing ad-hoc
+  `getattr(settings, ...)` chains and None-sentinel handling
+  ([`settings_default.py`](evennia/settings_default.py),
+  [`utils.py`](evennia/utils/utils.py)).
+
+### Authorization
+
+- **One grant write path.** `grant_capability` is now the one-element case of
+  `_apply_grants` ([`storage.py`](evennia/authorization/storage.py)): lock,
+  upsert, audit, and generation bump exist once. `grant_capabilities` is one
+  transaction and one generation bump per call regardless of capability
+  count (staff promotion grants 57 capabilities; that was 57 transactions).
+  **Behavior change:** bulk-granting to `group:<ref>` now raises `ValueError`
+  for an unknown group instead of silently writing rows on a nonexistent
+  group.
+- **One snapshot pipeline.** The inline loaders and the off-loop prewarm
+  installer build grant/resource/policy snapshots through shared builders and
+  one staleness predicate, so the two paths cannot drift
+  (`_grant_snapshot`, `_resource_snapshot`, `_policy_overrides`,
+  `_snapshot_is_valid`, and a single snapshot-miss chokepoint). Stored scope
+  labels are normalized identically on both paths.
+- **Prewarm fault isolation.** A queued object whose typeclass fails to load
+  is dropped with a log and flips the batch to not-ready instead of killing
+  the shared flush task and raising inside every waiting action. Coalescing
+  state is per event loop, which also fixes a crash when two loops (test
+  runners, secondary servers) used the prewarm back-to-back; the push-
+  invalidation cold-fact path (`ensure_authorization`) rides the same state.
+- **Deferred generation publishes never lower the cached generation.**
+
+### Movement and default commands
+
+- **One movement commit/hook pipeline.** Sync `move_to` and async
+  `move_to_async` share the veto gates, the compare-and-set commit
+  (`ObjectDB.compare_and_set_location`, with the no-op branch verified by
+  SELECT instead of a silent write), cache reconciliation, and the post-commit
+  hook sequence ([`movement.py`](evennia/objects/mixins/movement.py),
+  [`models.py`](evennia/objects/models.py)). All six move hooks' `fires_from`
+  now list both drivers.
+- **Async announce semantics changed (game hooks).** On `move_to_async`,
+  `announce_move_from` fires *after* the location row commits — a lost
+  compare-and-set no longer tells the source room the mover left — and
+  receives a keyword-only `origin=`. Overrides of `announce_move_from` should
+  accept `**kwargs`. The location-loop guard is shared with the sync driver
+  (`check_location_loop`), closing the boundary disagreement where one driver
+  rejected a through-exit move the other allowed.
+- **`get`/`drop`/`give`/`put`/`home` commit via `move_to_async`**
+  ([`actions/default/objects.py`](evennia/actions/default/objects.py),
+  [`general.py`](evennia/actions/default/general.py)). **Migration note:**
+  game-side `move_to` overrides are not consulted for these commands'
+  commits; move-policy hooks still gate them. Games that customized `move_to`
+  and rely on the default commands honoring it must override the
+  corresponding rule or `move_to_async`.
+
+### Attribute persistence
+
+- **Chained async deltas spool instead of failing.** When an async flush finds
+  a pending DELTA intent from a spooled earlier flush, it appends the chained
+  delta ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)) instead
+  of quarantining the row as `blocked`; a genuine `PREPARED_BLOCKING` witness
+  still quarantines, correctly.
+- **Sync flushes yield to the async worker owning a row.** A per-row flush-
+  claim registry lets `force_flush`/`flush_dirty` wait for the in-flight
+  worker's outcome on that row instead of racing it or raising
+  `AttributeUpdateUnavailable` spuriously.
+- **The vestigial legacy dirty-backend registry is deleted**;
+  `discard_dirty_backends()` is jsonb-only.
+
+### Sessions
+
+- **A duplicate-login kick now sends the `logout` OOB before disconnecting.**
+  A bare close read as a network drop, so the resumable web shell
+  auto-reconnected, browser-session auto-login re-hit the kick, and two tabs
+  ping-ponged forever.
+
+### Narrative, commands, misc fixes
+
+- RenderNode validation is scoped to render construction (N1); the CM1
+  completion-marker contract is documented where it is enforced; the
+  per-object tag miss cache is bounded and invalidation is centralized in the
+  tag cache; the dead legacy dirty-backend metric path is gone; the bus
+  backpressure documentation is qualified to the outgoing path.
+
+### Webclient
+
+- **Feed data-loss trio fixed** (routing draft commits on blur/explicit
+  action, id-keyed feeds with `holds()` as the filing truth, prune only when
+  no feed claims the line, backfill merged/trimmed by `ts`). The committed
+  bundle (`shell.js`) is rebuilt from the merged `.262` source.
+
+### Tests
+
+- Every burndown item ships its falsifier test; the declarative
+  `evennia_fixtures` selection landed in the hot typeclasses suites.
+  Full engine suite post-rebase: 4635 tests, OK (57 skipped), against
+  `underspire.262`.
+
 ## 6.0.0+underspire.262 — Font-independent quit mark
 
 ### Changes
