@@ -254,9 +254,10 @@ SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
 # (evennia/server/redis_transport.py); set an int to tune a busy deployment.
 # Explicit values are cast to int and floored at 1
 # (evennia.utils.utils.resolve_setting, the convention for engine tunables).
-# Ordinary admission reserves headroom for control/handshake frames, and
-# capacity pressure rejects the frame as backpressure instead of failing the
-# transport (see the 100-session load-test note in Redis-Bus-Delivery.md).
+# Ordinary admission reserves headroom for control/handshake frames. On the
+# outgoing path, capacity pressure rejects the frame as backpressure instead
+# of failing the transport; an exhausted incoming delivery queue does fail
+# the transport (see Redis-Bus-Delivery.md).
 REDIS_BUS_MAX_ENTRIES = None
 REDIS_BUS_MAX_BYTES = None
 REDIS_BUS_DATA_ENTRIES = None
