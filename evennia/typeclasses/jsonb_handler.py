@@ -1930,7 +1930,7 @@ class JsonbAttributeBackend(IAttributeBackend):
         return super().clear_attributes(category, accessing_obj, default_access)
 
     # ------------------------------------------------------------------
-    # Flush (participates in the existing flush_all_dirty() loop)
+    # Flush
     # ------------------------------------------------------------------
 
     def pending_count(self) -> int:
@@ -1943,7 +1943,10 @@ class JsonbAttributeBackend(IAttributeBackend):
         return max(0.0, time.monotonic() - self._dirty_since)
 
     def flush_dirty(self):
-        """Write the L1 dict to ``db_attrs`` and save.  Called by the tick.
+        """Write the L1 dict to ``db_attrs`` and save.
+
+        Direct one-backend write entry point; periodic flush and barriers use
+        the row-owned path (:func:`flush_all_dirty` -> ``_persist_row_state``).
 
         Returns:
             FlushResult or None: The flush outcome, or ``None`` when there was

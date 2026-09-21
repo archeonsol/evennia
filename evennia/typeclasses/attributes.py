@@ -11,7 +11,6 @@ which is a non-db version of Attributes.
 
 import fnmatch
 import re
-import weakref
 from collections import defaultdict
 from copy import copy
 
@@ -21,22 +20,18 @@ from django.utils.encoding import smart_str
 from evennia.utils.dbserialize import from_pickle
 from evennia.utils.utils import cached_setting, is_iter, lazy_property, make_iter, to_str
 
-# Write-behind cache: backends register here on dirty; flush_all_dirty() drains on each tick.
-_DIRTY_BACKENDS: "weakref.WeakSet" = weakref.WeakSet()
-
 
 def discard_dirty_backends():
-    """Drop all pending write-behind registrations *without* flushing them.
+    """Drop all pending write-behind row states *without* flushing them.
 
     For test teardown only. A test rolls back its DB transaction, so any
     unflushed JSONB attribute writes must be discarded with it; otherwise the
-    dirty backends leak into later tests (the idmapper cache is reset by
-    ``flush_cache()``, but this set is independent of it). Under SQLite pk
-    reuse a leaked stale backend can then clobber a later test's write during
-    ``flush_all_dirty()``. Never call this in production: it would silently
-    drop genuinely pending writes.
+    dirty rows leak into later tests (the idmapper cache is reset by
+    ``flush_cache()``, but the row-state registries are independent of it).
+    Under SQLite pk reuse a leaked stale row state can then clobber a later
+    test's write during ``flush_all_dirty()``. Never call this in production:
+    it would silently drop genuinely pending writes.
     """
-    _DIRTY_BACKENDS.clear()
     try:
         from evennia.typeclasses.jsonb_handler import discard_jsonb_row_states
 
@@ -51,15 +46,10 @@ def count_pending_dirty():
 
     Returns:
         dict: ``backends``, ``pending`` (sum), ``oldest_age`` (seconds the
-        oldest still-dirty backend has been waiting).
+        oldest still-dirty row has been waiting).
     """
     backends = 0
     oldest_age = 0.0
-    for backend in list(_DIRTY_BACKENDS):
-        backends += backend.pending_count()
-        age_fn = getattr(backend, "dirty_age", None)
-        if age_fn is not None:
-            oldest_age = max(oldest_age, age_fn())
     try:
         from evennia.typeclasses.jsonb_handler import dirty_jsonb_row_states
 
@@ -76,15 +66,12 @@ def has_undurable_writes():
     Health gate for graceful reload/shutdown.
 
     Returns:
-        bool: True if any backend holds a write that has failed to persist at
+        bool: True if any row holds a write that has failed to persist at
         least once and is not yet durable (still in the volatile L1 dict). A
         graceful-reload path can consult this and refuse to proceed until a
         flush drains or spools the backlog, so a reboot cannot silently drop
         the write.
     """
-    for backend in list(_DIRTY_BACKENDS):
-        if getattr(backend, "_flush_failures", 0) > 0:
-            return True
     try:
         from evennia.typeclasses.jsonb_handler import dirty_jsonb_row_states
 
@@ -100,11 +87,11 @@ def flush_all_dirty(*, source="manual"):
     Flush all pending attribute writes to DB. Called from the tick handler,
     from read-your-writes query barriers, and once at shutdown.
 
-    This is a full drain (every dirty backend), which the query barriers rely
-    on for correctness. JSONB handlers share one row-owned state and persist
+    This is a full drain (every dirty row), which the query barriers rely on
+    for correctness. JSONB handlers share one row-owned state and persist
     row-by-row under database serialization, merging the committed baseline
-    before one update. Legacy backends retain their own ``flush_dirty``
-    behavior. A failed JSONB row gets retry counting and durable-spool fallback.
+    before one update. A failed JSONB row gets retry counting and
+    durable-spool fallback.
 
     Returns:
         dict: ``backends``, ``total``, ``pending`` (pre-flush backlog),
@@ -128,27 +115,12 @@ def flush_all_dirty(*, source="manual"):
             "Attribute query barriers may not run inside blocking_update callbacks."
         )
 
-    dirty = [b for b in list(_DIRTY_BACKENDS) if b.pending_count()]
     jsonb_states = dirty_jsonb_row_states()
-    # capture pre-flush row counts so "total" stays a row count (a JSONB
-    # backend is one document == 1; a test/legacy backend may report more)
-    pre = {b: b.pending_count() for b in dirty}
     flushed = spooled = failed = 0
-
-    def _tally(backend, result):
-        nonlocal flushed, spooled, failed
-        n = pre.get(backend, 1)
-        # a legacy backend whose flush_dirty() returns None is assumed durable
-        if result is None or getattr(result, "ok", False):
-            flushed += n
-        elif getattr(result, "spooled", False):
-            spooled += n
-        else:
-            failed += n
 
     # JSONB correctness is row-owned: each row locks, merges its committed
     # baseline, and writes once regardless of how many Attribute/Nick handlers
-    # reference it. Legacy backends retain their historical flush contract.
+    # reference it.
     for state in sorted(jsonb_states, key=lambda item: item.key):
         result = _persist_row_state(state, allow_spool=True)
         if result.ok:
@@ -157,9 +129,6 @@ def flush_all_dirty(*, source="manual"):
             spooled += 1
         else:
             failed += 1
-
-    for backend in dirty:
-        _tally(backend, backend.flush_dirty())
 
     duration = time.perf_counter() - t0
     stats = {
@@ -182,8 +151,7 @@ async def flush_all_dirty_async():
     Immutable JSONB row snapshots are captured on the IO owner, persisted by a
     worker, then reconciled back on the owner. Query barriers and shutdown keep
     using :func:`flush_all_dirty`, where synchronous completion is part of their
-    contract. Legacy backends retain their synchronous flush behavior; the
-    default and supported production backend is JSONB.
+    contract.
     """
     import time
 
@@ -204,17 +172,6 @@ async def flush_all_dirty_async():
     flushed = int(jsonb["flushed"])
     spooled = int(jsonb["spooled"])
     failed = int(jsonb["failed"])
-
-    dirty = [backend for backend in list(_DIRTY_BACKENDS) if backend.pending_count()]
-    for backend in dirty:
-        pending = backend.pending_count()
-        result = backend.flush_dirty()
-        if result is None or getattr(result, "ok", False):
-            flushed += pending
-        elif getattr(result, "spooled", False):
-            spooled += pending
-        else:
-            failed += pending
 
     duration = time.perf_counter() - t0
     stats = {
