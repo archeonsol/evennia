@@ -2406,6 +2406,122 @@ class TestFlushRetry(BaseEvenniaTest):
         self.assertTrue(force_flush(self.obj1))
 
 
+class TestFlushRowOwnership(BaseEvenniaTest):
+    """A barrier yields to the async worker that owns the row, without flock queueing."""
+
+    evennia_fixtures = {"obj1"}
+
+    def setUp(self):
+        super().setUp()
+        self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        self.handler.add("owned", 1)
+
+    def _capture(self):
+        snapshots, failures = jsonb_handler._prepare_async_row_flushes()
+        self.assertEqual(failures, 0)
+        snapshots = tuple(snapshot for snapshot in snapshots if snapshot.key == self._state().key)
+        self.assertEqual(len(snapshots), 1)
+        return snapshots
+
+    def _state(self):
+        return self.handler.backend._row_state
+
+    def test_claim_lifecycle_sets_events_and_clears_registry(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        key = snapshots[0].key
+        self.assertIn(key, jsonb_handler._FLUSH_IN_FLIGHT)
+
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots, claims)
+        self.assertEqual(outcomes[0].status, "ok")
+        self.assertTrue(claims[key].event.is_set())
+        self.assertEqual(claims[key].outcome.status, "ok")
+
+        jsonb_handler._release_async_row_flushes(claims)
+        self.assertNotIn(key, jsonb_handler._FLUSH_IN_FLIGHT)
+
+    def test_release_sets_leftover_events(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        jsonb_handler._release_async_row_flushes(claims)
+        for claim in claims.values():
+            self.assertTrue(claim.event.is_set())
+        self.assertEqual(jsonb_handler._FLUSH_IN_FLIGHT, {})
+
+    def test_sync_flush_skips_when_worker_persisted_current_state(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        claim = claims[snapshots[0].key]
+        claim.outcome = jsonb_handler._AsyncFlushOutcome(
+            snapshots[0].key, "ok", final=snapshots[0].local
+        )
+        claim.event.set()
+        with patch.object(jsonb_handler, "_write_locked_document") as write:
+            result = force_flush(self.obj1)
+        self.assertTrue(result.ok)
+        write.assert_not_called()
+        jsonb_handler._release_async_row_flushes(claims)
+
+        with patch.object(jsonb_handler, "_write_locked_document") as write:
+            force_flush(self.obj1)
+        write.assert_called_once()
+
+    def test_skip_requires_unchanged_mutation_serial(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        self.handler.add("later", 2)
+        claim = claims[snapshots[0].key]
+        claim.outcome = jsonb_handler._AsyncFlushOutcome(
+            snapshots[0].key, "ok", final=snapshots[0].local
+        )
+        claim.event.set()
+        with patch.object(jsonb_handler, "_write_locked_document") as write:
+            force_flush(self.obj1)
+        write.assert_called_once()
+        jsonb_handler._release_async_row_flushes(claims)
+
+    def test_sync_flush_waits_while_worker_holds_the_row(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        claim = claims[snapshots[0].key]
+        key = snapshots[0].key
+        order = []
+        holding = threading.Event()
+
+        def worker():
+            with jsonb_handler._spool_row_lock(key):
+                holding.set()
+                release_at = time.monotonic() + 0.05
+                while time.monotonic() < release_at:
+                    time.sleep(0.005)
+            order.append("lock_released")
+            claim.outcome = jsonb_handler._AsyncFlushOutcome(key, "ok", final=snapshots[0].local)
+            claim.event.set()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        self.assertTrue(holding.wait(timeout=5))
+
+        try:
+            with patch.object(jsonb_handler, "_write_locked_document") as write:
+                result = force_flush(self.obj1)
+        finally:
+            thread.join(timeout=5)
+            jsonb_handler._release_async_row_flushes(claims)
+        self.assertEqual(order, ["lock_released"])
+        self.assertTrue(result.ok)
+        write.assert_not_called()
+
+    def test_queued_worker_does_not_stall_sync_flush(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        try:
+            result = force_flush(self.obj1)
+        finally:
+            jsonb_handler._release_async_row_flushes(claims)
+        self.assertTrue(result.ok)
+
+
 class TestThreeWayMerge(BaseEvenniaTest):
     evennia_fixtures = frozenset()
 
