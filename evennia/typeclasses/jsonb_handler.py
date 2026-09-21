@@ -2231,13 +2231,27 @@ def _persist_row_snapshot_worker(snapshot):
     """Persist one immutable snapshot; runs in a worker and touches no live object."""
     try:
         with _spool_row_lock(snapshot.key):
-            if _list_row_entries(snapshot.key):
-                return _AsyncFlushOutcome(
-                    snapshot.key,
-                    "failed",
-                    error_type="AttributeUpdateUnavailable",
-                    error_message="durable Attribute deltas are pending",
-                )
+            entries = _list_row_entries(snapshot.key)
+            if entries:
+                if any(payload.get("kind") == "PREPARED_BLOCKING" for _, _, payload in entries):
+                    return _AsyncFlushOutcome(
+                        snapshot.key,
+                        "blocked",
+                        error_type="AttributeUpdateUnavailable",
+                        error_message="A protected Attribute outcome awaits manual resolution.",
+                    )
+                # A queued DELTA reserves the write order; chaining another
+                # spool entry keeps this row's replay FIFO.
+                try:
+                    _write_spool_payload(snapshot.key, "DELTA", snapshot.durable, snapshot.local)
+                except Exception as spool_err:
+                    return _AsyncFlushOutcome(
+                        snapshot.key,
+                        "failed",
+                        error_type=type(spool_err).__name__,
+                        error_message=str(spool_err),
+                    )
+                return _AsyncFlushOutcome(snapshot.key, "spooled", final=snapshot.local)
             try:
                 with transaction.atomic(using=snapshot.alias):
                     connection = connections[snapshot.alias]
@@ -2401,6 +2415,14 @@ def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
         elif outcome.status == "conflict":
             logger.log_warn(
                 f"JsonbAttributeBackend: refusing stale conflicting write for pk={state.pk}."
+            )
+            failed += 1
+        elif outcome.status == "blocked":
+            state.pending_blocked = True
+            _STRONG_ROW_STATES[outcome.key] = state
+            logger.log_warn(
+                f"JsonbAttributeBackend: quarantining pk={state.pk}; "
+                "a protected Attribute outcome awaits manual resolution."
             )
             failed += 1
         else:
