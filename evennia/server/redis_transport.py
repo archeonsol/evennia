@@ -10,7 +10,13 @@ from uuid import uuid4
 from django.conf import settings
 
 from evennia.server import prometheus_metrics
-from evennia.server.bus_result import PublicationResult, TransportUnavailable
+from evennia.server.bus_result import (
+    CAPACITY_EXHAUSTED,
+    FRAME_TOO_LARGE,
+    TRANSPORT_UNAVAILABLE,
+    PublicationResult,
+    TransportUnavailable,
+)
 from evennia.utils import clock, logger
 from evennia.utils.utils import resolve_setting
 
@@ -26,10 +32,6 @@ MULTICAST_MAX_SESSIDS = 1024
 STOP_TIMEOUT = 3.0
 WAIT = 0.1
 WRITE_BATCH_SIZE = 64
-# Rejection reason for an ordinary queue-full publish. It is backpressure, not
-# a transport fault, so it must not fence the bus the way a dead Redis does.
-# Shared by the reject assignment and its check below.
-CAPACITY_EXHAUSTED = "transport capacity exhausted"
 READ_BATCH = 32
 
 
@@ -257,9 +259,9 @@ class RedisTransport:
         with self._condition:
             limits = resolve_limits()
             if self._stop.is_set() or not self.online:
-                reason = "transport unavailable"
+                reason = TRANSPORT_UNAVAILABLE
             elif len(data) > limits.frame_bytes:
-                reason = "encoded frame exceeds transport limit"
+                reason = FRAME_TOO_LARGE
             else:
                 count = len(self._outgoing)
                 size = self._outgoing_bytes

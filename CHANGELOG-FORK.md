@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.263 — Bus reject label closed set
+
+### Observability
+
+- **`evennia_bus_rejected_total{reason}` labels are a closed set.** The three
+  publish-rejection reasons now live in
+  [`bus_result.py`](evennia/server/bus_result.py), shared by the
+  [`redis_transport.py`](evennia/server/redis_transport.py) producer and the
+  [`prometheus_metrics.py`](evennia/server/prometheus_metrics.py) recorder.
+  Before, the 37-character `encoded frame exceeds transport limit` reason was
+  emitted truncated to 32 characters (trailing space), and any other string
+  created ad-hoc series. Out-of-set values now collapse to `unknown`; queries
+  matching the old truncated value need updating.
 ## 6.0.0+underspire.262 — Font-independent quit mark
 
 ### Changes

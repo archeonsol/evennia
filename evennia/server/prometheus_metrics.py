@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional
 
 from django.conf import settings
 
+from evennia.server.bus_result import BUS_REJECT_REASONS
+
 # Metric objects (None when prometheus_client is unavailable or disabled)
 ATTR_FLUSH_TOTAL = None
 ATTR_FLUSH_BACKENDS_TOTAL = None
@@ -67,7 +69,11 @@ BUS_WRITE_BATCH_SIZE = None
 
 _METRICS_READY = False
 _METRICS_LOCK = threading.Lock()
-_render_phase_samples = {"resolve": 0, "transform": 0, "clean": 0}
+_FLUSH_SOURCES = frozenset({"tick", "barrier", "shutdown", "manual"})
+_PREWARM_OUTCOMES = frozenset({"refreshed", "failed"})
+_PREWARM_WAIT_OUTCOMES = frozenset({"ready", "waited", "failed"})
+_RENDER_PHASES = frozenset({"resolve", "transform", "clean"})
+_render_phase_samples = dict.fromkeys(_RENDER_PHASES, 0)
 _RENDER_PHASE_SAMPLE_EVERY = 64
 
 
@@ -411,7 +417,7 @@ def record_attribute_flush(
     total = int(stats.get("total") or 0)
     backends = int(stats.get("backends") or 0)
     pending = int(stats.get("pending") or 0)
-    source = source if source in {"tick", "barrier", "shutdown", "manual"} else "manual"
+    source = source if source in _FLUSH_SOURCES else "manual"
 
     if ATTR_FLUSH_RUNS_TOTAL is not None:
         ATTR_FLUSH_RUNS_TOTAL.labels(source=source).inc()
@@ -530,7 +536,10 @@ def record_bus_publish(count: int = 1) -> None:
 
 def record_bus_reject(reason: str) -> None:
     if _init_metrics() and BUS_REJECTED_TOTAL is not None:
-        BUS_REJECTED_TOTAL.labels(reason=str(reason or "unknown")[:32]).inc()
+        reason = str(reason)
+        if reason not in BUS_REJECT_REASONS:
+            reason = "unknown"
+        BUS_REJECTED_TOTAL.labels(reason=reason).inc()
 
 
 def record_bus_write_batch(size: int) -> None:
@@ -554,7 +563,7 @@ def record_render_delivery(mode: str, duration_seconds: float) -> None:
 def record_render_phase(phase: str, duration_seconds: float) -> None:
     """Sample a bounded render phase without adding a histogram write per delivery."""
 
-    normalized = phase if phase in _render_phase_samples else "transform"
+    normalized = phase if phase in _RENDER_PHASES else "transform"
     count = _render_phase_samples[normalized] + 1
     _render_phase_samples[normalized] = count
     if count % _RENDER_PHASE_SAMPLE_EVERY:
@@ -597,7 +606,7 @@ def record_authorization_prewarm(outcome: str, duration_seconds: float) -> None:
 
     if not _init_metrics():
         return
-    normalized = outcome if outcome in {"refreshed", "failed"} else "failed"
+    normalized = outcome if outcome in _PREWARM_OUTCOMES else "failed"
     if AUTHORIZATION_PREWARM_TOTAL is not None:
         AUTHORIZATION_PREWARM_TOTAL.labels(outcome=normalized).inc()
     if AUTHORIZATION_PREWARM_DURATION_SECONDS is not None:
@@ -609,7 +618,7 @@ def record_authorization_prewarm_wait(outcome: str, duration_seconds: float) -> 
 
     if not _init_metrics():
         return
-    normalized = outcome if outcome in {"ready", "waited", "failed"} else "failed"
+    normalized = outcome if outcome in _PREWARM_WAIT_OUTCOMES else "failed"
     if AUTHORIZATION_PREWARM_WAIT_TOTAL is not None:
         AUTHORIZATION_PREWARM_WAIT_TOTAL.labels(outcome=normalized).inc()
     if AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS is not None:
