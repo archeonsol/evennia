@@ -25,6 +25,21 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.262 — Font-independent quit mark
+
+### Changes
+
+- **The quit overlay draws its power mark as inline SVG.** U+23FB (`⏻`) sits
+  outside the shell-glyph fallback range, so the Latin-only webfont stacks
+  rendered it as a missing-glyph box. `QuitOverlay.svelte` now inlines the mark
+  as SVG, keeping it font-independent and carrying the glow through
+  `drop-shadow`. The shipped shell bundle (`shell.js`, `shell.css`) is rebuilt
+  from the new source.
+
+### Tests
+
+- `evennia.web` — 149 tests OK.
+
 ## 6.0.0+underspire.261 — Bus input-queue observability
 
 ### Changes
