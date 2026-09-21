@@ -5,6 +5,13 @@ versions are unsupported. Use the normal game deployment workflow, which stops
 the service, replaces the engine and game revisions together, and then starts the
 service. Keep the configured Redis instance running.
 
+Defense in depth makes a skewed pair fail loudly rather than silently: a Server
+sends grouped output frames only when the Portal declares that capability in
+its handshake snapshot, so a new Server against an old Portal degrades to
+per-session frames; either side renegotiates the transport when it receives a
+frame key it does not know. These measures protect against accidental skew;
+they do not make mixed versions supported.
+
 Record the installed engine and game revisions before changing them. Upgrade
 both together. Preserve Redis stream contents, job lists, browser resume state,
 and unrelated consumer groups. The bus starts from a fresh stream tail and

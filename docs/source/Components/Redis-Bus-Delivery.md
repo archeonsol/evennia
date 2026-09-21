@@ -32,7 +32,10 @@ Within one reactor turn, byte-identical final frames are then grouped into one m
 bus frame and expanded to local sockets by the Portal. Grouping after cleaning preserves
 viewer-specific visibility, names, options, and encodings. Frames are grouped in rounds,
 which preserves each session's original output order. Groups are capped at 1,024 sessions;
-an oversized grouped payload falls back to ordinary per-session frames.
+an oversized grouped payload falls back to ordinary per-session frames. Grouped
+frames are sent only when the Portal declares the grouped-frame capability in
+its handshake snapshot; against a Portal that does not, output degrades to the
+same per-session frames.
 
 Queue depth, retained bytes, published/rejected frame counts, and write-batch sizes are
 exported as `evennia_bus_*` Prometheus metrics so a saturated bus is visible without

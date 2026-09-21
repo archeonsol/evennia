@@ -15,6 +15,8 @@ from evennia.server.portal import amp, ipc_handlers_portal
 from evennia.server.redis_transport import RedisTransport as _RedisTransport
 from evennia.utils import clock, logger
 
+MSGSERVER2PORTAL_MANY_CAP = amp.MsgServer2PortalMany.key
+
 
 def _stream_prefix():
     return getattr(settings, "REDIS_BUS_PREFIX", "evennia:bus")
@@ -333,6 +335,7 @@ class RedisServerBus(_RedisBusMixin):
         self._initial_setup_attempted = False
         self._startup_attempted = False
         self._startup_complete = False
+        self._portal_caps = frozenset()
         self._sessions = SessionReconciler(evennia.SERVER_SESSION_HANDLER)
 
     def _on_frame(self, cmdkey, data):
@@ -340,11 +343,20 @@ class RedisServerBus(_RedisBusMixin):
             ipc_handlers_server.receive_msgportal2server(data)
         elif cmdkey == b"AdminPortal2Server":
             ipc_handlers_server.receive_adminportal2server(data)
+        else:
+            logger.log_warn(f"redis bus: unexpected {cmdkey!r} frame; renegotiating transport")
+            self._handshake.disconnect()
 
     def send_MsgServer2Portal(self, session, **kwargs):
         return ipc_handlers_server.send_msgserver2portal(self, session, **kwargs)
 
     def send_MsgServer2PortalMany(self, sessids, **kwargs):
+        """Group output only for a Portal that declared the capability."""
+        if MSGSERVER2PORTAL_MANY_CAP not in self._portal_caps:
+            return [
+                ipc_handlers_server.data_to_portal(self, amp.MsgServer2Portal, sessid, **kwargs)
+                for sessid in sessids
+            ]
         return ipc_handlers_server.send_msgserver2portal_many(self, sessids, **kwargs)
 
     def send_AdminServer2Portal(self, session, operation="", **kwargs):
@@ -367,6 +379,7 @@ class RedisServerBus(_RedisBusMixin):
 
     def _apply_snapshot(self, payload):
         """Restore once at process start; reconcile surviving sessions later."""
+        self._portal_caps = frozenset(payload.get("caps", ()))
         self._published_ready = False
         self._transport.set_pair(self._handshake.pair, ready=False)
         sessions = payload["sessions"]
@@ -436,6 +449,9 @@ class RedisPortalBus(_RedisBusMixin):
             ipc_handlers_portal.receive_server2portal_many(data)
         elif cmdkey == b"AdminServer2Portal":
             ipc_handlers_portal.receive_adminserver2portal(self, data)
+        else:
+            logger.log_warn(f"redis bus: unexpected {cmdkey!r} frame; renegotiating transport")
+            self._handshake.disconnect()
 
     def _snapshot(self):
         """Capture current socket membership and its local revision."""
@@ -446,6 +462,7 @@ class RedisPortalBus(_RedisBusMixin):
             "sessions": handler.get_bus_sync_data(),
             "restart_mode": self.factory.portal.server_restart_mode,
             "portal_start_time": self.factory.portal.start_time,
+            "caps": [MSGSERVER2PORTAL_MANY_CAP],
         }
 
     def _apply_state(self, payload):
