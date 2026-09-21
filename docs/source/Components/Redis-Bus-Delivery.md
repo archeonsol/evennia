@@ -32,22 +32,30 @@ Within one reactor turn, byte-identical final frames are then grouped into one m
 bus frame and expanded to local sockets by the Portal. Grouping after cleaning preserves
 viewer-specific visibility, names, options, and encodings. Frames are grouped in rounds,
 which preserves each session's original output order. Groups are capped at 1,024 sessions;
-an oversized grouped payload falls back to ordinary per-session frames.
+an oversized grouped payload falls back to ordinary per-session frames. Grouped
+frames are sent only when the Portal declares the grouped-frame capability in
+its handshake snapshot; against a Portal that does not, output degrades to the
+same per-session frames.
 
 Queue depth, retained bytes, published/rejected frame counts, and write-batch sizes are
 exported as `evennia_bus_*` Prometheus metrics so a saturated bus is visible without
 log archaeology.
 
-Capacity pressure is local backpressure, not a transport failure: an over-limit frame
-is rejected (the publisher sees an unavailable result) and the transport stays online,
-so a burst of broadcast fan-out cannot cycle discovery and reconcile sessions.
-Mandatory control saturation still fails the generation when a control frame is
-rejected for any reason other than capacity. Player saturation rejects locally without
-evicting earlier work.
+Outgoing capacity pressure is local backpressure, not a transport failure: an
+over-limit frame is rejected (the publisher sees an unavailable result) and the
+transport stays online, so a burst of broadcast fan-out cannot cycle discovery and
+reconcile sessions. Mandatory control saturation still fails the generation when a
+control frame is rejected for any reason other than capacity. Player saturation
+rejects locally without evicting earlier work. The incoming direction is different:
+when the incoming delivery queue is exhausted the transport fails, because the
+reader has already advanced its stream cursor past those frames and rejecting
+them locally would drop them silently.
 
-The caps and batch size are tunable with the ``REDIS_BUS_MAX_ENTRIES``,
-``REDIS_BUS_MAX_BYTES``, ``REDIS_BUS_DATA_ENTRIES``, ``REDIS_BUS_DATA_BYTES`` and
-``REDIS_BUS_WRITE_BATCH`` settings; ``None`` keeps the module defaults above.
+The caps and batch sizes are tunable with the ``REDIS_BUS_MAX_ENTRIES``,
+``REDIS_BUS_MAX_BYTES``, ``REDIS_BUS_DATA_ENTRIES``, ``REDIS_BUS_DATA_BYTES``,
+``REDIS_BUS_WRITE_BATCH`` and ``REDIS_BUS_READ_BATCH`` settings; ``None`` keeps the
+module defaults above. The 1,024-session multicast group cap is a module constant
+without a setting.
 
 Publishing while outgoing occupancy exceeds 200 entries logs an
 `outgoing queue pressure` warning with the stream, pending entry count, encoded

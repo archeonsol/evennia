@@ -2,7 +2,7 @@
   import { settings, THEMES, FONTS, EMBER_THEMES, CUSTOM_VARS } from "../lib/settings.svelte";
   import { notify } from "../lib/notify.svelte";
   import { triggers } from "../lib/triggers.svelte";
-  import { routing } from "../lib/routing.svelte";
+  import { routing, type Route } from "../lib/routing.svelte";
   import { macros } from "../lib/macros.svelte";
   import { keybinds, comboFromEvent } from "../lib/keybinds.svelte";
   import { dock } from "../lib/dock.svelte";
@@ -78,6 +78,20 @@
   const fontStack = $derived(
     (FONTS.find((f) => f.id === settings.font) ?? FONTS[0]).stack,
   );
+
+  // Routing edits land on a draft, not on routing.routes: sync() purges the
+  // buffers of labels no live route owns, so syncing a mid-typo label would
+  // destroy a move feed irrecoverably. The draft reaches routing only on a
+  // commit (field blur, MOVE, delete, add).
+  let rdraft = $state<Route[]>([]);
+  function openView(id: View) {
+    if (id === "triggers") rdraft = routing.routes.map((r) => ({ ...r }));
+    view = id;
+  }
+  function commitRoutes() {
+    routing.routes = rdraft.map((r) => ({ ...r }));
+    routing.sync();
+  }
 </script>
 
 {#snippet toggle(label: string, key: string)}
@@ -111,7 +125,7 @@
     {#if view === "hub"}
       <div class="hub">
         {#each groups as g}
-          <button class="tile" onclick={() => (view = g.id)}>
+          <button class="tile" onclick={() => openView(g.id)}>
             <span class="glyph" aria-hidden="true">{g.glyph}</span>
             <span class="tile-label">{g.label}</span>
           </button>
@@ -297,21 +311,37 @@
 
       <div class="grp">Routing <span class="hint">file matching lines into a tab in the Feeds panel</span></div>
       <div class="rules">
-        {#each routing.routes as r, i}
+        {#each rdraft as r, i}
           <div class="rule">
-            <input class="r-cmd" placeholder="text or /regex/" bind:value={r.pattern} oninput={() => routing.sync()} />
-            <input class="r-label" placeholder="feed tab" bind:value={r.label} oninput={() => routing.sync()} />
+            <input class="r-cmd" placeholder="text or /regex/" bind:value={r.pattern} onblur={commitRoutes} />
+            <input class="r-label" placeholder="feed tab" bind:value={r.label} onblur={commitRoutes} />
             <button
               class="r-mode"
               class:on={r.move}
-              onclick={() => routing.toggleMove(i)}
+              onclick={() => {
+                r.move = !r.move;
+                commitRoutes();
+              }}
               title={r.move ? "line goes to the feed only" : "line goes to the feed and the terminal"}
             >{r.move ? "MOVE" : "COPY"}</button>
-            <button class="r-del" onclick={() => routing.remove(i)} aria-label="remove">×</button>
+            <button
+              class="r-del"
+              onclick={() => {
+                rdraft.splice(i, 1);
+                commitRoutes();
+              }}
+              aria-label="remove">×</button
+            >
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={() => routing.add()}>+ route</button>
+      <button
+        class="add-rule"
+        onclick={() => {
+          rdraft.push({ pattern: "", label: "", move: false });
+          commitRoutes();
+        }}>+ route</button
+      >
     {/if}
   </div>
 

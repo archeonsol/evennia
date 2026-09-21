@@ -646,16 +646,31 @@ _KIND_BY_TYPE = {cls: kind for kind, cls in _SPAN_KINDS.items()}
 _SPAN_FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 
 
+def span_kind(span_type) -> str | None:
+    """Return this span type's wire kind, or None if it is not serializable."""
+    return _KIND_BY_TYPE.get(span_type)
+
+
+def span_field_names(span_type) -> tuple[str, ...]:
+    """Return the cached field names of a span dataclass.
+
+    The serializable-span contract (registered kind, dataclass fields) lives
+    here so validation and serialization consult one source. Non-dataclass
+    input raises ``TypeError`` from ``fields()`` rather than being tolerated.
+    """
+    names = _SPAN_FIELD_NAMES.get(span_type)
+    if names is None:
+        names = tuple(item.name for item in fields(span_type))
+        _SPAN_FIELD_NAMES[span_type] = names
+    return names
+
+
 def span_to_dict(span) -> dict:
     """Serialize a span to a JSON-friendly dict (for stored/replayable trees)."""
-    kind = _KIND_BY_TYPE.get(type(span))
+    kind = span_kind(type(span))
     if kind is None:  # pragma: no cover
         raise TypeError(f"Unserializable span: {span!r}")
-    names = _SPAN_FIELD_NAMES.get(type(span))
-    if names is None:
-        names = tuple(item.name for item in fields(span))
-        _SPAN_FIELD_NAMES[type(span)] = names
-    data = {name: getattr(span, name) for name in names}
+    data = {name: getattr(span, name) for name in span_field_names(type(span))}
     data["_"] = kind
     return data
 

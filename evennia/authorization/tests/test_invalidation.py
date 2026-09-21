@@ -274,7 +274,7 @@ class EnsureAuthorizationTest(InvalidationTestBase):
         def request(*args, **kwargs):
             return state["fetched"], {}
 
-        async def flush():
+        async def flush(_state):
             state["fetched"] = True
             return True
 
@@ -286,7 +286,7 @@ class EnsureAuthorizationTest(InvalidationTestBase):
             self.assertTrue(asyncio.run(storage.ensure_authorization((object(),), (object(),))))
 
     def test_cold_fact_failure_returns_false(self):
-        async def flush():
+        async def flush(_state):
             return False
 
         with (

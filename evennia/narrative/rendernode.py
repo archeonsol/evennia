@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -40,22 +40,30 @@ CLIENT_NARRATIVE_FLAG = "CLIENT_NARRATIVE"
 RENDER_SCHEMA = "render.v1"
 MAX_BODY_CHARS = 128 * 1024
 MAX_REFS = 256
+MAX_SPANS = 256
 MAX_BLOCKS = 256
 MAX_METADATA_ITEMS = 64
 MAX_TAG_CHARS = 64
 MAX_HANDLE_CHARS = 128
 MAX_SEPARATOR_CHARS = 4096
 _FORBIDDEN_WIRE_KEYS = frozenset({"char_id", "from_id", "referent_id", "object_id"})
-_SPAN_FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 _SPAN_TAG_FIELDS = frozenset({"_", "kind", "role", "form", "lang", "channel"})
 
 
 def _max_refs():
-    """Resolve the span/reference bound: an explicit setting wins, else the constant."""
+    """Resolve the entity-reference bound: an explicit setting wins, else the constant."""
     from django.conf import settings
 
     value = getattr(settings, "RENDER_MAX_REFS", None)
     return max(1, int(value)) if value is not None else MAX_REFS
+
+
+def _max_spans():
+    """Resolve the span-sidecar bound: an explicit setting wins, else the constant."""
+    from django.conf import settings
+
+    value = getattr(settings, "RENDER_MAX_SPANS", None)
+    return max(1, int(value)) if value is not None else MAX_SPANS
 
 
 def _validate_text(value, name, limit=MAX_BODY_CHARS):
@@ -116,15 +124,14 @@ def _spans_contain_forbidden_identity(spans) -> bool:
     a crowd segment of ``CharRef`` spans short-circuits on the first span and
     the payload skips span serialization entirely.
     """
+    from evennia.narrative.render import span_field_names
+
     for segment in spans:
         for span in segment:
             span_type = type(span)
             forbidden = _FORBIDDEN_BY_TYPE.get(span_type)
             if forbidden is None:
-                names = _SPAN_FIELD_NAMES.get(span_type)
-                if names is None:
-                    names = tuple(item.name for item in fields(span_type))
-                    _SPAN_FIELD_NAMES[span_type] = names
+                names = span_field_names(span_type)
                 forbidden = bool(set(names) & _FORBIDDEN_WIRE_KEYS)
                 _FORBIDDEN_BY_TYPE[span_type] = forbidden
             if forbidden:
@@ -357,22 +364,19 @@ def _validate_spans(spans):
     """Validate each flat span record before resolution or public delivery.
 
     Field values are read directly from the frozen span dataclass; the field
-    list per span type is cached, so a crowd-sized segment does no per-span
-    ``fields()`` introspection or intermediate dict allocation.
+    list per span type is cached in :mod:`evennia.narrative.render`, so a
+    crowd-sized segment does no per-span ``fields()`` introspection or
+    intermediate dict allocation.
     """
-    from evennia.narrative.render import _KIND_BY_TYPE
+    from evennia.narrative.render import span_field_names, span_kind
 
-    if len(spans) > _max_refs():
+    if len(spans) > _max_spans():
         raise ValueError("render segment has too many spans")
     for span in spans:
         span_type = type(span)
-        names = _SPAN_FIELD_NAMES.get(span_type)
-        if names is None:
-            if span_type not in _KIND_BY_TYPE:
-                raise TypeError(f"Unserializable span: {span!r}")
-            names = tuple(item.name for item in fields(span_type))
-            _SPAN_FIELD_NAMES[span_type] = names
-        for name in names:
+        if span_kind(span_type) is None:
+            raise TypeError(f"Unserializable span: {span!r}")
+        for name in span_field_names(span_type):
             value = getattr(span, name)
             if isinstance(value, str):
                 limit = MAX_TAG_CHARS if name in _SPAN_TAG_FIELDS else MAX_BODY_CHARS
@@ -421,11 +425,15 @@ class RenderNode:
     #: Internal trust flag for :meth:`map_text`/:meth:`prepend_text`: the node
     #: was built from an already-validated node and only its text changed, so
     #: the (potentially crowd-sized) span tree does not need re-validation.
+    #: The flag is engine-internal, not a boundary: ``dataclasses.replace``
+    #: propagates it, and a trusted transform can still inflate ``body`` past
+    #: its budget, so :meth:`__post_init__` re-checks the body text even here.
     _validated: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self):
         """Validate resolved content before any client receives it."""
         if self._validated:
+            _validate_text(self.body, "RenderNode body")
             return
         for name in ("kind", "msg_type", "schema"):
             _validate_text(getattr(self, name), name, MAX_TAG_CHARS)
@@ -446,7 +454,7 @@ class RenderNode:
             raise ValueError("RenderNode body must be derived from its blocks")
         spans = None if self.spans is None else tuple(tuple(segment) for segment in self.spans)
         if spans is not None:
-            if len(spans) > MAX_BLOCKS:
+            if len(spans) > _max_spans():
                 raise ValueError("RenderNode has too many span segments")
             for segment in spans:
                 _validate_spans(segment)
@@ -497,6 +505,9 @@ class RenderNode:
                 break
         else:
             blocks.insert(0, Line(prefix))
+            # The insert branch only runs when every block is an empty
+            # container, so this count re-check walks nothing but empties.
+            _validate_blocks(blocks)
         frozen = tuple(blocks)
         return replace(self, body=flatten_blocks(frozen, self.sep), blocks=frozen, _validated=True)
 
@@ -812,9 +823,6 @@ def _text_metadata(node: RenderNode) -> dict:
 
 def _record_delivery_metric(mode: str, started: float) -> None:
     """Record optional engine metrics without coupling delivery to Prometheus."""
-    try:
-        from evennia.server.prometheus_metrics import record_render_delivery
+    from evennia.server.prometheus_metrics import best_effort, record_render_delivery
 
-        record_render_delivery(mode, time.perf_counter() - started)
-    except Exception:
-        pass
+    best_effort("render delivery", record_render_delivery, mode, time.perf_counter() - started)

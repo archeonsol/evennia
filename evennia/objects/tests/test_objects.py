@@ -725,6 +725,155 @@ class TestMoveResult(BaseEvenniaTest):
         self.assertIn(self.obj1, self.room1.contents)
         self.assertNotIn(self.obj1, self.room2.contents)
 
+    def test_async_move_rejects_adoption_when_the_row_was_replaced(self):
+        from evennia.utils import clock, defer
+
+        race_room = create.create_object(DefaultObject, key="race-room")
+
+        def raced(worker, *args, **kwargs):
+            changed = worker(*args, **kwargs)
+            # A concurrent owner-thread write lands after our conditional
+            # update: the row no longer holds the destination we set.
+            self.obj1.location = race_room
+            return changed
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=raced),
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=True)).result()
+
+        self.assertFalse(result)
+        self.assertEqual(result.failed_stage, "location_conflict")
+        self.assertIs(self.obj1.location, race_room)
+        self.assertNotIn(self.obj1, self.room2.contents)
+        self.assertEqual(
+            ObjectDB.objects.filter(pk=self.obj1.pk)
+            .values_list("db_location_id", flat=True)
+            .first(),
+            race_room.pk,
+        )
+
+    def test_conditional_update_noop_verifies_without_writing(self):
+        """A move to the current location may not depend on changed-row counts."""
+
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        meta = ObjectDB._meta
+        args = (
+            "default",
+            meta.db_table,
+            "id",
+            "db_location_id",
+            self.obj1.pk,
+            self.room1.pk,
+            self.room1.pk,
+        )
+        with CaptureQueriesContext(connection) as ctx:
+            changed = ObjectDB.compare_and_set_location(*args)
+        self.assertEqual(changed, 1)
+        self.assertFalse(
+            [q for q in ctx.captured_queries if q["sql"].strip().upper().startswith("UPDATE")]
+        )
+        # Once the row no longer holds the expected location it is a real conflict.
+        self.obj1.location = self.room2
+        self.assertEqual(ObjectDB.compare_and_set_location(*args), 0)
+
+    def test_async_move_conflict_sends_no_leave_announce(self):
+        """A lost optimistic update must not tell the source room the mover left."""
+        from evennia.utils import clock, defer
+
+        async def conflict(*args, **kwargs):
+            return 0
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=conflict),
+            patch.object(self.room1, "msg_contents") as room_said,
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=False)).result()
+
+        self.assertFalse(result)
+        room_said.assert_not_called()
+
+    def test_async_move_announce_maps_source_after_commit(self):
+        """The leave announce maps {origin} from the source room, not the live location."""
+        from evennia.utils import clock, defer
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        original = self.room1.msg_contents
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=immediate),
+            patch.object(self.room1, "msg_contents", side_effect=original) as room_said,
+            patch.object(self.room2, "msg_contents"),
+        ):
+            result = clock.run_coroutine(self.obj1.move_to_async(self.room2, quiet=False)).result()
+
+        self.assertTrue(result)
+        room_said.assert_called_once()
+        mapping = room_said.call_args.kwargs["mapping"]
+        self.assertIs(mapping["origin"], self.room1)
+
+    def test_async_move_into_own_contents_reports_location_failure(self):
+        """Placing the mover inside its own contents fails identically on both paths."""
+        from evennia.utils import clock, defer
+
+        child = create.create_object(DefaultObject, key="own-child", location=self.obj1)
+
+        sync_result = self.obj1.move_to(child, quiet=True)
+        self.assertFalse(sync_result)
+        self.assertEqual(sync_result.failed_stage, "location")
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=immediate),
+        ):
+            async_result = clock.run_coroutine(self.obj1.move_to_async(child, quiet=True)).result()
+
+        self.assertFalse(async_result)
+        self.assertEqual(async_result.failed_stage, "location")
+        self.assertIs(self.obj1.location, self.room1)
+
+    def test_loop_guard_boundary_agrees_between_paths(self):
+        """Both paths detect a cycle that closes within the eleven inspected nodes."""
+
+        from evennia.utils import clock, defer
+
+        chain = []
+        parent = self.obj1
+        for index in range(10):
+            parent = create.create_object(
+                DefaultObject, key=f"guard-chain-{index}", location=parent
+            )
+            chain.append(parent)
+        # From chain[-1] the walk reaches obj1 as the eleventh inspected node.
+        edge = chain[-1]
+
+        sync_result = self.obj1.move_to(edge, quiet=True)
+        self.assertFalse(sync_result)
+        self.assertEqual(sync_result.failed_stage, "location")
+
+        async def immediate(worker, *args, **kwargs):
+            return worker(*args, **kwargs)
+
+        with (
+            patch.object(clock, "loop_running", return_value=True),
+            patch.object(defer, "in_thread", side_effect=immediate),
+        ):
+            async_result = clock.run_coroutine(self.obj1.move_to_async(edge, quiet=True)).result()
+
+        self.assertFalse(async_result)
+        self.assertEqual(async_result.failed_stage, "location")
+        self.assertIs(self.obj1.location, self.room1)
+
     def test_async_move_allows_chains_deeper_than_the_guarded_depth(self):
         """The sync loop guard gives up past depth 10; the async one must too."""
         from evennia.utils import clock, defer

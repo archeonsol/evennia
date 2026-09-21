@@ -347,7 +347,11 @@ class Actor:
         co-session push/pop changes on this same instance without a database
         poll. The fast path returns ``True`` when its generation is unchanged.
         Used after a suspended rule resumes; ``False`` aborts the rest of the
-        phase when its pinned body was popped or the binding row was deleted.
+        phase when its pinned body was popped or the binding row was deleted
+        in this process through the ORM (the delete collector clears the
+        singleton's pk). The guard is process-local: cross-process changes and
+        raw-SQL deletes are accepted staleness, since bindings have no
+        shared-invalidation channel.
         """
         if self.binding is None or self._focus_snapshot is None:
             return True

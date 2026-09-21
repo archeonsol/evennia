@@ -332,11 +332,19 @@ class ControlBinding(SharedMemoryModel):
 
     # -- live shared-instance reads (cross-session race guard) --------------
     def current_generation(self):
-        """Return the generation from the process-wide idmapper instance."""
+        """Return the generation from the process-wide idmapper instance.
+
+        ``None`` means the row was deleted in this process: the delete
+        collector clears the cached instance's pk. Cross-process and raw-SQL
+        deletes stay invisible; this guard is process-local by decision.
+        """
         return self.db_generation if self.pk else None
 
     def live_contains(self, obj):
-        """Return whether ``obj`` remains on the live shared focus stack."""
+        """Return whether ``obj`` remains on the live shared focus stack.
+
+        Shares the process-local boundary of :meth:`current_generation`.
+        """
         return bool(self.pk) and self.contains(obj)
 
     # -- mutations (each bumps generation + saves) --------------------------

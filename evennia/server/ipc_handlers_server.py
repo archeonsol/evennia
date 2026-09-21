@@ -57,9 +57,7 @@ def receive_adminportal2server(packed_data):
         server_restart_mode = kwargs.get("server_restart_mode", "shutdown")
         evennia.EVENNIA_SERVER_SERVICE.run_init_hooks(server_restart_mode)
         evennia.SERVER_SESSION_HANDLER.portal_sessions_sync(kwargs.get("sessiondata"))
-        evennia.SERVER_SESSION_HANDLER.portal_start_time = kwargs.get(
-            "portal_start_time"
-        )
+        evennia.SERVER_SESSION_HANDLER.portal_start_time = kwargs.get("portal_start_time")
 
     elif operation == amp.SRELOAD:
         evennia.EVENNIA_SERVER_SERVICE.request_shutdown(mode="reload")
@@ -82,9 +80,7 @@ def data_to_portal(link, command, sessid, **kwargs):
         packed = amp.dumps_admin((sessid, kwargs))
     else:
         packed = amp.dumps_session((sessid, kwargs))
-    return link.callRemote(command, packed_data=packed).addErrback(
-        link.errback, command.key
-    )
+    return link.callRemote(command, packed_data=packed).addErrback(link.errback, command.key)
 
 
 def send_msgserver2portal(link, session, **kwargs):
@@ -93,17 +89,19 @@ def send_msgserver2portal(link, session, **kwargs):
 
 def send_msgserver2portal_many(link, sessids, **kwargs):
     """Publish one final output frame for several Portal sessions."""
-    from evennia.server.redis_transport import MAX_FRAME_BYTES
+    from evennia.server import redis_transport
 
+    limits = redis_transport.resolve_limits()
     results = []
     sessids = list(sessids)
-    for start in range(0, len(sessids), 1024):
-        chunk = sessids[start : start + 1024]
+    for start in range(0, len(sessids), limits.multicast_chunk):
+        chunk = sessids[start : start + limits.multicast_chunk]
         packed = amp.dumps_multicast((chunk, kwargs))
-        if len(packed) > MAX_FRAME_BYTES:
+        if len(packed) > limits.frame_bytes:
+            # The transport's own admission would reject this chunk; delivering
+            # it per session degrades grouping instead of dropping the output.
             results.extend(
-                data_to_portal(link, amp.MsgServer2Portal, sessid, **kwargs)
-                for sessid in chunk
+                data_to_portal(link, amp.MsgServer2Portal, sessid, **kwargs) for sessid in chunk
             )
             continue
         results.append(

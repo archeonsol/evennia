@@ -57,6 +57,8 @@ from evennia.utils.test_resources import BaseEvenniaTest
 
 
 class TestToJsonb(BaseEvenniaTest):
+    evennia_fixtures = frozenset()
+
     def _roundtrip(self, value):
         encoded = to_jsonb(value)
         return from_jsonb(encoded)
@@ -123,6 +125,8 @@ class TestToJsonb(BaseEvenniaTest):
 
 class TestJsonbBackendCRUD(BaseEvenniaTest):
     """Tests using the real JSONB backend wired to obj1 (an ObjectDB)."""
+
+    evennia_fixtures = {"obj1"}
 
     def setUp(self):
         super().setUp()
@@ -233,6 +237,8 @@ class TestJsonbBackendCRUD(BaseEvenniaTest):
 
 class TestBatchAttributeSnapshots(BaseEvenniaTest):
     """Bounded web snapshots preserve canonical JSONB state with one row query."""
+
+    evennia_fixtures = {"obj1"}
 
     def _row(self, key, value):
         from evennia.objects.models import ObjectDB
@@ -461,6 +467,8 @@ class TestBatchAttributeSnapshots(BaseEvenniaTest):
 
 
 class TestJsonbWriteBack(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -502,6 +510,8 @@ class TestJsonbWriteBack(BaseEvenniaTest):
 
 class TestJsonbPersistence(BaseEvenniaTest):
     """Reload the L1 dict from the saved db_attrs and confirm values survive."""
+
+    evennia_fixtures = {"obj1"}
 
     def setUp(self):
         super().setUp()
@@ -553,6 +563,8 @@ class TestJsonbPersistence(BaseEvenniaTest):
 
 class TestRowOwnedPersistence(BaseEvenniaTest):
     """Every handler for one model row shares one conflict-safe document."""
+
+    evennia_fixtures = {"obj1", "obj2"}
 
     def test_flush_all_dirty_merges_newer_database_edit(self):
         handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
@@ -744,6 +756,65 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
         self.assertEqual(statuses[handler_ok.backend._row_state.key], "ok")
         self.assertEqual(self._database_attrs()["~"]["_d"]["batch_ok"], 1)
 
+    def test_async_flush_spools_when_delta_intent_is_pending(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("first", 1)
+        flush_all_dirty()
+        state = handler.backend._row_state
+        handler.add("second", 2)
+        with (
+            tempfile.TemporaryDirectory() as spool,
+            override_settings(JSONB_WRITE_SPOOL_DIR=spool),
+        ):
+            with jsonb_handler._spool_row_lock(state.key):
+                jsonb_handler._write_spool_payload(
+                    state.key, "DELTA", state.durable_document, state.visible_document
+                )
+            state.durable_document = deepcopy(state.visible_document)
+            state.volatile_baseline = deepcopy(state.durable_document)
+
+            handler.add("third", 3)
+            snapshots = self._capture_async_snapshot(handler)
+            outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+            tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+            self.assertEqual(tallies, {"flushed": 0, "spooled": 1, "failed": 0})
+            self.assertFalse(state.pending_blocked)
+            self.assertEqual(spool_pending_count(), 2)
+            self.assertIn(state.key, jsonb_handler._STRONG_ROW_STATES)
+            self.assertEqual(self._database_attrs()["~"]["_d"], {"first": 1})
+
+            self.assertEqual(reclaim_spooled_writes(), 2)
+        self.assertEqual(self._database_attrs()["~"]["_d"], {"first": 1, "second": 2, "third": 3})
+
+    def test_async_flush_quarantines_prepared_blocking_witness(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots = self._capture_async_snapshot(handler)
+        state = handler.backend._row_state
+        baseline = self._database_attrs()
+        with (
+            tempfile.TemporaryDirectory() as spool,
+            override_settings(JSONB_WRITE_SPOOL_DIR=spool),
+        ):
+            with jsonb_handler._spool_row_lock(state.key):
+                jsonb_handler._write_spool_payload(
+                    state.key, "PREPARED_BLOCKING", baseline, baseline
+                )
+            outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+            self.assertEqual(outcomes[0].status, "blocked")
+            tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+            self.assertEqual(tallies, {"flushed": 0, "spooled": 0, "failed": 1})
+            self.assertTrue(state.pending_blocked)
+            self.assertIn(state.key, jsonb_handler._STRONG_ROW_STATES)
+            with self.assertRaises(AttributeUpdateUnavailable):
+                handler.add("blocked_key", 2)
+
+            more, preparation_failures = jsonb_handler._prepare_async_row_flushes()
+            self.assertGreaterEqual(preparation_failures, 1)
+            self.assertNotIn(state.key, {snapshot.key for snapshot in more})
+
     def test_attribute_revision_advances_on_dirtying_and_head_writes(self):
         baseline = jsonb_handler.attribute_revision(self.obj1)
         self.assertIsNotNone(baseline)
@@ -806,6 +877,8 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
 
 class TestBlockingUpdate(BaseEvenniaTest):
     """Supported protected JSONB Attribute mutation surface."""
+
+    evennia_fixtures = {"obj1", "obj2"}
 
     def setUp(self):
         super().setUp()
@@ -2010,6 +2083,8 @@ class TestSqliteProtectedSerialization(TransactionTestCase):
 class TestDurableIntentOrdering(BaseEvenniaTest):
     """Replayable DELTAs and non-replayable protected witnesses stay distinct."""
 
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
@@ -2159,6 +2234,8 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
 
 
 class TestForceFlushNoop(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def test_force_flush_noop_on_jsonb_backend(self):
         self.obj1.attributes.add("x", 1)
         force_flush(self.obj1)  # must not raise
@@ -2170,6 +2247,8 @@ class TestForceFlushNoop(BaseEvenniaTest):
 
 
 class TestFlushRetry(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -2327,7 +2406,125 @@ class TestFlushRetry(BaseEvenniaTest):
         self.assertTrue(force_flush(self.obj1))
 
 
+class TestFlushRowOwnership(BaseEvenniaTest):
+    """A barrier yields to the async worker that owns the row, without flock queueing."""
+
+    evennia_fixtures = {"obj1"}
+
+    def setUp(self):
+        super().setUp()
+        self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        self.handler.add("owned", 1)
+
+    def _capture(self):
+        snapshots, failures = jsonb_handler._prepare_async_row_flushes()
+        self.assertEqual(failures, 0)
+        snapshots = tuple(snapshot for snapshot in snapshots if snapshot.key == self._state().key)
+        self.assertEqual(len(snapshots), 1)
+        return snapshots
+
+    def _state(self):
+        return self.handler.backend._row_state
+
+    def test_claim_lifecycle_sets_events_and_clears_registry(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        key = snapshots[0].key
+        self.assertIn(key, jsonb_handler._FLUSH_IN_FLIGHT)
+
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots, claims)
+        self.assertEqual(outcomes[0].status, "ok")
+        self.assertTrue(claims[key].event.is_set())
+        self.assertEqual(claims[key].outcome.status, "ok")
+
+        jsonb_handler._release_async_row_flushes(claims)
+        self.assertNotIn(key, jsonb_handler._FLUSH_IN_FLIGHT)
+
+    def test_release_sets_leftover_events(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        jsonb_handler._release_async_row_flushes(claims)
+        for claim in claims.values():
+            self.assertTrue(claim.event.is_set())
+        self.assertEqual(jsonb_handler._FLUSH_IN_FLIGHT, {})
+
+    def test_sync_flush_skips_when_worker_persisted_current_state(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        claim = claims[snapshots[0].key]
+        claim.outcome = jsonb_handler._AsyncFlushOutcome(
+            snapshots[0].key, "ok", final=snapshots[0].local
+        )
+        claim.event.set()
+        with patch.object(jsonb_handler, "_write_locked_document") as write:
+            result = force_flush(self.obj1)
+        self.assertTrue(result.ok)
+        write.assert_not_called()
+        jsonb_handler._release_async_row_flushes(claims)
+
+        with patch.object(jsonb_handler, "_write_locked_document") as write:
+            force_flush(self.obj1)
+        write.assert_called_once()
+
+    def test_skip_requires_unchanged_mutation_serial(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        self.handler.add("later", 2)
+        claim = claims[snapshots[0].key]
+        claim.outcome = jsonb_handler._AsyncFlushOutcome(
+            snapshots[0].key, "ok", final=snapshots[0].local
+        )
+        claim.event.set()
+        with patch.object(jsonb_handler, "_write_locked_document") as write:
+            force_flush(self.obj1)
+        write.assert_called_once()
+        jsonb_handler._release_async_row_flushes(claims)
+
+    def test_sync_flush_waits_while_worker_holds_the_row(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        claim = claims[snapshots[0].key]
+        key = snapshots[0].key
+        order = []
+        holding = threading.Event()
+
+        def worker():
+            with jsonb_handler._spool_row_lock(key):
+                holding.set()
+                release_at = time.monotonic() + 0.05
+                while time.monotonic() < release_at:
+                    time.sleep(0.005)
+            order.append("lock_released")
+            claim.outcome = jsonb_handler._AsyncFlushOutcome(key, "ok", final=snapshots[0].local)
+            claim.event.set()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        self.assertTrue(holding.wait(timeout=5))
+
+        try:
+            with patch.object(jsonb_handler, "_write_locked_document") as write:
+                result = force_flush(self.obj1)
+        finally:
+            thread.join(timeout=5)
+            jsonb_handler._release_async_row_flushes(claims)
+        self.assertEqual(order, ["lock_released"])
+        self.assertTrue(result.ok)
+        write.assert_not_called()
+
+    def test_queued_worker_does_not_stall_sync_flush(self):
+        snapshots = self._capture()
+        claims = jsonb_handler._claim_async_row_flushes(snapshots)
+        try:
+            result = force_flush(self.obj1)
+        finally:
+            jsonb_handler._release_async_row_flushes(claims)
+        self.assertTrue(result.ok)
+
+
 class TestThreeWayMerge(BaseEvenniaTest):
+    evennia_fixtures = frozenset()
+
     def test_local_and_remote_deletions_preserve_missing_keys(self):
         baseline = {"a": 1, "b": 2}
         self.assertEqual(_three_way_merge(baseline, {"b": 2}, baseline), {"b": 2})
@@ -2344,6 +2541,8 @@ class TestThreeWayMerge(BaseEvenniaTest):
 
 
 class TestAttrtypeQueryAll(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -2384,6 +2583,8 @@ class TestAttrtypeQueryAll(BaseEvenniaTest):
 
 
 class TestPendingCount(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler
@@ -2410,6 +2611,8 @@ class TestPendingCount(BaseEvenniaTest):
 
 
 class TestPkCounter(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
     def setUp(self):
         super().setUp()
         from evennia.typeclasses.attributes import AttributeHandler

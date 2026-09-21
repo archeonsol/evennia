@@ -79,6 +79,7 @@ import inspect
 import json
 import os
 import tempfile
+import threading
 import time
 import uuid
 import weakref
@@ -327,6 +328,11 @@ class JsonbRowState:
 
 _ROW_STATES = WeakValueDictionary()
 _STRONG_ROW_STATES = {}
+# Rows an async worker owns, keyed for owner-thread cooperative waits. A sync
+# flush of a claimed row waits for the worker's event instead of queueing on
+# the row flock; the events have no timeout because the row flock had none
+# either (a hung database must stay visible as a hung flush).
+_FLUSH_IN_FLIGHT: dict[tuple, "_FlushClaim"] = {}
 _MISSING_ROW_MARKER = "_jsonb_row_missing"
 _MISSING_REMOTE_ROW = object()
 _SNAPSHOT_MAX_DEPTH = 32
@@ -1076,6 +1082,40 @@ def _spool_row_lock(key):
                 yield
             finally:
                 fcntl.flock(lockfile.fileno(), fcntl.LOCK_UN)
+
+
+def _spool_lock_available(key):
+    """True if the row's flock is free (its owner may be queued, not started)."""
+    spool = _spool_dir()
+    lock_dir = os.path.join(spool, ".locks")
+    if not os.path.isdir(lock_dir):
+        return True
+    digest = hashlib.sha256(repr(key).encode()).hexdigest()
+    path = os.path.join(lock_dir, f"{digest}.lock")
+    try:
+        with open(path, "a+b") as lockfile:
+            if os.name == "nt":
+                import msvcrt
+
+                _seed_lock_byte(lockfile)
+                lockfile.seek(0)
+                try:
+                    msvcrt.locking(lockfile.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return False
+                lockfile.seek(0)
+                msvcrt.locking(lockfile.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                try:
+                    fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    return False
+                fcntl.flock(lockfile.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        return True
+    return True
 
 
 def _read_spool_payload(path):
@@ -1890,7 +1930,7 @@ class JsonbAttributeBackend(IAttributeBackend):
         return super().clear_attributes(category, accessing_obj, default_access)
 
     # ------------------------------------------------------------------
-    # Flush (participates in the existing flush_all_dirty() loop)
+    # Flush
     # ------------------------------------------------------------------
 
     def pending_count(self) -> int:
@@ -1903,7 +1943,10 @@ class JsonbAttributeBackend(IAttributeBackend):
         return max(0.0, time.monotonic() - self._dirty_since)
 
     def flush_dirty(self):
-        """Write the L1 dict to ``db_attrs`` and save.  Called by the tick.
+        """Write the L1 dict to ``db_attrs`` and save.
+
+        Direct one-backend write entry point; periodic flush and barriers use
+        the row-owned path (:func:`flush_all_dirty` -> ``_persist_row_state``).
 
         Returns:
             FlushResult or None: The flush outcome, or ``None`` when there was
@@ -2044,6 +2087,45 @@ def _locked_row_query(state, fields=()):
     return manager, row
 
 
+def _await_row_owner(state):
+    """Yield to the async worker that owns this row; True if it covered it.
+
+    A claimed row whose worker has not reached it yet (free flock) is written
+    by the caller directly: queueing behind an event the worker has not
+    started would only lengthen the barrier stall. Once the worker runs, its
+    release event bounds the wait; True means the worker committed the row's
+    current state, so the caller's write would be a no-op duplicate.
+    """
+    claim = _FLUSH_IN_FLIGHT.get(state.key)
+    if claim is None:
+        return False
+    if not claim.event.is_set():
+        if _spool_lock_available(state.key):
+            return False
+        claim.event.wait()
+    outcome = claim.outcome
+    return bool(
+        outcome is not None and outcome.status == "ok" and claim.serial == state.mutation_serial
+    )
+
+
+def _claim_async_row_flushes(snapshots):
+    """Register owner-side ownership for each snapshot before handing work off."""
+    claims = {
+        snapshot.key: _FlushClaim(event=threading.Event(), serial=snapshot.mutation_serial)
+        for snapshot in snapshots
+    }
+    _FLUSH_IN_FLIGHT.update(claims)
+    return claims
+
+
+def _release_async_row_flushes(claims):
+    """End ownership for a batch; wake any barrier still waiting on it."""
+    for key, claim in claims.items():
+        _FLUSH_IN_FLIGHT.pop(key, None)
+        claim.event.set()
+
+
 def _persist_row_state(state, *, allow_spool):
     """Persist one shared row state without exposing backend-level races."""
     from evennia.utils import logger
@@ -2077,6 +2159,8 @@ def _persist_row_state(state, *, allow_spool):
                 "JSONB Attribute state is quarantined until recovery or process restart."
             ),
         )
+    if _await_row_owner(state):
+        return FlushResult(ok=True)
     try:
         return _persist_row_state_locked(state, allow_spool=allow_spool)
     except Exception as err:
@@ -2186,6 +2270,21 @@ class _AsyncFlushOutcome:
     error_message: str = ""
 
 
+@dataclass
+class _FlushClaim:
+    """Ownership record for one row an async worker persists.
+
+    The worker fills in ``outcome`` and sets ``event`` after the row's flock
+    is released; owner-thread sync flushes wait on it (``serial`` is the
+    mutation serial the worker captured, so a sync flush can tell whether the
+    worker already persisted the row's current state).
+    """
+
+    event: threading.Event
+    serial: int
+    outcome: "_AsyncFlushOutcome | None" = None
+
+
 def _prepare_async_row_flushes():
     """Capture immutable dirty-row snapshots without handing game state to workers."""
     _require_io_thread("JSONB asynchronous flush preparation")
@@ -2231,13 +2330,27 @@ def _persist_row_snapshot_worker(snapshot):
     """Persist one immutable snapshot; runs in a worker and touches no live object."""
     try:
         with _spool_row_lock(snapshot.key):
-            if _list_row_entries(snapshot.key):
-                return _AsyncFlushOutcome(
-                    snapshot.key,
-                    "failed",
-                    error_type="AttributeUpdateUnavailable",
-                    error_message="durable Attribute deltas are pending",
-                )
+            entries = _list_row_entries(snapshot.key)
+            if entries:
+                if any(payload.get("kind") == "PREPARED_BLOCKING" for _, _, payload in entries):
+                    return _AsyncFlushOutcome(
+                        snapshot.key,
+                        "blocked",
+                        error_type="AttributeUpdateUnavailable",
+                        error_message="A protected Attribute outcome awaits manual resolution.",
+                    )
+                # A queued DELTA reserves the write order; chaining another
+                # spool entry keeps this row's replay FIFO.
+                try:
+                    _write_spool_payload(snapshot.key, "DELTA", snapshot.durable, snapshot.local)
+                except Exception as spool_err:
+                    return _AsyncFlushOutcome(
+                        snapshot.key,
+                        "failed",
+                        error_type=type(spool_err).__name__,
+                        error_message=str(spool_err),
+                    )
+                return _AsyncFlushOutcome(snapshot.key, "spooled", final=snapshot.local)
             try:
                 with transaction.atomic(using=snapshot.alias):
                     connection = connections[snapshot.alias]
@@ -2305,15 +2418,35 @@ def _persist_row_snapshot_worker(snapshot):
     return _AsyncFlushOutcome(snapshot.key, "ok", final=final)
 
 
-def _persist_row_snapshots_worker(snapshots):
+def _persist_row_snapshots_worker(snapshots, claims=None):
     """Worker batch entry point returning plain immutable outcomes.
 
     Rows commit one transaction each: measured on production, grouping the
     batch into one transaction changed nothing (25.3ms -> 27.6ms for 20 rows)
     because the per-row ``SELECT ... FOR UPDATE`` round trip dominates, and
     per-row commits keep partial progress when a batch-level failure hits.
+
+    Each row's ownership event is set after the row's flock is released, so a
+    waiting sync flush can re-acquire it without queueing behind the worker.
     """
-    return tuple(_persist_row_snapshot_worker(snapshot) for snapshot in snapshots)
+    claims = claims or {}
+    outcomes = []
+    for snapshot in snapshots:
+        claim = claims.get(snapshot.key)
+        try:
+            outcome = _persist_row_snapshot_worker(snapshot)
+        except Exception as err:
+            outcome = _AsyncFlushOutcome(
+                snapshot.key,
+                "failed",
+                error_type=type(err).__name__,
+                error_message=str(err),
+            )
+        outcomes.append(outcome)
+        if claim is not None:
+            claim.outcome = outcome
+            claim.event.set()
+    return tuple(outcomes)
 
 
 def _set_async_durable_head(state, snapshot, durable, *, spooled):
@@ -2403,6 +2536,14 @@ def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
                 f"JsonbAttributeBackend: refusing stale conflicting write for pk={state.pk}."
             )
             failed += 1
+        elif outcome.status == "blocked":
+            state.pending_blocked = True
+            _STRONG_ROW_STATES[outcome.key] = state
+            logger.log_warn(
+                f"JsonbAttributeBackend: quarantining pk={state.pk}; "
+                "a protected Attribute outcome awaits manual resolution."
+            )
+            failed += 1
         else:
             if state.dirty and state.durable_document == snapshot.durable:
                 state.flush_failures = max(state.flush_failures, snapshot.flush_failures + 1)
@@ -2421,8 +2562,12 @@ async def flush_jsonb_rows_async():
     snapshots, preparation_failures = _prepare_async_row_flushes()
     if not snapshots:
         return {"flushed": 0, "spooled": 0, "failed": preparation_failures}
-    outcomes = await defer.in_thread(_persist_row_snapshots_worker, snapshots)
-    return _adopt_async_row_flushes(snapshots, outcomes, preparation_failures)
+    claims = _claim_async_row_flushes(snapshots)
+    try:
+        outcomes = await defer.in_thread(_persist_row_snapshots_worker, snapshots, claims)
+        return _adopt_async_row_flushes(snapshots, outcomes, preparation_failures)
+    finally:
+        _release_async_row_flushes(claims)
 
 
 @dataclass(frozen=True)
@@ -2964,6 +3109,8 @@ def force_flush(obj):
                     "JSONB Attribute state is quarantined until recovery or process restart."
                 ),
             )
+        if _await_row_owner(state):
+            return FlushResult(ok=True)
         try:
             with _spool_row_lock(state.key):
                 entries = _list_row_entries(state.key)

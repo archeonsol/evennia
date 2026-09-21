@@ -287,7 +287,7 @@ class CharacterObjectRules:
         return PASS
 
     @rule(Get, phase="carry_out", priority=50)
-    def carry_out_get(self, action, actor):
+    async def carry_out_get(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
         caller = self
@@ -304,7 +304,7 @@ class CharacterObjectRules:
             return CLAIM
         moved = []
         for obj in objs:
-            if obj.move_to(caller, quiet=True, move_type="get"):
+            if await obj.move_to_async(caller, quiet=True, move_type="get"):
                 moved.append(obj)
                 obj.at_post_get(caller)
         if not moved:
@@ -355,7 +355,7 @@ class CharacterObjectRules:
         return PASS
 
     @rule(Drop, phase="carry_out", priority=50)
-    def carry_out_drop(self, action, actor):
+    async def carry_out_drop(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
         objs = getattr(action, "_drop_objs", None)
@@ -364,7 +364,7 @@ class CharacterObjectRules:
         caller = self
         moved = []
         for obj in objs:
-            if obj.move_to(caller.location, quiet=True, move_type="drop"):
+            if await obj.move_to_async(caller.location, quiet=True, move_type="drop"):
                 moved.append(obj)
                 obj.at_post_drop(caller)
         if not moved:
@@ -424,7 +424,7 @@ class CharacterObjectRules:
         return PASS
 
     @rule(Give, phase="carry_out", priority=50)
-    def carry_out_give(self, action, actor):
+    async def carry_out_give(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
         to_give = getattr(action, "_give_objs", None)
@@ -434,7 +434,7 @@ class CharacterObjectRules:
         caller = self
         moved = []
         for obj in to_give:
-            if obj.move_to(target, quiet=True, move_type="give"):
+            if await obj.move_to_async(target, quiet=True, move_type="give"):
                 moved.append(obj)
                 obj.at_post_give(caller, target)
         if not moved:
@@ -517,7 +517,7 @@ class ContainerPutRules:
         return PASS
 
     @rule(Put, phase="carry_out", priority=50)
-    def carry_out_put(self, action, actor):
+    async def carry_out_put(self, action, actor):
         if not self._is_container(action):
             return SKIP
         if action._unresolved:
@@ -526,7 +526,7 @@ class ContainerPutRules:
         if caller is None:
             return SKIP
         obj = action.target
-        if not obj.move_to(self, quiet=True):
+        if not await obj.move_to_async(self, quiet=True):
             caller.msg("You can't put that in there.")
             return CLAIM
         if hasattr(self, "at_post_arrive"):

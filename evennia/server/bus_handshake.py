@@ -3,7 +3,7 @@
 import time
 from uuid import uuid4
 
-from django.conf import settings
+from evennia.utils.utils import resolve_setting
 
 
 class BusHandshake:
@@ -13,7 +13,8 @@ class BusHandshake:
     random challenges; lifecycle requests never enter this state machine.
     """
 
-    timeout = 4.0
+    timeout = 12.0
+    staleness = 4.0
     heartbeat = 1.0
 
     def __init__(
@@ -31,7 +32,23 @@ class BusHandshake:
     ):
         """Bind peer-specific state operations and a monotonic clock."""
         self.role = role
-        self.timeout = float(getattr(settings, "BUS_HANDSHAKE_TIMEOUT", type(self).timeout))
+        # The lease must outlast one probe cadence; below it a healthy peer
+        # disconnects on the first tick.
+        self.timeout = resolve_setting(
+            "BUS_HANDSHAKE_TIMEOUT", type(self).timeout, cast=float, minimum=type(self).heartbeat
+        )
+        # The replay bound must not exceed the handshake budget: tick bounds
+        # the handshake attempt by the lease, so an exchange accepted above
+        # this ceiling would be disconnected by the bound it was accepted under.
+        self.staleness = min(
+            resolve_setting(
+                "BUS_HANDSHAKE_STALENESS",
+                type(self).staleness,
+                cast=float,
+                minimum=type(self).heartbeat,
+            ),
+            self.timeout,
+        )
         self.process = uuid4().hex
         self.epoch = uuid4().hex
         self.state = "disconnected"
@@ -48,6 +65,9 @@ class BusHandshake:
         self._last_probe = -self.heartbeat
         self._pending = None
         self._offers = {}
+        # portal identity -> its live challenge; a re-probe replaces its own
+        # offer instead of consuming another slot of the bounded table.
+        self._offer_slots = {}
         self._exchange = None
 
     @property
@@ -64,6 +84,7 @@ class BusHandshake:
         self.epoch = uuid4().hex
         self._pending = self._exchange = None
         self._offers.clear()
+        self._offer_slots.clear()
         self._last_probe = -self.heartbeat
         self._on_unavailable()
 
@@ -138,14 +159,28 @@ class BusHandshake:
                 "pair": [portal, self.identity],
                 "at": self._now(),
             }
+            # Retention follows the lease, not the replay bound: a liveness
+            # pulse must still find its offer after a long peer turn. State
+            # authority is gated per-kind at acceptance instead.
             self._offers = {
                 key: value
                 for key, value in self._offers.items()
                 if self._now() - value["at"] < self.timeout
             }
+            slot = tuple(portal)
+            previous = self._offer_slots.pop(slot, None)
+            if previous is not None:
+                self._offers.pop(previous, None)
             if len(self._offers) >= 8:
-                return
+                # Answering the fresh probe outranks the oldest bound offer;
+                # dropping the probe instead would starve new portals behind
+                # re-probing ones.
+                oldest = min(self._offers, key=lambda key: self._offers[key]["at"])
+                evicted = self._offers.pop(oldest)
+                if self._offer_slots.get(tuple(evicted["pair"][0])) == oldest:
+                    del self._offer_slots[tuple(evicted["pair"][0])]
             self._offers[offer["challenge"]] = offer
+            self._offer_slots[slot] = offer["challenge"]
             self._emit(
                 "offer",
                 offer,
@@ -155,9 +190,14 @@ class BusHandshake:
             offer = self._offers.get(frame.get("challenge"))
             if not self._matches(frame, offer):
                 return
-            if self._now() - offer["at"] >= self.timeout:
+            # A pulse is a liveness answer: its age is bounded by the lease.
+            # A snapshot rewrites session state, so only the replay bound applies.
+            deadline = self.timeout if kind == "pulse" else self.staleness
+            if self._now() - offer["at"] >= deadline:
                 return
             del self._offers[frame["challenge"]]
+            if self._offer_slots.get(tuple(offer["pair"][0])) == frame["challenge"]:
+                del self._offer_slots[tuple(offer["pair"][0])]
             if kind == "pulse":
                 if self.state in ("ready", "stopping") and self.pair == frame["pair"]:
                     self._last_seen = self._now()
@@ -169,7 +209,7 @@ class BusHandshake:
             self._apply(frame["payload"])
             self._emit("applied", frame)
         elif kind == "confirm" and self._matches(frame, self._exchange):
-            if self._now() - self._exchange["at"] >= self.timeout:
+            if self._now() - self._exchange["at"] >= self.staleness:
                 return
             self._exchange = None
             self.state = "ready"
@@ -192,9 +232,9 @@ class BusHandshake:
         pending = self._pending
         if not pending or frame.get("probe") != pending["probe"]:
             return
-        if self._now() - pending["at"] >= self.timeout:
-            return
         if kind == "offer":
+            if self._now() - pending["at"] >= self.staleness:
+                return
             pair = frame.get("pair")
             if not isinstance(pair, list) or len(pair) != 2 or pair[0] != self.identity:
                 return
@@ -210,9 +250,12 @@ class BusHandshake:
         elif not self._matches(frame, pending):
             return
         elif kind == "pulse_ack" and self.state == "ready":
+            # A pulse_ack is the answer to a liveness pulse; late is fine.
             self._last_seen = self._now()
             self._pending = None
         elif kind in ("applied", "ready"):
+            if self._now() - pending["at"] >= self.staleness:
+                return
             if self._snapshot()[0] != pending.get("revision"):
                 self.disconnect()
                 return

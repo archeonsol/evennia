@@ -347,7 +347,7 @@ class CharacterGeneralRules(NickRules):
     """Baseline character-side general rules: nicks, ``home``, ``@sethelp``."""
 
     @rule(Home, phase="carry_out", requires=HasCapability("engine.world.build"))
-    def carry_out_home(self, action, actor):
+    async def carry_out_home(self, action, actor):
         if self is not getattr(actor, "character", None):
             return SKIP
         caller = self
@@ -361,7 +361,7 @@ class CharacterGeneralRules(NickRules):
             caller.msg("You are already home!")
         else:
             caller.msg("There's no place like home ...")
-            caller.move_to(home, move_type="teleport")
+            await caller.move_to_async(home, move_type="teleport")
         return CLAIM
 
     @rule(SetHelp, phase="carry_out", requires=HasCapability("engine.help.manage"))

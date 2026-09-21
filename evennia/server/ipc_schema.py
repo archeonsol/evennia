@@ -94,12 +94,8 @@ class SessionEnvelope(BaseModel):
         return amp_serde.pack_session_message(self.sessid, self.kwargs)
 
     @classmethod
-    def from_wire(
-        cls, data: bytes, *, enforce_limits: bool = True
-    ) -> "SessionEnvelope":
-        sessid, kwargs = amp_serde.unpack_session_message(
-            data, enforce_limits=enforce_limits
-        )
+    def from_wire(cls, data: bytes, *, enforce_limits: bool = True) -> "SessionEnvelope":
+        sessid, kwargs = amp_serde.unpack_session_message(data, enforce_limits=enforce_limits)
         return cls(sessid=sessid, kwargs=kwargs)
 
 
@@ -114,9 +110,7 @@ class MulticastEnvelope(BaseModel):
     @field_validator("sessids")
     @classmethod
     def _validate_sessids(cls, value):
-        if not value or any(
-            not isinstance(sessid, int) or sessid <= 0 for sessid in value
-        ):
+        if not value or any(not isinstance(sessid, int) or sessid <= 0 for sessid in value):
             raise ValueError("multicast sessids must be positive ints")
         if len(set(value)) != len(value):
             raise ValueError("multicast sessids must be unique")

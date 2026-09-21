@@ -252,9 +252,12 @@ REDIS_BUS_PREFIX = "evennia:bus"
 SERVER_WORKER_ID = "0"  # distinct per Server worker once multi-worker lands
 # Bus transport caps. None keeps the module default
 # (evennia/server/redis_transport.py); set an int to tune a busy deployment.
-# Ordinary admission reserves headroom for control/handshake frames, and
-# capacity pressure rejects the frame as backpressure instead of failing the
-# transport (see the 100-session load-test note in Redis-Bus-Delivery.md).
+# Explicit values are cast to int and floored at 1
+# (evennia.utils.utils.resolve_setting, the convention for engine tunables).
+# Ordinary admission reserves headroom for control/handshake frames. On the
+# outgoing path, capacity pressure rejects the frame as backpressure instead
+# of failing the transport; an exhausted incoming delivery queue does fail
+# the transport (see Redis-Bus-Delivery.md).
 REDIS_BUS_MAX_ENTRIES = None
 REDIS_BUS_MAX_BYTES = None
 REDIS_BUS_DATA_ENTRIES = None
@@ -266,12 +269,26 @@ REDIS_BUS_READ_BATCH = None
 # than a healthy reactor can legitimately run synchronous game/DB work, so
 # long turns were misread as dead peers and caused session reconciliation
 # churn. Real process death still fails fast through the Redis connection;
-# this lease only needs to bound silence.
+# this lease only needs to bound silence. None keeps the code default lease
+# (BusHandshake.timeout); values below the 1-second heartbeat are floored to it.
+# Widening this governs liveness and handshake-attempt recovery only; the
+# replay/staleness defenses are bounded by BUS_HANDSHAKE_STALENESS.
 BUS_HANDSHAKE_TIMEOUT = 12.0
-# Narrative render bound. None keeps the module default (256 spans per segment
-# and 256 entity references per node). Raise it for very crowded scenes, where
-# a room view carries a span per visible character per detail line.
+# Seconds a handshake offer, snapshot confirmation, or pending discovery frame
+# stays acceptable: the replay bound on session-state authority. Deliberately
+# separate from the liveness lease above: widening the lease to tolerate long
+# synchronous turns must not widen the window in which stale challenges and
+# delayed final acks are accepted. None keeps the code default of four seconds
+# (BusHandshake.staleness, the original lease value); values are floored at the
+# 1-second heartbeat and capped at BUS_HANDSHAKE_TIMEOUT.
+BUS_HANDSHAKE_STALENESS = None
+# Narrative render bounds. None keeps the module default (256 entity references
+# per node; 256 spans per segment and 256 span segments per node). Raise
+# RENDER_MAX_REFS for reference-heavy nodes and RENDER_MAX_SPANS for very
+# crowded scenes, where a room view carries a span per visible character per
+# detail line.
 RENDER_MAX_REFS = None
+RENDER_MAX_SPANS = None
 
 # Evennia is synchronous-by-default: game code, hooks, scripts and boot make
 # blocking Django ORM calls on the single event-loop thread. Opt out of Django's
@@ -838,7 +855,10 @@ REACTOR_STALL_WARNING_MS = 200
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # Diagnostic protocol record emitted after the complete CM1 input lifecycle.
-# Disabled for ordinary clients; load environments opt in explicitly.
+# Disabled for ordinary clients; load environments opt in explicitly. The
+# marker completes the session's single in-flight command, so a consumer must
+# not pipeline input (see the contract at the emission site in
+# evennia.utils.command_trace.command_trace_scope).
 COMMAND_COMPLETION_MARKERS_ENABLED = False
 # Log rule bodies that suspend a dispatch longer than this (ms; 0 = disabled).
 # A suspended rule holds the command's completion marker open; use it to find

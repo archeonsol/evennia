@@ -9,10 +9,13 @@ Disable all engine metrics with ``ENGINE_PROMETHEUS_METRICS_ENABLED = False``.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Dict, Optional
 
 from django.conf import settings
+
+from evennia.server.bus_result import BUS_REJECT_REASONS
 
 # Metric objects (None when prometheus_client is unavailable or disabled)
 ATTR_FLUSH_TOTAL = None
@@ -65,7 +68,12 @@ BUS_REJECTED_TOTAL = None
 BUS_WRITE_BATCH_SIZE = None
 
 _METRICS_READY = False
-_render_phase_samples = {"resolve": 0, "transform": 0, "clean": 0}
+_METRICS_LOCK = threading.Lock()
+_FLUSH_SOURCES = frozenset({"tick", "barrier", "shutdown", "manual"})
+_PREWARM_OUTCOMES = frozenset({"refreshed", "failed"})
+_PREWARM_WAIT_OUTCOMES = frozenset({"ready", "waited", "failed"})
+_RENDER_PHASES = frozenset({"resolve", "transform", "clean"})
+_render_phase_samples = dict.fromkeys(_RENDER_PHASES, 0)
 _RENDER_PHASE_SAMPLE_EVERY = 64
 
 
@@ -76,6 +84,38 @@ def _enabled() -> bool:
 def _init_metrics() -> bool:
     """Create metrics once on the default Prometheus registry."""
     global _METRICS_READY
+
+    if _METRICS_READY:
+        return ATTR_FLUSH_TOTAL is not None
+    # The writer thread and the server can reach a metric call at first
+    # contact simultaneously; without the lock both can pass the flag check
+    # and register the same timeseries twice (a registry error) or observe
+    # the flag set before any metric object exists.
+    with _METRICS_LOCK:
+        if _METRICS_READY:
+            return ATTR_FLUSH_TOTAL is not None
+        _METRICS_READY = True
+        return _create_metrics()
+
+
+def best_effort(label: str, recorder, *args, **kwargs) -> None:
+    """Call one metric recorder; a telemetry failure logs and continues.
+
+    Telemetry runs on hot game paths (output cleaning, rendering, caches);
+    a broken recorder must never break the caller, and must never vanish
+    silently either.
+    """
+
+    try:
+        recorder(*args, **kwargs)
+    except Exception as err:
+        from evennia.utils import logger
+
+        logger.log_warn(f"prometheus: {label} telemetry failed: {err}")
+
+
+def _create_metrics() -> bool:
+    """Build every metric on the default registry; caller holds the lock."""
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_RUNS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
@@ -101,10 +141,6 @@ def _init_metrics() -> bool:
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
     global BUS_INCOMING_DEPTH, BUS_INCOMING_BYTES, BUS_INCOMING_WAIT_SECONDS
     global BUS_REJECTED_TOTAL, BUS_WRITE_BATCH_SIZE
-
-    if _METRICS_READY:
-        return ATTR_FLUSH_TOTAL is not None
-    _METRICS_READY = True
 
     if not _enabled():
         return False
@@ -381,7 +417,7 @@ def record_attribute_flush(
     total = int(stats.get("total") or 0)
     backends = int(stats.get("backends") or 0)
     pending = int(stats.get("pending") or 0)
-    source = source if source in {"tick", "barrier", "shutdown", "manual"} else "manual"
+    source = source if source in _FLUSH_SOURCES else "manual"
 
     if ATTR_FLUSH_RUNS_TOTAL is not None:
         ATTR_FLUSH_RUNS_TOTAL.labels(source=source).inc()
@@ -492,14 +528,18 @@ def record_bus_incoming_wait(seconds: float) -> None:
         BUS_INCOMING_WAIT_SECONDS.observe(max(0.0, float(seconds)))
 
 
-def record_bus_publish() -> None:
+def record_bus_publish(count: int = 1) -> None:
+    """Count published bus frames in one increment."""
     if _init_metrics() and BUS_PUBLISHED_TOTAL is not None:
-        BUS_PUBLISHED_TOTAL.inc()
+        BUS_PUBLISHED_TOTAL.inc(count)
 
 
 def record_bus_reject(reason: str) -> None:
     if _init_metrics() and BUS_REJECTED_TOTAL is not None:
-        BUS_REJECTED_TOTAL.labels(reason=str(reason or "unknown")[:32]).inc()
+        reason = str(reason)
+        if reason not in BUS_REJECT_REASONS:
+            reason = "unknown"
+        BUS_REJECTED_TOTAL.labels(reason=reason).inc()
 
 
 def record_bus_write_batch(size: int) -> None:
@@ -523,7 +563,7 @@ def record_render_delivery(mode: str, duration_seconds: float) -> None:
 def record_render_phase(phase: str, duration_seconds: float) -> None:
     """Sample a bounded render phase without adding a histogram write per delivery."""
 
-    normalized = phase if phase in _render_phase_samples else "transform"
+    normalized = phase if phase in _RENDER_PHASES else "transform"
     count = _render_phase_samples[normalized] + 1
     _render_phase_samples[normalized] = count
     if count % _RENDER_PHASE_SAMPLE_EVERY:
@@ -566,7 +606,7 @@ def record_authorization_prewarm(outcome: str, duration_seconds: float) -> None:
 
     if not _init_metrics():
         return
-    normalized = outcome if outcome in {"refreshed", "failed"} else "failed"
+    normalized = outcome if outcome in _PREWARM_OUTCOMES else "failed"
     if AUTHORIZATION_PREWARM_TOTAL is not None:
         AUTHORIZATION_PREWARM_TOTAL.labels(outcome=normalized).inc()
     if AUTHORIZATION_PREWARM_DURATION_SECONDS is not None:
@@ -578,7 +618,7 @@ def record_authorization_prewarm_wait(outcome: str, duration_seconds: float) -> 
 
     if not _init_metrics():
         return
-    normalized = outcome if outcome in {"ready", "waited", "failed"} else "failed"
+    normalized = outcome if outcome in _PREWARM_WAIT_OUTCOMES else "failed"
     if AUTHORIZATION_PREWARM_WAIT_TOTAL is not None:
         AUTHORIZATION_PREWARM_WAIT_TOTAL.labels(outcome=normalized).inc()
     if AUTHORIZATION_PREWARM_WAIT_DURATION_SECONDS is not None:

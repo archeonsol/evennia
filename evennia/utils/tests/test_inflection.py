@@ -42,19 +42,18 @@ class LazyInflectionTest(TestCase):
         self.assertIs(engine, inflect_engine())
         self.assertEqual(engine.an("hour"), "an hour")
 
-    def test_pyinflect_is_usable_and_cached(self):
+    def test_pyinflect_is_cached_and_optional(self):
+        """Installed or absent, the answer is computed once and cached."""
+
         module = pyinflect_module()
 
-        self.assertIsNotNone(module)
         self.assertIs(module, pyinflect_module())
-        self.assertEqual(module.getInflection("walk", tag="VBZ"), ("walks",))
+        if module is not None:
+            self.assertEqual(module.getInflection("walk", tag="VBZ"), ("walks",))
 
     def test_no_engine_module_imports_inflect_at_module_scope(self):
         offenders = []
         for path in ENGINE_ROOT.rglob("*.py"):
-            parts = path.relative_to(ENGINE_ROOT).parts
-            if "tests" in parts or path.name.startswith("test_"):
-                continue
             if path.name == "inflection.py":
                 continue
             try:
@@ -73,10 +72,15 @@ class LazyInflectionTest(TestCase):
         )
 
     def test_warm_populates_both_caches(self):
+        inflect_engine.cache_clear()
+        pyinflect_module.cache_clear()
+
         warm()
 
-        self.assertIs(inflect_engine(), inflect_engine())
-        self.assertIs(pyinflect_module(), pyinflect_module())
+        # currsize, not identity: an empty cache would still pass an
+        # assertIs self-check, because either accessor caches on first call.
+        self.assertEqual(inflect_engine.cache_info().currsize, 1)
+        self.assertEqual(pyinflect_module.cache_info().currsize, 1)
 
     def test_the_server_start_hook_warms_them(self):
         """The laziness is only safe because a live server pays up front.

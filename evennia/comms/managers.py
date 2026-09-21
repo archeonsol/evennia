@@ -345,7 +345,11 @@ class MsgManager(TypedObjectManager):
             new_message.receivers = receiver
         for operation, policy in dict(policies or {}).items():
             new_message.policies.set(operation, policy)
-        from evennia.authorization.storage import grant_capability, principal_refs
+        from evennia.authorization.storage import (
+            grant_capabilities,
+            grant_capability,
+            principal_refs,
+        )
 
         sender_refs = {ref for sender in make_iter(senderobj) for ref in principal_refs(sender)}
         receiver_refs = {
@@ -361,14 +365,13 @@ class MsgManager(TypedObjectManager):
                 provenance="message_participant",
             )
         for principal_ref in sender_refs:
-            for capability in ("engine.message.edit", "engine.message.delete"):
-                grant_capability(
-                    principal_ref,
-                    capability,
-                    scope_kind="resource",
-                    scope_key=message_ref,
-                    provenance="message_sender",
-                )
+            grant_capabilities(
+                principal_ref,
+                ("engine.message.edit", "engine.message.delete"),
+                scope_kind="resource",
+                scope_key=message_ref,
+                provenance="message_sender",
+            )
         if tags:
             new_message.tags.batch_add(*tags)
 

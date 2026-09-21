@@ -13,7 +13,6 @@ function line(text: string, over: Partial<LogLine> = {}): LogLine {
     type: "text",
     cat: "system",
     ts: 1234,
-    filed: [],
     ...over,
   };
 }
@@ -37,14 +36,16 @@ describe("pruneMoved", () => {
     session.pruneMoved();
 
     expect(session.lines).toEqual([]);
-    expect(routing.buffers.chatter).toEqual([{ html: "<i>someone whispers</i>", ts: 1234 }]);
+    expect(routing.buffers.chatter).toHaveLength(1);
+    expect(routing.buffers.chatter[0]).toMatchObject({ html: "<i>someone whispers</i>", ts: 1234 });
     expect(routing.unread.chatter).toBe(1);
   });
 
   it("does not double-file a line already filed to the claiming feed", () => {
     routes([{ pattern: "whispers", label: "chatter" }]);
-    const filed = routing.process("<i>someone whispers</i>", "someone whispers");
-    session.lines.push(line("someone whispers", { filed: filed.labels }));
+    const l = line("someone whispers");
+    routing.process(l.html, l.text, l.id);
+    session.lines.push(l);
 
     routes([{ pattern: "whispers", label: "chatter", move: true }]);
     session.pruneMoved();
@@ -54,7 +55,7 @@ describe("pruneMoved", () => {
   });
 
   it("files a line into a claimed feed it was not filed to", () => {
-    session.lines.push(line("someone whispers", { filed: ["other"] }));
+    session.lines.push(line("someone whispers"));
 
     routes([{ pattern: "whispers", label: "chatter", move: true }]);
     session.pruneMoved();
@@ -75,5 +76,44 @@ describe("pruneMoved", () => {
     session.pruneMoved();
     expect(session.lines).toHaveLength(2);
     expect(routing.buffers["media-feed"]).toBeUndefined();
+  });
+
+  it("re-files a line whose buffer was purged by a rule edit", () => {
+    // The purge-then-re-add cycle: a copy route files the line, the route is
+    // deleted (purging the feed), then re-added. The log still holds the line,
+    // so the re-filed feed must get it back rather than lose it.
+    routes([{ pattern: "whispers", label: "chatter" }]);
+    const l = line("someone whispers");
+    routing.process(l.html, l.text, l.id);
+    session.lines.push(l);
+
+    routes([]);
+    expect(routing.buffers.chatter).toBeUndefined();
+
+    routes([{ pattern: "whispers", label: "chatter", move: true }]);
+    session.pruneMoved();
+
+    expect(session.lines).toEqual([]);
+    expect(routing.buffers.chatter).toHaveLength(1);
+    expect(routing.buffers.chatter[0].html).toBe("<i>someone whispers</i>");
+  });
+
+  it("keeps the scrollback copy when a full feed trims the backfilled line", () => {
+    // A feed holds MAX lines; an older scrollback line it never filed is
+    // backfilled, merged by ts and trimmed straight back out. The line must
+    // stay in the log: pruneMoved may only drop what the feed actually holds.
+    routes([{ pattern: "whispers", label: "chatter", move: true }]);
+    for (let i = 0; i < 300; i++) {
+      routing.process("<i>fresh</i>", "someone whispers", 1000 + i);
+    }
+    expect(routing.buffers.chatter).toHaveLength(300);
+
+    const l = line("someone whispers", { ts: 1 });
+    session.lines.push(l);
+    session.pruneMoved();
+
+    expect(session.lines).toHaveLength(1);
+    expect(routing.buffers.chatter).toHaveLength(300);
+    expect(routing.holds("chatter", l.id)).toBe(false);
   });
 });

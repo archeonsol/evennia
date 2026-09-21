@@ -18,6 +18,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 import evennia
 from evennia.server import ipc_schema, redis_bus, redis_transport, session
+from evennia.server.bus_result import PublicationResult, TransportUnavailable
 from evennia.server.portal import amp, amp_server
 from evennia.server.portal.portalsessionhandler import PortalSessionHandler
 from evennia.server.portal.service import EvenniaPortalService
@@ -271,6 +272,31 @@ class TestRedisBus(TestCase):
         evennia.PORTAL_SESSION_HANDLER.server_session_sync.assert_called_once_with(
             [{"sessid": 1}], True
         )
+
+    def test_dropped_control_frame_is_surfaced(self):
+        """A control frame lost to capacity is logged, not silently discarded."""
+
+        for sender, label, name in (
+            ("acknowledge_snapshot", "snapshot-1", "BusSnapshotAck"),
+            ("begin_shutdown", None, "BusStopping"),
+        ):
+            with self.subTest(frame=name):
+                self.portal_bus._transport.publish = MagicMock(
+                    return_value=PublicationResult.rejected(
+                        TransportUnavailable("transport capacity exhausted")
+                    )
+                )
+                with patch.object(redis_bus.logger, "log_warn") as warn:
+                    if sender == "acknowledge_snapshot":
+                        self.portal_bus.acknowledge_snapshot(label)
+                    else:
+                        self.portal_bus.begin_shutdown()
+                self.portal_bus._transport.publish.assert_called_once()
+                self.assertTrue(
+                    any(name in call.args[0] for call in warn.call_args_list),
+                    repr(warn.call_args_list),
+                )
+                self.portal_bus._transport.publish.reset_mock()
 
     def test_ipc_schema_session_wire(self):
         env = ipc_schema.SessionEnvelope(sessid=1, kwargs={"text": [["hi"], {}]})

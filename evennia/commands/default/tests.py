@@ -615,6 +615,25 @@ class TestAdmin(BaseEvenniaCommandTest):
             "Granted engine.object.view to Char2.",
         )
 
+    def test_grant_bundle_in_one_call(self):
+        with (
+            patch("evennia.commands.default.admin.grant_capabilities") as grant,
+            patch(
+                "evennia.authorization.capabilities.capability_registry.expand_bundle",
+                return_value=frozenset({"engine.a.two", "engine.a.one"}),
+            ),
+        ):
+            self.call(
+                admin.CmdGrant(),
+                "Obj = bundle:test_bundle",
+                "Granted engine.a.one, engine.a.two to Obj.",
+            )
+        grant.assert_called_once()
+        args, kwargs = grant.call_args
+        self.assertEqual(args[1], ("engine.a.one", "engine.a.two"))
+        self.assertEqual(kwargs["provenance"], "staff_command")
+        self.assertEqual(kwargs["reason"], "staff @grant")
+
     def test_wall(self):
         self.call(admin.CmdWall(), "Test", "Announcing to all connected sessions ...")
 

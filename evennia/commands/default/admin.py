@@ -11,7 +11,7 @@ from django.conf import settings
 
 import evennia
 from evennia.authorization.capabilities import capability_registry
-from evennia.authorization.storage import grant_capability, principal_refs, revoke_grant
+from evennia.authorization.storage import grant_capabilities, principal_refs, revoke_grant
 from evennia.server.models import AuthorizationGrant, ServerConfig
 from evennia.utils import class_from_module, evtable, logger, search
 
@@ -497,16 +497,15 @@ class CmdGrant(COMMAND_DEFAULT_CLASS):
             if declaration.lower().startswith("bundle:")
             else (capability_registry.require(declaration).key,)
         )
-        for capability in sorted(capabilities):
-            grant_capability(
-                principal_ref,
-                capability,
-                scope_kind=scope_kind,
-                scope_key=scope_key,
-                provenance="staff_command",
-                actor_ref=principal_refs(self.caller)[0],
-                reason="staff @grant",
-            )
+        grant_capabilities(
+            principal_ref,
+            tuple(sorted(capabilities)),
+            scope_kind=scope_kind,
+            scope_key=scope_key,
+            provenance="staff_command",
+            actor_ref=principal_refs(self.caller)[0],
+            reason="staff @grant",
+        )
         self.msg(f"Granted {', '.join(sorted(capabilities))} to {target}.")
 
 

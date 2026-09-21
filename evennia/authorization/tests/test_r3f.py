@@ -1,5 +1,7 @@
 """R3F capability-only runtime acceptance tests."""
 
+from unittest import mock
+
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
@@ -141,3 +143,41 @@ class CapabilityOnlyRuntimeTest(TestCase):
         self.assertTrue(principal.has_capability("engine.world.build"))
         self.assertFalse(AuthorizationPolicyOverride.objects.filter(pk=checkpoint.pk).exists())
         self.assertTrue(AuthorizationPolicyOverride.objects.filter(pk=authored.pk).exists())
+
+    @override_settings(
+        AUTHORIZATION_PERMISSION_MIGRATION={
+            "Builder": ("engine.world.build", "engine.runtime.manage"),
+        }
+    )
+    def test_finalizer_materializes_multiple_capabilities(self):
+        principal = ObjectDB.objects.create(db_key="multi-legacy-builder")
+        principal.permissions.add("Builder")
+
+        call_command("auth_finalize_capabilities", apply=True, verbosity=0)
+
+        self.assertTrue(principal.has_capability("engine.world.build"))
+        self.assertTrue(principal.has_capability("engine.runtime.manage"))
+
+    @override_settings(
+        AUTHORIZATION_PERMISSION_MIGRATION={
+            "Builder": ("engine.world.build", "engine.runtime.manage"),
+        }
+    )
+    def test_finalizer_grants_each_principal_in_one_call(self):
+        principal = ObjectDB.objects.create(db_key="batched-legacy-builder")
+        principal.permissions.add("Builder")
+
+        with mock.patch(
+            "evennia.server.management.commands.auth_finalize_capabilities.grant_capabilities"
+        ) as grant:
+            call_command("auth_finalize_capabilities", apply=True, verbosity=0)
+
+        grant.assert_called_once_with(
+            f"object:{principal.pk}",
+            ["engine.runtime.manage", "engine.world.build"],
+            scope_kind="world",
+            scope_key="*",
+            provenance="r3f_permission_import",
+            actor_ref="deployment:migration",
+            reason="R3F permission authority retirement",
+        )

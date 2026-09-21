@@ -858,6 +858,10 @@ class ServerSessionHandler(SessionHandler):
         ]
 
         for session in doublet_sessions:
+            # A bare close reads as a drop: the resumable shell reconnects and
+            # browser-session auto-login re-hits this kick. The logout OOB
+            # stops the reconnect; disconnect flushes it before closing.
+            session.msg(logout=("logged in from elsewhere",))
             self.disconnect(session, reason)
 
     def account_count(self):
@@ -1096,12 +1100,9 @@ class ServerSessionHandler(SessionHandler):
     @staticmethod
     def _record_clean_duration(started):
         """Sample one actual output-cleaning call or batch."""
-        try:
-            from evennia.server.prometheus_metrics import record_render_phase
+        from evennia.server.prometheus_metrics import best_effort, record_render_phase
 
-            record_render_phase("clean", time.perf_counter() - started)
-        except Exception:
-            pass
+        best_effort("render clean", record_render_phase, "clean", time.perf_counter() - started)
 
     def _flush_all_outbuf(self):
         """Drain one reactor turn and multicast byte-identical final frames.

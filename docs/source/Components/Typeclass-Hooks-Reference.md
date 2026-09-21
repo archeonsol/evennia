@@ -38,8 +38,8 @@ Hook returns a value evaluated by `is_veto`
 | `at_pre_arrive` | `MovementMixin` | mixins/movement.py:308 | Abort the move. Both mover-side and source-side pre-hooks already passed; no further hooks fire. | |
 | `at_pre_traverse` | `MovementMixin` | mixins/movement.py:548 | Abort traversal. `at_failed_traverse` fires on the exit. Move chain does NOT fire. | |
 | `at_pre_puppet` | `LifecycleMixin` | mixins/lifecycle.py:437 | Abort puppet attach. Session is left unpuppeted. Engine emits no message. | |
-| `at_pre_unpuppet` | `LifecycleMixin` | mixins/lifecycle.py:486 | Abort detach. Puppet stays attached; session.puppet/puid stay set. Engine emits no message. | |
-| `at_pre_login` | `DefaultAccount` | accounts/accounts.py:1737 | Disconnect the session (`SessionHandler.disconnect` with reason "Login refused."). Engine emits no message. | |
+| `at_pre_unpuppet` | `LifecycleMixin` | mixins/lifecycle.py:576 | Abort detach. Puppet stays attached; session.puppet/puid stay set. Engine emits no message. | |
+| `at_pre_login` | `DefaultAccount` | accounts/accounts.py:2540 | Disconnect the session (`SessionHandler.disconnect` with reason "Login refused."). Engine emits no message. | |
 | `at_pre_say` | `AppearanceMixin` | mixins/appearance.py:644 | See §3.5 (transform variant). | |
 | `at_pre_get` | `AppearanceMixin` | mixins/appearance.py:516 | Abort the get. Move does not run. | |
 | `at_pre_give` | `AppearanceMixin` | mixins/appearance.py:557 | Abort the give. Move does not run. | |
@@ -118,10 +118,10 @@ anything (typically `None`).
 | `at_character_removed` | `DefaultAccount` | accounts/accounts.py:377 | Characters-list mutation. |
 | `at_post_create_character` | `DefaultAccount` | accounts/accounts.py:1042 | Per character-creation event. |
 | `at_account_creation` | `DefaultAccount` | accounts/accounts.py:1577 | |
-| `at_post_password_change` | `DefaultAccount` | accounts/accounts.py:1730 | |
-| `at_first_login` | `DefaultAccount` | accounts/accounts.py:1711 | Fires after `at_pre_login` veto passes; only on accounts whose FIRST_LOGIN flag is set. |
+| `at_post_password_change` | `DefaultAccount` | accounts/accounts.py:2520 | |
+| `at_first_login` | `DefaultAccount` | accounts/accounts.py:2494 | Fires after `at_pre_login` veto passes; only on accounts whose FIRST_LOGIN flag is set. |
 | `at_post_login` | `DefaultAccount` / `DefaultGuest` | accounts/accounts.py:1793, :2143 | |
-| `at_failed_login` | `DefaultAccount` | accounts/accounts.py:1832 | |
+| `at_failed_login` | `DefaultAccount` | accounts/accounts.py:2687 | |
 | `at_disconnect` | `DefaultAccount` / `ServerSession` | accounts/accounts.py:1845; serversession.py:164 | |
 | `at_post_disconnect` | `DefaultAccount` / `DefaultGuest` | accounts/accounts.py:1862, :2167 | |
 | `at_post_get` / `at_post_give` / `at_post_drop` | `AppearanceMixin` | mixins/appearance.py:540, :582, :627 | Notifications. |
@@ -289,8 +289,8 @@ the authoritative roster.
 | `at_character_removed` | `DefaultAccount` | self | Notification: character removed from the persistent characters-list. |
 | `at_cmdset_get` | `DefaultAccount` | self | Account-side cmdset mutation. Mirrors LifecycleMixin.at_cmdset_get. |
 | `at_disconnect` | `DefaultAccount` | self | Account-side disconnect hook. |
-| `at_failed_login` | `DefaultAccount` | self | Fires when authentication or at_pre_login rejects a login attempt. |
-| `at_first_login` | `DefaultAccount` | self | One-shot first-login hook. Fires once via at_pre_login when last_login is unset. |
+| `at_failed_login` | `DefaultAccount` | self | Fires when authentication rejects a login attempt. |
+| `at_first_login` | `DefaultAccount` | self | One-shot first-login hook. Fires once during login, after at_pre_login, when the FIRST_LOGIN flag is set. |
 | `at_first_save` | `DefaultAccount` | self | Driven by Django post_save signal (created=True). Override at_account_creation instead. |
 | `at_post_access` | `DefaultAccount` | target | Account override of LifecycleMixin.at_post_access. |
 | `at_post_channel_msg` | `DefaultAccount` | self | Receiver-side post-delivery hook. |

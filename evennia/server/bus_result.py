@@ -9,6 +9,16 @@ class TransportUnavailable(RuntimeError):
     """The frame was rejected or its publication outcome is uncertain."""
 
 
+# Closed set of publish-rejection reasons. The producer fences on these
+# strings and the metrics layer labels on them, so both sides share one set.
+TRANSPORT_UNAVAILABLE = "transport unavailable"
+FRAME_TOO_LARGE = "encoded frame exceeds transport limit"
+# Rejection reason for an ordinary queue-full publish. It is backpressure, not
+# a transport fault, so it must not fence the bus the way a dead Redis does.
+CAPACITY_EXHAUSTED = "transport capacity exhausted"
+BUS_REJECT_REASONS = frozenset({TRANSPORT_UNAVAILABLE, FRAME_TOO_LARGE, CAPACITY_EXHAUSTED})
+
+
 class PublicationResult:
     """Track admission and publication, never completion of a game action.
 

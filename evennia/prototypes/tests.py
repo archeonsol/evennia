@@ -10,7 +10,6 @@ from time import time
 import mock
 from anything import Something
 from django.db import transaction
-
 from django.test.utils import override_settings
 
 from evennia.commands.default import building
@@ -539,11 +538,7 @@ class TestSpawnHookInTransaction(BaseEvenniaTest):
         jsonb_handler._resolve_model_save_outcomes(state)
 
         self.assertFalse(
-            [
-                scope
-                for scope, _snapshot in state.model_save_snapshots
-                if scope.status == "pending"
-            ],
+            [scope for scope, _snapshot in state.model_save_snapshots if scope.status == "pending"],
             "rolled-back spawn left an unresolved model-save scope",
         )
         self.assertNotIn(

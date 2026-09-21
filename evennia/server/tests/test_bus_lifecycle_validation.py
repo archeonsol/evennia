@@ -24,9 +24,7 @@ class TestBusLifecycleAdmission(TestCase):
     def test_startup_output_waits_in_transport_before_ready_publication(self):
         """Asynchronous startup output remains admissible behind final ready."""
         self.assertFalse(self.bus.ready)
-        result = self.bus.callRemote(
-            amp.MsgServer2Portal, packed_data=b"startup output"
-        )
+        result = self.bus.callRemote(amp.MsgServer2Portal, packed_data=b"startup output")
         self.assertTrue(result.admitted)
         self.bus._transport.publish.assert_called_once()
 
@@ -75,9 +73,7 @@ class TestBotSessionRecovery(TestCase):
             self.results.append(result)
             return result
 
-        self.service = SimpleNamespace(
-            portal_bus=SimpleNamespace(send_AdminServer2Portal=send)
-        )
+        self.service = SimpleNamespace(portal_bus=SimpleNamespace(send_AdminServer2Portal=send))
 
     def start(self, uid=7):
         """Request one bot session the way a starting Bot account does."""
@@ -130,3 +126,64 @@ class TestBotSessionRecovery(TestCase):
         with patch.object(evennia, "EVENNIA_SERVER_SERVICE", self.service, create=True):
             bus._ready()
         self.assertEqual(len(self.frames), 2)
+
+
+class TestMulticastCapability(TestCase):
+    """Grouped frames ship only to a Portal that declares the capability."""
+
+    CAP = b"MsgServer2PortalMany"
+
+    def setUp(self):
+        self.bus = RedisServerBus(SimpleNamespace())
+        self.bus._handshake.state = "ready"
+        self.bus._handshake.pair = [["portal", "p"], ["server", "s"]]
+        self.bus._transport.online = True
+        self.bus._transport.publish = Mock(return_value=PublicationResult())
+
+    def test_absent_capability_degrades_grouped_frames_to_per_session(self):
+        """An old Portal never sees a cmdkey it silently discards."""
+        self.bus.send_MsgServer2PortalMany([1, 2], text="same")
+        cmdkeys = [call.args[1] for call in self.bus._transport.publish.call_args_list]
+        self.assertEqual(cmdkeys, [b"MsgServer2Portal", b"MsgServer2Portal"])
+
+    def test_declared_capability_publishes_one_grouped_frame(self):
+        self.bus._portal_caps = frozenset({"MsgServer2PortalMany"})
+        self.bus.send_MsgServer2PortalMany([1, 2], text="same")
+        self.bus._transport.publish.assert_called_once()
+        self.assertEqual(self.bus._transport.publish.call_args.args[1], self.CAP)
+
+    def test_apply_snapshot_records_peer_capability_first(self):
+        """Caps settle before any reconcile branch can raise."""
+        self.bus._portal_caps = frozenset({"stale"})
+        with patch.object(self.bus, "_sessions") as sessions:
+            self.bus._startup_attempted = True
+            self.bus._startup_complete = True
+            self.bus._apply_snapshot({"sessions": {}, "caps": ["MsgServer2PortalMany"]})
+        self.assertEqual(self.bus._portal_caps, frozenset({"MsgServer2PortalMany"}))
+        sessions.reconcile.assert_called_once()
+
+    def test_unknown_frame_warns_and_renegotiates(self):
+        """A one-sided cmdkey becomes a loud renegotiation, not a silent drop."""
+        bus = RedisServerBus(SimpleNamespace())
+        bus._handshake.disconnect = Mock()
+        with patch("evennia.server.redis_bus.logger") as log:
+            bus._on_frame(b"MsgFuture", b"")
+        log.log_warn.assert_called_once()
+        bus._handshake.disconnect.assert_called_once()
+
+
+class TestPortalSnapshotDeclaration(TestCase):
+    """The Portal advertises the grouped-frame capability in its snapshot."""
+
+    def test_snapshot_declares_multicast_capability(self):
+        from evennia.server.redis_bus import RedisPortalBus
+
+        portal = SimpleNamespace()
+        portal.bus_revision = 0
+        portal.get_bus_sync_data = lambda: {}
+        portal.server_restart_mode = "shutdown"
+        portal.start_time = 0.0
+        bus = RedisPortalBus(portal)
+        with patch.object(evennia, "PORTAL_SESSION_HANDLER", portal, create=True):
+            _revision, payload = bus._snapshot()
+        self.assertEqual(payload["caps"], ["MsgServer2PortalMany"])

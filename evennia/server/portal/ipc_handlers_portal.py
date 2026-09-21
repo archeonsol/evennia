@@ -41,9 +41,7 @@ def receive_adminserver2portal(link, packed_data):
     elif operation == amp.SDISCONN:
         session = portal_sessionhandler.get(sessid)
         if session:
-            portal_sessionhandler.server_disconnect(
-                session, reason=kwargs.get("reason")
-            )
+            portal_sessionhandler.server_disconnect(session, reason=kwargs.get("reason"))
 
     elif operation == amp.SDISCONNALL:
         portal_sessionhandler.server_disconnect_all(reason=kwargs.get("reason"))
@@ -52,7 +50,9 @@ def receive_adminserver2portal(link, packed_data):
         mode = (
             "reload"
             if operation == amp.SRELOAD
-            else "reset" if operation == amp.SRESET else "shutdown"
+            else "reset"
+            if operation == amp.SRESET
+            else "shutdown"
         )
         result = link.stop_server(mode=mode)
         if operation == amp.PSHUTD:
@@ -102,9 +102,7 @@ def receive_adminserver2portal(link, packed_data):
 
     elif operation == amp.SSYNC:
         if kwargs.get("confirmed"):
-            portal_sessionhandler.apply_bus_state(
-                {"sessions": kwargs["sessiondata"], "closed": {}}
-            )
+            portal_sessionhandler.apply_bus_state({"sessions": kwargs["sessiondata"], "closed": {}})
             return {}
         if kwargs.get("snapshot_id"):
             portal_sessionhandler.apply_final_bus_state(kwargs["sessiondata"])

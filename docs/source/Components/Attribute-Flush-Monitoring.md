@@ -24,7 +24,10 @@ that sequence. System registration resets both the failure and fire counters.
 
 This monitor observes scheduled flushes. Query barriers, persistence, durable
 spool recovery, and the shutdown drain retain their own behavior. A clean
-scheduled result does not certify that every persistence path is healthy.
+scheduled result does not certify that every persistence path is healthy. When a
+sync flush meets an async worker that already owns the row, it waits on the
+worker's completion signal instead of queueing on the row's file lock; the wait
+has no timeout, exactly like the lock.
 
 Tests in `evennia.server.tests.test_engine_systems` cover classification, metrics,
 exception handling, and escalation without a database. Scheduler integration

@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from evennia.accounts.models import AccountDB
 from evennia.authorization.capabilities import capability_registry
-from evennia.authorization.storage import grant_capability
+from evennia.authorization.storage import grant_capabilities
 from evennia.objects.models import ObjectDB
 
 
@@ -78,17 +78,15 @@ class Command(BaseCommand):
         if not apply:
             return
         for prefix, principal, selected, capabilities in rows:
-            principal_ref = f"{prefix}:{principal.pk}"
-            for capability in capabilities:
-                grant_capability(
-                    principal_ref,
-                    capability,
-                    scope_kind="world",
-                    scope_key="*",
-                    provenance="r3f_permission_import",
-                    actor_ref="deployment:migration",
-                    reason="R3F permission authority retirement",
-                )
+            grant_capabilities(
+                f"{prefix}:{principal.pk}",
+                capabilities,
+                scope_kind="world",
+                scope_key="*",
+                provenance="r3f_permission_import",
+                actor_ref="deployment:migration",
+                reason="R3F permission authority retirement",
+            )
             if remove:
                 for permission in selected:
                     principal.permissions.remove(permission)

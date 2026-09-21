@@ -620,12 +620,9 @@ def _isolated_database_context() -> contextvars.Context:
 def _record_runtime_task(kind: str, event: str, had_connection: bool = False) -> None:
     """Emit optional low-cardinality task/connection lifecycle metrics."""
 
-    try:
-        from evennia.server.prometheus_metrics import record_runtime_task
+    from evennia.server.prometheus_metrics import best_effort, record_runtime_task
 
-        record_runtime_task(kind, event, had_connection=had_connection)
-    except Exception:
-        pass
+    best_effort("runtime task", record_runtime_task, kind, event, had_connection=had_connection)
 
 
 def _close_database_connections() -> bool:

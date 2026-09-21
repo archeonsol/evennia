@@ -130,7 +130,8 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         # Sanctioned addresses are dropped here, before the Server ever learns
         # of the connection.
         from evennia.moderation.portal_guard import REFUSAL_BYTES, refuses
-        from evennia.moderation.ratelimit import REFUSAL_BYTES as RATE_BYTES, rate_limited
+        from evennia.moderation.ratelimit import REFUSAL_BYTES as RATE_BYTES
+        from evennia.moderation.ratelimit import rate_limited
 
         if refuses(client_address):
             self.transport.write(REFUSAL_BYTES)

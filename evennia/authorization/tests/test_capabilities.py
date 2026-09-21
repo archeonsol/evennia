@@ -16,9 +16,7 @@ class CapabilityRegistryTest(SimpleTestCase):
     def test_register_and_expand_bundle_without_rank_implication(self):
         registry = CapabilityRegistry()
         edit = registry.register(CapabilityDefinition("engine.object.edit"))
-        delete = registry.register(
-            CapabilityDefinition("engine.object.delete", sensitive=True)
-        )
+        delete = registry.register(CapabilityDefinition("engine.object.delete", sensitive=True))
         registry.register_bundle("world_builder", (edit.key, delete.key))
 
         self.assertEqual(

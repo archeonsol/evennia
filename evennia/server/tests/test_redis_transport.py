@@ -140,14 +140,13 @@ class TestRedisTransport(SimpleTestCase):
     def test_incoming_drain_records_queue_wait(self):
         """Draining a frame records its queue wait and the remaining depth."""
         self.transport.online = True
-        with patch.object(transport_module, "_bus_metrics") as metrics:
+        with patch.object(transport_module, "prometheus_metrics") as metrics:
             self.transport._admit_incoming({b"c": b"Msg", b"d": b"a"})
             self.transport._drain_incoming()
 
-        recorder = metrics.return_value
-        self.assertTrue(recorder.observe_bus_incoming_queue.called)
-        self.assertTrue(recorder.record_bus_incoming_wait.called)
-        self.assertGreaterEqual(recorder.record_bus_incoming_wait.call_args[0][0], 0.0)
+        self.assertTrue(metrics.observe_bus_incoming_queue.called)
+        self.assertTrue(metrics.record_bus_incoming_wait.called)
+        self.assertGreaterEqual(metrics.record_bus_incoming_wait.call_args[0][0], 0.0)
 
     def test_control_saturation_can_recover(self):
         """Capacity rejects locally; a real failure still recovers."""

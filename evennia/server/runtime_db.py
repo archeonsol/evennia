@@ -28,12 +28,9 @@ def audit_runtime_connection(sender, connection, **kwargs):
     if clock.current_runtime_task_kind() is not None:
         return
 
-    try:
-        from evennia.server.prometheus_metrics import record_unmanaged_db_connection
+    from evennia.server.prometheus_metrics import best_effort, record_unmanaged_db_connection
 
-        record_unmanaged_db_connection()
-    except Exception:
-        pass
+    best_effort("unmanaged database connection", record_unmanaged_db_connection)
 
     message = (
         "Django connection opened in an unmanaged asyncio task; use "

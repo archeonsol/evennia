@@ -9,14 +9,13 @@ import unittest
 from ast import literal_eval
 from unittest.mock import MagicMock, patch
 
-import inflect
 from django.test import TestCase, override_settings
 from parameterized import parameterized
 from simpleeval import simple_eval
 
 from evennia.authorization.policy import RequiresCapability
 from evennia.authorization.storage import grant_capability, principal_refs, resource_ref
-from evennia.utils import funcparser, test_resources
+from evennia.utils import funcparser, inflection, test_resources
 
 
 def _test_callable(*args, **kwargs):
@@ -414,9 +413,6 @@ class TestFuncParser(TestCase):
         self.assertEqual("This is a _test(test=foo, foo=bar) string", ret)
 
 
-_INFLECT = inflect.engine()
-
-
 class _DummyObj:
     def __init__(self, name):
         self.name = name
@@ -425,7 +421,7 @@ class _DummyObj:
         return self.name
 
     def get_numbered_name(self, *args, **kwargs):
-        return _INFLECT.an(self.name)
+        return inflection.inflect_engine().an(self.name)
 
 
 class TestDefaultCallables(TestCase):

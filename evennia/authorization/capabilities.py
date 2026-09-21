@@ -31,9 +31,7 @@ def normalize_capability(value: str) -> str:
 
     key = str(value or "").strip().lower()
     if len(key) > 128 or not _CAPABILITY_RE.fullmatch(key):
-        raise InvalidCapability(
-            f"capability {value!r} must be a lowercase three-part namespace"
-        )
+        raise InvalidCapability(f"capability {value!r} must be a lowercase three-part namespace")
     return key
 
 
@@ -184,9 +182,7 @@ class CapabilityRegistry:
     def bundle_definitions(self) -> tuple[BundleDefinition, ...]:
         """Return described bundles in deterministic key order."""
 
-        return tuple(
-            self._bundle_definitions[key] for key in sorted(self._bundle_definitions)
-        )
+        return tuple(self._bundle_definitions[key] for key in sorted(self._bundle_definitions))
 
     def load_modules(self) -> None:
         """Import configured registration modules and invoke their hook.

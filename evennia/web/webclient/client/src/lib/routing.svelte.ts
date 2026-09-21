@@ -16,9 +16,24 @@ export interface Route {
   /** Take the line out of the main log rather than copying it. */
   move?: boolean;
 }
-interface Line {
+export interface Line {
+  /** Scrollback id of the line; lets callers ask a feed whether it holds it. */
+  id: number;
   html: string;
   ts: number;
+}
+
+/** Union of a timestamp-ordered buffer and additions, keeping the newest MAX. */
+function mergeLines(buf: Line[], adds: Line[]): Line[] {
+  const out: Line[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < buf.length && j < adds.length) {
+    out.push(buf[i].ts <= adds[j].ts ? buf[i++] : adds[j++]);
+  }
+  while (i < buf.length) out.push(buf[i++]);
+  while (j < adds.length) out.push(adds[j++]);
+  return out.length > MAX ? out.slice(-MAX) : out;
 }
 
 function compile(pattern: string): RegExp | null {
@@ -53,6 +68,12 @@ export class Routing {
     this.onSync = fn;
   }
 
+  /**
+   * Commit the current routes: compile, persist, purge and prune.
+   *
+   * Purging means a mid-typo rule state would destroy the buffer of its
+   * orphaned label, so callers edit against a draft and sync only on commit.
+   */
   sync(): void {
     this.cRoutes = this.compiled();
     // A deleted or renamed route's buffer would otherwise sit in memory for
@@ -126,45 +147,53 @@ export class Routing {
   }
 
   /**
-   * File already-delivered lines into their buffers, keeping their arrival
-   * time. Used when a route starts claiming lines the log still holds from
-   * before the route existed; `labels` are pre-filtered by the caller, which
-   * knows what each line was filed to on arrival.
+   * File already-delivered lines into their buffers under their arrival time,
+   * in timestamp order. Used when a route starts claiming lines the log still
+   * holds from before the route existed, or was purged after filing them.
+   * A full buffer merges by timestamp and keeps the newest lines, so an older
+   * backfill can be trimmed straight back out; `holds` reports the result.
    */
-  backfill(entries: { label: string; html: string; ts: number }[]): void {
+  backfill(entries: { label: string; html: string; ts: number; id: number }[]): void {
+    if (!entries.length) return;
+    const adds: Record<string, Line[]> = {};
+    for (const e of entries) (adds[e.label] ??= []).push({ id: e.id, html: e.html, ts: e.ts });
     let buffers = this.buffers;
     let unread = this.unread;
-    for (const e of entries) {
-      buffers = { ...buffers, [e.label]: [...(buffers[e.label] ?? []), { html: e.html, ts: e.ts }].slice(-MAX) };
-      unread = { ...unread, [e.label]: (unread[e.label] ?? 0) + 1 };
+    for (const [label, list] of Object.entries(adds)) {
+      list.sort((a, b) => a.ts - b.ts);
+      buffers = { ...buffers, [label]: mergeLines(buffers[label] ?? [], list) };
+      unread = { ...unread, [label]: (unread[label] ?? 0) + list.length };
     }
-    if (buffers !== this.buffers) this.buffers = buffers;
-    if (unread !== this.unread) this.unread = unread;
+    this.buffers = buffers;
+    this.unread = unread;
+  }
+
+  /** True while this feed holds the line with that scrollback id. */
+  holds(label: string, id: number): boolean {
+    return this.buffers[label]?.some((l) => l.id === id) ?? false;
   }
 
   /**
    * File a line into every buffer whose route matches.
    *
-   * Returns the labels filed to and whether any match was a move; on a move
-   * the caller must not also append the line to the main log.
+   * Returns whether any match was a move; on a move the caller must not also
+   * append the line to the main log. The id lets a later `pruneMoved` ask the
+   * feed whether it still holds the line (cap eviction, clears).
    */
-  process(html: string, text: string): { labels: string[]; moved: boolean } {
-    const labels: string[] = [];
+  process(html: string, text: string, id: number): boolean {
     let moved = false;
+    const done = new Set<string>();
     for (const r of this.cRoutes) {
       r.re.lastIndex = 0;
       if (!r.re.test(text)) continue;
-      if (labels.includes(r.label)) {
-        if (r.move) moved = true;
-        continue;
-      }
-      labels.push(r.label);
-      const buf = [...(this.buffers[r.label] ?? []), { html, ts: Date.now() }].slice(-MAX);
+      if (r.move) moved = true;
+      if (done.has(r.label)) continue;
+      done.add(r.label);
+      const buf = [...(this.buffers[r.label] ?? []), { id, html, ts: Date.now() }].slice(-MAX);
       this.buffers = { ...this.buffers, [r.label]: buf };
       this.unread = { ...this.unread, [r.label]: (this.unread[r.label] ?? 0) + 1 };
-      if (r.move) moved = true;
     }
-    return { labels, moved };
+    return moved;
   }
 
   /** Called when a feed's tab is on screen; drops its badge. */

@@ -13,46 +13,55 @@ from unittest.mock import patch
 from django.test import override_settings
 
 from evennia.server import prometheus_metrics
-from evennia.typeclasses import attribute_metrics, attributes
+from evennia.typeclasses import attribute_metrics, attributes, jsonb_handler
+from evennia.typeclasses.jsonb_handler import FlushResult
 
 
-class _FakeBackend:
-    """Stand-in dirty backend: reports a fixed pending count, flush is a no-op."""
+class _FakeState:
+    """Stand-in dirty JSONB row state for seam tests."""
 
-    def __init__(self, pending):
-        self._pending = pending
-        self.flushed = False
+    key = ("default", "typeclass", 7)
 
-    def pending_count(self):
-        return self._pending
-
-    def flush_dirty(self):
-        self.flushed = True
+    def dirty_age(self):
+        return 0.0
 
 
 class TestFlushMetrics(TestCase):
     def setUp(self):
         attributes.discard_dirty_backends()
-        self.backend = _FakeBackend(3)
-        attributes._DIRTY_BACKENDS.add(self.backend)
+        self.state = _FakeState()
 
     def tearDown(self):
         attributes.discard_dirty_backends()
 
+    def _seams(self, persist_return=None):
+        return (
+            patch.object(jsonb_handler, "dirty_jsonb_row_states", return_value=[self.state]),
+            patch.object(
+                jsonb_handler,
+                "_persist_row_state",
+                return_value=persist_return or FlushResult(ok=True),
+            ),
+        )
+
+    def test_legacy_dirty_backend_registry_is_gone(self):
+        self.assertFalse(hasattr(attributes, "_DIRTY_BACKENDS"))
+
     def test_flush_records_metrics(self):
-        with patch.object(prometheus_metrics, "record_attribute_flush") as rec:
+        states, persist = self._seams()
+        with states, persist, patch.object(prometheus_metrics, "record_attribute_flush") as rec:
             stats = attributes.flush_all_dirty()
 
-        self.assertTrue(self.backend.flushed)
-        self.assertEqual(stats["total"], 3)
+        self.assertEqual(stats["total"], 1)
         rec.assert_called_once()
         recorded_stats, kwargs = rec.call_args.args[0], rec.call_args.kwargs
-        self.assertEqual(recorded_stats["total"], 3)
+        self.assertEqual(recorded_stats["total"], 1)
         self.assertIn("duration_seconds", kwargs)
         self.assertEqual(kwargs["source"], "manual")
 
     def test_flush_forwards_bounded_source(self):
-        with patch.object(prometheus_metrics, "record_attribute_flush") as rec:
+        states, persist = self._seams()
+        with states, persist, patch.object(prometheus_metrics, "record_attribute_flush") as rec:
             attributes.flush_all_dirty(source="barrier")
 
         self.assertEqual(rec.call_args.kwargs["source"], "barrier")
@@ -61,13 +70,18 @@ class TestFlushMetrics(TestCase):
         # Deliberate contract: a genuine metrics bug surfaces rather than vanishing.
         # The structural guards in record_attribute_flush handle the only expected
         # condition (prometheus absent); anything else is a real error.
-        with patch.object(
-            prometheus_metrics, "record_attribute_flush", side_effect=RuntimeError("boom")
+        states, persist = self._seams()
+        with (
+            states,
+            persist as persist_row,
+            patch.object(
+                prometheus_metrics, "record_attribute_flush", side_effect=RuntimeError("boom")
+            ),
         ):
             with self.assertRaises(RuntimeError):
                 attributes.flush_all_dirty()
         # The actual flush still completed before the metrics call.
-        self.assertTrue(self.backend.flushed)
+        persist_row.assert_called_once()
 
 
 class TestWarnPendingDirty(TestCase):

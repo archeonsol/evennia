@@ -33,6 +33,19 @@ class ObjectCreationTest(BaseEvenniaTest):
         self.assertTrue(msg)
         self.assertEqual(str(msg), "peewee herman->: heh-heh!")
 
+    def test_sender_edit_and_delete_grants_land_in_one_call(self):
+        """A sender's two write grants share one bulk call per principal ref."""
+        with patch("evennia.authorization.storage.grant_capabilities") as bulk:
+            msg = create_message(self.account, "grouped grant", header="h")
+        refs = [call.args[0] for call in bulk.call_args_list]
+        self.assertEqual(len(refs), len(set(refs)))
+        self.assertIn(f"account:{self.account.pk}", refs)
+        for args, kwargs in bulk.call_args_list:
+            self.assertEqual(args[1], ("engine.message.edit", "engine.message.delete"))
+            self.assertEqual(kwargs["scope_kind"], "resource")
+            self.assertEqual(kwargs["scope_key"], msg.authorization_resource_ref())
+            self.assertEqual(kwargs["provenance"], "message_sender")
+
     def test_default_channel_settings_use_typed_policies(self):
         """Shipped channel definitions must create with their intended access."""
 

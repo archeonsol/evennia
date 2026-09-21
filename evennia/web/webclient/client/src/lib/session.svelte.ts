@@ -7,14 +7,13 @@ import { categorize, type LogCat } from "./logcats";
 import { htmlToText } from "./text";
 
 export interface LogLine {
+  /** Unique per session; the key routing uses to ask a feed if it holds this line. */
   id: number;
   html: string;
   text: string; // plain text for search, triggers and transcripts
   type: string;
   cat: LogCat; // lens category, resolved once at append (see below)
   ts: number; // epoch ms, for the timestamp gutter
-  /** Feed labels this line was filed to on arrival (see routing). */
-  filed: string[];
 }
 
 const MAX_LINES = 5000;
@@ -31,7 +30,7 @@ class GameSession {
   /** Append a pre-rendered (already HTML-safe) line to the scrollback. */
   append(html: string, type = "text"): void {
     const text = htmlToText(html);
-    let filed: string[] = [];
+    const id = nextId++;
     // Client triggers: gag drops the line; highlights colour keywords. Media
     // lines are exempt (they carry embed markup, not prose).
     if (type !== "media") {
@@ -40,14 +39,12 @@ class GameSession {
       triggers.runActions(text);
       // A move-route takes the line out of the terminal entirely; it lives in
       // its feed instead. Copy-routes fall through and the line is appended
-      // below as usual. `filed` records where the line already went, so a
-      // later move-route cannot double-file it in pruneMoved.
-      const routed = routing.process(html, text);
-      if (routed.moved) return;
-      filed = routed.labels;
+      // below as usual. The id lets the feed prove it holds the line, which
+      // is what pruneMoved trusts instead of any filing memory of ours.
+      if (routing.process(html, text, id)) return;
     }
     this.lines.push({
-      id: nextId++,
+      id,
       html,
       text,
       type,
@@ -55,7 +52,6 @@ class GameSession {
       // whole scrollback on every append, and categorize() is string work.
       cat: categorize(type),
       ts: Date.now(),
-      filed,
     });
     if (this.lines.length > MAX_LINES + TRIM_BLOCK) {
       this.lines.splice(0, this.lines.length - MAX_LINES);
@@ -68,26 +64,30 @@ class GameSession {
    * Routing gates lines as they arrive, so a rule switched to MOVE (or added
    * at all) left every earlier copy in the terminal, and the player read that
    * as routing doing nothing. Re-firing on each route edit makes the rule act
-   * retroactively. A claimed line is never dropped from the game: whatever
-   * feed it was not already filed to gets it, so a wrong-buffer rule still
-   * keeps the text. The array is only reassigned when something actually
+   * retroactively. A claimed line is never dropped from the game: a line
+   * leaves the log only once every claiming feed verifiably holds it (by id),
+   * so a purged feed re-files it and a full feed that trims it back out keeps
+   * the log copy. The array is only reassigned when something actually
    * moved, so an unrelated edit costs no re-render.
    */
   pruneMoved(): void {
-    const backfill: { label: string; html: string; ts: number }[] = [];
-    const kept: LogLine[] = [];
+    const claimed = new Map<LogLine, string[]>();
+    const backfill: { label: string; html: string; ts: number; id: number }[] = [];
     for (const l of this.lines) {
       // Media lines are exempt for the same reason append() exempts them.
-      const claimed = l.type === "media" ? [] : routing.claims(l.text);
-      if (!claimed.length) {
-        kept.push(l);
-        continue;
-      }
-      for (const label of claimed) {
-        if (!l.filed.includes(label)) backfill.push({ label, html: l.html, ts: l.ts });
+      const labels = l.type === "media" ? [] : routing.claims(l.text);
+      if (!labels.length) continue;
+      claimed.set(l, labels);
+      for (const label of labels) {
+        if (!routing.holds(label, l.id)) backfill.push({ label, html: l.html, ts: l.ts, id: l.id });
       }
     }
+    if (!claimed.size) return;
     routing.backfill(backfill);
+    const kept = this.lines.filter((l) => {
+      const labels = claimed.get(l);
+      return !labels || !labels.every((label) => routing.holds(label, l.id));
+    });
     if (kept.length !== this.lines.length) this.lines = kept;
   }
 

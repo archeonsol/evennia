@@ -205,12 +205,9 @@ class EvenniaServerService(MultiService):
         if settings.WEBSERVER_ENABLED:
             self.register_webserver()
 
-        try:
-            from evennia.server.prometheus_metrics import _init_metrics
+        from evennia.server.prometheus_metrics import _init_metrics, best_effort
 
-            _init_metrics()
-        except Exception:
-            pass
+        best_effort("metrics startup", _init_metrics)
 
         ENABLED = []
         if settings.IRC_ENABLED:

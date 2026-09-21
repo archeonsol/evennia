@@ -609,8 +609,9 @@ class TestWebSocketSubprotocolNegotiation(TestCase):
         self.assertEqual(client.wire_format.name, "v1.evennia.com")
 
     def test_bad_origin_raises_when_allowlist_set(self):
-        from evennia.server.portal.ws_protocol import HandshakeDenied
         from django.test import override_settings
+
+        from evennia.server.portal.ws_protocol import HandshakeDenied
 
         client = self._make_client()
         request = self._make_request(
