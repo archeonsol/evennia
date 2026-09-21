@@ -234,6 +234,35 @@ class TestFocusRaceGuard(EvenniaTest):
             self.assertTrue(actor.binding.live_contains(self.char1))
             self.assertTrue(actor.binding.live_contains(self.obj1))
 
+    def test_orm_cascade_during_suspend_aborts_phase(self):
+        """An in-process CASCADE delete is collector-visible and aborts."""
+        b, actor, fired, d, ctx = self._setup()
+        dd = _dispatch_d(RuleEngine(), Poke(), actor, ctx)
+        self.assertFalse(dd.called)
+        b.db_identity.delete()  # CASCADE removes the binding row through the ORM
+        d.callback(PASS)
+        self.assertEqual(fired, ["work"])  # 'after' never ran — phase aborted
+        self.assertEqual(_sync(dd).outcome, "aborted")
+
+    def test_raw_sql_row_delete_is_accepted_stale(self):
+        """Accepted staleness: raw SQL evades the idmapper; the guard passes.
+
+        The guard is a process-local race check over the shared instance.
+        Cross-process writes and raw-SQL deletes cannot be seen without a
+        shared-invalidation channel (bindings have none by decision), so a
+        suspended rule keeps running rather than aborting.
+        """
+        from django.db import connection
+
+        b, actor, fired, d, ctx = self._setup()
+        dd = _dispatch_d(RuleEngine(), Poke(), actor, ctx)
+        self.assertFalse(dd.called)
+        with connection.cursor() as cursor:
+            cursor.execute(f"DELETE FROM {ControlBinding._meta.db_table} WHERE id = %s", [b.pk])
+        d.callback(PASS)
+        self.assertEqual(fired, ["work", "after"])
+        self.assertEqual(_sync(dd).outcome, "succeeded")
+
     def test_unbound_actor_never_aborts(self):
         fired, d = [], Deferred()
         actor = Actor(session=self.session, account=self.account, character=self.char1)

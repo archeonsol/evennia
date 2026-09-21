@@ -79,10 +79,10 @@ overrides inherit registration silently.
 ## ControlBinding focus stack (identity / puppet)
 
 **Decision:** a durable `ControlBinding` with a focus stack owns the
-session→puppet relationship, replacing the legacy puid/puppet pointer pair. The
-`Actor`'s `focus`/`identity` resolve from the binding when one is attached
-(legacy triple is the bindingless fallback). This is the substrate for
-re-evaluating the multi-puppet question (I2; see [committed.md](committed.md)).
+session→puppet relationship, replacing the legacy puid/puppet pointer pair.
+`Actor` focus/identity resolve from it when attached (legacy triple is the
+bindingless fallback); substrate for multi-puppet (I2; see [committed.md](committed.md)).
+Guard boundary: process-local (cross-process and raw-SQL deletes accepted stale).
 
 ## Narrative emote render/deliver seam
 
