@@ -3,6 +3,7 @@
   import { logview, CATS } from "../lib/logview.svelte";
   import { keybinds } from "../lib/keybinds.svelte";
   import { typewriter, markBacklog } from "../lib/typewriter";
+  import { pinAfterScroll } from "../lib/autoscroll";
   import { settings } from "../lib/settings.svelte";
   import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
   import { onMount } from "svelte";
@@ -23,15 +24,24 @@
   // Scroll position across a panel hide; see the ResizeObserver below.
   let savedTop = 0;
   let hidden = false;
+  // The top our code wrote most recently, so a scroll event can tell its own
+  // echo from a real upward scroll; see pinAfterScroll.
+  let lastTop = 0;
   let saveOpen = $state(false);
   let saveEl = $state<HTMLDivElement | null>(null);
 
   // Freeze the existing backlog so only lines that arrive after mount type in.
   onMount(() => markBacklog(session.lines.at(-1)?.id ?? -1));
 
+  function scrollToBottom() {
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    lastTop = el.scrollTop;
+  }
+
   // Follow the newest line to the bottom as its characters reveal.
   function keepPinned() {
-    if (el && pinned && !logview.searchOpen) el.scrollTop = el.scrollHeight;
+    if (pinned && !logview.searchOpen) scrollToBottom();
   }
 
   // Per-line reveal duration; reduce-motion / screenreader force it instant.
@@ -65,7 +75,7 @@
   // Autoscroll to newest unless the user scrolled up or is searching.
   $effect(() => {
     void session.lines.length;
-    if (el && pinned && !logview.searchOpen) el.scrollTop = el.scrollHeight;
+    if (pinned && !logview.searchOpen) scrollToBottom();
   });
 
   // Keep the current match in range and scroll it into view.
@@ -82,10 +92,20 @@
     if (logview.searchOpen) searchInput?.focus();
   });
 
+  // A wheel up over the log is the user leaving the bottom. Reading intent from
+  // the input, not from scroll positions, is the only signal a same-frame line
+  // append cannot overwrite: its effect may write scrollTop after the wheel but
+  // before the wheel's scroll event is delivered, hiding the movement from
+  // pinAfterScroll until the next tick.
+  function onWheel(e: WheelEvent) {
+    if (e.deltaY < 0) pinned = false;
+  }
+
   function onScroll() {
     if (!el || !el.clientHeight) return; // a hide zeroes scrollTop; not a real scroll
     savedTop = el.scrollTop;
-    pinned = el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    pinned = pinAfterScroll(pinned, gap, el.scrollTop, lastTop);
   }
 
   // Restore the reading position when the panel comes back.
@@ -106,6 +126,7 @@
       if (!hidden) return;
       hidden = false;
       node.scrollTop = pinned ? node.scrollHeight : savedTop;
+      lastTop = node.scrollTop;
     });
     ro.observe(node);
     return () => ro.disconnect();
@@ -213,6 +234,7 @@
     class="game-log"
     bind:this={el}
     onscroll={onScroll}
+    onwheel={onWheel}
     role="log"
     aria-live="polite"
     aria-atomic="false"
