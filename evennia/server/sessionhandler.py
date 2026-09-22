@@ -53,6 +53,7 @@ def _send_admin_to_portal(session, **kwargs):
 # delayed imports
 _AccountDB = None
 _ServerSession = None
+_ServerSession_PATH = None
 _ServerConfig = None
 _ScriptDB = None
 _OOB_HANDLER = None
@@ -160,10 +161,15 @@ def delayed_import():
     Helper method for delayed import of all needed entities.
 
     """
-    global _ServerSession, _AccountDB, _ServerConfig, _ScriptDB
-    if not _ServerSession:
+    global _ServerSession, _ServerSession_PATH, _AccountDB, _ServerConfig, _ScriptDB
+    # Re-resolve when the setting changes: override_settings (notably the
+    # test classes' DEFAULT_SETTINGS) can point SERVER_SESSION_CLASS
+    # somewhere else after the first call, and a stale cache silently hands
+    # every later session the wrong class. class_from_module is cached.
+    if not _ServerSession or _ServerSession_PATH != settings.SERVER_SESSION_CLASS:
         # we allow optional arbitrary serversession class for overloading
         _ServerSession = class_from_module(settings.SERVER_SESSION_CLASS)
+        _ServerSession_PATH = settings.SERVER_SESSION_CLASS
     if not _AccountDB:
         from evennia.accounts.models import AccountDB as _AccountDB
     if not _ServerConfig:
