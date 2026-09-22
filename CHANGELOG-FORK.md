@@ -25,6 +25,36 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.264 — Session class re-resolve; webclient autoscroll fix
+
+### Engine
+
+- **`SERVER_SESSION_CLASS` changes take effect.** The class cached by
+  `delayed_import` in [`sessionhandler.py`](evennia/server/sessionhandler.py)
+  was resolved once and never revisited, so a later override — notably
+  `override_settings` in test classes — silently kept handing every new
+  session the previously cached class. The setting path is now stored next to
+  the class and re-resolved when it differs (`class_from_module` is
+  internally cached, so the check is cheap). Fixes `3d665f44a`.
+
+### Web client
+
+- **Log autoscroll no longer unpins on content growth.** The scroll handler
+  re-derived pinned state from the bottom gap on every scroll event, but the
+  events fired by the client's own `scrollTop` writes were delivered after
+  more lines had landed, so a fast burst (or the typewriter reveal) read as
+  "user scrolled up" and froze the view. Unpinning now requires evidence of
+  intent: a wheel-up over the log (`onwheel`, read synchronously so a
+  same-frame append cannot hide it), or a `scrollTop` drop below the top the
+  code last wrote. Pure content growth can neither lower `scrollTop` nor move
+  it below the recorded write, so it no longer unpins. Decision logic lives
+  in [`autoscroll.ts`](evennia/web/webclient/client/src/lib/autoscroll.ts)
+  with unit tests; `shell.js` is rebuilt. Fixes `e522d45af`.
+
+### Tests
+
+- `evennia.web` client — 551 tests OK (vitest), `svelte-check` clean.
+
 ## 6.0.0+underspire.263 — Fleet-review burndown: correctness, consolidation, closed-set metrics
 
 Forty-seven findings from the engine perf-sweep fleet review (run-20260919),
