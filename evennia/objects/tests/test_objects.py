@@ -37,7 +37,8 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertTrue(obj, errors)
         self.assertFalse(errors, errors)
         self.assertIsNone(obj.db.desc)
-        self.assertEqual(obj.default_description, obj.get_display_desc(obj))
+        self.assertEqual(obj.default_description, "")
+        self.assertEqual(obj.get_display_desc(obj), "")
 
     def test_object_is_portable_by_default(self):
         obj, errors = DefaultObject.create("console", location=self.room1)
@@ -157,7 +158,8 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertTrue(obj, errors)
         self.assertFalse(errors, errors)
         self.assertIsNone(obj.db.desc)
-        self.assertEqual(obj.default_description, obj.get_display_desc(obj))
+        self.assertEqual(obj.default_description, "")
+        self.assertEqual(obj.get_display_desc(obj), "")
 
     def test_exit_get_return_exit(self):
         ex1, _ = DefaultExit.create("north", self.room1, self.room2, account=self.account)

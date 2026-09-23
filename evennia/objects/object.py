@@ -428,7 +428,7 @@ class DefaultObject(
     objects = ObjectManager()
 
     # Used by get_display_desc when self.db.desc is None
-    default_description = _("You see nothing special.")
+    default_description = ""
 
     # populated by `return_appearance`
     appearance_template = """
