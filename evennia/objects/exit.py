@@ -96,7 +96,7 @@ class DefaultExit(DefaultObject):
     priority = 101
 
     # Used by get_display_desc when self.db.desc is None
-    default_description = _("This is an exit.")
+    default_description = ""
 
     # Helper classes and methods to implement the Exit. These need not
     # be overloaded unless one want to change the foundation for how

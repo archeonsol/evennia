@@ -25,6 +25,33 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.266 — Blank default descriptions
+
+### Engine
+
+- **Desc-less objects and exits render as just their name.** The engine
+  defaults [`DefaultObject.default_description`](evennia/objects/object.py)
+  ("You see nothing special.") and
+  [`DefaultExit.default_description`](evennia/objects/exit.py) ("This is an
+  exit.") are now empty. `get_display_desc` still falls back to them, so
+  `return_appearance` gets an empty `{desc}` slot, which
+  [`format_appearance`](evennia/objects/mixins/appearance.py) compresses
+  away. Rooms and characters are unchanged — they keep their own defaults
+  ("This is a room." / "This is a character.").
+
+### Migration
+
+- Typeclasses that relied on the old default strings (displaying or
+  comparing them) should set their own `default_description` or `db.desc`.
+  No API change; only the two class attribute values changed.
+
+### Tests
+
+- [`test_objects.py`](evennia/objects/tests/test_objects.py) pins
+  `default_description == ""` and `get_display_desc() == ""` for desc-less
+  `DefaultObject` and `DefaultExit`. `evennia.objects` — 121 tests OK in
+  the engine test game dir.
+
 ## 6.0.0+underspire.265 — Single put echo
 
 ### Engine
