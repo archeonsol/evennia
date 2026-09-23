@@ -534,8 +534,10 @@ class ContainerPutRules:
         obj_name = obj.get_numbered_name(1, caller, return_string=True)
         cont_name = self.get_display_name(caller)
         caller.msg(f"You put {obj_name} in {cont_name}.")
+        # The actor already has the direct line above; ``msg_contents`` would
+        # render the room echo for them too (``$You()`` → "You"), doubling it.
         caller.location.msg_contents(
-            f"$You() $conj(put) {obj_name} in {cont_name}.", from_obj=caller
+            f"$You() $conj(put) {obj_name} in {cont_name}.", from_obj=caller, exclude=caller
         )
         return CLAIM
 

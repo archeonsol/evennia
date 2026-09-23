@@ -104,3 +104,15 @@ class TestAsyncCommit(unittest.TestCase):
         coin.move_to_async.assert_awaited_once_with(chest, quiet=True)
         coin.move_to.assert_not_called()
         self.assertTrue(any("You put" in m for m in char.messages))
+
+    def test_put_room_echo_excludes_the_actor(self):
+        """The actor's direct line must not be doubled by the room broadcast."""
+        char, actor, room = self._char()
+        chest = _Container(key="chest")
+        coin = _coin(char, chest)
+        broadcasts = []
+        room.msg_contents = lambda text=None, **kwargs: broadcasts.append((text, kwargs))
+        self._trace(Put(target=coin, container=chest), actor, [char, chest])
+        self.assertEqual([m for m in char.messages if "You put" in m], ["You put coins in chest."])
+        self.assertEqual(len(broadcasts), 1)
+        self.assertIs(broadcasts[0][1].get("exclude"), char)
