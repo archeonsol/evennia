@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.265 — Single put echo
+
+### Engine
+
+- **`put` no longer echoes twice to the actor.**
+  [`ContainerPutRules.carry_out_put`](evennia/actions/default/objects.py) sent
+  the actor a direct line and then a room broadcast that included the actor, so
+  `$You()` rendered "You put X in Y." a second time. The broadcast now excludes
+  the actor; onlookers still get the third-person line. Fixes `4d59a88f7`.
+
+### Tests
+
+- [`test_default_objects.py`](evennia/actions/tests/test_default_objects.py)
+  asserts the put room echo excludes the actor. `evennia.actions` — 505 tests
+  OK in the engine test game dir.
+
 ## 6.0.0+underspire.264 — Session class re-resolve; webclient autoscroll fix
 
 ### Engine
