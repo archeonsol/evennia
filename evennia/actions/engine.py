@@ -669,7 +669,15 @@ class RuleEngine:
         ):
             msg = getattr(target, "msg", None)
             if callable(msg):
-                msg(message)
+                try:
+                    msg(message)
+                except Exception:
+                    # The rule-failure notice is best-effort; a failed send
+                    # must not escalate the original failure into an untrapped
+                    # error of its own.
+                    from evennia.utils import logger
+
+                    logger.log_trace("actions.engine._send failed")
                 return
 
     @staticmethod
