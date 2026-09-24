@@ -36,8 +36,21 @@ function keyName(e: KeyboardEvent): string {
   return e.key.length === 1 ? e.key.toUpperCase() : e.key;
 }
 
-/** Build a combo string from an event, or null for plain typing keys. */
+// Keys that only modify another key. Pressing Ctrl on its way to Ctrl+K
+// fires a keydown whose key is "Control"; capturing that saved the combo
+// "Ctrl+Control", which then matched every Ctrl press and ran the macro
+// over and over.
+const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta", "AltGraph", "CapsLock", "OS", "Hyper", "Super", "Fn"]);
+
+/** True for a combo that names no real key, like "Ctrl+Control". */
+export function isModifierOnly(combo: string | undefined | null): boolean {
+  if (!combo) return false;
+  return MODIFIER_KEYS.has(combo.split("+").pop() ?? "");
+}
+
+/** Build a combo string from an event, or null for plain typing and bare modifiers. */
 export function comboFromEvent(e: KeyboardEvent): string | null {
+  if (MODIFIER_KEYS.has(e.key)) return null;
   const isFn = /^F\d{1,2}$/.test(e.key);
   const mod = e.ctrlKey || e.metaKey || e.altKey;
   if (!isFn && !mod) return null;
@@ -66,8 +79,12 @@ class Keybinds {
     try {
       const raw = localStorage.getItem(KEY);
       const saved: Binding[] = raw ? JSON.parse(raw) : [];
-      // Merge defaults with saved (saved combos win; new defaults appear).
-      this.list = DEFAULTS.map((d) => ({ ...d, combo: saved.find((s) => s.id === d.id)?.combo ?? d.combo }));
+      // Merge defaults with saved (saved combos win; new defaults appear). A
+      // saved bare-modifier combo is the old capture bug; fall back to default.
+      this.list = DEFAULTS.map((d) => {
+        const mine = saved.find((s) => s.id === d.id)?.combo;
+        return { ...d, combo: mine && !isModifierOnly(mine) ? mine : d.combo };
+      });
     } catch {
       this.list = structuredClone(DEFAULTS);
     }

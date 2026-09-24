@@ -13,6 +13,11 @@ from evennia.server.protocol import register_event
 
 # -- session --------------------------------------------------------------
 register_event("logout", carrier="args", fields={"_": "str"}, doc="args[0] = reason (e.g. 'quit').")
+register_event(
+    "screenreader_mode",
+    fields={"on": "bool"},
+    doc="The session's SCREENREADER flag, sent whenever it is set (login restore, @option).",
+)
 
 # -- media ----------------------------------------------------------------
 register_event("image", carrier="args", fields={"_": "str"}, doc="args[0] = image URL.")

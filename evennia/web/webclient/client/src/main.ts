@@ -67,17 +67,26 @@ keybinds.init();
 panelPrefs.init();
 routing.init();
 // A route turned to MOVE retroactively claims lines already on screen.
-routing.setOnSync(() => session.pruneMoved());
+routing.setOnSync((fresh) => session.pruneMoved(fresh));
 notify.init();
 compose.init();
 // The preview is a real (silent) command, so it goes out on the command line
 // rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
 compose.setPreviewSender((line) => connection.sendCommand(line));
 
+// Local echo: the command as typed, in the terminal before the game's answer.
+commands.onRun((line) => {
+  const t = line.trim();
+  if (!settings.echoCommands || !t) return;
+  const safe = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  session.append(`<span class="cmd-echo">&gt; ${safe}</span>`, "echo");
+});
+
 // Speak new output. A category the player filtered out of the log is muted
-// here too, so the log's filter chips double as speech filters.
+// here too, so the log's filter chips double as speech filters. The echo of
+// the player's own command is not read back to them.
 session.onLine((line) => {
-  if (settings.speakOutput && line.type !== "media" && logview.filters[line.cat]) {
+  if (settings.speakOutput && line.type !== "media" && line.type !== "echo" && logview.filters[line.cat]) {
     announcer.say(line.text);
   }
 });
@@ -178,6 +187,9 @@ connection.on("oob", (env) => {
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
     if (is(event, "channel_msg")) echoChannel(env.kwargs ?? {});
+    // A thread only arrives because the player asked for one (@ticket, or a
+    // click in a ticket list): bring its panel forward.
+    if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);
@@ -197,6 +209,18 @@ connection.on("oob", (env) => {
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
     connection.markLoggedOut(String(reason ?? "quit"));
+  } else if (is(event, "screenreader_mode")) {
+    // The server's flag was set on (a saved @option restored at login, or
+    // @option now). Follow it. Only "on" is followed: turning the client's
+    // mode off stays the player's call in Settings, so a stale saved "off"
+    // cannot undo a layout they chose.
+    const on = !!(env.kwargs ?? {}).on;
+    if (on && !settings.screenreader) {
+      settings.screenreader = true;
+      settings.channelEcho = true;
+      settings.music = false;
+      announcer.now("Screen reader mode on, from your saved game option. One view at a time.");
+    }
   } else if (is(event, "player_mention")) {
     chat.onMention(env.kwargs ?? {});
   } else if (is(event, "compose_preview")) {

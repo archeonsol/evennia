@@ -7,14 +7,29 @@
 // in its feed, so each buffer carries an unread count - otherwise the whole
 // point of moving something is that you never find out it arrived.
 
+import { migrateLegacyPattern, parsePattern } from "./pattern";
+
 const KEY = "underspire.routing.v1";
-const MAX = 300;
+export const FEED_MAX = 1000;
+const MAX = FEED_MAX;
 
 export interface Route {
   pattern: string;
   label: string;
   /** Take the line out of the main log rather than copying it. */
   move?: boolean;
+  /** Off keeps the rule without applying it. Absent means on. */
+  enabled?: boolean;
+  /**
+   * Stable identity, assigned on first sync. It is how a renamed feed keeps
+   * its lines: the rule is the same rule, only its label changed.
+   */
+  id?: string;
+}
+
+let routeSeq = 0;
+export function newRouteId(): string {
+  return `r${Date.now().toString(36)}${(routeSeq++).toString(36)}`;
 }
 export interface Line {
   /** Scrollback id of the line; lets callers ask a feed whether it holds it. */
@@ -36,13 +51,23 @@ function mergeLines(buf: Line[], adds: Line[]): Line[] {
   return out.length > MAX ? out.slice(-MAX) : out;
 }
 
+// Patterns are "text or /regex/"; see pattern.ts. An unusable one (broken
+// regex, or one matching every line) routes nothing, and the settings field
+// says why.
 function compile(pattern: string): RegExp | null {
-  const p = (pattern || "").trim();
-  if (!p) return null;
+  return parsePattern(pattern).re;
+}
+
+// One bad rule must never take the log down with it: a line that makes a
+// pattern throw simply does not match that rule.
+function safeTest(re: RegExp, text: string): boolean {
   try {
-    return new RegExp(p, "gi");
+    re.lastIndex = 0;
+    return re.test(text);
   } catch {
-    return new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    return false;
+  } finally {
+    re.lastIndex = 0;
   }
 }
 
@@ -52,11 +77,19 @@ export class Routing {
   /** Lines filed into each buffer since it was last read. */
   unread = $state<Record<string, number>>({});
   private cRoutes: { re: RegExp; label: string; move: boolean }[] = [];
-  private onSync: (() => void) | null = null;
+  private onSync: ((fresh: Set<string>) => void) | null = null;
+  /** Each route's definition at the last sync, by id, to see which changed. */
+  private sigById = new Map<string, string>();
+  /** Each route's label at the last sync, by route id, to detect renames. */
+  private labelById = new Map<string, string>();
 
   init(): void {
     try {
-      this.routes = JSON.parse(localStorage.getItem(KEY) || "[]");
+      const saved: Route[] = JSON.parse(localStorage.getItem(KEY) || "[]");
+      // Saved under the old rules, where the raw field was the regex.
+      this.routes = Array.isArray(saved)
+        ? saved.map((r) => ({ ...r, pattern: migrateLegacyPattern(r.pattern) }))
+        : [];
     } catch {
       this.routes = [];
     }
@@ -64,7 +97,7 @@ export class Routing {
   }
 
   /** Run after routes change; the app prunes the scrollback of claimed lines. */
-  setOnSync(fn: () => void): void {
+  setOnSync(fn: (fresh: Set<string>) => void): void {
     this.onSync = fn;
   }
 
@@ -75,10 +108,42 @@ export class Routing {
    * orphaned label, so callers edit against a draft and sync only on commit.
    */
   sync(): void {
+    // Give every rule an id, then carry a renamed feed's lines to its new
+    // name. Without this, renaming "nous" to "Nous" purged the old buffer
+    // below and the feed came back empty.
+    if (this.routes.some((r) => !r.id)) {
+      this.routes = this.routes.map((r) => (r.id ? r : { ...r, id: newRouteId() }));
+    }
+    const stillUsed = new Set(this.routes.map((r) => (r.label || "").trim()));
+    for (const r of this.routes) {
+      const was = this.labelById.get(r.id!);
+      const now = (r.label || "").trim();
+      if (was && now && was !== now && !stillUsed.has(was) && this.buffers[was]?.length) {
+        this.buffers = { ...this.buffers, [now]: mergeLines(this.buffers[now] ?? [], this.buffers[was]) };
+        this.unread = { ...this.unread, [now]: (this.unread[now] ?? 0) + (this.unread[was] ?? 0) };
+      }
+    }
+    this.labelById = new Map(this.routes.map((r) => [r.id!, (r.label || "").trim()]));
+
+    // Feeds whose rule is new or was just changed. Their copy rules are
+    // applied to lines already in the terminal, so a new feed starts with
+    // its history instead of empty. Unchanged rules are left alone, or a
+    // feed the player cleared would refill on every unrelated edit.
+    const fresh = new Set<string>();
+    const sigs = new Map<string, string>();
+    for (const r of this.routes) {
+      const sig = `${r.pattern}\u0000${(r.label || "").trim()}\u0000${r.enabled !== false}\u0000${!!r.move}`;
+      sigs.set(r.id!, sig);
+      if (r.enabled !== false && this.sigById.get(r.id!) !== sig) fresh.add((r.label || "").trim());
+    }
+    this.sigById = sigs;
+
     this.cRoutes = this.compiled();
     // A deleted or renamed route's buffer would otherwise sit in memory for
     // the session and resurface verbatim if its label is ever reused.
-    const live = new Set(this.cRoutes.map((r) => r.label));
+    // Any rule naming the feed keeps it, on or off: switching a rule off
+    // must not throw away what it filed.
+    const live = new Set(this.allLabels());
     for (const key of Object.keys(this.buffers)) {
       if (!live.has(key)) {
         const rest = { ...this.buffers };
@@ -94,18 +159,39 @@ export class Routing {
     } catch {
       /* ignore */
     }
-    this.onSync?.();
+    this.onSync?.(fresh);
   }
 
   /** Routes with a usable pattern and a label, compiled in declaration order. */
   private compiled(): { re: RegExp; label: string; move: boolean }[] {
     const out: { re: RegExp; label: string; move: boolean }[] = [];
     for (const r of this.routes) {
+      if (r.enabled === false) continue;
       const re = compile(r.pattern);
       const label = (r.label || "").trim();
       if (re && label) out.push({ re, label, move: r.move === true });
     }
     return out;
+  }
+
+  /** Every feed name a rule names, enabled or not, in declaration order. */
+  allLabels(): string[] {
+    return [...new Set(this.routes.map((r) => (r.label || "").trim()).filter(Boolean))];
+  }
+
+  /** Move rule i up (-1) or down (+1). Order decides which feed a line lists first. */
+  reorder(i: number, dir: -1 | 1): void {
+    const j = i + dir;
+    if (i < 0 || j < 0 || i >= this.routes.length || j >= this.routes.length) return;
+    const next = [...this.routes];
+    [next[i], next[j]] = [next[j], next[i]];
+    this.routes = next;
+    this.sync();
+  }
+
+  setEnabled(i: number, on: boolean): void {
+    this.routes = this.routes.map((r, n) => (n === i ? { ...r, enabled: on } : r));
+    this.sync();
   }
 
   add(): void {
@@ -129,7 +215,11 @@ export class Routing {
    * revalidates, so tabs for routes added later stayed invisible until reload.
    */
   labels(): string[] {
-    return [...new Set(this.compiled().map((r) => r.label))];
+    // Feeds that still hold lines stay listed after their rule is switched
+    // off, so turning a rule off never hides what it already filed.
+    const live = this.compiled().map((r) => r.label);
+    const kept = this.allLabels().filter((l) => this.buffers[l]?.length);
+    return [...new Set([...live, ...kept])];
   }
 
   /**
@@ -140,8 +230,17 @@ export class Routing {
     const out: string[] = [];
     for (const r of this.cRoutes) {
       if (!r.move || out.includes(r.label)) continue;
-      r.re.lastIndex = 0;
-      if (r.re.test(text)) out.push(r.label);
+      if (safeTest(r.re, text)) out.push(r.label);
+    }
+    return out;
+  }
+
+  /** Labels of the copy-routes that match this line, without filing anything. */
+  copies(text: string): string[] {
+    const out: string[] = [];
+    for (const r of this.cRoutes) {
+      if (r.move || out.includes(r.label)) continue;
+      if (safeTest(r.re, text)) out.push(r.label);
     }
     return out;
   }
@@ -153,16 +252,24 @@ export class Routing {
    * A full buffer merges by timestamp and keeps the newest lines, so an older
    * backfill can be trimmed straight back out; `holds` reports the result.
    */
-  backfill(entries: { label: string; html: string; ts: number; id: number }[]): void {
+  backfill(entries: { label: string; html: string; ts: number; id: number }[], countUnread = true): void {
     if (!entries.length) return;
     const adds: Record<string, Line[]> = {};
-    for (const e of entries) (adds[e.label] ??= []).push({ id: e.id, html: e.html, ts: e.ts });
+    // One line once per feed: a feed with both a copy and a move rule would
+    // otherwise be handed the same line twice.
+    const seen = new Set<string>();
+    for (const e of entries) {
+      const k = `${e.label}\u0000${e.id}`;
+      if (seen.has(k) || this.holds(e.label, e.id)) continue;
+      seen.add(k);
+      (adds[e.label] ??= []).push({ id: e.id, html: e.html, ts: e.ts });
+    }
     let buffers = this.buffers;
     let unread = this.unread;
     for (const [label, list] of Object.entries(adds)) {
       list.sort((a, b) => a.ts - b.ts);
       buffers = { ...buffers, [label]: mergeLines(buffers[label] ?? [], list) };
-      unread = { ...unread, [label]: (unread[label] ?? 0) + list.length };
+      if (countUnread) unread = { ...unread, [label]: (unread[label] ?? 0) + list.length };
     }
     this.buffers = buffers;
     this.unread = unread;
@@ -184,11 +291,12 @@ export class Routing {
     let moved = false;
     const done = new Set<string>();
     for (const r of this.cRoutes) {
-      r.re.lastIndex = 0;
-      if (!r.re.test(text)) continue;
+      if (!safeTest(r.re, text)) continue;
       if (r.move) moved = true;
       if (done.has(r.label)) continue;
       done.add(r.label);
+      // A replayed line (reconnect resume) is filed once.
+      if (this.holds(r.label, id)) continue;
       const buf = [...(this.buffers[r.label] ?? []), { id, html, ts: Date.now() }].slice(-MAX);
       this.buffers = { ...this.buffers, [r.label]: buf };
       this.unread = { ...this.unread, [r.label]: (this.unread[r.label] ?? 0) + 1 };

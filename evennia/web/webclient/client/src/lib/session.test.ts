@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { routing } from "./routing.svelte";
+import { routing, FEED_MAX } from "./routing.svelte";
 import { session } from "./session.svelte";
 import type { LogLine } from "./session.svelte";
 
@@ -103,17 +103,17 @@ describe("pruneMoved", () => {
     // backfilled, merged by ts and trimmed straight back out. The line must
     // stay in the log: pruneMoved may only drop what the feed actually holds.
     routes([{ pattern: "whispers", label: "chatter", move: true }]);
-    for (let i = 0; i < 300; i++) {
-      routing.process("<i>fresh</i>", "someone whispers", 1000 + i);
+    for (let i = 0; i < FEED_MAX; i++) {
+      routing.process("<i>fresh</i>", "someone whispers", 100000 + i);
     }
-    expect(routing.buffers.chatter).toHaveLength(300);
+    expect(routing.buffers.chatter).toHaveLength(FEED_MAX);
 
     const l = line("someone whispers", { ts: 1 });
     session.lines.push(l);
     session.pruneMoved();
 
     expect(session.lines).toHaveLength(1);
-    expect(routing.buffers.chatter).toHaveLength(300);
+    expect(routing.buffers.chatter).toHaveLength(FEED_MAX);
     expect(routing.holds("chatter", l.id)).toBe(false);
   });
 });

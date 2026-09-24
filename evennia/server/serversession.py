@@ -396,6 +396,23 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
         if kwargs:
             self.protocol_flags.update(kwargs)
             self.sessionhandler.session_portal_sync(self)
+            if "SCREENREADER" in kwargs:
+                self._tell_shell_screenreader(bool(kwargs["SCREENREADER"]))
+
+    def _tell_shell_screenreader(self, on):
+        """Let the web shell follow a SCREENREADER flag set on the server.
+
+        A player who saved ``@option/save screenreader = on`` got
+        speech-shaped text from the game while the web shell stayed in its
+        visual layout. The login restore of saved options and ``@option``
+        both land here.
+        """
+        if getattr(self, "protocol_key", "") not in ("websocket", "webclient_ajax"):
+            return
+        try:
+            self.msg(screenreader_mode={"on": on})
+        except Exception:
+            pass
 
     def data_out(self, **kwargs):
         """

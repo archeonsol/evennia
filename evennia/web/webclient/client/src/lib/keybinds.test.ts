@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { comboFromEvent, reviewIndex } from "./keybinds.svelte";
+import { comboFromEvent, isModifierOnly, reviewIndex } from "./keybinds.svelte";
 
 function key(init: Partial<KeyboardEvent>): KeyboardEvent {
   return { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, key: "", code: "", ...init } as KeyboardEvent;
@@ -32,5 +32,20 @@ describe("reviewIndex", () => {
     expect(reviewIndex(key({ altKey: true, key: "0", code: "Digit0" }))).toBeNull();
     expect(reviewIndex(key({ altKey: true, ctrlKey: true, key: "1", code: "Digit1" }))).toBeNull();
     expect(reviewIndex(key({ key: "1", code: "Digit1" }))).toBeNull();
+  });
+});
+
+describe("bare modifiers", () => {
+  it("are never a combo, so capture waits for the real key", () => {
+    expect(comboFromEvent(key({ ctrlKey: true, key: "Control", code: "ControlLeft" }))).toBeNull();
+    expect(comboFromEvent(key({ altKey: true, key: "Alt", code: "AltLeft" }))).toBeNull();
+    expect(comboFromEvent(key({ ctrlKey: true, key: "k", code: "KeyK" }))).toBe("Ctrl+K");
+  });
+
+  it("are recognised in saved combos from the old capture bug", () => {
+    expect(isModifierOnly("Ctrl+Control")).toBe(true);
+    expect(isModifierOnly("Ctrl+Shift+Shift")).toBe(true);
+    expect(isModifierOnly("Ctrl+K")).toBe(false);
+    expect(isModifierOnly(undefined)).toBe(false);
   });
 });

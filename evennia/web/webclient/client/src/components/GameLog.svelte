@@ -6,7 +6,7 @@
   import { pinAfterScroll } from "../lib/autoscroll";
   import { settings } from "../lib/settings.svelte";
   import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   //: What each download format is for, in the order the menu offers them.
   //: HTML leads because it is the only one that keeps the colours *and* opens
@@ -72,11 +72,29 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  // Autoscroll to newest unless the user scrolled up or is searching.
+  // Autoscroll to newest unless the user scrolled up or is searching. While
+  // scrolled up, arrivals are counted on a "jump to latest" bar instead.
+  let unseen = $state(0);
+  let seenCount = 0;
   $effect(() => {
-    void session.lines.length;
-    if (pinned && !logview.searchOpen) scrollToBottom();
+    const n = session.lines.length;
+    const grew = n - seenCount;
+    seenCount = n;
+    if (pinned && !logview.searchOpen) {
+      scrollToBottom();
+      unseen = 0;
+    } else if (grew > 0) {
+      unseen = untrack(() => unseen) + grew;
+    }
   });
+  $effect(() => {
+    if (pinned) unseen = 0;
+  });
+  function jumpToLatest() {
+    pinned = true;
+    unseen = 0;
+    scrollToBottom();
+  }
 
   // Keep the current match in range and scroll it into view.
   $effect(() => {
@@ -279,6 +297,9 @@
       </div>
     {/each}
   </div>
+  {#if !pinned && unseen > 0 && !logview.searchOpen}
+    <button class="latest" onclick={jumpToLatest}>{unseen} new line{unseen === 1 ? "" : "s"} ↓</button>
+  {/if}
 </div>
 
 <style>
@@ -335,6 +356,11 @@
   }
   .s-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
 
+  .latest {
+    position: absolute; right: 18px; bottom: 12px; background: var(--bg-deep); border: 1px solid var(--accent);
+    color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em;
+    padding: 3px 10px; min-height: 24px; cursor: pointer; z-index: 5;
+  }
   .game-log { overflow-y: auto; padding: 0.7rem 1rem; line-height: var(--shell-line-height, 1.5); flex: 1; }
   .log-line { white-space: pre-wrap; word-break: break-word; }
   .log-line .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }

@@ -27,6 +27,16 @@
   // find and dismiss it.
   let booted = $state(settings.screenreader);
   let settingsOpen = $state(false);
+  // Other panels ask for a settings view (the Feeds panel's rules button).
+  let settingsView = $state("hub");
+  function onSettingsRequest(e: Event) {
+    settingsView = (e as CustomEvent).detail?.view ?? "hub";
+    settingsOpen = true;
+  }
+  $effect(() => {
+    window.addEventListener("underspire:settings", onSettingsRequest);
+    return () => window.removeEventListener("underspire:settings", onSettingsRequest);
+  });
   let paletteOpen = $state(false);
 
   // On (re)connect, ask the server to push the channel registry + assist inbox.
@@ -165,7 +175,10 @@
     <Boot ondone={() => (booted = true)} />
   {/if}
   {#if settingsOpen}
-    <SettingsPanel onclose={() => (settingsOpen = false)} />
+    <SettingsPanel initial={settingsView} onclose={() => {
+      settingsOpen = false;
+      settingsView = "hub";
+    }} />
   {/if}
   {#if paletteOpen}
     <CommandPalette onclose={() => (paletteOpen = false)} />

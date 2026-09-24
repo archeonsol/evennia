@@ -142,6 +142,33 @@ class TestWebclientOptionsScreenreader(unittest.TestCase):
         session.sessionhandler.session_portal_partial_sync.assert_not_called()
 
 
+class TestShellScreenreaderNotice(unittest.TestCase):
+    """A SCREENREADER flag set on the server reaches the web shell."""
+
+    def _session(self, protocol_key):
+        from evennia.server.serversession import ServerSession
+
+        session = ServerSession.__new__(ServerSession)
+        session.protocol_flags = {}
+        session.protocol_key = protocol_key
+        session.sessionhandler = mock.MagicMock()
+        session.msg = mock.Mock()
+        return session
+
+    def test_webclient_hears_the_flag(self):
+        session = self._session("websocket")
+        session.update_flags(SCREENREADER=True)
+        session.msg.assert_called_once_with(screenreader_mode={"on": True})
+
+    def test_telnet_and_other_flags_stay_quiet(self):
+        telnet = self._session("telnet")
+        telnet.update_flags(SCREENREADER=True)
+        telnet.msg.assert_not_called()
+        web = self._session("websocket")
+        web.update_flags(NOCOLOR=True)
+        web.msg.assert_not_called()
+
+
 class TestMonitoredInputfunc(BaseEvenniaTest):
     """
     Regressions for monitor/monitored inputfunc handling.

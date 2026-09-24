@@ -38,16 +38,22 @@ class GameSession {
     const text = htmlToText(html);
     const id = nextId++;
     // Client triggers: gag drops the line; highlights colour keywords. Media
-    // lines are exempt (they carry embed markup, not prose).
-    if (type !== "media") {
-      if (triggers.shouldGag(text)) return;
+    // lines are exempt (they carry embed markup, not prose), and so is the
+    // echo of the player's own command: a trigger or feed rule matching
+    // "say whispers" must not fire on the typing, only on what the game says.
+    if (type !== "media" && type !== "echo") {
+      // Feeds are filed before gags: a gag hides a line from the terminal,
+      // not from the feeds. It used to run first, so gagging chatter out of
+      // the terminal also emptied the feed that was meant to collect it.
+      const gagged = triggers.shouldGag(text);
       html = triggers.highlight(html);
-      triggers.runActions(text);
+      if (!gagged) triggers.runActions(text);
       // A move-route takes the line out of the terminal entirely; it lives in
       // its feed instead. Copy-routes fall through and the line is appended
       // below as usual. The id lets the feed prove it holds the line, which
       // is what pruneMoved trusts instead of any filing memory of ours.
-      if (routing.process(html, text, id)) return;
+      const moved = routing.process(html, text, id);
+      if (moved || gagged) return;
     }
     const line: LogLine = {
       id,
@@ -78,20 +84,33 @@ class GameSession {
    * the log copy. The array is only reassigned when something actually
    * moved, so an unrelated edit costs no re-render.
    */
-  pruneMoved(): void {
+  pruneMoved(fresh: Set<string> = new Set()): void {
     const claimed = new Map<LogLine, string[]>();
     const backfill: { label: string; html: string; ts: number; id: number }[] = [];
+    const history: { label: string; html: string; ts: number; id: number }[] = [];
     for (const l of this.lines) {
+      if (l.type === "media") continue;
+      // A new or changed copy rule takes a copy of what the terminal already
+      // shows; the line stays where it is.
+      if (fresh.size) {
+        for (const label of routing.copies(l.text)) {
+          if (fresh.has(label) && !routing.holds(label, l.id)) {
+            history.push({ label, html: l.html, ts: l.ts, id: l.id });
+          }
+        }
+      }
       // Media lines are exempt for the same reason append() exempts them.
-      const labels = l.type === "media" ? [] : routing.claims(l.text);
+      const labels = routing.claims(l.text);
       if (!labels.length) continue;
       claimed.set(l, labels);
       for (const label of labels) {
         if (!routing.holds(label, l.id)) backfill.push({ label, html: l.html, ts: l.ts, id: l.id });
       }
     }
-    if (!claimed.size) return;
+    // History is not news: it fills a new feed without lighting its badge.
+    routing.backfill(history, false);
     routing.backfill(backfill);
+    if (!claimed.size) return;
     const kept = this.lines.filter((l) => {
       const labels = claimed.get(l);
       return !labels || !labels.every((label) => routing.holds(label, l.id));

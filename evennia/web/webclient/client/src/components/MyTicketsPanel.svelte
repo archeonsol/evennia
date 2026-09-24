@@ -3,15 +3,19 @@
   // my_tickets / my_ticket RPCs; live staff replies arrive via ticket_msg.
   import { chat } from "../lib/chat.svelte";
   import { renderBody, renderSender } from "../lib/markup";
+  import { connection } from "../lib/evennia.svelte";
 
   let reply = $state("");
   let showClosed = $state(false);
   const ticket = $derived(chat.myTicket);
 
-  // Load on first mount and whenever the closed filter flips.
+  // Load when the socket is open (a layout restored at page load mounts this
+  // panel before it is), whenever the filter flips, and when a ticket of ours
+  // changes. It used to load once on mount and stay empty if that was early.
   $effect(() => {
     void showClosed;
-    chat.loadMyTickets(showClosed);
+    void chat.myTicketsRev;
+    if (connection.state === "open") chat.loadMyTickets(showClosed);
   });
 
   function open(t: any) {
@@ -56,6 +60,12 @@
 
   {#if !ticket}
     <div class="list">
+      {#if chat.myTicketsError}
+        <p class="empty err" role="alert">
+          {chat.myTicketsError}
+          <button class="retry" onclick={() => chat.loadMyTickets(showClosed)}>Try again</button>
+        </p>
+      {/if}
       {#if chat.myTickets.length}
         {#each chat.myTickets as t (t.id)}
           <button class="row" onclick={() => open(t)}>
@@ -107,6 +117,8 @@
   .tab { background: none; border: none; color: var(--fg-faint); font-family: inherit; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.12em; cursor: pointer; padding: 0; }
   .tab.on { color: var(--accent-bright); }
   .back { margin-left: auto; background: none; border: none; color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; cursor: pointer; }
+  .err { color: var(--alert); }
+  .retry { margin-left: 1ch; background: none; border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; cursor: pointer; }
   .list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
   .row { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--accent-bright); color: var(--fg); font-family: inherit; cursor: pointer; }
   .row:hover { border-color: var(--accent); }

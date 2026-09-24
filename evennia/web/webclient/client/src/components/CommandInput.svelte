@@ -31,10 +31,16 @@
   // store so it survives closing the pad and reloading the page.
   let composeEl = $state<HTMLTextAreaElement | null>(null);
 
+  let inputEl = $state<HTMLInputElement | null>(null);
   function submit() {
     commands.run(value);
-    value = "";
     histIdx = -1;
+    if (settings.keepCommand && value.trim()) {
+      // Kept and selected: Enter sends it again, typing replaces it.
+      queueMicrotask(() => inputEl?.select());
+    } else {
+      value = "";
+    }
   }
 
   function candidates(): string[] {
@@ -228,6 +234,7 @@
     <span class="chevron glow-text" aria-hidden="true">❯</span>
     <input
       class="command-input"
+      bind:this={inputEl}
       bind:value
       onkeydown={onKeydown}
       onpaste={onPaste}

@@ -180,7 +180,7 @@
       data-focus-region="channels"
       tabindex="-1"
     >
-      {#each shown as m, i (m.msgId || `${m.ts}-${m.sender}`)}
+      {#each shown as m, i (m.uid)}
         {@const isNew = !searching && mark > 0 && m.ts > mark && (i === 0 || shown[i - 1].ts <= mark)}
         {@const grouped = i > 0 && shown[i - 1].sender === m.sender && m.ts - shown[i - 1].ts < 300000}
         {@const current = i === curIdx}

@@ -25,6 +25,8 @@ export interface ChatChannel {
   mandatory?: boolean;
 }
 export interface ChatMsg {
+  /** Client-side key, unique for the page's life. See toMsg. */
+  uid: number;
   msgId: string;
   sender: string;
   senderHtml?: string;
@@ -47,8 +49,14 @@ function loadChannelPrefs(): Record<string, { color?: string; notify?: string }>
   }
 }
 
+// Rendering keys by uid, not msgId: a message without an id (or the same one
+// delivered twice) gave the keyed list duplicate keys, which a production
+// build does not report and can leave rendered wrong.
+let nextUid = 1;
+
 function toMsg(r: any): ChatMsg {
   return {
+    uid: nextUid++,
     msgId: String(r.msg_id ?? r.msgId ?? ""),
     sender: r.sender ?? "",
     senderHtml: r.sender_html ?? r.senderHtml,
@@ -78,6 +86,10 @@ class Chat {
   ticketHistory = $state<any[]>([]); // resolved/closed tickets (on demand)
   myTickets = $state<any[]>([]); // the player's own tickets
   myTicket = $state<any | null>(null); // player's open ticket detail
+  /** Why the player's list could not load; shown instead of "no tickets". */
+  myTicketsError = $state("");
+  /** Bumped when one of the player's tickets changes, so the list reloads. */
+  myTicketsRev = $state(0);
   staff = $state(false); // set true once the server sends assist_inbox (Builder+ only)
   active = $state<string>("");
   // Per-channel overrides: colour + notify mode ("all" | "mention" | "none").
@@ -181,7 +193,11 @@ class Chat {
         break;
       }
       case "ticket_thread":
-        this.ticket = kwargs && kwargs.id ? kwargs : null;
+        // Staff get the help-desk view; a player's own ticket opens in My
+        // Tickets (the staff panel does not exist for them).
+        if (!kwargs || !kwargs.id) break;
+        if (this.staff) this.ticket = kwargs;
+        else this.myTicket = kwargs;
         break;
       case "ticket_alert": {
         const title = `Unclaimed ${kwargs.label || "ticket"}`;
@@ -211,6 +227,8 @@ class Chat {
         // Live append to whichever open detail matches (staff or player view).
         if (this.ticket && kwargs.id === this.ticket.id) this.ticket = appendTo(this.ticket);
         if (this.myTicket && kwargs.id === this.myTicket.id) this.myTicket = appendTo(this.myTicket);
+        // Refresh the list's status and preview for the owner's own tickets.
+        if (!this.staff || this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTicketsRev += 1;
         break;
       }
       default:
@@ -361,19 +379,26 @@ class Chat {
 
   // -- player's own tickets ---------------------------------------------
 
+  /**
+   * Load the player's own tickets. A failure is kept and shown: it used to
+   * blank the list, which read as "you have no tickets". The panel calls this
+   * once the socket is open; a request made before that always failed.
+   */
   async loadMyTickets(includeClosed = false): Promise<void> {
     try {
       const r = await connection.request<any>("tickets", "my_tickets", { closed: includeClosed });
       this.myTickets = r?.tickets ?? [];
-    } catch {
-      this.myTickets = [];
+      this.myTicketsError = "";
+    } catch (e: any) {
+      this.myTicketsError = e?.message || "Could not load tickets.";
     }
   }
   async openMyTicket(id: string): Promise<void> {
     try {
       this.myTicket = await connection.request<any>("tickets", "my_ticket", { id });
-    } catch {
-      this.myTicket = null;
+      this.myTicketsError = "";
+    } catch (e: any) {
+      this.myTicketsError = e?.message || "Could not open that ticket.";
     }
   }
   replyMyTicket(id: string, text: string): void {
@@ -432,6 +457,8 @@ class Chat {
     if (!key) return;
     const m = toMsg(p);
     const prev = this.messages[key] ?? [];
+    // The same message twice (a resync racing a live send) is one message.
+    if (m.msgId && prev.some((x) => x.msgId === m.msgId)) return;
     const arr = [...prev, m];
     if (arr.length > MAX_PER_CHANNEL) arr.splice(0, arr.length - MAX_PER_CHANNEL);
     this.messages = { ...this.messages, [key]: arr };
@@ -446,10 +473,22 @@ class Chat {
     this.dropTyping(key, m.sender);
   }
 
+  /**
+   * Merge a history push into what the page already holds. It used to replace
+   * the channel's list outright, so a history payload (a resync, or the
+   * re-push after a deletion) wiped every message received since the page
+   * loaded that the backlog query did not return.
+   */
   private setHistory(map: Record<string, any[]>): void {
     const msgs = { ...this.messages };
     for (const [key, rows] of Object.entries(map)) {
-      if (Array.isArray(rows)) msgs[key] = rows.map(toMsg);
+      if (!Array.isArray(rows)) continue;
+      const incoming = rows.map(toMsg);
+      const known = new Set(incoming.map((m) => m.msgId).filter(Boolean));
+      const live = (msgs[key] ?? []).filter((m) => !m.msgId || !known.has(m.msgId));
+      const merged = [...incoming, ...live].sort((a, b) => a.ts - b.ts);
+      if (merged.length > MAX_PER_CHANNEL) merged.splice(0, merged.length - MAX_PER_CHANNEL);
+      msgs[key] = merged;
     }
     this.messages = msgs;
   }

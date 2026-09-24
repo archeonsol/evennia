@@ -168,6 +168,36 @@ class Dock {
     });
   }
 
+  /**
+   * Give one feed a panel of its own, so a player can keep, say, Nous traffic
+   * beside the terminal while the Feeds panel shows another tab.
+   */
+  openFeed(label: string): void {
+    const id = `feed:${label}`;
+    const title = `Feed: ${label}`;
+    if (settings.screenreader) {
+      simple.open({ id, component: "spawns", title, params: { feed: label } });
+      return;
+    }
+    if (!this.api) return;
+    const existing = this.api.getPanel(id);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const w = this.host?.clientWidth || this.api.width;
+    const h = this.host?.clientHeight || this.api.height;
+    const width = Math.max(Math.min(w * 0.45, 700), Math.min(w, 320));
+    const height = Math.max(Math.min(h * 0.6, 600), Math.min(h, 240));
+    this.api.addPanel({
+      id,
+      component: "spawns",
+      title,
+      params: { feed: label },
+      floating: { x: Math.max(0, w - width - 20), y: 20, width, height },
+    });
+  }
+
   /** Pop a panel's group out into a real browser window (multi-monitor). */
   popout(id: string): void {
     if (!this.api) return;

@@ -93,6 +93,10 @@ interface Persisted {
   channelEcho: boolean;
   /** Where a server-opened web page (the grid, notes, editors) goes. */
   webPages: WebPageMode;
+  /** Show each command you send in the terminal, as a MUD client's local echo does. */
+  echoCommands: boolean;
+  /** Leave the sent command in the command line, selected, instead of clearing it. */
+  keepCommand: boolean;
   customColors: Record<string, string>;
 }
 
@@ -125,6 +129,8 @@ const DEFAULTS: Persisted = {
   speakOutput: true,
   channelEcho: false,
   webPages: "panel",
+  echoCommands: false,
+  keepCommand: false,
   customColors: { ...CUSTOM_DEFAULTS },
 };
 
@@ -179,6 +185,8 @@ class Settings {
   speakOutput = $state(DEFAULTS.speakOutput);
   channelEcho = $state(DEFAULTS.channelEcho);
   webPages = $state<WebPageMode>(DEFAULTS.webPages);
+  echoCommands = $state(DEFAULTS.echoCommands);
+  keepCommand = $state(DEFAULTS.keepCommand);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;
 

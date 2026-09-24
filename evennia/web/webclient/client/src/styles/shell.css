@@ -234,6 +234,11 @@ html[data-glow] .glow-text {
 :root[data-screenreader] .crt-overlay,
 :root[data-screenreader] .embers { display: none !important; }
 
+/* Local echo of the player's own command. */
+.cmd-echo {
+  color: var(--fg-dim);
+}
+
 /* -- accessibility primitives ------------------------------------------- */
 
 /* Present to assistive tech, absent from the screen. */
@@ -284,4 +289,14 @@ textarea:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--accent-bright) !important;
   outline-offset: -2px;
+}
+
+/* Floating panels stay above docked ones but under the shell's own dialogs
+   (Settings 90, palette 95, toasts 120). dockview's default of 999 put a
+   floating feed or web page on top of the Settings dialog. Its inner shell
+   carries its own theme class, which sets the variable again. */
+.dv-underspire,
+.dv-underspire .dv-shell,
+.dv-underspire .dv-resize-container {
+  --dv-overlay-z-index: 40;
 }

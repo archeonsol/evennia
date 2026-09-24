@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Routing } from "./routing.svelte";
+import { FEED_MAX, Routing } from "./routing.svelte";
 
 function routed(routes: { pattern: string; label: string; move?: boolean }[]) {
   const r = new Routing();
@@ -144,20 +144,20 @@ describe("routing", () => {
 
   it("trims a full buffer by timestamp, keeping the newest lines", () => {
     const r = routed([{ pattern: "whispers", label: "chatter", move: true }]);
-    const fill = Array.from({ length: 300 }, (_, i) => ({
+    const fill = Array.from({ length: FEED_MAX }, (_, i) => ({
       label: "chatter",
       html: `<i>${i + 1}</i>`,
       ts: i + 1,
       id: i + 1,
     }));
     r.backfill(fill);
-    expect(r.buffers.chatter).toHaveLength(300);
+    expect(r.buffers.chatter).toHaveLength(FEED_MAX);
 
     // An older line cannot displace a newer one; a newer one evicts the oldest.
-    r.backfill([{ label: "chatter", html: "<i>old</i>", ts: 0, id: 999 }]);
-    expect(r.holds("chatter", 999)).toBe(false);
-    r.backfill([{ label: "chatter", html: "<i>new</i>", ts: 500, id: 998 }]);
-    expect(r.holds("chatter", 998)).toBe(true);
+    r.backfill([{ label: "chatter", html: "<i>old</i>", ts: 0, id: FEED_MAX + 999 }]);
+    expect(r.holds("chatter", FEED_MAX + 999)).toBe(false);
+    r.backfill([{ label: "chatter", html: "<i>new</i>", ts: FEED_MAX + 500, id: FEED_MAX + 998 }]);
+    expect(r.holds("chatter", FEED_MAX + 998)).toBe(true);
     expect(r.holds("chatter", 1)).toBe(false);
     expect(r.buffers.chatter[0].ts).toBe(2);
   });
