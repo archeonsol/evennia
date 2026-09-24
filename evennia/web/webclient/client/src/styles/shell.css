@@ -117,8 +117,12 @@ html[data-glow] .glow-text {
 }
 
 /* Re-skin dockview to the grimdark aesthetic: sharp, mono, accent-driven. Layered
-   over the base dockview-theme-dark class; we override the generic --dv-* vars. */
-.dv-underspire {
+   over the base dockview-theme-dark class; we override the generic --dv-* vars.
+   dockview puts its own theme class (abyss, a blue palette) on an inner
+   .dv-shell, which re-declared every one of these and turned the tab strips
+   blue; the variables are set on that element too. */
+.dv-underspire,
+.dv-underspire .dv-shell {
   font-family: var(--font-mono);
   --dv-background-color: var(--bg);
   --dv-group-view-background-color: var(--bg);
@@ -148,9 +152,13 @@ html[data-glow] .glow-text {
   --dv-scrollbar-background-color: var(--bg-deep);
   --dv-icon-hover-background-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
-/* Tabs - sharp, mono, uppercase; active tab gets a glowing accent underbar. */
+/* Tab strip: a row of channel plates on the panel's top rail. */
+.dv-underspire .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--border-bright);
+}
+/* Tabs - sharp, mono, uppercase; a status lamp marks the one on screen. */
 .dv-underspire .dv-tab {
-  padding: 0 13px;
+  padding: 0 12px 0 10px;
   border-right: 1px solid var(--border);
   color: var(--fg-dim);
   text-transform: uppercase;
@@ -158,6 +166,28 @@ html[data-glow] .glow-text {
   font-size: 0.68rem;
   position: relative;
   transition: color 0.12s ease, background 0.12s ease;
+}
+.dv-underspire .dv-tab .dv-default-tab-content::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 8px;
+  vertical-align: 1px;
+  background: var(--border-bright);
+}
+.dv-underspire .dv-tab.dv-active-tab .dv-default-tab-content::before {
+  background: var(--accent-bright);
+  box-shadow: 0 0 5px var(--glow);
+}
+/* The close control is there when wanted, not a row of x's on every tab. */
+.dv-underspire .dv-tab .dv-default-tab-action {
+  opacity: 0;
+}
+.dv-underspire .dv-tab:hover .dv-default-tab-action,
+.dv-underspire .dv-tab:focus-within .dv-default-tab-action,
+.dv-underspire .dv-tab.dv-active-tab .dv-default-tab-action {
+  opacity: 1;
 }
 .dv-underspire .dv-tab:hover {
   color: var(--fg);
@@ -172,7 +202,7 @@ html[data-glow] .glow-text {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  top: 0;
   height: 2px;
   background: var(--accent);
   box-shadow: 0 0 7px var(--glow);
@@ -299,4 +329,51 @@ select:focus-visible {
 .dv-underspire .dv-shell,
 .dv-underspire .dv-resize-container {
   --dv-overlay-z-index: 40;
+}
+
+/* Form controls in the shell's own hand: a flat track with a square thumb,
+   squared selects. The browser defaults (round pills and knobs) were the
+   one part of the settings that looked like a web app. The header volume
+   slider keeps its own rules (StatusBar.svelte). */
+input[type="range"]:not(.vol-slider) {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]:not(.vol-slider)::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--border-bright);
+}
+input[type="range"]:not(.vol-slider)::-moz-range-track {
+  height: 2px;
+  background: var(--border-bright);
+}
+input[type="range"]:not(.vol-slider)::-moz-range-progress {
+  height: 2px;
+  background: var(--accent);
+}
+input[type="range"]:not(.vol-slider)::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 14px;
+  margin-top: -6px;
+  background: var(--accent-bright);
+  border: 1px solid var(--bg-deep);
+  border-radius: 0;
+}
+input[type="range"]:not(.vol-slider)::-moz-range-thumb {
+  width: 10px;
+  height: 14px;
+  background: var(--accent-bright);
+  border: 1px solid var(--bg-deep);
+  border-radius: 0;
+}
+select {
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border-bright);
+  font-family: inherit;
 }

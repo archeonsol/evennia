@@ -19,6 +19,7 @@
 </script>
 
 <div class="hotbar" role="region" aria-label="Macros">
+  <span class="fn" aria-hidden="true">FUNCTION</span>
   <div class="macros">
     {#each macros.list as m, i (m.id)}
       {#if editing}
@@ -44,9 +45,9 @@
           onclick={() => commands.run(m.command)}
           title={m.command}
         >
+          {#if m.key}<span class="m-key">{m.key}</span>{/if}
           {#if m.icon}<span class="m-icon">{m.icon}</span>{/if}
           <span class="m-label">{m.label}</span>
-          {#if m.key}<span class="m-key">{m.key}</span>{/if}
         </button>
       {/if}
     {/each}
@@ -64,12 +65,15 @@
     background: var(--bg-elev); flex: 0 0 auto;
   }
   .macros { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; align-items: center; }
+  /* Function-key strip, as on the Nous deck: key code first, then the name. */
+  .fn { color: var(--fg-faint); font-size: 0.58rem; letter-spacing: 0.2em; flex: 0 0 auto; }
   .macro {
-    display: flex; align-items: baseline; gap: 6px;
+    display: flex; align-items: baseline; gap: 7px;
     background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
-    padding: 3px 9px; cursor: pointer;
+    font-family: inherit; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 3px 10px 3px 8px; cursor: pointer; min-height: 24px;
   }
+  @media (max-width: 820px) { .fn { display: none; } }
   .macro:hover { color: var(--accent-bright); border-color: var(--accent); }
   .m-key { color: var(--fg-faint); font-size: 0.62rem; }
   .macro:hover .m-key { color: var(--gold); }

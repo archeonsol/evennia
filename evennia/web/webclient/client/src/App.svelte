@@ -199,6 +199,7 @@
   .shell {
     display: grid;
     grid-template-rows: auto 1fr auto auto;
+    grid-template-columns: minmax(0, 1fr);
     height: 100%; width: 100%;
     color: var(--fg); font-family: var(--font-mono);
   }

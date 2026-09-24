@@ -10,6 +10,12 @@
   import { puppets } from "../lib/puppets.svelte";
 
   let host = $state<HTMLDivElement | null>(null);
+
+  /** Width for the scene/channels column on a fresh layout. */
+  function sideWidth(el: HTMLElement | null): number {
+    const w = el?.clientWidth || window.innerWidth;
+    return Math.round(Math.min(Math.max(w * 0.32, 280), 520));
+  }
   let api = $state<DockviewApi | null>(null);
   const LKEY = "underspire.layout.v2";
 
@@ -49,19 +55,34 @@
       restored = false;
     }
     if (!restored) {
+      // dockview measures its host later; sized panels added before then are
+      // scaled against nothing. Give it the real size first.
+      if (host.clientWidth && host.clientHeight) dv.layout(host.clientWidth, host.clientHeight);
       dv.addPanel({ id: "log", component: "log", title: "Terminal" });
-      dv.addPanel({
-        id: "scene",
-        component: "scene",
-        title: "Scene",
-        position: { referencePanel: "log", direction: "right" },
-      });
-      dv.addPanel({
-        id: "chat",
-        component: "chat",
-        title: "Channels",
-        position: { referencePanel: "scene", direction: "below" },
-      });
+      // A phone has no room for a side column: the terminal would be a strip
+      // one word wide. Scene and Channels become tabs beside it instead.
+      const narrow = (host.clientWidth || window.innerWidth) < 720;
+      if (narrow) {
+        dv.addPanel({ id: "scene", component: "scene", title: "Scene", position: { referencePanel: "log", direction: "within" } });
+        dv.addPanel({ id: "chat", component: "chat", title: "Channels", position: { referencePanel: "log", direction: "within" } });
+      } else {
+        dv.addPanel({
+          id: "scene",
+          component: "scene",
+          title: "Scene",
+          position: { referencePanel: "log", direction: "right" },
+          // A usable third of the width. Left to dockview it split evenly, or,
+          // laid out before the window had its size, left a sliver that
+          // wrapped every word.
+          initialWidth: sideWidth(host),
+        });
+        dv.addPanel({
+          id: "chat",
+          component: "chat",
+          title: "Channels",
+          position: { referencePanel: "scene", direction: "below" },
+        });
+      }
       dv.getPanel("log")?.api.setActive();
     }
 

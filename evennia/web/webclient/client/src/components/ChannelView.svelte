@@ -121,13 +121,13 @@
       {#if topic}<span class="topic">{topic}</span>{/if}
       <span class="tools">
         <button class="t" class:on={configuring} onclick={() => (configuring = !configuring)} title="channel settings"
-          aria-label="{name} channel settings" aria-expanded={configuring}>⚙</button>
+          aria-label="{name} channel settings" aria-expanded={configuring}>CFG</button>
         <button class="t" class:on={searching} onclick={() => { searching = !searching; if (!searching) search = ""; }} title="search"
-          aria-label="search {name}" aria-pressed={searching}>⌕</button>
+          aria-label="search {name}" aria-pressed={searching}>FIND</button>
         <button class="t" class:on={muted} onclick={() => chat.toggleMute(key)} title="mute channel" aria-pressed={muted}>
           {muted ? "muted" : "mute"}
         </button>
-        <button class="t" onclick={() => dock.openChannel(key, name)} title="pop out" aria-label="pop out {name}">⇱</button>
+        <button class="t" onclick={() => dock.openChannel(key, name)} title="pop out" aria-label="pop out {name}">POP</button>
       </span>
     </div>
 

@@ -231,7 +231,7 @@
       aria-label="Search command history" aria-describedby="rs-match" />
     <span class="rs-match" id="rs-match" aria-live="polite">{rMatch || "(no match)"}</span>
   {:else}
-    <span class="chevron glow-text" aria-hidden="true">❯</span>
+    <span class="chevron glow-text" aria-hidden="true">CMD&gt;</span>
     <input
       class="command-input"
       bind:this={inputEl}
@@ -251,7 +251,7 @@
       class:has-draft={compose.hasDraft}
       onclick={openCompose}
       title={compose.hasDraft ? "compose pad (draft saved)" : "compose pad"}
-      aria-label="compose pad">⤢</button
+      aria-label="compose pad">PAD</button
     >
   {/if}
 </div>
@@ -272,10 +272,13 @@
     color: var(--gold);
     flex: 0 0 auto;
   }
+  /* A named prompt, like the deck's PULSE>. */
   .chevron {
     color: var(--accent-bright);
     flex: 0 0 auto;
-    font-size: 1.05rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    font-weight: 500;
     line-height: 1;
   }
   .command-input {
@@ -297,8 +300,8 @@
   /* A saved draft is invisible once the pad is closed, so mark the button. */
   .compose-btn.has-draft { color: var(--accent-bright); border-color: var(--accent); }
   .compose-btn {
-    flex: 0 0 auto; background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.85rem; padding: 0 7px; cursor: pointer;
+    flex: 0 0 auto; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
+    font-family: inherit; font-size: 0.6rem; letter-spacing: 0.14em; padding: 0 8px; min-height: 24px; cursor: pointer;
   }
   .compose-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
   .rs-tag { color: var(--gold); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; flex: 0 0 auto; }
