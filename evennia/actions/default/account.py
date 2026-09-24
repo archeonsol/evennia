@@ -144,7 +144,10 @@ class DefaultAccountRules(NickRules):
             header = ("Name", "Value", "Saved") if saved_options else ("Name", "Value")
             table = evtable.EvTable(*header)
             for key in sorted(options):
-                row = [key, options[key]]
+                # protocol flags are not all text -- the webclient stores
+                # handshake metadata (HTTP_FP dict, HTTP_ORDER list) on the
+                # session too, and EvTable cells only take strings.
+                row = [key, utils.to_str(options[key])]
                 if saved_options:
                     saved = " |YYes|n" if key in saved_options else ""
                     changed = (
