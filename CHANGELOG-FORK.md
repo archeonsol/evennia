@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.268 — Ticket rows name the filing character
+
+### Web client
+
+- **The `TicketsPanel` names the character, not just the account.** The list
+  row and the open-ticket header rendered `account_name`, so a staff reader
+  saw the login handle even when the ticket carried the character it belongs
+  to. Both now render `requester_name` when the server sends one, with the
+  account as the fallback: the list keeps the account as a hover title and
+  the open ticket shows it beside the character
+  ([`TicketsPanel.svelte`](evennia/web/webclient/client/src/components/TicketsPanel.svelte)).
+- **The new-ticket toast follows suit.**
+  [`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts)
+  prefers `requester_name` too, so the first thing a staff member sees about
+  an arriving ticket is who filed it. `shell.js`/`shell.css` rebuilt.
+
+### Notes
+
+- Attribution is the server's: the game records the filing session's
+  character on `requester_id`, and this client renders `requester_name`
+  whenever a ticket carries it. Account-only tickets (browser pages, OOC
+  prompts) fall back to the login handle, unchanged.
+
+### Tests
+
+- Client vitest suite — 554 tests OK. No new client test: the panel renders
+  the field the server provides, and the attribution rule itself is covered
+  by the game's ticket tests.
+
 ## 6.0.0+underspire.267 — F5 macro and palette route to @stats
 
 ### Web client
