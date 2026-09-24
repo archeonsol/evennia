@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.273 — Feed-routed lines kept in the saved log and restored on unhide
+
+### Web client: feeds
+
+- **A line a feed rule moves out of the terminal is kept in the saved log**
+  ([`session.svelte.ts`](evennia/web/webclient/client/src/lib/session.svelte.ts),
+  [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)).
+  `session.lines` used to be the only buffer, so a routed-out line existed
+  nowhere but the feed: Save wrote the terminal, and a hidden line was missing
+  from the downloaded file. The session now keeps an `archive` of every
+  non-gagged line in arrival order, and Save reads it — hiding is for play,
+  not for the file.
+- **Switching "Hide in terminal" off (or deleting the rule) brings the lines
+  back.** `pruneMoved` reconciles the terminal with the rules in both
+  directions: a line a move-route claims is filed into its feed and taken out
+  of the terminal, and a line no rule hides any more returns from the record
+  at its arrival position. The existing guarantees hold: a claimed line leaves
+  the terminal only once every claiming feed verifiably holds it (by id), a
+  full feed that trims it back out keeps the terminal copy, a feed the player
+  cleared stays cleared, and the record and terminal trim together so the
+  terminal stays a subset. Gagged lines remain excluded from the record.
+
+### Tests
+
+- `npm test`: 623 tests. New coverage: the record keeps a routed-out line, a
+  rule switched off or deleted restores its hidden lines in arrival order, a
+  cleared feed does not resurface, and the full-feed trim still keeps the
+  terminal copy.
+
 ## 6.0.0+underspire.272 — Deferred capture rehydration out of caller transactions
 
 ### Actions / Attributes
