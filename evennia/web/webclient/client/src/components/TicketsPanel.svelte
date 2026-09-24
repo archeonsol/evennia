@@ -66,8 +66,15 @@
     const h = Math.floor(m / 60);
     return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
   }
-  function payloadEntries(p: any) {
-    return p ? Object.entries(p) : [];
+  // The deep report fields ride in the payload too. The bug block renders them
+  // from ticket_bug_detail with its own bounds; dumped inline they are an 8KB
+  // traceback with collapsed newlines, one wall of text that buries the thread.
+  const DEEP_PAYLOAD_KEYS = new Set(["traceback", "character_state"]);
+  function payloadEntries(p: any): [string, any][] {
+    return p ? Object.entries(p).filter(([k]) => !DEEP_PAYLOAD_KEYS.has(k)) : [];
+  }
+  function hasPayload(p: any) {
+    return !!p && Object.keys(p).length > 0;
   }
 </script>
 
@@ -141,45 +148,47 @@
         </span>
       </div>
 
-      {#if payloadEntries(ticket.payload).length}
-        <div class="ctx">
-          {#each payloadEntries(ticket.payload) as [k, v]}
-            <div class="cx"><span class="ck">{k}</span> <span class="cv">{v}</span></div>
-          {/each}
-          {#if ticket.kind === "bug" && !bugDetail}
-            <button class="loadbug" onclick={loadBug}>Load report detail ▾</button>
-          {/if}
-        </div>
-      {/if}
-
-      {#if bugDetail?.available}
-        <div class="bug">
-          <div class="bl"><span class="ck">reporter</span> {bugDetail.reporter} / {bugDetail.character}</div>
-          <div class="bl"><span class="ck">location</span> {bugDetail.location}</div>
-          {#if bugDetail.traceback_command}
-            <div class="bl"><span class="ck">last cmd</span> {bugDetail.traceback_command} <span class="dim">({bugDetail.traceback_time})</span></div>
-          {/if}
-          {#if bugDetail.traceback}
-            <div class="ck">traceback</div>
-            <pre class="tb">{bugDetail.traceback}</pre>
-          {/if}
-          {#if Object.keys(bugDetail.character_state ?? {}).length}
-            <div class="ck">character state</div>
-            <pre class="tb">{Object.entries(bugDetail.character_state).map(([k, v]) => `${k}: ${v}`).join("\n")}</pre>
-          {/if}
-        </div>
-      {:else if bugDetail && !bugDetail.available}
-        <div class="ctx"><span class="dim">No detailed bug report attached.</span></div>
-      {/if}
-
-      <div class="msgs">
-        {#each ticket.messages ?? [] as m, i (i)}
-          <div class="m" class:note={m.visibility === "internal"}>
-            <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
-            <span class="t">{@html renderBody(m.html, m.text)}</span>
+      <div class="body">
+        {#if hasPayload(ticket.payload)}
+          <div class="ctx">
+            {#each payloadEntries(ticket.payload) as [k, v]}
+              <div class="cx"><span class="ck">{k}</span> <span class="cv">{v}</span></div>
+            {/each}
+            {#if ticket.kind === "bug" && !bugDetail}
+              <button class="loadbug" onclick={loadBug}>Load report detail ▾</button>
+            {/if}
           </div>
-        {/each}
-        {#if !(ticket.messages ?? []).length}<p class="empty">No messages yet.</p>{/if}
+        {/if}
+
+        {#if bugDetail?.available}
+          <div class="bug">
+            <div class="bl"><span class="ck">reporter</span> {bugDetail.reporter} / {bugDetail.character}</div>
+            <div class="bl"><span class="ck">location</span> {bugDetail.location}</div>
+            {#if bugDetail.traceback_command}
+              <div class="bl"><span class="ck">last cmd</span> {bugDetail.traceback_command} <span class="dim">({bugDetail.traceback_time})</span></div>
+            {/if}
+            {#if bugDetail.traceback}
+              <div class="ck">traceback</div>
+              <pre class="tb">{bugDetail.traceback}</pre>
+            {/if}
+            {#if Object.keys(bugDetail.character_state ?? {}).length}
+              <div class="ck">character state</div>
+              <pre class="tb">{Object.entries(bugDetail.character_state).map(([k, v]) => `${k}: ${v}`).join("\n")}</pre>
+            {/if}
+          </div>
+        {:else if bugDetail && !bugDetail.available}
+          <div class="ctx"><span class="dim">No detailed bug report attached.</span></div>
+        {/if}
+
+        <div class="msgs">
+          {#each ticket.messages ?? [] as m, i (i)}
+            <div class="m" class:note={m.visibility === "internal"}>
+              <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
+              <span class="t">{@html renderBody(m.html, m.text)}</span>
+            </div>
+          {/each}
+          {#if !(ticket.messages ?? []).length}<p class="empty">No messages yet.</p>{/if}
+        </div>
       </div>
 
       <div class="reply">
@@ -283,7 +292,8 @@
   .cx { font-size: 0.74rem; }
   .ck { color: var(--accent-bright); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.06em; }
   .cv { color: var(--fg); }
-  .msgs { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: 1.5; }
+  .body { flex: 1; min-height: 0; overflow-y: auto; }
+  .msgs { padding: 6px 10px; line-height: 1.5; }
   .m { padding: 2px 0; font-size: 0.85rem; }
   .m .s { color: var(--accent-bright); margin-right: 0.6ch; }
   .m .t { color: var(--fg); white-space: pre-wrap; }
