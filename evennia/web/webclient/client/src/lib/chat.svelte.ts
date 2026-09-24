@@ -163,7 +163,11 @@ class Chat {
           const prev = new Set(this.tickets.map((t: any) => t.id));
           for (const t of next) {
             if (!prev.has(t.id)) {
-              toasts.push("ticket", `New ${t.label || "ticket"}`, t.account_name || t.short_id);
+              toasts.push(
+                "ticket",
+                `New ${t.label || "ticket"}`,
+                t.requester_name || t.account_name || t.short_id,
+              );
             }
           }
         }

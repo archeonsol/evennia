@@ -106,7 +106,10 @@
                 <span class="age">{ageOf(t.updated)}</span>
               </span>
             </span>
-            <span class="who">{t.account_name || t.short_id}</span>
+            <span
+              class="who"
+              title={t.account_name ? `account: ${t.account_name}` : undefined}
+            >{t.requester_name || t.account_name || t.short_id}</span>
             {#if t.subject}<span class="subject">{t.subject}</span>{/if}
             <span class="prev">{t.preview || "-"}</span>
           </button>
@@ -120,7 +123,12 @@
       <div class="head">
         <span class="petitioner">
           {#if ticket.subject}{ticket.subject}{:else}{ticket.label}{/if}
-          <span class="sub">{ticket.label}: {ticket.account_name || ticket.short_id}</span>
+          <span class="sub">
+            {ticket.label}: {ticket.requester_name || ticket.account_name || ticket.short_id}
+            {#if ticket.requester_name && ticket.account_name && ticket.requester_name !== ticket.account_name}
+              <span class="acct">({ticket.account_name})</span>
+            {/if}
+          </span>
         </span>
         <span class="actions">
           <button class="act" onclick={() => chat.ticketClaim(ticket.id)}>Claim</button>
@@ -293,4 +301,5 @@
   .reply input::placeholder { color: var(--fg-faint); font-style: italic; }
   .subject { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .petitioner .sub { display: block; color: var(--fg-dim); font-weight: 400; font-size: 0.72rem; }
+  .acct { color: var(--fg-faint); }
 </style>
