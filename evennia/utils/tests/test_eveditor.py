@@ -740,6 +740,39 @@ class TestEvEditorReload(BaseEvenniaCommandTest):
         _dispatch_line(actor, state, "after reload")
         self.assertIn("after reload", self.char1.ndb._eveditor.get_buffer())
 
+    def test_capture_rehydration_defers_out_of_caller_transaction(self):
+        # An object's first load after a restart can land inside a caller-owned
+        # transaction (e.g. an escrow item resolved under transaction.atomic),
+        # where its JSONB row state may not be materialized yet. The capture
+        # probe must defer to commit instead of failing the object's load.
+        from django.db import transaction
+
+        from evennia.typeclasses import jsonb_handler
+        from evennia.typeclasses.jsonb_handler import force_flush
+
+        EvEditor(self.char1, savefunc=_persistent_savefunc, persistent=True)
+        # Make the persisted marker durable before the simulated restart.
+        self.assertTrue(force_flush(self.char1).ok)
+        # Simulate a reload: the non-persistent state and ndb editor are gone.
+        self.char1.ndb._eveditor = None
+        self.char1.ndb.active_states = None
+
+        # Make the process-local row state cold again, as after a restart.
+        self.char1.__dict__.pop("attributes", None)
+        key = jsonb_handler._row_key(self.char1)
+        jsonb_handler._ROW_STATES.pop(key, None)
+        jsonb_handler._STRONG_ROW_STATES.pop(key, None)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                # at_post_load drives the seam; it must not raise mid-load.
+                self.char1.at_post_load()
+                self.assertIsNone(self.char1.ndb._eveditor)
+
+        self.assertIsNotNone(self.char1.ndb._eveditor)
+        actor = Actor(character=self.char1, session=self.session)
+        self.assertTrue(actor.has_state(EvEditorState))
+
     def _first(self):
         actor = Actor(character=self.char1, session=self.session)
         return actor, actor.state_objects[-1]

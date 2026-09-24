@@ -183,9 +183,33 @@ def rehydrate_captures(holder):
     majority). On the default JSONB backend ``query_key`` is just a membership
     check against the already-loaded row, so the gate costs no extra query.
 
+    The probe needs the holder's JSONB row state, which may not be materialized
+    yet (e.g. the holder's first load after a restart) and may not be created
+    inside a caller-owned transaction. That is not fatal: capture state is
+    non-persistent UI state, so the probe is deferred to transaction commit and
+    retried there.
+
     Args:
         holder: the character / account being loaded into the idmapper cache.
     """
+    from django.db import connections, transaction
+
+    from evennia.typeclasses.jsonb_handler import AttributeUpdateUsageError
+
+    try:
+        _probe_and_rehydrate(holder)
+    except AttributeUpdateUsageError:
+        # A cold JSONB row state may not be materialized inside a caller-owned
+        # transaction; retry once it commits (the row's own load must not fail
+        # just because a capture probe could not run yet).
+        alias = getattr(getattr(holder, "_state", None), "db", None) or "default"
+        if not connections[alias].in_atomic_block:
+            raise
+        transaction.on_commit(lambda: rehydrate_captures(holder), using=alias)
+
+
+def _probe_and_rehydrate(holder):
+    """Probe the capture markers and run any rehydrator they gate."""
     attrhandler = getattr(holder, "attributes", None)
     if attrhandler is None:
         return
