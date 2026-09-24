@@ -45,7 +45,7 @@
 <style>
   .chat { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
   .rail { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
-  .chan { display: flex; align-items: center; gap: 5px; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 8px; cursor: pointer; }
+  .chan { display: flex; align-items: center; gap: 5px; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.74rem; padding: 2px 9px; min-height: 24px; cursor: pointer; }
   .chan:hover { color: var(--fg); }
   .chan.active { color: var(--accent-bright); border-color: var(--accent); }
   .chan.muted .chan-name { opacity: 0.5; text-decoration: line-through; }

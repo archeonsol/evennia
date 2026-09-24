@@ -11,10 +11,10 @@
   let { onsettings }: { onsettings: () => void } = $props();
 
   const labels: Record<string, string> = {
-    connecting: "linking",
-    open: "online",
-    closed: "severed",
-    error: "fault",
+    connecting: "Connecting…",
+    open: "Online",
+    closed: "Disconnected",
+    error: "Connection error",
   };
 
   let viewsOpen = $state(false);
@@ -95,39 +95,32 @@
   }
 </script>
 
-<!-- An instrument strip, like the Nous deck's: labelled readout cells split by
-     rules, then the function keys. -->
+<!-- The client's own bar: plain words, the game's name, where you are, and
+     the controls. The Nous deck is the in-character device; this is the
+     player's out-of-character tool and should read as one. -->
 <header class="hud" data-state={connection.state}>
-  <div class="plate" aria-hidden="true"><span class="plate-mark">U</span><span class="plate-rest">NDERSPIRE</span></div>
-  <span class="sr-only">Underspire</span>
-
-  <div class="cell">
-    <span class="lbl" aria-hidden="true">LINK</span>
-    <span class="val conn"><span class="dot" aria-hidden="true"></span><span class="sr-only">Connection: </span>{labels[connection.state] ?? connection.state}</span>
+  <div class="side left">
+    <span class="brand glow-text">Underspire</span>
+    <span class="conn"><span class="dot" aria-hidden="true"></span><span class="sr-only">Connection: </span>{labels[connection.state] ?? connection.state}</span>
   </div>
 
-  <div class="cell grow">
+  <div class="mid">
     {#if scene.present && scene.room.name}
-      <span class="lbl" aria-hidden="true">LOC</span>
-      <span class="val loc glow-text"><span class="sr-only">Location: </span>{@html scene.room.name}</span>
+      <span class="loc"><span class="sr-only">Location: </span>{@html scene.room.name}</span>
     {/if}
-  </div>
-
-  {#if media.nowPlaying}
-    <div class="cell">
-      <span class="lbl" aria-hidden="true">AUDIO</span>
+    {#if media.nowPlaying}
       <button
         type="button"
         class="now-playing"
         title="Open media panel"
         onclick={() => media.openNowPlaying()}
       >
-        {media.nowPlayingLabel()}
+        <span aria-hidden="true">♪ </span>{media.nowPlayingLabel()}
       </button>
-    </div>
-  {/if}
+    {/if}
+  </div>
 
-  <div class="cell keys">
+  <div class="side right">
     <div
       class="vol"
       class:open={volOpen}
@@ -144,8 +137,13 @@
         }
       }}
     >
-      <span class="lbl" aria-hidden="true">VOL</span>
-      <span class="vol-val" aria-hidden="true">{media.volume === 0 ? "OFF" : String(media.volume).padStart(3, "0")}</span>
+      <svg class="vol-icon" viewBox="0 0 24 24" aria-hidden="true">
+        {#if media.volume === 0}
+          <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+        {:else}
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+        {/if}
+      </svg>
       <label class="sr-only" for="hud-vol">Music volume</label>
       <input
         id="hud-vol"
@@ -160,7 +158,7 @@
       />
     </div>
     <div class="menu">
-      <button class="cfg" bind:this={viewsBtn} onclick={() => (viewsOpen = !viewsOpen)} aria-expanded={viewsOpen} aria-label="Views">VIEWS</button>
+      <button class="cfg" bind:this={viewsBtn} onclick={() => (viewsOpen = !viewsOpen)} aria-expanded={viewsOpen}>Views</button>
       {#if viewsOpen}
         <!-- Disclosure, not role="menu": a menu role promises arrow-key
              handling these items never had. Escape closes it. -->
@@ -194,7 +192,7 @@
         </div>
       {/if}
     </div>
-    <button class="cfg" onclick={onsettings} aria-label="Settings">CFG</button>
+    <button class="cfg" onclick={onsettings}>Settings</button>
   </div>
 </header>
 
@@ -204,44 +202,37 @@
 
 <style>
   .hud {
-    display: flex;
-    align-items: stretch;
-    min-height: 2.1rem;
-    padding: 0 0.5rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+    align-items: center;
+    gap: 1rem;
+    min-height: 2.3rem;
+    padding: 0 0.8rem;
     border-bottom: 1px solid var(--accent);
     background: var(--bg-elev);
     color: var(--fg-dim);
-    font-size: 0.72rem;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
+    font-size: 0.78rem;
   }
-  /* Nameplate: the first letter keyed in a box, as on the Nous deck. */
-  .plate {
-    display: flex; align-items: center; padding-right: 0.8rem; margin-right: 0.2rem;
-    border-right: 1px solid var(--border-bright); white-space: nowrap;
+  .side { display: flex; align-items: center; gap: 0.9rem; min-width: 0; }
+  .right { justify-content: flex-end; }
+  .mid { display: flex; align-items: center; justify-content: center; gap: 0.8rem; min-width: 0; }
+  .brand {
+    color: var(--accent-bright); font-weight: 500; letter-spacing: 0.24em;
+    text-transform: uppercase; font-size: 0.74rem; white-space: nowrap;
   }
-  .plate-mark {
-    border: 1px solid var(--accent-bright); color: var(--accent-bright);
-    padding: 0 0.3em; margin-right: 0.15em; font-weight: 500; letter-spacing: 0;
-    text-shadow: 0 0 6px var(--glow);
+  .conn { display: flex; align-items: center; gap: 0.45rem; white-space: nowrap; color: var(--fg-dim); }
+  .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+  .vol-icon { flex-shrink: 0; width: 1rem; height: 1rem; fill: var(--fg-dim); }
+  .vol:hover .vol-icon, .vol.open .vol-icon, .vol:focus-within .vol-icon { fill: var(--accent-bright); }
+  .vol.muted .vol-icon { fill: var(--fg-faint); }
+  /* Narrow screens: the room name and the wordmark give way first. */
+  @media (max-width: 760px) {
+    .hud { grid-template-columns: minmax(0, 1fr) auto; }
+    .mid { display: none; }
   }
-  .plate-rest { color: var(--accent-bright); letter-spacing: 0.3em; font-weight: 500; }
-  /* Readout cell: a small label over, or beside, its value. */
-  .cell {
-    display: flex; align-items: center; gap: 0.6rem; padding: 0 0.8rem;
-    border-right: 1px solid var(--border); min-width: 0; white-space: nowrap;
+  @media (max-width: 420px) {
+    .brand { display: none; }
   }
-  .cell.grow { flex: 1 1 0; overflow: hidden; }
-  .hud { min-width: 0; }
-  /* Narrow screens: keep the values and keys, drop the labels first. */
-  @media (max-width: 820px) {
-    .plate-rest, .lbl { display: none; }
-    .cell { padding: 0 0.5rem; }
-  }
-  .cell.keys { border-right: none; padding-right: 0; gap: 0.5rem; }
-  .lbl { color: var(--fg-faint); font-size: 0.6rem; letter-spacing: 0.18em; }
-  .val { display: flex; align-items: center; gap: 0.5ch; color: var(--fg); min-width: 0; }
-  .vol-val { color: var(--fg); font-variant-numeric: tabular-nums; min-width: 3ch; }
   .dot { width: 0.5rem; height: 0.5rem; background: var(--fg-faint); }
   .hud[data-state="open"] .dot { background: var(--ok); }
   .hud[data-state="connecting"] .dot { background: var(--gold); }
@@ -249,8 +240,7 @@
   .hud[data-state="error"] .dot { background: var(--alert); }
   .loc {
     color: var(--gold);
-    letter-spacing: 0.2em;
-    display: block;
+    letter-spacing: 0.04em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -337,17 +327,15 @@
     white-space: nowrap;
     border: 0;
   }
-  /* Function keys: labelled, boxed, lit on hover or while open. */
   .cfg {
     background: var(--bg);
     border: 1px solid var(--border-bright);
-    color: var(--fg-dim);
+    color: var(--fg);
     font-family: inherit;
-    font-size: 0.66rem;
-    letter-spacing: 0.16em;
+    font-size: 0.74rem;
     cursor: pointer;
-    padding: 3px 9px;
-    min-height: 24px;
+    padding: 3px 12px;
+    min-height: 26px;
     white-space: nowrap;
   }
   .cfg:hover, .cfg[aria-expanded="true"] { color: var(--accent-bright); border-color: var(--accent); }

@@ -168,15 +168,15 @@
       {/if}
       <span class="tools" role="toolbar" aria-label="Feed tools">
         <button class="t" class:on={searching} aria-pressed={searching} aria-label="Search this feed" title="search"
-          onclick={() => { searching = !searching; if (!searching) query = ""; }}>FIND</button>
+          onclick={() => { searching = !searching; if (!searching) query = ""; }}>Search</button>
         <button class="t" class:on={stamps} aria-pressed={stamps} aria-label="Timestamps" title="timestamps"
-          onclick={() => (stamps = !stamps)}>TIME</button>
+          onclick={() => (stamps = !stamps)}>Times</button>
         {#if !feed && active}
-          <button class="t" aria-label="Open {active} in its own panel" title="own panel" onclick={() => dock.openFeed(active)}>POP</button>
+          <button class="t" aria-label="Open {active} in its own panel" title="own panel" onclick={() => dock.openFeed(active)}>Pop out</button>
         {/if}
-        <button class="t" aria-label="Edit feed rules" title="rules" onclick={openRules}>RULES</button>
+        <button class="t" aria-label="Edit feed rules" title="rules" onclick={openRules}>Rules</button>
         {#if active}
-          <button class="t" aria-label="Clear {active} feed" title="clear" onclick={clearFeed}>CLR</button>
+          <button class="t" aria-label="Clear {active} feed" title="clear" onclick={clearFeed}>Clear</button>
         {/if}
       </span>
     </div>
@@ -245,7 +245,7 @@
   .tools { display: flex; gap: 3px; flex: 0 0 auto; }
   .t {
     background: none; border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit;
-    font-size: 0.58rem; letter-spacing: 0.14em; min-width: 24px; min-height: 24px; padding: 0 6px; cursor: pointer;
+    font-size: 0.7rem; min-width: 24px; min-height: 24px; padding: 0 8px; cursor: pointer;
   }
   .t:hover, .t.on { color: var(--accent-bright); border-color: var(--accent); }
   .search { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }

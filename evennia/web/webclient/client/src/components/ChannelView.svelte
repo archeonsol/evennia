@@ -121,13 +121,13 @@
       {#if topic}<span class="topic">{topic}</span>{/if}
       <span class="tools">
         <button class="t" class:on={configuring} onclick={() => (configuring = !configuring)} title="channel settings"
-          aria-label="{name} channel settings" aria-expanded={configuring}>CFG</button>
+          aria-label="{name} channel settings" aria-expanded={configuring}>Settings</button>
         <button class="t" class:on={searching} onclick={() => { searching = !searching; if (!searching) search = ""; }} title="search"
-          aria-label="search {name}" aria-pressed={searching}>FIND</button>
+          aria-label="search {name}" aria-pressed={searching}>Search</button>
         <button class="t" class:on={muted} onclick={() => chat.toggleMute(key)} title="mute channel" aria-pressed={muted}>
-          {muted ? "muted" : "mute"}
+          {muted ? "Muted" : "Mute"}
         </button>
-        <button class="t" onclick={() => dock.openChannel(key, name)} title="pop out" aria-label="pop out {name}">POP</button>
+        <button class="t" onclick={() => dock.openChannel(key, name)} title="pop out" aria-label="pop out {name}">Pop out</button>
       </span>
     </div>
 
@@ -245,8 +245,8 @@
   .head { display: flex; align-items: baseline; gap: 1ch; padding: 5px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
   .title { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.78rem; }
   .topic { color: var(--fg-dim); font-size: 0.72rem; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tools { margin-left: auto; display: flex; gap: 4px; }
-  .t { background: none; border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 1px 6px; cursor: pointer; }
+  .tools { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .t { background: none; border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.7rem; padding: 1px 8px; cursor: pointer; white-space: nowrap; }
   .t:hover, .t.on { color: var(--accent-bright); border-color: var(--accent); }
   .pin { display: flex; align-items: baseline; gap: 0.6ch; padding: 3px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--gold) 8%, transparent); font-size: 0.76rem; }
   .pin-tag { color: var(--gold); font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; }

@@ -156,9 +156,9 @@ html[data-glow] .glow-text {
 .dv-underspire .dv-tabs-and-actions-container {
   border-bottom: 1px solid var(--border-bright);
 }
-/* Tabs - sharp, mono, uppercase; a status lamp marks the one on screen. */
+/* Tabs - sharp, mono, uppercase; the one on screen carries the accent bar. */
 .dv-underspire .dv-tab {
-  padding: 0 12px 0 10px;
+  padding: 0 13px;
   border-right: 1px solid var(--border);
   color: var(--fg-dim);
   text-transform: uppercase;
@@ -166,19 +166,6 @@ html[data-glow] .glow-text {
   font-size: 0.68rem;
   position: relative;
   transition: color 0.12s ease, background 0.12s ease;
-}
-.dv-underspire .dv-tab .dv-default-tab-content::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 8px;
-  vertical-align: 1px;
-  background: var(--border-bright);
-}
-.dv-underspire .dv-tab.dv-active-tab .dv-default-tab-content::before {
-  background: var(--accent-bright);
-  box-shadow: 0 0 5px var(--glow);
 }
 /* The close control is there when wanted, not a row of x's on every tab. */
 .dv-underspire .dv-tab .dv-default-tab-action {

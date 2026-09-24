@@ -234,12 +234,12 @@
       {/each}
     </div>
     <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)}
-      title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>TIME</button>
+      title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>Times</button>
     <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)}
-      title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>FIND</button>
+      title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>Search</button>
     <div class="save" bind:this={saveEl}>
       <button class="tool" class:on={saveOpen} onclick={() => (saveOpen = !saveOpen)}
-        title="save log" aria-label="save log" aria-expanded={saveOpen}>SAVE</button>
+        title="save log" aria-label="save log" aria-expanded={saveOpen}>Save</button>
       {#if saveOpen}
         <div class="save-menu">
           {#each SAVE_FORMATS as f}
@@ -250,7 +250,7 @@
         </div>
       {/if}
     </div>
-    <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">CLR</button>
+    <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">Clear</button>
   </div>
 
   {#if logview.searchOpen}
@@ -305,25 +305,25 @@
 <style>
   .log-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; position: relative; }
   .log-bar {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 3px 8px; border-bottom: 1px solid var(--border);
     background: var(--bg-elev); flex: 0 0 auto;
   }
-  .chips { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
-  /* Channel-select keys: a lamp shows whether the category is on screen. */
+  .chips { display: flex; gap: 4px; flex: 1 1 auto; min-width: min(100%, 16rem); flex-wrap: wrap; }
+  /* Category toggles: the light shows whether that kind of line is shown. */
   .chip {
     display: inline-flex; align-items: center; gap: 6px;
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase;
-    padding: 1px 8px 1px 6px; cursor: pointer; min-height: 24px;
+    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg);
+    font-family: inherit; font-size: 0.72rem;
+    padding: 1px 9px 1px 7px; cursor: pointer; min-height: 24px;
   }
   .chip:hover { color: var(--fg); border-color: var(--accent); }
-  .lamp { width: 6px; height: 6px; background: var(--accent-bright); box-shadow: 0 0 5px var(--glow); flex: 0 0 auto; }
+  .lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bright); flex: 0 0 auto; }
   .chip.off { color: var(--fg-faint); border-color: var(--border); }
   .chip.off .lamp { background: transparent; box-shadow: none; outline: 1px solid var(--border-bright); outline-offset: -1px; }
   .tool {
     background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.6rem; letter-spacing: 0.14em; padding: 0 7px; cursor: pointer; min-height: 24px; min-width: 24px;
+    font-family: inherit; font-size: 0.72rem; padding: 0 9px; cursor: pointer; min-height: 24px; min-width: 24px;
   }
   .tool:hover, .tool.on { color: var(--accent-bright); border-color: var(--accent); }
 

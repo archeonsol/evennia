@@ -193,12 +193,9 @@
   <div class="body">
     {#if view === "hub"}
       <div class="hub">
-        {#each groups as g, i}
-          <!-- A keyed menu line, as on the Nous deck, not an icon grid. -->
+        {#each groups as g}
           <button class="tile" id="settings-tile-{g.id}" onclick={() => openView(g.id)}>
-            <span class="glyph" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
             <span class="tile-label">{g.label}</span>
-            <span class="leader" aria-hidden="true"></span>
             <span class="go" aria-hidden="true">›</span>
           </button>
         {/each}
@@ -492,20 +489,17 @@
   .body { overflow-y: auto; padding: 0.4rem 1rem 0.5rem; }
 
   .hub {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; padding: 0.4rem 0;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 0.4rem 0;
   }
   .tile {
-    display: flex; align-items: baseline; gap: 10px;
-    padding: 7px 4px; background: none; border: none; border-bottom: 1px solid var(--border);
-    color: var(--fg); font-family: inherit; cursor: pointer; text-align: left; min-height: 32px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    color: var(--fg); font-family: inherit; cursor: pointer; text-align: left; min-height: 36px;
   }
-  .tile:hover { background: var(--bg-elev); }
-  .glyph { color: var(--fg-faint); font-size: 0.62rem; letter-spacing: 0.1em; flex: 0 0 auto; }
-  .tile-label { text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.72rem; color: var(--fg-dim); flex: 0 0 auto; }
-  .leader { flex: 1; border-bottom: 1px dotted var(--border-bright); transform: translateY(-3px); }
-  .go { color: var(--fg-faint); }
+  .tile:hover { border-color: var(--accent); }
+  .tile-label { font-size: 0.82rem; color: var(--fg); }
+  .go { color: var(--fg-dim); }
   .tile:hover .tile-label, .tile:hover .go { color: var(--accent-bright); }
-  .tile:hover .glyph { color: var(--accent); }
 
   .row {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
