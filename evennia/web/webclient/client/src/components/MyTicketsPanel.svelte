@@ -124,7 +124,7 @@
   .ctitle { color: var(--gold); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.78rem; }
   .msgs { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: 1.5; }
   .m { padding: 2px 0; font-size: 0.85rem; }
-  .m .s { color: var(--accent); margin-right: 0.6ch; }
+  .m .s { color: var(--accent-bright); margin-right: 0.6ch; }
   .m .t { color: var(--fg); white-space: pre-wrap; }
   .reply { display: flex; align-items: center; gap: 0.6rem; padding: 6px 10px; border-top: 1px solid var(--accent); flex: 0 0 auto; }
   .chev { color: var(--accent-bright); }

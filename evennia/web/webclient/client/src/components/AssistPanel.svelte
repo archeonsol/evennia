@@ -131,7 +131,7 @@
   .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 1ch; }
   .who { color: var(--gold); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; }
   .meta { display: flex; align-items: baseline; gap: 0.7ch; flex: 0 0 auto; }
-  .asg { color: var(--accent); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .asg { color: var(--accent-bright); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; }
   .age { color: var(--fg-faint); font-size: 0.68rem; }
   .status {
     font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em;
@@ -159,7 +159,7 @@
   .act.st-closed:hover { border-color: var(--fg-faint); }
   .msgs { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: 1.5; }
   .am { padding: 2px 0; font-size: 0.85rem; }
-  .am .s { color: var(--accent); margin-right: 0.6ch; }
+  .am .s { color: var(--accent-bright); margin-right: 0.6ch; }
   .am .t { color: var(--fg); white-space: pre-wrap; }
   .reply {
     display: flex; align-items: center; gap: 0.6rem; padding: 6px 10px;

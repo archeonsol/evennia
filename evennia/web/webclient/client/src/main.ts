@@ -25,6 +25,9 @@ import { dock } from "./lib/dock.svelte";
 import { createLegacyEmitter } from "./lib/legacy-emitter";
 import { compose } from "./lib/compose.svelte";
 import type { OobEvent } from "./lib/oob-events";
+import { announcer } from "./lib/announce.svelte";
+import { renderBody, renderSender } from "./lib/markup";
+import { logview } from "./lib/logview.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -70,6 +73,26 @@ compose.init();
 // The preview is a real (silent) command, so it goes out on the command line
 // rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
 compose.setPreviewSender((line) => connection.sendCommand(line));
+
+// Speak new output. A category the player filtered out of the log is muted
+// here too, so the log's filter chips double as speech filters.
+session.onLine((line) => {
+  if (settings.speakOutput && line.type !== "media" && logview.filters[line.cat]) {
+    announcer.say(line.text);
+  }
+});
+
+// Channel echo: telnet shows channel traffic in the one stream, and the shell
+// used to keep it in the Channels panel only, where a screen reader never
+// heard it. Muted channels stay quiet here as they do there.
+function echoChannel(kw: Record<string, any>): void {
+  const key = String(kw.channel ?? "");
+  if (!settings.channelEcho || !key || chat.muted[key]) return;
+  const name = chat.channels.find((c) => c.key === key)?.name ?? key;
+  const sender = renderSender(kw.sender_html, kw.sender);
+  const body = renderBody(kw.html, kw.text);
+  session.append(`<span class="chan-echo">${renderSender(undefined, `[${name}]`)}</span> ${sender}: ${body}`, "channel");
+}
 
 // Direct-message-ish kinds that deserve an attention ping when unfocused.
 const TELL_KINDS = new Set(["tell", "whisper", "page", "say_to"]);
@@ -128,6 +151,12 @@ function refreshPuppetManifest() {
 // trip here — the manifest is the one thing only the client knows it wants.
 connection.on("connection_open", () => {
   refreshPuppetManifest();
+  // The session flag starts off on every connection, and the settings store's
+  // own send runs before the socket is open, so it is dropped. Only "on" is
+  // sent: off must not undo a player's saved @option screenreader.
+  if (settings.screenreader) {
+    connection.sendOobRaw("webclient_options", [], { SCREENREADER: true });
+  }
 });
 
 // Every name this file routes on must exist in the server's event catalog.
@@ -148,6 +177,7 @@ connection.on("oob", (env) => {
     event.startsWith("ticket_")
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
+    if (is(event, "channel_msg")) echoChannel(env.kwargs ?? {});
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);
@@ -161,7 +191,7 @@ connection.on("oob", (env) => {
     const url = String(spec.url ?? "");
     if (url) {
       const id = String(spec.id ?? url);
-      dock.openIframe(id, String(spec.title ?? "Web"), url);
+      dock.openWebPage(id, String(spec.title ?? "Web"), url);
     }
   } else if (is(event, "logout")) {
     // Server-side @quit: raise the quit menu instead of silently reconnecting.

@@ -1,9 +1,14 @@
 <script lang="ts">
   import { connection } from "../lib/evennia.svelte";
+  import { modal } from "../lib/modal";
+
+  let reconnectBtn = $state<HTMLButtonElement | null>(null);
 </script>
 
 <div class="scrim">
-  <div class="quit framed">
+  <!-- No onclose: the session is over, so Escape has nothing to go back to. -->
+  <div class="quit framed" role="alertdialog" aria-modal="true" aria-labelledby="quit-title" aria-describedby="quit-sub"
+    use:modal={{ initial: reconnectBtn }}>
     <!-- Power mark as SVG: U+23FB sits outside the shell-glyph fallback range,
          so the Latin-only webfont stacks render it as a missing-glyph box. -->
     <div class="mark" aria-hidden="true">
@@ -13,10 +18,10 @@
         />
       </svg>
     </div>
-    <h2 class="glow-text">DISCONNECTED</h2>
-    <p class="sub">You have left Underspire.</p>
+    <h2 class="glow-text" id="quit-title">DISCONNECTED</h2>
+    <p class="sub" id="quit-sub">You have left Underspire.</p>
     <div class="acts">
-      <button class="primary" onclick={() => connection.reconnect()}>Reconnect</button>
+      <button class="primary" bind:this={reconnectBtn} onclick={() => connection.reconnect()}>Reconnect</button>
       <a class="secondary" href="/">Leave</a>
     </div>
     <p class="hint">Your session ended. Reconnect to return to the game.</p>

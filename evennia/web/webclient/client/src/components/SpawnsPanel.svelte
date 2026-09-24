@@ -22,7 +22,7 @@
       <button class="tab" class:on={l === active} onclick={() => (active = l)}
         >{l}{#if l !== active && routing.unread[l]}<span class="badge">{routing.unread[l]}</span>{/if}</button>
     {/each}
-    {#if active}<button class="clr" onclick={() => routing.clear(active)} title="clear">⌫</button>{/if}
+    {#if active}<button class="clr" onclick={() => routing.clear(active)} title="clear" aria-label="Clear {active} feed">⌫</button>{/if}
   </div>
   {#if labels.length}
     <div class="lines">

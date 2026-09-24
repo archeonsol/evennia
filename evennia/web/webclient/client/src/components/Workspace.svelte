@@ -6,17 +6,7 @@
   import { chat } from "../lib/chat.svelte";
   import { dock } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
-  import GameLog from "./GameLog.svelte";
-  import RoomPanel from "./RoomPanel.svelte";
-  import ChatPanel from "./ChatPanel.svelte";
-  import ChannelView from "./ChannelView.svelte";
-  import AssistPanel from "./AssistPanel.svelte";
-  import TicketsPanel from "./TicketsPanel.svelte";
-  import IFramePanel from "./IFramePanel.svelte";
-  import MediaPanel from "./MediaPanel.svelte";
-  import SpawnsPanel from "./SpawnsPanel.svelte";
-  import MyTicketsPanel from "./MyTicketsPanel.svelte";
-  import PuppetsPanel from "./PuppetsPanel.svelte";
+  import { PANELS } from "../lib/panelRegistry";
   import { puppets } from "../lib/puppets.svelte";
 
   let host = $state<HTMLDivElement | null>(null);
@@ -43,22 +33,10 @@
   $effect(() => {
     if (!host) return;
     const dv: DockviewApi = createDockview(host, {
-      createComponent: svelteComponents({
-        log: GameLog,
-        scene: RoomPanel,
-        chat: ChatPanel,
-        channel: ChannelView,
-        assist: AssistPanel,
-        tickets: TicketsPanel,
-        iframe: IFramePanel,
-        media: MediaPanel,
-        spawns: SpawnsPanel,
-        mytickets: MyTicketsPanel,
-        puppets: PuppetsPanel,
-      }),
+      createComponent: svelteComponents(PANELS),
     });
     api = dv;
-    dock.set(dv);
+    dock.set(dv, host);
 
     let restored = false;
     try {

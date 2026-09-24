@@ -6,6 +6,8 @@
   let dragId: string | null = null;
 
   function captureKey(id: string, e: KeyboardEvent) {
+    // Tab and Escape leave the field: capturing them trapped keyboard users.
+    if (e.key === "Tab" || e.key === "Escape") return;
     e.preventDefault();
     if (e.key === "Backspace" || e.key === "Delete") {
       macros.update(id, { key: undefined });
@@ -16,16 +18,21 @@
   }
 </script>
 
-<div class="hotbar">
+<div class="hotbar" role="region" aria-label="Macros">
   <div class="macros">
-    {#each macros.list as m (m.id)}
+    {#each macros.list as m, i (m.id)}
       {#if editing}
-        <div class="edit-cell">
-          <input class="e-icon" bind:value={m.icon} onchange={() => macros.save()} placeholder="◆" maxlength="2" />
-          <input class="e-label" bind:value={m.label} onchange={() => macros.save()} placeholder="label" />
-          <input class="e-cmd" bind:value={m.command} onchange={() => macros.save()} placeholder="command" />
-          <input class="e-key" readonly value={m.key ?? ""} onkeydown={(e) => captureKey(m.id, e)} placeholder="bind" />
-          <button class="e-del" onclick={() => macros.remove(m.id)} aria-label="remove">×</button>
+        {@const n = `Macro ${i + 1}`}
+        <div class="edit-cell" role="group" aria-label={n}>
+          <input class="e-icon" bind:value={m.icon} onchange={() => macros.save()} placeholder="◆" maxlength="2" aria-label="{n} icon" />
+          <input class="e-label" bind:value={m.label} onchange={() => macros.save()} placeholder="label" aria-label="{n} label" />
+          <input class="e-cmd" bind:value={m.command} onchange={() => macros.save()} placeholder="command" aria-label="{n} command" />
+          <input class="e-key" readonly value={m.key ?? ""} onkeydown={(e) => captureKey(m.id, e)} placeholder="bind"
+            aria-label="{n} key: press a key combination, Backspace to clear" />
+          <!-- Reordering had been drag-only. -->
+          <button class="e-mv" disabled={i === 0} onclick={() => macros.move(m.id, macros.list[i - 1].id)} aria-label="Move {n} left">‹</button>
+          <button class="e-mv" disabled={i === macros.list.length - 1} onclick={() => macros.move(m.id, macros.list[i + 1].id)} aria-label="Move {n} right">›</button>
+          <button class="e-del" onclick={() => macros.remove(m.id)} aria-label="Remove {n}">×</button>
         </div>
       {:else}
         <button
@@ -78,6 +85,8 @@
   .e-cmd { width: 8rem; }
   .e-key { width: 4.5rem; color: var(--gold); }
   .e-del { background: none; border: none; color: var(--alert); cursor: pointer; font-size: 0.9rem; }
+  .e-mv { background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 0.9rem; min-width: 18px; }
+  .e-mv:disabled { color: var(--fg-faint); cursor: default; }
   .add {
     background: none; border: 1px dashed var(--border-bright); color: var(--fg-dim);
     font-family: inherit; font-size: 0.7rem; padding: 3px 9px; cursor: pointer;

@@ -15,6 +15,7 @@ import { toasts } from "./toasts.svelte";
 import { notify } from "./notify.svelte";
 import { playMention } from "./audio";
 import { renderBody, renderSender } from "./markup";
+import { settings } from "./settings.svelte";
 
 export interface ChatChannel {
   key: string;
@@ -419,7 +420,8 @@ class Chat {
       this.unread = { ...this.unread, [key]: (this.unread[key] ?? 0) + 1 };
     }
     const name = this.channels.find((c) => c.key === key)?.name ?? key;
-    toasts.push("mention", `@ ${name}`, `${kwargs.sender ?? ""}: ${kwargs.text ?? ""}`);
+    // With channel echo on, the message itself is spoken from the terminal.
+    toasts.push("mention", `@ ${name}`, `${kwargs.sender ?? ""}: ${kwargs.text ?? ""}`, undefined, !settings.channelEcho);
     playMention();
     // Title/desktop attention if the tab is in the background (no extra sound).
     notify.ping(`@ ${name}`, `${kwargs.sender ?? ""}: ${kwargs.text ?? ""}`, false);

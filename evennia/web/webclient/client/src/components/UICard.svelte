@@ -7,6 +7,11 @@
   function submit() {
     ui.runForm(comp, values);
   }
+  // The card unmounts under the focused button; return to the command line.
+  function dismiss() {
+    ui.remove(comp.id);
+    document.querySelector<HTMLElement>('[data-focus-region="input"]')?.focus();
+  }
   const pct = $derived(
     comp.type === "gauge"
       ? Math.max(0, Math.min(100, ((comp.value ?? 0) / (comp.max || 1)) * 100))
@@ -14,11 +19,11 @@
   );
 </script>
 
-<div class="uic" class:gauge={comp.type === "gauge"}>
+<div class="uic" class:gauge={comp.type === "gauge"} role="region" aria-label={comp.title || comp.type}>
   <div class="uhd">
     {#if comp.title}<span class="utitle">{comp.title}</span>{/if}
     {#if comp.dismissible !== false}
-      <button class="ux" onclick={() => ui.remove(comp.id)} aria-label="dismiss">×</button>
+      <button class="ux" onclick={dismiss} aria-label="dismiss {comp.title || comp.type}">×</button>
     {/if}
   </div>
 
@@ -68,7 +73,8 @@
     </table>
   {:else if comp.type === "gauge"}
     <div class="ugauge">
-      <div class="ubar"><div class="ufill" style="width:{pct}%; background:{comp.color ?? 'var(--gold)'}"></div></div>
+      <div class="ubar" role="meter" aria-label={comp.title || "gauge"} aria-valuemin="0"
+        aria-valuemax={comp.max ?? 0} aria-valuenow={comp.value ?? 0}><div class="ufill" style="width:{pct}%; background:{comp.color ?? 'var(--gold)'}"></div></div>
       <span class="uval">{comp.value ?? 0}/{comp.max ?? 0}</span>
     </div>
   {/if}
@@ -83,7 +89,7 @@
   .uic.gauge { border-color: var(--border-bright); box-shadow: none; }
   .uhd { display: flex; align-items: center; padding: 5px 9px; border-bottom: 1px solid var(--border); }
   .utitle { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.72rem; }
-  .ux { margin-left: auto; background: none; border: none; color: var(--fg-dim); font-size: 1rem; line-height: 1; cursor: pointer; }
+  .ux { min-width: 24px; min-height: 24px; margin-left: auto; background: none; border: none; color: var(--fg-dim); font-size: 1rem; line-height: 1; cursor: pointer; }
   .ux:hover { color: var(--accent-bright); }
   .ubody { padding: 8px 10px; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
   .ubtns, .umenu { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 10px; }

@@ -12,7 +12,7 @@
   });
 </script>
 
-<div class="yt-bgm" aria-hidden="true">
+<div class="yt-bgm" aria-hidden="true" inert>
   <div id="yt-player"></div>
 </div>
 

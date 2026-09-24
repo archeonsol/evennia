@@ -46,7 +46,14 @@ export function typewriter(node: HTMLElement, params: TWParams) {
   let raf = 0;
   const chunks: { node: Text; text: string }[] = [];
   const { id, durationMs, onstep } = params;
-  const skip = revealed.has(id) || id <= baselineId || durationMs <= 0 || typeof Intl.Segmenter !== "function";
+  // A background tab gets no animation frames, so a line typed in there would
+  // sit blank until the player looked; it has nobody to animate for anyway.
+  const skip =
+    revealed.has(id) ||
+    id <= baselineId ||
+    durationMs <= 0 ||
+    typeof Intl.Segmenter !== "function" ||
+    (typeof document !== "undefined" && document.hidden);
   revealed.add(id);
 
   const finish = () => {

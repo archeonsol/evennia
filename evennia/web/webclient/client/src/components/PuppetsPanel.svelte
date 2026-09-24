@@ -69,7 +69,7 @@
   {#if active}
     <!-- Terminal view: act as this NPC, no p<n> prefix. -->
     <header class="term-head">
-      <button class="back" onclick={close} title="Back to puppet list">‹</button>
+      <button class="back" onclick={close} title="Back to puppet list" aria-label="Back to puppet list">‹</button>
       <strong>P{active.slot}</strong>
       <span class="name">{active.name}</span>
       <small>#{active.npcId}</small>

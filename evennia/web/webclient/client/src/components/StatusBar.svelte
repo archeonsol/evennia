@@ -4,6 +4,9 @@
   import { dock, VIEWS } from "../lib/dock.svelte";
   import { chat } from "../lib/chat.svelte";
   import { media } from "../lib/media.svelte";
+  import { settings } from "../lib/settings.svelte";
+  import { focusRegion, type Region } from "../lib/regions";
+  import { tick } from "svelte";
 
   let { onsettings }: { onsettings: () => void } = $props();
 
@@ -20,13 +23,27 @@
   const viewIds = $derived(
     Object.keys(VIEWS).filter((id) => id !== "tickets" || chat.staff),
   );
+  // Where focus goes after a pick: the view's own region when it has one,
+  // else the tab of the new view in the screen-reader layout, else back to
+  // the Views button. Closing the list must not leave focus on the body.
+  const REGION_OF: Record<string, Region> = { log: "output", scene: "scene", chat: "channels" };
+  async function afterPick(id?: string) {
+    viewsOpen = false;
+    await tick();
+    if (id && REGION_OF[id]) {
+      if (await focusRegion(REGION_OF[id])) return;
+    }
+    const tab = id ? document.getElementById(`sv-tab-${id}`) : null;
+    if (tab) tab.focus();
+    else if (document.activeElement === document.body || !document.activeElement) viewsBtn?.focus();
+  }
   function pick(id: string) {
     dock.openView(id);
-    viewsOpen = false;
+    void afterPick(id);
   }
   function openSite() {
-    dock.openIframe("view:site", "Web", location.origin);
-    viewsOpen = false;
+    dock.openWebPage("view:site", "Web", location.origin);
+    void afterPick("view:site");
   }
   // The notes page is a per-character tokenised URL the server puts in the
   // scene fields; it is only offered when the character actually has one.
@@ -34,12 +51,12 @@
     typeof scene.fields.notes_url === "string" ? scene.fields.notes_url : "",
   );
   function openNotes() {
-    if (notesUrl) dock.openIframe("view:notes", "Notes", notesUrl);
-    viewsOpen = false;
+    if (notesUrl) dock.openWebPage("view:notes", "Notes", notesUrl);
+    void afterPick("view:notes");
   }
   function reset() {
     viewsOpen = false;
-    dock.resetLayout();
+    if (confirm("Reset the panel layout to the default?")) dock.resetLayout();
   }
   let presets = $state<string[]>([]);
   function refreshPresets() {
@@ -47,7 +64,7 @@
   }
   function loadPreset(name: string) {
     dock.loadLayout(name);
-    viewsOpen = false;
+    void afterPick();
   }
   function savePreset() {
     const name = prompt("Save current layout as:");
@@ -64,12 +81,24 @@
   $effect(() => {
     if (viewsOpen) refreshPresets();
   });
+
+  let viewsBtn = $state<HTMLButtonElement | null>(null);
+  function focusFirst(node: HTMLElement, first: boolean) {
+    if (first) node.focus();
+  }
+  function onDropKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      viewsOpen = false;
+      viewsBtn?.focus();
+    }
+  }
 </script>
 
 <header class="hud" data-state={connection.state}>
   <div class="zone left">
     <span class="dot" aria-hidden="true"></span>
-    <span class="conn">{labels[connection.state] ?? connection.state}</span>
+    <span class="conn"><span class="sr-only">Connection: </span>{labels[connection.state] ?? connection.state}</span>
   </div>
 
   <div class="zone center">
@@ -129,44 +158,41 @@
     </div>
     <span class="brand glow-text">UNDERSPIRE</span>
     <div class="menu">
-      <button class="cfg" onclick={() => (viewsOpen = !viewsOpen)} aria-haspopup="true" aria-expanded={viewsOpen}>[ VIEWS ]</button>
+      <button class="cfg" bind:this={viewsBtn} onclick={() => (viewsOpen = !viewsOpen)} aria-expanded={viewsOpen} aria-label="Views">[ VIEWS ]</button>
       {#if viewsOpen}
-        <div class="drop" role="menu">
-          {#each viewIds as id}
-            <button class="mi" role="menuitem" class:on={dock.isOpen(id)} onclick={() => pick(id)}>
-              {VIEWS[id].title}{dock.isOpen(id) ? " ·" : ""}
+        <!-- Disclosure, not role="menu": a menu role promises arrow-key
+             handling these items never had. Escape closes it. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="drop" onkeydown={onDropKey}>
+          {#each viewIds as id, i}
+            <button class="mi" class:on={dock.isOpen(id)} onclick={() => pick(id)} use:focusFirst={i === 0}>
+              {VIEWS[id].title}{#if dock.isOpen(id)}<span aria-hidden="true"> ·</span><span class="sr-only"> (open)</span>{/if}
             </button>
           {/each}
-          <button class="mi" role="menuitem" onclick={openSite}>Web page</button>
+          <button class="mi" onclick={openSite}>Web page</button>
           {#if notesUrl}
-            <button class="mi" role="menuitem" onclick={openNotes}>Notes</button>
+            <button class="mi" onclick={openNotes}>Notes</button>
           {/if}
-          <div class="sep"></div>
+          <!-- Layouts belong to the docked workspace; the screen-reader
+               layout has none to save, lock or reset. -->
+          {#if !settings.screenreader}
+          <div class="sep" role="separator"></div>
           {#each presets as name}
-            <button class="mi preset" role="menuitem" onclick={() => loadPreset(name)}>
-              ▸ {name}
-              <span
-                class="del"
-                role="button"
-                tabindex="0"
-                onclick={(e) => delPreset(name, e)}
-                onkeydown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    delPreset(name, e);
-                  }
-                }}>×</span>
-            </button>
+            <div class="preset-row">
+              <button class="mi preset" onclick={() => loadPreset(name)}>▸ {name}</button>
+              <button class="del" onclick={(e) => delPreset(name, e)} aria-label="Delete layout {name}">×</button>
+            </div>
           {/each}
-          <button class="mi" role="menuitem" onclick={savePreset}>Save layout…</button>
-          <button class="mi" role="menuitem" class:on={dock.locked} onclick={() => dock.toggleLock()}>
+          <button class="mi" onclick={savePreset}>Save layout…</button>
+          <button class="mi" class:on={dock.locked} onclick={() => dock.toggleLock()}>
             {dock.locked ? "Unlock layout" : "Lock layout"}
           </button>
-          <button class="mi warn" role="menuitem" onclick={reset}>Reset layout</button>
+          <button class="mi warn" onclick={reset}>Reset layout</button>
+          {/if}
         </div>
       {/if}
     </div>
-    <button class="cfg" onclick={onsettings} aria-label="settings">[ CFG ]</button>
+    <button class="cfg" onclick={onsettings} aria-label="Settings">[ CFG ]</button>
   </div>
 </header>
 
@@ -207,7 +233,7 @@
   .now-playing {
     background: none;
     border: 1px solid var(--border);
-    color: var(--accent);
+    color: var(--accent-bright);
     font-family: inherit;
     font-size: 0.62rem;
     letter-spacing: 0.08em;
@@ -326,7 +352,11 @@
   .mi.on { color: var(--gold); }
   .mi.warn:hover { color: var(--alert); }
   .sep { height: 1px; background: var(--border); margin: 2px 0; }
-  .preset { display: flex; align-items: center; justify-content: space-between; }
-  .preset .del { color: var(--fg-faint); padding: 0 3px; }
-  .preset .del:hover { color: var(--alert); }
+  .preset-row { display: flex; align-items: stretch; }
+  .preset { flex: 1; }
+  .del {
+    background: none; border: none; color: var(--fg-dim); font-family: inherit;
+    padding: 0 8px; min-width: 24px; cursor: pointer;
+  }
+  .del:hover { color: var(--alert); }
 </style>

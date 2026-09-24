@@ -154,6 +154,25 @@
     if (!(e.target instanceof Node) || !saveEl?.contains(e.target)) saveOpen = false;
   }
 
+  // Reading the log with the keyboard, typing a command should just work: a
+  // printable key (or Escape) goes back to the command line, and the key
+  // itself lands there because focus moves before the character is inserted.
+  // A screen reader in browse mode keeps its letter keys; they never get here.
+  function onLogKey(e: KeyboardEvent) {
+    const printable = e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (!printable && e.key !== "Escape") return;
+    const input = document.querySelector<HTMLElement>('[data-focus-region="input"]');
+    if (!input) return;
+    if (e.key === "Escape") e.preventDefault();
+    input.focus();
+  }
+
+  // Opening the save list moves focus into it, so Enter on the button and
+  // Enter again downloads, instead of tabbing past the rest of the toolbar.
+  function focusFirst(node: HTMLElement, first: boolean) {
+    if (first) node.focus();
+  }
+
   function onSearchKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -184,26 +203,29 @@
 <svelte:window onkeydown={onGlobalKey} onpointerdowncapture={onGlobalPointer} />
 
 <div class="log-wrap">
-  <div class="log-bar">
+  <div class="log-bar" role="toolbar" aria-label="Output filters and tools">
     <div class="chips">
       {#each CATS as c}
         <button
           class="chip"
           class:off={!logview.filters[c.id]}
+          aria-pressed={!!logview.filters[c.id]}
           onclick={() => logview.toggle(c.id)}
-          title="toggle {c.label}"
+          title="show {c.label} lines"
         >{c.label}</button>
       {/each}
     </div>
-    <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)} title="timestamps">⏱</button>
-    <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)} title="search (Ctrl-F)">⌕</button>
+    <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)}
+      title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>⏱</button>
+    <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)}
+      title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>⌕</button>
     <div class="save" bind:this={saveEl}>
       <button class="tool" class:on={saveOpen} onclick={() => (saveOpen = !saveOpen)}
         title="save log" aria-label="save log" aria-expanded={saveOpen}>⭳</button>
       {#if saveOpen}
-        <div class="save-menu" role="menu">
+        <div class="save-menu">
           {#each SAVE_FORMATS as f}
-            <button role="menuitem" onclick={() => downloadLog(f.id)}>
+            <button onclick={() => downloadLog(f.id)} use:focusFirst={f === SAVE_FORMATS[0]}>
               <span class="fmt">{f.label}</span><span class="fmt-hint">{f.hint}</span>
             </button>
           {/each}
@@ -230,15 +252,20 @@
     </div>
   {/if}
 
+  <!-- Focusable on purpose: a scrollable region must be reachable by keyboard,
+       and Alt+O lands here. Its key handler only hands typing back. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="game-log"
     bind:this={el}
     onscroll={onScroll}
     onwheel={onWheel}
+    onkeydown={onLogKey}
     role="log"
-    aria-live="polite"
-    aria-atomic="false"
-    aria-label="game output"
+    aria-live="off"
+    aria-label="Game output"
+    tabindex="0"
+    data-focus-region="output"
   >
     {#each filtered as line (line.id)}
       <div
@@ -265,13 +292,14 @@
   .chip {
     background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
     font-family: inherit; font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase;
-    padding: 1px 7px; cursor: pointer;
+    padding: 1px 7px; cursor: pointer; min-height: 24px;
   }
   .chip:hover { color: var(--fg); }
-  .chip.off { color: var(--fg-faint); border-color: var(--border); opacity: 0.5; text-decoration: line-through; }
+  /* Off is faint and struck through; no opacity on top, which took it to 2:1. */
+  .chip.off { color: var(--fg-faint); border-color: var(--border); text-decoration: line-through; }
   .tool {
     background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.8rem; padding: 0 6px; cursor: pointer;
+    font-family: inherit; font-size: 0.8rem; padding: 0 6px; cursor: pointer; min-height: 24px; min-width: 24px;
   }
   .tool:hover, .tool.on { color: var(--accent-bright); border-color: var(--accent); }
 

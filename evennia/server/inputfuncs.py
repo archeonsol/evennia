@@ -515,7 +515,22 @@ def webclient_options(session, *args, **kwargs):
     Keyword Args:
         <option name>: an option to save
     """
+    # SCREENREADER is also a session protocol flag: the one telnet sets with
+    # client_options and that uses_screenreader() and the portal's text
+    # stripping read. Saving it only as a client preference, as this did,
+    # left the webclient's screen reader toggle with no effect on game output.
+    # Applied before the account lookup: the shell sends it as soon as the
+    # socket opens, which can be before the session is logged in.
+    if "SCREENREADER" in kwargs:
+        flag = bool(kwargs["SCREENREADER"])
+        session.protocol_flags["SCREENREADER"] = flag
+        session.sessionhandler.session_portal_partial_sync(
+            {session.sessid: {"protocol_flags": {"SCREENREADER": flag}}}
+        )
+
     account = session.account
+    if not account:
+        return
 
     clientoptions = account.db._saved_webclient_options
     if not clientoptions:

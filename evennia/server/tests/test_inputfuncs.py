@@ -100,6 +100,48 @@ class TestAzabanHelloInputfunc(unittest.TestCase):
         session.sessionhandler.session_portal_sync.assert_called_once_with(session)
 
 
+class TestWebclientOptionsScreenreader(unittest.TestCase):
+    """The webclient's screen reader toggle must reach the session, not just the account."""
+
+    def _session(self, saved=None):
+        account = SimpleNamespace(db=SimpleNamespace(_saved_webclient_options=saved or {"x": 1}))
+        return SimpleNamespace(
+            account=account,
+            sessid=7,
+            protocol_flags={},
+            sessionhandler=mock.MagicMock(),
+        )
+
+    def test_screenreader_sets_and_syncs_the_session_flag(self):
+        session = self._session()
+        inputfuncs.webclient_options(session, SCREENREADER=True, cmdid=3)
+
+        self.assertIs(session.protocol_flags["SCREENREADER"], True)
+        session.sessionhandler.session_portal_partial_sync.assert_called_once_with(
+            {7: {"protocol_flags": {"SCREENREADER": True}}}
+        )
+        # Still saved as a client preference too.
+        self.assertIs(session.account.db._saved_webclient_options["SCREENREADER"], True)
+
+    def test_turning_it_off_clears_the_flag(self):
+        session = self._session()
+        session.protocol_flags["SCREENREADER"] = True
+        inputfuncs.webclient_options(session, SCREENREADER=False)
+        self.assertIs(session.protocol_flags["SCREENREADER"], False)
+
+    def test_flag_is_set_before_login(self):
+        session = self._session()
+        session.account = None
+        inputfuncs.webclient_options(session, SCREENREADER=True)
+        self.assertIs(session.protocol_flags["SCREENREADER"], True)
+
+    def test_other_options_leave_the_flag_alone(self):
+        session = self._session()
+        inputfuncs.webclient_options(session, gagprompt=True)
+        self.assertNotIn("SCREENREADER", session.protocol_flags)
+        session.sessionhandler.session_portal_partial_sync.assert_not_called()
+
+
 class TestMonitoredInputfunc(BaseEvenniaTest):
     """
     Regressions for monitor/monitored inputfunc handling.

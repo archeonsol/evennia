@@ -2,9 +2,13 @@
   import { toasts } from "../lib/toasts.svelte";
 </script>
 
-<div class="toasts" aria-live="polite">
+<!-- Not a live region: toasts.push speaks through the announcer, which can
+     skip a toast the reader already heard. -->
+<div class="toasts" role="group" aria-label="Notifications"
+  onpointerenter={() => toasts.hold()} onpointerleave={() => toasts.release()}
+  onfocusin={() => toasts.hold()} onfocusout={() => toasts.release()}>
   {#each toasts.list as t (t.id)}
-    <button class="toast framed" data-kind={t.kind} onclick={() => toasts.dismiss(t.id)}>
+    <button class="toast framed" data-kind={t.kind} onclick={() => toasts.dismiss(t.id)} aria-label="{t.title}{t.body ? `: ${t.body}` : ''}. Dismiss">
       <span class="k">{t.kind}</span>
       <span class="title">{t.title}</span>
       {#if t.body}<span class="body">{t.body}</span>{/if}

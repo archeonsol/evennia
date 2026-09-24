@@ -2,6 +2,11 @@
 // channel out to its own floating window). Set by Workspace on creation.
 
 import type { DockviewApi } from "dockview-core";
+import { settings } from "./settings.svelte";
+import { simple } from "./simpleLayout.svelte";
+import { chat } from "./chat.svelte";
+import { toasts } from "./toasts.svelte";
+import { announcer } from "./announce.svelte";
 
 const LKEY = "underspire.layout.v2";
 const PRESET_PREFIX = "underspire.layout.preset.";
@@ -20,10 +25,12 @@ export const VIEWS: Record<string, { component: string; title: string }> = {
 
 class Dock {
   api: DockviewApi | null = null;
+  private host: HTMLElement | null = null;
   locked = $state(false);
 
-  set(api: DockviewApi | null): void {
+  set(api: DockviewApi | null, host: HTMLElement | null = null): void {
     this.api = api;
+    this.host = host;
     try {
       this.locked = localStorage.getItem(LOCK_KEY) === "1";
     } catch {
@@ -84,11 +91,17 @@ class Dock {
   }
 
   isOpen(id: string): boolean {
+    if (settings.screenreader) return simple.has(id);
     return !!this.api?.getPanel(id);
   }
 
   /** Reopen (or focus) one of the standard panels. */
   openView(id: string): void {
+    if (settings.screenreader) {
+      const v = VIEWS[id] ?? (id === "puppets" ? { component: "puppets", title: "Puppets" } : null);
+      if (v) simple.open({ id, ...v });
+      return;
+    }
     if (!this.api) return;
     const existing = this.api.getPanel(id);
     if (existing) {
@@ -100,15 +113,59 @@ class Dock {
     this.api.addPanel({ id, component: v.component, title: v.title });
   }
 
-  /** Open an embedded web page in a floating panel. */
+  /**
+   * Open a web page: in a browser window when the player chose that, else in
+   * the shell. A server-opened page arrives just after the command that asked
+   * for it, which is usually inside the browser's popup allowance; when it is
+   * not, the page opens in the shell and a toast says why.
+   */
+  openWebPage(id: string, title: string, url: string): void {
+    if (settings.webPages === "window") {
+      const win = window.open(url, `underspire-${id.replace(/[^\w-]/g, "_")}`);
+      if (win) return;
+      toasts.push("web", "Popup blocked", `${title} opened in the shell instead.`);
+    }
+    this.openIframe(id, title, url);
+  }
+
+  /** Open an embedded web page as a panel in the shell. */
   openIframe(id: string, title: string, url: string): void {
+    if (settings.screenreader) {
+      const fresh = !simple.has(id);
+      simple.open({ id, component: "iframe", title, params: { url, title } });
+      announcer.now(`${title} ${fresh ? "opened" : "shown"} in a new view tab. Alt+O returns to the game output.`);
+      return;
+    }
     if (!this.api) return;
     const existing = this.api.getPanel(id);
     if (existing) {
-      existing.api.setActive();
-      return;
+      // Saved layouts kept the old postage-stamp float, so a page that was
+      // opened small before comes back small forever. Reopen it at size.
+      const g: any = existing.group;
+      const floating = g?.api?.location?.type === "floating";
+      const tiny = floating && (g.width < 480 || g.height < 320);
+      if (!tiny) {
+        existing.api.setActive();
+        return;
+      }
+      existing.api.close();
     }
-    this.api.addPanel({ id, component: "iframe", title, params: { url }, floating: true });
+    // dockview's default float is a few hundred pixels square, which left the
+    // grid a postage stamp. Open near the full workspace instead; the player
+    // can still shrink or dock it.
+    // The element's own size: dockview's width reads 0 until its resize
+    // observer has fired once, which would collapse the float to 100px.
+    const w = this.host?.clientWidth || this.api.width;
+    const h = this.host?.clientHeight || this.api.height;
+    const width = Math.max(w - 40, Math.min(w, 480));
+    const height = Math.max(h - 40, Math.min(h, 360));
+    this.api.addPanel({
+      id,
+      component: "iframe",
+      title,
+      params: { url, title },
+      floating: { x: Math.max(0, (w - width) / 2), y: Math.max(0, (h - height) / 2), width, height },
+    });
   }
 
   /** Pop a panel's group out into a real browser window (multi-monitor). */
@@ -136,6 +193,12 @@ class Dock {
 
   /** Pop a channel out into its own floating panel (or focus it if already open). */
   openChannel(key: string, name?: string): void {
+    if (settings.screenreader) {
+      // One view at a time: a pop-out is just the channels view on this channel.
+      chat.setActive(key);
+      simple.open({ id: "chat", component: "chat", title: "Channels" });
+      return;
+    }
     if (!this.api) return;
     const id = `chan:${key}`;
     const existing = this.api.getPanel(id);

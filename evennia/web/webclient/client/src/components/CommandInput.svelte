@@ -8,6 +8,7 @@
   import { COMPOSE_MODES, composeToCommand, specFor } from "../lib/compose-modes";
   import { composePreviewToHtml } from "../lib/compose-preview";
   import { focusOnMount } from "../lib/focus";
+  import { announcer } from "../lib/announce.svelte";
 
   let value = $state("");
   // History recall over shared recents (newest-first). -1 = live/typed line.
@@ -78,15 +79,16 @@
     }
   }
 
-  function tabComplete(shift: boolean) {
+  /** Complete the word before the caret; false when there is nothing to complete. */
+  function tabComplete(shift: boolean): boolean {
     if (!compActive) {
       const parts = value.split(" ");
       compWordIdx = parts.length - 1;
       const base = parts[compWordIdx] ?? "";
-      if (!base) return;
+      if (!base) return false;
       const b = base.toLowerCase();
       compMatches = candidates().filter((c) => c.toLowerCase().startsWith(b));
-      if (!compMatches.length) return;
+      if (!compMatches.length) return false;
       compActive = true;
       compIdx = -1;
     }
@@ -94,6 +96,16 @@
     const parts = value.split(" ");
     parts[compWordIdx] = compMatches[compIdx];
     value = parts.join(" ");
+    // The field's new value is not reliably re-read; say the completion.
+    announcer.now(`${compMatches[compIdx]}, ${compIdx + 1} of ${compMatches.length}`);
+    return true;
+  }
+
+  // Page Up/Down page the game output from the command line, so reading back
+  // does not mean leaving the line you are typing.
+  function pageLog(dir: 1 | -1) {
+    const log = document.querySelector<HTMLElement>('[data-focus-region="output"]');
+    if (log) log.scrollBy({ top: dir * log.clientHeight * 0.9 });
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -104,9 +116,16 @@
       rQuery = "";
       return;
     }
+    // Tab completes a word when there is one to complete, and otherwise moves
+    // focus as it does everywhere else. Holding it for completion on an empty
+    // line trapped keyboard users in the field focused on load.
     if (e.key === "Tab") {
+      if (tabComplete(e.shiftKey)) e.preventDefault();
+      return;
+    }
+    if (e.key === "PageUp" || e.key === "PageDown") {
       e.preventDefault();
-      tabComplete(e.shiftKey);
+      pageLog(e.key === "PageUp" ? -1 : 1);
       return;
     }
     compActive = false; // any other key ends a completion cycle
@@ -174,7 +193,7 @@
       aria-label="compose"
     ></textarea>
     <!-- Server-rendered preview of what you and the room will actually see. -->
-    <div class="c-preview" aria-live="polite">
+    <div class="c-preview" role="region" aria-label="Preview">
       {#if compose.preview.error}
         <div class="c-err">{compose.preview.error}</div>
       {:else if compose.preview.you || compose.preview.room}
@@ -196,14 +215,15 @@
   </div>
 {/if}
 
-<div class="command-bar">
+<div class="command-bar" role="region" aria-label="Command line">
   {#if session.prompt && !settings.hidePrompt}
     <div class="prompt">{@html session.prompt}</div>
   {/if}
   {#if rSearch}
     <span class="rs-tag" aria-hidden="true">r-search</span>
-    <input class="rs-input" bind:value={rQuery} onkeydown={onRKey} use:focusOnMount placeholder="search history…" aria-label="reverse history search" />
-    <span class="rs-match">{rMatch || "(no match)"}</span>
+    <input class="rs-input" bind:value={rQuery} onkeydown={onRKey} use:focusOnMount placeholder="search history…"
+      aria-label="Search command history" aria-describedby="rs-match" />
+    <span class="rs-match" id="rs-match" aria-live="polite">{rMatch || "(no match)"}</span>
   {:else}
     <span class="chevron glow-text" aria-hidden="true">❯</span>
     <input
@@ -215,7 +235,8 @@
       autocapitalize="off"
       spellcheck="false"
       use:focusOnMount
-      aria-label="command input"
+      aria-label="Command"
+      data-focus-region="input"
       placeholder="enter command"
     />
     <button
@@ -237,6 +258,8 @@
     border-top: 1px solid var(--accent);
     background: var(--bg-elev);
   }
+  /* The command line's focus indicator; see shell.css. */
+  .command-bar:focus-within { box-shadow: inset 0 0 0 2px var(--accent-bright); }
   .prompt {
     white-space: pre-wrap;
     color: var(--gold);

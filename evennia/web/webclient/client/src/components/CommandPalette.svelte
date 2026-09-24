@@ -1,5 +1,6 @@
 <script lang="ts">
   import { commands, CURATED } from "../lib/commands.svelte";
+  import { modal } from "../lib/modal";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -56,14 +57,15 @@
         commands.run(q);
         onclose();
       }
-    } else if (e.key === "Escape") {
-      onclose();
     }
   }
 </script>
 
 <div class="scrim" onclick={onclose} role="presentation"></div>
-<div class="palette framed" role="dialog" aria-label="Command palette">
+<!-- Combobox pattern: the highlight is announced through aria-activedescendant,
+     so arrowing the list is heard, not just seen. -->
+<div class="palette framed" role="dialog" aria-label="Command palette" aria-modal="true"
+  use:modal={{ onclose, initial: input }}>
   <div class="bar">
     <span class="glyph glow-text" aria-hidden="true">❯</span>
     <input
@@ -71,15 +73,24 @@
       bind:value={q}
       onkeydown={onKey}
       placeholder="run a command…"
-      aria-label="command"
+      aria-label="Command"
+      role="combobox"
+      aria-expanded={items.length > 0}
+      aria-controls="palette-list"
+      aria-autocomplete="list"
+      aria-activedescendant={items[sel] ? `palette-opt-${sel}` : undefined}
     />
   </div>
-  <ul class="list">
+  <ul class="list" id="palette-list" role="listbox" aria-label="Commands">
     {#each items as it, i (it.cmd + i)}
-      <li>
+      <li role="presentation">
         <button
+          id="palette-opt-{i}"
           class="item"
           class:sel={i === sel}
+          role="option"
+          aria-selected={i === sel}
+          tabindex="-1"
           onmouseenter={() => (sel = i)}
           onclick={() => choose(it.cmd)}
         >

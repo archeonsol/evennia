@@ -6,13 +6,21 @@
 </script>
 
 <div class="chat">
-  <div class="rail">
+  <div class="rail" role="group" aria-label="Channels">
     {#each chat.channels as c (c.key)}
+      {@const extra = [
+        chat.unread[c.key] ? `${chat.unread[c.key]} unread` : "",
+        chat.mentions[c.key] ? "mentioned" : "",
+        chat.online[c.key] ? `${chat.online[c.key]} online` : "",
+        chat.muted[c.key] ? "muted" : "",
+      ].filter(Boolean)}
       <button
         class="chan"
         class:active={c.key === active}
         class:muted={chat.muted[c.key]}
         class:mention={chat.mentions[c.key]}
+        aria-current={c.key === active ? "true" : undefined}
+        aria-label={extra.length ? `${c.name}, ${extra.join(", ")}` : c.name}
         onclick={() => chat.setActive(c.key)}
         title={c.name}
       >
@@ -29,7 +37,8 @@
   {#if active}
     <ChannelView channelKey={active} />
   {:else}
-    <p class="empty">Awaiting channel registry…</p>
+    <!-- Alt+C still has somewhere to land before the registry arrives. -->
+    <p class="empty" tabindex="-1" data-focus-region="channels">Awaiting channel registry…</p>
   {/if}
 </div>
 

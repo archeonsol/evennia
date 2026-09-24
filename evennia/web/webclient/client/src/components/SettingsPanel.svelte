@@ -8,6 +8,8 @@
   import { dock } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { exportConfig, importConfig } from "../lib/backup";
+  import { modal } from "../lib/modal";
+  import { tick } from "svelte";
 
   let { onclose }: { onclose: () => void } = $props();
   const s = settings as any;
@@ -35,7 +37,16 @@
 
   let capKey = $state<string | null>(null);
   function onKbKey(e: KeyboardEvent, id: string) {
+    // Tab moves on and Escape cancels, leaving the binding as it was.
+    if (e.key === "Tab") {
+      capKey = null;
+      return;
+    }
     e.preventDefault();
+    if (e.key === "Escape") {
+      capKey = null;
+      return;
+    }
     const c = comboFromEvent(e);
     if (c) {
       keybinds.set(id, c);
@@ -56,8 +67,17 @@
 
   let capturing = $state<string | null>(null);
   function onMacroKey(e: KeyboardEvent, id: string) {
+    if (e.key === "Tab") {
+      capturing = null;
+      return;
+    }
     e.preventDefault();
+    // Escape cancels; it used to erase the binding. Backspace/Delete clear it.
     if (e.key === "Escape") {
+      capturing = null;
+      return;
+    }
+    if (e.key === "Backspace" || e.key === "Delete") {
       macros.update(id, { key: undefined });
       capturing = null;
       return;
@@ -84,9 +104,17 @@
   // destroy a move feed irrecoverably. The draft reaches routing only on a
   // commit (field blur, MOVE, delete, add).
   let rdraft = $state<Route[]>([]);
-  function openView(id: View) {
+  // Each view replaces the one before it, destroying the focused button, so
+  // focus goes to the heading or a keyboard user is dropped onto the page.
+  let heading = $state<HTMLElement | null>(null);
+  let cameFrom: View | null = null;
+  async function openView(id: View) {
     if (id === "triggers") rdraft = routing.routes.map((r) => ({ ...r }));
+    if (id !== "hub") cameFrom = id;
     view = id;
+    await tick();
+    const tile = id === "hub" && cameFrom ? document.getElementById(`settings-tile-${cameFrom}`) : null;
+    (tile ?? heading)?.focus();
   }
   function commitRoutes() {
     routing.routes = rdraft.map((r) => ({ ...r }));
@@ -94,10 +122,13 @@
   }
 </script>
 
-{#snippet toggle(label: string, key: string)}
-  <button class="row toggle" onclick={() => (s[key] = !s[key])}>
+{#snippet toggle(label: string, key: string, onflip?: (on: boolean) => void)}
+  <button class="row toggle" role="switch" aria-checked={!!s[key]} onclick={() => {
+    s[key] = !s[key];
+    onflip?.(s[key]);
+  }}>
     <span>{label}</span>
-    <span class="ind" class:on={s[key]}>{s[key] ? "ON" : "OFF"}</span>
+    <span class="ind" class:on={s[key]} aria-hidden="true">{s[key] ? "ON" : "OFF"}</span>
   </button>
 {/snippet}
 
@@ -111,21 +142,24 @@
 {/snippet}
 
 <div class="scrim" onclick={onclose} role="presentation"></div>
-<div class="panel framed" role="dialog" aria-label="Settings" aria-modal="true">
+<div class="panel framed" role="dialog" aria-labelledby="settings-heading" aria-modal="true"
+  use:modal={{ onclose: () => (view === "hub" ? onclose() : openView("hub")), initial: heading }}>
   <header>
     {#if view !== "hub"}
-      <button class="back" onclick={() => (view = "hub")} aria-label="back">‹</button>
+      <button class="back" onclick={() => openView("hub")} aria-label="Back to all settings">‹</button>
     {/if}
-    <span class="title glow-text">UNDERSPIRE</span>
-    <span class="sub">{view === "hub" ? "settings" : current?.label}</span>
-    <button class="x" onclick={onclose} aria-label="close">×</button>
+    <span class="title glow-text" aria-hidden="true">UNDERSPIRE</span>
+    <h2 class="sub" id="settings-heading" tabindex="-1" bind:this={heading}>
+      {view === "hub" ? "Settings" : `Settings: ${current?.label}`}
+    </h2>
+    <button class="x" onclick={onclose} aria-label="Close settings">×</button>
   </header>
 
   <div class="body">
     {#if view === "hub"}
       <div class="hub">
         {#each groups as g}
-          <button class="tile" onclick={() => openView(g.id)}>
+          <button class="tile" id="settings-tile-{g.id}" onclick={() => openView(g.id)}>
             <span class="glyph" aria-hidden="true">{g.glyph}</span>
             <span class="tile-label">{g.label}</span>
           </button>
@@ -187,8 +221,33 @@
       </button>
       {@render toggle("Notification sound", "notifySound")}
     {:else if view === "access"}
-      {@render toggle("Screenreader mode", "screenreader")}
+      <!-- Turning screen reader mode on also turns channel echo on: channels
+           are otherwise only in a view the player is not reading. -->
+      {@render toggle("Screen reader mode", "screenreader", (on) => {
+        if (on) {
+          s.channelEcho = true;
+          s.music = false;
+        }
+      })}
+      <p class="note">One view at a time behind a tab list, no visual effects, no intro. Turning it on also puts channel messages in the terminal and stops room music, which talks over speech; both can be turned back on. The server is told too, so it can format for speech.</p>
+      {@render toggle("Speak new output", "speakOutput")}
+      {@render toggle("Channel messages in terminal", "channelEcho")}
       {@render toggle("Reduce motion", "reduceMotion")}
+      <label class="row select">
+        <span>Open web pages</span>
+        <select bind:value={settings.webPages}>
+          <option value="panel">in the client</option>
+          <option value="window">in a new window</option>
+        </select>
+      </label>
+      <div class="grp">Keys</div>
+      <p class="note">
+        Alt+I command line, Alt+O game output, Alt+C channels, Alt+R scene.
+        Alt+1 to Alt+9 read back the last nine lines, newest first.
+        Page Up and Page Down scroll the output from the command line.
+        In the output, typing any letter returns to the command line.
+        Change the Alt keys under Keys.
+      </p>
     {:else if view === "text"}
       {@render slider("Typewriter reveal", "typewriterMs", 0, 1500, 50, (v) => (v ? `${v}ms` : "off"))}
       {@render toggle("Show scene panel", "sceneStrip")}
@@ -223,6 +282,7 @@
           <div class="row">
             <span>{b.label}</span>
             <button class="r-key" class:cap={capKey === b.id}
+              aria-label="{b.label}: {capKey === b.id ? 'press the new key, Escape to cancel' : b.combo}"
               onclick={() => (capKey = capKey === b.id ? null : b.id)}
               onkeydown={(e) => capKey === b.id && onKbKey(e, b.id)}>
               {capKey === b.id ? "press…" : b.combo}
@@ -236,20 +296,24 @@
       <input bind:this={fileInput} type="file" accept="application/json" style="display:none" onchange={onImport} />
     {:else if view === "macros"}
       <div class="rules">
-        {#each macros.list as m (m.id)}
-          <div class="rule macro">
-            <input class="r-icon" placeholder="◆" maxlength="2" value={m.icon ?? ""}
+        {#each macros.list as m, i (m.id)}
+          {@const n = `Macro ${i + 1}`}
+          <div class="rule macro" role="group" aria-label={n}>
+            <input class="r-icon" placeholder="◆" maxlength="2" value={m.icon ?? ""} aria-label="{n} icon"
               oninput={(e) => macros.update(m.id, { icon: e.currentTarget.value })} />
-            <input class="r-label" placeholder="label" value={m.label}
+            <input class="r-label" placeholder="label" value={m.label} aria-label="{n} label"
               oninput={(e) => macros.update(m.id, { label: e.currentTarget.value })} />
-            <input class="r-cmd" placeholder="command" value={m.command}
+            <input class="r-cmd" placeholder="command" value={m.command} aria-label="{n} command"
               oninput={(e) => macros.update(m.id, { command: e.currentTarget.value })} />
             <button class="r-key" class:cap={capturing === m.id}
+              aria-label="{n} key: {capturing === m.id ? 'press a combination, Escape to cancel, Backspace to clear' : m.key || 'none'}"
               onclick={() => (capturing = capturing === m.id ? null : m.id)}
               onkeydown={(e) => capturing === m.id && onMacroKey(e, m.id)}>
               {capturing === m.id ? "press…" : m.key || "key"}
             </button>
-            <button class="r-del" onclick={() => macros.remove(m.id)} aria-label="remove">×</button>
+            <button class="r-mv" disabled={i === 0} onclick={() => macros.move(m.id, macros.list[i - 1].id)} aria-label="Move {n} up">↑</button>
+            <button class="r-mv" disabled={i === macros.list.length - 1} onclick={() => macros.move(m.id, macros.list[i + 1].id)} aria-label="Move {n} down">↓</button>
+            <button class="r-del" onclick={() => macros.remove(m.id)} aria-label="Remove {n}">×</button>
           </div>
         {/each}
       </div>
@@ -259,9 +323,9 @@
       <div class="rules">
         {#each triggers.highlights as h, i}
           <div class="rule">
-            <input class="r-cmd" placeholder="text or /regex/" bind:value={h.pattern} oninput={() => triggers.sync()} />
-            <input class="r-color" type="color" bind:value={h.color} oninput={() => triggers.sync()} aria-label="colour" />
-            <button class="r-del" onclick={() => triggers.removeHighlight(i)} aria-label="remove">×</button>
+            <input class="r-cmd" placeholder="text or /regex/" bind:value={h.pattern} oninput={() => triggers.sync()} aria-label="Highlight {i + 1} pattern" />
+            <input class="r-color" type="color" bind:value={h.color} oninput={() => triggers.sync()} aria-label="Highlight {i + 1} colour" />
+            <button class="r-del" onclick={() => triggers.removeHighlight(i)} aria-label="Remove highlight {i + 1}">×</button>
           </div>
         {/each}
       </div>
@@ -271,8 +335,8 @@
       <div class="rules">
         {#each triggers.gags as g, i}
           <div class="rule">
-            <input class="r-cmd" placeholder="text or /regex/" bind:value={g.pattern} oninput={() => triggers.sync()} />
-            <button class="r-del" onclick={() => triggers.removeGag(i)} aria-label="remove">×</button>
+            <input class="r-cmd" placeholder="text or /regex/" bind:value={g.pattern} oninput={() => triggers.sync()} aria-label="Gag {i + 1} pattern" />
+            <button class="r-del" onclick={() => triggers.removeGag(i)} aria-label="Remove gag {i + 1}">×</button>
           </div>
         {/each}
       </div>
@@ -282,9 +346,9 @@
       <div class="rules">
         {#each triggers.aliases as a, i}
           <div class="rule">
-            <input class="r-label" placeholder="name" bind:value={a.name} oninput={() => triggers.sync()} />
-            <input class="r-cmd" placeholder="command" bind:value={a.command} oninput={() => triggers.sync()} />
-            <button class="r-del" onclick={() => triggers.removeAlias(i)} aria-label="remove">×</button>
+            <input class="r-label" placeholder="name" bind:value={a.name} oninput={() => triggers.sync()} aria-label="Alias {i + 1} name" />
+            <input class="r-cmd" placeholder="command" bind:value={a.command} oninput={() => triggers.sync()} aria-label="Alias {i + 1} command" />
+            <button class="r-del" onclick={() => triggers.removeAlias(i)} aria-label="Remove alias {i + 1}">×</button>
           </div>
         {/each}
       </div>
@@ -294,16 +358,17 @@
       <div class="rules">
         {#each triggers.actions as act, i}
           <div class="rule">
-            <input class="r-cmd" placeholder="text or /regex/" bind:value={act.pattern} oninput={() => triggers.sync()} />
-            <select class="r-kind" bind:value={act.kind} onchange={() => triggers.sync()}>
+            <input class="r-cmd" placeholder="text or /regex/" bind:value={act.pattern} oninput={() => triggers.sync()} aria-label="Action {i + 1} pattern" />
+            <select class="r-kind" bind:value={act.kind} onchange={() => triggers.sync()} aria-label="Action {i + 1} does">
               <option value="sound">sound</option>
               <option value="command">command</option>
               <option value="notify">notify</option>
             </select>
             {#if act.kind !== "sound"}
-              <input class="r-cmd" placeholder={act.kind === "command" ? "command" : "message"} bind:value={act.arg} oninput={() => triggers.sync()} />
+              <input class="r-cmd" placeholder={act.kind === "command" ? "command" : "message"} bind:value={act.arg} oninput={() => triggers.sync()}
+                aria-label="Action {i + 1} {act.kind === 'command' ? 'command' : 'message'}" />
             {/if}
-            <button class="r-del" onclick={() => triggers.removeAction(i)} aria-label="remove">×</button>
+            <button class="r-del" onclick={() => triggers.removeAction(i)} aria-label="Remove action {i + 1}">×</button>
           </div>
         {/each}
       </div>
@@ -313,11 +378,12 @@
       <div class="rules">
         {#each rdraft as r, i}
           <div class="rule">
-            <input class="r-cmd" placeholder="text or /regex/" bind:value={r.pattern} onblur={commitRoutes} />
-            <input class="r-label" placeholder="feed tab" bind:value={r.label} onblur={commitRoutes} />
+            <input class="r-cmd" placeholder="text or /regex/" bind:value={r.pattern} onblur={commitRoutes} aria-label="Route {i + 1} pattern" />
+            <input class="r-label" placeholder="feed tab" bind:value={r.label} onblur={commitRoutes} aria-label="Route {i + 1} feed tab" />
             <button
               class="r-mode"
               class:on={r.move}
+              aria-label="Route {i + 1}: {r.move ? 'move, the line goes to the feed only' : 'copy, the line goes to the feed and the terminal'}"
               onclick={() => {
                 r.move = !r.move;
                 commitRoutes();
@@ -330,7 +396,7 @@
                 rdraft.splice(i, 1);
                 commitRoutes();
               }}
-              aria-label="remove">×</button
+              aria-label="Remove route {i + 1}">×</button
             >
           </div>
         {/each}
@@ -368,7 +434,7 @@
     font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0; align-self: center;
   }
   .title { color: var(--accent-bright); letter-spacing: 0.3em; font-size: 0.85rem; }
-  .sub { color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.65rem; }
+  .sub { margin: 0; font-weight: normal; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.65rem; }
   .x { margin-left: auto; background: none; border: none; color: var(--fg-dim); font-size: 1.2rem; line-height: 1; cursor: pointer; }
   .x:hover { color: var(--accent-bright); }
   .body { overflow-y: auto; padding: 0.4rem 1rem 0.5rem; }
@@ -453,6 +519,11 @@
     font-family: inherit; cursor: pointer; padding: 2px 7px; line-height: 1;
   }
   .r-del:hover { border-color: var(--alert); color: var(--alert); }
+  .r-mv {
+    flex: 0 0 auto; background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
+    font-family: inherit; cursor: pointer; padding: 2px 6px; line-height: 1; min-width: 24px; min-height: 24px;
+  }
+  .r-mv:disabled { color: var(--fg-faint); cursor: default; }
   .add-rule {
     margin: 6px 0 2px; background: none; border: 1px dashed var(--border-bright); color: var(--fg-dim);
     font-family: inherit; font-size: 0.7rem; letter-spacing: 0.08em; padding: 5px 10px; cursor: pointer;

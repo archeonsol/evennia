@@ -26,6 +26,12 @@ let nextId = 0;
 class GameSession {
   lines = $state<LogLine[]>([]);
   prompt = $state<string>("");
+  private lineListeners: ((line: LogLine) => void)[] = [];
+
+  /** Hear each line as it lands in the scrollback (after gags and routing). */
+  onLine(fn: (line: LogLine) => void): void {
+    this.lineListeners.push(fn);
+  }
 
   /** Append a pre-rendered (already HTML-safe) line to the scrollback. */
   append(html: string, type = "text"): void {
@@ -43,7 +49,7 @@ class GameSession {
       // is what pruneMoved trusts instead of any filing memory of ours.
       if (routing.process(html, text, id)) return;
     }
-    this.lines.push({
+    const line: LogLine = {
       id,
       html,
       text,
@@ -52,7 +58,9 @@ class GameSession {
       // whole scrollback on every append, and categorize() is string work.
       cat: categorize(type),
       ts: Date.now(),
-    });
+    };
+    this.lines.push(line);
+    for (const fn of this.lineListeners) fn(line);
     if (this.lines.length > MAX_LINES + TRIM_BLOCK) {
       this.lines.splice(0, this.lines.length - MAX_LINES);
     }

@@ -15,7 +15,26 @@ const DEFAULTS: Binding[] = [
   { id: "search", label: "Search log", combo: "Ctrl+F" },
   { id: "settings", label: "Open settings", combo: "Ctrl+," },
   { id: "clear", label: "Clear buffer", combo: "Ctrl+L" },
+  // Focus jumps. A screen reader user otherwise tabs or arrows through every
+  // panel to get from the command line to what the game just said.
+  { id: "focusInput", label: "Go to command line", combo: "Alt+I" },
+  { id: "focusOutput", label: "Go to game output", combo: "Alt+O" },
+  { id: "focusChannels", label: "Go to channels", combo: "Alt+C" },
+  { id: "focusScene", label: "Go to scene", combo: "Alt+R" },
 ];
+
+/**
+ * The key a combo names. With Alt held, macOS Option turns a letter into a
+ * symbol (Option+I is a dead key, Option+O is "ø"), so an Alt combo reads the
+ * physical key instead, and "Alt+O" means the same key on every platform.
+ */
+function keyName(e: KeyboardEvent): string {
+  if (e.altKey) {
+    const m = /^(?:Key([A-Z])|Digit(\d))$/.exec(e.code ?? "");
+    if (m) return m[1] ?? m[2];
+  }
+  return e.key.length === 1 ? e.key.toUpperCase() : e.key;
+}
 
 /** Build a combo string from an event, or null for plain typing keys. */
 export function comboFromEvent(e: KeyboardEvent): string | null {
@@ -26,8 +45,18 @@ export function comboFromEvent(e: KeyboardEvent): string | null {
   if (e.ctrlKey || e.metaKey) s += "Ctrl+";
   if (e.altKey) s += "Alt+";
   if (e.shiftKey && !isFn) s += "Shift+";
-  s += isFn ? e.key : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  s += isFn ? e.key : keyName(e);
   return s;
+}
+
+/**
+ * Alt+1 to Alt+9: which recent line to read back (1 is the newest), or null.
+ * Fixed rather than rebindable: it is nine keys, and the digit is the argument.
+ */
+export function reviewIndex(e: KeyboardEvent): number | null {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  const m = /^Digit([1-9])$/.exec(e.code ?? "");
+  return m ? Number(m[1]) : null;
 }
 
 class Keybinds {
