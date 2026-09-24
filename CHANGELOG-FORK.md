@@ -25,6 +25,26 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.269 — F5 macro renamed to Stats
+
+### Web client
+
+- **The hotbar button and palette entry read "Stats", not "Score".** The F5
+  macro sends `@stats`; its label now matches the verb instead of the legacy
+  score convention
+  ([`macros.svelte.ts`](evennia/web/webclient/client/src/lib/macros.svelte.ts),
+  [`commands.svelte.ts`](evennia/web/webclient/client/src/lib/commands.svelte.ts)).
+- **Existing browsers migrate the label too.** `Macros.init` relabels a
+  persisted stock macro — the old `score` default or the interim `@stats` one
+  — and saves; a player-renamed label or retargeted command is left alone.
+  `shell.js` is rebuilt.
+
+### Tests
+
+- [`macros.test.ts`](evennia/web/webclient/client/src/lib/macros.test.ts)
+  covers the default label, migration from both stock shapes, and that edited
+  macros stay untouched. Client vitest suite — 556 tests OK.
+
 ## 6.0.0+underspire.268 — Ticket rows name the filing character
 
 ### Web client

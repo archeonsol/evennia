@@ -18,7 +18,7 @@ const DEFAULTS: Macro[] = [
   { id: "look", label: "Look", command: "look", key: "F2" },
   { id: "who", label: "Who", command: "who", key: "F3" },
   { id: "inv", label: "Inv", command: "inventory", key: "F4" },
-  { id: "score", label: "Score", command: "@stats", key: "F5" },
+  { id: "score", label: "Stats", command: "@stats", key: "F5" },
 ];
 
 /** Build a combo string from a keyboard event, or null if it's a plain typing key. */
@@ -51,11 +51,13 @@ export class Macros {
   private migrate(): void {
     let changed = false;
     this.list = this.list.map((m) => {
-      if (m.id === "score" && m.command === "score") {
-        changed = true;
-        return { ...m, command: "@stats" };
-      }
-      return m;
+      const stock =
+        m.id === "score" &&
+        m.label === "Score" &&
+        (m.command === "score" || m.command === "@stats");
+      if (!stock) return m;
+      changed = true;
+      return { ...m, label: "Stats", command: "@stats" };
     });
     if (changed) this.save();
   }
