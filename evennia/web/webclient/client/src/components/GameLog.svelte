@@ -6,7 +6,11 @@
   import { pinAfterScroll } from "../lib/autoscroll";
   import { settings } from "../lib/settings.svelte";
   import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
+  import { createLogVirtualizer, estimateLinePx, type LogVirtualizer } from "../lib/logvirtual";
+  import { logReveal } from "../lib/logreveal";
+  import { commandInput, isTypingTarget } from "../lib/focus";
   import { onMount, untrack } from "svelte";
+  import type { Virtualizer } from "@tanstack/virtual-core";
 
   //: What each download format is for, in the order the menu offers them.
   //: HTML leads because it is the only one that keeps the colours *and* opens
@@ -18,6 +22,19 @@
   ];
 
   let el = $state<HTMLDivElement | null>(null);
+  let spacer = $state<HTMLDivElement | null>(null);
+  // The scrollback can hold thousands of lines; only the rows around the
+  // viewport exist as DOM (see lib/logvirtual.ts). `virtualizer` is a class
+  // instance, so it is not deep-proxied; assigning it is the reactive part.
+  let virtualizer = $state<Virtualizer<HTMLDivElement, HTMLElement> | null>(null);
+  let logHandle: LogVirtualizer<HTMLDivElement> | null = null;
+  // Bumped whenever the virtualizer's rendered range or measurements change,
+  // so the derived rows below re-read it. Measurements land while Svelte is
+  // mounting a row (the `use:measureLine` action), and writing this state
+  // synchronously there re-enters the flush that is already running; queue it
+  // as a microtask instead, which still lands before the next paint.
+  let rev = $state(0);
+  let revQueued = false;
   let searchInput = $state<HTMLInputElement | null>(null);
   let pinned = $state(true);
   let matchPos = $state(0);
@@ -29,25 +46,12 @@
   let lastTop = 0;
   let saveOpen = $state(false);
   let saveEl = $state<HTMLDivElement | null>(null);
+  // A row that unmounts leaves its element in the virtualizer's cache; sweep
+  // disconnected nodes out once per microtask rather than once per row.
+  let sweepQueued = false;
 
   // Freeze the existing backlog so only lines that arrive after mount type in.
   onMount(() => markBacklog(session.lines.at(-1)?.id ?? -1));
-
-  function scrollToBottom() {
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    lastTop = el.scrollTop;
-  }
-
-  // Follow the newest line to the bottom as its characters reveal.
-  function keepPinned() {
-    if (pinned && !logview.searchOpen) scrollToBottom();
-  }
-
-  // Per-line reveal duration; reduce-motion / screenreader force it instant.
-  const twDuration = $derived(
-    settings.reduceMotion || settings.screenreader ? 0 : settings.typewriterMs,
-  );
 
   // Every filter on is the default and the common case, and it means "no
   // filtering" — so hand back the array itself rather than rebuilding a copy of
@@ -64,27 +68,149 @@
   // marking hits quadratic in the scrollback.
   const matchSet = $derived(new Set(matchIds));
 
-  function pad(n: number) {
-    return String(n).padStart(2, "0");
-  }
-  function hhmmss(ts: number) {
-    const d = new Date(ts);
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const virtualItems = $derived.by(() => {
+    void rev;
+    return virtualizer?.getVirtualItems() ?? [];
+  });
+  const totalSize = $derived.by(() => {
+    void rev;
+    return virtualizer?.getTotalSize() ?? 0;
+  });
+
+  // Per-line reveal duration; reduce-motion / screenreader force it instant.
+  const twDuration = $derived(
+    settings.reduceMotion || settings.screenreader ? 0 : settings.typewriterMs,
+  );
+
+  // Keep the scroll box's own height in step with the measurements *now*, not
+  // on the next render. When the newest line grows under the typewriter, the
+  // virtualizer's clamped-adjustment retry can only write the scrollTop it
+  // wants once the spacer already has the new height. The instance is passed
+  // in: reading `virtualizer` here would make the effect that owns it depend on
+  // a value it also writes.
+  function syncSpacer(v: Virtualizer<HTMLDivElement, HTMLElement> | null): void {
+    if (v && spacer) spacer.style.height = `${v.getTotalSize()}px`;
   }
 
+  function sweepLines(): void {
+    if (sweepQueued) return;
+    sweepQueued = true;
+    queueMicrotask(() => {
+      sweepQueued = false;
+      virtualizer?.measureElement(null);
+    });
+  }
+
+  function bumpRev(): void {
+    if (revQueued) return;
+    revQueued = true;
+    queueMicrotask(() => {
+      revQueued = false;
+      rev++;
+    });
+  }
+
+  function measureLine(node: HTMLElement) {
+    virtualizer?.measureElement(node);
+    return { destroy: sweepLines };
+  }
+
+  // The virtualizer lives with the scroll element: recreate it if the panel is
+  // remounted, and tear down its observers with the component.
+  //
+  // The whole lifecycle is untracked. Attaching the observers walks every row
+  // through `getItemKey` (reading the line list), and a tracked read there
+  // would make this effect depend on the scrollback: every append would tear
+  // the virtualizer down and rebuild it, losing every measurement and
+  // resetting the scroll position. This effect must live and die with the
+  // scroll element alone; the options effect below owns the list.
+  $effect(() => {
+    const node = el;
+    if (!node) return;
+    return untrack(() => {
+      // One computed-style read per unmounted row is not worth it; the style is
+      // sampled once here. Mounted rows are measured for real, and the estimate
+      // only ever positions rows that have never been seen. Rounded to match
+      // the integer heights the measurements report.
+      const lineEstimate = Math.round(estimateLinePx(getComputedStyle(node)));
+      const handle = createLogVirtualizer({
+        getScrollElement: () => node,
+        getCount: () => filtered.length,
+        getKey: (i) => filtered[i]?.id ?? i,
+        estimateSize: () => lineEstimate,
+        onChange: (v) => {
+          bumpRev();
+          syncSpacer(v);
+        },
+        onWrite: (top) => {
+          lastTop = top;
+        },
+      });
+      logHandle = handle;
+      virtualizer = handle.instance;
+      const cleanup = handle.instance._didMount();
+      handle.instance._willUpdate();
+      return () => {
+        cleanup();
+        if (logHandle === handle) {
+          logHandle = null;
+          virtualizer = null;
+        }
+      };
+    });
+  });
+
+  // State the line list to the virtualizer whenever it changes (append, trim,
+  // filter) and, on the first pass, start pinned at the newest line as the old
+  // log did.
+  let started = false;
+  $effect(() => {
+    const v = virtualizer;
+    const list = filtered;
+    const n = list.length;
+    // Read the edges too: a filter can change the list without changing its
+    // length or the array reference the log already holds.
+    void list[0]?.id;
+    void list[n - 1]?.id;
+    if (!v || !logHandle) return;
+    untrack(() => {
+      // setOptions replaces the whole options object, so the factory re-states
+      // every option from its closures.
+      logHandle!.sync();
+      // The spacer must have the new height before `_willUpdate` applies a
+      // follow-scroll, or the write clamps against the old content.
+      syncSpacer(v);
+      v._willUpdate();
+      if (!started) {
+        started = true;
+        v.scrollToEnd({ behavior: "auto" });
+      }
+      rev++;
+    });
+  });
+
   // Autoscroll to newest unless the user scrolled up or is searching. While
-  // scrolled up, arrivals are counted on a "jump to latest" bar instead.
+  // scrolled up, arrivals are counted on a "jump to latest" bar instead. The
+  // virtualizer follows appends on its own (followOnAppend); this effect only
+  // owns the counter and the reveal policy.
   let unseen = $state(0);
   let seenCount = 0;
   $effect(() => {
-    const n = session.lines.length;
+    const lines = session.lines;
+    const n = lines.length;
     const grew = n - seenCount;
     seenCount = n;
     if (pinned && !logview.searchOpen) {
-      scrollToBottom();
       unseen = 0;
     } else if (grew > 0) {
       unseen = untrack(() => unseen) + grew;
+    }
+    // A line that lands while the reader is not following the bottom must not
+    // type itself in whenever it is finally scrolled into view.
+    if (grew > 0 && !pinned) {
+      const ids: number[] = [];
+      for (let i = Math.max(0, n - grew); i < n; i++) ids.push(lines[i].id);
+      logReveal.revealAll(ids);
     }
   });
   $effect(() => {
@@ -93,21 +219,40 @@
   function jumpToLatest() {
     pinned = true;
     unseen = 0;
-    scrollToBottom();
+    virtualizer?.scrollToEnd({ behavior: "auto" });
   }
 
-  // Keep the current match in range and scroll it into view.
+  // Keep the current match in range and scroll it into view. The match ordinal
+  // is not the row index: matchIds only holds the hits, so the row index is
+  // where that line sits in `filtered`.
   $effect(() => {
     const n = matchIds.length;
     if (n === 0) return;
     if (matchPos >= n) matchPos = n - 1;
     const id = matchIds[matchPos];
-    const node = el?.querySelector(`[data-lid="${id}"]`);
-    node?.scrollIntoView({ block: "center" });
+    const v = virtualizer;
+    if (!v) return;
+    untrack(() => {
+      const index = filtered.findIndex((l) => l.id === id);
+      if (index >= 0) v.scrollToIndex(index, { align: "center" });
+    });
   });
 
   $effect(() => {
     if (logview.searchOpen) searchInput?.focus();
+  });
+
+  // A global content change (timestamps, font metrics) remeasures every mounted
+  // row. The virtualizer deliberately does not compensate a row that spans the
+  // fold, so a reader following the bottom can be left a few rows short.
+  // Re-assert the end and let the library's scroll reconcile chase the growing
+  // content as the rows remeasure.
+  let lastViewKey = `${logview.timestamps}|${settings.font}|${settings.fontSize}|${settings.lineHeight}`;
+  $effect(() => {
+    const key = `${logview.timestamps}|${settings.font}|${settings.fontSize}|${settings.lineHeight}`;
+    if (key === lastViewKey) return;
+    lastViewKey = key;
+    if (pinned) virtualizer?.scrollToEnd({ behavior: "auto" });
   });
 
   // A wheel up over the log is the user leaving the bottom. Reading intent from
@@ -135,20 +280,37 @@
   // A zero-height box is the hide; the next non-zero one is the return.
   $effect(() => {
     const node = el;
+    const v = virtualizer;
     if (!node) return;
     const ro = new ResizeObserver(() => {
       if (!node.clientHeight) {
         hidden = true;
         return;
       }
-      if (!hidden) return;
-      hidden = false;
-      node.scrollTop = pinned ? node.scrollHeight : savedTop;
-      lastTop = node.scrollTop;
+      if (!v) return;
+      // Following the bottom survives any resize, including the first one a
+      // panel that mounted hidden ever gets. A reader scrolled up is put back
+      // through the library's own offset (it is stale while hidden, because it
+      // saw height 0), never by writing scrollTop behind its back.
+      if (pinned) {
+        hidden = false;
+        v.scrollToEnd({ behavior: "auto" });
+      } else if (hidden) {
+        hidden = false;
+        v.scrollToOffset(savedTop, { align: "start", behavior: "auto" });
+      }
     });
     ro.observe(node);
     return () => ro.disconnect();
   });
+
+  function pad(n: number) {
+    return String(n).padStart(2, "0");
+  }
+  function hhmmss(ts: number) {
+    const d = new Date(ts);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
 
   function step(d: number) {
     const n = matchIds.length;
@@ -172,6 +334,23 @@
     if (!(e.target instanceof Node) || !saveEl?.contains(e.target)) saveOpen = false;
   }
 
+  // A mouse click in the terminal hands the keyboard back to the command line:
+  // reading the log or clicking a filter chip must not cost a second click
+  // before typing again (and Enter must work again). A drag-select keeps its
+  // selection; fields and open dialogs keep their focus; a control activated
+  // from the keyboard (detail 0) is left where it is.
+  function onPanelClick(e: MouseEvent) {
+    if (e.detail === 0) return;
+    if (!window.getSelection()?.isCollapsed) return;
+    queueMicrotask(() => {
+      if (document.querySelector('[aria-modal="true"]')) return;
+      const active = document.activeElement;
+      if (isTypingTarget(active)) return;
+      const input = commandInput();
+      if (input && active !== input) input.focus({ preventScroll: true });
+    });
+  }
+
   // Reading the log with the keyboard, typing a command should just work: a
   // printable key (or Escape) goes back to the command line, and the key
   // itself lands there because focus moves before the character is inserted.
@@ -179,10 +358,10 @@
   function onLogKey(e: KeyboardEvent) {
     const printable = e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
     if (!printable && e.key !== "Escape") return;
-    const input = document.querySelector<HTMLElement>('[data-focus-region="input"]');
+    const input = commandInput();
     if (!input) return;
     if (e.key === "Escape") e.preventDefault();
-    input.focus();
+    input.focus({ preventScroll: true });
   }
 
   // Opening the save list moves focus into it, so Enter on the button and
@@ -220,7 +399,10 @@
 
 <svelte:window onkeydown={onGlobalKey} onpointerdowncapture={onGlobalPointer} />
 
-<div class="log-wrap">
+<!-- The click handler only returns keyboard focus to the command line; it is
+     not an action on the container, so it needs no role or key equivalent. -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="log-wrap" onclick={onPanelClick}>
   <div class="log-bar" role="toolbar" aria-label="Output filters and tools">
     <div class="chips">
       {#each CATS as c}
@@ -285,17 +467,30 @@
     tabindex="0"
     data-focus-region="output"
   >
-    {#each filtered as line (line.id)}
-      <div
-        class="log-line"
-        data-cat={line.cat}
-        data-lid={line.id}
-        class:hit={matchSet.has(line.id)}
-        class:active={matchIds[matchPos] === line.id}
-      >
-        {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span class="body" use:typewriter={{ id: line.id, durationMs: twDuration, onstep: keepPinned }}>{@html line.html}</span>
-      </div>
-    {/each}
+    <!-- The spacer holds the full scroll height; rows are positioned inside
+         it. Only the virtualized window is mounted. -->
+    <div class="log-spacer" bind:this={spacer} style="height: {totalSize}px">
+      {#each virtualItems as item (item.key)}
+        {@const line = filtered[item.index]}
+        {#if line}
+          <div
+            class="log-line"
+            data-index={item.index}
+            data-cat={line.cat}
+            data-lid={line.id}
+            class:hit={matchSet.has(line.id)}
+            class:active={matchIds[matchPos] === line.id}
+            style="transform: translateY({item.start}px)"
+            use:measureLine
+          >
+            {#if logview.timestamps}<span class="ts">{hhmmss(line.ts)}</span>{/if}<span
+              class="body"
+              use:typewriter={{ id: line.id, ts: line.ts, durationMs: twDuration }}
+            >{@html line.html}</span>
+          </div>
+        {/if}
+      {/each}
+    </div>
   </div>
   {#if !pinned && unseen > 0 && !logview.searchOpen}
     <button class="latest" onclick={jumpToLatest}>{unseen} new line{unseen === 1 ? "" : "s"} ↓</button>
@@ -364,8 +559,17 @@
     color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em;
     padding: 3px 10px; min-height: 24px; cursor: pointer; z-index: 5;
   }
-  .game-log { overflow-y: auto; padding: 0.7rem 1rem; line-height: var(--shell-line-height, 1.5); flex: 1; }
-  .log-line { white-space: pre-wrap; word-break: break-word; }
+  .game-log {
+    overflow-y: auto; padding: 0.7rem 1rem; line-height: var(--shell-line-height, 1.5); flex: 1;
+    /* The virtualizer owns scroll anchoring (anchorTo: "end"); the browser's
+       own anchoring would fight its corrections. */
+    overflow-anchor: none;
+  }
+  .log-spacer { position: relative; width: 100%; }
+  .log-line {
+    position: absolute; top: 0; left: 0; width: 100%;
+    white-space: pre-wrap; word-break: break-word;
+  }
   .log-line .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }
   /* Category accents - only the standouts get a marker, to avoid noise. */
   .log-line[data-cat="combat"] { border-left: 2px solid var(--alert); padding-left: 7px; margin-left: -9px; }

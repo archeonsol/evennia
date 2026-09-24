@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Virtualized log</title>
+<style>
+  html, body { margin: 0; background: #111; }
+  #host { width: 640px; height: 320px; display: flex; flex-direction: column; font: 15px/1.5 monospace; color: #ddd; }
+  #results { white-space: pre-wrap; font: 12px/1.4 monospace; color: #ccc; padding: 8px; }
+</style>
+<div id="host"></div>
+<input id="cmd" data-focus-region="input" aria-label="Command" style="width: 640px; font: 15px/1.5 monospace;" />
+<pre id="results">Running...</pre>
+<script type="module" src="./log.ts"></script>

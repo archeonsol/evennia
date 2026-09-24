@@ -1,15 +1,27 @@
-// Lines revealed at least once; remounts (filter/search toggles) skip replay.
-const revealed = new Set<number>();
-// Highest line id present when the log first mounted; backlog never animates.
-let baselineId = Number.POSITIVE_INFINITY;
+// The game log is virtualized, so a line mounts when it scrolls into view, not
+// once at append time. Three gates decide whether a mount still types in:
+// the backlog at mount never does, a line the log marked revealed (it landed
+// off-screen) never does, and a line older than FRESH_MS never does - the
+// moment it was news has passed.
+
+import { logReveal } from "./logreveal";
+
+/** How long after a line lands it may still type in. */
+export const FRESH_MS = 1500;
 
 /** Freeze the backlog so only lines appended after mount type in. */
 export function markBacklog(maxId: number): void {
-  baselineId = maxId;
+  logReveal.markBacklog(maxId);
 }
 
 interface TWParams {
   id: number;
+  /**
+   * Epoch ms the line landed. A line older than FRESH_MS renders instantly:
+   * virtualization can mount it late (scrolled back to, panel restored), and
+   * replaying the reveal then reads as the log being broken, not alive.
+   */
+  ts?: number;
   /**
    * Milliseconds to reveal this line in full, regardless of its length, so a
    * help file and a one-liner finish together. 0 (reduce-motion / screenreader
@@ -46,15 +58,16 @@ export function typewriter(node: HTMLElement, params: TWParams) {
   let raf = 0;
   const chunks: { node: Text; text: string }[] = [];
   const { id, durationMs, onstep } = params;
+  const fresh = params.ts === undefined || Date.now() - params.ts <= FRESH_MS;
   // A background tab gets no animation frames, so a line typed in there would
   // sit blank until the player looked; it has nobody to animate for anyway.
   const skip =
-    revealed.has(id) ||
-    id <= baselineId ||
+    !fresh ||
+    logReveal.isRevealed(id) ||
     durationMs <= 0 ||
     typeof Intl.Segmenter !== "function" ||
     (typeof document !== "undefined" && document.hidden);
-  revealed.add(id);
+  logReveal.reveal(id);
 
   const finish = () => {
     if (finished) return;

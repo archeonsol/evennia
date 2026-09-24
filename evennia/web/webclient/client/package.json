@@ -12,10 +12,12 @@
     "watch": "vite build --watch",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:browser": "node tests/run-browser.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "playwright-core": "^1.63.0",
     "svelte": "^5.19.0",
     "svelte-check": "^4.1.1",
     "typescript": "^5.7.3",
@@ -23,6 +25,7 @@
     "vitest": "^3.0.5"
   },
   "dependencies": {
+    "@tanstack/virtual-core": "^3.17.11",
     "dockview-core": "^7.0.2"
   }
 }

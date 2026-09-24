@@ -25,6 +25,60 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.271 — Virtualized terminal, command-line focus
+
+### Web client: performance
+
+- **The game log is virtualized** ([`logvirtual.ts`](evennia/web/webclient/client/src/lib/logvirtual.ts),
+  [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)).
+  The terminal used to mount every scrollback line as DOM — 5,000 lines with
+  colour spans is tens of thousands of nodes, all re-reconciled and re-laid-out
+  on every append. It now uses `@tanstack/virtual-core`: a spacer carries the
+  full scroll height and only the rows around the viewport are mounted,
+  roughly 40 nodes regardless of scrollback depth. A burst (combat spam, a
+  help file, a room look) no longer pays for the whole buffer.
+- **Anchored by line id, never by row number** (`getItemKey`,
+  `anchorTo: "end"`, `followOnAppend`). Following the bottom keeps following
+  through appends and trims; a reader scrolled up keeps the exact line and
+  pixel offset through an append, a filter change, and the scrollback cap
+  trimming 500 lines at once.
+- **Typewriter honesty** ([`logreveal.ts`](evennia/web/webclient/client/src/lib/logreveal.ts),
+  [`typewriter.ts`](evennia/web/webclient/client/src/lib/typewriter.ts)).
+  A line types in only if it is fresh and was visible when it landed; the
+  backlog and off-screen arrivals (scrolled up, hidden panel) render instantly
+  instead of replaying when scrolled back to.
+- **Search, filters and restores.** Search scrolls by row index; timestamps or
+  font-metric changes remeasure mounted rows and re-pin the bottom when
+  following; a hidden panel restores through the virtualizer.
+- The in-memory scrollback cap is unchanged (5,000 lines, trimmed in blocks of
+  500). Virtualization removed the DOM cost, not the memory or the portal
+  replay window.
+
+### Web client: command line
+
+- **Typing always reaches the command line** ([`focus.ts`](evennia/web/webclient/client/src/lib/focus.ts),
+  [`App.svelte`](evennia/web/webclient/client/src/App.svelte)). A plain
+  character typed anywhere that is not a field or an open dialog is redirected
+  to the command line, and a mouse click in the terminal (a log row, a filter
+  chip, the toolbar) returns focus there. Reading or filtering no longer costs
+  a second click before typing again, and Enter works after a click.
+- A drag-select keeps its selection; a control activated from the keyboard
+  (click `detail === 0`) keeps its focus.
+
+### Tests
+
+- `npm test`: 619 tests. New: 17 virtualizer tests (bounded window, follow,
+  anchor through append/trim/filter, fold compensation, growth under the
+  typewriter), 5 reveal tests, 8 focus tests.
+- `npm run test:browser` (new): drives [`tests/log.html`](evennia/web/webclient/client/tests/log.html)
+  (30 checks) and the existing `tests/display.html` (49 checks) in an installed
+  Edge/Chrome via `playwright-core` (devDependency; downloads no browser).
+
+### Dependencies
+
+- Added `@tanstack/virtual-core` (runtime) and `playwright-core` (dev). No
+  settings or API changes; no migration.
+
 ## 6.0.0+underspire.270: web client accessibility, feeds, tickets, visual pass
 
 ### Web client: accessibility
