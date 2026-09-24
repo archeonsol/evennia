@@ -17,7 +17,7 @@ export const CURATED: CmdItem[] = [
   { cmd: "look", label: "Look" },
   { cmd: "who", label: "Who is online" },
   { cmd: "inventory", label: "Inventory" },
-  { cmd: "score", label: "Score / sheet" },
+  { cmd: "@stats", label: "Score / sheet" },
   { cmd: "say ", label: "Say…" },
   { cmd: "pose ", label: "Pose…" },
   { cmd: "emote ", label: "Emote…" },
