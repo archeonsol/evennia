@@ -25,6 +25,32 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.272 — Deferred capture rehydration out of caller transactions
+
+### Actions / Attributes
+
+- **Loading an object no longer fails because its JSONB Attribute row state is
+  cold inside a caller-owned transaction** ([`state.py`](evennia/actions/state.py)).
+  `at_post_load` probes every loaded object for persisted input-captures, which
+  needs the holder's JSONB row state; a cold state may not be materialized
+  inside `transaction.atomic()` (`AttributeUpdateUsageError: A new JSONB
+  Attribute row state requires autocommit`). Any escrowed item resolved under a
+  transaction — the reported one is the courier accept path (`accept_order` →
+  `claim` → `MoveBatch.deliver` → `resolve_item`) — therefore failed its own
+  load and aborted the service with an untrapped error, e.g. accepting any
+  courier job after a restart. `rehydrate_captures` now catches that specific
+  refusal and retries the probe through `transaction.on_commit`; a rolled-back
+  transaction simply skips the probe, which is the correct outcome for
+  non-persistent UI state. Loads outside a transaction are unchanged.
+
+### Tests
+
+- New regression test
+  [`test_eveditor.py::TestEvEditorReload::test_capture_rehydration_defers_out_of_caller_transaction`](evennia/utils/tests/test_eveditor.py):
+  forces a cold row state (after making the persisted marker durable with
+  `force_flush`), loads the holder inside `transaction.atomic()` and asserts
+  rehydration lands on commit.
+
 ## 6.0.0+underspire.271 — Virtualized terminal, command-line focus
 
 ### Web client: performance
