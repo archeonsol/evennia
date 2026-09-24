@@ -24,3 +24,38 @@ export function focusOnMount(node: HTMLElement, options: FocusOptions = {}) {
     if (options.select && node instanceof HTMLInputElement) node.select();
   });
 }
+
+/** Whether the event target is a field that owns its own keystrokes. */
+export function isTypingTarget(target: unknown): boolean {
+  if (!target || typeof target !== "object") return false;
+  const el = target as { tagName?: unknown; isContentEditable?: unknown };
+  const tag = typeof el.tagName === "string" ? el.tagName.toUpperCase() : "";
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
+}
+
+/** The command line, wherever it is mounted. */
+export function commandInput(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-focus-region="input"]');
+}
+
+/**
+ * Whether a keydown should be handed to the command line from wherever it
+ * landed. Clicking the log or a filter chip must not cost a second click before
+ * the player can type again, so a plain character typed anywhere that is not a
+ * field is redirected. The character still lands in the input: focus moves
+ * during keydown, before the browser inserts it.
+ *
+ * Left alone: modified keys (shortcuts), Space (activates a focused control),
+ * Enter and the rest of the named keys, fields, IME composition, and anything
+ * while a dialog is open.
+ */
+export function shouldTypeCommand(
+  e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "isComposing">,
+  target: unknown,
+  modalOpen: boolean,
+): boolean {
+  if (modalOpen || e.isComposing) return false;
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  if (e.key.length !== 1 || e.key === " ") return false;
+  return !isTypingTarget(target);
+}

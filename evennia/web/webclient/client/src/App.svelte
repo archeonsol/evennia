@@ -22,6 +22,7 @@
   import { logview } from "./lib/logview.svelte";
   import { announcer } from "./lib/announce.svelte";
   import { focusRegion, type Region } from "./lib/regions";
+  import { commandInput, shouldTypeCommand } from "./lib/focus";
 
   // The intro is a visual flourish; a screen reader user would only have to
   // find and dismiss it.
@@ -123,6 +124,14 @@
     }
     const combo = comboOf(e);
     if (combo && macros.handleKey(combo)) e.preventDefault();
+    // A plain character typed anywhere that is not a field goes to the command
+    // line, so clicking the log, a filter chip or a channel does not cost a
+    // second click before typing. The character still lands: focus moves
+    // during keydown, before the browser inserts it.
+    if (shouldTypeCommand(e, e.target, modalOpen)) {
+      const input = commandInput();
+      if (input && document.activeElement !== input) input.focus({ preventScroll: true });
+    }
   }
 </script>
 
