@@ -251,7 +251,7 @@
   .kind { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem; }
   .meta { display: flex; align-items: baseline; gap: 0.7ch; }
   .pri { color: var(--danger, #e5484d); font-size: 0.62rem; font-weight: bold; }
-  .asg { color: var(--accent); font-size: 0.6rem; text-transform: uppercase; }
+  .asg { color: var(--accent-bright); font-size: 0.6rem; text-transform: uppercase; }
   .age { color: var(--fg-faint); font-size: 0.66rem; }
   .status {
     font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.08em;
@@ -281,11 +281,11 @@
   .act.no:hover { border-color: #e5484d; color: #e5484d; }
   .ctx { padding: 5px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
   .cx { font-size: 0.74rem; }
-  .ck { color: var(--accent); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.06em; }
+  .ck { color: var(--accent-bright); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.06em; }
   .cv { color: var(--fg); }
   .msgs { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: 1.5; }
   .m { padding: 2px 0; font-size: 0.85rem; }
-  .m .s { color: var(--accent); margin-right: 0.6ch; }
+  .m .s { color: var(--accent-bright); margin-right: 0.6ch; }
   .m .t { color: var(--fg); white-space: pre-wrap; }
   .m.note { opacity: 0.8; }
   .m.note .s::after { content: " (note)"; color: var(--danger, #e5484d); font-size: 0.7em; }

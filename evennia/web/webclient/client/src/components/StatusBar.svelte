@@ -4,14 +4,17 @@
   import { dock, VIEWS } from "../lib/dock.svelte";
   import { chat } from "../lib/chat.svelte";
   import { media } from "../lib/media.svelte";
+  import { settings } from "../lib/settings.svelte";
+  import { focusRegion, type Region } from "../lib/regions";
+  import { tick } from "svelte";
 
   let { onsettings }: { onsettings: () => void } = $props();
 
   const labels: Record<string, string> = {
-    connecting: "linking",
-    open: "online",
-    closed: "severed",
-    error: "fault",
+    connecting: "Connecting…",
+    open: "Online",
+    closed: "Disconnected",
+    error: "Connection error",
   };
 
   let viewsOpen = $state(false);
@@ -20,13 +23,27 @@
   const viewIds = $derived(
     Object.keys(VIEWS).filter((id) => id !== "tickets" || chat.staff),
   );
+  // Where focus goes after a pick: the view's own region when it has one,
+  // else the tab of the new view in the screen-reader layout, else back to
+  // the Views button. Closing the list must not leave focus on the body.
+  const REGION_OF: Record<string, Region> = { log: "output", scene: "scene", chat: "channels" };
+  async function afterPick(id?: string) {
+    viewsOpen = false;
+    await tick();
+    if (id && REGION_OF[id]) {
+      if (await focusRegion(REGION_OF[id])) return;
+    }
+    const tab = id ? document.getElementById(`sv-tab-${id}`) : null;
+    if (tab) tab.focus();
+    else if (document.activeElement === document.body || !document.activeElement) viewsBtn?.focus();
+  }
   function pick(id: string) {
     dock.openView(id);
-    viewsOpen = false;
+    void afterPick(id);
   }
   function openSite() {
-    dock.openIframe("view:site", "Web", location.origin);
-    viewsOpen = false;
+    dock.openWebPage("view:site", "Web", location.origin);
+    void afterPick("view:site");
   }
   // The notes page is a per-character tokenised URL the server puts in the
   // scene fields; it is only offered when the character actually has one.
@@ -34,12 +51,12 @@
     typeof scene.fields.notes_url === "string" ? scene.fields.notes_url : "",
   );
   function openNotes() {
-    if (notesUrl) dock.openIframe("view:notes", "Notes", notesUrl);
-    viewsOpen = false;
+    if (notesUrl) dock.openWebPage("view:notes", "Notes", notesUrl);
+    void afterPick("view:notes");
   }
   function reset() {
     viewsOpen = false;
-    dock.resetLayout();
+    if (confirm("Reset the panel layout to the default?")) dock.resetLayout();
   }
   let presets = $state<string[]>([]);
   function refreshPresets() {
@@ -47,7 +64,7 @@
   }
   function loadPreset(name: string) {
     dock.loadLayout(name);
-    viewsOpen = false;
+    void afterPick();
   }
   function savePreset() {
     const name = prompt("Save current layout as:");
@@ -64,19 +81,32 @@
   $effect(() => {
     if (viewsOpen) refreshPresets();
   });
+
+  let viewsBtn = $state<HTMLButtonElement | null>(null);
+  function focusFirst(node: HTMLElement, first: boolean) {
+    if (first) node.focus();
+  }
+  function onDropKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      viewsOpen = false;
+      viewsBtn?.focus();
+    }
+  }
 </script>
 
+<!-- The client's own bar: plain words, the game's name, where you are, and
+     the controls. The Nous deck is the in-character device; this is the
+     player's out-of-character tool and should read as one. -->
 <header class="hud" data-state={connection.state}>
-  <div class="zone left">
-    <span class="dot" aria-hidden="true"></span>
-    <span class="conn">{labels[connection.state] ?? connection.state}</span>
+  <div class="side left">
+    <span class="brand glow-text">Underspire</span>
+    <span class="conn"><span class="dot" aria-hidden="true"></span><span class="sr-only">Connection: </span>{labels[connection.state] ?? connection.state}</span>
   </div>
 
-  <div class="zone center">
+  <div class="mid">
     {#if scene.present && scene.room.name}
-      <span class="mark" aria-hidden="true">⌁</span>
-      <span class="loc glow-text">{@html scene.room.name}</span>
-      <span class="mark" aria-hidden="true">⌁</span>
+      <span class="loc"><span class="sr-only">Location: </span>{@html scene.room.name}</span>
     {/if}
     {#if media.nowPlaying}
       <button
@@ -85,12 +115,12 @@
         title="Open media panel"
         onclick={() => media.openNowPlaying()}
       >
-        {media.nowPlayingLabel()}
+        <span aria-hidden="true">♪ </span>{media.nowPlayingLabel()}
       </button>
     {/if}
   </div>
 
-  <div class="zone right">
+  <div class="side right">
     <div
       class="vol"
       class:open={volOpen}
@@ -127,46 +157,42 @@
         aria-label="Music volume"
       />
     </div>
-    <span class="brand glow-text">UNDERSPIRE</span>
     <div class="menu">
-      <button class="cfg" onclick={() => (viewsOpen = !viewsOpen)} aria-haspopup="true" aria-expanded={viewsOpen}>[ VIEWS ]</button>
+      <button class="cfg" bind:this={viewsBtn} onclick={() => (viewsOpen = !viewsOpen)} aria-expanded={viewsOpen}>Views</button>
       {#if viewsOpen}
-        <div class="drop" role="menu">
-          {#each viewIds as id}
-            <button class="mi" role="menuitem" class:on={dock.isOpen(id)} onclick={() => pick(id)}>
-              {VIEWS[id].title}{dock.isOpen(id) ? " ·" : ""}
+        <!-- Disclosure, not role="menu": a menu role promises arrow-key
+             handling these items never had. Escape closes it. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="drop" onkeydown={onDropKey}>
+          {#each viewIds as id, i}
+            <button class="mi" class:on={dock.isOpen(id)} onclick={() => pick(id)} use:focusFirst={i === 0}>
+              {VIEWS[id].title}{#if dock.isOpen(id)}<span aria-hidden="true"> ·</span><span class="sr-only"> (open)</span>{/if}
             </button>
           {/each}
-          <button class="mi" role="menuitem" onclick={openSite}>Web page</button>
+          <button class="mi" onclick={openSite}>Web page</button>
           {#if notesUrl}
-            <button class="mi" role="menuitem" onclick={openNotes}>Notes</button>
+            <button class="mi" onclick={openNotes}>Notes</button>
           {/if}
-          <div class="sep"></div>
+          <!-- Layouts belong to the docked workspace; the screen-reader
+               layout has none to save, lock or reset. -->
+          {#if !settings.screenreader}
+          <div class="sep" role="separator"></div>
           {#each presets as name}
-            <button class="mi preset" role="menuitem" onclick={() => loadPreset(name)}>
-              ▸ {name}
-              <span
-                class="del"
-                role="button"
-                tabindex="0"
-                onclick={(e) => delPreset(name, e)}
-                onkeydown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    delPreset(name, e);
-                  }
-                }}>×</span>
-            </button>
+            <div class="preset-row">
+              <button class="mi preset" onclick={() => loadPreset(name)}>▸ {name}</button>
+              <button class="del" onclick={(e) => delPreset(name, e)} aria-label="Delete layout {name}">×</button>
+            </div>
           {/each}
-          <button class="mi" role="menuitem" onclick={savePreset}>Save layout…</button>
-          <button class="mi" role="menuitem" class:on={dock.locked} onclick={() => dock.toggleLock()}>
+          <button class="mi" onclick={savePreset}>Save layout…</button>
+          <button class="mi" class:on={dock.locked} onclick={() => dock.toggleLock()}>
             {dock.locked ? "Unlock layout" : "Lock layout"}
           </button>
-          <button class="mi warn" role="menuitem" onclick={reset}>Reset layout</button>
+          <button class="mi warn" onclick={reset}>Reset layout</button>
+          {/if}
         </div>
       {/if}
     </div>
-    <button class="cfg" onclick={onsettings} aria-label="settings">[ CFG ]</button>
+    <button class="cfg" onclick={onsettings}>Settings</button>
   </div>
 </header>
 
@@ -177,29 +203,44 @@
 <style>
   .hud {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
     align-items: center;
-    padding: 0.35rem 0.8rem;
+    gap: 1rem;
+    min-height: 2.3rem;
+    padding: 0 0.8rem;
     border-bottom: 1px solid var(--accent);
     background: var(--bg-elev);
     color: var(--fg-dim);
-    font-size: 0.72rem;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
+    font-size: 0.78rem;
   }
-  .zone { display: flex; align-items: center; gap: 0.6rem; }
+  .side { display: flex; align-items: center; gap: 0.9rem; min-width: 0; }
   .right { justify-content: flex-end; }
-  .center { justify-content: center; gap: 0.8ch; }
+  .mid { display: flex; align-items: center; justify-content: center; gap: 0.8rem; min-width: 0; }
+  .brand {
+    color: var(--accent-bright); font-weight: 500; letter-spacing: 0.24em;
+    text-transform: uppercase; font-size: 0.74rem; white-space: nowrap;
+  }
+  .conn { display: flex; align-items: center; gap: 0.45rem; white-space: nowrap; color: var(--fg-dim); }
+  .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+  .vol-icon { flex-shrink: 0; width: 1rem; height: 1rem; fill: var(--fg-dim); }
+  .vol:hover .vol-icon, .vol.open .vol-icon, .vol:focus-within .vol-icon { fill: var(--accent-bright); }
+  .vol.muted .vol-icon { fill: var(--fg-faint); }
+  /* Narrow screens: the room name and the wordmark give way first. */
+  @media (max-width: 760px) {
+    .hud { grid-template-columns: minmax(0, 1fr) auto; }
+    .mid { display: none; }
+  }
+  @media (max-width: 420px) {
+    .brand { display: none; }
+  }
   .dot { width: 0.5rem; height: 0.5rem; background: var(--fg-faint); }
   .hud[data-state="open"] .dot { background: var(--ok); }
   .hud[data-state="connecting"] .dot { background: var(--gold); }
   .hud[data-state="closed"] .dot,
   .hud[data-state="error"] .dot { background: var(--alert); }
-  .mark { color: var(--accent); }
   .loc {
     color: var(--gold);
-    letter-spacing: 0.2em;
-    max-width: 44vw;
+    letter-spacing: 0.04em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -207,7 +248,7 @@
   .now-playing {
     background: none;
     border: 1px solid var(--border);
-    color: var(--accent);
+    color: var(--accent-bright);
     font-family: inherit;
     font-size: 0.62rem;
     letter-spacing: 0.08em;
@@ -219,28 +260,14 @@
     white-space: nowrap;
   }
   .now-playing:hover { color: var(--accent-bright); border-color: var(--accent); }
-  .brand { color: var(--accent-bright); letter-spacing: 0.32em; font-weight: 500; }
 
   .vol {
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 0.6rem;
     height: 1.25rem;
     cursor: default;
   }
-  .vol-icon {
-    flex-shrink: 0;
-    width: 0.85rem;
-    height: 0.85rem;
-    fill: var(--fg-faint);
-    transition: fill 0.15s ease;
-  }
-  .vol:hover .vol-icon,
-  .vol.open .vol-icon,
-  .vol:focus-within .vol-icon {
-    fill: var(--accent);
-  }
-  .vol.muted .vol-icon { fill: var(--fg-faint); opacity: 0.65; }
 
   .vol-slider {
     -webkit-appearance: none;
@@ -301,16 +328,17 @@
     border: 0;
   }
   .cfg {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
+    background: var(--bg);
+    border: 1px solid var(--border-bright);
+    color: var(--fg);
     font-family: inherit;
-    font-size: inherit;
-    letter-spacing: 0.1em;
+    font-size: 0.74rem;
     cursor: pointer;
-    padding: 0;
+    padding: 3px 12px;
+    min-height: 26px;
+    white-space: nowrap;
   }
-  .cfg:hover { color: var(--accent-bright); }
+  .cfg:hover, .cfg[aria-expanded="true"] { color: var(--accent-bright); border-color: var(--accent); }
   .menu { position: relative; display: inline-flex; }
   .drop {
     position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 50;
@@ -326,7 +354,11 @@
   .mi.on { color: var(--gold); }
   .mi.warn:hover { color: var(--alert); }
   .sep { height: 1px; background: var(--border); margin: 2px 0; }
-  .preset { display: flex; align-items: center; justify-content: space-between; }
-  .preset .del { color: var(--fg-faint); padding: 0 3px; }
-  .preset .del:hover { color: var(--alert); }
+  .preset-row { display: flex; align-items: stretch; }
+  .preset { flex: 1; }
+  .del {
+    background: none; border: none; color: var(--fg-dim); font-family: inherit;
+    padding: 0 8px; min-width: 24px; cursor: pointer;
+  }
+  .del:hover { color: var(--alert); }
 </style>

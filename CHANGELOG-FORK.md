@@ -25,6 +25,91 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.270: web client accessibility, feeds, tickets, visual pass
+
+### Web client: accessibility
+
+- **Screen reader mode** ([`SimpleWorkspace.svelte`](evennia/web/webclient/client/src/components/SimpleWorkspace.svelte),
+  [`simpleLayout.svelte.ts`](evennia/web/webclient/client/src/lib/simpleLayout.svelte.ts)):
+  one view at a time behind a tab list, no visual effects or intro, channel
+  messages in the terminal, room music off. It is the first Tab stop on the
+  page. Server-opened pages (the grid) open as a view tab and are announced.
+- **One voice for speech** ([`announce.svelte.ts`](evennia/web/webclient/client/src/lib/announce.svelte.ts)):
+  new output is spoken from an off-screen region, batched per burst and cut to
+  the newest 15 lines. The visible log is no longer a live region; the
+  typewriter used to make it speak fragments.
+- **Keys** ([`keybinds.svelte.ts`](evennia/web/webclient/client/src/lib/keybinds.svelte.ts),
+  [`regions.ts`](evennia/web/webclient/client/src/lib/regions.ts)): Alt+I/O/C/R
+  jump to the command line, output, channels and scene; Alt+1 to Alt+9 read
+  back recent lines; Page Up/Down page the output from the command line.
+- **Keyboard fixes**: Tab only completes when there is a match (it trapped
+  focus in the command line); key-capture fields let Tab and Escape out;
+  dialogs trap focus, close on Escape and return focus
+  ([`modal.ts`](evennia/web/webclient/client/src/lib/modal.ts)); the palette is
+  a combobox; fake `role=menu` dropdowns are disclosures; channel messages are
+  one Tab stop with arrow keys; cards, disconnects and completions are
+  announced; controls are labelled.
+- **Contrast**: `--fg-faint` and `--fg-dim` meet 4.5:1 in every theme; a global
+  focus ring; 24px targets on the densest controls.
+- **Server flag**: `webclient_options` now sets the session `SCREENREADER`
+  protocol flag and syncs it to the portal
+  ([`inputfuncs.py`](evennia/server/inputfuncs.py)), so game output is shaped
+  for speech as on telnet. `ServerSession.update_flags` sends the new
+  `screenreader_mode` event when the flag is set (a saved `@option` restored at
+  login, or `@option`), and the shell turns its mode on to match
+  ([`serversession.py`](evennia/server/serversession.py),
+  [`core_events.py`](evennia/server/protocol/core_events.py)).
+
+### Web client: feeds
+
+- One pattern parser for feeds and triggers
+  ([`pattern.ts`](evennia/web/webclient/client/src/lib/pattern.ts)): plain text
+  is literal, `/regex/` is a regex. Broken or match-everything patterns are
+  refused and shown in Settings. Saved bare regexes migrate to `/.../i`.
+- Rules can be switched off and reordered; renaming a feed keeps its lines; a
+  new or edited rule takes matching lines already in the terminal; replayed
+  lines are filed once; buffers hold 1000 lines
+  ([`routing.svelte.ts`](evennia/web/webclient/client/src/lib/routing.svelte.ts)).
+- Gags hide lines from the terminal only; feeds still get them. "Hide in
+  terminal" replaces COPY/MOVE.
+- The Feeds panel follows new lines, shows a jump-to-latest bar when scrolled
+  up, searches, shows times, and opens a feed in its own panel
+  ([`SpawnsPanel.svelte`](evennia/web/webclient/client/src/components/SpawnsPanel.svelte)).
+  Feed rules have their own Settings view. The terminal gets the same jump bar.
+
+### Web client: tickets, channels, input
+
+- My Tickets loads once the socket is open, shows load errors, refreshes when
+  a ticket changes; a player's `@ticket` opens it.
+- Channel history pushes merge with what the page holds; messages dedupe by
+  id and use a client key.
+- A bare Ctrl/Alt/Shift press is never captured as a bind; old
+  "Ctrl+Control" binds are cleared on load.
+- Settings: echo commands in the terminal; keep the command after sending.
+- Web pages from the server open near full size instead of a 100px float, or
+  in a browser window; embedded pages have "Open in new window".
+- Floating panels no longer cover the Settings dialog.
+
+### Web client: look
+
+- dockview's inner shell carried its own blue theme class, which overrode the
+  tab strip colours; the theme variables are now set there too.
+- Plain labels on the header and toolbars; Settings opens on a simple list;
+  squared sliders and selects.
+- A fresh layout gives the scene/channels column a usable width; on a phone
+  they are tabs beside the terminal.
+
+### Engine
+
+- `@option` renders structured protocol flags (HTTP_ORDER, HTTP_FP, TLS_FP)
+  instead of raising on a bare `@option` from a websocket session.
+
+### Migration notes
+
+- `screenreader_mode` is a new OOB event; nothing needs to handle it.
+  Regenerate `oob-events.ts` with `gen_ts` if a game keeps its own copy.
+- `shell.js` / `shell.css` are rebuilt.
+
 ## 6.0.0+underspire.269 — F5 macro renamed to Stats
 
 ### Web client

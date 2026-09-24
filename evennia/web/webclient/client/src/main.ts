@@ -25,6 +25,9 @@ import { dock } from "./lib/dock.svelte";
 import { createLegacyEmitter } from "./lib/legacy-emitter";
 import { compose } from "./lib/compose.svelte";
 import type { OobEvent } from "./lib/oob-events";
+import { announcer } from "./lib/announce.svelte";
+import { renderBody, renderSender } from "./lib/markup";
+import { logview } from "./lib/logview.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -64,12 +67,41 @@ keybinds.init();
 panelPrefs.init();
 routing.init();
 // A route turned to MOVE retroactively claims lines already on screen.
-routing.setOnSync(() => session.pruneMoved());
+routing.setOnSync((fresh) => session.pruneMoved(fresh));
 notify.init();
 compose.init();
 // The preview is a real (silent) command, so it goes out on the command line
 // rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
 compose.setPreviewSender((line) => connection.sendCommand(line));
+
+// Local echo: the command as typed, in the terminal before the game's answer.
+commands.onRun((line) => {
+  const t = line.trim();
+  if (!settings.echoCommands || !t) return;
+  const safe = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  session.append(`<span class="cmd-echo">&gt; ${safe}</span>`, "echo");
+});
+
+// Speak new output. A category the player filtered out of the log is muted
+// here too, so the log's filter chips double as speech filters. The echo of
+// the player's own command is not read back to them.
+session.onLine((line) => {
+  if (settings.speakOutput && line.type !== "media" && line.type !== "echo" && logview.filters[line.cat]) {
+    announcer.say(line.text);
+  }
+});
+
+// Channel echo: telnet shows channel traffic in the one stream, and the shell
+// used to keep it in the Channels panel only, where a screen reader never
+// heard it. Muted channels stay quiet here as they do there.
+function echoChannel(kw: Record<string, any>): void {
+  const key = String(kw.channel ?? "");
+  if (!settings.channelEcho || !key || chat.muted[key]) return;
+  const name = chat.channels.find((c) => c.key === key)?.name ?? key;
+  const sender = renderSender(kw.sender_html, kw.sender);
+  const body = renderBody(kw.html, kw.text);
+  session.append(`<span class="chan-echo">${renderSender(undefined, `[${name}]`)}</span> ${sender}: ${body}`, "channel");
+}
 
 // Direct-message-ish kinds that deserve an attention ping when unfocused.
 const TELL_KINDS = new Set(["tell", "whisper", "page", "say_to"]);
@@ -128,6 +160,12 @@ function refreshPuppetManifest() {
 // trip here — the manifest is the one thing only the client knows it wants.
 connection.on("connection_open", () => {
   refreshPuppetManifest();
+  // The session flag starts off on every connection, and the settings store's
+  // own send runs before the socket is open, so it is dropped. Only "on" is
+  // sent: off must not undo a player's saved @option screenreader.
+  if (settings.screenreader) {
+    connection.sendOobRaw("webclient_options", [], { SCREENREADER: true });
+  }
 });
 
 // Every name this file routes on must exist in the server's event catalog.
@@ -148,6 +186,10 @@ connection.on("oob", (env) => {
     event.startsWith("ticket_")
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
+    if (is(event, "channel_msg")) echoChannel(env.kwargs ?? {});
+    // A thread only arrives because the player asked for one (@ticket, or a
+    // click in a ticket list): bring its panel forward.
+    if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);
@@ -161,12 +203,24 @@ connection.on("oob", (env) => {
     const url = String(spec.url ?? "");
     if (url) {
       const id = String(spec.id ?? url);
-      dock.openIframe(id, String(spec.title ?? "Web"), url);
+      dock.openWebPage(id, String(spec.title ?? "Web"), url);
     }
   } else if (is(event, "logout")) {
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
     connection.markLoggedOut(String(reason ?? "quit"));
+  } else if (is(event, "screenreader_mode")) {
+    // The server's flag was set on (a saved @option restored at login, or
+    // @option now). Follow it. Only "on" is followed: turning the client's
+    // mode off stays the player's call in Settings, so a stale saved "off"
+    // cannot undo a layout they chose.
+    const on = !!(env.kwargs ?? {}).on;
+    if (on && !settings.screenreader) {
+      settings.screenreader = true;
+      settings.channelEcho = true;
+      settings.music = false;
+      announcer.now("Screen reader mode on, from your saved game option. One view at a time.");
+    }
   } else if (is(event, "player_mention")) {
     chat.onMention(env.kwargs ?? {});
   } else if (is(event, "compose_preview")) {

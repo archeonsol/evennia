@@ -4,6 +4,8 @@
 //   aliases:    expand a typed first word into a command
 // Rules are structured (pattern + fields), edited row-by-row, persisted locally.
 
+import { migrateLegacyPattern, parsePattern } from "./pattern";
+
 const KEY = "underspire.triggers.v2";
 
 export interface Highlight {
@@ -24,14 +26,9 @@ export interface TAction {
   arg: string; // command to run / notify text; ignored for sound
 }
 
+// Patterns are "text or /regex/"; see pattern.ts.
 function compile(pattern: string): RegExp | null {
-  const p = (pattern || "").trim();
-  if (!p) return null;
-  try {
-    return new RegExp(p, "gi");
-  } catch {
-    return new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-  }
+  return parsePattern(pattern).re;
 }
 
 // `highlight()` interpolates the colour into a style attribute, so anything that
@@ -59,10 +56,13 @@ class Triggers {
   init(): void {
     try {
       const p = JSON.parse(localStorage.getItem(KEY) || "{}");
-      this.highlights = p.highlights ?? [];
-      this.gags = p.gags ?? [];
+      // Saved under the old rules, where the raw field was the regex.
+      const up = <T extends { pattern: string }>(list: T[]) =>
+        list.map((x) => ({ ...x, pattern: migrateLegacyPattern(x.pattern) }));
+      this.highlights = up(p.highlights ?? []);
+      this.gags = up(p.gags ?? []);
       this.aliases = p.aliases ?? [];
-      this.actions = p.actions ?? [];
+      this.actions = up(p.actions ?? []);
     } catch {
       /* ignore */
     }

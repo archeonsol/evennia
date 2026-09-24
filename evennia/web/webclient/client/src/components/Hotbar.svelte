@@ -6,6 +6,8 @@
   let dragId: string | null = null;
 
   function captureKey(id: string, e: KeyboardEvent) {
+    // Tab and Escape leave the field: capturing them trapped keyboard users.
+    if (e.key === "Tab" || e.key === "Escape") return;
     e.preventDefault();
     if (e.key === "Backspace" || e.key === "Delete") {
       macros.update(id, { key: undefined });
@@ -16,16 +18,21 @@
   }
 </script>
 
-<div class="hotbar">
+<div class="hotbar" role="region" aria-label="Macros">
   <div class="macros">
-    {#each macros.list as m (m.id)}
+    {#each macros.list as m, i (m.id)}
       {#if editing}
-        <div class="edit-cell">
-          <input class="e-icon" bind:value={m.icon} onchange={() => macros.save()} placeholder="◆" maxlength="2" />
-          <input class="e-label" bind:value={m.label} onchange={() => macros.save()} placeholder="label" />
-          <input class="e-cmd" bind:value={m.command} onchange={() => macros.save()} placeholder="command" />
-          <input class="e-key" readonly value={m.key ?? ""} onkeydown={(e) => captureKey(m.id, e)} placeholder="bind" />
-          <button class="e-del" onclick={() => macros.remove(m.id)} aria-label="remove">×</button>
+        {@const n = `Macro ${i + 1}`}
+        <div class="edit-cell" role="group" aria-label={n}>
+          <input class="e-icon" bind:value={m.icon} onchange={() => macros.save()} placeholder="◆" maxlength="2" aria-label="{n} icon" />
+          <input class="e-label" bind:value={m.label} onchange={() => macros.save()} placeholder="label" aria-label="{n} label" />
+          <input class="e-cmd" bind:value={m.command} onchange={() => macros.save()} placeholder="command" aria-label="{n} command" />
+          <input class="e-key" readonly value={m.key ?? ""} onkeydown={(e) => captureKey(m.id, e)} placeholder="bind"
+            aria-label="{n} key: press a key combination, Backspace to clear" />
+          <!-- Reordering had been drag-only. -->
+          <button class="e-mv" disabled={i === 0} onclick={() => macros.move(m.id, macros.list[i - 1].id)} aria-label="Move {n} left">‹</button>
+          <button class="e-mv" disabled={i === macros.list.length - 1} onclick={() => macros.move(m.id, macros.list[i + 1].id)} aria-label="Move {n} right">›</button>
+          <button class="e-del" onclick={() => macros.remove(m.id)} aria-label="Remove {n}">×</button>
         </div>
       {:else}
         <button
@@ -47,7 +54,7 @@
       <button class="add" onclick={() => macros.add()}>+ macro</button>
     {/if}
   </div>
-  <button class="edit" onclick={() => (editing = !editing)}>{editing ? "done" : "edit"}</button>
+  <button class="edit" onclick={() => (editing = !editing)}>{editing ? "Done" : "Edit macros"}</button>
 </div>
 
 <style>
@@ -58,10 +65,10 @@
   }
   .macros { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; align-items: center; }
   .macro {
-    display: flex; align-items: baseline; gap: 6px;
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
-    padding: 3px 9px; cursor: pointer;
+    display: flex; align-items: baseline; gap: 7px;
+    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg);
+    font-family: inherit; font-size: 0.76rem;
+    padding: 3px 10px; cursor: pointer; min-height: 26px;
   }
   .macro:hover { color: var(--accent-bright); border-color: var(--accent); }
   .m-key { color: var(--fg-faint); font-size: 0.62rem; }
@@ -78,6 +85,8 @@
   .e-cmd { width: 8rem; }
   .e-key { width: 4.5rem; color: var(--gold); }
   .e-del { background: none; border: none; color: var(--alert); cursor: pointer; font-size: 0.9rem; }
+  .e-mv { background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 0.9rem; min-width: 18px; }
+  .e-mv:disabled { color: var(--fg-faint); cursor: default; }
   .add {
     background: none; border: 1px dashed var(--border-bright); color: var(--fg-dim);
     font-family: inherit; font-size: 0.7rem; padding: 3px 9px; cursor: pointer;
@@ -85,8 +94,8 @@
   .add:hover { color: var(--accent-bright); border-color: var(--accent); }
   .edit {
     background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.66rem; letter-spacing: 0.16em; text-transform: uppercase;
-    padding: 2px 10px; cursor: pointer;
+    font-family: inherit; font-size: 0.72rem;
+    padding: 2px 10px; cursor: pointer; min-height: 26px;
   }
   .edit:hover { color: var(--accent-bright); border-color: var(--accent); }
 </style>

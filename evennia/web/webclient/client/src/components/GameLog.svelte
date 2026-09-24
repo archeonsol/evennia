@@ -6,7 +6,7 @@
   import { pinAfterScroll } from "../lib/autoscroll";
   import { settings } from "../lib/settings.svelte";
   import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   //: What each download format is for, in the order the menu offers them.
   //: HTML leads because it is the only one that keeps the colours *and* opens
@@ -72,11 +72,29 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  // Autoscroll to newest unless the user scrolled up or is searching.
+  // Autoscroll to newest unless the user scrolled up or is searching. While
+  // scrolled up, arrivals are counted on a "jump to latest" bar instead.
+  let unseen = $state(0);
+  let seenCount = 0;
   $effect(() => {
-    void session.lines.length;
-    if (pinned && !logview.searchOpen) scrollToBottom();
+    const n = session.lines.length;
+    const grew = n - seenCount;
+    seenCount = n;
+    if (pinned && !logview.searchOpen) {
+      scrollToBottom();
+      unseen = 0;
+    } else if (grew > 0) {
+      unseen = untrack(() => unseen) + grew;
+    }
   });
+  $effect(() => {
+    if (pinned) unseen = 0;
+  });
+  function jumpToLatest() {
+    pinned = true;
+    unseen = 0;
+    scrollToBottom();
+  }
 
   // Keep the current match in range and scroll it into view.
   $effect(() => {
@@ -154,6 +172,25 @@
     if (!(e.target instanceof Node) || !saveEl?.contains(e.target)) saveOpen = false;
   }
 
+  // Reading the log with the keyboard, typing a command should just work: a
+  // printable key (or Escape) goes back to the command line, and the key
+  // itself lands there because focus moves before the character is inserted.
+  // A screen reader in browse mode keeps its letter keys; they never get here.
+  function onLogKey(e: KeyboardEvent) {
+    const printable = e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (!printable && e.key !== "Escape") return;
+    const input = document.querySelector<HTMLElement>('[data-focus-region="input"]');
+    if (!input) return;
+    if (e.key === "Escape") e.preventDefault();
+    input.focus();
+  }
+
+  // Opening the save list moves focus into it, so Enter on the button and
+  // Enter again downloads, instead of tabbing past the rest of the toolbar.
+  function focusFirst(node: HTMLElement, first: boolean) {
+    if (first) node.focus();
+  }
+
   function onSearchKey(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -184,33 +221,36 @@
 <svelte:window onkeydown={onGlobalKey} onpointerdowncapture={onGlobalPointer} />
 
 <div class="log-wrap">
-  <div class="log-bar">
+  <div class="log-bar" role="toolbar" aria-label="Output filters and tools">
     <div class="chips">
       {#each CATS as c}
         <button
           class="chip"
           class:off={!logview.filters[c.id]}
+          aria-pressed={!!logview.filters[c.id]}
           onclick={() => logview.toggle(c.id)}
-          title="toggle {c.label}"
-        >{c.label}</button>
+          title="show {c.label} lines"
+        ><span class="lamp" aria-hidden="true"></span>{c.label}</button>
       {/each}
     </div>
-    <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)} title="timestamps">⏱</button>
-    <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)} title="search (Ctrl-F)">⌕</button>
+    <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)}
+      title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>Times</button>
+    <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)}
+      title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>Search</button>
     <div class="save" bind:this={saveEl}>
       <button class="tool" class:on={saveOpen} onclick={() => (saveOpen = !saveOpen)}
-        title="save log" aria-label="save log" aria-expanded={saveOpen}>⭳</button>
+        title="save log" aria-label="save log" aria-expanded={saveOpen}>Save</button>
       {#if saveOpen}
-        <div class="save-menu" role="menu">
+        <div class="save-menu">
           {#each SAVE_FORMATS as f}
-            <button role="menuitem" onclick={() => downloadLog(f.id)}>
+            <button onclick={() => downloadLog(f.id)} use:focusFirst={f === SAVE_FORMATS[0]}>
               <span class="fmt">{f.label}</span><span class="fmt-hint">{f.hint}</span>
             </button>
           {/each}
         </div>
       {/if}
     </div>
-    <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">⌫</button>
+    <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">Clear</button>
   </div>
 
   {#if logview.searchOpen}
@@ -230,15 +270,20 @@
     </div>
   {/if}
 
+  <!-- Focusable on purpose: a scrollable region must be reachable by keyboard,
+       and Alt+O lands here. Its key handler only hands typing back. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="game-log"
     bind:this={el}
     onscroll={onScroll}
     onwheel={onWheel}
+    onkeydown={onLogKey}
     role="log"
-    aria-live="polite"
-    aria-atomic="false"
-    aria-label="game output"
+    aria-live="off"
+    aria-label="Game output"
+    tabindex="0"
+    data-focus-region="output"
   >
     {#each filtered as line (line.id)}
       <div
@@ -252,26 +297,33 @@
       </div>
     {/each}
   </div>
+  {#if !pinned && unseen > 0 && !logview.searchOpen}
+    <button class="latest" onclick={jumpToLatest}>{unseen} new line{unseen === 1 ? "" : "s"} ↓</button>
+  {/if}
 </div>
 
 <style>
   .log-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; position: relative; }
   .log-bar {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 3px 8px; border-bottom: 1px solid var(--border);
     background: var(--bg-elev); flex: 0 0 auto;
   }
-  .chips { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+  .chips { display: flex; gap: 4px; flex: 1 1 auto; min-width: min(100%, 16rem); flex-wrap: wrap; }
+  /* Category toggles: the light shows whether that kind of line is shown. */
   .chip {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase;
-    padding: 1px 7px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg);
+    font-family: inherit; font-size: 0.72rem;
+    padding: 1px 9px 1px 7px; cursor: pointer; min-height: 24px;
   }
-  .chip:hover { color: var(--fg); }
-  .chip.off { color: var(--fg-faint); border-color: var(--border); opacity: 0.5; text-decoration: line-through; }
+  .chip:hover { color: var(--fg); border-color: var(--accent); }
+  .lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bright); flex: 0 0 auto; }
+  .chip.off { color: var(--fg-faint); border-color: var(--border); }
+  .chip.off .lamp { background: transparent; box-shadow: none; outline: 1px solid var(--border-bright); outline-offset: -1px; }
   .tool {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.8rem; padding: 0 6px; cursor: pointer;
+    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
+    font-family: inherit; font-size: 0.72rem; padding: 0 9px; cursor: pointer; min-height: 24px; min-width: 24px;
   }
   .tool:hover, .tool.on { color: var(--accent-bright); border-color: var(--accent); }
 
@@ -307,6 +359,11 @@
   }
   .s-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
 
+  .latest {
+    position: absolute; right: 18px; bottom: 12px; background: var(--bg-deep); border: 1px solid var(--accent);
+    color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em;
+    padding: 3px 10px; min-height: 24px; cursor: pointer; z-index: 5;
+  }
   .game-log { overflow-y: auto; padding: 0.7rem 1rem; line-height: var(--shell-line-height, 1.5); flex: 1; }
   .log-line { white-space: pre-wrap; word-break: break-word; }
   .log-line .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }

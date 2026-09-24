@@ -132,6 +132,11 @@ export interface PlayerMentionPayload {
   text: string;
 }
 
+/** The session's SCREENREADER flag, sent whenever it is set (login restore, @option). */
+export interface ScreenreaderModePayload {
+  on: boolean;
+}
+
 /** Fade the current track out. */
 export interface StopMusicPayload {
   fade_out?: number;
@@ -214,6 +219,7 @@ export type OobEvent =
   | "play_music"
   | "play_yt"
   | "player_mention"
+  | "screenreader_mode"
   | "stop_music"
   | "stop_music_now"
   | "ticket_alert"
@@ -255,6 +261,7 @@ export interface OobEventMap {
   "play_music": PlayMusicPayload;
   "play_yt": PlayYtPayload;
   "player_mention": PlayerMentionPayload;
+  "screenreader_mode": ScreenreaderModePayload;
   "stop_music": StopMusicPayload;
   "stop_music_now": StopMusicNowPayload;
   "ticket_alert": TicketAlertPayload;

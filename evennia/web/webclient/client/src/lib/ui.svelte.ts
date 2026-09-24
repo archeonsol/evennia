@@ -3,6 +3,8 @@
 // and the UIHost renders them generically. Interactions run game commands.
 
 import { connection } from "./evennia.svelte";
+import { announcer } from "./announce.svelte";
+import { htmlToText } from "./text";
 
 export interface UIComponent {
   id: string;
@@ -28,7 +30,16 @@ class UI {
 
   set(comp: UIComponent): void {
     if (!comp || !comp.id) return;
+    // A card appearing is otherwise silent: it lands in a corner with no focus.
+    // Say its title once, on arrival. Gauges update constantly and stay quiet.
+    const isNew = !(comp.id in this.components);
     this.components = { ...this.components, [comp.id]: comp };
+    if (isNew && comp.type !== "gauge") {
+      const what = comp.type === "form" ? "Form" : comp.type === "menu" ? "Menu" : "Card";
+      const head = comp.title ? `${what}: ${comp.title}` : `New ${what.toLowerCase()}`;
+      const body = comp.body ? htmlToText(comp.body).slice(0, 300) : "";
+      announcer.now(body ? `${head}. ${body}` : head);
+    }
   }
   remove(id: string): void {
     if (!id || !(id in this.components)) return;

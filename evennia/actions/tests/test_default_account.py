@@ -47,6 +47,25 @@ class TestOption(unittest.TestCase):
         self._option(account, actor, "")
         self.assertTrue(any("Client settings" in m for m in account.messages))
 
+    def test_display_settings_tolerates_structured_flags(self):
+        """Non-string protocol flags must not break the settings table.
+
+        The webclient records handshake metadata on the session alongside the
+        client options -- ``HTTP_ORDER`` is a list, ``HTTP_FP`` a dict -- and a
+        bare ``@option`` renders every flag into an EvTable, whose cells are
+        text-only.
+        """
+        account, _, actor = _setup(
+            flags={
+                "ANSI": True,
+                "HTTP_ORDER": ["Host", "User-Agent"],
+                "HTTP_FP": {"user-agent": "curl/8.0"},
+                "PEER_IP": None,
+            }
+        )
+        self._option(account, actor, "")
+        self.assertTrue(any("Client settings" in m for m in account.messages))
+
     def test_set_option(self):
         account, session, actor = _setup()
         self._option(account, actor, "ANSI = off")

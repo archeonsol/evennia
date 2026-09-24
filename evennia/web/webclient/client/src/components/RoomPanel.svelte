@@ -8,10 +8,10 @@
   );
 </script>
 
-<aside class="room-panel">
+<section class="room-panel" aria-label="Scene" data-focus-region="scene" tabindex="-1">
   {#if scene.present}
     {#if scene.room.name}
-      <div class="panel-title glow-text">{@html scene.room.name}</div>
+      <div class="panel-title glow-text" role="heading" aria-level="2">{@html scene.room.name}</div>
     {/if}
     {#if scene.room.atmosphere}
       <div class="atmo">{@html scene.room.atmosphere}</div>
@@ -23,8 +23,8 @@
       <p class="pose-line">{poseLine}</p>
     {/if}
 
-    <div class="section-head">
-      <span class="br">┤</span>Present<span class="br">├</span><span class="rule"></span>
+    <div class="section-head" role="heading" aria-level="3">
+      <span class="br" aria-hidden="true">┤</span>Present<span class="br" aria-hidden="true">├</span><span class="rule" aria-hidden="true"></span>
     </div>
     {#if scene.occupants.length}
       <ul>
@@ -39,8 +39,8 @@
     {/if}
 
     {#if scene.exits.length}
-      <div class="section-head">
-        <span class="br">┤</span>Exits<span class="br">├</span><span class="rule"></span>
+      <div class="section-head" role="heading" aria-level="3">
+        <span class="br" aria-hidden="true">┤</span>Exits<span class="br" aria-hidden="true">├</span><span class="rule" aria-hidden="true"></span>
       </div>
       <ul>
         {#each scene.exits as e (e.key)}
@@ -51,7 +51,7 @@
   {:else}
     <p class="awaiting">Awaiting signal…</p>
   {/if}
-</aside>
+</section>
 
 <style>
   .room-panel {

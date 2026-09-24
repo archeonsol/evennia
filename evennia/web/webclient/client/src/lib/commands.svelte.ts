@@ -42,9 +42,17 @@ class Commands {
     }
   }
 
+  private runListeners: ((line: string) => void)[] = [];
+
+  /** Hear each command the player sends (the local echo uses this). */
+  onRun(fn: (line: string) => void): void {
+    this.runListeners.push(fn);
+  }
+
   run(line: string): void {
     // Client aliases expand the first word before it hits the server.
     const expanded = triggers.expand(line);
+    for (const fn of this.runListeners) fn(line);
     connection.sendCommand(expanded);
     const t = line.trim();
     if (t) {

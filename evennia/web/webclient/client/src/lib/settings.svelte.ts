@@ -4,6 +4,8 @@
 // Audio and Text (see SettingsPanel).
 
 export type ThemeName = "haemal" | "amber" | "abyssal" | "sanctum" | "matrix" | "custom";
+/** "panel" docks the page in the shell; "window" opens it in a browser window. */
+export type WebPageMode = "panel" | "window";
 
 export const THEMES: { id: ThemeName; label: string }[] = [
   { id: "haemal", label: "Haemal - Blood" },
@@ -85,6 +87,16 @@ interface Persisted {
   screenreader: boolean;
   reduceMotion: boolean;
   hidePrompt: boolean;
+  /** Speak each new line of game output through the announcer. */
+  speakOutput: boolean;
+  /** Copy channel messages into the terminal, as telnet shows them. */
+  channelEcho: boolean;
+  /** Where a server-opened web page (the grid, notes, editors) goes. */
+  webPages: WebPageMode;
+  /** Show each command you send in the terminal, as a MUD client's local echo does. */
+  echoCommands: boolean;
+  /** Leave the sent command in the command line, selected, instead of clearing it. */
+  keepCommand: boolean;
   customColors: Record<string, string>;
 }
 
@@ -114,6 +126,11 @@ const DEFAULTS: Persisted = {
     typeof matchMedia === "function" &&
     matchMedia("(prefers-reduced-motion: reduce)").matches,
   hidePrompt: false,
+  speakOutput: true,
+  channelEcho: false,
+  webPages: "panel",
+  echoCommands: false,
+  keepCommand: false,
   customColors: { ...CUSTOM_DEFAULTS },
 };
 
@@ -165,6 +182,11 @@ class Settings {
   screenreader = $state(DEFAULTS.screenreader);
   reduceMotion = $state(DEFAULTS.reduceMotion);
   hidePrompt = $state(DEFAULTS.hidePrompt);
+  speakOutput = $state(DEFAULTS.speakOutput);
+  channelEcho = $state(DEFAULTS.channelEcho);
+  webPages = $state<WebPageMode>(DEFAULTS.webPages);
+  echoCommands = $state(DEFAULTS.echoCommands);
+  keepCommand = $state(DEFAULTS.keepCommand);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;
 
