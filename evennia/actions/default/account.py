@@ -114,7 +114,12 @@ class DefaultAccountRules(NickRules):
         # display current options
         if not action.args:
             if "save" in action.switches:
-                caller.db._saved_protocol_flags = flags
+                # off screenreader is stored as absence, so a saved False
+                # never restores over a live True flag
+                saved_all = dict(flags)
+                if not saved_all.get("SCREENREADER"):
+                    saved_all.pop("SCREENREADER", None)
+                caller.db._saved_protocol_flags = saved_all
                 msg("|gSaved all options. Use option/clear to remove.|n")
             if "clear" in action.switches:
                 caller.db._saved_protocol_flags = {}
@@ -230,11 +235,21 @@ class DefaultAccountRules(NickRules):
         else:
             msg("|rNo option named '|w%s|r'." % name)
         if optiondict:
-            if "save" in action.switches:
+            # SCREENREADER is an account-wide choice, like the webclient
+            # panel's toggle: persist it with or without /save, or the setting
+            # silently resets at the next restart. Off is stored as absence.
+            saved_keys = set(optiondict) if "save" in action.switches else set()
+            if "SCREENREADER" in optiondict:
+                saved_keys.add("SCREENREADER")
+            if saved_keys:
                 saved_options = caller.attributes.get("_saved_protocol_flags", default={})
-                saved_options.update(optiondict)
+                saved_options.update(
+                    {key: value for key, value in optiondict.items() if key in saved_keys}
+                )
+                if "SCREENREADER" in saved_keys and not optiondict["SCREENREADER"]:
+                    saved_options.pop("SCREENREADER", None)
                 caller.attributes.add("_saved_protocol_flags", saved_options)
-                for key in optiondict:
+                for key in saved_keys:
                     msg(f"|gSaved option {key}.|n")
             if "clear" in action.switches:
                 for key in optiondict:

@@ -742,6 +742,19 @@ class TestAccount(BaseEvenniaCommandTest):
     def test_option(self):
         self.call(account.CmdOption(), "", "Client settings", caller=self.account)
 
+    def test_option_screenreader_saves_account_wide(self):
+        # SCREENREADER persists without /save: it is an account-wide choice,
+        # and off is stored as absence so a saved False cannot restore over
+        # a live True flag.
+        self.session.protocol_flags.pop("SCREENREADER", None)
+        self.account.attributes.add("_saved_protocol_flags", {})
+        self.call(account.CmdOption(), "screenreader = on", caller=self.account)
+        self.assertEqual(
+            self.account.attributes.get("_saved_protocol_flags"), {"SCREENREADER": True}
+        )
+        self.call(account.CmdOption(), "screenreader = off", caller=self.account)
+        self.assertEqual(self.account.attributes.get("_saved_protocol_flags"), {})
+
     def test_who(self):
         self.call(account.CmdWho(), "", "Accounts:", caller=self.account)
 

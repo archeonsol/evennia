@@ -96,8 +96,35 @@ class TestOption(unittest.TestCase):
     def test_save_all_options(self):
         account, session, actor = _setup()
         self._option(account, actor, "", switches=("save",))
-        self.assertEqual(account.db._saved_protocol_flags, session.protocol_flags)
+        self.assertEqual(
+            account.db._saved_protocol_flags,
+            {k: v for k, v in session.protocol_flags.items() if k != "SCREENREADER"},
+        )
         self.assertTrue(any("Saved all options" in m for m in account.messages))
+
+    def test_screenreader_saves_without_the_save_switch(self):
+        account, _, actor = _setup()
+        self._option(account, actor, "SCREENREADER = on")
+        self.assertEqual(account.db._saved_protocol_flags, {"SCREENREADER": True})
+        self.assertTrue(any("Saved option SCREENREADER" in m for m in account.messages))
+
+    def test_screenreader_off_is_stored_as_absence(self):
+        account, _, actor = _setup()
+        account.db._saved_protocol_flags = {"SCREENREADER": True, "ANSI": True}
+        self._option(account, actor, "SCREENREADER = off")
+        self.assertEqual(account.db._saved_protocol_flags, {"ANSI": True})
+
+    def test_screenreader_off_on_a_quiet_session_still_clears_the_save(self):
+        account, _, actor = _setup()
+        account.db._saved_protocol_flags = {"SCREENREADER": True}
+        self._option(account, actor, "SCREENREADER = off")
+        self.assertEqual(account.db._saved_protocol_flags, {})
+
+    def test_save_all_drops_a_saved_screenreader_off(self):
+        account, _, actor = _setup()
+        self._option(account, actor, "", switches=("save",))
+        self.assertNotIn("SCREENREADER", account.db._saved_protocol_flags)
+        self.assertIn("ANSI", account.db._saved_protocol_flags)
 
     def test_clear_saved_options(self):
         account, _, actor = _setup()

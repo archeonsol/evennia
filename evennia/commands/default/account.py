@@ -564,8 +564,12 @@ class CmdOption(AccountCommand):
             # list the option settings
 
             if "save" in self.switches:
-                # save all options
-                self.caller.db._saved_protocol_flags = flags
+                # save all options; off screenreader is stored as absence, so a
+                # saved False never restores over a live True flag
+                saved_all = dict(flags)
+                if not saved_all.get("SCREENREADER"):
+                    saved_all.pop("SCREENREADER", None)
+                self.caller.db._saved_protocol_flags = saved_all
                 self.msg("|gSaved all options. Use option/clear to remove.|n")
             if "clear" in self.switches:
                 # clear all saves
@@ -685,12 +689,22 @@ class CmdOption(AccountCommand):
             self.msg("|rNo option named '|w%s|r'." % name)
         if optiondict:
             # a valid setting
-            if "save" in self.switches:
+            # SCREENREADER is an account-wide choice, like the webclient
+            # panel's toggle: persist it with or without /save, or the setting
+            # silently resets at the next restart. Off is stored as absence.
+            saved_keys = set(optiondict) if "save" in self.switches else set()
+            if "SCREENREADER" in optiondict:
+                saved_keys.add("SCREENREADER")
+            if saved_keys:
                 # save this option only
                 saved_options = self.account.attributes.get("_saved_protocol_flags", default={})
-                saved_options.update(optiondict)
+                saved_options.update(
+                    {key: value for key, value in optiondict.items() if key in saved_keys}
+                )
+                if "SCREENREADER" in saved_keys and not optiondict["SCREENREADER"]:
+                    saved_options.pop("SCREENREADER", None)
                 self.account.attributes.add("_saved_protocol_flags", saved_options)
-                for key in optiondict:
+                for key in saved_keys:
                     self.msg(f"|gSaved option {key}.|n")
             if "clear" in self.switches:
                 # clear this save
