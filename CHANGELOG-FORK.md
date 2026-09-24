@@ -25,6 +25,29 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.267 — F5 macro and palette route to @stats
+
+### Web client
+
+- **The stock F5 "Score" macro sends `@stats`.** It shipped `score`, which
+  matches no command on the server, so the hotbar button and F5 both returned
+  `Huh?` instead of the character sheet. `@stats` is the canonical verb;
+  `@sheet` and `@score` remain aliases. The macro default lives in
+  [`macros.svelte.ts`](evennia/web/webclient/client/src/lib/macros.svelte.ts).
+- **Existing browsers migrate.** `Macros.init` repoints a persisted stock
+  macro (`id: "score"`, `command: "score"`) to `@stats` and saves, so a
+  browser holding the old default in `localStorage` does not keep the broken
+  binding. Player-edited macros are left alone. The command palette's
+  "Score / sheet" entry
+  ([`commands.svelte.ts`](evennia/web/webclient/client/src/lib/commands.svelte.ts))
+  sends `@stats` too. `shell.js` is rebuilt.
+
+### Tests
+
+- [`macros.test.ts`](evennia/web/webclient/client/src/lib/macros.test.ts)
+  covers the new default, the persisted-macro migration, and that an edited
+  macro is untouched. Client vitest suite — 554 tests OK.
+
 ## 6.0.0+underspire.266 — Blank default descriptions
 
 ### Engine

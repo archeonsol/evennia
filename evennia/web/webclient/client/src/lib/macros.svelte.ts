@@ -18,7 +18,7 @@ const DEFAULTS: Macro[] = [
   { id: "look", label: "Look", command: "look", key: "F2" },
   { id: "who", label: "Who", command: "who", key: "F3" },
   { id: "inv", label: "Inv", command: "inventory", key: "F4" },
-  { id: "score", label: "Score", command: "score", key: "F5" },
+  { id: "score", label: "Score", command: "@stats", key: "F5" },
 ];
 
 /** Build a combo string from a keyboard event, or null if it's a plain typing key. */
@@ -35,7 +35,7 @@ export function comboOf(e: KeyboardEvent): string | null {
   return s;
 }
 
-class Macros {
+export class Macros {
   list = $state<Macro[]>([]);
 
   init(): void {
@@ -45,6 +45,19 @@ class Macros {
     } catch {
       this.list = structuredClone(DEFAULTS);
     }
+    this.migrate();
+  }
+
+  private migrate(): void {
+    let changed = false;
+    this.list = this.list.map((m) => {
+      if (m.id === "score" && m.command === "score") {
+        changed = true;
+        return { ...m, command: "@stats" };
+      }
+      return m;
+    });
+    if (changed) this.save();
   }
 
   add(): Macro {
