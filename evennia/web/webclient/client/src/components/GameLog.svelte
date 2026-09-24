@@ -384,7 +384,9 @@
   function downloadLog(format: TranscriptFormat) {
     saveOpen = false;
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    const file = buildTranscript(session.lines, format, {
+    // Save the record, not just the terminal: a feed's "hide in terminal" is
+    // for play, and a download is the file the player keeps.
+    const file = buildTranscript(session.archive, format, {
       timestamps: logview.timestamps,
       title: `Underspire log ${stamp}`,
     });

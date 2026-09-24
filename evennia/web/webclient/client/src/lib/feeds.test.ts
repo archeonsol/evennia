@@ -6,12 +6,6 @@ vi.mock("./text", () => ({ htmlToText: (html: string) => html.replace(/<[^>]*>/g
 
 import { Routing, routing } from "./routing.svelte";
 import { session } from "./session.svelte";
-import type { LogLine } from "./session.svelte";
-
-let nextId = 5000;
-function line(text: string): LogLine {
-  return { id: nextId++, html: `<i>${text}</i>`, text, type: "text", cat: "system", ts: nextId };
-}
 
 describe("feed rules", () => {
   it("reads /regex/ and plain text as the settings field says", () => {
@@ -93,13 +87,15 @@ describe("feed rules", () => {
 describe("refiling the scrollback", () => {
   beforeEach(() => {
     session.lines = [];
+    session.archive = [];
     routing.routes = [];
     routing.sync();
     for (const k of Object.keys(routing.buffers)) routing.clear(k);
   });
 
   it("gives a new copy rule the matching lines already in the terminal, without a badge", () => {
-    session.lines.push(line("Kessa whispers hi"), line("rain"));
+    session.append("<i>Kessa whispers hi</i>");
+    session.append("<i>rain</i>");
     routing.routes = [{ pattern: "whispers", label: "chatter" }];
     routing.setOnSync((fresh) => session.pruneMoved(fresh));
     routing.sync();
@@ -109,7 +105,7 @@ describe("refiling the scrollback", () => {
   });
 
   it("does not refill a cleared feed when an unrelated rule changes", () => {
-    session.lines.push(line("Kessa whispers hi"));
+    session.append("<i>Kessa whispers hi</i>");
     routing.routes = [{ pattern: "whispers", label: "chatter" }];
     routing.setOnSync((fresh) => session.pruneMoved(fresh));
     routing.sync();
@@ -120,7 +116,7 @@ describe("refiling the scrollback", () => {
   });
 
   it("files a line once when its feed has both a copy and a move rule", () => {
-    session.lines.push(line("Kessa whispers hi"));
+    session.append("<i>Kessa whispers hi</i>");
     routing.routes = [
       { pattern: "whispers", label: "chatter" },
       { pattern: "Kessa", label: "chatter", move: true },
@@ -135,6 +131,7 @@ describe("refiling the scrollback", () => {
 describe("gags and feeds", () => {
   beforeEach(() => {
     session.lines = [];
+    session.archive = [];
     routing.routes = [];
     routing.sync();
   });
@@ -148,6 +145,8 @@ describe("gags and feeds", () => {
     session.append("<i>some chatter</i>", "text");
     expect(session.lines).toHaveLength(0);
     expect(routing.buffers.Chat).toHaveLength(1);
+    // A gag is the player muting chatter, so it is not kept in the record.
+    expect(session.archive).toHaveLength(0);
     triggers.gags = [];
     triggers.sync();
   });
