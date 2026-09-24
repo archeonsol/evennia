@@ -565,6 +565,19 @@ def webclient_options(session, *args, **kwargs):
     else:
         # kwargs provided: persist them to the account object.
         clientoptions.update(kwargs)
+        # SCREENREADER is account-wide, not a browser preference: a player who
+        # turns it on in the panel expects it after a restart, on any device,
+        # and in telnet output stripping. _saved_protocol_flags is the store
+        # every restore path reads (at_post_login, Session.at_sync). Store only
+        # True and pop on off: a saved False would restore over a live True
+        # flag and leave the shell and the portal's stripping out of step.
+        if "SCREENREADER" in kwargs:
+            saved_flags = account.db._saved_protocol_flags or {}
+            if kwargs["SCREENREADER"]:
+                saved_flags["SCREENREADER"] = True
+            else:
+                saved_flags.pop("SCREENREADER", None)
+            account.db._saved_protocol_flags = saved_flags
 
 
 # OOB protocol-specific aliases and wrappers

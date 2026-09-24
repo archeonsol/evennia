@@ -103,8 +103,13 @@ class TestAzabanHelloInputfunc(unittest.TestCase):
 class TestWebclientOptionsScreenreader(unittest.TestCase):
     """The webclient's screen reader toggle must reach the session, not just the account."""
 
-    def _session(self, saved=None):
-        account = SimpleNamespace(db=SimpleNamespace(_saved_webclient_options=saved or {"x": 1}))
+    def _session(self, saved=None, saved_flags=None):
+        account = SimpleNamespace(
+            db=SimpleNamespace(
+                _saved_webclient_options=saved or {"x": 1},
+                _saved_protocol_flags=saved_flags,
+            )
+        )
         return SimpleNamespace(
             account=account,
             sessid=7,
@@ -140,6 +145,34 @@ class TestWebclientOptionsScreenreader(unittest.TestCase):
         inputfuncs.webclient_options(session, gagprompt=True)
         self.assertNotIn("SCREENREADER", session.protocol_flags)
         session.sessionhandler.session_portal_partial_sync.assert_not_called()
+        self.assertIsNone(session.account.db._saved_protocol_flags)
+
+    def test_screenreader_is_saved_account_wide(self):
+        session = self._session()
+        inputfuncs.webclient_options(session, SCREENREADER=True, cmdid=3)
+        self.assertEqual(session.account.db._saved_protocol_flags, {"SCREENREADER": True})
+
+    def test_screenreader_on_keeps_other_saved_flags(self):
+        session = self._session(saved_flags={"ANSI": True})
+        inputfuncs.webclient_options(session, SCREENREADER=True)
+        self.assertEqual(
+            session.account.db._saved_protocol_flags, {"ANSI": True, "SCREENREADER": True}
+        )
+
+    def test_turning_it_off_pops_the_saved_flag(self):
+        session = self._session(saved_flags={"ANSI": True, "SCREENREADER": True})
+        inputfuncs.webclient_options(session, SCREENREADER=False)
+        self.assertEqual(
+            session.account.db._saved_protocol_flags,
+            {"ANSI": True},
+            "A saved False would restore over a live True flag at login.",
+        )
+
+    def test_pre_login_send_does_not_touch_saved_flags(self):
+        session = self._session()
+        session.account = None
+        inputfuncs.webclient_options(session, SCREENREADER=True)
+        self.assertIs(session.protocol_flags["SCREENREADER"], True)
 
 
 class TestShellScreenreaderNotice(unittest.TestCase):
