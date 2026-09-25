@@ -38,6 +38,12 @@ const PAGES = [
     report: () => window.__workspaceTest ?? null,
   },
   {
+    path: "tests/tickets.html",
+    label: "ticket panels",
+    done: () => window.__ticketsTest?.done === true,
+    report: () => window.__ticketsTest ?? null,
+  },
+  {
     path: "tests/display.html",
     label: "display regressions",
     done: () => /failures/.test(document.title),

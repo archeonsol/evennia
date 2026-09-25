@@ -1,11 +1,24 @@
 <script lang="ts">
-  import { chat } from "../lib/chat.svelte";
+  // The staff Ticket Queue: find a ticket, read it, act on it.
+  //
+  // Actions go through the ticket_act RPC (chat.ticketAct), so each button's
+  // answer shows here, not as "Posted." or "Ticket #... closed." in the
+  // terminal beside the panel.
+  import { chat, type TicketResult } from "../lib/chat.svelte";
   import { renderBody, renderSender } from "../lib/markup";
+
+  type Show = "all" | "pending" | "waiting" | "unclaimed";
 
   let reply = $state("");
   let internal = $state(false);
   let history = $state(false);
   let kindFilter = $state("all");
+  let show = $state<Show>("all");
+  let search = $state("");
+  let reason = $state("");
+  let deciding = $state<"approve" | "deny" | null>(null);
+  let feedback = $state<TicketResult | null>(null);
+  let busy = $state(false);
   let bugDetail = $state<any | null>(null);
   const ticket = $derived(chat.ticket);
   // Kinds present in the current list, for the filter bar.
@@ -14,25 +27,52 @@
     "all",
     ...Array.from(new Set(source.map((t: any) => t.kind))),
   ]);
-  // Filter by kind, then highest priority first, then longest-waiting.
+  const q = $derived(search.trim().toLowerCase());
+  // The open queue is small and already here, so it narrows as you type, on
+  // the fields the server's search reads. The history is searched on the
+  // server (it is paged there, and the conversation is not in the rows).
+  function matches(t: any): boolean {
+    if (!q) return true;
+    return [t.short_id, t.subject, t.requester_name, t.account_name, t.preview, t.label, t.assignee]
+      .some((v) => String(v ?? "").toLowerCase().includes(q));
+  }
+  // Filter by kind and state, then highest priority first, then longest-waiting.
   const rows = $derived(
     [...source]
       .filter((t: any) => kindFilter === "all" || t.kind === kindFilter)
+      .filter((t: any) =>
+        history || show === "all" ? true : show === "unclaimed" ? !t.assignee : t.status === show,
+      )
+      .filter((t: any) => history || matches(t))
       .sort(
         (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (a.updated ?? 0) - (b.updated ?? 0),
       ),
   );
+  const counts = $derived({
+    pending: chat.tickets.filter((t: any) => t.status === "pending").length,
+    waiting: chat.tickets.filter((t: any) => t.status === "waiting").length,
+    unclaimed: chat.tickets.filter((t: any) => !t.assignee).length,
+  });
   function kindLabel(k: string) {
     if (k === "all") return "All";
     const t = source.find((x: any) => x.kind === k);
     return t ? t.label : k;
   }
 
-  function toggleHistory() {
-    history = !history;
-    if (history) chat.loadTicketHistory();
-  }
+  let historyTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const term = search.trim();
+    if (!history) return;
+    if (historyTimer) clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => void chat.loadTicketHistory(term), term ? 300 : 0);
+    return () => {
+      if (historyTimer) clearTimeout(historyTimer);
+    };
+  });
+
   function open(t: any) {
+    feedback = null;
+    deciding = null;
     chat.openTicket(t.id);
   }
   async function loadBug() {
@@ -45,67 +85,109 @@
   });
   function back() {
     chat.ticket = null;
+    feedback = null;
+    deciding = null;
   }
-  function send() {
-    if (reply.trim() && ticket) {
-      chat.ticketReply(ticket.id, reply, internal);
-      reply = "";
+  async function act(run: () => Promise<TicketResult>) {
+    if (busy) return;
+    busy = true;
+    feedback = await run();
+    busy = false;
+  }
+  async function send() {
+    const text = reply.trim();
+    if (!text || !ticket) return;
+    await act(() => chat.ticketReply(ticket.id, text, internal));
+    if (feedback?.ok) reply = "";
+  }
+  async function decide() {
+    if (!ticket || !deciding) return;
+    const id = ticket.id;
+    const why = reason.trim();
+    await act(() => (deciding === "approve" ? chat.ticketApprove(id, why) : chat.ticketDeny(id, why)));
+    if (feedback?.ok) {
+      deciding = null;
+      reason = "";
     }
   }
+  // Enter sends; Shift+Enter is a new line.
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      send();
+      void send();
     }
   }
   function ageOf(ts: number) {
     if (!ts) return "";
-    const m = Math.floor(Date.now() / 1000 - ts) / 60;
+    const m = Math.floor((Date.now() / 1000 - ts) / 60);
     if (m < 1) return "now";
-    if (m < 60) return `${Math.floor(m)}m`;
+    if (m < 60) return `${m}m`;
     const h = Math.floor(m / 60);
     return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
   }
+  function stamp(ts: number) {
+    if (!ts) return "";
+    const d = new Date(ts * 1000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  const isOpen = $derived(!!ticket && (ticket.status === "pending" || ticket.status === "waiting"));
   // The deep report fields ride in the payload too. The bug block renders them
   // from ticket_bug_detail with its own bounds; dumped inline they are an 8KB
   // traceback with collapsed newlines, one wall of text that buries the thread.
-  const DEEP_PAYLOAD_KEYS = new Set(["traceback", "character_state"]);
+  const DEEP_PAYLOAD_KEYS = new Set(["traceback", "character_state", "subject"]);
   function payloadEntries(p: any): [string, any][] {
     return p ? Object.entries(p).filter(([k]) => !DEEP_PAYLOAD_KEYS.has(k)) : [];
   }
   function hasPayload(p: any) {
-    return !!p && Object.keys(p).length > 0;
+    return payloadEntries(p).length > 0;
   }
 </script>
 
 <div class="tickets">
   <div class="hd">
-    <span class="tag glow-text">Tickets</span>
+    <span class="tag glow-text">Ticket queue</span>
     {#if ticket}
-      <button class="back" onclick={back}>‹ inbox</button>
+      <button class="back" onclick={back}>‹ queue</button>
     {:else}
       <button class="tab" class:on={!history} onclick={() => (history = false)}>Open</button>
-      <button class="tab" class:on={history} onclick={toggleHistory}>History</button>
+      <button class="tab" class:on={history} onclick={() => (history = true)}>History</button>
       <span class="count">{rows.length}</span>
     {/if}
   </div>
 
+  {#if feedback}
+    <p class="fb" class:err={!feedback.ok} role="status">{feedback.message}</p>
+  {/if}
+
   {#if !ticket}
-    {#if kinds.length > 2}
-      <div class="filters">
-        {#each kinds as k}
-          <button class="fchip" class:on={kindFilter === k} onclick={() => (kindFilter = k)}>
-            {kindLabel(k)}
-          </button>
-        {/each}
-      </div>
-    {/if}
+    <div class="filters">
+      <input class="search" bind:value={search} placeholder={history ? "Search the record…" : "Search the queue…"}
+        aria-label={history ? "Search closed tickets" : "Search open tickets"} />
+      {#if !history}
+        <div class="fl" role="radiogroup" aria-label="Show">
+          <button class="fchip" role="radio" aria-checked={show === "all"} class:on={show === "all"} onclick={() => (show = "all")}>All</button>
+          <button class="fchip" role="radio" aria-checked={show === "pending"} class:on={show === "pending"} onclick={() => (show = "pending")}>Needs reply {counts.pending}</button>
+          <button class="fchip" role="radio" aria-checked={show === "waiting"} class:on={show === "waiting"} onclick={() => (show = "waiting")}>On player {counts.waiting}</button>
+          <button class="fchip" role="radio" aria-checked={show === "unclaimed"} class:on={show === "unclaimed"} onclick={() => (show = "unclaimed")}>Unclaimed {counts.unclaimed}</button>
+        </div>
+      {/if}
+      {#if kinds.length > 2}
+        <div class="fl">
+          {#each kinds as k}
+            <button class="fchip" class:on={kindFilter === k} onclick={() => (kindFilter = k)}>
+              {kindLabel(k)}
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
     <div class="list">
       {#if rows.length}
         {#each rows as t (t.id)}
           <button class="row" data-kind={t.kind} onclick={() => open(t)}>
             <span class="r1">
-              <span class="kind">{t.label}</span>
+              <span class="kind">{t.label} <span class="sid">#{t.short_id}</span></span>
               <span class="meta">
                 {#if t.priority > 0}<span class="pri" title="priority">▲{t.priority}</span>{/if}
                 {#if t.assignee}<span class="asg" title="claimed by {t.assignee}">◆ {t.assignee}</span>{/if}
@@ -122,7 +204,10 @@
           </button>
         {/each}
       {:else}
-        <p class="empty">No {kindFilter === "all" ? "" : kindLabel(kindFilter).toLowerCase() + " "}tickets{history ? " in history" : ""}.</p>
+        <p class="empty">
+          {#if q}Nothing {history ? "in the record " : "in the queue "}matches “{search.trim()}”.
+          {:else}No {kindFilter === "all" ? "" : kindLabel(kindFilter).toLowerCase() + " "}tickets{history ? " in history" : ""}.{/if}
+        </p>
       {/if}
     </div>
   {:else}
@@ -131,22 +216,39 @@
         <span class="petitioner">
           {#if ticket.subject}{ticket.subject}{:else}{ticket.label}{/if}
           <span class="sub">
-            {ticket.label}: {ticket.requester_name || ticket.account_name || ticket.short_id}
+            {ticket.label} #{ticket.short_id}: {ticket.requester_name || ticket.account_name || ticket.short_id}
             {#if ticket.requester_name && ticket.account_name && ticket.requester_name !== ticket.account_name}
               <span class="acct">({ticket.account_name})</span>
             {/if}
+            · <span class="status s-{ticket.status}">{ticket.status}</span>
+            {#if ticket.assignee}· ◆ {ticket.assignee}{/if}
           </span>
         </span>
         <span class="actions">
-          <button class="act" onclick={() => chat.ticketClaim(ticket.id)}>Claim</button>
-          {#if ticket.approvable}
-            <button class="act ok" onclick={() => chat.ticketApprove(ticket.id)}>Approve</button>
-            <button class="act no" onclick={() => chat.ticketDeny(ticket.id)}>Deny</button>
-          {:else}
-            <button class="act" onclick={() => chat.ticketResolve(ticket.id)}>Resolve</button>
+          {#if isOpen}
+            <button class="act" disabled={busy} onclick={() => act(() => chat.ticketClaim(ticket.id))}>Claim</button>
+            {#if ticket.approvable}
+              <button class="act ok" disabled={busy} onclick={() => (deciding = "approve")}>Approve</button>
+              <button class="act no" disabled={busy} onclick={() => (deciding = "deny")}>Deny</button>
+            {:else}
+              <button class="act" disabled={busy} onclick={() => act(() => chat.ticketResolve(ticket.id))}>Close</button>
+            {/if}
+          {:else if !ticket.approvable}
+            <button class="act" disabled={busy} onclick={() => act(() => chat.ticketReopen(ticket.id))}>Reopen</button>
           {/if}
         </span>
       </div>
+
+      {#if deciding}
+        <div class="decide">
+          <input bind:value={reason} placeholder={deciding === "approve" ? "note for the player (optional)…" : "reason, shown to the player…"}
+            aria-label="Reason" onkeydown={(e) => e.key === "Enter" && (e.preventDefault(), void decide())} />
+          <button class="act" class:ok={deciding === "approve"} class:no={deciding === "deny"} disabled={busy} onclick={decide}>
+            {deciding === "approve" ? "Approve" : "Deny"}
+          </button>
+          <button class="act" onclick={() => { deciding = null; reason = ""; }}>Cancel</button>
+        </div>
+      {/if}
 
       <div class="body">
         {#if hasPayload(ticket.payload)}
@@ -180,12 +282,18 @@
           <div class="ctx"><span class="dim">No detailed bug report attached.</span></div>
         {/if}
 
-        <div class="msgs">
+        <div class="msgs" role="log" aria-label="Conversation">
           {#each ticket.messages ?? [] as m, i (i)}
-            <div class="m" class:note={m.visibility === "internal"}>
-              <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
-              <span class="t">{@html renderBody(m.html, m.text)}</span>
-            </div>
+            {#if m.origin === "system"}
+              <div class="sys"><span class="mts">{stamp(m.ts)}</span> {m.text}</div>
+            {:else}
+              <div class="m" class:note={m.visibility === "internal"} class:staffmsg={m.origin === "staff"}>
+                <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
+                {#if m.origin === "player"}<span class="role">player</span>{/if}
+                <span class="mts">{stamp(m.ts)}</span>
+                <span class="t">{@html renderBody(m.html, m.text)}</span>
+              </div>
+            {/if}
           {/each}
           {#if !(ticket.messages ?? []).length}<p class="empty">No messages yet.</p>{/if}
         </div>
@@ -193,12 +301,13 @@
 
       <div class="reply">
         <label class="int"><input type="checkbox" bind:checked={internal} /> note</label>
-        <input
+        <textarea
           bind:value={reply}
           onkeydown={onKey}
-          placeholder={internal ? "internal staff note…" : "reply to player…"}
+          rows="2"
+          placeholder={internal ? "internal staff note… (Enter sends)" : "reply to player… (Enter sends, Shift+Enter for a new line)"}
           aria-label="ticket reply"
-        />
+        ></textarea>
       </div>
     </div>
   {/if}
@@ -268,7 +377,7 @@
   }
   .s-pending { color: var(--accent-bright); }
   .s-waiting { color: var(--gold); }
-  .s-closed, .s-approved, .s-denied, .s-resolved { color: var(--fg-faint); }
+  .s-closed, .s-approved, .s-denied, .s-resolved, .s-withdrawn { color: var(--fg-faint); }
   .who { color: var(--gold); font-size: 0.78rem; }
   .prev { color: var(--fg-dim); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { color: var(--fg-faint); font-style: italic; padding: 8px 10px; }
@@ -304,11 +413,25 @@
     border-top: 1px solid var(--accent); flex: 0 0 auto;
   }
   .int { color: var(--fg-dim); font-size: 0.62rem; text-transform: uppercase; display: flex; align-items: center; gap: 3px; }
-  .reply input:not([type]) {
-    flex: 1; background: transparent; border: none; outline: none;
+  .reply textarea {
+    flex: 1; background: transparent; border: none; outline: none; resize: vertical;
     color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);
   }
-  .reply input::placeholder { color: var(--fg-faint); font-style: italic; }
+  .reply textarea::placeholder { color: var(--fg-faint); font-style: italic; }
+  .fb { margin: 0; padding: 4px 10px; font-size: 0.74rem; color: var(--ok, var(--accent-bright)); border-bottom: 1px solid var(--border); }
+  .fb.err { color: var(--alert); }
+  .filters { flex-direction: column; align-items: stretch; }
+  .fl { display: flex; flex-wrap: wrap; gap: 4px; }
+  .search { background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg); font-family: inherit; font-size: 0.8rem; padding: 4px 7px; min-height: 26px; }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .sid { color: var(--fg-faint); font-size: 0.62rem; letter-spacing: 0; }
+  .decide { display: flex; gap: 4px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
+  .decide input { flex: 1; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg); font-family: inherit; font-size: 0.78rem; padding: 3px 6px; }
+  .act:disabled { opacity: 0.5; cursor: default; }
+  .sys { color: var(--fg-dim); font-size: 0.74rem; font-style: italic; text-align: center; padding: 2px 0; }
+  .mts { color: var(--fg-faint); font-size: 0.66rem; margin-right: 0.6ch; }
+  .role { font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold); border: 1px solid currentColor; padding: 0 4px; margin-right: 0.6ch; }
+  .m.staffmsg .s { color: var(--accent-bright); }
   .subject { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .petitioner .sub { display: block; color: var(--fg-dim); font-weight: 400; font-size: 0.72rem; }
   .acct { color: var(--fg-faint); }

@@ -8,7 +8,8 @@
   onpointerenter={() => toasts.hold()} onpointerleave={() => toasts.release()}
   onfocusin={() => toasts.hold()} onfocusout={() => toasts.release()}>
   {#each toasts.list as t (t.id)}
-    <button class="toast framed" data-kind={t.kind} onclick={() => toasts.dismiss(t.id)} aria-label="{t.title}{t.body ? `: ${t.body}` : ''}. Dismiss">
+    <button class="toast framed" data-kind={t.kind} onclick={() => { t.open?.(); toasts.dismiss(t.id); }}
+      aria-label="{t.title}{t.body ? `: ${t.body}` : ''}. {t.open ? 'Open' : 'Dismiss'}">
       <span class="k">{t.kind}</span>
       <span class="title">{t.title}</span>
       {#if t.body}<span class="body">{t.body}</span>{/if}
