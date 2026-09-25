@@ -218,6 +218,54 @@ async function run(): Promise<void> {
   await settle(6);
   check("a media row keeps the bottom", gap() < 2, `gap ${gap().toFixed(1)}`);
 
+  // Real traffic. Every server message is its own socket frame, so each append
+  // runs in its own task and several land inside one animation frame, before
+  // the browser has delivered the scroll event for the previous follow. Lines
+  // wrap to several rows, and the typewriter (on by default) grows each row as
+  // it types. The log has to be at the bottom when the traffic stops.
+  await pinToBottom();
+  settings.reduceMotion = false;
+  settings.typewriterMs = 275;
+  for (let i = 0; i < 12; i++) {
+    session.append(`<span>${"traffic ".repeat(40)}${i}</span><br><span>second row ${i}</span>`, "text");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  await settle(6);
+  check("socket-frame bursts keep the bottom", gap() < 2, `gap ${gap().toFixed(1)}`);
+  check("socket-frame bursts show the newest line", bodyText().includes("second row 11"));
+
+  // Paced traffic: one wrapped line every few frames while the previous one is
+  // still typing in.
+  for (let i = 0; i < 8; i++) {
+    session.append(`<span>${"paced ".repeat(50)}${i}</span>`, "text");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  await settle(6);
+  check("paced wrapped lines keep the bottom", gap() < 2, `gap ${gap().toFixed(1)}`);
+
+  // The same traffic must not pull a reader who has scrolled up back down,
+  // whether they left with the wheel or by dragging the scrollbar (no wheel).
+  for (const how of ["wheel", "drag"]) {
+    await pinToBottom();
+    if (how === "wheel") el.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    el.scrollTop -= 600;
+    el.dispatchEvent(new Event("scroll"));
+    await settle();
+    const readingLine = topRow()?.dataset.lid;
+    for (let i = 0; i < 6; i++) {
+      session.append(`<span>${"reader ".repeat(40)}${i}</span>`, "text");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await settle(6);
+    check(`socket-frame traffic leaves a reader who scrolled up (${how}) in place`, topRow()?.dataset.lid === readingLine, `${readingLine} -> ${topRow()?.dataset.lid}`);
+  }
+  settings.typewriterMs = 0;
+  settings.reduceMotion = true;
+  await settle();
+
   // Typing must not cost a second click: a mouse click in the terminal hands
   // the keyboard back to the command line.
   const cmd = document.getElementById("cmd") as HTMLInputElement;

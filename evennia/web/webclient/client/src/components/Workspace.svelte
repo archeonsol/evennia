@@ -4,7 +4,7 @@
   import type { DockviewApi } from "dockview-core";
   import { svelteComponents } from "../lib/dockAdapter";
   import { chat } from "../lib/chat.svelte";
-  import { dock } from "../lib/dock.svelte";
+  import { dock, VIEWS } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { puppets } from "../lib/puppets.svelte";
@@ -140,22 +140,32 @@
     }
   });
 
-  // Staff-only: the server pushes ticket_inbox to Builder+ sessions, so we add the
-  // unified Tickets help-desk panel the moment that data appears. Players never do.
+  // Staff-only: the ticket queue panel follows the server's ticket_role. A
+  // saved layout (or a named preset) can hold the panel from a staff session
+  // on this browser; once the server says this session is not staff, it goes.
   $effect(() => {
-    if (chat.staff && api && !api.getPanel("tickets")) {
+    if (!api) return;
+    const panel: any = api.getPanel("tickets");
+    if (chat.staff) {
       try {
-        api.addPanel({
-          id: "tickets",
-          component: "tickets",
-          title: "Tickets",
-          position: api.getPanel("chat")
-            ? { referencePanel: "chat", direction: "within" }
-            : undefined,
-        });
+        if (!panel) {
+          api.addPanel({
+            id: "tickets",
+            component: "tickets",
+            title: VIEWS.tickets.title,
+            position: api.getPanel("chat")
+              ? { referencePanel: "chat", direction: "within" }
+              : undefined,
+          });
+        } else if (panel.title !== VIEWS.tickets.title) {
+          // Layouts saved before the rename still say "Tickets".
+          panel.api.setTitle(VIEWS.tickets.title);
+        }
       } catch {
         /* ignore */
       }
+    } else if (chat.staffKnown && panel) {
+      panel.api.close();
     }
   });
 </script>

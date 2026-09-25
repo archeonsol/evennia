@@ -86,6 +86,8 @@ commands.onRun((line) => {
 // here too, so the log's filter chips double as speech filters. The echo of
 // the player's own command is not read back to them.
 session.onLine((line) => {
+  // The player's own command echo is not news.
+  if (line.type !== "echo") notify.activity();
   if (settings.speakOutput && line.type !== "media" && line.type !== "echo" && logview.filters[line.cat]) {
     announcer.say(line.text);
   }
@@ -186,7 +188,11 @@ connection.on("oob", (env) => {
     event.startsWith("ticket_")
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
-    if (is(event, "channel_msg")) echoChannel(env.kwargs ?? {});
+    if (is(event, "channel_msg")) {
+      echoChannel(env.kwargs ?? {});
+      const key = String(env.kwargs?.channel ?? "");
+      if (key && !chat.muted[key]) notify.activity();
+    }
     // A thread only arrives because the player asked for one (@ticket, or a
     // click in a ticket list): bring its panel forward.
     if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");

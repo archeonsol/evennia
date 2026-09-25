@@ -4,7 +4,8 @@
   import { renderBody, renderSender } from "../lib/markup";
   import { htmlToText } from "../lib/text";
   import { settings } from "../lib/settings.svelte";
-  import { tick } from "svelte";
+  import { pinAfterScroll } from "../lib/autoscroll";
+  import { tick, untrack } from "svelte";
 
   import { focusOnMount } from "../lib/focus";
   let { channelKey = "" }: { channelKey?: string } = $props();
@@ -33,15 +34,142 @@
     q ? msgs.filter((m) => `${m.text} ${m.sender}`.toLowerCase().includes(q)) : msgs,
   );
 
-  // Follow new traffic only while already at the bottom: jumping there on
-  // every message pulled the list away from anyone reading history.
-  let atBottom = true;
-  function onListScroll() {
-    if (listEl) atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 24;
+  // Following new traffic works as it does in the game log. `pinned` is the
+  // reader's intent, read from the wheel and from scroll events judged by
+  // pinAfterScroll; while it holds, every change to the list ends at the
+  // newest message.
+  //
+  // This used to re-derive "at the bottom" from each scroll event and follow
+  // when the message *count* changed. Both failed in play: a second message
+  // landing before the scroll event for the first follow read as the reader
+  // having scrolled away, and a channel at its 500-message cap never changes
+  // count, so a busy channel stopped following for good.
+  let listInner = $state<HTMLDivElement | null>(null);
+  let pinned = $state(true);
+  let unseen = $state(0);
+  // The top our code wrote most recently, so a scroll event can tell its own
+  // echo from a real upward scroll.
+  let lastTop = 0;
+  // The reading position across a hide: dockview hides an inactive tab, and a
+  // hidden box reports a zero scrollTop.
+  let savedTop = 0;
+  let hidden = false;
+  let seenUid = 0;
+  const newest = $derived(msgs.at(-1)?.uid ?? 0);
+
+  function toBottom(): void {
+    if (!listEl || !listEl.clientHeight) return;
+    const top = Math.max(0, listEl.scrollHeight - listEl.clientHeight);
+    lastTop = top;
+    listEl.scrollTop = top;
   }
+  function jumpToLatest(): void {
+    pinned = true;
+    unseen = 0;
+    toBottom();
+  }
+  function onWheel(e: WheelEvent) {
+    if (e.deltaY < 0 && listEl && listEl.scrollHeight > listEl.clientHeight + 1) pinned = false;
+  }
+  function onListScroll() {
+    if (!listEl || !listEl.clientHeight) return; // a hide zeroes scrollTop; not a real scroll
+    savedTop = listEl.scrollTop;
+    // Anything but the echo of our own write is the reader moving.
+    if (Math.abs(listEl.scrollTop - lastTop) > 1) anchor = null;
+    const gap = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+    pinned = pinAfterScroll(pinned, gap, listEl.scrollTop, lastTop);
+    if (pinned) unseen = 0;
+  }
+
+  // A different channel in the same view starts at its newest message.
   $effect(() => {
-    void msgs.length;
-    if (listEl && atBottom) listEl.scrollTop = listEl.scrollHeight;
+    void key;
+    untrack(() => {
+      pinned = true;
+      unseen = 0;
+      seenUid = newest;
+    });
+  });
+
+  // A reader scrolled up keeps the message they are looking at. At the cap an
+  // arrival also drops the oldest message, and without this the whole list
+  // slid up under them by that message's height. Recorded before the list
+  // re-renders, restored after. The offset is measured once and kept until
+  // the reader scrolls: re-measuring on every arrival would start each
+  // correction from a rounded scrollTop, and the rounding would add up.
+  let anchor: { uid: string; offset: number } | null = null;
+  $effect.pre(() => {
+    void shown;
+    untrack(() => {
+      if (!listEl || pinned || !listEl.clientHeight) {
+        anchor = null;
+        return;
+      }
+      if (anchor && listEl.querySelector(`.msg[data-uid="${anchor.uid}"]`)) return;
+      anchor = null;
+      const top = listEl.getBoundingClientRect().top;
+      for (const node of listEl.querySelectorAll<HTMLElement>(".msg")) {
+        const r = node.getBoundingClientRect();
+        if (r.bottom > top) {
+          anchor = { uid: node.dataset.uid ?? "", offset: r.top - top };
+          break;
+        }
+      }
+    });
+  });
+  $effect(() => {
+    void shown;
+    untrack(() => {
+      if (!listEl) return;
+      if (pinned) {
+        toBottom();
+        return;
+      }
+      const node = anchor ? listEl.querySelector<HTMLElement>(`.msg[data-uid="${anchor.uid}"]`) : null;
+      if (!node || !anchor) return;
+      const delta = node.getBoundingClientRect().top - listEl.getBoundingClientRect().top - anchor.offset;
+      if (Math.abs(delta) > 0.5) {
+        lastTop = listEl.scrollTop + delta;
+        listEl.scrollTop = lastTop;
+      }
+    });
+  });
+
+  // Arrivals while scrolled up are counted on a "new messages" bar.
+  $effect(() => {
+    const n = newest;
+    untrack(() => {
+      if (pinned || n <= seenUid) {
+        if (pinned) unseen = 0;
+        seenUid = Math.max(seenUid, n);
+        return;
+      }
+      unseen += msgs.filter((m) => m.uid > seenUid).length;
+      seenUid = n;
+    });
+  });
+
+  // Size changes the message list does not cause: the panel shown again after
+  // being a background tab, a resize, an image or a web font arriving late.
+  $effect(() => {
+    const box = listEl;
+    const inner = listInner;
+    if (!box) return;
+    const ro = new ResizeObserver(() => {
+      if (!box.clientHeight) {
+        hidden = true;
+        return;
+      }
+      if (pinned) toBottom();
+      else if (hidden) {
+        lastTop = savedTop;
+        box.scrollTop = savedTop;
+      }
+      hidden = false;
+    });
+    ro.observe(box);
+    if (inner) ro.observe(inner);
+    return () => ro.disconnect();
   });
 
   // The message list is one Tab stop. Arrow keys move between messages, and
@@ -168,11 +296,13 @@
     <!-- Live only when channel traffic is not already echoed to the terminal,
          where the announcer speaks it; otherwise each message would be heard twice.
          Arrow keys move between messages (roving tabindex). -->
+    <div class="msgs-wrap">
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       class="msgs"
       bind:this={listEl}
       onscroll={onListScroll}
+      onwheel={onWheel}
       onkeydown={onMsgKey}
       role="log"
       aria-live={settings.channelEcho ? "off" : "polite"}
@@ -180,13 +310,14 @@
       data-focus-region="channels"
       tabindex="-1"
     >
+      <div class="msgs-inner" bind:this={listInner}>
       {#each shown as m, i (m.uid)}
         {@const isNew = !searching && mark > 0 && m.ts > mark && (i === 0 || shown[i - 1].ts <= mark)}
         {@const grouped = i > 0 && shown[i - 1].sender === m.sender && m.ts - shown[i - 1].ts < 300000}
         {@const current = i === curIdx}
         {#if isNew}<div class="divider" role="separator" aria-label="new messages"><span aria-hidden="true">new</span></div>{/if}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="msg" class:disc={m.platform === "discord"} class:grouped
+        <div class="msg" class:disc={m.platform === "discord"} class:grouped data-uid={m.uid}
           role="article" aria-label={spoken(m)} tabindex={current ? 0 : -1}
           onfocus={() => (cur = i === shown.length - 1 ? -1 : i)}>
           {#if !grouped}
@@ -220,6 +351,11 @@
         </div>
       {/each}
       {#if !shown.length}<p class="empty">{q ? "no matches" : "no traffic"}</p>{/if}
+      </div>
+    </div>
+    {#if !pinned && unseen > 0}
+      <button class="latest" onclick={jumpToLatest}>{unseen} new message{unseen === 1 ? "" : "s"} ↓</button>
+    {/if}
     </div>
 
     {#if typers.length}
@@ -262,7 +398,15 @@
   .csearch .cnt { color: var(--fg-dim); font-size: 0.72rem; }
   .divider { display: flex; align-items: center; gap: 0.6ch; margin: 4px 0; color: var(--accent-bright); font-size: 0.6rem; letter-spacing: 0.24em; text-transform: uppercase; }
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: color-mix(in srgb, var(--accent) 50%, transparent); }
-  .msgs { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: 1.5; }
+  .msgs-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+  /* This view anchors a scrolled-up reader itself; the browser's own
+     anchoring would correct the same shift a second time. */
+  .msgs { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; padding: 6px 10px; line-height: 1.5; }
+  .latest {
+    position: absolute; right: 14px; bottom: 8px; z-index: 5;
+    background: var(--bg-deep); border: 1px solid var(--accent); color: var(--accent-bright);
+    font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em; padding: 3px 10px; min-height: 24px; cursor: pointer;
+  }
   .msg { padding: 1px 0; font-size: 0.85rem; word-break: break-word; }
   .msg.grouped { padding-left: 2.4ch; }
   .mts { color: var(--fg-faint); font-size: 0.72em; margin-right: 0.6ch; user-select: none; }

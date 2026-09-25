@@ -110,6 +110,33 @@
     });
   }
 
+  // Following the newest line is this log's decision, not the virtualizer's.
+  //
+  // The virtualizer's own followOnAppend asks "is the reader at the end?" from
+  // the offset its last scroll *event* reported. Server messages arrive as
+  // separate socket frames, so a second one routinely lands before the event
+  // for the first follow has been delivered: the stale offset reads as the
+  // reader having scrolled away, the follow is skipped, and the log never
+  // follows again. `pinned` is read from the reader's own input (wheel, and
+  // scroll events judged by pinAfterScroll), so while it holds, every append
+  // and every re-measure (a line typing in, an image loading) ends at the
+  // bottom. Coalesced to one write per microtask, which still lands before
+  // the next paint.
+  let followQueued = false;
+  function follow(): void {
+    if (followQueued) return;
+    followQueued = true;
+    queueMicrotask(() => {
+      followQueued = false;
+      const v = virtualizer;
+      if (!v || !el || !el.clientHeight || !pinned) return;
+      // A search holds its match in view; following would scroll past it.
+      if (logview.searchOpen && logview.search.trim()) return;
+      syncSpacer(v);
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) v.scrollToEnd({ behavior: "auto" });
+    });
+  }
+
   function measureLine(node: HTMLElement) {
     virtualizer?.measureElement(node);
     return { destroy: sweepLines };
@@ -141,6 +168,7 @@
         onChange: (v) => {
           bumpRev();
           syncSpacer(v);
+          follow();
         },
         onWrite: (top) => {
           lastTop = top;
@@ -185,6 +213,7 @@
         started = true;
         v.scrollToEnd({ behavior: "auto" });
       }
+      follow();
       rev++;
     });
   });

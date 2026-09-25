@@ -20,6 +20,24 @@ const PAGES = [
     report: () => window.__logTest ?? null,
   },
   {
+    path: "tests/channel.html",
+    label: "channel view",
+    done: () => window.__channelTest?.done === true,
+    report: () => window.__channelTest ?? null,
+  },
+  {
+    path: "tests/notify.html",
+    label: "tab alert",
+    done: () => window.__notifyTest?.done === true,
+    report: () => window.__notifyTest ?? null,
+  },
+  {
+    path: "tests/workspace.html",
+    label: "workspace panels",
+    done: () => window.__workspaceTest?.done === true,
+    report: () => window.__workspaceTest ?? null,
+  },
+  {
     path: "tests/display.html",
     label: "display regressions",
     done: () => /failures/.test(document.title),
@@ -32,6 +50,8 @@ const PAGES = [
 
 async function launch() {
   const attempts = [
+    // An explicit browser wins, e.g. a Playwright-managed Chromium in CI.
+    ...(process.env.BROWSER_PATH ? [{ executablePath: process.env.BROWSER_PATH }] : []),
     { channel: "msedge" },
     { channel: "chrome" },
     { executablePath: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" },

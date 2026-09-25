@@ -255,6 +255,15 @@
         <span class="ind" class:on={s.notifyDesktop}>{s.notifyDesktop ? "ON" : "OFF"}</span>
       </button>
       {@render toggle("Notification sound", "notifySound")}
+      <!-- While you are in another tab or window. -->
+      <label class="row select">
+        <span>Flash the browser tab</span>
+        <select bind:value={settings.tabAlert}>
+          <option value="any">on anything new</option>
+          <option value="direct">on messages to me</option>
+          <option value="off">never</option>
+        </select>
+      </label>
     {:else if view === "access"}
       <!-- Turning screen reader mode on also turns channel echo on: channels
            are otherwise only in a view the player is not reading. -->

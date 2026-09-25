@@ -17,7 +17,8 @@ export const VIEWS: Record<string, { component: string; title: string }> = {
   log: { component: "log", title: "Terminal" },
   scene: { component: "scene", title: "Scene" },
   chat: { component: "chat", title: "Channels" },
-  tickets: { component: "tickets", title: "Tickets" },
+  // Staff-only. Named apart from My Tickets, which every player has.
+  tickets: { component: "tickets", title: "Ticket Queue" },
   media: { component: "media", title: "Media" },
   spawns: { component: "spawns", title: "Feeds" },
   mytickets: { component: "mytickets", title: "My Tickets" },
