@@ -18,10 +18,15 @@ pgbouncer.ini, but many ops teams cannot edit that file and the fork's
 default should work out-of-the-box behind the most common pooler config.
 
 Caveat for pure transaction-pool deployments: session-level ``SET`` may not
-persist across backend rebinding. For maximum guarantees under transaction
-pooling, set ``statement_timeout`` at the role level
-(``ALTER ROLE app_user SET statement_timeout = '30s'``) and treat this
-signal-based setter as best-effort on top.
+persist across backend rebinding, and a ``SET`` that does persist is inherited
+by the next client. PgBouncer transaction mode does not run ``DISCARD ALL``
+unless ``server_reset_query_always`` is on, so a replica's
+``default_transaction_read_only = on`` stays on the backend and the next
+primary borrower cannot write. The primary handshake therefore clears that
+flag on every connect. For maximum guarantees under transaction pooling, set
+``statement_timeout`` at the role level
+(``ALTER ROLE app_user SET statement_timeout = '30s'``) and treat the
+signal-based timeout as best-effort on top.
 """
 
 from __future__ import annotations
@@ -91,11 +96,13 @@ def build_read_replica_entry(primary: Dict[str, Any], *, name: str = "replica") 
 def _apply_engine_pg_session_init(sender, connection, **kwargs):
     """Apply session-level PostgreSQL tunables after each connection handshake.
 
-    Runs ``SET statement_timeout`` on the ``default`` alias and
-    ``SET default_transaction_read_only = on`` on aliases registered via
-    ``build_read_replica_entry``. Works through PgBouncer transaction-pool
-    mode (unlike the rejected ``options=-c ...`` startup parameter); see
-    module docstring for the transaction-pool caveat.
+    Runs ``SET statement_timeout`` and ``SET default_transaction_read_only = off``
+    on the ``default`` alias, and ``SET default_transaction_read_only = on`` on
+    aliases registered via ``build_read_replica_entry``. The primary clear is
+    required under PgBouncer transaction pooling: a reused backend otherwise
+    keeps a replica's read-only default and rejects writes. Works through
+    transaction-pool mode (unlike the rejected ``options=-c ...`` startup
+    parameter); see the module docstring.
     """
     if connection.vendor != "postgresql":
         return
@@ -106,6 +113,7 @@ def _apply_engine_pg_session_init(sender, connection, **kwargs):
         timeout_ms = int(getattr(settings, "ENGINE_DATABASE_STATEMENT_TIMEOUT_MS", 30000) or 0)
         if timeout_ms > 0:
             stmts.append("SET statement_timeout = %d" % timeout_ms)
+        stmts.append("SET default_transaction_read_only = off")
     if connection.alias in _READ_REPLICA_ALIASES:
         stmts.append("SET default_transaction_read_only = on")
     if not stmts:

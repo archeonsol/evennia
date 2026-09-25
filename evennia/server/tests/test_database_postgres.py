@@ -117,6 +117,13 @@ class TestConnectionCreatedReceiver(SimpleTestCase):
         with self.settings(ENGINE_DATABASE_STATEMENT_TIMEOUT_MS=30000):
             dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
         cursor.execute.assert_any_call("SET statement_timeout = 30000")
+        cursor.execute.assert_any_call("SET default_transaction_read_only = off")
+
+    def test_default_alias_clears_read_only_when_timeout_disabled(self):
+        conn, cursor = self._fake_connection(alias="default")
+        with self.settings(ENGINE_DATABASE_STATEMENT_TIMEOUT_MS=0):
+            dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
+        cursor.execute.assert_called_once_with("SET default_transaction_read_only = off")
 
     def test_non_default_alias_does_not_set_statement_timeout(self):
         conn, cursor = self._fake_connection(alias="reporting")
@@ -124,12 +131,6 @@ class TestConnectionCreatedReceiver(SimpleTestCase):
             dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
         for call in cursor.execute.call_args_list:
             self.assertNotIn("statement_timeout", call.args[0])
-
-    def test_zero_timeout_skips_set_statement_timeout(self):
-        conn, cursor = self._fake_connection(alias="default")
-        with self.settings(ENGINE_DATABASE_STATEMENT_TIMEOUT_MS=0):
-            dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
-        conn.cursor.assert_not_called()
 
     def test_registered_replica_alias_sets_read_only(self):
         dbpg._READ_REPLICA_ALIASES.add("reporting")
