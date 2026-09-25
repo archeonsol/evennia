@@ -25,6 +25,34 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.275 — The screen-reader choice persists account-wide
+
+### Account options
+
+- **The webclient panel's screen-reader toggle now saves to the account**
+  ([`inputfuncs.py`](evennia/server/inputfuncs.py)). `webclient_options` set
+  only the in-RAM session flag, so the choice vanished on restart or reconnect
+  unless the player also ran `@option/save`. It now mirrors `SCREENREADER` into
+  `account.db._saved_protocol_flags`, the store every restore path reads
+  (`at_post_login`, `Session.at_sync`). Only `True` is stored and off pops the
+  key: a saved `False` would restore over a live `True` flag and leave the
+  shell and the portal's output stripping out of step.
+- **`@option screenreader` saves itself, in both the command and the
+  action** ([`account.py`](evennia/commands/default/account.py),
+  [`account.py`](evennia/actions/default/account.py)). A telnet player's
+  choice reset at the next reconnect unless they knew the `/save` switch, the
+  same gap the panel toggle just closed. `SCREENREADER` now auto-persists
+  whether or not `/save` is given, off is stored as absence, and
+  `@option/save`-all no longer stores an off `SCREENREADER` that would restore
+  over a live `True`.
+
+### Tests
+
+- New coverage in `evennia/server/tests/test_inputfuncs.py`,
+  `evennia/actions/tests/test_default_account.py`, and
+  `evennia/commands/default/tests.py` for the auto-save, the pop-on-off rule,
+  and `save`-all dropping a saved-off `SCREENREADER`.
+
 ## 6.0.0+underspire.274 — Best-effort rule notices and a scrollable ticket thread
 
 ### Actions
