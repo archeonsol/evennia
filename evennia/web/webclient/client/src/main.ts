@@ -73,6 +73,9 @@ compose.init();
 // The preview is a real (silent) command, so it goes out on the command line
 // rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
 compose.setPreviewSender((line) => connection.sendCommand(line));
+// A ticket toast opens its panel; the dock imports the chat store, so the
+// store is handed the opener rather than importing the dock.
+chat.setPanelOpener((view) => dock.openView(view));
 
 // Local echo: the command as typed, in the terminal before the game's answer.
 commands.onRun((line) => {

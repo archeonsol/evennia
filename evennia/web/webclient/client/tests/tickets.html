@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Ticket panels</title>
+<style>
+  html, body { margin: 0; background: #111; color: #ddd; }
+  #mine, #queue { width: 420px; height: 420px; display: inline-flex; flex-direction: column; vertical-align: top; font: 14px/1.5 monospace; }
+</style>
+<div id="mine"></div><div id="queue"></div><div id="toasts"></div>
+<pre id="results">Running...</pre>
+<script type="module" src="./tickets.ts"></script>
