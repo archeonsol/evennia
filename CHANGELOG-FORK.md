@@ -25,6 +25,16 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.276 — Primary connections clear a leaked read-only default
+
+### Engine
+
+- **A primary database connection is writable even when PgBouncer hands it a backend a replica left read-only** ([`database_postgres.py`](evennia/server/database_postgres.py)). Transaction pooling does not run `DISCARD ALL` unless `server_reset_query_always` is on, so `SET default_transaction_read_only = on` from a replica alias stays on that Postgres backend. The next borrower was the game's `default` alias, whose handshake only set `statement_timeout`. Writes then failed with `cannot execute INSERT/UPDATE/SELECT FOR UPDATE in a read-only transaction`: bug tickets did not save, attribute flushes stalled, and a bus resync could not load the account for a session already marked logged in. `at_disconnect` then raised `AttributeError` on the missing account and the portal dropped the client. The primary handshake now also runs `SET default_transaction_read_only = off` on every connect. Replica aliases still set the flag on. No setting rename and no migration.
+
+### Tests
+
+- **The session-init tests cover the clear** ([`test_database_postgres.py`](evennia/server/tests/test_database_postgres.py)). The default alias asserts `SET default_transaction_read_only = off` both with a statement timeout and when the timeout is disabled. A timeout of zero no longer skips the handshake.
+
 ## 6.0.0+underspire.275 — The screen-reader choice persists account-wide
 
 ### Account options
