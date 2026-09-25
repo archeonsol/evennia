@@ -25,6 +25,24 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.277 — The web client follows its output, flashes the tab, and answers tickets in place
+
+### Webclient
+
+- **The terminal follows new lines again** ([`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)). Following was delegated to the virtualizer's `followOnAppend`, which decides "at the end?" from the offset its last scroll *event* reported. Server messages are separate socket frames, so a second one routinely landed before the event for the first follow: the stale offset read as the reader having scrolled away, the follow was skipped, and the log never followed again, with no "new lines" bar because the log still believed it was pinned. The log's own `pinned` state (read from wheel and scroll input through `pinAfterScroll`) now decides, and every append and every re-measure (a line typing in, an image loading) ends at the bottom. A reader who scrolled up, by wheel or by dragging the scrollbar, is left in place.
+- **Channels follow the same way** ([`ChannelView.svelte`](evennia/web/webclient/client/src/components/ChannelView.svelte)). Pinned state instead of a per-event "near the bottom" guess; a scrolled-up reader is anchored on the message they are reading, including when the 500-message cap drops the oldest under them; a "N new messages" bar; and a `ResizeObserver` for a panel shown again, the "transmitting" line taking a row, or content growing after it rendered.
+- **The browser tab flashes when something new arrives while the player is away** ([`tabalert.ts`](evennia/web/webclient/client/src/lib/tabalert.ts), [`notify.svelte.ts`](evennia/web/webclient/client/src/lib/notify.svelte.ts)). New output blinks the title and badges the favicon; a message for the player is named and counted. Settings > Notifications > "Flash the browser tab": on anything new (default), on messages to me, never. Reduced motion and screen-reader mode hold a steady marker instead of blinking.
+- **The staff ticket queue is staff-only on screen as well as on the wire** ([`Workspace.svelte`](evennia/web/webclient/client/src/components/Workspace.svelte), [`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts)). The shell decided a session was staff when a `ticket_inbox` arrived and never unlearned it, and dockview layouts are saved per browser, so a layout saved from a staff session gave the next player on that browser the staff panel beside their own My Tickets. The server now states the role (`ticket_role`, a game event); the panel is removed for anyone it says is not staff, a stray inbox cannot overrule it, and the panel is renamed **Ticket Queue**.
+- **Ticket panels act in place** ([`MyTicketsPanel.svelte`](evennia/web/webclient/client/src/components/MyTicketsPanel.svelte), [`TicketsPanel.svelte`](evennia/web/webclient/client/src/components/TicketsPanel.svelte)). Every panel button typed a command, and every command printed its confirmation ("Posted.", "Ticket #... closed.") into the terminal. Both panels now call the game's `ticket_act` / `my_ticket_act` / `my_ticket_open` RPCs and show the answer in the panel. My Tickets gains search, Open / Waiting on you / All, sorting, unread markers, filing a request in the panel, withdraw, and reply-to-reopen; the queue gains search, Needs reply / On player / Unclaimed, decision reasons and Reopen. A staff reply or status change for a player's ticket that is not in front of them raises a toast that opens it (toasts may now carry an `open` action).
+
+### Migration
+
+- None for the engine. The game must register `ticket_role` and serve the ticket RPCs; without them the shell behaves as before (the queue panel follows the inbox, panel actions report the RPC as unavailable).
+
+### Tests
+
+- Browser pages ([`tests/`](evennia/web/webclient/client/tests)) for the log under socket-frame bursts, wrapped lines and the typewriter, readers scrolled up by wheel or drag; the channel view; the tab alert; the workspace's staff panel; and both ticket panels against a stubbed connection, asserting no panel action types a command. `BROWSER_PATH` selects a Chromium for `npm run test:browser`. Unit tests for the tab alert and the ticket role.
+
 ## 6.0.0+underspire.276 — Primary connections clear a leaked read-only default
 
 ### Engine
