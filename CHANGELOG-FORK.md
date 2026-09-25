@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.274 — Best-effort rule notices and a scrollable ticket thread
+
+### Actions
+
+- **A rule-failure notice can no longer double-fault the engine**
+  ([`engine.py`](evennia/actions/engine.py)). `RuleEngine._notify_rule_error`
+  delivered through `_send`, which called `msg()` unguarded. If the target's
+  JSONB Attribute row was unavailable — the reported case is a rule body that
+  ran during dispatch and then deleted the actor, leaving the same dispatch's
+  later phases firing against it — the delivery raised again and the player saw
+  an "untrapped error occurred" with no usable notice. The notice is now
+  best-effort: a failed send is logged and swallowed, so the original rule
+  failure is what surfaces.
+
+### Web client: tickets
+
+- **A bug ticket's traceback can no longer bury the thread**
+  ([`TicketsPanel.svelte`](evennia/web/webclient/client/src/components/TicketsPanel.svelte),
+  [`shell.js`](evennia/web/static/webclient/shell/shell.js),
+  [`shell.css`](evennia/web/static/webclient/shell/shell.css)). The payload
+  carries `traceback` (up to 8KB) and `character_state`, and every payload entry
+  rendered inline: the traceback arrived as one un-capped block whose newlines
+  ordinary white-space handling collapsed, and the messages list was the
+  detail's only scroll region, so a deep report collapsed it and pushed the
+  reply bar out of the clipped group. Payload rows now skip the deep report
+  fields — the on-demand `ticket_bug_detail` block already renders them bounded
+  and pre-wrapped — and the conversation body (payload, bug report, messages)
+  is one scroll region with the ticket header and reply bar pinned.
+
 ## 6.0.0+underspire.273 — Feed-routed lines kept in the saved log and restored on unhide
 
 ### Web client: feeds
