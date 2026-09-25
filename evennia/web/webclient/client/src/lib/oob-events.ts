@@ -174,6 +174,11 @@ export interface TicketMsgPayload {
   status?: string;
 }
 
+/** Whether this session works the staff ticket queue. Sent at login and on @sync_channels. */
+export interface TicketRolePayload {
+  staff: boolean;
+}
+
 /** A full ticket dict (see tickets.core.to_dict). */
 export type TicketThreadPayload = Record<string, any>;
 
@@ -231,6 +236,7 @@ export type OobEvent =
   | "ticket_alert"
   | "ticket_inbox"
   | "ticket_msg"
+  | "ticket_role"
   | "ticket_thread"
   | "ui_component"
   | "ui_remove"
@@ -274,6 +280,7 @@ export interface OobEventMap {
   "ticket_alert": TicketAlertPayload;
   "ticket_inbox": TicketInboxPayload;
   "ticket_msg": TicketMsgPayload;
+  "ticket_role": TicketRolePayload;
   "ticket_thread": TicketThreadPayload;
   "ui_component": UiComponentPayload;
   "ui_remove": UiRemovePayload;

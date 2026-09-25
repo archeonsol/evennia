@@ -3,6 +3,8 @@
 // change is a single attribute/var flip. Grouped conceptually into Visual, CRT,
 // Audio and Text (see SettingsPanel).
 
+import type { TabAlertMode } from "./tabalert";
+
 export type ThemeName = "haemal" | "amber" | "abyssal" | "sanctum" | "matrix" | "custom";
 /** "panel" docks the page in the shell; "window" opens it in a browser window. */
 export type WebPageMode = "panel" | "window";
@@ -84,6 +86,8 @@ interface Persisted {
   sceneStrip: boolean;
   notifyDesktop: boolean;
   notifySound: boolean;
+  /** What flashes the browser tab while the player is away from it. */
+  tabAlert: TabAlertMode;
   screenreader: boolean;
   reduceMotion: boolean;
   hidePrompt: boolean;
@@ -121,6 +125,7 @@ const DEFAULTS: Persisted = {
   sceneStrip: true,
   notifyDesktop: false,
   notifySound: true,
+  tabAlert: "any",
   screenreader: false,
   reduceMotion:
     typeof matchMedia === "function" &&
@@ -179,6 +184,7 @@ class Settings {
   sceneStrip = $state(DEFAULTS.sceneStrip);
   notifyDesktop = $state(DEFAULTS.notifyDesktop);
   notifySound = $state(DEFAULTS.notifySound);
+  tabAlert = $state<TabAlertMode>(DEFAULTS.tabAlert);
   screenreader = $state(DEFAULTS.screenreader);
   reduceMotion = $state(DEFAULTS.reduceMotion);
   hidePrompt = $state(DEFAULTS.hidePrompt);

@@ -90,7 +90,15 @@ class Chat {
   myTicketsError = $state("");
   /** Bumped when one of the player's tickets changes, so the list reloads. */
   myTicketsRev = $state(0);
-  staff = $state(false); // set true once the server sends assist_inbox (Builder+ only)
+  /** This session works the staff ticket queue (ticket_role, or an assist/ticket inbox arriving). */
+  staff = $state(false);
+  /**
+   * The server has said whether this session is staff. Until then `staff`
+   * false only means "not yet known": a layout restored at page load keeps
+   * its queue panel until the answer arrives.
+   */
+  staffKnown = $state(false);
+  private assistViewer = false;
   active = $state<string>("");
   // Per-channel overrides: colour + notify mode ("all" | "mention" | "none").
   channelPrefs = $state<Record<string, { color?: string; notify?: string }>>(loadChannelPrefs());
@@ -149,6 +157,7 @@ class Chat {
       }
       case "assist_inbox": {
         this.staff = true;
+        this.assistViewer = true;
         const next = kwargs.threads ?? [];
         // Toast newly-arrived tickets (not on the initial inbox push).
         if (this.assistThreads.length) {
@@ -169,8 +178,18 @@ class Chat {
           messages: kwargs.messages ?? [],
         };
         break;
+      case "ticket_role":
+        // The server's answer, on login and on every channel resync. Reading
+        // staff from an inbox arriving was never taken back, so a player who
+        // was once sent one kept the staff queue panel for good.
+        this.staff = !!kwargs.staff || this.assistViewer;
+        this.staffKnown = true;
+        break;
       case "ticket_inbox": {
-        this.staff = true;
+        // Before the server has stated the role, an inbox is the only sign of
+        // staff. After, the role stands: a stray inbox must not hand a player
+        // the staff queue.
+        if (!this.staffKnown) this.staff = true;
         const next = kwargs.tickets ?? [];
         if (this.tickets.length) {
           const prev = new Set(this.tickets.map((t: any) => t.id));
