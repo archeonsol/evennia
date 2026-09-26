@@ -212,6 +212,10 @@ _CLIENT_OPTIONS = (
 )
 
 
+#: The largest screen width or height ``client_options`` accepts: what NAWS can carry.
+_MAX_CLIENT_SIZE = 0xFFFF
+
+
 def client_options(session, *args, **kwargs):
     """
     This allows the client an OOB way to inform us about its name and capabilities.
@@ -253,7 +257,10 @@ def client_options(session, *args, **kwargs):
         return val
 
     def validate_size(val):
-        return {0: int(val)}
+        # Bounded as NAWS is: a telnet client's window size is 16-bit and never
+        # zero. Unbounded, a zero or negative width reached EvTable, which
+        # raises on it, and a huge one had help and headers build lines of it.
+        return {0: max(1, min(int(val), _MAX_CLIENT_SIZE))}
 
     def validate_bool(val):
         if isinstance(val, str):

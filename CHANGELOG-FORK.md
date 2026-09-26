@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.277 — The web client follows its output, flashes the tab, and answers tickets in place
+## 6.0.0+underspire.277 — The web client follows its output, flashes the tab, reports its size, and answers tickets in place
 
 ### Webclient
 
@@ -35,9 +35,16 @@ matching release procedure.
 - **The staff ticket queue is staff-only on screen as well as on the wire** ([`Workspace.svelte`](evennia/web/webclient/client/src/components/Workspace.svelte), [`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts)). The shell decided a session was staff when a `ticket_inbox` arrived and never unlearned it, and dockview layouts are saved per browser, so a layout saved from a staff session gave the next player on that browser the staff panel beside their own My Tickets. The server now states the role (`ticket_role`, a game event); the panel is removed for anyone it says is not staff, a stray inbox cannot overrule it, and the panel is renamed **Ticket Queue**.
 - **Ticket panels act in place** ([`MyTicketsPanel.svelte`](evennia/web/webclient/client/src/components/MyTicketsPanel.svelte), [`TicketsPanel.svelte`](evennia/web/webclient/client/src/components/TicketsPanel.svelte)). Every panel button typed a command, and every command printed its confirmation ("Posted.", "Ticket #... closed.") into the terminal. Both panels now call the game's `ticket_act` / `my_ticket_act` / `my_ticket_open` RPCs and show the answer in the panel. My Tickets gains search, Open / Waiting on you / All, sorting, unread markers, filing a request in the panel, withdraw, and reply-to-reopen; the queue gains search, Needs reply / On player / Unclaimed, decision reasons and Reopen. A staff reply or status change for a player's ticket that is not in front of them raises a toast that opens it (toasts may now carry an `open` action).
 
+- **The web client reports its terminal size, as telnet's NAWS does** ([`screensize.ts`](evennia/web/webclient/client/src/lib/screensize.ts), [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte), [`main.ts`](evennia/web/webclient/client/src/main.ts)). The server lays out everything width-aware from the session's `SCREENWIDTH` / `SCREENHEIGHT` (help, tables, headers, `who`, EvMore paging), and a telnet client keeps those current with NAWS. The web client never reported them, so every web session was laid out for the 78x45 default whatever its window: tables broke across lines on a narrow window and sat in a strip on a wide one. The game log now measures the character grid it shows (its own font, less the timestamp gutter when timestamps are on) and sends it through the stock `client_options` inputfunc on connect and after each resize or font change, debounced to one report per change. A hidden panel reports nothing.
+
+### Server
+
+- **`client_options` bounds screen sizes as NAWS does** ([`inputfuncs.py`](evennia/server/inputfuncs.py)). `screenwidth` / `screenheight` took any integer; a zero or negative width reached EvTable, which raises on it, and a huge one had help and headers build lines that long. Both are now held to 1-65535, the range a NAWS report can carry.
+
 ### Migration
 
-- None for the engine. The game must register `ticket_role` and serve the ticket RPCs; without them the shell behaves as before (the queue panel follows the inbox, panel actions report the RPC as unavailable).
+- A game with an `AZABAN_PUBLIC_ACTIONS` allowlist must add `client_options` for the web client's size report to reach the server; without it the report is dropped at the portal and web sessions stay at the default size.
+- None otherwise for the engine. The game must register `ticket_role` and serve the ticket RPCs; without them the shell behaves as before (the queue panel follows the inbox, panel actions report the RPC as unavailable).
 
 ### Tests
 

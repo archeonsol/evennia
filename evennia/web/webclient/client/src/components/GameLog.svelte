@@ -9,6 +9,7 @@
   import { createLogVirtualizer, estimateLinePx, type LogVirtualizer } from "../lib/logvirtual";
   import { logReveal } from "../lib/logreveal";
   import { commandInput, isTypingTarget } from "../lib/focus";
+  import { gridFor, screenSize } from "../lib/screensize";
   import { onMount, untrack } from "svelte";
   import type { Virtualizer } from "@tanstack/virtual-core";
 
@@ -23,6 +24,10 @@
 
   let el = $state<HTMLDivElement | null>(null);
   let spacer = $state<HTMLDivElement | null>(null);
+  let cellProbe = $state<HTMLDivElement | null>(null);
+  let cellRun = $state<HTMLSpanElement | null>(null);
+  //: Characters in the measuring run; more of them average out sub-pixel advances.
+  const PROBE_CELLS = 50;
   // The scrollback can hold thousands of lines; only the rows around the
   // viewport exist as DOM (see lib/logvirtual.ts). `virtualizer` is a class
   // instance, so it is not deep-proxied; assigning it is the reactive part.
@@ -333,6 +338,38 @@
     return () => ro.disconnect();
   });
 
+  // Tell the server how many characters this log shows, as a telnet client's
+  // NAWS does (lib/screensize.ts). The measuring line sits in the log itself,
+  // so it has the log's font, size and line height; it is observed along with
+  // the log, so a font change or the timestamps toggle re-measures as surely
+  // as a resize does. A hidden panel measures 0x0 and reports nothing.
+  function measureGrid(): void {
+    const node = el;
+    const probe = cellProbe;
+    const run = cellRun;
+    if (!node || !probe || !run) return;
+    const style = getComputedStyle(node);
+    const px = (v: string) => Number.parseFloat(v) || 0;
+    const width = node.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
+    const height = node.clientHeight - px(style.paddingTop) - px(style.paddingBottom);
+    // A timestamp takes the start of every line, so it is not room for text.
+    const stamp = probe.querySelector<HTMLElement>(".ts");
+    const stampWidth = stamp ? stamp.getBoundingClientRect().width + px(getComputedStyle(stamp).marginRight) : 0;
+    const cell = { width: run.getBoundingClientRect().width / PROBE_CELLS, height: probe.getBoundingClientRect().height };
+    screenSize.update(gridFor({ width: width - stampWidth, height }, cell));
+  }
+
+  $effect(() => {
+    const node = el;
+    const probe = cellProbe;
+    if (!node || !probe) return;
+    const ro = new ResizeObserver(() => measureGrid());
+    ro.observe(node);
+    ro.observe(probe);
+    measureGrid();
+    return () => ro.disconnect();
+  });
+
   function pad(n: number) {
     return String(n).padStart(2, "0");
   }
@@ -498,6 +535,10 @@
     tabindex="0"
     data-focus-region="output"
   >
+    <!-- One line's worth of the log's own text, never seen: it measures a
+         character cell for the size reported to the server. -->
+    <div class="cell-probe" aria-hidden="true" bind:this={cellProbe}>{#if logview.timestamps}<span class="ts">00:00:00</span>{/if}<span
+        bind:this={cellRun}>{"0".repeat(PROBE_CELLS)}</span></div>
     <!-- The spacer holds the full scroll height; rows are positioned inside
          it. Only the virtualized window is mounted. -->
     <div class="log-spacer" bind:this={spacer} style="height: {totalSize}px">
@@ -601,7 +642,11 @@
     position: absolute; top: 0; left: 0; width: 100%;
     white-space: pre-wrap; word-break: break-word;
   }
-  .log-line .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }
+  .log-line .ts, .cell-probe .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }
+  .cell-probe {
+    position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none;
+    white-space: pre; user-select: none;
+  }
   /* Category accents - only the standouts get a marker, to avoid noise. */
   .log-line[data-cat="combat"] { border-left: 2px solid var(--alert); padding-left: 7px; margin-left: -9px; }
   .log-line[data-cat="comms"] { border-left: 2px solid var(--gold); padding-left: 7px; margin-left: -9px; }

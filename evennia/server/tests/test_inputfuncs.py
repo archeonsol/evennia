@@ -253,3 +253,36 @@ class TestTextDispatchErrback(unittest.TestCase):
         log_mock.assert_called()
         logged = " ".join(str(a) for c in log_mock.call_args_list for a in c.args)
         self.assertIn("dispatch kaboom", logged)
+
+
+class TestClientOptionsScreenSize(unittest.TestCase):
+    """``client_options`` sets a session's screen size, as NAWS does for telnet.
+
+    The webclient reports its terminal's columns and rows this way on connect
+    and after each resize. Everything width-aware lays out from the result, so
+    it must be a size a table can be drawn at.
+    """
+
+    def _session(self):
+        return SimpleNamespace(sessid=4, protocol_flags={}, sessionhandler=mock.MagicMock())
+
+    def test_sets_and_syncs_the_size(self):
+        session = self._session()
+        inputfuncs.client_options(session, screenwidth=96, screenheight="30")
+        self.assertEqual(session.protocol_flags["SCREENWIDTH"], {0: 96})
+        self.assertEqual(session.protocol_flags["SCREENHEIGHT"], {0: 30})
+        session.sessionhandler.session_portal_partial_sync.assert_called_once_with(
+            {4: {"protocol_flags": {"SCREENWIDTH": {0: 96}, "SCREENHEIGHT": {0: 30}}}}
+        )
+
+    def test_size_is_bounded_like_naws(self):
+        # NAWS carries 16-bit sizes, so a telnet client cannot report less
+        # than 1 or more than 65535. client_options took any integer, and a
+        # zero or negative width reaches EvTable, which raises on it.
+        session = self._session()
+        inputfuncs.client_options(session, screenwidth=0, screenheight=-4)
+        self.assertEqual(session.protocol_flags["SCREENWIDTH"], {0: 1})
+        self.assertEqual(session.protocol_flags["SCREENHEIGHT"], {0: 1})
+        inputfuncs.client_options(session, screenwidth=10**9, screenheight=10**9)
+        self.assertEqual(session.protocol_flags["SCREENWIDTH"], {0: 65535})
+        self.assertEqual(session.protocol_flags["SCREENHEIGHT"], {0: 65535})

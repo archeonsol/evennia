@@ -28,6 +28,7 @@ import type { OobEvent } from "./lib/oob-events";
 import { announcer } from "./lib/announce.svelte";
 import { renderBody, renderSender } from "./lib/markup";
 import { logview } from "./lib/logview.svelte";
+import { screenSize } from "./lib/screensize";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -163,8 +164,17 @@ function refreshPuppetManifest() {
 // Scene, room BGM and RP fields are re-pushed server-side from the `hello`
 // handshake (see the game's azaban_hello), so connecting costs no extra round
 // trip here — the manifest is the one thing only the client knows it wants.
+// The terminal's size in characters, measured by the game log and reported
+// through the stock client_options inputfunc, as telnet's NAWS is. Server-side
+// layout (help, tables, headers, paging) then fits the window it lands in.
+screenSize.connect((grid) =>
+  connection.sendOobRaw("client_options", [], { screenwidth: grid.cols, screenheight: grid.rows }),
+);
+
 connection.on("connection_open", () => {
   refreshPuppetManifest();
+  // Screen size is a session flag, so a new connection starts without one.
+  screenSize.resend();
   // The session flag starts off on every connection, and the settings store's
   // own send runs before the socket is open, so it is dropped. Only "on" is
   // sent: off must not undo a player's saved @option screenreader.

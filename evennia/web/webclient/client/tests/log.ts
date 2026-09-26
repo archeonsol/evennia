@@ -13,6 +13,7 @@ import GameLog from "../src/components/GameLog.svelte";
 import { session } from "../src/lib/session.svelte";
 import { logview } from "../src/lib/logview.svelte";
 import { settings } from "../src/lib/settings.svelte";
+import { screenSize } from "../src/lib/screensize";
 
 declare global {
   interface Window {
@@ -313,6 +314,42 @@ async function run(): Promise<void> {
   await tick();
   check("keyboard activation keeps its focus", document.activeElement === chip);
   cmd.focus();
+
+  // The size reported to the server is the characters that really fit: the
+  // server wraps and lays out tables to it, so a column too many breaks every
+  // full line in two and a column too few wastes the edge.
+  const fitsPerLine = (): number => {
+    const row = rows().find((r) => (r.textContent ?? "").includes("x".repeat(40)));
+    const body = row?.querySelector<HTMLElement>(".body");
+    const text = body ? (document.createTreeWalker(body, NodeFilter.SHOW_TEXT).nextNode() as Text | null) : null;
+    if (!text) return -1;
+    const range = document.createRange();
+    let firstTop: number | null = null;
+    for (let i = 0; i < text.length; i++) {
+      range.setStart(text, i);
+      range.setEnd(text, i + 1);
+      const top = range.getBoundingClientRect().top;
+      if (firstTop === null) firstTop = top;
+      else if (top > firstTop + 2) return i;
+    }
+    return text.length;
+  };
+  logview.timestamps = false;
+  session.append(`<span>${"x".repeat(600)}</span>`, "text");
+  await settle();
+  logEl().scrollTop = logEl().scrollHeight;
+  await settle(8);
+  check("reports the columns that fit", screenSize.current?.cols === fitsPerLine(), `${screenSize.current?.cols} vs ${fitsPerLine()}`);
+  host.style.width = "400px";
+  await settle(8);
+  check("a narrower log reports fewer columns", screenSize.current?.cols === fitsPerLine() && fitsPerLine() < 50, `${screenSize.current?.cols} vs ${fitsPerLine()}`);
+  logview.timestamps = true;
+  await settle(8);
+  check("timestamps take their width off the report", screenSize.current?.cols === fitsPerLine(), `${screenSize.current?.cols} vs ${fitsPerLine()}`);
+  logview.timestamps = false;
+  host.style.width = "";
+  await settle(8);
+  check("the report follows the log back", screenSize.current?.cols === fitsPerLine(), `${screenSize.current?.cols} vs ${fitsPerLine()}`);
 
   // Clear empties the scrollback and the DOM.
   session.clear();
