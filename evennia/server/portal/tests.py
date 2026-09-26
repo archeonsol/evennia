@@ -13,6 +13,7 @@ import string
 import sys
 
 import mock
+from django.test import override_settings
 from mock import MagicMock, Mock
 from twisted.conch.telnet import DO, DONT, IAC, NAWS, SB, SE, WILL
 from twisted.internet.base import DelayedCall
@@ -28,6 +29,10 @@ from evennia.utils.test_resources import BaseEvenniaTest
 
 from .amp import AMP_MAXLEN, AMPMultiConnectionProtocol, MsgPortal2Server, MsgServer2Portal
 from .amp_server import AMPServerFactory
+from .charset import ACCEPTED as CHARSET_ACCEPTED
+from .charset import CHARSET
+from .charset import REJECTED as CHARSET_REJECTED
+from .charset import REQUEST as CHARSET_REQUEST
 from .mccp import MCCP
 from .mssp import MSSP
 from .mxp import MXP
@@ -252,7 +257,7 @@ class TestTelnet(TwistedTestCase):
         self.assertTrue(self.proto.protocol_flags["NOGOAHEAD"])
         self.proto.dataReceived(IAC + DONT + SUPPRESS_GA)
         self.assertFalse(self.proto.protocol_flags["NOGOAHEAD"])
-        self.assertEqual(self.proto.handshakes, 7)
+        self.assertEqual(self.proto.handshakes, 8)
         # test naws
         self.assertEqual(self.proto.protocol_flags["SCREENWIDTH"], {0: DEFAULT_WIDTH})
         self.assertEqual(self.proto.protocol_flags["SCREENHEIGHT"], {0: DEFAULT_HEIGHT})
@@ -260,7 +265,7 @@ class TestTelnet(TwistedTestCase):
         self.proto.dataReceived(b"".join([IAC, SB, NAWS, b"", b"x", b"", b"d", IAC, SE]))
         self.assertEqual(self.proto.protocol_flags["SCREENWIDTH"][0], 78)
         self.assertEqual(self.proto.protocol_flags["SCREENHEIGHT"][0], 45)
-        self.assertEqual(self.proto.handshakes, 6)
+        self.assertEqual(self.proto.handshakes, 7)
         # test ttype
         self.assertFalse(self.proto.protocol_flags["TTYPE"])
         self.assertTrue(self.proto.protocol_flags["ANSI"])
@@ -273,25 +278,25 @@ class TestTelnet(TwistedTestCase):
         self.assertFalse(self.proto.protocol_flags["NOPROMPTGOAHEAD"])
         self.proto.dataReceived(b"".join([IAC, SB, TTYPE, IS, b"XTERM", IAC, SE]))
         self.proto.dataReceived(b"".join([IAC, SB, TTYPE, IS, b"MTTS 137", IAC, SE]))
-        self.assertEqual(self.proto.handshakes, 5)
+        self.assertEqual(self.proto.handshakes, 6)
         # test mccp
         self.proto.dataReceived(IAC + DONT + MCCP)
         self.assertFalse(self.proto.protocol_flags["MCCP"])
-        self.assertEqual(self.proto.handshakes, 4)
+        self.assertEqual(self.proto.handshakes, 5)
         # test mssp
         self.proto.dataReceived(IAC + DONT + MSSP)
-        self.assertEqual(self.proto.handshakes, 3)
+        self.assertEqual(self.proto.handshakes, 4)
         # test oob
         self.proto.dataReceived(IAC + DO + MSDP)
         self.proto.dataReceived(
             b"".join([IAC, SB, MSDP, MSDP_VAR, b"LIST", MSDP_VAL, b"COMMANDS", IAC, SE])
         )
         self.assertTrue(self.proto.protocol_flags["OOB"])
-        self.assertEqual(self.proto.handshakes, 2)
+        self.assertEqual(self.proto.handshakes, 3)
         # test mxp
         self.proto.dataReceived(IAC + DONT + MXP)
         self.assertFalse(self.proto.protocol_flags["MXP"])
-        self.assertEqual(self.proto.handshakes, 1)
+        self.assertEqual(self.proto.handshakes, 2)
         # clean up to prevent Unclean reactor
         self.proto.nop_keep_alive.stop()
         self.proto._handshake_delay.cancel()
@@ -373,6 +378,134 @@ class TestTelnet(TwistedTestCase):
         self.assertEqual(self.proto.protocol_flags["SCREENWIDTH"][0], 160)
         self.assertEqual(synced_widths, [160])  # sync saw the NEW width, not 120
 
+        return d
+
+    # -- CHARSET (RFC 2066) and the ASCII fallback --------------------------
+    #
+    # Game text is Unicode (box-drawing frames, bars, arrows). A telnet client
+    # left in ASCII or Latin-1 mode showed each multi-byte character as
+    # replacement diamonds. The portal now offers UTF-8 through CHARSET, and a
+    # session that never confirms UTF-8 gets text folded to what it can show.
+
+    def _connect(self):
+        self.transport.client = ["localhost"]
+        self.transport.setTcpKeepAlive = Mock()
+        d = self.proto.makeConnection(self.transport)
+        self.addCleanup(self.proto.nop_keep_alive.stop)
+        self.addCleanup(self.proto._handshake_delay.cancel)
+        self.synced = []
+        self.proto.sessionhandler.sync = lambda session: self.synced.append(
+            dict(session.protocol_flags)
+        )
+        return d
+
+    def _sb(self, *parts):
+        return b"".join([IAC, SB, CHARSET, *parts, IAC, SE])
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_charset_offers_utf8_and_takes_the_answer(self):
+        d = self._connect()
+        self.assertIn(IAC + WILL + CHARSET, self.transport.value())
+        self.assertFalse(self.proto.protocol_flags.get("UTF-8"))
+        before = self.proto.handshakes
+        self.proto.dataReceived(IAC + DO + CHARSET)
+        self.assertIn(self._sb(CHARSET_REQUEST, b";UTF-8"), self.transport.value())
+        self.proto.dataReceived(self._sb(CHARSET_ACCEPTED, b"UTF-8"))
+        self.assertIs(self.proto.protocol_flags["UTF-8"], True)
+        self.assertEqual(self.proto.protocol_flags["ENCODING"], "utf-8")
+        self.assertEqual(self.proto.handshakes, before - 1)
+        self.assertIn("CHARSET", self.proto.protocol_flags["NEG_ORDER"])
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_charset_refused_leaves_utf8_unconfirmed(self):
+        d = self._connect()
+        before = self.proto.handshakes
+        self.proto.dataReceived(IAC + DONT + CHARSET)
+        self.assertEqual(self.proto.handshakes, before - 1)
+        self.assertFalse(self.proto.protocol_flags.get("UTF-8"))
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_charset_rejected(self):
+        d = self._connect()
+        before = self.proto.handshakes
+        self.proto.dataReceived(IAC + DO + CHARSET)
+        self.proto.dataReceived(self._sb(CHARSET_REJECTED))
+        self.assertEqual(self.proto.handshakes, before - 1)
+        self.assertFalse(self.proto.protocol_flags.get("UTF-8"))
+        # A repeated answer does not count the handshake twice.
+        self.proto.dataReceived(self._sb(CHARSET_REJECTED))
+        self.assertEqual(self.proto.handshakes, before - 1)
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_charset_request_from_the_client(self):
+        d = self._connect()
+        self.proto.dataReceived(IAC + WILL + CHARSET)
+        self.assertIn(IAC + DO + CHARSET, self.transport.value())
+        self.proto.dataReceived(self._sb(CHARSET_REQUEST, b" ISO-8859-1 utf-8"))
+        self.assertIn(self._sb(CHARSET_ACCEPTED, b"utf-8"), self.transport.value())
+        self.assertIs(self.proto.protocol_flags["UTF-8"], True)
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_charset_request_without_utf8_is_rejected(self):
+        d = self._connect()
+        self.proto.dataReceived(IAC + WILL + CHARSET)
+        self.proto.dataReceived(self._sb(CHARSET_REQUEST, b";ISO-8859-1;CP437"))
+        self.assertIn(self._sb(CHARSET_REJECTED), self.transport.value())
+        self.assertFalse(self.proto.protocol_flags.get("UTF-8"))
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_charset_accepted_after_the_handshake_reaches_the_server(self):
+        # A slow client answers after the handshake timeout already synced the
+        # session; the server must still learn it is UTF-8.
+        d = self._connect()
+        self.proto.handshake_done(timeout=True)
+        self.synced.clear()
+        self.proto.dataReceived(IAC + DO + CHARSET)
+        self.proto.dataReceived(self._sb(CHARSET_ACCEPTED, b"UTF-8"))
+        self.assertTrue(self.synced and self.synced[-1].get("UTF-8"))
+        return d
+
+    def _sent(self, text, **options):
+        self.transport.clear()
+        self.proto.send_text(text, options=options)
+        return self.transport.value()
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_unconfirmed_client_gets_folded_text(self):
+        d = self._connect()
+        sent = self._sent("┌─┐ café → │")
+        self.assertIn(b"+-+ cafe > |", sent)
+        self.assertNotIn("─".encode("utf-8"), sent)
+        # Prompts are folded too.
+        self.transport.clear()
+        self.proto.send_prompt("HP ■■□ >", options={})
+        self.assertIn(b"HP ##. >", self.transport.value())
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_utf8_client_gets_unicode(self):
+        d = self._connect()
+        self.proto.protocol_flags["UTF-8"] = True
+        self.assertIn("┌─┐ café".encode("utf-8"), self._sent("┌─┐ café"))
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_fallback_can_be_turned_off(self):
+        d = self._connect()
+        with override_settings(TELNET_ASCII_FALLBACK=False):
+            self.assertIn("┌─┐".encode("utf-8"), self._sent("┌─┐"))
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_legacy_encoding_keeps_what_it_can_carry(self):
+        d = self._connect()
+        self.proto.protocol_flags["ENCODING"] = "cp437"
+        self.assertIn("┌─┐ café >".encode("cp437"), self._sent("┌─┐ café →"))
         return d
 
 

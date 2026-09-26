@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.277 — The web client follows its output, flashes the tab, reports its size, and answers tickets in place
+## 6.0.0+underspire.277 — The web client follows its output and reports its size, tickets act in place, and telnet negotiates UTF-8
 
 ### Webclient
 
@@ -37,12 +37,18 @@ matching release procedure.
 
 - **The web client reports its terminal size, as telnet's NAWS does** ([`screensize.ts`](evennia/web/webclient/client/src/lib/screensize.ts), [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte), [`main.ts`](evennia/web/webclient/client/src/main.ts)). The server lays out everything width-aware from the session's `SCREENWIDTH` / `SCREENHEIGHT` (help, tables, headers, `who`, EvMore paging), and a telnet client keeps those current with NAWS. The web client never reported them, so every web session was laid out for the 78x45 default whatever its window: tables broke across lines on a narrow window and sat in a strip on a wide one. The game log now measures the character grid it shows (its own font, less the timestamp gutter when timestamps are on) and sends it through the stock `client_options` inputfunc on connect and after each resize or font change, debounced to one report per change. A hidden panel reports nothing.
 
+### Telnet
+
+- **The portal asks telnet clients for UTF-8, and folds text for those that never confirm it** ([`charset.py`](evennia/server/portal/charset.py), [`textfold.py`](evennia/utils/textfold.py), [`telnet.py`](evennia/server/portal/telnet.py)). Game text is Unicode and always went out as UTF-8, but the portal never told a telnet client so, and many start in ASCII or Latin-1. Every box-drawing frame, bar and arrow then arrived as bytes the client could not decode: replacement diamonds in Mudlet, `â”€` mojibake elsewhere, a status screen turned to noise. The portal now offers UTF-8 through the telnet CHARSET option (RFC 2066) on connect; a client that accepts (Mudlet and tintin++ do, unprompted) is marked `UTF-8` and gets Unicode unchanged, as does one reporting the UTF-8 bit in MTTS or a player who sets `@option utf-8 = on`. The negotiation is one more telnet handshake (the count goes from 8 to 9), so the first screen still waits for the answer, and an acceptance that lands after the handshake timeout is synced to the server on its own. A session that never confirms UTF-8 gets its text (lines and prompts) folded by `evennia.utils.textfold.fold_text`: `─` to `-`, `│` to `|`, corners to `+`, `█` to `#`, `░` to `.`, `→` to `>`, `—` to `-`, `é` to `e`, anything else to `?`. Every character folds to exactly one, so frames and tables laid out one column per character stay aligned. A legacy encoding the player chose with `@option encoding` (such as `cp437`) keeps every character it can carry and folds only the rest. ASCII text is returned untouched after one `str.isascii()` check.
+- **New setting `TELNET_ASCII_FALLBACK`** (default `True`). Set `False` to send Unicode to every telnet client as before.
+
 ### Server
 
 - **`client_options` bounds screen sizes as NAWS does** ([`inputfuncs.py`](evennia/server/inputfuncs.py)). `screenwidth` / `screenheight` took any integer; a zero or negative width reached EvTable, which raises on it, and a huge one had help and headers build lines that long. Both are now held to 1-65535, the range a NAWS report can carry.
 
 ### Migration
 
+- Telnet clients that have not confirmed UTF-8 now receive folded ASCII instead of raw UTF-8. A client that decodes UTF-8 without saying so (no CHARSET, no MTTS bit) sees plain frames until the player sets `@option/save utf-8 = on`; set `TELNET_ASCII_FALLBACK = False` to keep the old behaviour for everyone.
 - A game with an `AZABAN_PUBLIC_ACTIONS` allowlist must add `client_options` for the web client's size report to reach the server; without it the report is dropped at the portal and web sessions stay at the default size.
 - None otherwise for the engine. The game must register `ticket_role` and serve the ticket RPCs; without them the shell behaves as before (the queue panel follows the inbox, panel actions report the RPC as unavailable).
 

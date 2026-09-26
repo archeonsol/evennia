@@ -82,3 +82,29 @@ Workaround:
 * In-game: Use `@option NOPKEEPALIVE=off` for the session, or use the `/save`
 parameter to disable it for that Evennia account permanently.
 * Client-side: Set a gag-type trigger on the NOP character to make it invisible to the client.
+
+### Issue: Box-drawing lines, bars and arrows show as `?` diamonds or garbage.
+
+Game text is Unicode and goes out as UTF-8. A client decoding in ASCII or
+Latin-1 shows each multi-byte character as replacement diamonds (Mudlet) or
+mojibake such as `â”€` (most others).
+
+What the server does about it:
+
+* On connect the portal offers UTF-8 through the telnet CHARSET option
+  (RFC 2066). A client that accepts switches its own decoding and gets full
+  Unicode; Mudlet and tintin++ do this with no setup. A client that reports the
+  UTF-8 bit in MTTS is treated the same way.
+* A client that never confirms UTF-8 gets text folded to plain characters, one
+  for one so tables stay aligned: `─` is `-`, `│` is `|`, corners are `+`,
+  `█` is `#`, `→` is `>`, `é` is `e`, and anything with no equivalent is `?`
+  (`evennia.utils.textfold`). A player who chose a legacy encoding with
+  `@option ENCODING` (such as `cp437`) keeps every character it can carry.
+  Turn this off with `TELNET_ASCII_FALLBACK = False`.
+
+Workaround for a client that decodes UTF-8 but does not say so:
+
+* In-game: `@option UTF-8=on` for the session, or `@option/save UTF-8=on` to
+  keep it for the account.
+* Client-side: set the client's encoding to UTF-8 (MUSHclient: "UTF-8
+  (Unicode)" in the world's output settings).

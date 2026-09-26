@@ -60,6 +60,15 @@ SSL_CERTIFICATE_ISSUER = {
     "OU": "Evennia Department",
     "CN": "evennia",
 }
+# Fold output to plain ASCII for telnet clients that have not confirmed they
+# decode UTF-8. Game text is Unicode (box-drawing frames, bars, arrows), and a
+# client left in ASCII or Latin-1 mode shows each such character as replacement
+# diamonds or mojibake. The portal offers UTF-8 through telnet CHARSET, which
+# clients like Mudlet and TinTin++ accept on their own; a client that also
+# reports the UTF-8 bit in MTTS, or a player who sets `option utf-8 = on`, gets
+# Unicode too. Everyone else gets `+`, `-`, `|`, `->` and friends in its place
+# (see evennia.utils.textfold). Set False to always send Unicode as-is.
+TELNET_ASCII_FALLBACK = True
 # OOB (out-of-band) telnet communication allows Evennia to communicate
 # special commands and data with enabled Telnet clients. This is used
 # to create custom client interfaces over a telnet connection. To make
