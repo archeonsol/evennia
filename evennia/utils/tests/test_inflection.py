@@ -2,6 +2,8 @@
 
 import ast
 import pathlib
+from importlib.util import find_spec
+from unittest import skipIf
 
 from django.test import TestCase
 
@@ -95,3 +97,50 @@ class LazyInflectionTest(TestCase):
         start_hook = source.split("def at_server_start(self):", 1)[1].split("def ", 1)[0]
 
         self.assertIn("warm", start_hook, "at_server_start no longer warms the inflection cache")
+
+
+# Every lemma with a VBZ entry in pyinflect 0.5.1's overrides.csv, mapped to
+# the form its main table (infl.csv) gives.
+MAIN_TABLE_VBZ = {
+    "stick": "sticks",
+    "knock": "knocks",
+    "fear": "fears",
+    "roar": "roars",
+    "weep": "weeps",
+    "pluck": "plucks",
+    "murmur": "murmurs",
+    "harden": "hardens",
+    "dim": "dims",
+    "round": "rounds",
+    "tramp": "tramps",
+    "profane": "profanes",
+    "mine": "mines",
+    "abide": "abides",
+    "rid": "rids",
+    "star": "stars",
+    "rag": "rags",
+    "dot": "dots",
+    "envelop": "envelops",
+    "shoe": "shoes",
+    "thee": "thees",
+    "thou": "thous",
+}
+
+
+@skipIf(find_spec("pyinflect") is None, "pyinflect is not installed")
+class PyinflectVbzOverrideTest(TestCase):
+    """pyinflect's VBZ overrides are wrong; the main table answers instead."""
+
+    def test_get_inflection_uses_main_table(self):
+        module = pyinflect_module()
+        for lemma, expected in MAIN_TABLE_VBZ.items():
+            with self.subTest(lemma=lemma):
+                self.assertEqual(module.getInflection(lemma, tag="VBZ")[0], expected)
+
+    def test_emote_conjugation_uses_main_table(self):
+        from evennia.narrative.emote import IRREGULAR_VERBS, _conjugate
+
+        for lemma, expected in MAIN_TABLE_VBZ.items():
+            with self.subTest(lemma=lemma):
+                self.assertNotIn(lemma, IRREGULAR_VERBS)
+                self.assertEqual(_conjugate(lemma), expected)
