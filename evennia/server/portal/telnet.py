@@ -8,13 +8,14 @@ sessions etc.
 """
 
 import asyncio
+import codecs
 import re
 import time
 
 from django.conf import settings
 from twisted.internet import protocol
 
-from evennia.server.portal import mssp, naws, suppress_ga, telnet_oob, ttype
+from evennia.server.portal import charset, mssp, naws, suppress_ga, telnet_oob, ttype
 from evennia.server.portal.asyncio_transport import AsyncioTransportShim
 from evennia.server.portal.mccp import MCCP, Mccp, mccp_compress
 from evennia.server.portal.mxp import Mxp, mxp_parse
@@ -34,6 +35,7 @@ from evennia.server.portal.telnet_parser import (
     Telnet,
 )
 from evennia.utils import ansi, clock
+from evennia.utils.textfold import fold_text
 from evennia.utils.utils import class_from_module, to_bytes
 
 _RE_N = re.compile(r"\|n$")
@@ -125,7 +127,8 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         client_address = client_address[0] if client_address else None
         # this number is counted down for every handshake that completes.
         # when it reaches 0 the portal/server syncs their data
-        self.handshakes = 8  # suppress-go-ahead, naws, ttype, mccp, mssp, msdp, gmcp, mxp
+        # suppress-go-ahead, naws, ttype, charset, mccp, mssp, msdp, gmcp, mxp
+        self.handshakes = 9
 
         # Sanctioned addresses are dropped here, before the Server ever learns
         # of the connection.
@@ -171,6 +174,8 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         # negotiate ttype (client info)
         # Obs: mudlet ttype does not seem to work if we start mccp before ttype. /Griatch
         self.ttype = ttype.Ttype(self)
+        # negotiate charset: ask the client to decode UTF-8
+        self.charset = charset.Charset(self)
         # negotiate mccp (data compression) - turn this off for wireshark analysis
         self.mccp = Mccp(self)
         # negotiate mssp (crawler communication)
@@ -287,6 +292,7 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
             return (
                 option == ttype.TTYPE
                 or option == naws.NAWS
+                or option == charset.CHARSET
                 or option == MCCP
                 or option == mssp.MSSP
                 or option == ECHO
@@ -298,6 +304,7 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
             option == LINEMODE
             or option == ttype.TTYPE
             or option == naws.NAWS
+            or option == charset.CHARSET
             or option == MCCP
             or option == mssp.MSSP
             or option == ECHO
@@ -318,6 +325,7 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         return (
             option == LINEMODE
             or option == MCCP
+            or option == charset.CHARSET
             or option == ECHO
             or option == suppress_ga.SUPPRESS_GA
         )
@@ -416,7 +424,7 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
             line (str): Line to send.
 
         """
-        line = to_bytes(line, self)
+        line = to_bytes(self.fit_text(line), self)
         # escape IAC in line mode, and correctly add \r\n (the TELNET end-of-line)
         line = line.replace(IAC, IAC + IAC)
         line = line.replace(b"\n", b"\r\n")
@@ -425,6 +433,40 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         if not self.protocol_flags.get("NOGOAHEAD", True):
             line += IAC + GA
         return self.transport.write(mccp_compress(self, line))
+
+    def fit_text(self, text):
+        """
+        Fit outgoing text to what this client can display.
+
+        Game text is Unicode and goes out as UTF-8. A client that has not
+        confirmed it decodes UTF-8 (by CHARSET, the UTF-8 bit of MTTS, or the
+        player's `option utf-8`) is often in ASCII or Latin-1 mode, where every
+        box-drawing line and arrow shows as replacement diamonds. Such text is
+        folded to plain equivalents instead (`evennia.utils.textfold`), unless
+        `TELNET_ASCII_FALLBACK` is off. A legacy encoding the player chose
+        (`option encoding`) keeps every character it can carry.
+
+        Args:
+            text (str or bytes): The text about to be encoded and sent.
+
+        Returns:
+            str or bytes: The text to encode. Bytes and ASCII pass through.
+
+        """
+        if not isinstance(text, str) or text.isascii():
+            return text
+        flags = self.protocol_flags
+        encoding = flags.get("ENCODING") or "utf-8"
+        try:
+            utf8 = codecs.lookup(encoding).name == "utf-8"
+        except LookupError:
+            # to_bytes falls back to UTF-8 for an unknown encoding.
+            utf8 = True
+        if not utf8:
+            return fold_text(text, encoding=encoding)
+        if flags.get("UTF-8") or not getattr(settings, "TELNET_ASCII_FALLBACK", True):
+            return text
+        return fold_text(text)
 
     # Session hooks
 
@@ -529,7 +571,7 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
                 )
                 if mxp:
                     prompt = mxp_parse(prompt)
-            prompt = to_bytes(prompt, self)
+            prompt = to_bytes(self.fit_text(prompt), self)
             prompt = prompt.replace(IAC, IAC + IAC).replace(b"\n", b"\r\n")
             if not self.protocol_flags.get(
                 "NOPROMPTGOAHEAD", self.protocol_flags.get("NOGOAHEAD", True)
