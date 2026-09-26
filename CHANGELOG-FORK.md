@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.277 — Emote verbs conjugate from pyinflect's main table
+
+### Engine
+
+- **Third-person verb forms come from pyinflect's main table, not its override file** ([`inflection.py`](evennia/utils/inflection.py)). Every `VBZ` entry in pyinflect 0.5.1's `overrides.csv` is wrong, and overrides replace the main table (`infl.csv`) on every lookup. Emotes and poses therefore rendered "she stickes", "he knockes", "it abode", "they shod", and 18 more like them. `pyinflect_module()` now removes the `VBZ` overrides from the loaded pyinflect instance, so `getInflection(w, tag="VBZ")` returns the main-table form (sticks, knocks, abides, shoes, ...). The removal is on the shared instance, so it also covers game code that calls pyinflect after `warm()` or `pyinflect_module()` has run. Other override tags (`NNS`, `VBN`, ...) are unchanged and were not audited. Loading is still lazy. No setting change and no migration.
+- **Downstream:** a game that added `irregular_verbs` entries to work around these forms (for example `stick: sticks`, `knock: knocks`) can remove them.
+
+### Tests
+
+- **Every overridden verb conjugates to its main-table form** ([`test_inflection.py`](evennia/utils/tests/test_inflection.py)). Covers all 22 `VBZ` override lemmas through both `pyinflect_module().getInflection` and emote `_conjugate`. The tests skip when pyinflect is not installed, and it is not an engine dependency, so they run only in an environment that has it.
+
+### Webclient
+
+- **Puppet unread badges count only room activity** ([`puppets.svelte.ts`](evennia/web/webclient/client/src/lib/puppets.svelte.ts), rebuilt into [`shell.js`](evennia/web/static/webclient/shell/shell.js); `2bd525cb7`). Every line added to an inactive puppet's feed raised its unread count, so network traffic and the puppet's own command feedback badged the tab as if something had happened in the room. A line now counts only when its `news` meta is `room`; a line with no `news` value counts as `room`. `network` and `self` lines still render in the feed. No server change.
+- **Test:** [`puppets.test.ts`](evennia/web/webclient/client/src/lib/puppets.test.ts) adds one `network` and one `self` line to an inactive feed and asserts both render and unread stays 0.
+
 ## 6.0.0+underspire.276 — Primary connections clear a leaked read-only default
 
 ### Engine
