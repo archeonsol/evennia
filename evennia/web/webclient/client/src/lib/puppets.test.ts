@@ -150,6 +150,28 @@ describe("puppet scene protocol", () => {
     expect(feed.unread).toBe(2);
   });
 
+  it("renders network and self-news lines without counting them unread", () => {
+    const scenes = new PuppetScenes();
+    scenes.apply(snapshot(71, 2, 1));
+
+    for (const [index, news] of ["network", "self"].entries()) {
+      scenes.apply({
+        target: "puppets",
+        ops: [
+          {
+            op: "add",
+            path: "/71/feed/-",
+            value: { body: `line ${index}`, meta: { revision: index + 1, news } },
+          },
+        ],
+      });
+    }
+
+    const feed = scenes.feeds.get("71")!;
+    expect(feed.feed).toHaveLength(2);
+    expect(feed.unread).toBe(0);
+  });
+
   it("opening a terminal clears its unread and marks it active", () => {
     const request = vi.fn();
     const scenes = new PuppetScenes(request);
