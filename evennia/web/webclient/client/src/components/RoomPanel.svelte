@@ -49,7 +49,7 @@
       </ul>
     {/if}
   {:else}
-    <p class="awaiting">Awaiting signal…</p>
+    <p class="awaiting">No room yet</p>
   {/if}
 </section>
 
@@ -62,7 +62,7 @@
     background: var(--bg-elev);
     font-size: 0.9rem;
   }
-  .awaiting { color: var(--fg-faint); font-style: italic; }
+  .awaiting { color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .panel-title {
     color: var(--accent-bright);
     text-transform: uppercase;

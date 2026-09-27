@@ -230,22 +230,20 @@
       <div class="c-modes" role="group" aria-label="compose mode">
         {#each COMPOSE_MODES as m (m.id)}
           <button
-            class="c-mode"
-            class:active={compose.mode === m.id}
+            class="sh-toggle"
             aria-pressed={compose.mode === m.id}
             onclick={() => compose.setMode(m.id)}>{m.label}</button
           >
         {/each}
       </div>
-      <span class="c-hint">Ctrl-Enter to send, Esc to close</span>
-      <button class="c-x" onclick={() => compose.hide()} aria-label="close">×</button>
+      <span class="c-hint">Ctrl+Enter send &middot; Esc close</span>
+      <button class="sh-cmd c-x" onclick={() => compose.hide()} aria-label="close">Close</button>
     </div>
     <textarea
       bind:this={composeEl}
       value={compose.text}
       oninput={(e) => compose.setText(e.currentTarget.value)}
       onkeydown={onComposeKey}
-      placeholder="write a longer pose or message…"
       aria-label="compose"
     ></textarea>
     <!-- Server-rendered preview of what you and the room will actually see. -->
@@ -264,10 +262,10 @@
           </div>
         {/if}
       {:else}
-        <div class="c-empty">preview appears as you type</div>
+        <div class="c-empty">Preview</div>
       {/if}
     </div>
-    <button class="c-send" onclick={sendCompose}>Send</button>
+    <button class="sh-cmd primary c-send" onclick={sendCompose}>Send</button>
   </div>
 {/if}
 
@@ -277,11 +275,11 @@
   {/if}
   {#if rSearch}
     <span class="rs-tag" aria-hidden="true">r-search</span>
-    <input class="rs-input" bind:value={rQuery} onkeydown={onRKey} use:focusOnMount placeholder="search history…"
+    <input class="rs-input" bind:value={rQuery} onkeydown={onRKey} use:focusOnMount class:sh-placeholder={true} placeholder="Search history"
       aria-label="Search command history" aria-describedby="rs-match" />
     <span class="rs-match" id="rs-match" aria-live="polite">{rMatch || "(no match)"}</span>
   {:else}
-    <span class="chevron glow-text" aria-hidden="true">❯</span>
+    <span class="chevron glow-text" aria-hidden="true">&gt;</span>
     <input
       class="command-input"
       bind:this={inputEl}
@@ -294,10 +292,9 @@
       use:focusOnMount
       aria-label="Command"
       data-focus-region="input"
-      placeholder="enter command"
     />
     <button
-      class="compose-btn"
+      class="sh-cmd compose-btn"
       class:has-draft={compose.hasDraft}
       onclick={openCompose}
       title={compose.hasDraft ? "compose pad (draft saved)" : "compose pad"}
@@ -325,7 +322,6 @@
   .chevron {
     color: var(--accent-bright);
     flex: 0 0 auto;
-    font-size: 1.05rem;
     line-height: 1;
   }
   .command-input {
@@ -338,19 +334,9 @@
     letter-spacing: 0.02em;
     caret-color: var(--accent-bright);
   }
-  .command-input::placeholder {
-    color: var(--fg-faint);
-    font-style: italic;
-    letter-spacing: 0.14em;
-    text-transform: lowercase;
-  }
   /* A saved draft is invisible once the pad is closed, so mark the button. */
-  .compose-btn.has-draft { color: var(--accent-bright); border-color: var(--accent); }
-  .compose-btn {
-    flex: 0 0 auto; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.72rem; padding: 0 10px; min-height: 26px; cursor: pointer;
-  }
-  .compose-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
+  .compose-btn { flex: 0 0 auto; }
+  .compose-btn.has-draft { color: var(--gold); }
   .rs-tag { color: var(--gold); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; flex: 0 0 auto; }
   .rs-input {
     flex: 1 1 auto; background: transparent; border: none; outline: none;
@@ -363,33 +349,21 @@
   }
   .c-head { display: flex; align-items: center; gap: 1ch; }
   .c-tag { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.18em; font-size: 0.72rem; }
-  .c-hint { color: var(--fg-faint); font-size: 0.66rem; }
-  .c-x { margin-left: auto; background: none; border: none; color: var(--fg-dim); font-size: 1.1rem; line-height: 1; cursor: pointer; }
-  .c-x:hover { color: var(--accent-bright); }
-  .c-modes { display: flex; gap: 3px; }
-  .c-mode {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em;
-    padding: 1px 6px; cursor: pointer;
-  }
-  .c-mode:hover { color: var(--accent-bright); border-color: var(--accent); }
-  .c-mode.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+  .c-hint { color: var(--fg-faint); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; }
+  .c-x { margin-left: auto; }
+  .c-modes { display: flex; gap: 2px 6px; flex-wrap: wrap; }
   .c-preview {
     min-height: 2.4em; border-left: 2px solid var(--border-bright);
     padding: 2px 0 2px 8px; font-size: 0.84rem; line-height: 1.45;
   }
   .c-line { color: var(--fg); }
   .c-room { color: var(--fg-dim); }
-  .c-empty, .c-err { color: var(--fg-faint); font-style: italic; font-size: 0.72rem; }
+  .c-empty, .c-err { color: var(--fg-faint); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .c-err { color: var(--accent-ember, var(--fg-dim)); }
   .compose textarea {
     background: var(--bg); color: var(--fg); border: 1px solid var(--border-bright);
     font-family: inherit; font-size: 0.9rem; padding: 6px 8px; min-height: 80px; resize: vertical; line-height: 1.5;
   }
   .compose textarea:focus { outline: none; border-color: var(--accent); }
-  .c-send {
-    align-self: flex-end; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em; padding: 4px 14px; cursor: pointer;
-  }
-  .c-send:hover { color: var(--accent-bright); border-color: var(--accent); }
+  .c-send { align-self: flex-end; }
 </style>

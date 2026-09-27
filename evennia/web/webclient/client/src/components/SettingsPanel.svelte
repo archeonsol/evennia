@@ -163,7 +163,7 @@
     onflip?.(s[key]);
   }}>
     <span>{label}</span>
-    <span class="ind" class:on={s[key]} aria-hidden="true">{s[key] ? "ON" : "OFF"}</span>
+    <span class="sh-plate ind" class:hot={s[key]} class:dim={!s[key]} aria-hidden="true">{s[key] ? "On" : "Off"}</span>
   </button>
 {/snippet}
 
@@ -180,23 +180,24 @@
 <div class="panel framed" role="dialog" aria-labelledby="settings-heading" aria-modal="true"
   use:modal={{ onclose: () => (view === "hub" ? onclose() : openView("hub")), initial: heading }}>
   <header>
-    {#if view !== "hub"}
-      <button class="back" onclick={() => openView("hub")} aria-label="Back to all settings">‹</button>
-    {/if}
-    <span class="title glow-text" aria-hidden="true">UNDERSPIRE</span>
+    <span class="title glow-text" aria-hidden="true">Underspire</span>
+    <span class="sep" aria-hidden="true">//</span>
     <h2 class="sub" id="settings-heading" tabindex="-1" bind:this={heading}>
       {view === "hub" ? "Settings" : `Settings: ${current?.label}`}
     </h2>
-    <button class="x" onclick={onclose} aria-label="Close settings">×</button>
+    {#if view !== "hub"}
+      <button class="sh-cmd back" onclick={() => openView("hub")} aria-label="Back to all settings">Back</button>
+    {/if}
+    <button class="sh-cmd x" onclick={onclose} aria-label="Close settings">Close</button>
   </header>
 
   <div class="body">
     {#if view === "hub"}
       <div class="hub">
-        {#each groups as g}
+        {#each groups as g, i}
           <button class="tile" id="settings-tile-{g.id}" onclick={() => openView(g.id)}>
+            <span class="num" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
             <span class="tile-label">{g.label}</span>
-            <span class="go" aria-hidden="true">›</span>
           </button>
         {/each}
       </div>
@@ -294,7 +295,7 @@
       {#if openPanels.length}
         {#each openPanels as p (p.id)}
           <div class="grp">{p.title}
-            <button class="pop" onclick={() => dock.popout(p.id)}>pop out ⇱</button>
+            <button class="sh-cmd pop" onclick={() => dock.popout(p.id)}>Pop out</button>
           </div>
           <label class="row range">
             <span>Font</span>
@@ -323,7 +324,7 @@
               aria-label="{b.label}: {capKey === b.id ? 'press the new key, Escape to cancel' : b.combo}"
               onclick={() => (capKey = capKey === b.id ? null : b.id)}
               onkeydown={(e) => capKey === b.id && onKbKey(e, b.id)}>
-              {capKey === b.id ? "press…" : b.combo}
+              {capKey === b.id ? "Press key" : b.combo}
             </button>
           </div>
         {/each}
@@ -332,8 +333,8 @@
         <div class="row"><span>Scroll output from the command line</span><span class="r-fixed">Page Up / Page Down</span></div>
       </div>
     {:else if view === "data"}
-      <button class="add-rule" onclick={exportConfig}>⤓ Export config</button>
-      <button class="add-rule" onclick={() => fileInput?.click()}>⤒ Import config</button>
+      <button class="sh-cmd add-rule" onclick={exportConfig}>Export config</button>
+      <button class="sh-cmd add-rule" onclick={() => fileInput?.click()}>Import config</button>
       <input bind:this={fileInput} type="file" accept="application/json" style="display:none" onchange={onImport} />
     {:else if view === "macros"}
       <div class="rules">
@@ -350,7 +351,7 @@
               aria-label="{n} key: {capturing === m.id ? 'press a combination, Escape to cancel, Backspace to clear' : m.key || 'none'}"
               onclick={() => (capturing = capturing === m.id ? null : m.id)}
               onkeydown={(e) => capturing === m.id && onMacroKey(e, m.id)}>
-              {capturing === m.id ? "press…" : m.key || "key"}
+              {capturing === m.id ? "Press key" : m.key || "key"}
             </button>
             <button class="r-mv" disabled={i === 0} onclick={() => macros.move(m.id, macros.list[i - 1].id)} aria-label="Move {n} up">↑</button>
             <button class="r-mv" disabled={i === macros.list.length - 1} onclick={() => macros.move(m.id, macros.list[i + 1].id)} aria-label="Move {n} down">↓</button>
@@ -358,7 +359,7 @@
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={() => macros.add()}>+ macro</button>
+      <button class="sh-cmd add-rule" onclick={() => macros.add()}>Add macro</button>
     {:else if view === "triggers"}
       <div class="grp">Highlights</div>
       <div class="rules">
@@ -371,7 +372,7 @@
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={() => triggers.addHighlight()}>+ highlight</button>
+      <button class="sh-cmd add-rule" onclick={() => triggers.addHighlight()}>Add highlight</button>
 
       <div class="grp">Gags <span class="hint">hide from the terminal</span></div>
       <div class="rules">
@@ -383,7 +384,7 @@
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={() => triggers.addGag()}>+ gag</button>
+      <button class="sh-cmd add-rule" onclick={() => triggers.addGag()}>Add gag</button>
 
       <div class="grp">Aliases <span class="hint">name → command</span></div>
       <div class="rules">
@@ -395,7 +396,7 @@
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={() => triggers.addAlias()}>+ alias</button>
+      <button class="sh-cmd add-rule" onclick={() => triggers.addAlias()}>Add alias</button>
 
       <div class="grp">Actions <span class="hint">on match: sound / command / notify</span></div>
       <div class="rules">
@@ -416,7 +417,7 @@
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={() => triggers.addAction()}>+ action</button>
+      <button class="sh-cmd add-rule" onclick={() => triggers.addAction()}>Add action</button>
 
     {:else if view === "feeds"}
       <datalist id="feed-names">
@@ -465,13 +466,10 @@
           </div>
         {/each}
       </div>
-      <button class="add-rule" onclick={addRoute}>+ rule</button>
+      <button class="sh-cmd add-rule" onclick={addRoute}>Add rule</button>
     {/if}
   </div>
 
-  {#if view === "hub"}
-    <button class="close-btn" onclick={onclose}>Close</button>
-  {/if}
 </div>
 
 <style>
@@ -484,31 +482,31 @@
     background: var(--bg-elev); color: var(--fg); font-family: var(--font-mono);
   }
   header {
-    display: flex; align-items: baseline; gap: 0.6ch;
-    padding: 0.7rem 1rem 0.5rem; border-bottom: 1px solid var(--accent);
+    display: flex; align-items: center; gap: 0.8ch;
+    padding: 0.55rem 0.7rem 0.5rem 1rem; border-bottom: 1px solid var(--accent);
   }
-  .back {
-    background: none; border: none; color: var(--accent-bright);
-    font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0; align-self: center;
-  }
-  .title { color: var(--accent-bright); letter-spacing: 0.3em; font-size: 0.85rem; }
+  .title { color: var(--accent-bright); letter-spacing: 0.3em; font-size: 0.8rem; text-transform: uppercase; }
+  .sep { color: var(--fg-faint); font-size: 0.7rem; }
   .sub { margin: 0; font-weight: normal; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.65rem; }
-  .x { margin-left: auto; background: none; border: none; color: var(--fg-dim); font-size: 1.2rem; line-height: 1; cursor: pointer; }
-  .x:hover { color: var(--accent-bright); }
-  .body { overflow-y: auto; padding: 0.4rem 1rem 0.5rem; }
+  .sub:focus-visible { outline: none; color: var(--fg); }
+  .back { margin-left: auto; }
+  .back + .x { margin-left: 0; }
+  .x { margin-left: auto; }
+  .body { overflow-y: auto; padding: 0.4rem 1rem 0.8rem; }
 
+  /* The hub is a numbered menu, the way a machine's setup screen lists its pages. */
   .hub {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 0.4rem 0;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1.5rem; padding: 0.4rem 0;
   }
   .tile {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
-    color: var(--fg); font-family: inherit; cursor: pointer; text-align: left; min-height: 36px;
+    display: flex; align-items: baseline; gap: 1.4ch;
+    padding: 7px 0.6ch; background: none; border: 0; border-bottom: 1px solid var(--border);
+    color: var(--fg); font-family: inherit; cursor: pointer; text-align: left; min-height: 34px;
   }
-  .tile:hover { border-color: var(--accent); }
-  .tile-label { font-size: 0.82rem; color: var(--fg); }
-  .go { color: var(--fg-dim); }
-  .tile:hover .tile-label, .tile:hover .go { color: var(--accent-bright); }
+  .num { color: var(--fg-faint); font-size: 0.66rem; }
+  .tile-label { font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase; }
+  .tile:hover, .tile:focus-visible { background: var(--accent); color: var(--bg-deep); }
+  .tile:hover .num, .tile:focus-visible .num { color: inherit; }
 
   .row {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -527,15 +525,10 @@
   .range input { flex: 1; max-width: 55%; accent-color: var(--accent); }
   .val { color: var(--fg-dim); min-width: 3.6em; text-align: right; }
   .toggle { background: none; border: none; border-bottom: 1px solid var(--border); color: inherit; font-family: inherit; cursor: pointer; }
-  .toggle:hover .ind { color: var(--accent-bright); }
-  .ind { letter-spacing: 0.15em; font-size: 0.7rem; color: var(--fg-faint); border: 1px solid var(--border-bright); padding: 1px 9px; }
-  .ind.on { color: var(--accent-bright); border-color: var(--accent); }
-  .note { color: var(--fg-faint); font-size: 0.72rem; font-style: italic; padding: 8px 0; }
-  .pop {
-    margin-left: auto; background: none; border: none; color: var(--accent-bright);
-    font-family: inherit; font-size: 0.62rem; text-transform: none; letter-spacing: 0; cursor: pointer;
-  }
-  .pop:hover { color: var(--gold); }
+  .ind { min-width: 4ch; text-align: center; }
+  .toggle:hover .ind.dim { color: var(--fg); }
+  .note { color: var(--fg-faint); font-size: 0.72rem; padding: 8px 0; }
+  .pop { margin-left: auto; }
   /* Structured rule rows (macros / triggers) */
   .grp {
     display: flex; align-items: baseline;
@@ -546,10 +539,10 @@
   .rules { display: flex; flex-direction: column; gap: 5px; }
   .rule { display: flex; align-items: center; gap: 5px; }
   .rule input {
-    background: var(--bg); color: var(--fg); border: 1px solid var(--border-bright);
-    font-family: inherit; font-size: 0.78rem; padding: 4px 6px; min-width: 0;
+    background: transparent; color: var(--fg); border: 0; border-bottom: 1px solid var(--border-bright);
+    font-family: inherit; font-size: 0.78rem; padding: 4px 3px; min-width: 0;
   }
-  .rule input:focus { outline: none; border-color: var(--accent); }
+  .rule input:focus { outline: none; border-bottom-color: var(--accent-bright); }
   .r-icon { flex: 0 0 2.4em; text-align: center; }
   .r-label { flex: 0 0 6.5em; }
   .r-cmd { flex: 1 1 auto; }
@@ -573,14 +566,15 @@
   }
   .r-mode.on { color: var(--accent-bright); border-color: var(--accent); }
   .r-del {
-    flex: 0 0 auto; background: none; border: 1px solid var(--border-bright); color: var(--fg-faint);
-    font-family: inherit; cursor: pointer; padding: 2px 7px; line-height: 1;
+    flex: 0 0 auto; background: none; border: 0; color: var(--fg-faint);
+    font-family: inherit; cursor: pointer; padding: 2px 7px; line-height: 1; min-width: 24px; min-height: 24px;
   }
-  .r-del:hover { border-color: var(--alert); color: var(--alert); }
+  .r-del:hover { background: var(--alert); color: var(--bg-deep); }
   .r-mv {
-    flex: 0 0 auto; background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
+    flex: 0 0 auto; background: none; border: 0; color: var(--fg-dim);
     font-family: inherit; cursor: pointer; padding: 2px 6px; line-height: 1; min-width: 24px; min-height: 24px;
   }
+  .r-mv:not(:disabled):hover { background: var(--accent); color: var(--bg-deep); }
   .r-mv:disabled { color: var(--fg-faint); cursor: default; }
   .route { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
   .route.off .r-cmd, .route.off .r-label { opacity: 0.6; }
@@ -607,15 +601,5 @@
   .t-ok { color: var(--fg-dim); }
   .rules input[aria-invalid="true"] { border-color: var(--alert) !important; }
   .link { background: none; border: none; padding: 0; color: var(--accent-bright); font: inherit; text-decoration: underline; cursor: pointer; }
-  .add-rule {
-    margin: 6px 0 2px; background: none; border: 1px dashed var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.7rem; letter-spacing: 0.08em; padding: 5px 10px; cursor: pointer;
-  }
-  .add-rule:hover { border-color: var(--accent); color: var(--accent-bright); }
-  .close-btn {
-    margin: 0.6rem 1rem 0.9rem; padding: 0.5rem; background: var(--bg);
-    color: var(--fg-dim); border: 1px solid var(--border-bright); font-family: inherit;
-    letter-spacing: 0.24em; text-transform: uppercase; font-size: 0.72rem; cursor: pointer;
-  }
-  .close-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
+  .add-rule { margin: 6px 0 2px -0.5ch; }
 </style>

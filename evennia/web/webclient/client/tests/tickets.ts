@@ -92,7 +92,7 @@ async function run(): Promise<void> {
   await settle();
   await wait(50);
   await settle();
-  const rows = () => Array.from(mine.querySelectorAll<HTMLElement>(".row"));
+  const rows = () => Array.from(mine.querySelectorAll<HTMLElement>(".sh-row"));
   check("My Tickets lists open tickets", rows().length === 2, `${rows().length}`);
 
   const waiting = mine.querySelector<HTMLButtonElement>('.chips button[aria-checked="false"]');
@@ -118,7 +118,7 @@ async function run(): Promise<void> {
   rows()[0].click();
   await settle();
   check("opening a ticket shows the system notice as a notice", !!mine.querySelector(".sys") && mine.querySelector(".sys")!.textContent!.includes("handling"));
-  check("staff lines are marked staff", mine.querySelector(".m.staffmsg .role")?.textContent?.trim() === "staff");
+  check("staff lines are marked staff", mine.querySelector(".m.staffmsg .sh-plate")?.textContent?.trim() === "Staff");
 
   const box = mine.querySelector<HTMLTextAreaElement>(".reply textarea")!;
   box.value = "Still stuck.";

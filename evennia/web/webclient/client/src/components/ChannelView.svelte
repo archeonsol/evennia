@@ -248,14 +248,14 @@
       <span class="title glow-text" style={color ? `color:${color}` : ""}>{name}</span>
       {#if topic}<span class="topic">{topic}</span>{/if}
       <span class="tools">
-        <button class="t" class:on={configuring} onclick={() => (configuring = !configuring)} title="channel settings"
+        <button class="sh-cmd" onclick={() => (configuring = !configuring)} title="channel settings"
           aria-label="{name} channel settings" aria-expanded={configuring}>Settings</button>
-        <button class="t" class:on={searching} onclick={() => { searching = !searching; if (!searching) search = ""; }} title="search"
+        <button class="sh-cmd" onclick={() => { searching = !searching; if (!searching) search = ""; }} title="search"
           aria-label="search {name}" aria-pressed={searching}>Search</button>
-        <button class="t" class:on={muted} onclick={() => chat.toggleMute(key)} title="mute channel" aria-pressed={muted}>
+        <button class="sh-cmd" onclick={() => chat.toggleMute(key)} title="mute channel" aria-pressed={muted}>
           {muted ? "Muted" : "Mute"}
         </button>
-        <button class="t" onclick={() => dock.openChannel(key, name)} title="pop out" aria-label="pop out {name}">Pop out</button>
+        <button class="sh-cmd" onclick={() => dock.openChannel(key, name)} title="pop out" aria-label="pop out {name}">Pop out</button>
       </span>
     </div>
 
@@ -280,7 +280,7 @@
     {#if searching}
       <div class="csearch">
         <span class="s-glyph" aria-hidden="true">⌕</span>
-        <input bind:value={search} placeholder="search {name}…" aria-label="search channel" use:focusOnMount />
+        <input bind:value={search} class="sh-placeholder" placeholder="Search {name}" aria-label="search channel" use:focusOnMount />
         <span class="cnt" aria-live="polite">{shown.length}<span class="sr-only"> matching messages</span></span>
       </div>
     {/if}
@@ -354,22 +354,22 @@
       </div>
     </div>
     {#if !pinned && unseen > 0}
-      <button class="latest" onclick={jumpToLatest}>{unseen} new message{unseen === 1 ? "" : "s"} ↓</button>
+      <button class="latest" onclick={jumpToLatest}>&#9660; {unseen} new message{unseen === 1 ? "" : "s"}</button>
     {/if}
     </div>
 
     {#if typers.length}
-      <div class="typing">{typers.join(", ")} {typers.length === 1 ? "is" : "are"} transmitting…</div>
+      <div class="typing">{typers.join(", ")} typing</div>
     {/if}
     {#if replyTo}
       <div class="replybar">
-        <span>↩ replying to {replyTo}</span>
-        <button onclick={() => (replyTo = null)} aria-label="cancel reply to {replyTo}">×</button>
+        <span>Reply to <b>{replyTo}</b></span>
+        <button class="sh-cmd" onclick={() => (replyTo = null)} aria-label="cancel reply to {replyTo}">Cancel</button>
       </div>
     {/if}
     <div class="composer">
-      <span class="chev glow-text" aria-hidden="true">❯</span>
-      <input bind:value={draft} onkeydown={onKey} placeholder="transmit to {name}…" aria-label="Message {name}" autocomplete="off" />
+      <span class="chev glow-text" aria-hidden="true">{name}&gt;</span>
+      <input bind:value={draft} onkeydown={onKey} aria-label="Message {name}" autocomplete="off" />
     </div>
   {:else}
     <p class="empty">No channel.</p>
@@ -382,8 +382,6 @@
   .title { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.78rem; }
   .topic { color: var(--fg-dim); font-size: 0.72rem; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tools { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-  .t { background: none; border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.7rem; padding: 1px 8px; cursor: pointer; white-space: nowrap; }
-  .t:hover, .t.on { color: var(--accent-bright); border-color: var(--accent); }
   .pin { display: flex; align-items: baseline; gap: 0.6ch; padding: 3px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--gold) 8%, transparent); font-size: 0.76rem; }
   .pin-tag { color: var(--gold); font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; }
   .pin-text { color: var(--fg); flex: 1; }
@@ -414,12 +412,12 @@
   .msg.disc .sender { color: var(--accent-bright); }
   .text { color: var(--fg); white-space: pre-wrap; }
   .reacts { margin-left: 0.5ch; }
-  .react { border: 1px solid var(--border-bright); background: var(--bg); color: var(--fg-dim); font-family: inherit; font-size: 0.72em; padding: 0 5px; margin-left: 3px; cursor: pointer; }
+  .react { border: 0; border-bottom: 1px solid var(--border-bright); background: none; color: var(--fg-dim); font-family: inherit; font-size: 0.72em; padding: 0 4px; margin-left: 3px; cursor: pointer; }
   .react:hover { border-color: var(--accent); color: var(--fg); }
   .mtools { position: relative; margin-left: 4px; white-space: nowrap; }
   .mt { background: none; border: none; color: var(--fg-faint); cursor: pointer; font-size: 0.8em; opacity: 0; transition: opacity 0.1s; }
   .msg:hover .mt, .msg:focus-within .mt, .msg:focus .mt { opacity: 1; }
-  .mt, .t { min-height: 24px; min-width: 24px; }
+  .mt { min-height: 24px; min-width: 24px; }
   .mt:hover { color: var(--accent-bright); }
   .picker { position: absolute; right: 0; bottom: 1.4em; z-index: 5; display: flex; gap: 2px; padding: 3px 4px; background: var(--bg-elev); border: 1px solid var(--accent); }
   .picker button { background: none; border: none; cursor: pointer; font-size: 0.95em; padding: 1px 3px; }
@@ -429,7 +427,7 @@
   .replybar { display: flex; justify-content: space-between; align-items: center; padding: 2px 10px; font-size: 0.72rem; color: var(--gold); border-top: 1px solid var(--border); }
   .replybar button { background: none; border: none; color: var(--fg-faint); cursor: pointer; }
   .composer { display: flex; align-items: center; gap: 0.6rem; padding: 6px 10px; border-top: 1px solid var(--accent); flex: 0 0 auto; }
-  .chev { color: var(--accent-bright); }
+  .chev { color: var(--accent-bright); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
   .composer input { flex: 1; background: transparent; border: none; outline: none; color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright); }
   .composer input::placeholder { color: var(--fg-faint); font-style: italic; }
 </style>

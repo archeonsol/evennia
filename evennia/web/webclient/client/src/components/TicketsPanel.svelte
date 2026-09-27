@@ -142,16 +142,20 @@
   function hasPayload(p: any) {
     return payloadEntries(p).length > 0;
   }
+
+  // Status plate colours, shared with the player's panel: the move that is
+  // due stands out, finished tickets fade.
+  const PLATE: Record<string, string> = { pending: "hot", waiting: "gold", approved: "ok" };
 </script>
 
 <div class="tickets">
   <div class="hd">
-    <span class="tag glow-text">Ticket queue</span>
+    <span class="title glow-text">Ticket queue</span>
     {#if ticket}
-      <button class="back" onclick={back}>‹ queue</button>
+      <button class="sh-cmd back" onclick={back}>Back</button>
     {:else}
-      <button class="tab" class:on={!history} onclick={() => (history = false)}>Open</button>
-      <button class="tab" class:on={history} onclick={() => (history = true)}>History</button>
+      <button class="sh-toggle" aria-pressed={!history} onclick={() => (history = false)}>Open</button>
+      <button class="sh-toggle" aria-pressed={history} onclick={() => (history = true)}>History</button>
       <span class="count">{rows.length}</span>
     {/if}
   </div>
@@ -162,20 +166,20 @@
 
   {#if !ticket}
     <div class="filters">
-      <input class="search" bind:value={search} placeholder={history ? "Search the record…" : "Search the queue…"}
+      <input class="sh-field search" bind:value={search} placeholder={history ? "Search record" : "Search queue"}
         aria-label={history ? "Search closed tickets" : "Search open tickets"} />
       {#if !history}
         <div class="fl" role="radiogroup" aria-label="Show">
-          <button class="fchip" role="radio" aria-checked={show === "all"} class:on={show === "all"} onclick={() => (show = "all")}>All</button>
-          <button class="fchip" role="radio" aria-checked={show === "pending"} class:on={show === "pending"} onclick={() => (show = "pending")}>Needs reply {counts.pending}</button>
-          <button class="fchip" role="radio" aria-checked={show === "waiting"} class:on={show === "waiting"} onclick={() => (show = "waiting")}>On player {counts.waiting}</button>
-          <button class="fchip" role="radio" aria-checked={show === "unclaimed"} class:on={show === "unclaimed"} onclick={() => (show = "unclaimed")}>Unclaimed {counts.unclaimed}</button>
+          <button class="sh-toggle" role="radio" aria-checked={show === "all"} onclick={() => (show = "all")}>All</button>
+          <button class="sh-toggle" role="radio" aria-checked={show === "pending"} onclick={() => (show = "pending")}>Needs reply<span class="sh-count">{counts.pending}</span></button>
+          <button class="sh-toggle" role="radio" aria-checked={show === "waiting"} onclick={() => (show = "waiting")}>On player<span class="sh-count">{counts.waiting}</span></button>
+          <button class="sh-toggle" role="radio" aria-checked={show === "unclaimed"} onclick={() => (show = "unclaimed")}>Unclaimed<span class="sh-count">{counts.unclaimed}</span></button>
         </div>
       {/if}
       {#if kinds.length > 2}
         <div class="fl">
           {#each kinds as k}
-            <button class="fchip" class:on={kindFilter === k} onclick={() => (kindFilter = k)}>
+            <button class="sh-toggle" aria-pressed={kindFilter === k} onclick={() => (kindFilter = k)}>
               {kindLabel(k)}
             </button>
           {/each}
@@ -185,13 +189,13 @@
     <div class="list">
       {#if rows.length}
         {#each rows as t (t.id)}
-          <button class="row" data-kind={t.kind} onclick={() => open(t)}>
+          <button class="sh-row row" data-kind={t.kind} onclick={() => open(t)}>
             <span class="r1">
               <span class="kind">{t.label} <span class="sid">#{t.short_id}</span></span>
               <span class="meta">
                 {#if t.priority > 0}<span class="pri" title="priority">▲{t.priority}</span>{/if}
                 {#if t.assignee}<span class="asg" title="claimed by {t.assignee}">◆ {t.assignee}</span>{/if}
-                <span class="status s-{t.status}">{t.status}</span>
+                <span class="sh-plate {PLATE[t.status] ?? ''}">{t.status}</span>
                 <span class="age">{ageOf(t.updated)}</span>
               </span>
             </span>
@@ -200,12 +204,12 @@
               title={t.account_name ? `account: ${t.account_name}` : undefined}
             >{t.requester_name || t.account_name || t.short_id}</span>
             {#if t.subject}<span class="subject">{t.subject}</span>{/if}
-            <span class="prev">{t.preview || "-"}</span>
+            {#if t.preview}<span class="prev">{t.preview}</span>{/if}
           </button>
         {/each}
       {:else}
         <p class="empty">
-          {#if q}Nothing {history ? "in the record " : "in the queue "}matches “{search.trim()}”.
+          {#if q}No match.
           {:else}No {kindFilter === "all" ? "" : kindLabel(kindFilter).toLowerCase() + " "}tickets{history ? " in history" : ""}.{/if}
         </p>
       {/if}
@@ -220,33 +224,33 @@
             {#if ticket.requester_name && ticket.account_name && ticket.requester_name !== ticket.account_name}
               <span class="acct">({ticket.account_name})</span>
             {/if}
-            · <span class="status s-{ticket.status}">{ticket.status}</span>
+            <span class="sh-plate {PLATE[ticket.status] ?? ''}">{ticket.status}</span>
             {#if ticket.assignee}· ◆ {ticket.assignee}{/if}
           </span>
         </span>
         <span class="actions">
           {#if isOpen}
-            <button class="act" disabled={busy} onclick={() => act(() => chat.ticketClaim(ticket.id))}>Claim</button>
+            <button class="sh-cmd act" disabled={busy} onclick={() => act(() => chat.ticketClaim(ticket.id))}>Claim</button>
             {#if ticket.approvable}
-              <button class="act ok" disabled={busy} onclick={() => (deciding = "approve")}>Approve</button>
-              <button class="act no" disabled={busy} onclick={() => (deciding = "deny")}>Deny</button>
+              <button class="sh-cmd primary act" disabled={busy} onclick={() => (deciding = "approve")}>Approve</button>
+              <button class="sh-cmd warn act" disabled={busy} onclick={() => (deciding = "deny")}>Deny</button>
             {:else}
-              <button class="act" disabled={busy} onclick={() => act(() => chat.ticketResolve(ticket.id))}>Close</button>
+              <button class="sh-cmd act" disabled={busy} onclick={() => act(() => chat.ticketResolve(ticket.id))}>Close</button>
             {/if}
           {:else if !ticket.approvable}
-            <button class="act" disabled={busy} onclick={() => act(() => chat.ticketReopen(ticket.id))}>Reopen</button>
+            <button class="sh-cmd act" disabled={busy} onclick={() => act(() => chat.ticketReopen(ticket.id))}>Reopen</button>
           {/if}
         </span>
       </div>
 
       {#if deciding}
         <div class="decide">
-          <input bind:value={reason} placeholder={deciding === "approve" ? "note for the player (optional)…" : "reason, shown to the player…"}
+          <input class="sh-field" bind:value={reason} placeholder={deciding === "approve" ? "Note to player (optional)" : "Reason (the player sees it)"}
             aria-label="Reason" onkeydown={(e) => e.key === "Enter" && (e.preventDefault(), void decide())} />
-          <button class="act" class:ok={deciding === "approve"} class:no={deciding === "deny"} disabled={busy} onclick={decide}>
+          <button class="sh-cmd act" class:primary={deciding === "approve"} class:warn={deciding === "deny"} disabled={busy} onclick={decide}>
             {deciding === "approve" ? "Approve" : "Deny"}
           </button>
-          <button class="act" onclick={() => { deciding = null; reason = ""; }}>Cancel</button>
+          <button class="sh-cmd act" onclick={() => { deciding = null; reason = ""; }}>Cancel</button>
         </div>
       {/if}
 
@@ -257,7 +261,7 @@
               <div class="cx"><span class="ck">{k}</span> <span class="cv">{v}</span></div>
             {/each}
             {#if ticket.kind === "bug" && !bugDetail}
-              <button class="loadbug" onclick={loadBug}>Load report detail ▾</button>
+              <button class="sh-cmd loadbug" onclick={loadBug}>Report detail</button>
             {/if}
           </div>
         {/if}
@@ -289,7 +293,7 @@
             {:else}
               <div class="m" class:note={m.visibility === "internal"} class:staffmsg={m.origin === "staff"}>
                 <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
-                {#if m.origin === "player"}<span class="role">player</span>{/if}
+                {#if m.origin === "player"}<span class="sh-plate gold">Player</span>{/if}
                 <span class="mts">{stamp(m.ts)}</span>
                 <span class="t">{@html renderBody(m.html, m.text)}</span>
               </div>
@@ -305,9 +309,12 @@
           bind:value={reply}
           onkeydown={onKey}
           rows="2"
-          placeholder={internal ? "internal staff note… (Enter sends)" : "reply to player… (Enter sends, Shift+Enter for a new line)"}
+          class="sh-placeholder"
+          placeholder={internal ? "Staff note" : "Reply to player"}
           aria-label="ticket reply"
+          aria-describedby="queue-reply-keys"
         ></textarea>
+        <span id="queue-reply-keys" class="sr-only">Enter sends. Shift+Enter starts a new line.</span>
       </div>
     </div>
   {/if}
@@ -316,123 +323,77 @@
 <style>
   .tickets { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
   .hd {
-    display: flex; align-items: baseline; gap: 1ch; padding: 6px 10px;
+    display: flex; align-items: center; gap: 0.6ch; padding: 5px 8px 5px 10px;
     border-bottom: 1px solid var(--accent); flex: 0 0 auto;
   }
-  .tag { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.8rem; }
-  .count { margin-left: auto; color: var(--gold); font-size: 0.68rem; letter-spacing: 0.1em; }
-  .tab {
-    background: none; border: none; color: var(--fg-faint); font-family: inherit;
-    font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.14em; cursor: pointer; padding: 0;
-  }
-  .tab.on { color: var(--accent-bright); }
+  .title { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; margin-right: 1ch; }
+  .count { margin-left: auto; color: var(--gold); font-size: 0.66rem; letter-spacing: 0.1em; }
+  .back { margin-left: auto; }
   .filters {
-    display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 8px;
+    display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 10px;
     border-bottom: 1px solid var(--border); flex: 0 0 auto;
   }
-  .fchip {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em;
-    padding: 2px 8px; border-radius: 999px; cursor: pointer;
-  }
-  .fchip:hover { color: var(--fg); border-color: var(--accent); }
-  .fchip.on { color: var(--bg-deep); background: var(--accent-bright); border-color: var(--accent-bright); }
-  .loadbug {
-    align-self: flex-start; margin-top: 3px; background: none; border: none;
-    color: var(--accent-bright); font-family: inherit; font-size: 0.66rem; cursor: pointer; padding: 0;
-  }
+  .fl { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+  .loadbug { align-self: flex-start; margin: 3px 0 0 -0.5ch; }
   .bug { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
   .bl { font-size: 0.74rem; color: var(--fg); }
   .dim { color: var(--fg-faint); }
   .tb {
-    margin: 2px 0 4px; padding: 6px; background: var(--bg); border: 1px solid var(--border);
+    margin: 2px 0 4px; padding: 6px; background: var(--bg-deep); border-left: 1px solid var(--border-bright);
     color: var(--fg-dim); font-size: 0.7rem; max-height: 180px; overflow: auto; white-space: pre-wrap;
   }
-  .back {
-    margin-left: auto; background: none; border: none; color: var(--accent-bright);
-    font-family: inherit; font-size: 0.7rem; letter-spacing: 0.1em; cursor: pointer;
-  }
-  .list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
-  .row {
-    display: flex; flex-direction: column; gap: 4px; text-align: left;
-    padding: 8px 10px 8px 12px; background: var(--bg); border: 1px solid var(--border);
-    border-left: 3px solid var(--border-bright); color: var(--fg); font-family: inherit; cursor: pointer;
-    transition: border-color 0.12s, background 0.12s;
-  }
-  .row:hover { border-color: var(--accent); border-left-color: var(--accent); background: var(--bg-elev); }
-  /* Kind accent stripe on the left edge. */
-  .row[data-kind="bug"] { border-left-color: var(--alert, #e5484d); }
-  .row[data-kind="puppet"] { border-left-color: var(--gold); }
-  .row[data-kind="report"] { border-left-color: #c14bd8; }
-  .row[data-kind="request"] { border-left-color: var(--accent-bright); }
+  .list { overflow-y: auto; flex: 1; min-height: 0; }
   .r1 { display: flex; justify-content: space-between; align-items: baseline; gap: 1ch; }
-  .kind { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem; }
-  .meta { display: flex; align-items: baseline; gap: 0.7ch; }
-  .pri { color: var(--danger, #e5484d); font-size: 0.62rem; font-weight: bold; }
-  .asg { color: var(--accent-bright); font-size: 0.6rem; text-transform: uppercase; }
-  .age { color: var(--fg-faint); font-size: 0.66rem; }
-  .status {
-    font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.08em;
-    padding: 1px 5px; border: 1px solid currentColor; border-radius: 2px;
-  }
-  .s-pending { color: var(--accent-bright); }
-  .s-waiting { color: var(--gold); }
-  .s-closed, .s-approved, .s-denied, .s-resolved, .s-withdrawn { color: var(--fg-faint); }
+  .kind { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.68rem; }
+  .row[data-kind="bug"] .kind { color: var(--alert); }
+  .row[data-kind="puppet"] .kind { color: var(--gold); }
+  .row[data-kind="report"] .kind { color: var(--fg); }
+  .meta { display: flex; align-items: baseline; gap: 0.8ch; }
+  .pri { color: var(--alert); font-size: 0.62rem; }
+  .asg { color: var(--fg-dim); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .age { color: var(--fg-faint); font-size: 0.64rem; }
   .who { color: var(--gold); font-size: 0.78rem; }
   .prev { color: var(--fg-dim); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .empty { color: var(--fg-faint); font-style: italic; padding: 8px 10px; }
+  .empty { color: var(--fg-faint); padding: 12px 10px; margin: 0; font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; }
 
   .convo { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .head {
-    display: flex; align-items: center; gap: 1ch; padding: 5px 10px;
+    display: flex; align-items: flex-start; gap: 1ch; padding: 7px 10px;
     border-bottom: 1px solid var(--border);
   }
-  .petitioner { color: var(--gold); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.76rem; }
-  .actions { display: flex; gap: 4px; margin-left: auto; }
-  .act {
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
-    padding: 2px 6px; cursor: pointer;
-  }
-  .act:hover { border-color: var(--accent); color: var(--fg); }
-  .act.ok:hover { border-color: #3fb950; color: #3fb950; }
-  .act.no:hover { border-color: #e5484d; color: #e5484d; }
-  .ctx { padding: 5px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+  .petitioner { color: var(--gold); letter-spacing: 0.04em; font-size: 0.86rem; }
+  .petitioner .sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8ch; margin-top: 3px; color: var(--fg-dim); font-size: 0.7rem; }
+  .acct { color: var(--fg-faint); }
+  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; margin-left: auto; }
+  .ctx { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
   .cx { font-size: 0.74rem; }
-  .ck { color: var(--accent-bright); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.06em; }
+  .ck { color: var(--fg-faint); text-transform: uppercase; font-size: 0.6rem; letter-spacing: 0.14em; }
   .cv { color: var(--fg); }
   .body { flex: 1; min-height: 0; overflow-y: auto; }
-  .msgs { padding: 6px 10px; line-height: 1.5; }
-  .m { padding: 2px 0; font-size: 0.85rem; }
+  .msgs { padding: 8px 10px; line-height: 1.5; display: flex; flex-direction: column; gap: 8px; }
+  .m { padding-left: 1.5ch; border-left: 1px solid var(--border-bright); font-size: 0.85rem; }
+  .m.staffmsg { border-left-color: var(--accent); }
   .m .s { color: var(--accent-bright); margin-right: 0.6ch; }
-  .m .t { color: var(--fg); white-space: pre-wrap; }
-  .m.note { opacity: 0.8; }
-  .m.note .s::after { content: " (note)"; color: var(--danger, #e5484d); font-size: 0.7em; }
+  .m .t { display: block; color: var(--fg); white-space: pre-wrap; }
+  .m.note { border-left-style: dashed; }
+  .m.note .s::after { content: " (note)"; content: " (note)" / ""; color: var(--alert); font-size: 0.7em; letter-spacing: 0.1em; text-transform: uppercase; }
+  .m .sh-plate { margin-right: 0.6ch; }
   .reply {
-    display: flex; align-items: center; gap: 0.6rem; padding: 6px 10px;
+    display: flex; align-items: center; gap: 0.8rem; padding: 7px 10px;
     border-top: 1px solid var(--accent); flex: 0 0 auto;
   }
-  .int { color: var(--fg-dim); font-size: 0.62rem; text-transform: uppercase; display: flex; align-items: center; gap: 3px; }
+  .int { color: var(--fg-dim); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; display: flex; align-items: center; gap: 4px; }
   .reply textarea {
     flex: 1; background: transparent; border: none; outline: none; resize: vertical;
     color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);
   }
-  .reply textarea::placeholder { color: var(--fg-faint); font-style: italic; }
-  .fb { margin: 0; padding: 4px 10px; font-size: 0.74rem; color: var(--ok, var(--accent-bright)); border-bottom: 1px solid var(--border); }
+  .fb { margin: 0; padding: 4px 10px; font-size: 0.72rem; color: var(--ok, var(--accent-bright)); border-bottom: 1px solid var(--border); }
   .fb.err { color: var(--alert); }
-  .filters { flex-direction: column; align-items: stretch; }
-  .fl { display: flex; flex-wrap: wrap; gap: 4px; }
-  .search { background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg); font-family: inherit; font-size: 0.8rem; padding: 4px 7px; min-height: 26px; }
-  .search:focus { outline: none; border-color: var(--accent); }
   .sid { color: var(--fg-faint); font-size: 0.62rem; letter-spacing: 0; }
-  .decide { display: flex; gap: 4px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
-  .decide input { flex: 1; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg); font-family: inherit; font-size: 0.78rem; padding: 3px 6px; }
-  .act:disabled { opacity: 0.5; cursor: default; }
-  .sys { color: var(--fg-dim); font-size: 0.74rem; font-style: italic; text-align: center; padding: 2px 0; }
-  .mts { color: var(--fg-faint); font-size: 0.66rem; margin-right: 0.6ch; }
-  .role { font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold); border: 1px solid currentColor; padding: 0 4px; margin-right: 0.6ch; }
-  .m.staffmsg .s { color: var(--accent-bright); }
-  .subject { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .petitioner .sub { display: block; color: var(--fg-dim); font-weight: 400; font-size: 0.72rem; }
-  .acct { color: var(--fg-faint); }
+  .decide { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .decide input { flex: 1; }
+  .sys { color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 2px 0; }
+  .sys::before { content: "-- "; content: "-- " / ""; }
+  .mts { color: var(--fg-faint); font-size: 0.64rem; margin-right: 0.6ch; }
+  .subject { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -115,7 +115,7 @@ const DEFAULTS: Persisted = {
   vignette: true,
   vignetteIntensity: 70,
   glow: true,
-  embers: true,
+  embers: false,
   emberTheme: "ash",
   emberIntensity: 45,
   keyboardSfx: false,

@@ -116,6 +116,223 @@ html[data-glow] .glow-text {
   color: var(--fg-faint);
 }
 
+/* -- Console primitives ---------------------------------------------------
+   The shell is a console, not a web page, and every surface draws its controls
+   from these few pieces so the whole thing reads as one machine:
+
+     .sh-cmd     a command: [ BRACKETED ], upper case, inverse video on hover
+     .sh-toggle  a switch: a square lamp, lit or dark
+     .sh-plate   a status plate: an inverse block of upper case
+     .sh-count   a number riding on a command or switch
+     .sh-field   a text field: one rule underneath, no box
+     .sh-row     one line in a list: ruled, marked with ▸ when pointed at
+
+   Markup keeps words in sentence case and CSS sets the capitals, so a screen
+   reader says "Request", not R-E-Q-U-E-S-T. The brackets and markers are
+   generated content with empty alt text, so they are never read aloud. */
+.sh-cmd,
+.sh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5ch;
+  min-height: 24px;
+  padding: 0 0.5ch;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sh-cmd::before {
+  content: "[";
+  content: "[" / "";
+  color: var(--fg-faint);
+}
+.sh-cmd::after {
+  content: "]";
+  content: "]" / "";
+  color: var(--fg-faint);
+}
+.sh-cmd:hover,
+.sh-cmd:focus-visible {
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+.sh-cmd:hover::before,
+.sh-cmd:hover::after,
+.sh-cmd:focus-visible::before,
+.sh-cmd:focus-visible::after {
+  color: inherit;
+}
+/* The one thing a surface is for, and a command that is switched on. */
+.sh-cmd.primary,
+.sh-cmd.on,
+.sh-cmd[aria-pressed="true"],
+.sh-cmd[aria-expanded="true"] {
+  color: var(--accent-bright);
+}
+.sh-cmd.warn {
+  color: var(--alert);
+}
+.sh-cmd.primary:hover,
+.sh-cmd.on:hover,
+.sh-cmd[aria-pressed="true"]:hover,
+.sh-cmd[aria-expanded="true"]:hover,
+.sh-cmd.warn:hover {
+  color: var(--bg-deep);
+}
+.sh-cmd.warn:hover {
+  background: var(--alert);
+}
+.sh-cmd:disabled {
+  color: var(--fg-faint);
+  background: none;
+  cursor: default;
+}
+
+.sh-toggle {
+  color: var(--fg);
+}
+.sh-toggle::before {
+  content: "";
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  margin-right: 0.3ch;
+  background: var(--accent-bright);
+}
+html[data-glow] .sh-toggle::before {
+  box-shadow: 0 0 5px var(--glow);
+}
+.sh-toggle.off,
+.sh-toggle[aria-pressed="false"],
+.sh-toggle[aria-checked="false"] {
+  color: var(--fg-faint);
+}
+.sh-toggle.off::before,
+.sh-toggle[aria-pressed="false"]::before,
+.sh-toggle[aria-checked="false"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-faint);
+}
+.sh-toggle:hover,
+.sh-toggle:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.sh-plate {
+  display: inline-block;
+  padding: 0 0.6ch;
+  background: var(--fg-faint);
+  color: var(--bg-deep);
+  font-size: 0.6rem;
+  line-height: 1.6;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sh-plate.hot {
+  background: var(--accent-bright);
+}
+.sh-plate.gold {
+  background: var(--gold);
+}
+.sh-plate.ok {
+  background: var(--ok);
+}
+.sh-plate.dim {
+  background: transparent;
+  color: var(--fg-faint);
+  box-shadow: inset 0 0 0 1px var(--border-bright);
+}
+
+.sh-count {
+  padding: 0 0.5ch;
+  background: var(--accent-bright);
+  color: var(--bg-deep);
+  font-size: 0.6rem;
+  letter-spacing: 0;
+}
+
+.sh-field {
+  min-height: 26px;
+  padding: 3px 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.sh-field:focus {
+  border-bottom-color: var(--accent-bright);
+}
+textarea.sh-field {
+  border: 1px solid var(--border-bright);
+  padding: 5px 7px;
+  resize: vertical;
+}
+textarea.sh-field:focus {
+  border-color: var(--accent-bright);
+}
+.sh-field::placeholder,
+.sh-placeholder::placeholder {
+  color: var(--fg-faint);
+  font-style: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+  opacity: 1;
+}
+
+.sh-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px 7px 2.4ch;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sh-row::before {
+  content: "\25B8";
+  content: "\25B8" / "";
+  position: absolute;
+  left: 0.8ch;
+  top: 7px;
+  color: transparent;
+}
+.sh-row:hover,
+.sh-row:focus-visible {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.sh-row:hover::before,
+.sh-row:focus-visible::before,
+.sh-row.hot::before {
+  color: var(--accent-bright);
+}
+
+/* Upper-case, tracked label for a field or a group of controls. */
+.sh-label {
+  color: var(--fg-dim);
+  font-size: 0.64rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
 /* Re-skin dockview to the grimdark aesthetic: sharp, mono, accent-driven. Layered
    over the base dockview-theme-dark class; we override the generic --dv-* vars.
    dockview puts its own theme class (abyss, a blue palette) on an inner

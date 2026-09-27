@@ -475,20 +475,19 @@
     <div class="chips">
       {#each CATS as c}
         <button
-          class="chip"
-          class:off={!logview.filters[c.id]}
+          class="sh-toggle chip"
           aria-pressed={!!logview.filters[c.id]}
           onclick={() => logview.toggle(c.id)}
           title="show {c.label} lines"
-        ><span class="lamp" aria-hidden="true"></span>{c.label}</button>
+        >{c.label}</button>
       {/each}
     </div>
-    <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)}
+    <button class="sh-cmd tool" onclick={() => (logview.timestamps = !logview.timestamps)}
       title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>Times</button>
-    <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)}
+    <button class="sh-cmd tool" onclick={() => (logview.searchOpen = !logview.searchOpen)}
       title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>Search</button>
     <div class="save" bind:this={saveEl}>
-      <button class="tool" class:on={saveOpen} onclick={() => (saveOpen = !saveOpen)}
+      <button class="sh-cmd tool" onclick={() => (saveOpen = !saveOpen)}
         title="save log" aria-label="save log" aria-expanded={saveOpen}>Save</button>
       {#if saveOpen}
         <div class="save-menu">
@@ -500,7 +499,7 @@
         </div>
       {/if}
     </div>
-    <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">Clear</button>
+    <button class="sh-cmd tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">Clear</button>
   </div>
 
   {#if logview.searchOpen}
@@ -510,13 +509,14 @@
         bind:this={searchInput}
         bind:value={logview.search}
         onkeydown={onSearchKey}
-        placeholder="search scrollback"
+        class="sh-placeholder"
+        placeholder="Search scrollback"
         aria-label="search scrollback"
       />
       <span class="s-count">{matchIds.length ? matchPos + 1 : 0}/{matchIds.length}</span>
-      <button class="s-btn" onclick={() => step(-1)} aria-label="previous">↑</button>
-      <button class="s-btn" onclick={() => step(1)} aria-label="next">↓</button>
-      <button class="s-btn" onclick={() => (logview.searchOpen = false)} aria-label="close">×</button>
+      <button class="sh-cmd" onclick={() => step(-1)} aria-label="previous">Prev</button>
+      <button class="sh-cmd" onclick={() => step(1)} aria-label="next">Next</button>
+      <button class="sh-cmd" onclick={() => (logview.searchOpen = false)} aria-label="close">Close</button>
     </div>
   {/if}
 
@@ -565,7 +565,7 @@
     </div>
   </div>
   {#if !pinned && unseen > 0 && !logview.searchOpen}
-    <button class="latest" onclick={jumpToLatest}>{unseen} new line{unseen === 1 ? "" : "s"} ↓</button>
+    <button class="latest" onclick={jumpToLatest}>&#9660; {unseen} new line{unseen === 1 ? "" : "s"}</button>
   {/if}
 </div>
 
@@ -576,24 +576,7 @@
     padding: 3px 8px; border-bottom: 1px solid var(--border);
     background: var(--bg-elev); flex: 0 0 auto;
   }
-  .chips { display: flex; gap: 4px; flex: 1 1 auto; min-width: min(100%, 16rem); flex-wrap: wrap; }
-  /* Category toggles: the light shows whether that kind of line is shown. */
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg);
-    font-family: inherit; font-size: 0.72rem;
-    padding: 1px 9px 1px 7px; cursor: pointer; min-height: 24px;
-  }
-  .chip:hover { color: var(--fg); border-color: var(--accent); }
-  .lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bright); flex: 0 0 auto; }
-  .chip.off { color: var(--fg-faint); border-color: var(--border); }
-  .chip.off .lamp { background: transparent; box-shadow: none; outline: 1px solid var(--border-bright); outline-offset: -1px; }
-  .tool {
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.72rem; padding: 0 9px; cursor: pointer; min-height: 24px; min-width: 24px;
-  }
-  .tool:hover, .tool.on { color: var(--accent-bright); border-color: var(--accent); }
-
+  .chips { display: flex; gap: 2px 4px; flex: 1 1 auto; min-width: min(100%, 16rem); flex-wrap: wrap; }
   .save { position: relative; display: flex; }
   .save-menu {
     position: absolute; top: calc(100% + 3px); right: 0; z-index: 20;
@@ -620,17 +603,13 @@
     color: var(--fg); font-family: inherit; font-size: 0.85rem;
   }
   .s-count { color: var(--fg-dim); font-size: 0.72rem; min-width: 3.5em; text-align: right; }
-  .s-btn {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; cursor: pointer; padding: 0 6px;
-  }
-  .s-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
 
   .latest {
-    position: absolute; right: 18px; bottom: 12px; background: var(--bg-deep); border: 1px solid var(--accent);
-    color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em;
+    position: absolute; right: 18px; bottom: 12px; background: var(--accent); border: 0;
+    color: var(--bg-deep); font-family: inherit; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase;
     padding: 3px 10px; min-height: 24px; cursor: pointer; z-index: 5;
   }
+  .latest:hover { background: var(--accent-bright); }
   .game-log {
     overflow-y: auto; padding: 0.7rem 1rem; line-height: var(--shell-line-height, 1.5); flex: 1;
     /* The virtualizer owns scroll anchoring (anchorTo: "end"); the browser's

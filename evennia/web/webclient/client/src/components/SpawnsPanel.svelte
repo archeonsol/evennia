@@ -160,30 +160,30 @@
               aria-label={routing.unread[l] && l !== active ? `${l}, ${routing.unread[l]} unread` : l}
               onclick={() => (active = l)}
               onkeydown={(e) => onTabKey(e, i)}
-            >{l}{#if l !== active && routing.unread[l]}<span class="badge" aria-hidden="true">{routing.unread[l]}</span>{/if}</button>
+            >{l}{#if l !== active && routing.unread[l]}<span class="sh-count" aria-hidden="true">{routing.unread[l]}</span>{/if}</button>
           {/each}
         </div>
       {:else}
         <span class="solo">{feed}</span>
       {/if}
       <span class="tools" role="toolbar" aria-label="Feed tools">
-        <button class="t" class:on={searching} aria-pressed={searching} aria-label="Search this feed" title="search"
+        <button class="sh-cmd" aria-pressed={searching} aria-label="Search this feed" title="search"
           onclick={() => { searching = !searching; if (!searching) query = ""; }}>Search</button>
-        <button class="t" class:on={stamps} aria-pressed={stamps} aria-label="Timestamps" title="timestamps"
+        <button class="sh-cmd" aria-pressed={stamps} aria-label="Timestamps" title="timestamps"
           onclick={() => (stamps = !stamps)}>Times</button>
         {#if !feed && active}
-          <button class="t" aria-label="Open {active} in its own panel" title="own panel" onclick={() => dock.openFeed(active)}>Pop out</button>
+          <button class="sh-cmd" aria-label="Open {active} in its own panel" title="own panel" onclick={() => dock.openFeed(active)}>Pop out</button>
         {/if}
-        <button class="t" aria-label="Edit feed rules" title="rules" onclick={openRules}>Rules</button>
+        <button class="sh-cmd" aria-label="Edit feed rules" title="rules" onclick={openRules}>Rules</button>
         {#if active}
-          <button class="t" aria-label="Clear {active} feed" title="clear" onclick={clearFeed}>Clear</button>
+          <button class="sh-cmd" aria-label="Clear {active} feed" title="clear" onclick={clearFeed}>Clear</button>
         {/if}
       </span>
     </div>
 
     {#if searching}
       <div class="search">
-        <input bind:value={query} placeholder="search {active}…" aria-label="Search {active}"
+        <input class="sh-field sh-placeholder" bind:value={query} placeholder="Search {active}" aria-label="Search {active}"
           onkeydown={(e) => { if (e.key === "Escape") { searching = false; query = ""; } }}
           use:autofocus />
         <span class="cnt" aria-live="polite">{shown.length}<span class="sr-only"> matching lines</span></span>
@@ -211,15 +211,15 @@
       </div>
       {#if !pinned && unseen > 0}
         <button class="latest" onclick={jumpToLatest}>
-          {unseen} new line{unseen === 1 ? "" : "s"} ↓
+          &#9660; {unseen} new line{unseen === 1 ? "" : "s"}
         </button>
       {:else if !pinned}
-        <button class="latest quiet" onclick={jumpToLatest} aria-label="Jump to the latest line">↓</button>
+        <button class="latest quiet" onclick={jumpToLatest} aria-label="Jump to the latest line">&#9660;</button>
       {/if}
     </div>
   {:else}
     <div class="intro">
-      <button class="make" onclick={openRules}>Add a feed</button>
+      <button class="sh-cmd primary" onclick={openRules}>Add feed</button>
     </div>
   {/if}
 </div>
@@ -234,36 +234,29 @@
 <style>
   .spawns { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
   .bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
-  .tabs { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .tabs { display: flex; gap: 2px; flex-wrap: wrap; flex: 1; min-width: 0; }
   .solo { flex: 1; color: var(--accent-bright); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em; }
   .tab {
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit;
-    font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 8px; min-height: 24px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.6ch;
+    background: none; border: 0; color: var(--fg-dim); font-family: inherit;
+    font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.14em; padding: 2px 0.8ch; min-height: 24px; cursor: pointer;
   }
-  .tab.on { color: var(--accent-bright); border-color: var(--accent); }
-  .badge { margin-left: 5px; color: var(--gold); }
-  .tools { display: flex; gap: 3px; flex: 0 0 auto; }
-  .t {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit;
-    font-size: 0.7rem; min-width: 24px; min-height: 24px; padding: 0 8px; cursor: pointer;
-  }
-  .t:hover, .t.on { color: var(--accent-bright); border-color: var(--accent); }
+  .tab:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .tab.on { color: var(--bg-deep); background: var(--accent); }
+  .tools { display: flex; gap: 2px; flex: 0 0 auto; }
   .search { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-  .search input { flex: 1; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg); font-family: inherit; font-size: 0.8rem; padding: 2px 6px; }
+  .search input { flex: 1; }
   .cnt { color: var(--fg-dim); font-size: 0.72rem; }
   .lines-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
   .lines { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: var(--shell-line-height, 1.5); }
   .line { white-space: pre-wrap; word-break: break-word; }
   .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }
   .latest {
-    position: absolute; right: 14px; bottom: 10px; background: var(--bg-deep); border: 1px solid var(--accent);
-    color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em; padding: 3px 10px; min-height: 24px; cursor: pointer;
+    position: absolute; right: 14px; bottom: 10px; background: var(--accent); border: 0;
+    color: var(--bg-deep); font-family: inherit; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; padding: 3px 10px; min-height: 24px; cursor: pointer;
   }
+  .latest:hover { background: var(--accent-bright); }
   .latest.quiet { padding: 3px 7px; }
-  .empty { color: var(--fg-faint); font-style: italic; padding: 10px 0; font-size: 0.78rem; }
+  .empty { color: var(--fg-faint); padding: 10px 0; margin: 0; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .intro { padding: 12px; color: var(--fg-dim); font-size: 0.8rem; line-height: 1.5; }
-  .make {
-    background: none; border: 1px solid var(--accent); color: var(--accent-bright); font-family: inherit;
-    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; padding: 4px 12px; min-height: 24px; cursor: pointer;
-  }
 </style>

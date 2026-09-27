@@ -67,12 +67,13 @@
 <div class="palette framed" role="dialog" aria-label="Command palette" aria-modal="true"
   use:modal={{ onclose, initial: input }}>
   <div class="bar">
-    <span class="glyph glow-text" aria-hidden="true">❯</span>
+    <span class="glyph glow-text" aria-hidden="true">&gt;</span>
     <input
       bind:this={input}
       bind:value={q}
       onkeydown={onKey}
-      placeholder="run a command…"
+      class="sh-placeholder"
+      placeholder="Command"
       aria-label="Command"
       role="combobox"
       aria-expanded={items.length > 0}
@@ -116,7 +117,7 @@
     display: flex; align-items: center; gap: 0.7ch;
     padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--accent);
   }
-  .glyph { color: var(--accent-bright); font-size: 1.05rem; }
+  .glyph { color: var(--accent-bright); }
   .bar input {
     flex: 1; background: transparent; border: none; outline: none;
     color: var(--fg); font-family: inherit; font-size: 0.95rem; letter-spacing: 0.02em;
@@ -127,7 +128,8 @@
     padding: 6px 12px; background: none; border: none; color: var(--fg);
     font-family: inherit; font-size: 0.85rem; cursor: pointer; text-align: left;
   }
-  .item.sel { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .item.sel { background: var(--accent); color: var(--bg-deep); }
+  .item.sel .lbl, .item.sel .tag, .item.sel .hint { color: inherit; }
   .tag { color: var(--accent); width: 1ch; }
   .lbl { color: var(--fg); }
   .hint { margin-left: auto; color: var(--fg-faint); font-size: 0.75rem; }
