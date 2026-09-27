@@ -204,6 +204,19 @@ WEBSOCKET_CLIENT_ENABLED = True
 WEBSOCKET_CLIENT_PORT = 4002
 # Interface addresses to listen to. If 0.0.0.0, listen to all. Use :: for IPv6.
 WEBSOCKET_CLIENT_INTERFACE = "0.0.0.0"
+# Seconds between WebSocket pings from the Portal to each web client (0 turns
+# them off). Browsers answer a protocol ping without running page code, so this
+# keeps idle connections open through NATs and proxies that forget a silent
+# flow, and it is how the Portal notices a client that vanished without a close.
+WEBCLIENT_PING_DELAY = 20
+# Seconds with nothing at all from a web client (not even a pong) before the
+# Portal takes it to be gone and drops the link. Never less than two pings.
+WEBCLIENT_PING_TIMEOUT = 60
+# Seconds a signed-in web session outlives a dropped connection. A phone that
+# changes network or sleeps briefly reconnects into the same session: no logout
+# or login, and the output it missed is replayed. Only closing the tab, quitting,
+# or being disconnected by the server ends a session at once. 0 turns this off.
+WEBCLIENT_RESUME_GRACE = 90
 # Actual URL for webclient component to reach the websocket. You only need
 # to set this if you know you need it, like using some sort of proxy setup.
 # If given it must be on the form "ws[s]://hostname[:port]". If left at None,

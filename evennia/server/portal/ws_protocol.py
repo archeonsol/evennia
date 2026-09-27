@@ -8,9 +8,9 @@ hand-rolled framing.
 
 Why this shape (vs. autobahn, vs. folding the socket into an ASGI server):
     - The webclient socket must stay on the **Portal** process so it survives a
-      Server ``@reload`` (the Portal keeps its sockets; the resume stash covers
-      the rare unclean blip). That rules out moving it onto the Server's ASGI
-      app.
+      Server ``@reload`` (the Portal keeps its sockets, and holds a session
+      whose socket drops until the browser reconnects to it). That rules out
+      moving it onto the Server's ASGI app.
     - A plain Twisted ``Protocol`` runs natively on the reactor: no worker
       thread, no cross-thread session marshalling. Under the asyncio reactor it
       is already on the shared loop, so it gets the "one loop" win for free while
@@ -26,6 +26,7 @@ churn): the ``onConnect``/``onOpen``/``onMessage``/``onClose`` callbacks, the
 """
 
 import asyncio
+import time
 from urllib.parse import urlparse
 
 from twisted.internet import protocol
@@ -103,6 +104,9 @@ class _WSCore:
         self._msg_parts = []  # fragments of the message being received
         self._msg_bytes = 0
         self._msg_is_binary = False
+        # Monotonic time the peer last sent us anything at all: a frame, a pong,
+        # a fragment. A keepalive reads it to tell a quiet peer from a gone one.
+        self.last_received = time.monotonic()
         # Continue cooperative init into the session mixin.
         super().__init__(*args, **kwargs)
 
@@ -113,6 +117,7 @@ class _WSCore:
 
     def feed(self, data):
         """Feed received bytes into the state machine and drain events."""
+        self.last_received = time.monotonic()
         try:
             self._ws.receive_data(data)
         except RemoteProtocolError as err:
@@ -227,6 +232,42 @@ class _WSCore:
         except Exception:
             pass
         self._lose_connection()
+
+    def sendPing(self, payload=b""):
+        """Send a protocol ping, which the peer's WebSocket stack answers by itself.
+
+        A browser replies with a pong without running any page code, so this
+        works for a background tab whose timers are throttled. The reply lands
+        in ``feed`` like any other traffic and refreshes ``last_received``.
+
+        Args:
+            payload (bytes): Up to 125 bytes echoed back in the pong.
+
+        Returns:
+            bool: Whether a ping was written. False once the socket is closing.
+
+        """
+        if self._ws_closed or not self._ws_open:
+            return False
+        try:
+            data = self._ws.send(Ping(payload=bytes(payload)))
+        except Exception:
+            return False
+        self._safe_write(data)
+        return True
+
+    def abortConnection(self):
+        """Drop the link at once, discarding anything still buffered for the peer.
+
+        ``sendClose`` flushes before closing, which never finishes when the peer
+        has stopped reading: the kernel keeps retransmitting to a phone that has
+        left. A peer judged gone gets this instead.
+        """
+        self._ws_closed = True
+        try:
+            self._transport_abort()
+        except Exception:
+            self._lose_connection()
 
     # -- helpers --------------------------------------------------------
 
@@ -391,6 +432,13 @@ class _TwistedWSAdapter(protocol.Protocol):
     def _transport_close(self):
         self.transport.loseConnection()
 
+    def _transport_abort(self):
+        abort = getattr(self.transport, "abortConnection", None)
+        if abort is None:
+            self.transport.loseConnection()
+        else:
+            abort()
+
     def _peer_host(self):
         peer = self.transport.getPeer()
         return getattr(peer, "host", None)
@@ -419,6 +467,9 @@ class _AsyncioWSAdapter(asyncio.Protocol):
 
     def _transport_close(self):
         self.transport.close()
+
+    def _transport_abort(self):
+        self.transport.abort()
 
     def _peer_host(self):
         peer = self.transport.get_extra_info("peername")
