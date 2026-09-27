@@ -3,6 +3,7 @@
 import unittest
 from dataclasses import dataclass
 from types import SimpleNamespace
+from unittest import mock
 
 from evennia.actions.action import Action, action
 from evennia.actions.exceptions import RuleConflict
@@ -10,6 +11,7 @@ from evennia.actions.predicate import HasCapability
 from evennia.actions.registry import ActionRegistry, RuleRegistry, VerbTrie
 from evennia.actions.result import CLAIM, FAIL, PASS
 from evennia.actions.rule import PHASES, RuleSpec, rule
+from evennia.utils import logger
 
 
 # --- test action types (registered on a private registry where possible) ----
@@ -271,6 +273,73 @@ class TestRuleRegistry(unittest.TestCase):
         merged = reg.rules_for(Sub, _Kick, "check")
         self.assertEqual(merged, [])
 
+    def test_same_chain_drop_logs_info(self):
+        class Base:
+            @rule(_Kick, phase="check")
+            def gate(self, action, actor):
+                return FAIL("base")
+
+        class Sub(Base):
+            def gate(self, action, actor):
+                return PASS
+
+        reg = RuleRegistry()
+        with (
+            mock.patch.object(logger, "log_info") as info,
+            mock.patch.object(logger, "log_warn") as warn,
+        ):
+            reg.collect(Sub)
+        self.assertEqual(info.call_count, 1)
+        self.assertIn("_Kick/check", info.call_args[0][0])
+        warn.assert_not_called()
+
+    def test_unrelated_shadow_without_redeclare_warns(self):
+        class Left:
+            @rule(_Kick, phase="check")
+            def gate(self, action, actor):
+                return FAIL("left")
+
+        class Right:
+            def gate(self, action, actor):  # unrelated mixin, same method name
+                return PASS
+
+        Probe = type("Probe", (Right, Left), {})
+        reg = RuleRegistry()
+        with (
+            mock.patch.object(logger, "log_warn") as warn,
+            mock.patch.object(logger, "log_info") as info,
+        ):
+            index = reg.collect(Probe)
+        self.assertNotIn((_Kick, "check"), index)
+        self.assertEqual(warn.call_count, 1)
+        message = warn.call_args[0][0]
+        for fragment in ("gate", "Left", "Right", "Probe", "_Kick/check"):
+            self.assertIn(fragment, message)
+        info.assert_not_called()
+
+    def test_shadow_with_redeclare_is_silent(self):
+        class Left:
+            @rule(_Kick, phase="check")
+            def gate(self, action, actor):
+                return FAIL("left")
+
+        class Right(Left):
+            @rule(_Kick, phase="check")
+            def gate(self, action, actor):
+                return PASS
+
+        reg = RuleRegistry()
+        with (
+            mock.patch.object(logger, "log_warn") as warn,
+            mock.patch.object(logger, "log_info") as info,
+        ):
+            index = reg.collect(Right)
+        self.assertEqual(
+            [s.func for s in index[(_Kick, "check")]], [Right.__dict__["gate"]]
+        )
+        warn.assert_not_called()
+        info.assert_not_called()
+
     def test_all_specs_introspection(self):
         reg = RuleRegistry()
         Provider = self._provider()
@@ -339,7 +408,9 @@ class TestVerbTrieLeafScan(unittest.TestCase):
         self.assertIsNone(self._trie().match("zzz"))
 
     def test_prefix_candidates_still_returns_all(self):
-        self.assertEqual(sorted(self._trie().prefix_candidates("loo")), ["look", "lookat"])
+        self.assertEqual(
+            sorted(self._trie().prefix_candidates("loo")), ["look", "lookat"]
+        )
 
     def test_ranked_iteration_shortest_first_then_lexicographic(self):
         trie = VerbTrie()

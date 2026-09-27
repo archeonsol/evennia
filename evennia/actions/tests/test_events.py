@@ -145,6 +145,45 @@ class TestEventRegistry(unittest.TestCase):
         self.assertEqual(event_registry.handlers_for(Derived, Departed), [])
         self.assertEqual(len(event_registry.handlers_for(Base, Departed)), 1)
 
+    def test_unrelated_shadow_without_resubscribe_warns(self):
+        class Left:
+            @subscribe(Departed)
+            def react(self, event): ...
+
+        class Right:
+            def react(self, event):  # unrelated mixin, same method name
+                ...
+
+        Probe = type("Probe", (Right, Left), {})
+        with (
+            mock.patch.object(logger, "log_warn") as warn,
+            mock.patch.object(logger, "log_info"),
+        ):
+            index = event_registry.collect(Probe)
+        self.assertNotIn(Departed, index)
+        self.assertEqual(warn.call_count, 1)
+        message = warn.call_args[0][0]
+        for fragment in ("react", "Left", "Right", "Probe", "Departed"):
+            self.assertIn(fragment, message)
+
+    def test_shadow_with_resubscribe_is_silent(self):
+        class Left:
+            @subscribe(Departed)
+            def react(self, event): ...
+
+        class Right(Left):
+            @subscribe(Departed)
+            def react(self, event): ...
+
+        with (
+            mock.patch.object(logger, "log_warn") as warn,
+            mock.patch.object(logger, "log_info") as info,
+        ):
+            index = event_registry.collect(Right)
+        self.assertEqual(len(index[Departed]), 1)
+        warn.assert_not_called()
+        info.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

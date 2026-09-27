@@ -258,9 +258,13 @@ class ActionRegistry:
         self._trie = None  # lazily built; invalidated on register
         self._symbol_verbs = None  # lazily built; invalidated on register
         self._glued_verbs = None  # explicitly opted-in word-bearing prefixes
-        self._no_space_prefix = None  # combined symbol+glued tuple; invalidated on register
+        self._no_space_prefix = (
+            None  # combined symbol+glued tuple; invalidated on register
+        )
         self._phrase_metadata = None  # lazily built; invalidated on register
-        self._suggest_indexes = {}  # max_dist -> SymSpell deletion index; cleared on register
+        self._suggest_indexes = (
+            {}
+        )  # max_dist -> SymSpell deletion index; cleared on register
 
     def _rebuild_phrase_metadata(self):
         """Recompute and cache ``(max_phrase_words, multi_word_starters)``.
@@ -305,8 +309,12 @@ class ActionRegistry:
             key = verb.lower()
             existing = self._by_verb.get(key)
             if existing is not None and existing is not action_cls:
-                engine_default = existing.__module__.startswith("evennia.actions.default.")
-                game_override = not action_cls.__module__.startswith("evennia.actions.default.")
+                engine_default = existing.__module__.startswith(
+                    "evennia.actions.default."
+                )
+                game_override = not action_cls.__module__.startswith(
+                    "evennia.actions.default."
+                )
                 if not (engine_default and game_override):
                     raise RuleConflict(
                         f"verb {verb!r} already registered to {existing.__name__}; "
@@ -491,7 +499,9 @@ class ActionRegistry:
                     candidates.append(verb)
         return candidates
 
-    def suggest_verbs(self, token: str, max_dist: int = 2, limit: int = 3, reachable=None):
+    def suggest_verbs(
+        self, token: str, max_dist: int = 2, limit: int = 3, reachable=None
+    ):
         """Return up to ``limit`` registered verbs within edit distance
         ``max_dist`` of ``token``, closest first (for "did you mean…" output).
 
@@ -527,7 +537,9 @@ class ActionRegistry:
             if max_dist <= _SUGGEST_INDEX_MAX_DIST:
                 candidates = self._suggest_candidates(token, max_dist)
             else:
-                candidates = (verb for verb in self._by_verb if not _is_system_verb(verb))
+                candidates = (
+                    verb for verb in self._by_verb if not _is_system_verb(verb)
+                )
             for verb in candidates:
                 dist = _banded_levenshtein(token, verb, max_dist)
                 if dist <= max_dist:
@@ -550,13 +562,69 @@ def _is_catch_all(action_type) -> bool:
     return "_is_catch_all_base" in getattr(action_type, "__dict__", {})
 
 
+def _warn_shadowed_method(
+    cls,
+    name,
+    shadowed_class,
+    shadowed_specs,
+    shadowing_class,
+    shadowing_specs,
+    coverage_key,
+    label,
+    kind,
+):
+    """Log when a spec-carrying method is shadowed by name without re-declaring its specs.
+
+    An override that re-declares the same coverage key (a rule's
+    ``(action_type, phase)`` pair, or an event type) is an intentional
+    replacement and stays silent. Specs the override does not re-declare are
+    dropped without effect; an unrelated-mixin name collision is almost always
+    a bug and warns, while a same-hierarchy override is the documented disable
+    path and only logs at info level.
+    """
+    covered = {coverage_key(spec) for spec in shadowing_specs}
+    lost = [spec for spec in shadowed_specs if coverage_key(spec) not in covered]
+    if not lost:
+        return
+    from evennia.utils import logger
+
+    dropped = ", ".join(label(spec) for spec in lost)
+    detail = (
+        f"{kind} method '{name}' on {shadowed_class.__name__} is shadowed by "
+        f"{shadowing_class.__name__}.{name} on {cls.__name__}, which does not "
+        f"re-declare {dropped}; those handlers will not fire"
+    )
+    if issubclass(shadowing_class, shadowed_class) or issubclass(
+        shadowed_class, shadowing_class
+    ):
+        logger.log_info(f"[actions] override dropped {kind}: {detail}")
+    else:
+        logger.log_warn(
+            f"[actions] unrelated mixins collide on {kind} method '{name}': {detail}"
+        )
+
+
+def _rule_coverage_key(spec):
+    return (spec.action_type, spec.phase)
+
+
+def _rule_label(spec):
+    return f"{spec.action_type.__name__}/{spec.phase}"
+
+
+def _rule_specs(attr):
+    return getattr(attr, "__evennia_rule_specs__", None) or ()
+
+
 class RuleRegistry:
     """Collects and indexes ``@rule`` specs per provider class."""
 
     def collect(self, cls):
         """Walk ``cls``'s MRO, gather rule specs, and cache the index on the
         class. The most-derived definition of a method wins (a subclass override
-        — even one without ``@rule`` — shadows the base method's rules).
+        — even one without ``@rule`` — shadows the base method's rules). A
+        shadow that drops specs its replacement does not re-declare is logged
+        (see :func:`_warn_shadowed_method`).
 
         Returns:
             dict: the ``(action_type, phase) -> [RuleSpec]`` concrete index
@@ -564,21 +632,35 @@ class RuleRegistry:
         """
         concrete = {}  # (action_type, phase) -> list[RuleSpec]
         catchall = {}  # phase -> list[RuleSpec]
-        seen_methods = set()
+        seen_methods = {}  # method name -> (defining class, specs)
 
         for klass in cls.__mro__:
             for name, attr in vars(klass).items():
+                specs = _rule_specs(attr)
                 if name in seen_methods:
+                    winner_class, winner_specs = seen_methods[name]
+                    _warn_shadowed_method(
+                        cls,
+                        name,
+                        klass,
+                        specs,
+                        winner_class,
+                        winner_specs,
+                        _rule_coverage_key,
+                        _rule_label,
+                        "rule",
+                    )
                     continue
-                seen_methods.add(name)
-                specs = getattr(attr, "__evennia_rule_specs__", None)
+                seen_methods[name] = (klass, tuple(specs))
                 if not specs:
                     continue
                 for spec in specs:
                     if _is_catch_all(spec.action_type):
                         catchall.setdefault(spec.phase, []).append(spec)
                     else:
-                        concrete.setdefault((spec.action_type, spec.phase), []).append(spec)
+                        concrete.setdefault((spec.action_type, spec.phase), []).append(
+                            spec
+                        )
 
         # sort each bucket by priority desc, stable
         for bucket in concrete.values():
