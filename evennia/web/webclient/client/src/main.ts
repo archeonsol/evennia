@@ -30,6 +30,7 @@ import { announcer } from "./lib/announce.svelte";
 import { renderBody, renderSender } from "./lib/markup";
 import { logview } from "./lib/logview.svelte";
 import { screenSize } from "./lib/screensize";
+import { help } from "./lib/help.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -182,6 +183,8 @@ connection.on("connection_open", () => {
   if (settings.screenreader) {
     connection.sendOobRaw("webclient_options", [], { SCREENREADER: true });
   }
+  // Where help goes is a session flag too: the panel, or the log.
+  help.sendPreference(settings.helpInPanel);
 });
 
 // Every name this file routes on must exist in the server's event catalog.
@@ -240,6 +243,13 @@ connection.on("oob", (env) => {
       settings.channelEcho = true;
       settings.music = false;
       announcer.now("Screen reader mode on, from your saved game option. One view at a time.");
+    }
+  } else if (is(event, "help_view")) {
+    // A typed `help`: show the page in the help panel, not the terminal.
+    const page = env.kwargs && Object.keys(env.kwargs).length ? env.kwargs : Array.isArray(env.args) ? env.args[0] : env.args;
+    if (page) {
+      help.show(page);
+      dock.openHelp();
     }
   } else if (is(event, "player_mention")) {
     chat.onMention(env.kwargs ?? {});

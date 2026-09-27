@@ -22,6 +22,7 @@ export const VIEWS: Record<string, { component: string; title: string }> = {
   media: { component: "media", title: "Media" },
   spawns: { component: "spawns", title: "Feeds" },
   mytickets: { component: "mytickets", title: "My Tickets" },
+  help: { component: "help", title: "Help" },
 };
 
 class Dock {
@@ -195,6 +196,33 @@ class Dock {
       component: "spawns",
       title,
       params: { feed: label },
+      floating: { x: Math.max(0, w - width - 20), y: 20, width, height },
+    });
+  }
+
+  /**
+   * Show the help panel. It floats at the right, so the terminal stays in view;
+   * once open it is focused where the player left it (docked, tabbed, popped out).
+   */
+  openHelp(): void {
+    if (settings.screenreader) {
+      simple.open({ id: "help", component: "help", title: "Help" });
+      return;
+    }
+    if (!this.api) return;
+    const existing = this.api.getPanel("help");
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const w = this.host?.clientWidth || this.api.width;
+    const h = this.host?.clientHeight || this.api.height;
+    const width = Math.max(Math.min(w * 0.42, 640), Math.min(w, 340));
+    const height = Math.max(h - 40, Math.min(h, 320));
+    this.api.addPanel({
+      id: "help",
+      component: "help",
+      title: "Help",
       floating: { x: Math.max(0, w - width - 20), y: 20, width, height },
     });
   }

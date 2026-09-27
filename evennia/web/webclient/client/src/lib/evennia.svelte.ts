@@ -32,6 +32,8 @@ const CLIENT_CAPS = {
   assets: false, // TODO: true once the asset channel exists
   images: true,
   theme: true,
+  // Shows `help_view` in the help panel; the game then sends help there, not to the log.
+  helpPanel: true,
 };
 
 // The resume token identifies *one connection's* replay buffer, so it belongs to

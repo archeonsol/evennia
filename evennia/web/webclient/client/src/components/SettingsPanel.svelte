@@ -290,6 +290,7 @@
       {@render toggle("Hide prompt line", "hidePrompt")}
       {@render toggle("Echo commands in terminal", "echoCommands")}
       {@render toggle("Keep command after sending", "keepCommand")}
+      {@render toggle("Help in its own panel", "helpPanel")}
     {:else if view === "panels"}
       {#if openPanels.length}
         {#each openPanels as p (p.id)}
