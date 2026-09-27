@@ -24,6 +24,7 @@ import { ui } from "./lib/ui.svelte";
 import { dock } from "./lib/dock.svelte";
 import { createLegacyEmitter } from "./lib/legacy-emitter";
 import { compose } from "./lib/compose.svelte";
+import { lexicon } from "./lib/lexicon.svelte";
 import type { OobEvent } from "./lib/oob-events";
 import { announcer } from "./lib/announce.svelte";
 import { renderBody, renderSender } from "./lib/markup";
@@ -225,6 +226,10 @@ connection.on("oob", (env) => {
     chat.onMention(env.kwargs ?? {});
   } else if (is(event, "compose_preview")) {
     compose.applyPreview(env.kwargs ?? (Array.isArray(env.args) ? env.args[0] : env.args));
+  } else if (is(event, "completion_lexicon")) {
+    // Pushed from the game's azaban_hello: what verbs exist changes rarely, so
+    // the command line completes from this instead of asking per keystroke.
+    lexicon.setVerbs((env.kwargs ?? {}).verbs);
   } else if (is(event, "image") || is(event, "audio") || is(event, "video") || is(event, "youtube")) {
     const url = Array.isArray(env.args) ? env.args[0] : env.args;
     const kw = env.kwargs ?? {};
