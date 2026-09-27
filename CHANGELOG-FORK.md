@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.280: A dropped web socket no longer logs the player out
+
+### Webclient and Portal
+
+- **A dropped socket holds the session instead of ending it** ([`webclient.py`](evennia/server/portal/webclient.py), [`portalsessionhandler.py`](evennia/server/portal/portalsessionhandler.py)). Players on phones were logged out every few minutes. Every reconnect after an unclean drop found the old socket by `csessid`, disconnected its Server session and connected a new one, so the Server logged `Logged out` and `Logged in` a few seconds apart and the character dropped and came back. Worse, a peer close frame with a code other than 1000/1001 left the socket half-closed; the next line of room output raised `Disconnected`, which ran a full `disconnect()` that also cleared the browser's auto-login stamp. The reconnect then came back signed out, and the resume check logged `resume token presented by a different uid; not replaying`. Now only an explicit end finishes a session: the browser closing with 1000/1001, the client's `websocket_close`, or a Server disconnect. Any other loss holds the session for `WEBCLIENT_RESUME_GRACE` seconds (default 90). The Portal keeps it under its sessid, keeps recording output, and does not tell the Server. A reconnect from the same tab, signed in as the same account, takes it over in place: same sessid, same bus socket incarnation, the handler entry swapped, only changed socket facts synced (`PCONNSYNC`), missed output replayed. No logout or login hooks run. A hold nobody claims ends as an ordinary disconnect and leaves the browser signed in.
+- **Resume tokens are issued by the Portal and replaced on every takeover.** The `hello` reply carries `token`; the shell keeps it in `sessionStorage` and presents it on reconnect. The browser's signed-in account must also be the held session's account, so a token alone cannot take over or read another account's session. A copied tab cannot bounce a session between windows: the first to use a token gets the session and a new token. A socket that still looks open (a phone that changed networks before the keepalive noticed) is taken over too, and is sent close code 4001 before it is aborted. The client-chosen token, the uid-stamped stash and its helpers are gone (`_RESUME_STASH`, `_stash_for_resume`, `_handle_resume`, `RESUME_STASH_MAX`); `RESUME_HOLD_MAX` (512) and `WEBSOCKET_RESUME_STASH_BYTES` now cap held sessions, oldest first.
+- **Shell sockets reach the Server only after their `hello`** (at most 5 seconds), because a socket that resumes a session must never arrive as a new connection. Other wire formats connect on open, and on an unclean drop they now end at once instead of lingering until the same browser reconnects.
+- **The Portal pings every web client and drops the silent ones** ([`ws_protocol.py`](evennia/server/portal/ws_protocol.py)). `WEBCLIENT_PING_DELAY` (default 20 seconds) was set by games and read by nothing. One Portal-wide loop now sends WebSocket pings, which browsers answer without page code, so idle connections stay open through carrier NATs and proxies. A socket with no inbound traffic for `WEBCLIENT_PING_TIMEOUT` (default 60, never below two pings) is aborted and its session held. The host's TCP keepalive cannot do this behind a reverse proxy: the Portal's socket is the proxy's local upstream connection.
+- **The shell checks its own socket** ([`evennia.svelte.ts`](evennia/web/webclient/client/src/lib/evennia.svelte.ts)). A page never sees protocol pings, and a phone that changed networks can hold a dead socket "open" for minutes. After 25 seconds of silence the shell sends `{"t": "ping"}`; the Portal answers `pong` itself (never stamped, replayed, or forwarded). No answer in 10 seconds: the shell closes with 4000, which holds the session, and reconnects at once. Coming back to the tab, regaining the network, or restoring from the back-forward cache probes at once or cuts a reconnect backoff short. Close code 4001 raises the quit screen ("Your session moved to another window") instead of reconnecting. A resume that lost evicted output says so in the log.
+- **Every socket loss is logged** with its cause, close code, whether the close handshake completed, connection age, time since last heard, and outcome (held, ended, dropped before hello). Takeovers log the time offline and frames replayed; refused claims log a warning.
+- **A replaced socket changes nothing.** Its late close, frames and timers are ignored, and `PortalSessionHandler.disconnect`/`server_disconnect` no longer remove or disconnect a sessid on behalf of anything but its current holder. New `PortalSessionHandler.owns()` and `rebind()`; `_WSCore.sendPing()`, `abortConnection()` and `last_received`; `AsyncioTransportShim.abortConnection()`.
+
+### Settings
+
+- `WEBCLIENT_PING_DELAY` (20) is now read. New `WEBCLIENT_PING_TIMEOUT` (60) and `WEBCLIENT_RESUME_GRACE` (90; 0 turns holding off).
+
+### Migration
+
+- The `hello` reply gains `token` (and `gap` when replay lost output); clients may send `ping` and get `pong`. A shell bundle from before this release presents a token the Portal never issued, so it reconnects into a fresh session until the page reloads.
+- A signed-in web session whose socket drops now stays connected on the Server for up to `WEBCLIENT_RESUME_GRACE` seconds. Game code that reacts to disconnects sees them that much later, and only if the player does not come back.
+- Subclasses of `WebSocketClient` that overrode `onClose` or read `websocket_close_code` must move to `_link_down` / `_end_session`.
+- None for games otherwise. The per-tab `sessionStorage` key (`underspire.client.token`) is unchanged.
+
+### Tests
+
+- [`test_webclient_resume.py`](evennia/server/portal/test_webclient_resume.py) (45) drives real sessions through a real `PortalSessionHandler` and checks what the Server is told: holding, the half-closed-socket regression, expiry, caps, takeover without logout or login, token rotation, ownership refusals, superseded sockets, gaps, the deferred connect, the Portal-local heartbeat and the keepalive. [`test_ws_keepalive.py`](evennia/server/portal/test_ws_keepalive.py) (4) checks ping, pong and abort over a real wsproto handshake. [`connection.test.ts`](evennia/web/webclient/client/src/lib/connection.test.ts) (7) covers the shell side. `test_webclient_transport.py` keeps its buffer and hello tests; its stash tests moved to the new module.
+
+---
+
 ## 6.0.0+underspire.279 — The web client follows its output, reports its size and opens help in a panel; tickets act in place; telnet negotiates UTF-8
 
 Prepared locally as `underspire.277`, which never shipped: `.277` (pyinflect VBZ overrides) and `.278` (Tab completion) were cut on `underspire` in the meantime. The feature commits were replayed onto `.278` and this entry covers all of them.
