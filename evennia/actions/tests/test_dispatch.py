@@ -196,7 +196,9 @@ class TestRouting(unittest.TestCase):
         goblin = RuleTarget("goblin")
         self.char._search_hook = lambda name: goblin
         with (
-            mock.patch.object(storage, "prewarm_authorization", return_value=False),
+            mock.patch.object(
+                storage, "ensure_authorization", mock.AsyncMock(return_value=False)
+            ),
             mock.patch.object(
                 storage, "authorization_snapshot_scope", return_value=nullcontext()
             ) as snapshot_scope,
