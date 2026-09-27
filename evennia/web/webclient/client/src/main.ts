@@ -173,6 +173,18 @@ screenSize.connect((grid) =>
   connection.sendOobRaw("client_options", [], { screenwidth: grid.cols, screenheight: grid.rows }),
 );
 
+// A resumed session is replayed what it missed, from a bounded window. When the
+// window had already moved past some of it, say so rather than leave a silent
+// hole in the log.
+connection.on("hello", (env) => {
+  if (env.gap === true) {
+    session.append(
+      `<span class="conn-note">Some output was lost while you were disconnected.</span>`,
+      "system",
+    );
+  }
+});
+
 connection.on("connection_open", () => {
   refreshPuppetManifest();
   // Screen size is a session flag, so a new connection starts without one.

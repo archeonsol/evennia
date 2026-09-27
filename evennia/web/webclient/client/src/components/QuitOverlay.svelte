@@ -3,6 +3,8 @@
   import { modal } from "../lib/modal";
 
   let reconnectBtn = $state<HTMLButtonElement | null>(null);
+  // The portal handed this session to another window (a copied tab).
+  const moved = $derived(connection.logoutReason === "superseded");
 </script>
 
 <div class="scrim">
@@ -19,12 +21,18 @@
       </svg>
     </div>
     <h2 class="glow-text" id="quit-title">DISCONNECTED</h2>
-    <p class="sub" id="quit-sub">You have left Underspire.</p>
+    <p class="sub" id="quit-sub">
+      {moved ? "Your session moved to another window." : "You have left Underspire."}
+    </p>
     <div class="acts">
       <button class="primary" bind:this={reconnectBtn} onclick={() => connection.reconnect()}>Reconnect</button>
       <a class="secondary" href="/">Leave</a>
     </div>
-    <p class="hint">Your session ended. Reconnect to return to the game.</p>
+    <p class="hint">
+      {moved
+        ? "Reconnect to play in this window as well."
+        : "Your session ended. Reconnect to return to the game."}
+    </p>
   </div>
 </div>
 
