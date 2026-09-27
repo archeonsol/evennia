@@ -44,6 +44,12 @@ const PAGES = [
     report: () => window.__ticketsTest ?? null,
   },
   {
+    path: "tests/input.html",
+    label: "command line and compose",
+    done: () => window.__inputTest?.done === true,
+    report: () => window.__inputTest ?? null,
+  },
+  {
     path: "tests/display.html",
     label: "display regressions",
     done: () => /failures/.test(document.title),

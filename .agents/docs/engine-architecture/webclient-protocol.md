@@ -60,7 +60,8 @@ if that encoding is negotiated in `hello`.
 
 **Client → server**
 - `hello`: `{ client, caps: { rendersNodes, images, patches, assets, encoding } }`.
-- `cmd`: `{ line }`. A command line.
+- `cmd`: `{ line }`. A command line. It may hold line breaks: Shift+Enter in the
+  command line and the compose pad both send multi-line text as one command.
 - `req`: `{ seq, ns, action, data }`. RPC (autocomplete, history, channel ops).
 - `oob`: `{ ns, action, data }`. Fire-and-forget actions.
 

@@ -291,6 +291,16 @@
       {@render toggle("Hide prompt line", "hidePrompt")}
       {@render toggle("Echo commands in terminal", "echoCommands")}
       {@render toggle("Keep command after sending", "keepCommand")}
+      <!-- The line being typed is never lost to Up and Down either way; this
+           only decides whether typed text is walked from at all. -->
+      <label class="row select">
+        <span>Up and Down recall commands</span>
+        <select bind:value={settings.historyKeys}>
+          <option value="edge">from the first or last line</option>
+          <option value="empty">only from an empty line</option>
+        </select>
+      </label>
+      {@render toggle("Keep compose open after sending", "composeStaysOpen")}
     {:else if view === "panels"}
       {#if openPanels.length}
         {#each openPanels as p (p.id)}

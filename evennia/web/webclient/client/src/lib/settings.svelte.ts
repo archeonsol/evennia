@@ -3,6 +3,7 @@
 // change is a single attribute/var flip. Grouped conceptually into Visual, CRT,
 // Audio and Text (see SettingsPanel).
 
+import type { RecallKeys } from "./history";
 import type { TabAlertMode } from "./tabalert";
 
 export type ThemeName = "haemal" | "amber" | "abyssal" | "sanctum" | "matrix" | "custom";
@@ -101,6 +102,10 @@ interface Persisted {
   echoCommands: boolean;
   /** Leave the sent command in the command line, selected, instead of clearing it. */
   keepCommand: boolean;
+  /** When Up and Down walk from typed text into the history (lib/history.ts). */
+  historyKeys: RecallKeys;
+  /** Leave the compose pad open after sending from it, for the next pose. */
+  composeStaysOpen: boolean;
   customColors: Record<string, string>;
 }
 
@@ -136,6 +141,8 @@ const DEFAULTS: Persisted = {
   webPages: "panel",
   echoCommands: false,
   keepCommand: false,
+  historyKeys: "edge",
+  composeStaysOpen: false,
   customColors: { ...CUSTOM_DEFAULTS },
 };
 
@@ -193,6 +200,8 @@ class Settings {
   webPages = $state<WebPageMode>(DEFAULTS.webPages);
   echoCommands = $state(DEFAULTS.echoCommands);
   keepCommand = $state(DEFAULTS.keepCommand);
+  historyKeys = $state<RecallKeys>(DEFAULTS.historyKeys);
+  composeStaysOpen = $state(DEFAULTS.composeStaysOpen);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;
 

@@ -519,7 +519,7 @@ textarea.sh-field:focus {
    exception: it is focused nearly all the time, so its whole bar lights up
    instead (CommandInput.svelte). */
 input:not([type="range"]):not(.command-input):focus-visible,
-textarea:focus-visible,
+textarea:not(.command-input):focus-visible,
 select:focus-visible {
   outline: 2px solid var(--accent-bright) !important;
   outline-offset: -2px;
