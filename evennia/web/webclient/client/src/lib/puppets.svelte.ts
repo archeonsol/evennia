@@ -136,7 +136,11 @@ export class PuppetScenes {
         this.feeds.get(key) ??
         blankFeed(npcId, Number(lineMeta.slot ?? 0), String(lineMeta.name ?? `#${npcId}`));
       const feed = [...current.feed, line].slice(-MAX_FEED_LINES);
-      const unread = this.activeId === npcId ? 0 : current.unread + 1;
+      // Only room activity badges the tab. Network traffic and the puppet's
+      // own command feedback still render in the terminal but stay silent.
+      let unread = current.unread;
+      if (this.activeId === npcId) unread = 0;
+      else if (String(lineMeta.news ?? "room") === "room") unread += 1;
       this.feeds.set(key, { ...current, feed, unread });
     }
   }

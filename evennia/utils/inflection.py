@@ -55,7 +55,25 @@ def pyinflect_module():
         import pyinflect
     except ImportError:
         return None
+    _drop_vbz_overrides(pyinflect.InflectionEngine())
     return pyinflect
+
+
+def _drop_vbz_overrides(engine):
+    """
+    Let pyinflect's main table answer third-person singular lookups.
+
+    Every `VBZ` entry in pyinflect 0.5.1's `overrides.csv` is wrong
+    (stick -> "stickes", abide -> "abode"), while `infl.csv` has the right
+    form for each. Overrides replace the main table in `getAllInflections`,
+    so removing them is enough.
+
+    Args:
+        engine (pyinflect.Inflections): The loaded pyinflect instance.
+
+    """
+    for forms in engine.overrides.values():
+        forms.pop("VBZ", None)
 
 
 def warm():

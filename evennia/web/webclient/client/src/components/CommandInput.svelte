@@ -3,12 +3,14 @@
   import { settings } from "../lib/settings.svelte";
   import { commands, CURATED } from "../lib/commands.svelte";
   import { chat } from "../lib/chat.svelte";
+  import { scene } from "../lib/scene.svelte";
   import { playKey } from "../lib/audio";
   import { compose } from "../lib/compose.svelte";
   import { COMPOSE_MODES, composeToCommand, specFor } from "../lib/compose-modes";
   import { composePreviewToHtml } from "../lib/compose-preview";
   import { focusOnMount } from "../lib/focus";
   import { announcer } from "../lib/announce.svelte";
+  import { lexicon } from "../lib/lexicon.svelte";
 
   let value = $state("");
   // History recall over shared recents (newest-first). -1 = live/typed line.
@@ -31,6 +33,25 @@
   // store so it survives closing the pad and reloading the page.
   let composeEl = $state<HTMLTextAreaElement | null>(null);
 
+  // Warm the scope cache while a target word is being typed, so Tab answers
+  // from cache instead of a round trip after the keypress.
+  $effect(() => {
+    const parts = value.split(" ");
+    const word = parts.length > 1 ? (parts[parts.length - 1] ?? "").toLowerCase() : "";
+    if (!word) return;
+    const t = setTimeout(() => {
+      if (lexicon.scopeMatches(word) === undefined) void lexicon.fetchScope(word);
+    }, 250);
+    return () => clearTimeout(t);
+  });
+
+  // Another room is another set of targets. (Same-name rooms and arrivals are
+  // covered by the store's own cache age.)
+  $effect(() => {
+    scene.room.name;
+    lexicon.reset();
+  });
+
   let inputEl = $state<HTMLInputElement | null>(null);
   function submit() {
     commands.run(value);
@@ -45,6 +66,7 @@
 
   function candidates(): string[] {
     const set = new Set<string>();
+    for (const v of lexicon.verbs) set.add(v);
     for (const c of commands.recent) set.add(c.split(" ")[0]);
     for (const c of CURATED) set.add(c.cmd.trim());
     for (const ch of chat.channels) if (ch.name) set.add(ch.name);
@@ -85,6 +107,24 @@
     }
   }
 
+  /**
+   * Tab a target word whose scope answer is not cached yet; complete it when
+   * the reply lands, unless the line moved on in the meantime.
+   */
+  function startScopeComplete(word: string) {
+    const lineAtAsk = value;
+    void lexicon.fetchScope(word).then((names) => {
+      if (!names.length || value !== lineAtAsk) return;
+      compMatches = names;
+      compActive = true;
+      compIdx = 0;
+      const parts = value.split(" ");
+      parts[compWordIdx] = names[0];
+      value = parts.join(" ");
+      announcer.now(`${names[0]}, 1 of ${names.length}`);
+    });
+  }
+
   /** Complete the word before the caret; false when there is nothing to complete. */
   function tabComplete(shift: boolean): boolean {
     if (!compActive) {
@@ -93,7 +133,16 @@
       const base = parts[compWordIdx] ?? "";
       if (!base) return false;
       const b = base.toLowerCase();
-      compMatches = candidates().filter((c) => c.toLowerCase().startsWith(b));
+      if (compWordIdx === 0) {
+        compMatches = candidates().filter((c) => c.toLowerCase().startsWith(b));
+      } else {
+        const scope = lexicon.scopeMatches(b);
+        if (scope === undefined) {
+          startScopeComplete(b);
+          return true;
+        }
+        compMatches = scope;
+      }
       if (!compMatches.length) return false;
       compActive = true;
       compIdx = -1;
@@ -122,11 +171,12 @@
       rQuery = "";
       return;
     }
-    // Tab completes a word when there is one to complete, and otherwise moves
-    // focus as it does everywhere else. Holding it for completion on an empty
-    // line trapped keyboard users in the field focused on load.
+    // An empty line has nothing to complete, so Tab moves focus as it does
+    // everywhere else; holding it there trapped keyboard users in the field
+    // focused on load. Once the line has text Tab belongs to the command:
+    // releasing it on a miss walked focus to the Compose button mid-word.
     if (e.key === "Tab") {
-      if (tabComplete(e.shiftKey)) e.preventDefault();
+      if (tabComplete(e.shiftKey) || value.trim()) e.preventDefault();
       return;
     }
     if (e.key === "PageUp" || e.key === "PageDown") {
