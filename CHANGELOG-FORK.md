@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.278 — Tab completes verbs and scope targets
+
+### Webclient
+
+- **Tab belongs to the command line once it has text** ([`CommandInput.svelte`](evennia/web/webclient/client/src/components/CommandInput.svelte), rebuilt into [`shell.js`](evennia/web/static/webclient/shell/shell.js)). Tab used to fall through to browser focus navigation whenever completion found no match, so typing `!nod` then Tab walked focus to the Compose button mid-word. Tab is now consumed on any non-blank line and still moves focus on an empty one, which keeps the escape hatch that freed keyboard users from the field focused on load.
+- **First word completes from a server-pushed verb lexicon** ([`lexicon.svelte.ts`](evennia/web/webclient/client/src/lib/lexicon.svelte.ts)). The shell stores the `completion_lexicon` OOB payload (`{verbs}`) in a new reactive store and merges it ahead of the local history/CURATED/channel sources, so every verb the player can actually reach (and every `!social` token) completes with zero latency instead of the 16-entry curated list.
+- **Target words complete from the actor's live scope** ([`CommandInput.svelte`](evennia/web/webclient/client/src/components/CommandInput.svelte)). A non-first word asks `connection.request("client", "complete", {word})` and cycles the returned names; a 250 ms debounce warms the cache while the word is still being typed, and Tab during the round trip completes when the reply lands (if the line has not moved on). Answers cache per word for 5 s and drop on a room change, so cycling is local and a room turnover is at most one request.
+- **Downstream (game-side):** the shell degrades to the previous client-only lists until the game wires both ends. It must register a `completion_lexicon` event and push `{verbs}` at hello (reachable registry verbs plus `!social` tokens), and implement a `complete` inputfunc returning `{"names": [...]}` for the puppet's visible room/inventory names, allowlisted in `AZABAN_PUBLIC_ACTIONS`. UNDERSPIRE's `server/conf/inputfuncs.py` implements both. The catalog entry regenerates [`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts) from the game directory (`python -m evennia.server.protocol.gen_ts`).
+
+### Tests
+
+- **Cache semantics are tested, not the DOM** ([`lexicon.test.ts`](evennia/web/webclient/client/src/lib/lexicon.test.ts)). Seven vitest cases: verb payload filtering, never-fetched versus fetched-empty, one request per word with concurrent dedupe, TTL expiry, failures caching empty without poisoning the word, and room-change reset. `npm test` 631 pass; `svelte-check` clean.
+
 ## 6.0.0+underspire.277 — Emote verbs conjugate from pyinflect's main table
 
 ### Engine

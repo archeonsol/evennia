@@ -97,6 +97,11 @@ export interface CommunityMilestonePayload {
   label: string;
 }
 
+/** Reachable verbs and !social tokens for Tab completion. */
+export interface CompletionLexiconPayload {
+  verbs: any[];
+}
+
 /** Live preview of a pose/emote/say before it is sent. */
 export interface ComposePreviewPayload {
   you: string;
@@ -210,6 +215,7 @@ export type OobEvent =
   | "channels_list"
   | "community_kudos"
   | "community_milestone"
+  | "completion_lexicon"
   | "compose_preview"
   | "editor_close"
   | "editor_open"
@@ -252,6 +258,7 @@ export interface OobEventMap {
   "channels_list": ChannelsListPayload;
   "community_kudos": CommunityKudosPayload;
   "community_milestone": CommunityMilestonePayload;
+  "completion_lexicon": CompletionLexiconPayload;
   "compose_preview": ComposePreviewPayload;
   "editor_close": EditorClosePayload;
   "editor_open": EditorOpenPayload;
