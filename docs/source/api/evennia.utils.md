@@ -40,6 +40,7 @@ evennia.utils
    evennia.utils.systems
    evennia.utils.test_resources
    evennia.utils.text2html
+   evennia.utils.textfold
    evennia.utils.utils
    evennia.utils.validatorfuncs
 
