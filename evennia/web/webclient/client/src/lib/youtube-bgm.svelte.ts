@@ -12,6 +12,7 @@ interface YtPlayer {
   getVolume(): number;
   getPlayerState(): number;
   getCurrentTime(): number;
+  getDuration(): number;
   getVideoData(): YtVideoData;
   loadVideoById(options: { videoId: string; startSeconds?: number }): void;
   stopVideo(): void;
@@ -119,10 +120,30 @@ class YoutubeBgmController {
     }
   }
 
-  /** Room elapsed seconds now (server offset + time since play_yt). */
+  /**
+   * Room elapsed seconds now (server offset + time since play_yt). A looping
+   * room track wraps at its length: the server counts from when the track was
+   * set and never learns how long it is, so once it has played through the
+   * raw count lies past the end, and seeking there ends the video again.
+   */
   expectedSyncSeconds(): number {
     const elapsed = (Date.now() - this.syncAnchorWallMs) / 1000;
-    return Math.max(0, this.syncAnchorOffset + elapsed);
+    const seconds = Math.max(0, this.syncAnchorOffset + elapsed);
+    const length = this.loopLength();
+    return length > 0 ? seconds % length : seconds;
+  }
+
+  /** Length of the active track when the room loops it and it has loaded; else 0. */
+  private loopLength(): number {
+    if (!this.roomLoop || !this.player?.getDuration) return 0;
+    try {
+      // Right after loadVideoById the player still reports the previous video.
+      if (this.player.getVideoData?.()?.video_id !== this.activeVideoId) return 0;
+      const length = this.player.getDuration();
+      return Number.isFinite(length) && length > 0 ? length : 0;
+    } catch {
+      return 0;
+    }
   }
 
   /** Room-music setting toggle. Disabling stops playback and blocks all loads. */
@@ -306,13 +327,20 @@ class YoutubeBgmController {
 
     try {
       const now = this.player.getCurrentTime();
-      if (Math.abs(now - target) <= YoutubeBgmController.SYNC_TOLERANCE_S) return true;
+      if (this.syncGap(now, target) <= YoutubeBgmController.SYNC_TOLERANCE_S) return true;
       this.player.seekTo(target, true);
       const after = this.player.getCurrentTime();
-      return Math.abs(after - target) <= YoutubeBgmController.SYNC_TOLERANCE_S;
+      return this.syncGap(after, target) <= YoutubeBgmController.SYNC_TOLERANCE_S;
     } catch {
       return false;
     }
+  }
+
+  /** Seconds between two track positions; a looping track counts across the wrap. */
+  private syncGap(a: number, b: number): number {
+    const gap = Math.abs(a - b);
+    const length = this.loopLength();
+    return length > 0 ? Math.max(0, Math.min(gap, length - gap)) : gap;
   }
 
   private scheduleSyncRetries(gen: number): void {

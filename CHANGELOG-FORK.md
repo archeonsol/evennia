@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.282 — A looping room track keeps looping
+
+Players heard a room's looping track once, then a long silence before it came back.
+
+### Webclient
+
+- **A looping room track wraps its sync position at the track's length** ([`youtube-bgm.svelte.ts`](evennia/web/webclient/client/src/lib/youtube-bgm.svelte.ts)). The `play_yt` offset counts from when the room's track was set (the game's `bgm_start_time`) and the server never learns how long the track is; the client then advances that offset with the wall clock. Once a looping track had played through, the position lay past its end: the loop-back on `ENDED` seeked to 0, the sync check on `PLAYING` seeked past the end, and the video ended again. `expectedSyncSeconds()` now takes the position modulo `getDuration()` when the room loops and the loaded video is the active one (right after `loadVideoById` the player still reports the previous video, so that length is never used). The sync tolerance counts across the loop point, so a track that ends a moment before the wall clock does is not dragged back to its last second. A join, refresh or reconnect long after the track was set now lands inside the track as soon as its length is known.
+- The shell bundle ([`shell.js`](evennia/web/static/webclient/shell/shell.js)) is rebuilt from the source; the source at `underspire.281` rebuilds byte-identical to the bundle it replaces.
+
+### Tests
+
+- [`room-bgm.test.ts`](evennia/web/webclient/client/src/lib/room-bgm.test.ts) covers the wrapped start offset, the loop-back after `ENDED`, the loop-point tolerance, and two guards: a track that does not loop, and a new video whose length has not loaded, are not wrapped. The three wrap tests fail on the `underspire.281` source.
+
 ## 6.0.0+underspire.281 — One Server per game, and an unreplayable spool intent can no longer wedge a boot
 
 Two architectural guards close the failure class behind a production incident: a lifecycle race (a service restart racing a manual `evennia reload`) started a second Server, and the conflicting write-behind documents it produced were spooled at shutdown as intents that could never replay — every later boot blocked those rows, the Portal<->Server handshake died on a blocked read, and the unit restarted forever.
