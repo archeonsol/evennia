@@ -163,10 +163,23 @@ class Give(Action):
         return cls(mode="plain", count=count, item_spec=item_spec, target_spec=target_spec)
 
 
+def _reachable_containers(actor):
+    """Where ``put`` looks for its container: what the body carries, then the room.
+
+    A bag on your back or a kit in your hands is as much a container as a chest
+    on the floor, so a room-only search could never find one you are holding.
+    """
+    body = actor.character
+    location = actor.location
+    carried = list(getattr(body, "contents", None) or ())
+    nearby = list(getattr(location, "contents", None) or ()) if location is not None else []
+    return carried + [obj for obj in nearby if obj not in carried]
+
+
 @action("put", "insert")
 @dataclass
 class Put(Action):
-    """Put an item into a container in the current room.
+    """Put an item into a container you carry or one in the current room.
 
     |wput <item> in <container>|n / |wput <item> into <container>|n. The item
     normally must be carried; the container's rules decide whether it accepts
@@ -194,7 +207,7 @@ class Put(Action):
             act = cls()
             act._usage = True
             return act
-        container = actor.search(container_spec, location=actor.location)
+        container = actor.search(container_spec, candidates=_reachable_containers(actor))
         item_location = (
             actor.location
             if container is not None
