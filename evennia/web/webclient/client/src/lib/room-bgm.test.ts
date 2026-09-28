@@ -13,6 +13,7 @@ type MockPlayer = {
   getVolume: ReturnType<typeof vi.fn>;
   getPlayerState: ReturnType<typeof vi.fn>;
   getCurrentTime: ReturnType<typeof vi.fn>;
+  getDuration?: ReturnType<typeof vi.fn>;
   getVideoData: ReturnType<typeof vi.fn>;
   isMuted: ReturnType<typeof vi.fn>;
   stopVideo: ReturnType<typeof vi.fn>;
@@ -150,6 +151,92 @@ describe("room BGM re-enter sync (youtube-bgm)", () => {
     vi.advanceTimersByTime(3000);
 
     expect(player.stopVideo).not.toHaveBeenCalled();
+  });
+});
+
+describe("a looping room track wraps at its length", () => {
+  const PS = { PLAYING: 1, BUFFERING: 3, ENDED: 0, UNSTARTED: -1, PAUSED: 2, CUED: 5 };
+  const ctl = ytBgm as unknown as {
+    onStateChange: (state: number, target: MockPlayer) => void;
+  };
+
+  /** A 100-second track whose position follows seekTo. */
+  function looping(overrides: Partial<MockPlayer> = {}): MockPlayer {
+    let t = 0;
+    const player = mockPlayer({
+      getDuration: vi.fn(() => 100),
+      getCurrentTime: vi.fn(() => t),
+      getPlayerState: vi.fn(() => PS.PLAYING),
+      ...overrides,
+    });
+    player.seekTo.mockImplementation((sec: number) => {
+      t = sec;
+    });
+    attachPlayer(player);
+    return player;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { YT: { PlayerState: PS } });
+    ytBgm.setVolumeGetter(() => 40);
+  });
+
+  afterEach(() => {
+    ytBgm.stopNow();
+    attachPlayer(null as unknown as MockPlayer);
+    vi.useRealTimers();
+  });
+
+  it("a server offset past the end starts inside the track", () => {
+    const player = looping();
+    ytBgm.playSequence("dQw4w9WgXcQ", 250, true);
+    expect(player.loadVideoById).toHaveBeenCalledWith({
+      videoId: "dQw4w9WgXcQ",
+      startSeconds: 50,
+    });
+  });
+
+  it("after the track ends it plays from the top, not past the end", () => {
+    const player = looping();
+    ytBgm.playSequence("dQw4w9WgXcQ", 0, true);
+    vi.advanceTimersByTime(100_400);
+    player.seekTo.mockClear();
+
+    ctl.onStateChange(PS.ENDED, player);
+    ctl.onStateChange(PS.PLAYING, player);
+
+    expect(player.seekTo.mock.calls).toEqual([[0, true]]);
+  });
+
+  it("counts across the loop point, so a track that ends a moment early keeps playing", () => {
+    const player = looping();
+    ytBgm.playSequence("dQw4w9WgXcQ", 0, true);
+    vi.advanceTimersByTime(99_200);
+    player.seekTo.mockClear();
+
+    ctl.onStateChange(PS.ENDED, player);
+    ctl.onStateChange(PS.PLAYING, player);
+
+    expect(player.seekTo.mock.calls).toEqual([[0, true]]);
+  });
+
+  it("a track that does not loop is not wrapped", () => {
+    const player = looping();
+    ytBgm.playSequence("dQw4w9WgXcQ", 250, false);
+    expect(player.loadVideoById).toHaveBeenCalledWith({
+      videoId: "dQw4w9WgXcQ",
+      startSeconds: 250,
+    });
+  });
+
+  it("the previous video's length is not used for a new one", () => {
+    const player = looping({ getVideoData: vi.fn(() => ({ video_id: "aaaaaaaaaaa" })) });
+    ytBgm.playSequence("dQw4w9WgXcQ", 250, true);
+    expect(player.loadVideoById).toHaveBeenCalledWith({
+      videoId: "dQw4w9WgXcQ",
+      startSeconds: 250,
+    });
   });
 });
 
