@@ -23,7 +23,7 @@ them), so the builder can splat optional slots without filtering.
 
 from dataclasses import dataclass, field
 
-__all__ = ["ActionContext", "ActionContextBuilder", "build_context"]
+__all__ = ["ActionContext", "ActionContextBuilder", "build_context", "build_contexts"]
 
 
 @dataclass
@@ -84,30 +84,40 @@ class ActionContextBuilder:
         Returns:
             ActionContext: providers in canonical dispatch order.
         """
+        (context,) = self.build_many(
+            actor,
+            (action_type,),
+            raw_string=raw_string,
+            targets=targets,
+            trace_id=trace_id,
+            callertype=callertype,
+        )
+        return context
+
+    def build_many(
+        self, actor, action_types, raw_string="", targets=(), trace_id="", callertype=None
+    ):
+        """Return one :class:`ActionContext` per action type, in the same order.
+
+        Each context equals what :meth:`build` returns for that type. The
+        actor's states, equipment and room are read once for the whole list,
+        so asking about every registered action costs one room read.
+
+        Args:
+            actor (Actor): the acting entity.
+            action_types (iterable): action types, as :meth:`build` takes one.
+            raw_string, targets, trace_id, callertype: as for :meth:`build`.
+
+        Returns:
+            list: :class:`ActionContext` objects, one per entry of ``action_types``.
+        """
+        from .registry import rule_registry
+
         effective = actor.effective
         location = actor.location
-        targets = list(targets)
         account = getattr(actor, "account", None)
-
-        handler = (
-            getattr(action_type, "__primary_handler__", None) if action_type is not None else None
-        )
-
-        actor_providers = []
-        if account is not None:
-            if handler is not None:
-                try:
-                    if isinstance(account, handler) and effective is not account:
-                        actor_providers.append(account)
-                except TypeError:
-                    pass
-            elif callertype == "account":
-                actor_providers.append(account)
-        actor_providers.append(effective)
-
-        ordered = [
-            *actor.state_objects,
-            *actor_providers,
+        states = list(actor.state_objects)
+        surroundings = [
             *actor.equipped_items,
             location,
             *self._location_providers(location),
@@ -115,17 +125,45 @@ class ActionContextBuilder:
             *self._room_contents(location),
         ]
 
-        providers = self._dedupe(ordered)
-        if action_type is not None:
-            from .registry import rule_registry
+        contexts = []
+        for action_type in action_types:
+            ordered = [
+                *states,
+                *self._actor_providers(account, effective, action_type, callertype),
+                *surroundings,
+            ]
+            providers = self._dedupe(ordered)
+            if action_type is not None:
+                providers = [p for p in providers if rule_registry.responds(type(p), action_type)]
+            contexts.append(
+                ActionContext(
+                    providers=providers,
+                    actor=actor,
+                    raw_string=raw_string,
+                    trace_id=trace_id,
+                )
+            )
+        return contexts
 
-            providers = [p for p in providers if rule_registry.responds(type(p), action_type)]
-        return ActionContext(
-            providers=providers,
-            actor=actor,
-            raw_string=raw_string,
-            trace_id=trace_id,
+    @staticmethod
+    def _actor_providers(account, effective, action_type, callertype):
+        """The actor's own providers: ``effective``, preceded by the account when
+        the action type's primary handler (or a legacy account caller) wants it."""
+        handler = (
+            getattr(action_type, "__primary_handler__", None) if action_type is not None else None
         )
+        providers = []
+        if account is not None:
+            if handler is not None:
+                try:
+                    if isinstance(account, handler) and effective is not account:
+                        providers.append(account)
+                except TypeError:
+                    pass
+            elif callertype == "account":
+                providers.append(account)
+        providers.append(effective)
+        return providers
 
     @staticmethod
     def _location_providers(location):
@@ -179,4 +217,6 @@ class ActionContextBuilder:
 
 
 #: shared builder instance
-build_context = ActionContextBuilder().build
+_builder = ActionContextBuilder()
+build_context = _builder.build
+build_contexts = _builder.build_many

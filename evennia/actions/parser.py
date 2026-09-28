@@ -42,6 +42,7 @@ __all__ = [
     "NoMatchAction",
     "LoginStartAction",
     "DynamicVerbResolver",
+    "reachable_actions",
 ]
 
 #: Maximum suggestions offered on a no-match (prefix candidates + fuzzy).
@@ -381,13 +382,48 @@ def _verb_reachable(action_cls, actor) -> bool:
         bool: whether the verb may be offered to this actor.
     """
     from .context import build_context
-    from .engine import RuleEngine
-    from .registry import rule_registry
 
     try:
         context = build_context(actor, action_type=action_cls)
     except Exception:
         return False
+    return _context_reachable(context, action_cls, actor)
+
+
+def reachable_actions(action_classes, actor) -> list:
+    """The action classes whose verbs may be offered to ``actor``.
+
+    Gives the same answer as :func:`_verb_reachable` for each class, but reads
+    the actor's states, equipment and room once for the whole list.
+
+    Args:
+        action_classes (iterable): candidate :class:`~evennia.actions.action.Action`
+            subclasses.
+        actor: the asking actor.
+
+    Returns:
+        list: the reachable classes, in input order. Empty when the provider
+        context cannot be built for ``actor`` (fail closed).
+    """
+    from .context import build_contexts
+
+    action_classes = list(action_classes)
+    try:
+        contexts = build_contexts(actor, action_classes)
+    except Exception:
+        return []
+    return [
+        action_cls
+        for action_cls, context in zip(action_classes, contexts)
+        if _context_reachable(context, action_cls, actor)
+    ]
+
+
+def _context_reachable(context, action_cls, actor) -> bool:
+    """The :func:`_verb_reachable` test over an already-built context."""
+    from .engine import RuleEngine
+    from .registry import rule_registry
+
     gated = False
     for provider in context.providers:
         for spec in rule_registry.rules_for(type(provider), action_cls, "carry_out"):

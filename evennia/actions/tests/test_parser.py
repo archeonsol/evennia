@@ -14,7 +14,13 @@ from typing import Literal
 
 from evennia.actions.action import Action, GameObject
 from evennia.actions.exceptions import AmbiguousTarget, ParseError
-from evennia.actions.parser import ActionParser, NoMatchAction, ParseResult
+from evennia.actions.parser import (
+    ActionParser,
+    NoMatchAction,
+    ParseResult,
+    _verb_reachable,
+    reachable_actions,
+)
 from evennia.actions.predicate import HasCapability
 from evennia.actions.registry import ActionRegistry
 from evennia.actions.result import CLAIM
@@ -604,6 +610,58 @@ class TestGatedSuggestions(unittest.TestCase):
         res = _gated_parser().parse("@dgi", _Obj("husk"))
         self.assertIsInstance(res.action, NoMatchAction)
         self.assertEqual(res.action.suggestions, [])
+
+
+class _Kiosk:
+    """A room object that carries an ungated way to dig."""
+
+    @rule(Dig, phase="carry_out")
+    def carry_out_dig(self, action, actor):
+        return CLAIM
+
+
+class _CountingRoom:
+    """A room that counts how often its contents are read."""
+
+    def __init__(self, contents):
+        self._contents = list(contents)
+        self.reads = 0
+
+    @property
+    def contents(self):
+        self.reads += 1
+        return list(self._contents)
+
+
+class TestReachableActions(unittest.TestCase):
+    """The batch form gives the per-verb answer while reading the room once."""
+
+    _CLASSES = (Dig, Wave, Ping)
+
+    def _assert_parity(self, actor):
+        expected = [cls for cls in self._CLASSES if _verb_reachable(cls, actor)]
+        self.assertEqual(reachable_actions(self._CLASSES, actor), expected)
+
+    def test_matches_per_verb_answer_for_a_player(self):
+        self._assert_parity(_gated_actor(perms=("Player",)))
+
+    def test_matches_per_verb_answer_for_a_builder(self):
+        self._assert_parity(_gated_actor(perms=("engine.world.build",)))
+
+    def test_room_contents_open_a_gated_verb(self):
+        actor = _gated_actor(perms=("Player",))
+        actor.location = _CountingRoom([_Kiosk()])
+        self._assert_parity(actor)
+        self.assertIn(Dig, reachable_actions(self._CLASSES, actor))
+
+    def test_reads_the_room_once(self):
+        actor = _gated_actor(perms=("Player",))
+        actor.location = _CountingRoom([_Kiosk()])
+        reachable_actions(self._CLASSES, actor)
+        self.assertEqual(actor.location.reads, 1)
+
+    def test_unshaped_actor_fails_closed(self):
+        self.assertEqual(reachable_actions(self._CLASSES, _Obj("husk")), [])
 
 
 class TestPrefixSuggestions(unittest.TestCase):
