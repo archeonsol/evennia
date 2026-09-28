@@ -87,61 +87,68 @@
 </script>
 
 <div class="helpp" role="region" aria-label="Help">
+  <!-- The panel's own command line: a prompt and a field, then its commands. -->
   <div class="hd">
-    <button class="nav" onclick={() => help.back()} disabled={!help.canBack} aria-label="Back" title="Back">‹</button>
-    <button class="nav" onclick={() => help.forward()} disabled={!help.canForward} aria-label="Forward" title="Forward">›</button>
-    <button class="nav" onclick={() => go("")} aria-label="All topics" title="All topics">≡</button>
-    <input
-      class="search"
-      bind:value={query}
-      onkeydown={onSearchKey}
-      placeholder="Search help, or type a topic…"
-      aria-label="Search help"
-    />
+    <label class="line">
+      <span class="prompt" aria-hidden="true">HELP&gt;</span>
+      <input
+        class="search sh-field sh-placeholder"
+        bind:value={query}
+        onkeydown={onSearchKey}
+        placeholder="Search or type a topic"
+        aria-label="Search help"
+      />
+    </label>
+    <span class="cmds">
+      <button class="nav sh-cmd" onclick={() => help.back()} disabled={!help.canBack} aria-label="Back">Back</button>
+      <button class="nav sh-cmd" onclick={() => help.forward()} disabled={!help.canForward} aria-label="Forward">Forward</button>
+      <button class="nav sh-cmd" onclick={() => go("")} aria-label="All topics">Topics</button>
+    </span>
   </div>
   {#if help.error}<p class="err" role="alert">{help.error}</p>{/if}
 
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="body" bind:this={body} onclick={onBodyClick} aria-live="polite" aria-busy={help.loading}>
     {#if !view}
-      <p class="empty">{help.loading ? "Loading help…" : "Type a topic above, or press ≡ for every topic."}</p>
+      <p class="empty">{help.loading ? "Loading help" : "Search above, or choose Topics for every topic."}</p>
     {:else if view.kind === "index"}
       <p class="lead">
-        New here? Start with <button class="crumb" onclick={() => go("newbie")}>help newbie</button>. To read a
-        syntax line, see <button class="crumb" onclick={() => go("syntax")}>help syntax</button>.
+        Start with <button class="ref" onclick={() => go("newbie")}>help newbie</button>. How to read a syntax
+        line: <button class="ref" onclick={() => go("syntax")}>help syntax</button>.
       </p>
       {#each view.categories ?? [] as cat (cat.name)}
         <section class="cat">
           <button class="catname" onclick={() => go(`category ${cat.name.toLowerCase()}`)}>{cat.name}</button>
-          <div class="chips">
+          <div class="topics">
             {#each cat.topics as t (t.key)}
-              <button class="chip" title={helpPlain(t.summary)} onclick={() => go(t.key)}>{t.key}</button>
+              <button class="topic" title={helpPlain(t.summary)} onclick={() => go(t.key)}>{t.key}</button>
             {/each}
           </div>
         </section>
       {/each}
     {:else if view.kind === "category"}
-      <div class="crumbs"><button class="crumb" onclick={() => go("")}>Help</button> › <span>{view.category}</span></div>
+      <div class="crumbs"><button class="crumb" onclick={() => go("")}>Help</button><span class="sep" aria-hidden="true">/</span><span>{view.category}</span></div>
       <h2 class="title">{view.category}</h2>
       <div class="rows">
         {#each view.topics ?? [] as t (t.key)}
-          <button class="row" onclick={() => go(t.key)}>
+          <button class="row sh-row" onclick={() => go(t.key)}>
             <span class="k">{t.key}</span><span class="s">{helpPlain(t.summary)}</span>
           </button>
         {/each}
       </div>
     {:else if (view.kind === "topic" || view.kind === "section") && topic}
       <div class="crumbs">
-        <button class="crumb" onclick={() => go("")}>Help</button> ›
-        <button class="crumb" onclick={() => go(`category ${topic.category.toLowerCase()}`)}>{topic.category}</button> ›
+        <button class="crumb" onclick={() => go("")}>Help</button><span class="sep" aria-hidden="true">/</span>
+        <button class="crumb" onclick={() => go(`category ${topic.category.toLowerCase()}`)}>{topic.category}</button><span class="sep" aria-hidden="true">/</span>
         <span>{cap(topic.key)}</span>
       </div>
       <h2 class="title">{cap(topic.key)}</h2>
       <p class="summary">{@html helpTextToHtml(topic.summary)}</p>
       {#if topic.sections.length >= 4}
-        <nav class="toc chips" aria-label="Sections">
+        <nav class="toc" aria-label="Sections">
+          <span class="toclbl" aria-hidden="true">Sections</span>
           {#each topic.sections as s (s.title)}
-            <button class="chip" class:on={s.title === view.section} onclick={() => jump(s.title)}>{s.title}</button>
+            <button class="topic" class:on={s.title === view.section} onclick={() => jump(s.title)}>{s.title}</button>
           {/each}
         </nav>
       {/if}
@@ -156,19 +163,19 @@
       {#if view.kind === "not_found"}
         <p class="lead">No help topic matches “{view.query}”.</p>
       {:else}
-        <p class="lead">{plural(view.hits?.length ?? 0, "match")} for “{view.query}”. Press Enter to open the best one.</p>
+        <p class="lead">{plural(view.hits?.length ?? 0, "match")} for “{view.query}”. Enter opens the first.</p>
       {/if}
       {#if view.suggestions?.length}
-        <div class="chips">
-          <span class="dim">Did you mean</span>
+        <div class="suggest">
+          <span class="toclbl">Did you mean</span>
           {#each view.suggestions as s (s.query)}
-            <button class="chip" onclick={() => go(s.query)}>{s.label}</button>
+            <button class="topic" onclick={() => go(s.query)}>{s.label}</button>
           {/each}
         </div>
       {/if}
       <div class="rows">
         {#each view.hits ?? [] as h (h.query)}
-          <button class="row" onclick={() => go(h.query)}>
+          <button class="row sh-row" onclick={() => go(h.query)}>
             <span class="k">{h.query}</span><span class="s">{h.snippet}</span>
           </button>
         {/each}
@@ -178,36 +185,71 @@
 </div>
 
 <style>
+  /* The console grammar the rest of the shell uses (styles/shell.css): a
+     prompt on a ruled line, bracketed commands, ruled rows, section heads on a
+     rule. No boxes, chips or cards: help is text, so it reads as text. */
   .helpp { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
-  .hd { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
-  .nav { background: none; border: 1px solid var(--border-bright); color: var(--accent-bright); font-family: inherit; font-size: 0.85rem; min-width: 26px; min-height: 26px; cursor: pointer; }
-  .nav:disabled { opacity: 0.35; cursor: default; }
-  .search { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg); font-family: inherit; font-size: 0.8rem; padding: 4px 7px; min-height: 26px; }
-  .search:focus { outline: none; border-color: var(--accent); }
+  .hd {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+    padding: 6px 10px 5px; border-bottom: 1px solid var(--border-bright); flex: 0 0 auto;
+  }
+  .line { flex: 1 1 18ch; min-width: 0; display: flex; align-items: center; gap: 0.8ch; }
+  .prompt { color: var(--accent-bright); font-size: 0.78rem; letter-spacing: 0.08em; flex: none; }
+  .search { flex: 1; min-width: 0; }
+  .search:focus { outline: none; }
+  .cmds { display: flex; flex: none; margin-left: auto; }
   .err { margin: 0; padding: 4px 10px; font-size: 0.74rem; color: var(--alert); border-bottom: 1px solid var(--border); }
   .body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 16px; line-height: 1.5; font-size: 0.86rem; color: var(--fg); }
-  .empty, .dim { color: var(--fg-faint); font-style: italic; }
+  .empty { color: var(--fg-faint); letter-spacing: 0.08em; }
   .lead { color: var(--fg-dim); margin: 0 0 10px; }
-  .crumbs { color: var(--fg-faint); font-size: 0.7rem; letter-spacing: 0.06em; margin-bottom: 2px; }
-  .crumb { background: none; border: none; padding: 0; color: var(--accent-bright); font-family: inherit; font-size: inherit; cursor: pointer; text-decoration: underline; }
-  .title { margin: 2px 0 4px; color: var(--gold); font-size: 1.05rem; letter-spacing: 0.06em; font-weight: 600; }
+  .ref, .crumb {
+    background: none; border: 0; padding: 0; font: inherit; color: var(--accent-bright); cursor: pointer;
+    text-decoration: underline dotted; text-underline-offset: 3px;
+  }
+  .ref:hover, .ref:focus-visible, .crumb:hover, .crumb:focus-visible { background: var(--accent); color: var(--bg-deep); text-decoration: none; }
+  .crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.8ch; color: var(--fg-faint); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 2px; }
+  .crumbs .crumb { color: var(--fg-dim); text-decoration: none; letter-spacing: inherit; text-transform: inherit; }
+  .sep { color: var(--border-bright); }
+  .title { margin: 2px 0 4px; color: var(--gold); font-size: 0.95rem; letter-spacing: 0.16em; font-weight: normal; text-transform: uppercase; }
   .summary { margin: 0 0 8px; color: var(--fg-dim); }
-  .cat { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-top: 1px solid var(--border); }
-  .catname { align-self: flex-start; background: none; border: none; padding: 0; color: var(--accent-bright); font-family: inherit; text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.72rem; cursor: pointer; }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-  .toc { margin: 4px 0 10px; }
-  .chip { background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.72rem; padding: 1px 8px; min-height: 24px; cursor: pointer; }
-  .chip:hover, .chip.on { color: var(--accent-bright); border-color: var(--accent); }
-  .rows { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-  .row { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 6px 9px; background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--border-bright); color: var(--fg); font-family: inherit; cursor: pointer; }
-  .row:hover { border-color: var(--accent); }
-  .k { color: var(--accent-bright); font-size: 0.78rem; }
+
+  /* The index is a help listing, as a MUD prints one: each category a head on
+     a rule, its topics set in columns underneath. */
+  .cat { padding: 4px 0 8px; }
+  .catname {
+    display: flex; align-items: center; gap: 1ch; width: 100%; margin: 4px 0 3px; padding: 0;
+    background: none; border: 0; font: inherit; font-size: 0.66rem; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--gold); text-align: left; cursor: pointer; white-space: nowrap;
+  }
+  .catname::after { content: ""; flex: 1; height: 1px; background: linear-gradient(to right, var(--border-bright), transparent); }
+  .catname:hover, .catname:focus-visible { color: var(--accent-bright); }
+  .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(21ch, 1fr)); gap: 0 1ch; }
+  .topic {
+    background: none; border: 0; padding: 1px 0.6ch; min-height: 22px; font: inherit; font-size: 0.8rem;
+    color: var(--fg-dim); text-align: left; cursor: pointer; overflow-wrap: anywhere;
+  }
+  .topic:hover, .topic:focus-visible, .topic.on { background: var(--accent); color: var(--bg-deep); }
+  .toc, .suggest { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.4ch; margin: 4px 0 10px; }
+  .toclbl { color: var(--fg-faint); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; margin-right: 0.8ch; }
+
+  .rows { display: flex; flex-direction: column; margin-top: 6px; border-top: 1px solid var(--border); }
+  .rows:empty { display: none; }
+  .k { color: var(--accent-bright); font-size: 0.8rem; }
   .s { color: var(--fg-dim); font-size: 0.76rem; }
-  .sec { margin-top: 12px; padding-left: 8px; border-left: 2px solid var(--border); scroll-margin-top: 6px; transition: border-color 0.4s, background 0.4s; }
-  .sec.focus { border-left-color: var(--accent); }
-  .sec:global(.flash) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-  .sec h3 { margin: 0 0 4px; color: var(--accent-bright); font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; }
+
+  /* A section is a head on a rule and its text. The section a page was opened
+     at carries the list marker; arriving at it lights its head for a moment. */
+  .sec { margin-top: 14px; scroll-margin-top: 6px; }
+  .sec h3 {
+    position: relative; display: flex; align-items: center; gap: 1ch; margin: 0 0 4px; padding: 0 0.5ch 0 2.2ch;
+    color: var(--accent-bright); font-size: 0.7rem; font-weight: normal; letter-spacing: 0.2em; text-transform: uppercase;
+  }
+  .sec h3::before { content: "\25B8"; content: "\25B8" / ""; position: absolute; left: 0.3ch; color: transparent; }
+  .sec h3::after { content: ""; flex: 1; height: 1px; background: linear-gradient(to right, var(--border-bright), transparent); }
+  .sec.focus h3::before { color: var(--accent-bright); }
+  .sec:global(.flash) h3 { background: var(--accent); color: var(--bg-deep); }
+  .sec:global(.flash) h3::before { color: var(--bg-deep); }
   .text { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .body :global(a.help-link) { color: var(--accent-bright); text-decoration: underline; cursor: pointer; }
-  :global([data-calm]) .sec { transition: none; }
+  .body :global(a.help-link) { color: var(--accent-bright); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+  .body :global(a.help-link:hover), .body :global(a.help-link:focus-visible) { background: var(--accent); color: var(--bg-deep); text-decoration: none; }
 </style>

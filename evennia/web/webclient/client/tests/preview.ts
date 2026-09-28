@@ -3,6 +3,7 @@
 //
 //   npx vite --port 5300   then open /tests/preview.html
 //   ?panel=tickets  opens My Tickets; ?theme=<id> picks a theme.
+//   ?help=<query>   opens the help panel on a recorded page ("" is the index).
 //
 // Nothing here is under test; the browser suites live beside it.
 
@@ -20,6 +21,8 @@ import { session } from "../src/lib/session.svelte";
 import { settings } from "../src/lib/settings.svelte";
 import { dock } from "../src/lib/dock.svelte";
 import { toasts } from "../src/lib/toasts.svelte";
+import { help, type HelpPage } from "../src/lib/help.svelte";
+import helpFixtures from "./help-fixtures.json";
 
 const params = new URLSearchParams(location.search);
 try {
@@ -44,7 +47,13 @@ const thread = {
     { origin: "staff", sender: "Mira", text: "Fixed the lock. Try it now.", ts: now - 240 },
   ],
 };
-(connection as any).request = async (_ns: string, action: string) => {
+const helpViews = helpFixtures.views as Record<string, HelpPage>;
+const helpSearches = helpFixtures.searches as Record<string, HelpPage>;
+(connection as any).request = async (_ns: string, action: string, data?: any) => {
+  const q = String(data?.query ?? "");
+  if (action === "help_view") return helpViews[q] ?? { kind: "not_found", query: q, hits: [], suggestions: [] };
+  if (action === "help_search") return helpSearches[q] ?? { kind: "search", query: q, hits: [] };
+  if (action === "help_prefs") return { panel: true };
   if (action === "my_tickets") return { tickets: mine };
   if (action === "my_ticket") return thread;
   if (action === "ticket_list") return { tickets: [] };
@@ -94,6 +103,13 @@ setTimeout(() => {
   if (theme) document.documentElement.setAttribute("data-theme", theme);
   const panel = params.get("panel");
   if (panel) setTimeout(() => dock.openView(panel), 200);
+  const helpQuery = params.get("help");
+  if (helpQuery !== null) {
+    setTimeout(() => {
+      dock.openHelp();
+      void help.open(helpQuery);
+    }, 250);
+  }
   if (params.has("thread")) {
     setTimeout(() => document.querySelector<HTMLElement>(".mine .sh-row")?.click(), 700);
   }

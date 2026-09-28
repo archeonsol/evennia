@@ -77,15 +77,15 @@ async function run(): Promise<void> {
   check("index lists categories in reading order", cats[0] === "General" && cats.includes("Lore"), String(cats));
   check("index hides staff categories", !cats.includes("Admin"));
 
-  // A topic chip opens the topic, over the RPC.
-  const chip = $$(".chip").find((b) => b.textContent === "inventory");
-  chip?.click();
+  // A topic in the index opens the topic, over the RPC.
+  const entry = $$(".topics .topic").find((b) => b.textContent === "inventory");
+  entry?.click();
   await settle();
-  check("chip asks for the topic", views_of("help_view").at(-1) === "inventory");
+  check("an index entry asks for the topic", views_of("help_view").at(-1) === "inventory");
   check("topic title shows", $(".title")?.textContent === "Inventory", $(".title")?.textContent ?? "");
   const secs = $$(".sec h3").map((h) => h.textContent);
   check("every section renders", secs.includes("Wear") && secs.includes("Frisk"), String(secs));
-  check("long topics get a section list", $$(".toc .chip").length === secs.length);
+  check("long topics get a section list", $$(".toc .topic").length === secs.length);
   check("headings are not printed as # lines", !$(".body")!.textContent!.includes("# wear"));
 
   // A help reference in the text is an in-panel link.
@@ -131,7 +131,7 @@ async function run(): Promise<void> {
   // Not found offers close spellings.
   help.show(views["wera"]);
   await settle();
-  check("not found suggests close spellings", $$(".chip").some((c) => c.textContent === "wear"));
+  check("not found suggests close spellings", $$(".suggest .topic").some((c) => c.textContent === "wear"));
 
   // The pose example keeps its lines; prose reflows.
   help.show(views["roleplaying"]);
