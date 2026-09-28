@@ -9,6 +9,7 @@
   import { createLogVirtualizer, estimateLinePx, type LogVirtualizer } from "../lib/logvirtual";
   import { logReveal } from "../lib/logreveal";
   import { commandInput, isTypingTarget } from "../lib/focus";
+  import { gridFor, screenSize } from "../lib/screensize";
   import { onMount, untrack } from "svelte";
   import type { Virtualizer } from "@tanstack/virtual-core";
 
@@ -23,6 +24,10 @@
 
   let el = $state<HTMLDivElement | null>(null);
   let spacer = $state<HTMLDivElement | null>(null);
+  let cellProbe = $state<HTMLDivElement | null>(null);
+  let cellRun = $state<HTMLSpanElement | null>(null);
+  //: Characters in the measuring run; more of them average out sub-pixel advances.
+  const PROBE_CELLS = 50;
   // The scrollback can hold thousands of lines; only the rows around the
   // viewport exist as DOM (see lib/logvirtual.ts). `virtualizer` is a class
   // instance, so it is not deep-proxied; assigning it is the reactive part.
@@ -110,6 +115,33 @@
     });
   }
 
+  // Following the newest line is this log's decision, not the virtualizer's.
+  //
+  // The virtualizer's own followOnAppend asks "is the reader at the end?" from
+  // the offset its last scroll *event* reported. Server messages arrive as
+  // separate socket frames, so a second one routinely lands before the event
+  // for the first follow has been delivered: the stale offset reads as the
+  // reader having scrolled away, the follow is skipped, and the log never
+  // follows again. `pinned` is read from the reader's own input (wheel, and
+  // scroll events judged by pinAfterScroll), so while it holds, every append
+  // and every re-measure (a line typing in, an image loading) ends at the
+  // bottom. Coalesced to one write per microtask, which still lands before
+  // the next paint.
+  let followQueued = false;
+  function follow(): void {
+    if (followQueued) return;
+    followQueued = true;
+    queueMicrotask(() => {
+      followQueued = false;
+      const v = virtualizer;
+      if (!v || !el || !el.clientHeight || !pinned) return;
+      // A search holds its match in view; following would scroll past it.
+      if (logview.searchOpen && logview.search.trim()) return;
+      syncSpacer(v);
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) v.scrollToEnd({ behavior: "auto" });
+    });
+  }
+
   function measureLine(node: HTMLElement) {
     virtualizer?.measureElement(node);
     return { destroy: sweepLines };
@@ -141,6 +173,7 @@
         onChange: (v) => {
           bumpRev();
           syncSpacer(v);
+          follow();
         },
         onWrite: (top) => {
           lastTop = top;
@@ -185,6 +218,7 @@
         started = true;
         v.scrollToEnd({ behavior: "auto" });
       }
+      follow();
       rev++;
     });
   });
@@ -304,6 +338,38 @@
     return () => ro.disconnect();
   });
 
+  // Tell the server how many characters this log shows, as a telnet client's
+  // NAWS does (lib/screensize.ts). The measuring line sits in the log itself,
+  // so it has the log's font, size and line height; it is observed along with
+  // the log, so a font change or the timestamps toggle re-measures as surely
+  // as a resize does. A hidden panel measures 0x0 and reports nothing.
+  function measureGrid(): void {
+    const node = el;
+    const probe = cellProbe;
+    const run = cellRun;
+    if (!node || !probe || !run) return;
+    const style = getComputedStyle(node);
+    const px = (v: string) => Number.parseFloat(v) || 0;
+    const width = node.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
+    const height = node.clientHeight - px(style.paddingTop) - px(style.paddingBottom);
+    // A timestamp takes the start of every line, so it is not room for text.
+    const stamp = probe.querySelector<HTMLElement>(".ts");
+    const stampWidth = stamp ? stamp.getBoundingClientRect().width + px(getComputedStyle(stamp).marginRight) : 0;
+    const cell = { width: run.getBoundingClientRect().width / PROBE_CELLS, height: probe.getBoundingClientRect().height };
+    screenSize.update(gridFor({ width: width - stampWidth, height }, cell));
+  }
+
+  $effect(() => {
+    const node = el;
+    const probe = cellProbe;
+    if (!node || !probe) return;
+    const ro = new ResizeObserver(() => measureGrid());
+    ro.observe(node);
+    ro.observe(probe);
+    measureGrid();
+    return () => ro.disconnect();
+  });
+
   function pad(n: number) {
     return String(n).padStart(2, "0");
   }
@@ -409,20 +475,19 @@
     <div class="chips">
       {#each CATS as c}
         <button
-          class="chip"
-          class:off={!logview.filters[c.id]}
+          class="sh-toggle chip"
           aria-pressed={!!logview.filters[c.id]}
           onclick={() => logview.toggle(c.id)}
           title="show {c.label} lines"
-        ><span class="lamp" aria-hidden="true"></span>{c.label}</button>
+        >{c.label}</button>
       {/each}
     </div>
-    <button class="tool" class:on={logview.timestamps} onclick={() => (logview.timestamps = !logview.timestamps)}
+    <button class="sh-cmd tool" onclick={() => (logview.timestamps = !logview.timestamps)}
       title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>Times</button>
-    <button class="tool" class:on={logview.searchOpen} onclick={() => (logview.searchOpen = !logview.searchOpen)}
+    <button class="sh-cmd tool" onclick={() => (logview.searchOpen = !logview.searchOpen)}
       title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>Search</button>
     <div class="save" bind:this={saveEl}>
-      <button class="tool" class:on={saveOpen} onclick={() => (saveOpen = !saveOpen)}
+      <button class="sh-cmd tool" onclick={() => (saveOpen = !saveOpen)}
         title="save log" aria-label="save log" aria-expanded={saveOpen}>Save</button>
       {#if saveOpen}
         <div class="save-menu">
@@ -434,7 +499,7 @@
         </div>
       {/if}
     </div>
-    <button class="tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">Clear</button>
+    <button class="sh-cmd tool" onclick={clearBuffer} title="clear buffer" aria-label="clear buffer">Clear</button>
   </div>
 
   {#if logview.searchOpen}
@@ -444,13 +509,14 @@
         bind:this={searchInput}
         bind:value={logview.search}
         onkeydown={onSearchKey}
-        placeholder="search scrollback"
+        class="sh-placeholder"
+        placeholder="Search scrollback"
         aria-label="search scrollback"
       />
       <span class="s-count">{matchIds.length ? matchPos + 1 : 0}/{matchIds.length}</span>
-      <button class="s-btn" onclick={() => step(-1)} aria-label="previous">↑</button>
-      <button class="s-btn" onclick={() => step(1)} aria-label="next">↓</button>
-      <button class="s-btn" onclick={() => (logview.searchOpen = false)} aria-label="close">×</button>
+      <button class="sh-cmd" onclick={() => step(-1)} aria-label="previous">Prev</button>
+      <button class="sh-cmd" onclick={() => step(1)} aria-label="next">Next</button>
+      <button class="sh-cmd" onclick={() => (logview.searchOpen = false)} aria-label="close">Close</button>
     </div>
   {/if}
 
@@ -469,6 +535,10 @@
     tabindex="0"
     data-focus-region="output"
   >
+    <!-- One line's worth of the log's own text, never seen: it measures a
+         character cell for the size reported to the server. -->
+    <div class="cell-probe" aria-hidden="true" bind:this={cellProbe}>{#if logview.timestamps}<span class="ts">00:00:00</span>{/if}<span
+        bind:this={cellRun}>{"0".repeat(PROBE_CELLS)}</span></div>
     <!-- The spacer holds the full scroll height; rows are positioned inside
          it. Only the virtualized window is mounted. -->
     <div class="log-spacer" bind:this={spacer} style="height: {totalSize}px">
@@ -495,7 +565,7 @@
     </div>
   </div>
   {#if !pinned && unseen > 0 && !logview.searchOpen}
-    <button class="latest" onclick={jumpToLatest}>{unseen} new line{unseen === 1 ? "" : "s"} ↓</button>
+    <button class="latest" onclick={jumpToLatest}>&#9660; {unseen} new line{unseen === 1 ? "" : "s"}</button>
   {/if}
 </div>
 
@@ -506,24 +576,7 @@
     padding: 3px 8px; border-bottom: 1px solid var(--border);
     background: var(--bg-elev); flex: 0 0 auto;
   }
-  .chips { display: flex; gap: 4px; flex: 1 1 auto; min-width: min(100%, 16rem); flex-wrap: wrap; }
-  /* Category toggles: the light shows whether that kind of line is shown. */
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg);
-    font-family: inherit; font-size: 0.72rem;
-    padding: 1px 9px 1px 7px; cursor: pointer; min-height: 24px;
-  }
-  .chip:hover { color: var(--fg); border-color: var(--accent); }
-  .lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bright); flex: 0 0 auto; }
-  .chip.off { color: var(--fg-faint); border-color: var(--border); }
-  .chip.off .lamp { background: transparent; box-shadow: none; outline: 1px solid var(--border-bright); outline-offset: -1px; }
-  .tool {
-    background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.72rem; padding: 0 9px; cursor: pointer; min-height: 24px; min-width: 24px;
-  }
-  .tool:hover, .tool.on { color: var(--accent-bright); border-color: var(--accent); }
-
+  .chips { display: flex; gap: 2px 4px; flex: 1 1 auto; min-width: min(100%, 16rem); flex-wrap: wrap; }
   .save { position: relative; display: flex; }
   .save-menu {
     position: absolute; top: calc(100% + 3px); right: 0; z-index: 20;
@@ -550,17 +603,13 @@
     color: var(--fg); font-family: inherit; font-size: 0.85rem;
   }
   .s-count { color: var(--fg-dim); font-size: 0.72rem; min-width: 3.5em; text-align: right; }
-  .s-btn {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; cursor: pointer; padding: 0 6px;
-  }
-  .s-btn:hover { color: var(--accent-bright); border-color: var(--accent); }
 
   .latest {
-    position: absolute; right: 18px; bottom: 12px; background: var(--bg-deep); border: 1px solid var(--accent);
-    color: var(--accent-bright); font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em;
+    position: absolute; right: 18px; bottom: 12px; background: var(--accent); border: 0;
+    color: var(--bg-deep); font-family: inherit; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase;
     padding: 3px 10px; min-height: 24px; cursor: pointer; z-index: 5;
   }
+  .latest:hover { background: var(--accent-bright); }
   .game-log {
     overflow-y: auto; padding: 0.7rem 1rem; line-height: var(--shell-line-height, 1.5); flex: 1;
     /* The virtualizer owns scroll anchoring (anchorTo: "end"); the browser's
@@ -572,7 +621,11 @@
     position: absolute; top: 0; left: 0; width: 100%;
     white-space: pre-wrap; word-break: break-word;
   }
-  .log-line .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }
+  .log-line .ts, .cell-probe .ts { color: var(--fg-faint); margin-right: 0.8ch; font-size: 0.82em; user-select: none; }
+  .cell-probe {
+    position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none;
+    white-space: pre; user-select: none;
+  }
   /* Category accents - only the standouts get a marker, to avoid noise. */
   .log-line[data-cat="combat"] { border-left: 2px solid var(--alert); padding-left: 7px; margin-left: -9px; }
   .log-line[data-cat="comms"] { border-left: 2px solid var(--gold); padding-left: 7px; margin-left: -9px; }

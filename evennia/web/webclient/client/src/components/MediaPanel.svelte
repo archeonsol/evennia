@@ -33,7 +33,7 @@
   <div class="np">
     <div class="hd">
       <span class="tag glow-text">Now playing</span>
-      {#if media.nowPlaying}<button class="x" onclick={() => media.stop()} aria-label="stop">×</button>{/if}
+      {#if media.nowPlaying}<button class="sh-cmd x" onclick={() => media.stop()} aria-label="stop">Stop</button>{/if}
     </div>
 
     {#if media.nowPlaying}
@@ -49,10 +49,10 @@
         {/if}
       </div>
     {:else}
-      <p class="empty">Nothing playing. The game can push audio or a YouTube link here.</p>
+      <p class="empty">Nothing playing</p>
     {/if}
     <div class="vol">
-      <span class="vglyph" aria-hidden="true">{media.volume === 0 ? "🔇" : "🔊"}</span>
+      <span class="vglyph" class:muted={media.volume === 0} aria-hidden="true">Vol</span>
       <input
         type="range" min="0" max="100" step="1" value={media.volume}
         oninput={(e) => media.setVolume(+e.currentTarget.value)}
@@ -64,7 +64,7 @@
 
   <div class="gallery">
     <div class="hd"><span class="tag glow-text">Images</span>
-      {#if media.images.length}<button class="x" onclick={() => media.clearImages()} aria-label="clear">clear</button>{/if}
+      {#if media.images.length}<button class="sh-cmd x" onclick={() => media.clearImages()} aria-label="clear">Clear</button>{/if}
     </div>
     {#if media.images.length}
       <div class="grid">
@@ -75,7 +75,7 @@
         {/each}
       </div>
     {:else}
-      <p class="empty">No images yet.</p>
+      <p class="empty">No images</p>
     {/if}
   </div>
 </div>
@@ -84,8 +84,7 @@
   .media-panel { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); overflow-y: auto; }
   .hd { display: flex; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .tag { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.72rem; }
-  .x { margin-left: auto; background: none; border: none; color: var(--fg-dim); font-family: inherit; font-size: 0.7rem; cursor: pointer; }
-  .x:hover { color: var(--accent-bright); }
+  .x { margin-left: auto; }
   .np { flex: 0 0 auto; border-bottom: 1px solid var(--accent); }
   .player { padding: 8px 10px 0; }
   .player video { width: 100%; max-height: 240px; border: 1px solid var(--border-bright); }
@@ -93,9 +92,10 @@
   .yt-note a { color: var(--accent-bright); word-break: break-all; }
   .vol { display: flex; align-items: center; gap: 8px; padding: 6px 10px 9px; }
   .vol input { flex: 1; accent-color: var(--accent); }
-  .vglyph { font-size: 0.9rem; }
+  .vglyph { color: var(--fg-dim); font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase; }
+  .vglyph.muted { color: var(--fg-faint); text-decoration: line-through; }
   .vval { color: var(--fg-dim); font-size: 0.72rem; min-width: 2em; text-align: right; }
-  .empty { color: var(--fg-faint); font-style: italic; padding: 10px; font-size: 0.78rem; }
+  .empty { color: var(--fg-faint); padding: 10px; margin: 0; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .gallery { flex: 1; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 5px; padding: 8px 10px; }
   .thumb { display: block; aspect-ratio: 1; overflow: hidden; border: 1px solid var(--border-bright); }

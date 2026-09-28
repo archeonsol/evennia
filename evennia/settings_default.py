@@ -60,6 +60,15 @@ SSL_CERTIFICATE_ISSUER = {
     "OU": "Evennia Department",
     "CN": "evennia",
 }
+# Fold output to plain ASCII for telnet clients that have not confirmed they
+# decode UTF-8. Game text is Unicode (box-drawing frames, bars, arrows), and a
+# client left in ASCII or Latin-1 mode shows each such character as replacement
+# diamonds or mojibake. The portal offers UTF-8 through telnet CHARSET, which
+# clients like Mudlet and TinTin++ accept on their own; a client that also
+# reports the UTF-8 bit in MTTS, or a player who sets `option utf-8 = on`, gets
+# Unicode too. Everyone else gets `+`, `-`, `|`, `->` and friends in its place
+# (see evennia.utils.textfold). Set False to always send Unicode as-is.
+TELNET_ASCII_FALLBACK = True
 # OOB (out-of-band) telnet communication allows Evennia to communicate
 # special commands and data with enabled Telnet clients. This is used
 # to create custom client interfaces over a telnet connection. To make
@@ -195,6 +204,19 @@ WEBSOCKET_CLIENT_ENABLED = True
 WEBSOCKET_CLIENT_PORT = 4002
 # Interface addresses to listen to. If 0.0.0.0, listen to all. Use :: for IPv6.
 WEBSOCKET_CLIENT_INTERFACE = "0.0.0.0"
+# Seconds between WebSocket pings from the Portal to each web client (0 turns
+# them off). Browsers answer a protocol ping without running page code, so this
+# keeps idle connections open through NATs and proxies that forget a silent
+# flow, and it is how the Portal notices a client that vanished without a close.
+WEBCLIENT_PING_DELAY = 20
+# Seconds with nothing at all from a web client (not even a pong) before the
+# Portal takes it to be gone and drops the link. Never less than two pings.
+WEBCLIENT_PING_TIMEOUT = 60
+# Seconds a signed-in web session outlives a dropped connection. A phone that
+# changes network or sleeps briefly reconnects into the same session: no logout
+# or login, and the output it missed is replayed. Only closing the tab, quitting,
+# or being disconnected by the server ends a session at once. 0 turns this off.
+WEBCLIENT_RESUME_GRACE = 90
 # Actual URL for webclient component to reach the websocket. You only need
 # to set this if you know you need it, like using some sort of proxy setup.
 # If given it must be on the form "ws[s]://hostname[:port]". If left at None,

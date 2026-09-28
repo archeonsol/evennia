@@ -258,6 +258,44 @@ class PortalSessionHandler(SessionHandler):
                     session, operation=PCONNSYNC, sessiondata=sessdata
                 )
 
+    def owns(self, session):
+        """
+        Whether ``session`` is the live holder of its sessid, here or queued.
+
+        Args:
+            session (PortalSession): Session to check.
+
+        Returns:
+            bool: True if the handler routes the session's sessid to it.
+
+        """
+        return self.get(session.sessid) is session or session in _CONNECTION_QUEUE
+
+    def rebind(self, old, new):
+        """
+        Move a session from one protocol object onto its replacement socket.
+
+        Used when a web client reconnects and takes over the session its last
+        socket left behind. The Server keeps its session: the sessid and the bus
+        socket incarnation stay the same, so it sees neither a disconnect nor a
+        connect, and output for that sessid now reaches ``new``. Only the socket
+        facts that changed (address, protocol flags) are synced across.
+
+        Args:
+            old (PortalSession): The protocol object that held the session.
+            new (PortalSession): The replacement, already carrying the session
+                state and ``old``'s sessid.
+
+        """
+        if self.get(old.sessid) is old:
+            self[old.sessid] = new
+        if old in _CONNECTION_QUEUE:
+            # Not yet announced to the Server: the queued connect goes out for
+            # the replacement instead.
+            _CONNECTION_QUEUE[_CONNECTION_QUEUE.index(old)] = new
+        self.bus_revision += 1
+        self.sync(new)
+
     def disconnect(self, session):
         """
         Called from portal when the connection is closed from the
@@ -278,6 +316,12 @@ class PortalSessionHandler(SessionHandler):
             # connection was already dropped before we had time
             # to forward this to the Server, so now we just remove it.
             _CONNECTION_QUEUE.remove(session)
+            return
+
+        current = self.get(session.sessid)
+        if current is not None and current is not session:
+            # A replacement socket took this sessid over (see rebind). The
+            # Server session is its session now, not this one's to end.
             return
 
         if session.sessid in self and not hasattr(self, "_disconnect_all"):
@@ -361,7 +405,7 @@ class PortalSessionHandler(SessionHandler):
         """
         if session:
             session.disconnect(reason)
-            if session.sessid in self:
+            if self.get(session.sessid) is session:
                 # in case sess.disconnect doesn't delete it
                 del self[session.sessid]
             del session

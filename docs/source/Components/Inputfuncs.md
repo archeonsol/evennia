@@ -92,6 +92,11 @@ as an outputcommand `("client_options", (), {key=value, ...})`-
  - mccp (bool): MCCP compression on/off
  - screenheight (int): Screen height in lines
  - screenwidth (int): Screen width in characters
+
+   Both sizes are held to 1-65535, the range a telnet client's NAWS report can
+   carry. The default web client sends them itself: the columns and rows its
+   output pane shows, on connect and again after each resize, so server-side
+   layout (help, tables, headers, EvMore paging) fits the window.
  - inputdebug (bool): Debug input functions
  - nomarkup (bool): Strip all text tags
  - raw (bool): Leave text tags unparsed 

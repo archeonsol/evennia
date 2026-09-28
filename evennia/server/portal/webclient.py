@@ -35,7 +35,9 @@ from the command line and interprets it as an Evennia Command: `["text", ["look"
 
 import asyncio
 import json
+import secrets
 import time
+import weakref
 from collections import deque
 
 from django.conf import settings
@@ -48,30 +50,84 @@ from evennia.server.portal.ws_protocol import (
     HandshakeDenied,
     WSProtocolBase,
 )
-from evennia.utils import clock
+from evennia.utils import clock, logger
 from evennia.utils.utils import class_from_module, mod_import
 
 _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 
-# --- Resumable sessions ---
-# Each outbound JSON frame is stamped with a monotonic ``s`` (seq). On an unclean
-# close we stash the recent buffer keyed by the client's resume token for a short
-# grace window; when the client reconnects and presents the token + its last seen
-# seq in `hello`, we replay the frames it missed, so a brief blip doesn't drop
-# lines. State events are idempotent, so the parallel fresh-login pushes are safe.
+# --- Session continuity ---
+# A socket and a game session are different things. A phone that changes
+# network, sleeps, or loses its radio for a few seconds drops the socket, but
+# the player has not left. So only an explicit end finishes the session: the
+# browser closing with 1000/1001 (a closed tab, a navigation), the client's
+# `websocket_close`, or the Server disconnecting it. Any other loss *holds* the
+# session: the Portal keeps it under its sessid for WEBCLIENT_RESUME_GRACE
+# seconds, still recording what the Server sends, and the Server is not told.
+# A reconnect that proves it is the same tab of the same account takes the
+# session over in place (same sessid, same Server session, no logout or login
+# hooks) and is replayed what it missed. Only an unclaimed hold reaches the
+# Server as a disconnect.
 #
-# The stash is keyed on a token the *client* chooses, so it is bound to the
-# authenticated uid at stash time and only replayed to a connection carrying the
-# same uid. Without that, holding someone's token would be enough to read the
-# tail of their session.
+# The proof has two parts. The browser's signed-in account (the Django session
+# the handshake presents) must be the account the held session is logged in
+# as, so no one can claim, or read the output of, another account's session.
+# And the client must present the resume token the Portal issued to that
+# connection in its last `hello` reply, because an account alone cannot tell
+# two tabs apart. The token lives in the tab's sessionStorage and is replaced
+# on every takeover, so a copied tab cannot bounce a session between windows.
+#
+# Every outbound JSON frame is stamped with a monotonic ``s`` (seq) and kept in
+# a bounded per-session buffer; the client presents the last seq it applied and
+# is sent what came after.
 RESUME_BUFFER_MAX = 400  # frames kept per connection
-RESUME_GRACE_SECONDS = 90  # how long a stash survives a disconnect
-#: Hard cap on stashed connections. Each stash costs up to RESUME_BUFFER_MAX
-#: frames for RESUME_GRACE_SECONDS, so an open/close loop with fresh tokens is a
-#: memory-growth lever unless the total is bounded.
-RESUME_STASH_MAX = 512
-# token -> {"frames": [(seq, str)], "last_seq": int, "deadline": float, "uid": int|None}
-_RESUME_STASH = {}
+#: Default seconds a dropped session is held (``settings.WEBCLIENT_RESUME_GRACE``).
+RESUME_GRACE_SECONDS = 90
+#: Hard cap on sessions held at once. Each keeps a Server session and up to
+#: RESUME_BUFFER_MAX frames alive, so the oldest hold ends first past this.
+RESUME_HOLD_MAX = 512
+#: How long an Azaban socket may stay silent before its session starts without
+#: a resume. The shell sends `hello` as soon as the socket opens.
+HELLO_WAIT_SECONDS = 5
+#: Default seconds between protocol pings (``settings.WEBCLIENT_PING_DELAY``).
+PING_DELAY_SECONDS = 20
+#: Default seconds of silence after which a peer is taken to be gone
+#: (``settings.WEBCLIENT_PING_TIMEOUT``). Never less than two ping intervals.
+PING_TIMEOUT_SECONDS = 60
+#: Close code sent to a socket whose session another connection took over.
+CLOSE_SUPERSEDED = 4001
+#: resume token -> the WebSocketClient that owns it, live or held.
+_RESUMABLE = {}
+#: Open sockets the keepalive pings.
+_LIVE_SOCKETS = weakref.WeakSet()
+#: The Portal-wide keepalive loop, started with the first socket.
+_KEEPALIVE = None
+
+#: Session state that belongs to the game session rather than to its socket, and
+#: so moves across when a reconnect takes a held session over. Socket facts
+#: (address, csessid, nonce, headers, fingerprints) stay the new socket's own.
+_SESSION_STATE = (
+    "sessid",
+    "suid",
+    "uid",
+    "uname",
+    "logged_in",
+    "bid",
+    "conn_time",
+    "cmd_last",
+    "cmd_last_visible",
+    "cmd_total",
+    "server_data",
+    "cmdset_storage_string",
+    "server_connected",
+    "command_counter",
+    "command_counter_reset",
+    "_bus_notice_at",
+    # The bus socket incarnation. Keeping it is what tells the Server that
+    # the session it holds is still this one, not a new connection.
+    "_bus_socket_id",
+    "_bus_protocol_auth",
+    "_bus_confirmed",
+)
 
 # --- Frame batching ---
 # One outputfunc is one frame is one WebSocket send, so a single room look costs
@@ -122,25 +178,91 @@ def _trim_replay_frames(frames):
         total -= len(frame)
 
 
-def _prune_resume_stash():
-    """Drop expired stashes, then enforce the total cap oldest-deadline-first."""
-    now = time.time()
-    for tok in [t for t, s in _RESUME_STASH.items() if s["deadline"] < now]:
-        _RESUME_STASH.pop(tok, None)
-    overflow = len(_RESUME_STASH) - RESUME_STASH_MAX
-    if overflow > 0:
-        for tok, _stash in sorted(_RESUME_STASH.items(), key=lambda kv: kv[1]["deadline"])[
-            :overflow
-        ]:
-            _RESUME_STASH.pop(tok, None)
+def _setting_seconds(name, default):
+    """Read a non-negative duration in seconds from settings."""
+    value = getattr(settings, name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise ValueError(f"settings.{name} must be a non-negative number of seconds")
+    return value
+
+
+def _resume_grace():
+    """Seconds a dropped session is held for its tab to come back (0 disables)."""
+    return _setting_seconds("WEBCLIENT_RESUME_GRACE", RESUME_GRACE_SECONDS)
+
+
+def _keepalive_timing():
+    """Return ``(ping_delay, silence_timeout)`` in seconds; a zero delay disables."""
+    delay = _setting_seconds("WEBCLIENT_PING_DELAY", PING_DELAY_SECONDS)
+    timeout = _setting_seconds("WEBCLIENT_PING_TIMEOUT", PING_TIMEOUT_SECONDS)
+    # One late pong must never read as a dead peer.
+    return delay, max(timeout, 2 * delay)
+
+
+def _call_later(delay, fn, *args):
+    """Schedule ``fn`` on the Portal loop, or return None where none is running."""
+    if not clock.loop_running():
+        return None
+    return clock.call_later(delay, fn, *args, _task_kind="transport")
+
+
+def _buffer_bytes(session):
+    """Bytes of replay a session holds (frames are ASCII, so length is size)."""
+    return sum(len(frame) for _, frame in getattr(session, "out_buffer", None) or ())
+
+
+def _enforce_hold_limits():
+    """End overdue holds, then the oldest ones until the count and byte caps hold.
+
+    Holds end on their own timer; the overdue sweep here only matters if one
+    never fired. Held sessions each keep a Server session alive, so an open-close
+    loop must not be able to pile them up.
+    """
+    now = time.monotonic()
+    held = []
+    for owner in list(_RESUMABLE.values()):
+        if owner._held_until is None:
+            continue
+        if owner._held_until <= now:
+            owner._expire_hold("grace expired")
+        else:
+            held.append(owner)
+    held.sort(key=lambda owner: owner._held_until)
     byte_limit = _setting_bytes("WEBSOCKET_RESUME_STASH_BYTES", _DEFAULT_RESUME_STASH_BYTES)
-    total = sum(len(frame) for stash in _RESUME_STASH.values() for _, frame in stash["frames"])
-    if total > byte_limit:
-        for token, stash in sorted(_RESUME_STASH.items(), key=lambda item: item[1]["deadline"]):
-            total -= sum(len(frame) for _, frame in stash["frames"])
-            _RESUME_STASH.pop(token, None)
-            if total <= byte_limit:
-                break
+    total = sum(_buffer_bytes(owner) for owner in held)
+    while held and (len(held) > RESUME_HOLD_MAX or total > byte_limit):
+        oldest = held.pop(0)
+        total -= _buffer_bytes(oldest)
+        oldest._expire_hold("hold capacity reached")
+
+
+def _ensure_keepalive():
+    """Start the Portal-wide keepalive loop once, if pings are enabled."""
+    global _KEEPALIVE
+    if _KEEPALIVE is not None and _KEEPALIVE.running:
+        return
+    delay, _timeout = _keepalive_timing()
+    if not delay or not clock.loop_running():
+        return
+    _KEEPALIVE = clock.looping(delay, _keepalive_sweep)
+
+
+def _keepalive_sweep():
+    """Ping every open socket, and drop the ones that stopped answering.
+
+    The ping keeps the path warm: carrier NATs and proxies forget a silent TCP
+    flow, and a browser idling in a room sends nothing. The silence check is what
+    finds a phone that vanished without a FIN, which otherwise sits "connected"
+    until the kernel gives up retransmitting, minutes later.
+    """
+    _delay, timeout = _keepalive_timing()
+    now = time.monotonic()
+    for sock in list(_LIVE_SOCKETS):
+        try:
+            sock._keepalive_tick(now, timeout)
+        except Exception:
+            logger.log_trace("webclient keepalive")
+    _enforce_hold_limits()
 
 
 # CLOSE_NORMAL (1000) / GOING_AWAY (1001) are imported from ws_protocol.
@@ -253,6 +375,25 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
     # nonce value, used to prevent the webclient from erasing the
     # webclient_authenticated_uid value of csession on disconnect
     nonce = 0
+
+    # Session-continuity state. Class-level defaults, so an instance built
+    # without a live handshake (as tests and bus recovery do) reads consistently.
+    #: The resume token issued in this connection's last `hello` reply.
+    resume_token = None
+    #: Registered with the session handler, by a connect or a takeover.
+    _session_bound = False
+    #: The socket is gone: output is recorded for replay, never written.
+    _link_lost = False
+    #: Monotonic deadline while the session is held for a reconnect.
+    _held_until = None
+    #: Another socket took this session over; this object speaks for no one.
+    _superseded = False
+    #: The session is over and nothing may revive it.
+    _ended = False
+    _hello_timer = None
+    _hold_timer = None
+    _opened_at = None
+    _lost_at = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -493,7 +634,6 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         self.init_session("websocket", client_address, self.factory.sessionhandler)
 
         csession = self.get_client_session()  # this sets self.csessid
-        csessid = self.csessid
         uid = csession and csession.get("webclient_authenticated_uid", None)
         nonce = csession and csession.get("webclient_authenticated_nonce", 0)
         if uid:
@@ -501,15 +641,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             self.uid = uid
             self.nonce = nonce
             self.logged_in = True
-
-            for old_session in self.sessionhandler.sessions_from_csessid(csessid):
-                if (
-                    hasattr(old_session, "websocket_close_code")
-                    and old_session.websocket_close_code != CLOSE_NORMAL
-                ):
-                    # if we have old sessions with the same csession, they are remnants
-                    self.sessid = old_session.sessid
-                    self.sessionhandler.disconnect(old_session)
+        # A session this browser dropped is no longer swept up here by csessid:
+        # it is held for the tab it belongs to, which claims it with its resume
+        # token (see _resume), and ends on its own if that tab never returns.
 
         # Ensure wire_format is set (it should be from onConnect, but
         # in testing scenarios onConnect may not have been called)
@@ -526,43 +660,83 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             self.sendClose(CLOSE_NORMAL, "No wire formats available")
             return
 
-        browserstr = f":{self.browserstr}" if self.browserstr else ""
-        proto_name = self.wire_format.name
-        self.protocol_flags["CLIENTNAME"] = (
-            f"Evennia Webclient (websocket{browserstr} [{proto_name}])"
-        )
-        self.protocol_flags["UTF-8"] = True
-        # Address provenance, synced to the Server so moderation tooling can tell a
-        # real client address from an un-rewritten proxy address.
-        self.protocol_flags["PEER_IP"] = getattr(self, "_peer_host", None)
-        self.protocol_flags["XFF_APPLIED"] = bool(getattr(self, "_xff_applied", False))
-        self.protocol_flags["XFF_PRESENT"] = bool(getattr(self, "_xff_present", False))
-        # Handshake headers the browser sent us. Read once here -- http_headers is
-        # only populated for the lifetime of the connection and nothing else in the
-        # codebase looks at it. Raw values only; hashing happens server-side.
-        self.protocol_flags["HTTP_FP"] = self._collect_http_fingerprint()
-        self.protocol_flags["HTTP_ORDER"] = list(getattr(self, "http_header_order", None) or ())[
-            :64
-        ]
-        self.protocol_flags["TLS_FP"] = self._collect_tls_fingerprint()
-        # page_id is only set when the client sends the three-argument form.
-        self.protocol_flags["BROWSERSTR"] = str(getattr(self, "browserstr", "") or "")
-        self.protocol_flags["PAGE_ID"] = str(getattr(self, "page_id", "") or "")
-        self.protocol_flags["DEVICE_TOKEN"] = self._device_token()
-        self.protocol_flags["OOB"] = self.wire_format.supports_oob
-        self.protocol_flags["TRUECOLOR"] = True
-        self.protocol_flags["XTERM256"] = True
-        self.protocol_flags["ANSI"] = True
+        self.protocol_flags.update(self._socket_flags())
 
         # watch for dead links
         self.transport.setTcpKeepAlive(1)
-        # actually do the connection
+        self._opened_at = time.monotonic()
+        _LIVE_SOCKETS.add(self)
+        _ensure_keepalive()
+        if getattr(self.wire_format, "supports_resume", False):
+            # This client's first frame is a `hello` that may claim a held
+            # session, and a socket that resumes one must never reach the Server
+            # as a new connection. So the connect waits for it, briefly.
+            self._hello_timer = _call_later(HELLO_WAIT_SECONDS, self._connect_session)
+        else:
+            self._connect_session()
+
+    def _socket_flags(self):
+        """Protocol flags that describe this socket rather than the session on it.
+
+        A takeover keeps the session's own flags (screen reader, screen size,
+        saved options, negotiated capabilities) and replaces only these.
+
+        Returns:
+            dict: flag name to value.
+
+        """
+        browserstr = f":{self.browserstr}" if self.browserstr else ""
+        return {
+            "CLIENTNAME": f"Evennia Webclient (websocket{browserstr} [{self.wire_format.name}])",
+            "UTF-8": True,
+            # Address provenance, synced to the Server so moderation tooling can
+            # tell a real client address from an un-rewritten proxy address.
+            "PEER_IP": getattr(self, "_peer_host", None),
+            "XFF_APPLIED": bool(getattr(self, "_xff_applied", False)),
+            "XFF_PRESENT": bool(getattr(self, "_xff_present", False)),
+            # Handshake headers the browser sent us. Read once here --
+            # http_headers is only populated for the lifetime of the connection
+            # and nothing else in the codebase looks at it. Raw values only;
+            # hashing happens server-side.
+            "HTTP_FP": self._collect_http_fingerprint(),
+            "HTTP_ORDER": list(getattr(self, "http_header_order", None) or ())[:64],
+            "TLS_FP": self._collect_tls_fingerprint(),
+            # page_id is only set when the client sends the three-argument form.
+            "BROWSERSTR": str(getattr(self, "browserstr", "") or ""),
+            "PAGE_ID": str(getattr(self, "page_id", "") or ""),
+            "DEVICE_TOKEN": self._device_token(),
+            "OOB": self.wire_format.supports_oob,
+            "TRUECOLOR": True,
+            "XTERM256": True,
+            "ANSI": True,
+        }
+
+    def _connect_session(self):
+        """Start this socket's session with the Server, once."""
+        self._cancel_timer("_hello_timer")
+        if self._session_bound or self._link_lost or self._superseded or self._ended:
+            return
+        self._session_bound = True
         self.sessionhandler.connect(self)
+
+    def _cancel_timer(self, name):
+        """Cancel and forget one of this socket's pending timers."""
+        timer = getattr(self, name, None)
+        if timer is not None:
+            setattr(self, name, None)
+            try:
+                timer.cancel()
+            except Exception:
+                pass
 
     def disconnect(self, reason=None):
         """
         Generic hook for the engine to call in order to
         disconnect this protocol.
+
+        This ends the session: the Server has disconnected it, the client asked
+        to close, or the browser closed the page. A dropped socket does not come
+        here; see ``_link_down``.
 
         Args:
             reason (str or None): Motivation for the disconnection.
@@ -573,49 +747,252 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         if getattr(self, "_disconnecting", False):
             return
         self._disconnecting = True
+        self._end_session(reason)
 
-        csession = self.get_client_session()
+    def _end_session(self, reason=None, clear_browser_auth=True):
+        """End the session on this socket and tell the Server.
 
-        # Portal-wide shutdown (deploy reboot) must not wipe the Django session
-        # auto-login stamp — the webclient reconnect loop relies on it.
-        preserve_auth = getattr(self.sessionhandler, "_disconnect_all", False)
-        if csession and not preserve_auth:
-            # if the nonce is different, webclient_authenticated_uid has been
-            # set *before* this disconnect (disconnect called after a new client
-            # connects, which occurs in some 'fast' browsers like Google Chrome
-            # and Mobile Safari)
-            if csession.get("webclient_authenticated_nonce", 0) == self.nonce:
-                csession["webclient_authenticated_uid"] = None
-                csession["webclient_authenticated_nonce"] = 0
-                csession.save()
-            self.logged_in = False
+        Args:
+            reason (str or None): Close reason for the socket, if it is still up.
+            clear_browser_auth (bool): Clear the browser's auto-login stamp, as a
+                logout does. A hold that runs out keeps it: the browser never
+                asked to leave, and its next visit should find the player still
+                signed in.
 
-        self.sessionhandler.disconnect(self)
-        # Batched frames are flushed on the next loop iteration, so a burst
-        # queued in this same iteration (e.g. the `logout` OOB that precedes a
-        # server-side quit) would be written after the close and lost. Drain it
-        # first.
-        self._flush_batch()
-        # RFC 6455 close codes: 1000 normal, 1001 browser window closed,
-        # 3000-4999 application-specific (in case anyone wants to expose that).
-        self.sendClose(CLOSE_NORMAL, reason)
+        """
+        if self._ended or self._superseded:
+            return
+        self._ended = True
+        self._held_until = None
+        self._cancel_timer("_hold_timer")
+        self._cancel_timer("_hello_timer")
+        _LIVE_SOCKETS.discard(self)
+        if self.resume_token and _RESUMABLE.get(self.resume_token) is self:
+            del _RESUMABLE[self.resume_token]
+
+        if clear_browser_auth:
+            csession = self.get_client_session()
+            # Portal-wide shutdown (deploy reboot) must not wipe the Django
+            # session auto-login stamp: the webclient reconnect loop relies on it.
+            preserve_auth = getattr(getattr(self, "sessionhandler", None), "_disconnect_all", False)
+            if csession and not preserve_auth:
+                # if the nonce is different, webclient_authenticated_uid has been
+                # set *before* this disconnect (disconnect called after a new
+                # client connects, which occurs in some 'fast' browsers like
+                # Google Chrome and Mobile Safari)
+                if csession.get("webclient_authenticated_nonce", 0) == self.nonce:
+                    csession["webclient_authenticated_uid"] = None
+                    csession["webclient_authenticated_nonce"] = 0
+                    csession.save()
+                self.logged_in = False
+
+        if self._session_bound:
+            self.sessionhandler.disconnect(self)
+        if not self._link_lost:
+            # Batched frames are flushed on the next loop iteration, so a burst
+            # queued in this same iteration (e.g. the `logout` OOB that precedes
+            # a server-side quit) would be written after the close and lost.
+            # Drain it first.
+            self._flush_batch()
+            # RFC 6455 close codes: 1000 normal, 1001 browser window closed,
+            # 3000-4999 application-specific (CLOSE_SUPERSEDED is one).
+            self.sendClose(CLOSE_NORMAL, reason)
+
+    def _link_down(self, code=None, clean=False, cause="closed"):
+        """The socket is gone; decide what becomes of the session on it.
+
+        Runs once per socket: from ``onClose``, or from the first write or
+        keepalive check that finds the socket dead, whichever comes first.
+
+        Args:
+            code (int or None): Close code the peer sent, if it sent one.
+            clean (bool): Whether the WebSocket closing handshake completed.
+            cause (str): What noticed the loss, for the log.
+
+        """
+        if self._link_lost:
+            return
+        self._link_lost = True
+        self._lost_at = time.monotonic()
+        _LIVE_SOCKETS.discard(self)
+        self._cancel_timer("_hello_timer")
+        if self._superseded or self._ended:
+            return
+        # Anything still queued for coalescing must reach the replay buffer
+        # before the session is held, or a reconnect replays a hole.
+        if getattr(self, "_batch_pending", None):
+            try:
+                self._flush_batch()
+            except Exception:
+                logger.log_trace("webclient: flushing a batch on link loss")
+        if code in (CLOSE_NORMAL, GOING_AWAY):
+            # GOING_AWAY (1001) is an ordinary browser tab-close/navigation, so it
+            # must clear the auto-login stamp like a normal close. A portal reboot
+            # keeps the stamp via the _disconnect_all guard in _end_session().
+            self._log_link_down(code, clean, cause, "session ended")
+            self.disconnect()
+        elif not self._session_bound:
+            # Gone before its session started: there is nothing to hold or end.
+            self._ended = True
+            self._log_link_down(code, clean, cause, "dropped before hello")
+        elif self._hold():
+            self._log_link_down(
+                code, clean, cause, "held %ds for a reconnect" % round(_resume_grace())
+            )
+        else:
+            self._log_link_down(code, clean, cause, "session ended")
+            self._end_session(clear_browser_auth=False)
+
+    def _log_link_down(self, code, clean, cause, outcome):
+        """Record why a socket closed and what happened to its session.
+
+        Close codes are the only evidence of what broke a connection: a peer
+        that sent 1000/1001 left on purpose, a missing code means the link just
+        died, and a keepalive timeout means it died without a word.
+        """
+        now = time.monotonic()
+        age = now - self._opened_at if self._opened_at else 0.0
+        heard = now - getattr(self, "last_received", now)
+        logger.log_info(
+            "webclient: link %s for session %s (uid %s) after %ds: code %s%s, last heard"
+            " %ds ago; %s"
+            % (
+                cause,
+                getattr(self, "sessid", None),
+                getattr(self, "uid", None),
+                age,
+                code,
+                "" if clean else ", unclean",
+                heard,
+                outcome,
+            )
+        )
+
+    def _hold(self):
+        """Keep this session for its tab to reclaim, if it can be reclaimed.
+
+        Only a signed-in session that was issued a resume token can be claimed
+        back, so nothing else is held: an anonymous login screen is cheaper to
+        redraw than to keep.
+
+        Returns:
+            bool: Whether the session is now held.
+
+        """
+        grace = _resume_grace()
+        token = self.resume_token
+        if (
+            not grace
+            or not token
+            or _RESUMABLE.get(token) is not self
+            or not (self.logged_in and self.uid)
+            or getattr(self, "_disconnecting", False)
+        ):
+            return False
+        self._held_until = time.monotonic() + grace
+        self._hold_timer = _call_later(grace, self._expire_hold, "grace expired")
+        _enforce_hold_limits()
+        return not self._ended
+
+    def _expire_hold(self, why="grace expired"):
+        """End a held session nobody came back for.
+
+        Args:
+            why (str): What ended the hold, for the log.
+
+        """
+        if self._held_until is None or self._superseded or self._ended:
+            return
+        logger.log_info(
+            "webclient: session %s (uid %s) was not reclaimed (%s); ending it"
+            % (self.sessid, self.uid, why)
+        )
+        self._end_session(clear_browser_auth=False)
+
+    def _keepalive_tick(self, now, timeout):
+        """Ping this socket, or drop it if it has been silent past ``timeout``.
+
+        Args:
+            now (float): Monotonic time of this sweep.
+            timeout (float): Seconds of silence after which the peer is gone.
+
+        """
+        if self._link_lost or self._superseded or self._ended:
+            _LIVE_SOCKETS.discard(self)
+            return
+        if now - self.last_received > timeout:
+            # Abort rather than close: a graceful close waits to flush to a peer
+            # that is not reading, which is the problem being handled.
+            self.abortConnection()
+            self._link_down(cause="silent past the keepalive timeout")
+        else:
+            self.sendPing()
+
+    def _write(self, data, is_binary=False):
+        """Put one frame on the wire, unless the wire is gone.
+
+        A held or dead socket writes nothing: its frames are already in the
+        replay buffer, which is where a reconnect finds them.
+
+        Args:
+            data (bytes): The encoded frame.
+            is_binary (bool): Send as a BINARY frame.
+
+        """
+        if self._link_lost or self._superseded:
+            return None
+        try:
+            return self.sendMessage(data, isBinary=is_binary)
+        except Disconnected:
+            # The socket closed under us: the browser sent a close frame this
+            # session has not acted on yet, or the link died. Either way it is a
+            # lost link, not a logout.
+            self._link_down(cause="found closed on write")
+            return None
 
     def _handle_client_hello(self, raw):
-        """Handle the client's ``hello``: resume what we can, then answer.
+        """Handle the client's ``hello``: resume a held session or start one, then answer.
 
         The reply is what re-bases the client's sequence counter. Without it a
-        client that reconnects after its stash expired keeps asking to resume
+        client that reconnects after its hold expired keeps asking to resume
         from a seq the server's fresh counter will never reach again, and
-        replay silently stops working for that browser forever.
+        replay silently stops working for that browser forever. It also carries
+        the resume token for the client's next reconnect.
 
         Args:
             raw (dict): the decoded client ``hello`` envelope.
 
         """
-        resumed = self._handle_resume(raw.get("resume") or {})
+        resume = raw.get("resume")
+        resumed = self._resume(resume if isinstance(resume, dict) else {})
+        if resumed is None:
+            self._connect_session()
+        reply = {
+            "t": "hello",
+            "protocol": "azaban.v1",
+            "resumed": resumed is not None,
+            "token": self._issue_resume_token(),
+        }
+        if resumed and resumed["gap"]:
+            reply["gap"] = True
         # Stamped last, so its seq is above every frame replayed above it and
         # the client can assign (not max) its cursor from it.
-        self.sendLine({"t": "hello", "protocol": "azaban.v1", "resumed": resumed})
+        self.sendLine(reply)
+
+    def _issue_resume_token(self):
+        """Give this connection a fresh resume token and retire its old one.
+
+        Returns:
+            str: The new token.
+
+        """
+        old = self.resume_token
+        if old and _RESUMABLE.get(old) is self:
+            del _RESUMABLE[old]
+        token = secrets.token_urlsafe(24)
+        self.resume_token = token
+        _RESUMABLE[token] = self
+        return token
 
     def _reset_resume_buffer(self):
         """Drop the replay window this socket is holding.
@@ -625,71 +1002,151 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         from seq 0 - a fresh page has no cursor to present - so the whole window
         replayed straight back into the log the player had just cleared, and the
         clear looked like it had silently undone itself. Clearing here is what
-        makes it stick.
+        makes it stick. The seq counter runs on.
 
         """
         buf = getattr(self, "out_buffer", None)
         if buf is not None:
             buf.clear()
-        # The live stash (if one is bound) mirrors the same frames; its last_seq
-        # is left alone so the counter still runs on across a reconnect.
-        stash = _RESUME_STASH.get(getattr(self, "resume_token", None))
-        if stash is not None and stash is getattr(self, "_resume_stash", None):
-            stash["frames"].clear()
 
-    def _handle_resume(self, resume):
-        """On reconnect: bind the resume token and replay any missed frames.
+    def _resume(self, resume):
+        """Take over the session a reconnecting tab asks for, and replay its gap.
 
         Args:
-            resume (dict): the ``resume`` block of the client's hello,
-                carrying its ``token`` and the last ``last_seq`` it applied.
+            resume (dict): the ``resume`` block of the client's hello: the
+                ``token`` its last connection was issued and the ``last_seq`` it
+                applied.
 
         Returns:
-            bool: whether a stash was found, owned by this client, and replayed.
+            dict or None: ``{"replayed": int, "gap": bool}`` when this socket now
+                carries the session; None when it starts a new one.
 
         """
         token = resume.get("token")
-        if not token:
-            return False
-        self.resume_token = token
-        _prune_resume_stash()
-        stash = _RESUME_STASH.pop(token, None)
-        if not stash:
-            return False
-        if stash.get("uid") != getattr(self, "uid", None):
-            # Right token, wrong account: a stash only ever replays to the
-            # session that produced it.
-            from evennia.utils import logger
+        if not isinstance(token, str) or not token or self._session_bound:
+            # No claim, or this socket already started a session of its own (its
+            # hello came after HELLO_WAIT_SECONDS): adopting now would orphan it.
+            return None
+        _enforce_hold_limits()
+        old = _RESUMABLE.get(token)
+        if old is None or old is self or old._ended or old._superseded:
+            return None
+        if not (self.uid and old.logged_in and old.uid == self.uid):
+            # The token is not enough: the browser must be signed in as the
+            # account the session belongs to, or holding a token would be
+            # enough to take over someone's session and read its output.
+            logger.log_warn(
+                "webclient: resume of session %s refused: this browser is not signed in"
+                " as its account" % old.sessid
+            )
+            return None
+        handler = self.sessionhandler
+        if not handler.owns(old):
+            # Nothing on the Server to resume; the old socket is a leftover.
+            old._end_session(clear_browser_auth=False)
+            return None
+        offline = time.monotonic() - old._lost_at if old._lost_at else 0.0
+        self._adopt(old)
+        replayed, gap = self._replay_since(resume.get("last_seq"))
+        logger.log_info(
+            "webclient: session %s (uid %s) resumed on a new connection after %.1fs;"
+            " replayed %d frame(s)%s"
+            % (self.sessid, self.uid, offline, replayed, ", with a gap" if gap else "")
+        )
+        return {"replayed": replayed, "gap": gap}
 
-            logger.log_warn("webclient: resume token presented by a different uid; not replaying")
-            return False
-        # Continue the seq counter across the gap and replay what the client
-        # hasn't seen. Replayed frames already carry their seq, so bypass sendLine.
-        self.out_seq = stash["last_seq"]
-        self.out_buffer = deque(stash["frames"])
-        last_seen = int(resume.get("last_seq") or 0)
-        for seq, frame in list(self.out_buffer):
+    def _adopt(self, old):
+        """Move ``old``'s session onto this socket, in place.
+
+        The Server keeps its session object: the sessid and the bus socket
+        incarnation carry over, the handler entry is swapped, and only the socket
+        facts that changed (address, headers, flags) are synced across.
+
+        Args:
+            old (WebSocketClient): The held, or still apparently open, socket
+                that owned the session until now.
+
+        """
+        was_live = not old._link_lost
+        # Settle the old socket first. What it had queued goes to the buffer
+        # that moves across, and from here on it writes nothing and its late
+        # callbacks (a close, a timer, a frame) change nothing.
+        old._link_lost = True
+        _LIVE_SOCKETS.discard(old)
+        if getattr(old, "_batch_pending", None):
+            old._flush_batch()
+        old._cancel_timer("_hold_timer")
+        old._cancel_timer("_hello_timer")
+        old._held_until = None
+        old._superseded = True
+        if old.resume_token and _RESUMABLE.get(old.resume_token) is old:
+            del _RESUMABLE[old.resume_token]
+
+        for attr in _SESSION_STATE:
+            if hasattr(old, attr):
+                setattr(self, attr, getattr(old, attr))
+        flags = dict(old.protocol_flags or {})
+        flags.update(self._socket_flags())
+        self.protocol_flags = flags
+        self.out_seq = getattr(old, "out_seq", 0)
+        self.out_buffer = getattr(old, "out_buffer", None) or deque()
+        old.out_buffer = deque()
+        self._cancel_timer("_hello_timer")
+        self._session_bound = True
+        self.sessionhandler.rebind(old, self)
+
+        if was_live:
+            # The old socket still looked open: a phone that changed networks
+            # before the keepalive noticed, or a copied tab. Say why it is being
+            # closed, then cut it loose without waiting on a peer that may be gone.
+            old.sendClose(CLOSE_SUPERSEDED, "session resumed on another connection")
+            old.abortConnection()
+
+    def _replay_since(self, last_seq):
+        """Resend buffered frames the client has not applied.
+
+        Args:
+            last_seq (int or None): The last seq the client applied.
+
+        Returns:
+            tuple: ``(replayed, gap)``: how many frames were resent, and whether
+                some it missed had already been evicted from the buffer.
+
+        """
+        try:
+            last_seen = max(0, int(last_seq or 0))
+        except (TypeError, ValueError):
+            last_seen = 0
+        buf = getattr(self, "out_buffer", None) or ()
+        out_seq = getattr(self, "out_seq", 0)
+        oldest = buf[0][0] if buf else out_seq + 1
+        # A reloaded page has no cursor (0) and is not missing anything it
+        # could have had; only a client that was following along has a gap.
+        gap = 0 < last_seen < out_seq and oldest > last_seen + 1
+        replayed = 0
+        # Replayed frames already carry their seq, so they bypass sendLine.
+        for seq, frame in list(buf):
             if seq > last_seen:
-                try:
-                    self.sendMessage(frame.encode())
-                except Exception:
-                    pass
-        return True
+                self._write(frame.encode("utf-8"))
+                replayed += 1
+        return replayed, gap
 
-    def _stash_for_resume(self):
-        """Retain a bounded replay window owned by this socket."""
-        token = getattr(self, "resume_token", None)
-        buf = getattr(self, "out_buffer", None)
-        if token and buf:
-            frames = deque(buf)
-            _trim_replay_frames(frames)
-            self._resume_stash = _RESUME_STASH[token] = {
-                "frames": frames,
-                "last_seq": getattr(self, "out_seq", 0),
-                "deadline": time.time() + RESUME_GRACE_SECONDS,
-                "uid": getattr(self, "uid", None),
-            }
-            _prune_resume_stash()
+    def _send_pong(self, raw):
+        """Answer the client's heartbeat at the Portal.
+
+        Portal-local like ``hello``: never stamped, buffered, or replayed, and
+        never sent on to the Server. The client uses it to notice a socket that
+        died without the browser being told.
+
+        Args:
+            raw (dict): The client's ``ping`` envelope.
+
+        """
+        pong = {"t": "pong"}
+        nonce = raw.get("n")
+        if isinstance(nonce, int) and not isinstance(nonce, bool):
+            pong["n"] = nonce
+        self._write(json.dumps(pong).encode("utf-8"))
 
     def onClose(self, wasClean, code=None, reason=None):
         """
@@ -703,21 +1160,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             reason (str or None): Close reason as sent by the WebSocket peer.
 
         """
-        # Anything still queued for coalescing must reach the buffer before the
-        # stash is taken, or a reconnect replays a hole.
-        if getattr(self, "_batch_pending", None):
-            try:
-                self._flush_batch()
-            except Exception:
-                pass
-        self._stash_for_resume()
-        if code in (CLOSE_NORMAL, GOING_AWAY):
-            # GOING_AWAY (1001) is an ordinary browser tab-close/navigation, so it
-            # must clear the auto-login stamp like a normal close. A portal reboot
-            # keeps the stamp via the _disconnect_all guard inside disconnect().
-            self.disconnect(reason)
-        else:
-            self.websocket_close_code = code
+        self._link_down(code=code, clean=wasClean)
 
     def onMessage(self, payload, isBinary):
         """
@@ -732,6 +1175,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                              UTF-8 encoded text.
 
         """
+        if self._superseded or self._ended:
+            # A late frame from a socket whose session moved on, or ended,
+            # speaks for no one.
+            return
         # Peek for a resume request in the client's hello (before decoding), so
         # we can replay missed frames at the portal without involving the server.
         if not isBinary:
@@ -739,12 +1186,19 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 raw = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 raw = None
-            if isinstance(raw, dict) and raw.get("t") == "hello":
+            kind = raw.get("t") if isinstance(raw, dict) else None
+            if kind == "hello":
                 self._handle_client_hello(raw)
-            elif isinstance(raw, dict) and raw.get("t") == "resume_reset":
+            elif kind == "resume_reset":
                 # Client-side scrollback wipe. Portal-local, like `hello`: the
                 # server has no say in what this browser keeps on screen.
                 self._reset_resume_buffer()
+            elif kind == "ping":
+                # Transport heartbeat: it neither starts a session nor reaches one.
+                self._send_pong(raw)
+                return
+        # Any frame but a `hello` means this client is not resuming anything.
+        self._connect_session()
 
         if self.wire_format:
             kwargs = self.wire_format.decode_incoming(
@@ -765,7 +1219,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         """Stamp a monotonic ``s`` seq onto a JSON frame and buffer it for resume.
 
         Args:
-            frame (dict or str): the envelope. A dict is stamped as-is — the
+            frame (dict or str): the envelope. A dict is stamped as-is: the
                 wire format handed us the object, so there is nothing to parse.
                 A str is decoded first, for formats that serialize their own
                 frames (and for anything already on the wire, like a replay).
@@ -795,16 +1249,6 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             buf = self.out_buffer = deque()
         buf.append((self.out_seq, line))
         _trim_replay_frames(buf)
-        stash = _RESUME_STASH.get(getattr(self, "resume_token", None))
-        if (
-            stash is not None
-            and stash is getattr(self, "_resume_stash", None)
-            and stash["uid"] == getattr(self, "uid", None)
-        ):
-            stash["frames"].append((self.out_seq, line))
-            _trim_replay_frames(stash["frames"])
-            stash["last_seq"] = self.out_seq
-            _prune_resume_stash()
         return line
 
     def sendLine(self, line):
@@ -821,12 +1265,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             self._flush_batch()
         line = self._stamp_and_buffer(line)
         _check_outgoing_size(line)
-        try:
-            return self.sendMessage(line.encode())
-        except Disconnected:
-            # this can happen on an unclean close of certain browsers.
-            # it means this link is actually already closed.
-            self.disconnect(reason="Browser already closed.")
+        return self._write(line.encode())
 
     def sendEncoded(self, data, is_binary=False):
         """
@@ -863,10 +1302,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         elif isinstance(data, str):
             data = data.encode("utf-8")
         _check_outgoing_size(data)
-        try:
-            return self.sendMessage(data, isBinary=is_binary)
-        except Disconnected:
-            self.disconnect(reason="Browser already closed.")
+        return self._write(data, is_binary=is_binary)
 
     def _batching_enabled(self):
         """
@@ -973,11 +1409,9 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             if group:
                 payloads.append(group[0] if len(group) == 1 else {"t": "batch", "frames": group})
         for payload in payloads:
-            try:
-                self.sendMessage(self._stamp_and_buffer(payload).encode("utf-8"))
-            except Disconnected:
-                self.disconnect(reason="Browser already closed.")
-                return
+            # Stamped and buffered even once the link is gone, so a reconnect
+            # replays the whole burst.
+            self._write(self._stamp_and_buffer(payload).encode("utf-8"))
 
     def _serialize_stamped(self, frame, seq):
         """Serialize one JSON envelope with a prospective sequence stamp."""
@@ -1034,6 +1468,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             this point.
 
         """
+        if self._superseded or self._ended:
+            return
         if "websocket_close" in kwargs:
             self.disconnect()
             return

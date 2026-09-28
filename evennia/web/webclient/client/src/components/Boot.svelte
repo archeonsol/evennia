@@ -3,13 +3,14 @@
 
   let { ondone }: { ondone: () => void } = $props();
 
+  // Plain words: this is the player's own client starting up, not a device
+  // in the fiction, so it says what it is doing and nothing more.
   const LINES = [
     "U N D E R S P I R E",
-    "> establishing sanctioned uplink . . .",
-    "> rousing the machine-spirit . . .",
-    "> purging corrupted sectors . . .",
-    "> rites of activation observed",
-    "// access granted",
+    "> web client",
+    "> loading layout and settings",
+    "> connecting to the game",
+    "// ready",
   ];
 
   let shown = $state(0);

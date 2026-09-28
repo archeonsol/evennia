@@ -29,6 +29,8 @@ import type { OobEvent } from "./lib/oob-events";
 import { announcer } from "./lib/announce.svelte";
 import { renderBody, renderSender } from "./lib/markup";
 import { logview } from "./lib/logview.svelte";
+import { screenSize } from "./lib/screensize";
+import { help } from "./lib/help.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -74,6 +76,9 @@ compose.init();
 // The preview is a real (silent) command, so it goes out on the command line
 // rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
 compose.setPreviewSender((line) => connection.sendCommand(line));
+// A ticket toast opens its panel; the dock imports the chat store, so the
+// store is handed the opener rather than importing the dock.
+chat.setPanelOpener((view) => dock.openView(view));
 
 // Local echo: the command as typed, in the terminal before the game's answer.
 commands.onRun((line) => {
@@ -87,6 +92,8 @@ commands.onRun((line) => {
 // here too, so the log's filter chips double as speech filters. The echo of
 // the player's own command is not read back to them.
 session.onLine((line) => {
+  // The player's own command echo is not news.
+  if (line.type !== "echo") notify.activity();
   if (settings.speakOutput && line.type !== "media" && line.type !== "echo" && logview.filters[line.cat]) {
     announcer.say(line.text);
   }
@@ -159,14 +166,37 @@ function refreshPuppetManifest() {
 // Scene, room BGM and RP fields are re-pushed server-side from the `hello`
 // handshake (see the game's azaban_hello), so connecting costs no extra round
 // trip here — the manifest is the one thing only the client knows it wants.
+// The terminal's size in characters, measured by the game log and reported
+// through the stock client_options inputfunc, as telnet's NAWS is. Server-side
+// layout (help, tables, headers, paging) then fits the window it lands in.
+screenSize.connect((grid) =>
+  connection.sendOobRaw("client_options", [], { screenwidth: grid.cols, screenheight: grid.rows }),
+);
+
+// A resumed session is replayed what it missed, from a bounded window. When the
+// window had already moved past some of it, say so rather than leave a silent
+// hole in the log.
+connection.on("hello", (env) => {
+  if (env.gap === true) {
+    session.append(
+      `<span class="conn-note">Some output was lost while you were disconnected.</span>`,
+      "system",
+    );
+  }
+});
+
 connection.on("connection_open", () => {
   refreshPuppetManifest();
+  // Screen size is a session flag, so a new connection starts without one.
+  screenSize.resend();
   // The session flag starts off on every connection, and the settings store's
   // own send runs before the socket is open, so it is dropped. Only "on" is
   // sent: off must not undo a player's saved @option screenreader.
   if (settings.screenreader) {
     connection.sendOobRaw("webclient_options", [], { SCREENREADER: true });
   }
+  // Where help goes is a session flag too: the panel, or the log.
+  help.sendPreference(settings.helpInPanel);
 });
 
 // Every name this file routes on must exist in the server's event catalog.
@@ -187,7 +217,11 @@ connection.on("oob", (env) => {
     event.startsWith("ticket_")
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
-    if (is(event, "channel_msg")) echoChannel(env.kwargs ?? {});
+    if (is(event, "channel_msg")) {
+      echoChannel(env.kwargs ?? {});
+      const key = String(env.kwargs?.channel ?? "");
+      if (key && !chat.muted[key]) notify.activity();
+    }
     // A thread only arrives because the player asked for one (@ticket, or a
     // click in a ticket list): bring its panel forward.
     if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");
@@ -221,6 +255,13 @@ connection.on("oob", (env) => {
       settings.channelEcho = true;
       settings.music = false;
       announcer.now("Screen reader mode on, from your saved game option. One view at a time.");
+    }
+  } else if (is(event, "help_view")) {
+    // A typed `help`: show the page in the help panel, not the terminal.
+    const page = env.kwargs && Object.keys(env.kwargs).length ? env.kwargs : Array.isArray(env.args) ? env.args[0] : env.args;
+    if (page) {
+      help.show(page);
+      dock.openHelp();
     }
   } else if (is(event, "player_mention")) {
     chat.onMention(env.kwargs ?? {});

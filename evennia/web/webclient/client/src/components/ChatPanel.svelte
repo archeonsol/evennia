@@ -24,37 +24,39 @@
         onclick={() => chat.setActive(c.key)}
         title={c.name}
       >
-        <span class="dot" aria-hidden="true" style={chat.channelColor(c.key) ? `background:${chat.channelColor(c.key)}` : ""}></span>
-        <span class="chan-name" style={chat.channelColor(c.key) ? `color:${chat.channelColor(c.key)}` : ""}>{c.name}</span>
+        <span class="chan-name" style={chat.channelColor(c.key) && c.key !== active ? `color:${chat.channelColor(c.key)}` : ""}>{c.name}</span>
         {#if chat.mentions[c.key]}<span class="at">@</span>{/if}
         {#if chat.online[c.key]}<span class="online">{chat.online[c.key]}</span>{/if}
-        {#if chat.unread[c.key]}<span class="badge">{chat.unread[c.key]}</span>{/if}
+        {#if chat.unread[c.key]}<span class="sh-count">{chat.unread[c.key]}</span>{/if}
       </button>
     {/each}
-    {#if !chat.channels.length}<span class="rail-empty">no channels</span>{/if}
+    {#if !chat.channels.length}<span class="rail-empty">No channels</span>{/if}
   </div>
 
   {#if active}
     <ChannelView channelKey={active} />
   {:else}
     <!-- Alt+C still has somewhere to land before the registry arrives. -->
-    <p class="empty" tabindex="-1" data-focus-region="channels">Awaiting channel registry…</p>
+    <p class="empty" tabindex="-1" data-focus-region="channels">Waiting for channels</p>
   {/if}
 </div>
 
 <style>
   .chat { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
-  .rail { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
-  .chan { display: flex; align-items: center; gap: 5px; background: var(--bg); border: 1px solid var(--border-bright); color: var(--fg-dim); font-family: inherit; font-size: 0.74rem; padding: 2px 9px; min-height: 24px; cursor: pointer; }
-  .chan:hover { color: var(--fg); }
-  .chan.active { color: var(--accent-bright); border-color: var(--accent); }
+  /* The channel rail: names in capitals, the one on screen in inverse video. */
+  .rail { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
+  .chan {
+    display: flex; align-items: center; gap: 0.6ch; background: none; border: 0; color: var(--fg-dim);
+    font-family: inherit; font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 2px 0.8ch; min-height: 24px; cursor: pointer;
+  }
+  .chan:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .chan.active { color: var(--bg-deep); background: var(--accent); }
   .chan.muted .chan-name { opacity: 0.5; text-decoration: line-through; }
-  .chan.mention { border-color: var(--gold); box-shadow: 0 0 6px color-mix(in srgb, var(--gold) 40%, transparent); }
-  .at { color: var(--gold); font-weight: 500; }
-  .chan .dot { width: 5px; height: 5px; background: var(--border-bright); }
-  .chan.active .dot { background: var(--accent); box-shadow: 0 0 5px var(--glow); }
-  .online { color: var(--ok); font-size: 0.6rem; }
-  .badge { background: var(--accent); color: var(--bg-deep); font-size: 0.6rem; padding: 0 4px; min-width: 1.1em; text-align: center; }
-  .rail-empty { color: var(--fg-faint); font-size: 0.7rem; font-style: italic; }
-  .empty { color: var(--fg-faint); font-style: italic; padding: 8px 10px; }
+  .chan.mention:not(.active) .chan-name { color: var(--gold) !important; }
+  .at { color: var(--gold); }
+  .chan.active .at, .chan.active .online { color: inherit; }
+  .online { color: var(--ok); font-size: 0.6rem; letter-spacing: 0; }
+  .rail-empty, .empty { color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
+  .empty { padding: 10px; margin: 0; }
 </style>

@@ -41,12 +41,9 @@ if that encoding is negotiated in `hello`.
 ## Message types
 
 **Server → client**
-- `hello`: `{ protocol, resumed }`. Sent in reply to the client's `hello`, after
-  any replayed frames, and **stamped last** so its `s` sits above them. The
-  client *assigns* its resume cursor from that `s` rather than taking a maximum:
-  when the server could not resume the session it restarts its counter at zero,
-  and a cursor that only ever climbs would sit permanently above anything the
-  new connection will send, so replay would silently never fire again.
+- `hello`: `{ protocol, resumed, token, gap? }`. Reply to the client's `hello`,
+  stamped after any replay; the cursor rules, `token`, and `gap` are in the runtime doc.
+- `pong`: `{ n? }`. The Portal's answer to a client `ping`; never replayed.
 - `text`: `{ html, kind? }`. HTML log line for anything not yet a structured node.
 - `prompt`: `{ html }`.
 - `render`: `{ nodes: RenderNode[] }`. Structured R1 narrative (blocks + inline
@@ -59,8 +56,12 @@ if that encoding is negotiated in `hello`.
 - `res`: `{ re, ok, data | error }`. RPC response.
 
 **Client → server**
-- `hello`: `{ client, caps: { rendersNodes, images, patches, assets, encoding } }`.
-- `cmd`: `{ line }`. A command line.
+- `hello`: `{ client, caps: { rendersNodes, images, patches, assets, encoding },
+  resume: { token, last_seq } }`.
+- `ping`: `{ n }`. Liveness probe, answered at the Portal with `pong`.
+- `resume_reset`: `{}`. Drop the Portal's replay buffer (the log was cleared).
+- `cmd`: `{ line }`. A command line. It may hold line breaks: Shift+Enter in the
+  command line and the compose pad both send multi-line text as one command.
 - `req`: `{ seq, ns, action, data }`. RPC (autocomplete, history, channel ops).
 - `oob`: `{ ns, action, data }`. Fire-and-forget actions.
 

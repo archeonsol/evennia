@@ -72,7 +72,11 @@ class Compose {
     this.open = false;
   }
 
-  /** Consume the draft as a command line, clearing it. Returns "" if empty. */
+  /**
+   * Consume the draft as a command line, clearing it. Returns "" if empty.
+   * The pad stays open: closing it after a send is the player's setting, so
+   * the caller decides.
+   */
   take(): string {
     const text = this.text.trim();
     if (!text) return "";
@@ -80,7 +84,6 @@ class Compose {
     this.preview = { you: "", room: "", error: "" };
     this.persist();
     this.cancelPreview();
-    this.open = false;
     return text;
   }
 

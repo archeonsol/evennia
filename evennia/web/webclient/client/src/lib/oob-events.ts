@@ -118,6 +118,19 @@ export type EditorOpenPayload = any[];
 /** args[0] = 'saved' | 'unsaved'. */
 export type EditorStatusPayload = string;
 
+/** A help page: index, category, topic, section, search, or not_found. */
+export interface HelpViewPayload {
+  kind: string;
+  query: string;
+  categories?: any[];
+  category?: string;
+  topics?: any[];
+  topic?: Record<string, any>;
+  section?: string;
+  hits?: any[];
+  suggestions?: any[];
+}
+
 /** args[0] = image URL. */
 export type ImagePayload = string;
 
@@ -174,6 +187,11 @@ export interface TicketMsgPayload {
   status?: string;
 }
 
+/** Whether this session works the staff ticket queue. Sent at login and on @sync_channels. */
+export interface TicketRolePayload {
+  staff: boolean;
+}
+
 /** A full ticket dict (see tickets.core.to_dict). */
 export type TicketThreadPayload = Record<string, any>;
 
@@ -220,6 +238,7 @@ export type OobEvent =
   | "editor_close"
   | "editor_open"
   | "editor_status"
+  | "help_view"
   | "image"
   | "logout"
   | "play_music"
@@ -231,6 +250,7 @@ export type OobEvent =
   | "ticket_alert"
   | "ticket_inbox"
   | "ticket_msg"
+  | "ticket_role"
   | "ticket_thread"
   | "ui_component"
   | "ui_remove"
@@ -263,6 +283,7 @@ export interface OobEventMap {
   "editor_close": EditorClosePayload;
   "editor_open": EditorOpenPayload;
   "editor_status": EditorStatusPayload;
+  "help_view": HelpViewPayload;
   "image": ImagePayload;
   "logout": LogoutPayload;
   "play_music": PlayMusicPayload;
@@ -274,6 +295,7 @@ export interface OobEventMap {
   "ticket_alert": TicketAlertPayload;
   "ticket_inbox": TicketInboxPayload;
   "ticket_msg": TicketMsgPayload;
+  "ticket_role": TicketRolePayload;
   "ticket_thread": TicketThreadPayload;
   "ui_component": UiComponentPayload;
   "ui_remove": UiRemovePayload;

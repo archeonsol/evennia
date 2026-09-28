@@ -10,6 +10,8 @@ export interface Toast {
   kind: string;
   title: string;
   body: string;
+  /** What a click does besides dismissing: open the thing the toast is about. */
+  open?: () => void;
 }
 
 let seq = 0;
@@ -25,10 +27,10 @@ class Toasts {
    * already heard another way (a mention echoed into the terminal); the stack
    * itself is not a live region, so nothing is said twice.
    */
-  push(kind: string, title: string, body: string, ttl = TTL, speak = true): void {
+  push(kind: string, title: string, body: string, ttl = TTL, speak = true, open?: () => void): void {
     const id = ++seq;
     if (speak) announcer.now(body ? `${title}: ${body}` : title);
-    this.list = [...this.list, { id, kind, title, body }];
+    this.list = [...this.list, { id, kind, title, body, open }];
     this.timers.set(id, { left: ttl, started: Date.now(), handle: null });
     if (!this.held) this.arm(id);
   }

@@ -4,6 +4,7 @@
   // survives switching away; `hidden` also takes it out of the reading order.
   import { tick } from "svelte";
   import { simple } from "../lib/simpleLayout.svelte";
+  import { VIEWS } from "../lib/dock.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { chat } from "../lib/chat.svelte";
   import { puppets } from "../lib/puppets.svelte";
@@ -14,7 +15,10 @@
   // workspace adds them: when the data that needs them first arrives.
   $effect(() => {
     if (chat.staff && !simple.has("tickets")) {
-      simple.views = [...simple.views, { id: "tickets", component: "tickets", title: "Tickets", closable: false }];
+      simple.views = [...simple.views, { id: "tickets", component: "tickets", title: VIEWS.tickets.title, closable: false }];
+    } else if (!chat.staff && chat.staffKnown && simple.has("tickets")) {
+      simple.views = simple.views.filter((v) => v.id !== "tickets");
+      if (simple.active === "tickets") simple.active = "log";
     }
   });
   $effect(() => {

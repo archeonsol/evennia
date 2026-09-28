@@ -38,6 +38,21 @@ export interface ChatMsg {
 }
 
 const MAX_PER_CHANNEL = 500;
+const SEEN_KEY = "underspire.tickets.seen.v1";
+
+/** The answer to a ticket action, for the panel to show. */
+export interface TicketResult {
+  ok: boolean;
+  message: string;
+}
+
+function loadSeen(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
 const TYPING_MS = 6000;
 const PREFS_KEY = "underspire.channelprefs.v1";
 
@@ -88,14 +103,30 @@ class Chat {
   myTicket = $state<any | null>(null); // player's open ticket detail
   /** Why the player's list could not load; shown instead of "no tickets". */
   myTicketsError = $state("");
+  /** The player's current search in My Tickets ("" = none). */
+  myTicketsSearch = $state("");
   /** Bumped when one of the player's tickets changes, so the list reloads. */
   myTicketsRev = $state(0);
-  staff = $state(false); // set true once the server sends assist_inbox (Builder+ only)
+  /** This session works the staff ticket queue (ticket_role, or an assist/ticket inbox arriving). */
+  staff = $state(false);
+  /**
+   * The server has said whether this session is staff. Until then `staff`
+   * false only means "not yet known": a layout restored at page load keeps
+   * its queue panel until the answer arrives.
+   */
+  staffKnown = $state(false);
+  private assistViewer = false;
   active = $state<string>("");
   // Per-channel overrides: colour + notify mode ("all" | "mention" | "none").
   channelPrefs = $state<Record<string, { color?: string; notify?: string }>>(loadChannelPrefs());
 
   private typingTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  /** Opens a panel by view id. Set from main.ts: dock imports this store. */
+  private openPanel: ((view: string) => void) | null = null;
+
+  setPanelOpener(fn: (view: string) => void): void {
+    this.openPanel = fn;
+  }
 
   handleOob(event: string, args: any[], kwargs: Record<string, any>): void {
     switch (event) {
@@ -149,6 +180,7 @@ class Chat {
       }
       case "assist_inbox": {
         this.staff = true;
+        this.assistViewer = true;
         const next = kwargs.threads ?? [];
         // Toast newly-arrived tickets (not on the initial inbox push).
         if (this.assistThreads.length) {
@@ -169,8 +201,18 @@ class Chat {
           messages: kwargs.messages ?? [],
         };
         break;
+      case "ticket_role":
+        // The server's answer, on login and on every channel resync. Reading
+        // staff from an inbox arriving was never taken back, so a player who
+        // was once sent one kept the staff queue panel for good.
+        this.staff = !!kwargs.staff || this.assistViewer;
+        this.staffKnown = true;
+        break;
       case "ticket_inbox": {
-        this.staff = true;
+        // Before the server has stated the role, an inbox is the only sign of
+        // staff. After, the role stands: a stray inbox must not hand a player
+        // the staff queue.
+        if (!this.staffKnown) this.staff = true;
         const next = kwargs.tickets ?? [];
         if (this.tickets.length) {
           const prev = new Set(this.tickets.map((t: any) => t.id));
@@ -213,6 +255,7 @@ class Chat {
           messages: [
             ...(t.messages ?? []),
             {
+              origin: kwargs.origin,
               text: kwargs.text,
               html: kwargs.html,
               sender: kwargs.sender,
@@ -225,10 +268,21 @@ class Chat {
           ],
         });
         // Live append to whichever open detail matches (staff or player view).
-        if (this.ticket && kwargs.id === this.ticket.id) this.ticket = appendTo(this.ticket);
-        if (this.myTicket && kwargs.id === this.myTicket.id) this.myTicket = appendTo(this.myTicket);
+        const openStaff = !!this.ticket && kwargs.id === this.ticket.id;
+        const openMine = !!this.myTicket && kwargs.id === this.myTicket.id;
+        if (openStaff) this.ticket = appendTo(this.ticket);
+        if (openMine) this.myTicket = appendTo(this.myTicket);
+        // Lists show the new status at once: a closed ticket used to read
+        // "pending" until the list was reloaded.
+        const restatus = (rows: any[]) =>
+          rows.map((t: any) =>
+            t.id === kwargs.id ? { ...t, status: kwargs.status ?? t.status, updated: kwargs.ts ?? t.updated } : t,
+          );
+        if (this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTickets = restatus(this.myTickets);
+        if (this.tickets.some((t: any) => t.id === kwargs.id)) this.tickets = restatus(this.tickets);
         // Refresh the list's status and preview for the owner's own tickets.
         if (!this.staff || this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTicketsRev += 1;
+        this.announceTicket(kwargs, openStaff, openMine);
         break;
       }
       default:
@@ -340,30 +394,46 @@ class Chat {
   }
 
   // -- unified tickets (staff) ------------------------------------------
+  //
+  // Panel actions go through the ticket_act RPC. They used to type the
+  // matching command, and each command printed its confirmation ("Posted.",
+  // "Ticket #... closed.") into the terminal beside the panel. The answer now
+  // comes back to the panel, with the ticket as it stands.
 
   openTicket(id: string): void {
     connection.sendCommand(`@ticket ${id}`);
   }
-  ticketReply(id: string, text: string, internal = false): void {
-    const t = (text || "").trim();
-    if (!t) return;
-    connection.sendCommand(internal ? `@ticket/internal ${id} = ${t}` : `@ticket ${id} = ${t}`);
-  }
-  ticketClaim(id: string): void {
-    connection.sendCommand(`@claim ${id}`);
-  }
-  ticketResolve(id: string): void {
-    connection.sendCommand(`@resolve ${id}`);
-  }
-  ticketApprove(id: string, reason = ""): void {
-    connection.sendCommand(reason ? `@approve ${id} = ${reason}` : `@approve ${id}`);
-  }
-  ticketDeny(id: string, reason = ""): void {
-    connection.sendCommand(reason ? `@deny ${id} = ${reason}` : `@deny ${id}`);
-  }
-  async loadTicketHistory(): Promise<void> {
+  /** One staff action. Resolves to the message to show; the open ticket is refreshed. */
+  async ticketAct(id: string, action: string, extra: Record<string, unknown> = {}): Promise<TicketResult> {
     try {
-      const r = await connection.request<any>("tickets", "ticket_list", { history: true });
+      const r = await connection.request<any>("tickets", "ticket_act", { id, action, ...extra });
+      if (r?.ticket && (!this.ticket || this.ticket.id === r.ticket.id)) this.ticket = r.ticket;
+      return { ok: true, message: String(r?.message ?? "Done.") };
+    } catch (e: any) {
+      return { ok: false, message: e?.message || "That did not go through." };
+    }
+  }
+  ticketReply(id: string, text: string, internal = false): Promise<TicketResult> {
+    return this.ticketAct(id, "reply", { text, internal });
+  }
+  ticketClaim(id: string): Promise<TicketResult> {
+    return this.ticketAct(id, "claim");
+  }
+  ticketResolve(id: string): Promise<TicketResult> {
+    return this.ticketAct(id, "close");
+  }
+  ticketReopen(id: string): Promise<TicketResult> {
+    return this.ticketAct(id, "reopen");
+  }
+  ticketApprove(id: string, reason = ""): Promise<TicketResult> {
+    return this.ticketAct(id, "approve", { text: reason });
+  }
+  ticketDeny(id: string, reason = ""): Promise<TicketResult> {
+    return this.ticketAct(id, "deny", { text: reason });
+  }
+  async loadTicketHistory(search = ""): Promise<void> {
+    try {
+      const r = await connection.request<any>("tickets", "ticket_list", { history: true, search });
       this.ticketHistory = r?.tickets ?? [];
     } catch {
       this.ticketHistory = [];
@@ -383,10 +453,11 @@ class Chat {
    * Load the player's own tickets. A failure is kept and shown: it used to
    * blank the list, which read as "you have no tickets". The panel calls this
    * once the socket is open; a request made before that always failed.
+   * A search covers finished tickets too, and never a staff-only note.
    */
-  async loadMyTickets(includeClosed = false): Promise<void> {
+  async loadMyTickets(includeClosed = false, search = this.myTicketsSearch): Promise<void> {
     try {
-      const r = await connection.request<any>("tickets", "my_tickets", { closed: includeClosed });
+      const r = await connection.request<any>("tickets", "my_tickets", { closed: includeClosed, search });
       this.myTickets = r?.tickets ?? [];
       this.myTicketsError = "";
     } catch (e: any) {
@@ -397,13 +468,83 @@ class Chat {
     try {
       this.myTicket = await connection.request<any>("tickets", "my_ticket", { id });
       this.myTicketsError = "";
+      this.markSeen(this.myTicket);
     } catch (e: any) {
       this.myTicketsError = e?.message || "Could not open that ticket.";
     }
   }
-  replyMyTicket(id: string, text: string): void {
-    const t = (text || "").trim();
-    if (t) connection.sendCommand(`@ticket ${id} = ${t}`);
+  /** Reply to, or withdraw, one of the player's own tickets. */
+  async myTicketAct(id: string, action: "reply" | "withdraw", text = ""): Promise<TicketResult> {
+    try {
+      const r = await connection.request<any>("tickets", "my_ticket_act", { id, action, text });
+      if (r?.ticket) {
+        this.myTicket = r.ticket;
+        this.markSeen(r.ticket);
+      }
+      this.myTicketsRev += 1;
+      return { ok: true, message: String(r?.message ?? "Done.") };
+    } catch (e: any) {
+      return { ok: false, message: e?.message || "That did not go through." };
+    }
+  }
+  replyMyTicket(id: string, text: string): Promise<TicketResult> {
+    return this.myTicketAct(id, "reply", text);
+  }
+  /** File a new help request without leaving the panel. */
+  async openRequest(subject: string, text: string): Promise<TicketResult> {
+    try {
+      const r = await connection.request<any>("tickets", "my_ticket_open", { subject, text });
+      if (r?.ticket) this.myTicket = r.ticket;
+      this.myTicketsRev += 1;
+      return { ok: true, message: String(r?.message ?? "Filed.") };
+    } catch (e: any) {
+      return { ok: false, message: e?.message || "The request could not be filed." };
+    }
+  }
+
+  // "Last seen" per ticket, so My Tickets can mark a reply the player has not
+  // read. Per browser, like the rest of the panel's conveniences.
+  seen = $state<Record<string, number>>(loadSeen());
+  private markSeen(t: any): void {
+    if (!t?.id) return;
+    const last = Math.max(t.updated ?? 0, ...(t.messages ?? []).map((m: any) => m.ts ?? 0));
+    this.seen = { ...this.seen, [t.id]: last };
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(this.seen));
+    } catch {
+      /* ignore */
+    }
+  }
+  /** Whether staff (or the system) moved a ticket since the player last opened it. */
+  unseen(t: any): boolean {
+    return !!t?.id && (t.updated ?? 0) > (this.seen[t.id] ?? 0) && t.status !== "pending";
+  }
+
+  /**
+   * Say so when a ticket message is for this player and they are not already
+   * looking at it. A staff reply used to reach a web player only as an update
+   * to My Tickets, so with the panel closed it arrived in silence.
+   */
+  private announceTicket(k: Record<string, any>, openStaff: boolean, openMine: boolean): void {
+    const ref = `#${k.short_id ?? String(k.id ?? "").slice(0, 8)}`;
+    const about = k.subject ? `${ref} ${k.subject}` : `${k.label ?? "Ticket"} ${ref}`;
+    const preview = String(k.text ?? "").slice(0, 140);
+    if (k.audience === "owner" && k.origin && k.origin !== "player" && !openMine) {
+      const title = k.origin === "system" ? `Ticket update: ${about}` : `Staff replied: ${about}`;
+      const body = k.origin === "system" ? preview : `${k.sender ?? "Staff"}: ${preview}`;
+      toasts.push("ticket", title, body, 12000, true, () => {
+        void this.openMyTicket(String(k.id));
+        this.openPanel?.("mytickets");
+      });
+      notify.ping(title, body, false);
+    } else if (k.audience === "assignee" && k.origin === "player" && !openStaff) {
+      const title = `Player replied: ${about}`;
+      toasts.push("ticket", title, `${k.sender ?? ""}: ${preview}`, 12000, true, () => {
+        this.openTicket(String(k.id));
+        this.openPanel?.("tickets");
+      });
+      notify.ping(title, preview, false);
+    }
   }
 
   // -- event handlers ----------------------------------------------------

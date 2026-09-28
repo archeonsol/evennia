@@ -14,7 +14,7 @@
   {#if url}
     <div class="bar">
       <span class="name">{title}</span>
-      <button class="pop" onclick={popOut}>Open in new window</button>
+      <button class="sh-cmd pop" onclick={popOut}>New window</button>
     </div>
     <iframe src={url} {title} referrerpolicy="no-referrer"></iframe>
   {:else}
@@ -32,11 +32,7 @@
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: var(--fg-dim); font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
   }
-  .pop {
-    background: none; border: 1px solid var(--border-bright); color: var(--fg-dim);
-    font-family: inherit; font-size: 0.7rem; padding: 2px 8px; cursor: pointer; min-height: 24px;
-  }
-  .pop:hover { color: var(--accent-bright); border-color: var(--accent); }
+  .pop { flex: none; }
   iframe { flex: 1; width: 100%; min-height: 0; border: none; background: #fff; }
-  .empty { color: var(--fg-faint); font-style: italic; padding: 1rem; }
+  .empty { color: var(--fg-faint); padding: 1rem; margin: 0; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
 </style>

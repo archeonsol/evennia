@@ -11,10 +11,10 @@
   let { onsettings }: { onsettings: () => void } = $props();
 
   const labels: Record<string, string> = {
-    connecting: "Connecting…",
-    open: "Online",
+    connecting: "Connecting",
+    open: "Connected",
     closed: "Disconnected",
-    error: "Connection error",
+    error: "Link error",
   };
 
   let viewsOpen = $state(false);
@@ -115,7 +115,7 @@
         title="Open media panel"
         onclick={() => media.openNowPlaying()}
       >
-        <span aria-hidden="true">♪ </span>{media.nowPlayingLabel()}
+        <span aria-hidden="true">&#9834; </span>{media.nowPlayingLabel()}
       </button>
     {/if}
   </div>
@@ -158,7 +158,7 @@
       />
     </div>
     <div class="menu">
-      <button class="cfg" bind:this={viewsBtn} onclick={() => (viewsOpen = !viewsOpen)} aria-expanded={viewsOpen}>Views</button>
+      <button class="sh-cmd" bind:this={viewsBtn} onclick={() => (viewsOpen = !viewsOpen)} aria-expanded={viewsOpen}>Views</button>
       {#if viewsOpen}
         <!-- Disclosure, not role="menu": a menu role promises arrow-key
              handling these items never had. Escape closes it. -->
@@ -183,7 +183,7 @@
               <button class="del" onclick={(e) => delPreset(name, e)} aria-label="Delete layout {name}">×</button>
             </div>
           {/each}
-          <button class="mi" onclick={savePreset}>Save layout…</button>
+          <button class="mi" onclick={savePreset}>Save layout</button>
           <button class="mi" class:on={dock.locked} onclick={() => dock.toggleLock()}>
             {dock.locked ? "Unlock layout" : "Lock layout"}
           </button>
@@ -192,7 +192,7 @@
         </div>
       {/if}
     </div>
-    <button class="cfg" onclick={onsettings}>Settings</button>
+    <button class="sh-cmd" onclick={onsettings}>Settings</button>
   </div>
 </header>
 
@@ -214,14 +214,22 @@
     font-size: 0.78rem;
   }
   .side { display: flex; align-items: center; gap: 0.9rem; min-width: 0; }
+  .right { gap: 0.4rem; }
   .right { justify-content: flex-end; }
   .mid { display: flex; align-items: center; justify-content: center; gap: 0.8rem; min-width: 0; }
   .brand {
     color: var(--accent-bright); font-weight: 500; letter-spacing: 0.24em;
     text-transform: uppercase; font-size: 0.74rem; white-space: nowrap;
   }
-  .conn { display: flex; align-items: center; gap: 0.45rem; white-space: nowrap; color: var(--fg-dim); }
-  .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+  /* The link lamp: a square LED and the state in capitals. */
+  .conn {
+    display: flex; align-items: center; gap: 0.6ch; white-space: nowrap; color: var(--fg-dim);
+    font-size: 0.64rem; letter-spacing: 0.18em; text-transform: uppercase;
+  }
+  .hud[data-state="open"] .conn { color: var(--ok); }
+  .hud[data-state="closed"] .conn,
+  .hud[data-state="error"] .conn { color: var(--alert); }
+  .hud[data-state="connecting"] .conn { color: var(--gold); }
   .vol-icon { flex-shrink: 0; width: 1rem; height: 1rem; fill: var(--fg-dim); }
   .vol:hover .vol-icon, .vol.open .vol-icon, .vol:focus-within .vol-icon { fill: var(--accent-bright); }
   .vol.muted .vol-icon { fill: var(--fg-faint); }
@@ -234,6 +242,10 @@
     .brand { display: none; }
   }
   .dot { width: 0.5rem; height: 0.5rem; background: var(--fg-faint); }
+  :global(html[data-glow]) .hud[data-state="open"] .dot { box-shadow: 0 0 6px var(--ok); }
+  .hud[data-state="connecting"] .dot { animation: link-blink 1s steps(2, jump-none) infinite; }
+  @keyframes link-blink { 50% { opacity: 0.25; } }
+  :global(html[data-calm]) .hud .dot { animation: none; }
   .hud[data-state="open"] .dot { background: var(--ok); }
   .hud[data-state="connecting"] .dot { background: var(--gold); }
   .hud[data-state="closed"] .dot,
@@ -247,8 +259,8 @@
   }
   .now-playing {
     background: none;
-    border: 1px solid var(--border);
-    color: var(--accent-bright);
+    border: 0;
+    color: var(--fg-dim);
     font-family: inherit;
     font-size: 0.62rem;
     letter-spacing: 0.08em;
@@ -259,7 +271,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .now-playing:hover { color: var(--accent-bright); border-color: var(--accent); }
+  .now-playing:hover { color: var(--bg-deep); background: var(--accent); }
 
   .vol {
     display: flex;
@@ -277,7 +289,7 @@
     margin: 0;
     padding: 0;
     border: none;
-    border-radius: 1px;
+    border-radius: 0;
     background: var(--border);
     outline: none;
     opacity: 0;
@@ -294,18 +306,18 @@
   }
   .vol-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+    width: 6px;
+    height: 10px;
+    border-radius: 0;
     background: var(--accent);
     cursor: pointer;
     border: none;
     box-shadow: 0 0 0 1px var(--bg-elev);
   }
   .vol-slider::-moz-range-thumb {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+    width: 6px;
+    height: 10px;
+    border-radius: 0;
     background: var(--accent);
     cursor: pointer;
     border: none;
@@ -313,7 +325,7 @@
   .vol-slider::-moz-range-track {
     height: 2px;
     background: var(--border);
-    border-radius: 1px;
+    border-radius: 0;
   }
 
   .sr-only {
@@ -327,18 +339,6 @@
     white-space: nowrap;
     border: 0;
   }
-  .cfg {
-    background: var(--bg);
-    border: 1px solid var(--border-bright);
-    color: var(--fg);
-    font-family: inherit;
-    font-size: 0.74rem;
-    cursor: pointer;
-    padding: 3px 12px;
-    min-height: 26px;
-    white-space: nowrap;
-  }
-  .cfg:hover, .cfg[aria-expanded="true"] { color: var(--accent-bright); border-color: var(--accent); }
   .menu { position: relative; display: inline-flex; }
   .drop {
     position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 50;
@@ -350,9 +350,9 @@
     font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
     text-align: left; padding: 6px 10px; cursor: pointer;
   }
-  .mi:hover { color: var(--accent-bright); background: var(--bg); }
+  .mi:hover, .mi:focus-visible { color: var(--bg-deep); background: var(--accent); }
   .mi.on { color: var(--gold); }
-  .mi.warn:hover { color: var(--alert); }
+  .mi.warn:hover { color: var(--bg-deep); background: var(--alert); }
   .sep { height: 1px; background: var(--border); margin: 2px 0; }
   .preset-row { display: flex; align-items: stretch; }
   .preset { flex: 1; }

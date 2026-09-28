@@ -19,6 +19,7 @@
   import { session } from "./lib/session.svelte";
   import { chat } from "./lib/chat.svelte";
   import { settings } from "./lib/settings.svelte";
+  import { dock } from "./lib/dock.svelte";
   import { logview } from "./lib/logview.svelte";
   import { announcer } from "./lib/announce.svelte";
   import { focusRegion, type Region } from "./lib/regions";
@@ -114,6 +115,11 @@
     if (keybinds.match(e, "settings")) {
       e.preventDefault();
       settingsOpen = true;
+      return;
+    }
+    if (keybinds.match(e, "help")) {
+      e.preventDefault();
+      dock.openHelp();
       return;
     }
     if (keybinds.match(e, "clear")) {
