@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.286: Verb reachability for a whole list in one pass
+
+A game that builds a player's full verb list (a Tab-completion lexicon, say) rebuilt the provider context once per registered action. In production one list cost about 270ms, and a Portal reconnect built one for every session in a single reactor turn (an 854ms stall).
+
+### Actions
+
+- **`reachable_actions(action_classes, actor)`** ([`parser.py`](evennia/actions/parser.py)) returns the classes whose verbs may be offered to the actor, in input order. It gives the same answer as `_verb_reachable` for each class and fails closed the same way (an actor the context cannot be built for gets `[]`). The per-verb test now runs over a prebuilt context through `_context_reachable`, which both paths share.
+- **`ActionContextBuilder.build_many(actor, action_types)`** ([`context.py`](evennia/actions/context.py)), exported as `build_contexts`, returns one context per action type. It reads the actor's states, equipment, room providers and room contents once; each type then gets its own account slot (from `__primary_handler__`) and its own B2 prefilter. `build` is `build_many` over one type, so dispatch keeps its exact provider order.
+
+### Tests
+
+- `TestReachableActions` in [`test_parser.py`](evennia/actions/tests/test_parser.py) checks the batch answer against `_verb_reachable` for a player, a builder, and a player whose room holds an ungated provider for a gated verb; checks the room's contents are read once for the whole list; and checks an unshaped actor gets `[]`.
+
 ## 6.0.0+underspire.285: Saved protocol flags no longer break the Portal sync
 
 A player whose saved options held a dict-valued flag broke every full session sync, so output to every player dropped each time the bus peer reset.
