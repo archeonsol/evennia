@@ -733,11 +733,19 @@ class EvenniaServerService(MultiService):
         This is called first when the server is starting, before any other hooks, regardless of how it's starting.
         """
         # Replay any attribute documents that a past DB outage diverted to the
-        # durable write spool, before normal operation reads them.
+        # durable write spool, before normal operation reads them. Unreplayable
+        # intents are quarantined by the reclaimer itself (loudly) so they can
+        # never wedge a boot.
         try:
             from evennia.typeclasses.jsonb_handler import reclaim_spooled_writes
 
-            reclaim_spooled_writes()
+            report = reclaim_spooled_writes()
+            if report.quarantined:
+                logger.log_err(
+                    "at_server_init: %d unreplayable spooled intent(s) quarantined to %s; "
+                    "review with the spool status tool"
+                    % (len(report.quarantined), report.quarantine_dir)
+                )
         except Exception:
             logger.log_trace("at_server_init: spooled-write reclamation failed")
         # Reclaim jobs left in-flight by a crashed worker (expired leases /

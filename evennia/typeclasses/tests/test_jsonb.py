@@ -47,6 +47,7 @@ from evennia.typeclasses.jsonb_handler import (
     read_attribute_snapshots,
     reclaim_spooled_writes,
     spool_pending_count,
+    spool_quarantine_dirs,
 )
 from evennia.typeclasses.jsonb_util import _SENTINEL, from_jsonb, to_jsonb
 from evennia.utils.test_resources import BaseEvenniaTest
@@ -784,7 +785,7 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
             self.assertIn(state.key, jsonb_handler._STRONG_ROW_STATES)
             self.assertEqual(self._database_attrs()["~"]["_d"], {"first": 1})
 
-            self.assertEqual(reclaim_spooled_writes(), 2)
+            self.assertEqual(reclaim_spooled_writes().reclaimed, 2)
         self.assertEqual(self._database_attrs()["~"]["_d"], {"first": 1, "second": 2, "third": 3})
 
     def test_async_flush_quarantines_prepared_blocking_witness(self):
@@ -1844,7 +1845,7 @@ class TestBlockingUpdate(BaseEvenniaTest):
 
                 self.assertEqual(spool_pending_count(), 1)
                 self.assertEqual(self._database_document()["~"]["_d"]["state"]["revision"], 2)
-                self.assertEqual(reclaim_spooled_writes(), 0)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 0)
                 self.assertEqual(spool_pending_count(), 0)
 
     def test_full_model_save_cannot_overwrite_indeterminate_commit(self):
@@ -1938,7 +1939,7 @@ class TestBlockingUpdate(BaseEvenniaTest):
                 with self.assertRaises(AttributeUpdateUnavailable):
                     self.handler.get("state")
 
-                self.assertEqual(reclaim_spooled_writes(), 0)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 0)
                 self.assertEqual(self.handler.get("state")["revision"], 2)
 
     def test_noop_cache_sync_failure_recovers_without_witness(self):
@@ -2112,7 +2113,7 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                 changed["~"]["_d"]["state"] = {"revision": 99}
                 type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=changed)
 
-                self.assertEqual(reclaim_spooled_writes(), 0)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 0)
                 self.assertEqual(spool_pending_count(), 1)
                 self.assertEqual(self._database_document()["~"]["_d"]["state"], {"revision": 99})
 
@@ -2129,7 +2130,7 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                     )
                 type(self.obj1).objects.filter(pk=self.obj1.pk).delete()
 
-                self.assertEqual(reclaim_spooled_writes(), 0)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 0)
                 self.assertEqual(spool_pending_count(), 1)
 
     def test_new_row_state_blocks_until_pending_delta_is_reclaimed(self):
@@ -2151,7 +2152,7 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                 with self.assertRaises(AttributeUpdateUnavailable):
                     restarted.add("later", 5)
 
-                self.assertEqual(reclaim_spooled_writes(), 1)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 1)
                 self.assertEqual(restarted.get("queued"), 4)
 
     def test_two_deltas_replay_fifo_and_keep_newer_visible_head(self):
@@ -2176,7 +2177,7 @@ class TestDurableIntentOrdering(BaseEvenniaTest):
                 remote.setdefault("~", {}).setdefault("_d", {})["remote"] = 3
                 type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
 
-                self.assertEqual(reclaim_spooled_writes(), 2)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 2)
                 self.assertEqual(spool_pending_count(), 0)
                 self.assertEqual(
                     self._database_document()["~"]["_d"],
@@ -2317,8 +2318,8 @@ class TestFlushRetry(BaseEvenniaTest):
                     self.backend._do_flush()
                 self.assertEqual(spool_pending_count(), 1)
                 # reclamation writes the doc to the DB and clears the spool
-                reclaimed = reclaim_spooled_writes()
-                self.assertEqual(reclaimed, 1)
+                report = reclaim_spooled_writes()
+                self.assertEqual(report.reclaimed, 1)
                 self.assertEqual(spool_pending_count(), 0)
                 self.obj1.refresh_from_db()
                 self.assertEqual(self.obj1.db_attrs["~"]["_d"]["x"], 42)
@@ -2338,7 +2339,7 @@ class TestFlushRetry(BaseEvenniaTest):
                 remote.setdefault("~", {}).setdefault("_d", {})["y"] = 7
                 type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
 
-                self.assertEqual(reclaim_spooled_writes(), 1)
+                self.assertEqual(reclaim_spooled_writes().reclaimed, 1)
                 document = (
                     type(self.obj1)
                     .objects.filter(pk=self.obj1.pk)
@@ -2347,7 +2348,7 @@ class TestFlushRetry(BaseEvenniaTest):
                 )
                 self.assertEqual(document["~"]["_d"], {"x": 42, "y": 7})
 
-    def test_reclaim_leaves_conflicting_spool_for_recovery(self):
+    def test_reclaim_quarantines_conflicting_spool_and_frees_the_row(self):
         with tempfile.TemporaryDirectory() as spool:
             with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
                 self.handler.add("x", 42)
@@ -2362,8 +2363,21 @@ class TestFlushRetry(BaseEvenniaTest):
                 remote.setdefault("~", {}).setdefault("_d", {})["x"] = 99
                 type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
 
-                self.assertEqual(reclaim_spooled_writes(), 0)
-                self.assertEqual(spool_pending_count(), 1)
+                report = reclaim_spooled_writes()
+
+                # The unwinnable intent is preserved, not applied; the row stays
+                # readable and shows committed truth instead of blocking boot.
+                self.assertEqual(report.reclaimed, 0)
+                self.assertEqual(len(report.quarantined), 1)
+                self.assertEqual(report.quarantined[0].reason, "conflict")
+                self.assertEqual(spool_pending_count(), 0)
+                self.assertTrue(os.path.isfile(report.quarantined[0].dest_path))
+                self.assertTrue(
+                    os.path.isfile(os.path.join(report.quarantine_dir, "manifest.jsonl"))
+                )
+                self.assertEqual(self.handler.get("x"), 99)
+                listed = dict((path, count) for path, count, _mtime in spool_quarantine_dirs())
+                self.assertEqual(listed.get(report.quarantine_dir), 1)
                 document = (
                     type(self.obj1)
                     .objects.filter(pk=self.obj1.pk)
@@ -2371,6 +2385,40 @@ class TestFlushRetry(BaseEvenniaTest):
                     .get()
                 )
                 self.assertEqual(document["~"]["_d"]["x"], 99)
+
+    def test_reclaim_can_still_leave_conflicts_in_place(self):
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                self.handler.add("x", 42)
+                self.backend._flush_failures = self.backend._FLUSH_FAIL_LIMIT - 1
+                with patch.object(
+                    jsonb_handler,
+                    "_write_locked_document",
+                    side_effect=Exception("db down"),
+                ):
+                    self.backend._do_flush()
+                remote = deepcopy(self.obj1.db_attrs or {})
+                remote.setdefault("~", {}).setdefault("_d", {})["x"] = 99
+                type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
+
+                report = reclaim_spooled_writes(quarantine_conflicts=False)
+
+                self.assertEqual(report.reclaimed, 0)
+                self.assertEqual(report.quarantined, ())
+                self.assertEqual(spool_pending_count(), 1)
+
+    def test_unreadable_spool_payload_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as spool:
+            with override_settings(JSONB_WRITE_SPOOL_DIR=spool):
+                with open(os.path.join(spool, "broken.objects_objectdb.1.0.json"), "w") as fh:
+                    fh.write("{not json")
+
+                report = reclaim_spooled_writes()
+
+                self.assertEqual(len(report.quarantined), 1)
+                self.assertEqual(report.quarantined[0].reason, "unreadable")
+                self.assertEqual(spool_pending_count(), 0)
+                self.assertTrue(os.path.isfile(report.quarantined[0].dest_path))
 
     def test_success_resets_failure_counter(self):
         self.handler.add("x", 1)

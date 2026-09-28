@@ -266,7 +266,10 @@ Deployment boundaries are explicit:
 
 - Live cache coherence is process-local. Exactly one authoritative Server
   process may own and mutate a given ObjectDB row; multiple independent game
-  workers need an external ownership/routing design.
+  workers need an external ownership/routing design. The engine enforces the
+  singular Server with an exclusive advisory lock taken beside the pidfile at
+  bootstrap (`evennia.server.server_lock`): a second Server refuses to start,
+  and the Portal and launcher probe the lock before spawning one.
 - Every process that can persist these Attributes must see the same
   `JSONB_WRITE_SPOOL_DIR` on one host or a shared filesystem whose advisory
   locks and atomic rename/fsync semantics are reliable.
@@ -277,6 +280,17 @@ Deployment boundaries are explicit:
   the coordinator takes a database-wide write lock with a no-op `db_attrs`
   UPDATE before reading. That UPDATE may fire database UPDATE triggers even
   when the Attribute document is unchanged.
+
+At Server bootstrap, `reclaim_spooled_writes()` replays durable intents once,
+before any game code reads a row. An intent that can never replay — a
+three-way merge conflict with the committed document, or an unreadable payload —
+must not wedge the boot: it is moved to a sibling
+`jsonb_spool_quarantine_<UTC>_<pid>/` directory with a `manifest.jsonl`, the
+pass logs an error, the row starts readable on committed truth, and the
+preserved files stay for operator reconciliation or dismissal. The pass returns
+a `SpoolReclaimReport`; `quarantine_conflicts=False` restores the legacy
+leave-in-place behavior. Protected-outcome witnesses (`PREPARED_BLOCKING`)
+keep their operator-resolution contract and are never quarantined here.
 
 ### Using AttributeProperty
 

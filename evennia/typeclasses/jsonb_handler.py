@@ -115,8 +115,11 @@ __all__ = (
     "force_flush",
     "has_spooled_write",
     "reclaim_spooled_writes",
+    "QuarantinedIntent",
+    "SpoolReclaimReport",
     "read_attribute_snapshots",
     "spool_pending_count",
+    "spool_quarantine_dirs",
 )
 
 # Document sub-keys within each category section.
@@ -168,6 +171,44 @@ class FlushResult:
 
     def __repr__(self):
         return f"<FlushResult ok={self.ok} spooled={self.spooled}>"
+
+
+@dataclass(frozen=True)
+class QuarantinedIntent:
+    """One unreplayable spooled intent moved aside for operator review.
+
+    Attributes:
+        row_key (tuple or None): ``(alias, model, pk)`` the intent belonged
+            to, or None when the payload could not be read at all.
+        source_path (str): Where the intent lived in the active spool.
+        dest_path (str): Where it was preserved in the quarantine directory.
+        reason (str): ``"conflict"`` for a three-way merge conflict with the
+            committed document, or ``"unreadable"`` for an undecodable file.
+    """
+
+    row_key: tuple | None
+    source_path: str
+    dest_path: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class SpoolReclaimReport:
+    """Outcome of one :func:`reclaim_spooled_writes` pass.
+
+    Attributes:
+        reclaimed (int): Intents replayed into the database.
+        dropped_missing (int): Intents whose row no longer exists.
+        quarantined (tuple): The :class:`QuarantinedIntent` entries moved to
+            :attr:`quarantine_dir`, preserved for reconciliation.
+        quarantine_dir (str or None): The quarantine directory created by this
+            pass, if anything was quarantined.
+    """
+
+    reclaimed: int = 0
+    dropped_missing: int = 0
+    quarantined: tuple[QuarantinedIntent, ...] = ()
+    quarantine_dir: str | None = None
 
 
 class JsonbWriteConflict(RuntimeError):
@@ -1302,14 +1343,63 @@ def spool_pending_count():
         return 0
 
 
-def reclaim_spooled_writes():
+def spool_quarantine_dirs():
+    """Quarantine directories left by passes over unreplayable spool intents.
+
+    Returns:
+        list: ``(path, file_count, mtime)`` tuples, newest first. Only
+        directories matching ``jsonb_spool_quarantine_*`` beside the active
+        spool are listed, so operator tooling can report and age them out.
+
+    """
+    spool = _spool_dir()
+    parent = os.path.dirname(spool) or spool
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        if not name.startswith("jsonb_spool_quarantine_"):
+            continue
+        path = os.path.join(parent, name)
+        if not os.path.isdir(path):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+            count = sum(1 for entry in os.listdir(path) if entry.endswith(".json"))
+        except OSError:
+            continue
+        found.append((path, count, mtime))
+    found.sort(key=lambda item: item[2], reverse=True)
+    return found
+
+
+def reclaim_spooled_writes(*, quarantine_conflicts: bool = True):
     """
     Replay any spooled attribute documents into the database.
 
     Call once at server start, before normal operation, so writes diverted to
     the spool during a past DB outage are not lost. Each successfully replayed
     document's spool file is removed; a file whose object no longer exists is
-    dropped. Returns the number of documents reclaimed.
+    dropped.
+
+    An intent that can never replay — a three-way merge conflict with the
+    committed document, or an unreadable payload — must not hold the game
+    hostage: with ``quarantine_conflicts`` (the default) it is moved to a
+    sibling ``jsonb_spool_quarantine_*`` directory with a manifest, its row
+    starts readable, and an incident is logged for operators. The preserved
+    files remain available for reconciliation. Protected-outcome witnesses
+    (``PREPARED_BLOCKING``) follow their own retention contract and are never
+    quarantined here.
+
+    Args:
+        quarantine_conflicts (bool): Move unreplayable intents aside instead
+            of leaving them to block their rows indefinitely. False keeps the
+            legacy behavior of leaving them in place.
+
+    Returns:
+        SpoolReclaimReport: Counts of replayed, dropped and quarantined intents.
     """
     from django.apps import apps
 
@@ -1323,8 +1413,46 @@ def reclaim_spooled_writes():
         )
     spool = _spool_dir()
     if not os.path.isdir(spool):
-        return 0
+        return SpoolReclaimReport()
+    quarantine_dir = None
+    quarantined: list[QuarantinedIntent] = []
+
+    def _quarantine(entries, row_key, reason):
+        """Move ``(sequence, path)`` intents aside and record the manifest."""
+        nonlocal quarantine_dir
+        if quarantine_dir is None:
+            stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            quarantine_dir = os.path.join(
+                os.path.dirname(spool) or spool,
+                f"jsonb_spool_quarantine_{stamp}_{os.getpid()}",
+            )
+            os.makedirs(quarantine_dir, exist_ok=True)
+        with open(
+            os.path.join(quarantine_dir, "manifest.jsonl"), "a", encoding="utf-8"
+        ) as manifest:
+            for sequence, path in entries:
+                dest = os.path.join(quarantine_dir, os.path.basename(path))
+                if os.path.exists(dest):
+                    dest = f"{dest}.{sequence}"
+                os.replace(path, dest)
+                quarantined.append(QuarantinedIntent(row_key, path, dest, reason))
+                manifest.write(
+                    json.dumps(
+                        {
+                            "ts": time.time(),
+                            "reason": reason,
+                            "model": row_key[1] if row_key else None,
+                            "pk": row_key[2] if row_key else None,
+                            "file": os.path.basename(path),
+                            "sequence": sequence,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
+
     groups = {}
+    unreadable = []
     for name in os.listdir(spool):
         if not name.endswith(".json"):
             continue
@@ -1333,20 +1461,30 @@ def reclaim_spooled_writes():
             payload = _read_spool_payload(path)
             groups.setdefault(_payload_key(payload), []).append(path)
         except Exception:
-            logger.log_trace(f"jsonb spool: unreadable {name}; leaving it in place")
+            if quarantine_conflicts:
+                unreadable.append((0, path))
+            else:
+                logger.log_trace(f"jsonb spool: unreadable {name}; leaving it in place")
+    if unreadable:
+        _quarantine(sorted(unreadable, key=lambda item: item[1]), None, "unreadable")
+        logger.log_err(
+            "jsonb spool: quarantined %d unreadable intent(s) to %s; "
+            "the game will start; reconcile or dismiss them" % (len(unreadable), quarantine_dir)
+        )
     for alias in {key[0] for key in groups}:
         if _has_user_transaction(connections[alias]):
             raise AttributeUpdateUsageError(
                 "Spool reclamation requires ownership of the outer transaction."
             )
     reclaimed = 0
+    dropped_missing = 0
     for key in sorted(groups):
         alias, model_label, pk = key
         with _spool_row_lock(key):
             entries = _list_row_entries(key)
             last_committed = None
             row_missing = False
-            for _sequence, path, payload in entries:
+            for index, (_sequence, path, payload) in enumerate(entries):
                 try:
                     app_label, model_name = model_label.split(".", 1)
                     model = apps.get_model(app_label, model_name)
@@ -1366,6 +1504,7 @@ def reclaim_spooled_writes():
                                 )
                                 break
                             os.remove(path)
+                            dropped_missing += 1
                             logger.log_warn(
                                 "jsonb spool: %s no longer exists; dropping spooled write"
                                 % model_label
@@ -1395,7 +1534,30 @@ def reclaim_spooled_writes():
                     os.remove(path)
                     reclaimed += 1
                     last_committed = merged
+                except JsonbWriteConflict:
+                    if quarantine_conflicts:
+                        # This intent and every later one for the row build on
+                        # state that never applied, so the whole tail is
+                        # unreplayable. Preserve it and free the row.
+                        remainder = [
+                            (sequence, entry_path)
+                            for sequence, entry_path, _payload in entries[index:]
+                        ]
+                        _quarantine(remainder, key, "conflict")
+                        logger.log_err(
+                            "jsonb spool: quarantined %d conflicting intent(s) for %s#%s to %s; "
+                            "the game will start; reconcile or dismiss them"
+                            % (len(remainder), model_label, pk, quarantine_dir)
+                        )
+                    else:
+                        logger.log_trace(
+                            f"jsonb spool: failed to reclaim {os.path.basename(path)}; "
+                            "leaving it and later intents in place"
+                        )
+                    break
                 except Exception:
+                    # Transient failure (database unreachable, locked row). The
+                    # intents stay for the next boot rather than being dropped.
                     logger.log_trace(
                         f"jsonb spool: failed to reclaim {os.path.basename(path)}; "
                         "leaving it and later intents in place"
@@ -1435,9 +1597,20 @@ def reclaim_spooled_writes():
                     else:
                         if not state.dirty:
                             _STRONG_ROW_STATES.pop(key, None)
+                else:
+                    # Nothing replayed and nothing pending: let the next access
+                    # reconcile the row from committed truth. This also clears
+                    # any pre-existing blocked state left by quarantined
+                    # intents without trusting a stale cached document.
+                    state.pending_checked = False
     if reclaimed:
         logger.log_info("jsonb spool: reclaimed %d deferred attribute write(s)" % reclaimed)
-    return reclaimed
+    return SpoolReclaimReport(
+        reclaimed=reclaimed,
+        dropped_missing=dropped_missing,
+        quarantined=tuple(quarantined),
+        quarantine_dir=quarantine_dir,
+    )
 
 
 # ---------------------------------------------------------------------------
