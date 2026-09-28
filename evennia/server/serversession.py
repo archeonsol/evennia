@@ -394,7 +394,11 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
 
         """
         if kwargs:
-            self.protocol_flags.update(kwargs)
+            from evennia.utils.dbserialize import deserialize
+
+            # Saved flags come from an Attribute as _SaverDicts: the Portal sync
+            # cannot pack them, and a mutation would write back to the Attribute.
+            self.protocol_flags.update(deserialize(kwargs))
             self.sessionhandler.session_portal_sync(self)
             if "SCREENREADER" in kwargs:
                 self._tell_shell_screenreader(bool(kwargs["SCREENREADER"]))
