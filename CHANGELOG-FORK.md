@@ -25,6 +25,26 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.283 — The scrollback copies whole, and reads back a line at a time
+
+The virtualized log mounts only the rows around the viewport. Copying a passage lost the middle that had unmounted, a selection died when its rows scrolled away, and Chromium emitted no line break between absolutely positioned rows, so even the lines a copy caught ran together. The review keys could re-read one of the last nine lines and go no further back.
+
+### Webclient
+
+- **A selection holds its rows** ([`logcopy.ts`](evennia/web/webclient/client/src/lib/logcopy.ts), [`logvirtual.ts`](evennia/web/webclient/client/src/lib/logvirtual.ts), [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)). A live selection's two end rows stay mounted wherever the reader scrolls (`getPinned` feeds the virtualizer's range extractor); the rows that mount between them sit between them in DOM order and paint selected. The extractor is replaced only when the held set changes, so the window stays memoized through appends. Before this, scrolling a row out of the window dropped the selection with it.
+- **Copy comes from the scrollback** ([`logcopy.ts`](evennia/web/webclient/client/src/lib/logcopy.ts), [`transcript.ts`](evennia/web/webclient/client/src/lib/transcript.ts)). A copy that spans lines is assembled from the log lines, not from whichever rows are mounted: plain text is one line per log line (the same projection search and the downloads use), and the HTML carries palette colours resolved inline against the live document, the log's own background and a system mono stack, so a paste into a document keeps its shape. The two ends are cut from their lines' own HTML at the selected character, a line still typing copies whole, and client-only links (MXP `href="#"`, scripts) paste as their text. A selection inside one line, or one reaching outside the log, is left to the browser's own copy, which is exact.
+- **Select all is the scrollback** ([`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)). Ctrl+A with focus in the output holds the first and last line, then selects between them; a copy takes every line the log is showing.
+- **A review cursor walks the scrollback** ([`review.ts`](evennia/web/webclient/client/src/lib/review.ts), [`App.svelte`](evennia/web/webclient/client/src/App.svelte), [`keybinds.svelte.ts`](evennia/web/webclient/client/src/lib/keybinds.svelte.ts)). Alt+1..9 still read one of the last nine lines; Alt+Up and Alt+Down now step a line at a time from there, and Alt+Shift+Up and Alt+Shift+Down jump to the oldest and newest line. The cursor holds a line id, not a row, so new output and the scrollback trim do not move it; it follows the log's category filters and skips media rows and blank lines; sending a command puts it back below the newest line. The four arrows are new rebindable bindings, listed for capture in the settings key view and shown as "Alt+Up" (`displayCombo`).
+- [`text.ts`](evennia/web/webclient/client/src/lib/text.ts) splits the text projection so an already-parsed fragment (`nodesToText`) projects exactly as a markup string does; the copied parts use it.
+- The shell bundle ([`shell.js`](evennia/web/static/webclient/shell/shell.js)) is rebuilt from the source.
+
+### Tests
+
+- [`review.test.ts`](evennia/web/webclient/client/src/lib/review.test.ts) covers walking by line id in both directions, the top/bottom edges, filters and blank lines, lines trimmed out from under the cursor, new output, and reset.
+- [`logvirtual.test.ts`](evennia/web/webclient/client/src/lib/logvirtual.test.ts) covers `withPinned` (ascending, unique, deduped against the window) and a pinned row surviving appends.
+- [`keybinds.test.ts`](evennia/web/webclient/client/src/lib/keybinds.test.ts) covers the new defaults and `displayCombo`'s "Alt+Up" labels.
+- [`tests/log.ts`](evennia/web/webclient/client/tests/log.ts) runs in a real Chromium and now asserts a selection surviving a scroll across three thousand lines, the copy of that span as text and HTML, and select-all. The log page is 63 checks; the vitest suite is 726 tests.
+
 ## 6.0.0+underspire.282 — A looping room track keeps looping
 
 Players heard a room's looping track once, then a long silence before it came back.
