@@ -1,0 +1,1371 @@
+{
+ "views": {
+  "": {
+   "kind": "index",
+   "query": "",
+   "categories": [
+    {
+     "name": "General",
+     "topics": [
+      {
+       "key": "accessibility",
+       "category": "General",
+       "summary": "Read the game in plain text with a screen reader."
+      },
+      {
+       "key": "account",
+       "category": "General",
+       "summary": "Manage account settings, connections, and character control."
+      },
+      {
+       "key": "calendar",
+       "category": "General",
+       "summary": "Read the current in-world date and time."
+      },
+      {
+       "key": "capsule hotel",
+       "category": "General",
+       "summary": "Use a capsule hotel as private shelter when you log out."
+      },
+      {
+       "key": "character progression",
+       "category": "General",
+       "summary": "View your character sheet and spend experience points."
+      },
+      {
+       "key": "colors",
+       "category": "General",
+       "summary": "Add color to text with pipe codes."
+      },
+      {
+       "key": "doors",
+       "category": "General",
+       "summary": "Operate doors, bulkheads, keypads, and rented entrances."
+      },
+      {
+       "key": "elevators",
+       "category": "General",
+       "summary": "Call an elevator and select a floor."
+      },
+      {
+       "key": "following",
+       "category": "General",
+       "summary": "Follow, escort, or shadow another character."
+      },
+      {
+       "key": "hauling",
+       "category": "General",
+       "summary": "Move heavy objects with a hauling team."
+      },
+      {
+       "key": "help system",
+       "category": "General",
+       "summary": "Find and read help topics."
+      },
+      {
+       "key": "inventory",
+       "category": "General",
+       "summary": "Manage carried items, clothing, armor, and held weapons."
+      },
+      {
+       "key": "looking",
+       "category": "General",
+       "summary": "Observe rooms, objects, and people."
+      },
+      {
+       "key": "lost and found",
+       "category": "General",
+       "summary": "Take free secondhand clothing and loose change from a lost and found bin."
+      },
+      {
+       "key": "movement",
+       "category": "General",
+       "summary": "Move through rooms and stop active movement or combat."
+      },
+      {
+       "key": "newbie",
+       "category": "General",
+       "summary": "New here? Start with this: the handful of commands you need in your first hour."
+      },
+      {
+       "key": "notes",
+       "category": "General",
+       "summary": "Manage private character notes that staff can read."
+      },
+      {
+       "key": "objects",
+       "category": "General",
+       "summary": "Pick up, drop, give, place, and install objects."
+      },
+      {
+       "key": "skills",
+       "category": "General",
+       "summary": "What each skill and attribute covers. Use |w@stats|n to view your sheet and |w@xp|n to spend experience."
+      },
+      {
+       "key": "syntax",
+       "category": "General",
+       "summary": "Read the command syntax in help, and name the people and things a command uses."
+      },
+      {
+       "key": "tickets",
+       "category": "General",
+       "summary": "Open a help request, report a problem, or review your requests."
+      },
+      {
+       "key": "verticality",
+       "category": "General",
+       "summary": "Climb, jump, rig lines, and use aerial equipment."
+      }
+     ]
+    },
+    {
+     "name": "Communication",
+     "topics": [
+      {
+       "key": "channels",
+       "category": "Communication",
+       "summary": "Use global out-of-character communication channels."
+      },
+      {
+       "key": "handset",
+       "category": "Communication",
+       "summary": "Use handset calls, messages, contacts, and web links."
+      },
+      {
+       "key": "handset groups",
+       "category": "Communication",
+       "summary": "Manage handset group chats and their members."
+      },
+      {
+       "key": "handset photos",
+       "category": "Communication",
+       "summary": "Take, manage, and share handset photos."
+      },
+      {
+       "key": "nous",
+       "category": "Communication",
+       "summary": "Use the Nous network, the in-character network that your Tessera connects you to."
+      },
+      {
+       "key": "player community",
+       "category": "Communication",
+       "summary": "View player profiles, presence, reactions, kudos, and mentor status."
+      }
+     ]
+    },
+    {
+     "name": "Roleplay",
+     "topics": [
+      {
+       "key": "body modifications",
+       "category": "Roleplay",
+       "summary": "Apply and remove tattoos, piercings, and cosmetics."
+      },
+      {
+       "key": "description",
+       "category": "Roleplay",
+       "summary": "Set your character's appearance, pronouns, voice, and scent."
+      },
+      {
+       "key": "media",
+       "category": "Roleplay",
+       "summary": "Use cameras, photographs, DataSlates, DataDrives, and documents."
+      },
+      {
+       "key": "performance",
+       "category": "Roleplay",
+       "summary": "Perform for a crowd, with or without an instrument."
+      },
+      {
+       "key": "places",
+       "category": "Roleplay",
+       "summary": "Create room places and use local expression."
+      },
+      {
+       "key": "posture",
+       "category": "Roleplay",
+       "summary": "Sit, lie down, or stand up."
+      },
+      {
+       "key": "recognition",
+       "category": "Roleplay",
+       "summary": "Recognize characters and manage short memory notes."
+      },
+      {
+       "key": "roleplaying",
+       "category": "Roleplay",
+       "summary": "Talk, and write what your character does."
+      },
+      {
+       "key": "room music",
+       "category": "Roleplay",
+       "summary": "Manage background music in an authorized room."
+      },
+      {
+       "key": "room poses",
+       "category": "Roleplay",
+       "summary": "Set pose lines shown when players look at a room."
+      },
+      {
+       "key": "tokens",
+       "category": "Roleplay",
+       "summary": "Substitution tokens dynamically insert names and pronouns into room poses, tease lines, garment descriptions, body-part descriptions, and your general description."
+      },
+      {
+       "key": "trust",
+       "category": "Roleplay",
+       "summary": "Trust grants permission for other characters to perform invasive or intimate physical actions on you."
+      }
+     ]
+    },
+    {
+     "name": "Combat",
+     "topics": [
+      {
+       "key": "cages",
+       "category": "Combat",
+       "summary": "Enter, secure, and leave cages."
+      },
+      {
+       "key": "combat",
+       "category": "Combat",
+       "summary": "Fight with melee weapons, firearms, and combat actions."
+      },
+      {
+       "key": "custody",
+       "category": "Combat",
+       "summary": "Surrender, arrest a suspect, or complete precinct booking."
+      },
+      {
+       "key": "firearm modifications",
+       "category": "Combat",
+       "summary": "Install, remove, and operate firearm modifications."
+      },
+      {
+       "key": "firearms",
+       "category": "Combat",
+       "summary": "Reload, unload, inspect, and clean a firearm."
+      },
+      {
+       "key": "firing range",
+       "category": "Combat",
+       "summary": "View and clear firing-range scores."
+      },
+      {
+       "key": "grapple",
+       "category": "Combat",
+       "summary": "Grapple, control, and release another character in combat."
+      },
+      {
+       "key": "loading",
+       "category": "Combat",
+       "summary": "Fill a magazine, a speedloader, or an alchemy station."
+      },
+      {
+       "key": "sleight",
+       "category": "Combat",
+       "summary": "Conceal, steal, and plant carried items."
+      },
+      {
+       "key": "stealth",
+       "category": "Combat",
+       "summary": "Hide, move quietly, and search for concealed targets."
+      }
+     ]
+    },
+    {
+     "name": "Survival",
+     "topics": [
+      {
+       "key": "cultivation",
+       "category": "Survival",
+       "summary": "Use farming modules or the communal farm to produce materials."
+      },
+      {
+       "key": "husbandry",
+       "category": "Survival",
+       "summary": "Capture wild animals and manage companion animals."
+      },
+      {
+       "key": "industrial mining",
+       "category": "Survival",
+       "summary": "Operate an extraction combine in a mining bay."
+      },
+      {
+       "key": "scavenging",
+       "category": "Survival",
+       "summary": "Scavenge sites and harvest corpses."
+      },
+      {
+       "key": "survival",
+       "category": "Survival",
+       "summary": "Use food, water, field sources, and fishing equipment."
+      }
+     ]
+    },
+    {
+     "name": "Medical",
+     "topics": [
+      {
+       "key": "custodians",
+       "category": "Medical",
+       "summary": "Use biomonitors and casualty recovery services."
+      },
+      {
+       "key": "cyberware",
+       "category": "Medical",
+       "summary": "Inspect, activate, and operate installed cyberware."
+      },
+      {
+       "key": "medical",
+       "category": "Medical",
+       "summary": "Assess patients and provide medical treatment."
+      },
+      {
+       "key": "medical devices",
+       "category": "Medical",
+       "summary": "Operate IV, rescue, resuscitation, dialysis, and stasis equipment."
+      },
+      {
+       "key": "medical diagnostics",
+       "category": "Medical",
+       "summary": "Examine patients with diagnostic tools."
+      },
+      {
+       "key": "scanning",
+       "category": "Medical",
+       "summary": "Scan medical patients and Matrix Sprites or tools."
+      },
+      {
+       "key": "splintering",
+       "category": "Medical",
+       "summary": "Use a splinter pod and obtain a replacement sleeve after death."
+      },
+      {
+       "key": "surgery",
+       "category": "Medical",
+       "summary": "Perform surgery or assist another surgeon."
+      }
+     ]
+    },
+    {
+     "name": "Crafting",
+     "topics": [
+      {
+       "key": "alchemy",
+       "category": "Crafting",
+       "summary": "Refine specimens and make chemical compounds."
+      },
+      {
+       "key": "armorsmithing",
+       "category": "Crafting",
+       "summary": "Forge, inspect, repair, and reinforce armor."
+      },
+      {
+       "key": "artisan design",
+       "category": "Crafting",
+       "summary": "Edit unfinished jewelry and perfume."
+      },
+      {
+       "key": "artwork",
+       "category": "Crafting",
+       "summary": "Make, finish, and install artwork."
+      },
+      {
+       "key": "brewing",
+       "category": "Crafting",
+       "summary": "Use kitchens and brewing vessels to prepare drinks."
+      },
+      {
+       "key": "cooking",
+       "category": "Crafting",
+       "summary": "Use a kitchen to prepare food."
+      },
+      {
+       "key": "crafting",
+       "category": "Crafting",
+       "summary": "Use blueprints and manage a crafting station."
+      },
+      {
+       "key": "dismantling",
+       "category": "Crafting",
+       "summary": "Break crafted items into salvage materials."
+      },
+      {
+       "key": "finishing",
+       "category": "Crafting",
+       "summary": "Set the name and sensory descriptions of a new crafted item."
+      },
+      {
+       "key": "rune carving",
+       "category": "Crafting",
+       "summary": "Prepare and carve ritual seals."
+      },
+      {
+       "key": "tailoring",
+       "category": "Crafting",
+       "summary": "Weave cloth and turn a carried bolt into one finished garment."
+      },
+      {
+       "key": "tanning",
+       "category": "Crafting",
+       "summary": "Process hides and related materials at a tanning station."
+      },
+      {
+       "key": "technical artifacts",
+       "category": "Crafting",
+       "summary": "Inspect, activate, and recharge technical artifacts."
+      },
+      {
+       "key": "weaponsmithing",
+       "category": "Crafting",
+       "summary": "Forge weapons and repair damaged weapons."
+      }
+     ]
+    },
+    {
+     "name": "Economy",
+     "topics": [
+      {
+       "key": "bar",
+       "category": "Economy",
+       "summary": "Prepare, serve, stock, and manage venue menu items."
+      },
+      {
+       "key": "businesses",
+       "category": "Economy",
+       "summary": "Run a business: staff, wages, money, and the shop counter."
+      },
+      {
+       "key": "commissions",
+       "category": "Economy",
+       "summary": "Browse, accept, and deliver faction commissions."
+      },
+      {
+       "key": "contracts",
+       "category": "Economy",
+       "summary": "Accept, complete, and collect freight assignments."
+      },
+      {
+       "key": "economy",
+       "category": "Economy",
+       "summary": "Buy, sell, appraise, transfer, and bank money."
+      }
+     ]
+    },
+    {
+     "name": "Vehicles",
+     "topics": [
+      {
+       "key": "mechanics",
+       "category": "Vehicles",
+       "summary": "Inspect, repair, refuel, and customize vehicles."
+      },
+      {
+       "key": "robotics",
+       "category": "Vehicles",
+       "summary": "Build, inspect, operate, and repair modular machines."
+      },
+      {
+       "key": "vehicle cargo",
+       "category": "Vehicles",
+       "summary": "Use vehicle crew stations, cargo storage, hatches, and racks."
+      },
+      {
+       "key": "vehicle combat",
+       "category": "Vehicles",
+       "summary": "Fire, load, install, and use vehicle weapons."
+      },
+      {
+       "key": "vehicle security",
+       "category": "Vehicles",
+       "summary": "Lock vehicles, manage access, and bypass security."
+      },
+      {
+       "key": "vehicles",
+       "category": "Vehicles",
+       "summary": "Start, control, drive, and fly vehicles."
+      }
+     ]
+    },
+    {
+     "name": "Matrix",
+     "topics": [
+      {
+       "key": "dive rigs",
+       "category": "Matrix",
+       "summary": "Use a stationary dive rig for Matrix and remote-vehicle connections."
+      },
+      {
+       "key": "matrix",
+       "category": "Matrix",
+       "summary": "Connect to the Matrix, move through it, and run programs."
+      },
+      {
+       "key": "matrix combat",
+       "category": "Matrix",
+       "summary": "Deploy, command, capture, and tune Matrix Sprites."
+      },
+      {
+       "key": "matrix pages",
+       "category": "Matrix",
+       "summary": "Build your own page on the Matrix web, at an address other characters can open."
+      },
+      {
+       "key": "slotting",
+       "category": "Matrix",
+       "summary": "Install DataSlate media, dive-rig modules, and Matrix cartridges."
+      },
+      {
+       "key": "vaults",
+       "category": "Matrix",
+       "summary": "Enter a private Matrix Vault."
+      }
+     ]
+    },
+    {
+     "name": "Games",
+     "topics": [
+      {
+       "key": "cards",
+       "category": "Games",
+       "summary": "Use a shared deck, table piles, and private hands."
+      },
+      {
+       "key": "dice",
+       "category": "Games",
+       "summary": "Use a held digital dice roller."
+      },
+      {
+       "key": "diskette",
+       "category": "Games",
+       "summary": "Play Diskette inside an arena."
+      },
+      {
+       "key": "mechanical bull",
+       "category": "Games",
+       "summary": "Ride a mechanical bull and post your score on its board."
+      },
+      {
+       "key": "pool",
+       "category": "Games",
+       "summary": "Play pool on a pool table in the room."
+      }
+     ]
+    },
+    {
+     "name": "Lore",
+     "topics": [
+      {
+       "key": "abkal",
+       "category": "Lore",
+       "summary": "The Abkal: Suburba's divers, keepers of the Cortex, and the slums' way into Abzu."
+      },
+      {
+       "key": "cabiri",
+       "category": "Lore",
+       "summary": "The Cabiri: the slum fraternity of mechanics and rogue engineers who believe nothing has a final form."
+      },
+      {
+       "key": "coterie",
+       "category": "Lore",
+       "summary": "The Coterie: the masked crime syndicate that rules Suburba's underworld and its vice."
+      },
+      {
+       "key": "deshret",
+       "category": "Lore",
+       "summary": "Deshret: the last city, built downward into the earth after the surface burned."
+      },
+      {
+       "key": "districts",
+       "category": "Lore",
+       "summary": "The four tiers of Deshret, from the slums under the surface down to the palaces at the bottom."
+      },
+      {
+       "key": "diving",
+       "category": "Lore",
+       "summary": "Diving: going into Abzu, the Matrix, which most of the city treats as something closer to a spirit realm than a machine."
+      },
+      {
+       "key": "glossary",
+       "category": "Lore",
+       "summary": "Words your character would know, from Abzu to yeoman."
+      },
+      {
+       "key": "great houses",
+       "category": "Lore",
+       "summary": "The nine families who rule Deshret from the deepest floors, and how their titles and bastards work."
+      },
+      {
+       "key": "guilds",
+       "category": "Lore",
+       "summary": "The Six Guilds: the city's great monopolies, their patron Saints, and the particles their members wear."
+      },
+      {
+       "key": "house amari",
+       "category": "Lore",
+       "summary": "House Amari: keepers of the only real garden in Deshret, and the city's supplier of the real thing."
+      },
+      {
+       "key": "house drepane",
+       "category": "Lore",
+       "summary": "House Drepane: devoted servants of Symphony's digital gods, who live for beauty, drama, and spectacle."
+      },
+      {
+       "key": "house kadesh",
+       "category": "Lore",
+       "summary": "House Kadesh: the truest believers in the city, who carve their faith into their own flesh."
+      },
+      {
+       "key": "house morcant",
+       "category": "Lore",
+       "summary": "House Morcant: masked, nameless, and somehow tied to death."
+      },
+      {
+       "key": "house qamarat",
+       "category": "Lore",
+       "summary": "House Qamarat: owners of the crystals that power the city, the richest House, and very aware of it."
+      },
+      {
+       "key": "house rook",
+       "category": "Lore",
+       "summary": "House Rook: the youngest Great House, raised up from the city watch, where nobody cares about your birth until you have served."
+      },
+      {
+       "key": "house valcora",
+       "category": "Lore",
+       "summary": "House Valcora: restless pilots who own the city's largest air fleet, and the only House that would rather go up."
+      },
+      {
+       "key": "house varga",
+       "category": "Lore",
+       "summary": "House Varga: the feral nobles who keep the city's great hunting ground and breed the stock that splicing needs."
+      },
+      {
+       "key": "house vesalius",
+       "category": "Lore",
+       "summary": "House Vesalius: the ancient, beautiful, and coldly polite rulers of Mythos."
+      },
+      {
+       "key": "kolkhos",
+       "category": "Lore",
+       "summary": "The Kolkhos: the farmers' collective that feeds much of Suburba, and can turn a farm shift into a militia in minutes."
+      },
+      {
+       "key": "languages",
+       "category": "Lore",
+       "summary": "The four languages of Deshret: Shinar, Babble, Harran, and Nisabic."
+      },
+      {
+       "key": "law",
+       "category": "Lore",
+       "summary": "Law and order in Deshret: a turf war between the state, the Church, the guilds, and the underworld."
+      },
+      {
+       "key": "life in deshret",
+       "category": "Lore",
+       "summary": "What everyday life is like in Deshret, from housing and food to status, sex, drugs, and music."
+      },
+      {
+       "key": "materials",
+       "category": "Lore",
+       "summary": "What Deshret runs on and is made of: crystal power, synfuel, synthetic cloth, and slum woodwork."
+      },
+      {
+       "key": "mythos",
+       "category": "Lore",
+       "summary": "Mythos: the guild that owns your body, and heals, augments, splices, and modifies it."
+      },
+      {
+       "key": "ophirian league",
+       "category": "Lore",
+       "summary": "The Ophirian League: Suburba's salvage traders, a respectable professional association, and a cartel."
+      },
+      {
+       "key": "outriders",
+       "category": "Lore",
+       "summary": "The Outriders: the guild that crosses into the scorched surface and brings back what the city cannot make."
+      },
+      {
+       "key": "pegasus",
+       "category": "Lore",
+       "summary": "Pegasus: the unseen guild. It votes, it tithes, and nobody has ever met a member."
+      },
+      {
+       "key": "religion",
+       "category": "Lore",
+       "summary": "The Church of the Nine: the city's one faith, what counts as sin, and how splintering brings the dead back."
+      },
+      {
+       "key": "saints",
+       "category": "Lore",
+       "summary": "The nine Saints: the Founders of Deshret, what each stands for, and how people wear them."
+      },
+      {
+       "key": "seals",
+       "category": "Lore",
+       "summary": "The eight Seals: holy shapes of broken and unbroken lines, and what people wear them for."
+      },
+      {
+       "key": "sepulchre",
+       "category": "Lore",
+       "summary": "Sepulchre: the Church in a guild's seat, keeper of splintering and hunter of tech heresy."
+      },
+      {
+       "key": "splicers",
+       "category": "Lore",
+       "summary": "Splicers: people with non-human DNA, from a pair of cat ears to a full animal head."
+      },
+      {
+       "key": "symphony",
+       "category": "Lore",
+       "summary": "Symphony: the guild of everything the city sees, hears, and believes, run by gods who live in the Matrix."
+      },
+      {
+       "key": "technology",
+       "category": "Lore",
+       "summary": "Technology in Deshret: what the Church allows, what it forbids, and why a musket can share a room with a modern rifle."
+      },
+      {
+       "key": "the hum",
+       "category": "Lore",
+       "summary": "The Hum: the sound that runs through the whole city, and what people believe it is."
+      },
+      {
+       "key": "vulcani",
+       "category": "Lore",
+       "summary": "Vulcani: the forge guild, where the craft itself is a form of worship, and every side of a war buys from the same catalogue."
+      }
+     ]
+    }
+   ]
+  },
+  "inventory": {
+   "kind": "topic",
+   "query": "inventory",
+   "topic": {
+    "key": "inventory",
+    "category": "General",
+    "summary": "Manage carried items, clothing, armor, and held weapons.",
+    "aliases": [
+     "inv",
+     "i",
+     "wear",
+     "don",
+     "remove",
+     "doff",
+     "toggle",
+     "adjust",
+     "strip",
+     "wield",
+     "hold",
+     "unwield",
+     "stash",
+     "draw",
+     "unsheathe",
+     "unholster",
+     "sheathe",
+     "sheath",
+     "holster",
+     "freehands",
+     "fh",
+     "frisk",
+     "patdown"
+    ],
+    "intro": "",
+    "sections": [
+     {
+      "title": "inventory",
+      "body": "|winventory|n\n\nShow your carried and held items. Aliases: |winv|n and |wi|n.",
+      "syntax": [
+       "inventory"
+      ]
+     },
+     {
+      "title": "wear",
+      "body": "|wwear <clothing/armor>|n\n\nPut on carried clothing or armor. Alias: |wdon|n.",
+      "syntax": [
+       "wear <clothing/armor>"
+      ]
+     },
+     {
+      "title": "remove",
+      "body": "|wremove <clothing/armor>|n\n\nTake off worn clothing or armor. Alias: |wdoff|n.",
+      "syntax": [
+       "remove <clothing/armor>"
+      ]
+     },
+     {
+      "title": "toggle",
+      "body": "|wtoggle <garment>|n\n\nChange a two-state garment. Alias: |wadjust|n.",
+      "syntax": [
+       "toggle <garment>"
+      ]
+     },
+     {
+      "title": "strip",
+      "body": "|wstrip <item> from <target>|n\n\nRemove worn gear from a subdued, dead, or trusting character.",
+      "syntax": [
+       "strip <item> from <target>"
+      ]
+     },
+     {
+      "title": "wield",
+      "body": "|wwield <weapon>|n\n\nMove a carried weapon into your hand. Alias: |whold|n.",
+      "syntax": [
+       "wield <weapon>"
+      ]
+     },
+     {
+      "title": "unwield",
+      "body": "|wunwield [<weapon>]|n\n\nMove a held weapon into your inventory. Alias: |wstash|n.",
+      "syntax": [
+       "unwield [<weapon>]"
+      ]
+     },
+     {
+      "title": "draw",
+      "body": "|wdraw [<weapon>]|n\n|wdraw from <cistern>|n\n\nDraw a weapon from worn storage, or work a cistern pump in the room. Weapon\naliases: |wunsheathe|n and |wunholster|n.",
+      "syntax": [
+       "draw [<weapon>]",
+       "draw from <cistern>"
+      ]
+     },
+     {
+      "title": "sheathe",
+      "body": "|wsheathe [<weapon>] [in/into/on <rig>]|n\n\nPut a held weapon into compatible worn storage. Aliases: |wsheath|n and |wholster|n.",
+      "syntax": [
+       "sheathe [<weapon>] [in/into/on <rig>]"
+      ]
+     },
+     {
+      "title": "freehands",
+      "body": "|wfreehands|n\n\nPut all held objects into your inventory. Alias: |wfh|n.",
+      "syntax": [
+       "freehands"
+      ]
+     },
+     {
+      "title": "frisk",
+      "body": "|wfrisk <character>|n\n\nSearch a compliant or subdued character's carried gear. Alias: |wpatdown|n.\n\nFor guns, see |whelp firearms|n and |whelp firearm modifications|n.\nFor clothing, see |whelp tailoring|n.",
+      "syntax": [
+       "frisk <character>"
+      ]
+     }
+    ],
+    "links": [
+     "firearms",
+     "firearm modifications",
+     "tailoring"
+    ]
+   }
+  },
+  "wear": {
+   "kind": "section",
+   "query": "wear",
+   "topic": {
+    "key": "inventory",
+    "category": "General",
+    "summary": "Manage carried items, clothing, armor, and held weapons.",
+    "aliases": [
+     "inv",
+     "i",
+     "wear",
+     "don",
+     "remove",
+     "doff",
+     "toggle",
+     "adjust",
+     "strip",
+     "wield",
+     "hold",
+     "unwield",
+     "stash",
+     "draw",
+     "unsheathe",
+     "unholster",
+     "sheathe",
+     "sheath",
+     "holster",
+     "freehands",
+     "fh",
+     "frisk",
+     "patdown"
+    ],
+    "intro": "",
+    "sections": [
+     {
+      "title": "inventory",
+      "body": "|winventory|n\n\nShow your carried and held items. Aliases: |winv|n and |wi|n.",
+      "syntax": [
+       "inventory"
+      ]
+     },
+     {
+      "title": "wear",
+      "body": "|wwear <clothing/armor>|n\n\nPut on carried clothing or armor. Alias: |wdon|n.",
+      "syntax": [
+       "wear <clothing/armor>"
+      ]
+     },
+     {
+      "title": "remove",
+      "body": "|wremove <clothing/armor>|n\n\nTake off worn clothing or armor. Alias: |wdoff|n.",
+      "syntax": [
+       "remove <clothing/armor>"
+      ]
+     },
+     {
+      "title": "toggle",
+      "body": "|wtoggle <garment>|n\n\nChange a two-state garment. Alias: |wadjust|n.",
+      "syntax": [
+       "toggle <garment>"
+      ]
+     },
+     {
+      "title": "strip",
+      "body": "|wstrip <item> from <target>|n\n\nRemove worn gear from a subdued, dead, or trusting character.",
+      "syntax": [
+       "strip <item> from <target>"
+      ]
+     },
+     {
+      "title": "wield",
+      "body": "|wwield <weapon>|n\n\nMove a carried weapon into your hand. Alias: |whold|n.",
+      "syntax": [
+       "wield <weapon>"
+      ]
+     },
+     {
+      "title": "unwield",
+      "body": "|wunwield [<weapon>]|n\n\nMove a held weapon into your inventory. Alias: |wstash|n.",
+      "syntax": [
+       "unwield [<weapon>]"
+      ]
+     },
+     {
+      "title": "draw",
+      "body": "|wdraw [<weapon>]|n\n|wdraw from <cistern>|n\n\nDraw a weapon from worn storage, or work a cistern pump in the room. Weapon\naliases: |wunsheathe|n and |wunholster|n.",
+      "syntax": [
+       "draw [<weapon>]",
+       "draw from <cistern>"
+      ]
+     },
+     {
+      "title": "sheathe",
+      "body": "|wsheathe [<weapon>] [in/into/on <rig>]|n\n\nPut a held weapon into compatible worn storage. Aliases: |wsheath|n and |wholster|n.",
+      "syntax": [
+       "sheathe [<weapon>] [in/into/on <rig>]"
+      ]
+     },
+     {
+      "title": "freehands",
+      "body": "|wfreehands|n\n\nPut all held objects into your inventory. Alias: |wfh|n.",
+      "syntax": [
+       "freehands"
+      ]
+     },
+     {
+      "title": "frisk",
+      "body": "|wfrisk <character>|n\n\nSearch a compliant or subdued character's carried gear. Alias: |wpatdown|n.\n\nFor guns, see |whelp firearms|n and |whelp firearm modifications|n.\nFor clothing, see |whelp tailoring|n.",
+      "syntax": [
+       "frisk <character>"
+      ]
+     }
+    ],
+    "links": [
+     "firearms",
+     "firearm modifications",
+     "tailoring"
+    ]
+   },
+   "section": "wear"
+  },
+  "category combat": {
+   "kind": "category",
+   "query": "category combat",
+   "category": "Combat",
+   "topics": [
+    {
+     "key": "cages",
+     "category": "Combat",
+     "summary": "Enter, secure, and leave cages."
+    },
+    {
+     "key": "combat",
+     "category": "Combat",
+     "summary": "Fight with melee weapons, firearms, and combat actions."
+    },
+    {
+     "key": "custody",
+     "category": "Combat",
+     "summary": "Surrender, arrest a suspect, or complete precinct booking."
+    },
+    {
+     "key": "firearm modifications",
+     "category": "Combat",
+     "summary": "Install, remove, and operate firearm modifications."
+    },
+    {
+     "key": "firearms",
+     "category": "Combat",
+     "summary": "Reload, unload, inspect, and clean a firearm."
+    },
+    {
+     "key": "firing range",
+     "category": "Combat",
+     "summary": "View and clear firing-range scores."
+    },
+    {
+     "key": "grapple",
+     "category": "Combat",
+     "summary": "Grapple, control, and release another character in combat."
+    },
+    {
+     "key": "loading",
+     "category": "Combat",
+     "summary": "Fill a magazine, a speedloader, or an alchemy station."
+    },
+    {
+     "key": "sleight",
+     "category": "Combat",
+     "summary": "Conceal, steal, and plant carried items."
+    },
+    {
+     "key": "stealth",
+     "category": "Combat",
+     "summary": "Hide, move quietly, and search for concealed targets."
+    }
+   ]
+  },
+  "wera": {
+   "kind": "not_found",
+   "query": "wera",
+   "hits": [],
+   "suggestions": [
+    {
+     "label": "wear",
+     "query": "wear"
+    }
+   ]
+  },
+  "tailoring": {
+   "kind": "topic",
+   "query": "tailoring",
+   "topic": {
+    "key": "tailoring",
+    "category": "Crafting",
+    "summary": "Weave cloth and turn a carried bolt into one finished garment.",
+    "aliases": [
+     "tailor",
+     "loom",
+     "weaving",
+     "fabric",
+     "garment",
+     "bolt",
+     "bolt of cloth",
+     "clothing token",
+     "wardrobe"
+    ],
+    "intro": "",
+    "sections": [
+     {
+      "title": "Recommended workflow",
+      "body": "1. Open the garment designer with |wtailor <bolt>|n or |wtailor/web <bolt>|n.\n2. Set a real name, examined description, worn appearance, and coverage. These four fields are required.\n3. Add optional search aliases, fashion details, disguise shaping, and action messages.\n4. Add appearance B if the garment can open, close, raise, lower, or otherwise switch configuration. Unchanged B fields inherit appearance A.\n5. Use Preview. It shows the wearer, interaction target, and room-observer lines produced by the same renderer used in play.\n6. Finalize only when the proof reads correctly. Finalizing consumes the bolt whether the craft succeeds or the work falls apart.\n\nAfter finalization the strings live on the garment. |wtailor <garment>|n opens the garment record and reads every field back exactly as it was set.\n\nAction messages use one reliable form: start with |w$N|n and mark the action as |w.verb|n.\n\n|w$N .slip into $p $I.|n\n|w$N .tip $p $I toward $T.|n\n\nPut-on, take-off, and appearance-switch messages have no target. Only the interaction message accepts target tokens. If it uses one, the command in play is |wtease <garment> at <person>|n. Quotes and apostrophes are allowed. Write |w$$|n for a literal dollar sign.\n\nWorn descriptions are appearance prose, not actions. They may use wearer and garment tokens, but never target tokens or |w.verb|n.\n\nSee |whelp tokens|n for the complete token table.",
+      "syntax": [
+       "$N .slip into $p $I.",
+       "$N .tip $p $I toward $T."
+      ]
+     },
+     {
+      "title": "loom",
+      "body": "|wloom [<process>]|n\n\nOpen the loom menu. Give a process to start it.",
+      "syntax": [
+       "loom [<process>]"
+      ]
+     },
+     {
+      "title": "loom status",
+      "body": "|wloom status|n\n\nCheck the work at the loom.",
+      "syntax": [
+       "loom status"
+      ]
+     },
+     {
+      "title": "loom claim",
+      "body": "|wloom claim|n\n\nCollect finished cloth from the loom.",
+      "syntax": [
+       "loom claim"
+      ]
+     },
+     {
+      "title": "tailor",
+      "body": "|wtailor [<bolt>]|n\n\nOpen the garment designer. Give a carried bolt to use it.\n\nThe in-game Preview option includes examined text, appearance A and B, put-on, take-off, interaction, and both appearance-switch messages.",
+      "syntax": [
+       "tailor [<bolt>]"
+      ]
+     },
+     {
+      "title": "tailor garment",
+      "body": "|wtailor <garment>|n\n\nRead back a finished garment's authored strings exactly as they were set, including the rendered lines a wearer, target, and room will see. This is read-only; nothing on the garment changes.\n\nWith no argument, |wtailor|n opens the only carried bolt, or offers the carried garments when there is no bolt.",
+      "syntax": [
+       "tailor <garment>"
+      ]
+     },
+     {
+      "title": "clothing token",
+      "body": "|wuse clothing token|n\n\nOpen the starting wardrobe designer. Finishing the garment uses the token.\nA new character gets four tokens during the |w@newbie|n tour, and they only\nwork there: make your starting clothes before you finish the tour.",
+      "syntax": [
+       "use clothing token"
+      ]
+     },
+     {
+      "title": "tailor/web",
+      "body": "|wtailor/web [<bolt>]|n\n\nOpen the web editor for a carried bolt.\n\nThe proof pane updates from unsaved text and reports invalid grammar before you save it.",
+      "syntax": [
+       "tailor/web [<bolt>]"
+      ]
+     },
+     {
+      "title": "tailor/web modify",
+      "body": "|wtailor/web modify <garment>|n\n\nOpen the web editor for a tailored garment.\n\nFor wearing clothing, see |whelp inventory|n.\nFor text formatting, see |whelp tokens|n.",
+      "syntax": [
+       "tailor/web modify <garment>"
+      ]
+     }
+    ],
+    "links": [
+     "tokens",
+     "inventory"
+    ]
+   }
+  },
+  "roleplaying": {
+   "kind": "topic",
+   "query": "roleplaying",
+   "topic": {
+    "key": "roleplaying",
+    "category": "Roleplay",
+    "summary": "Talk, and write what your character does.",
+    "aliases": [
+     "roleplay",
+     "rp",
+     "communication",
+     "say",
+     "to",
+     "whisper",
+     "looc",
+     "talking",
+     "speech",
+     "\"",
+     "'",
+     "pose",
+     "posing",
+     "emote",
+     ".",
+     ",",
+     "language",
+     "tease",
+     "flaunt",
+     "@afk",
+     "@away",
+     "@bak",
+     "@unafk",
+     "afk"
+    ],
+    "intro": "",
+    "sections": [
+     {
+      "title": "say",
+      "body": "|wsay <message>|n\n|w\"<message>|n\n|w'<message>|n\n\nSay something out loud to everyone in the room.\n\nExample: |w\"Nice night for it.|n",
+      "syntax": [
+       "say <message>",
+       "\"<message>",
+       "'<message>"
+      ]
+     },
+     {
+      "title": "to",
+      "body": "|wto <person> <message>|n\n\nSay something out loud to the room, aimed at one person. Name them the way\nyou see them.\n\nExample: |wto lissome One root-fibre tea, please.|n",
+      "syntax": [
+       "to <person> <message>"
+      ]
+     },
+     {
+      "title": "whisper",
+      "body": "|wwhisper <person>[, <person> ...] = <message>|n\n\nSpeak quietly to one or more people. Others in the room may catch part of it.",
+      "syntax": [
+       "whisper <person>[, <person> ...] = <message>"
+      ]
+     },
+     {
+      "title": "pose",
+      "body": "|wpose <text>|n\n|w.<text>|n\n\nWrite what you do in the first person and leave your name out. The game puts\nyour name in front and fixes your first verb for each reader. Put a dot in\nfront of any later verb that needs the same fix. Your |wI|n, |wmy|n, and\n|wme|n become your pronouns for everyone else.\n\nExample: |w.wave at Prismodal and .give them a nudge.|n\n\n  You see:     You wave at Prismodal and give them a nudge.\n  Others see:  Sol waves at Prismodal and gives them a nudge.\n\nThe person you name reads \"you\" in place of their name.\n\nName people the way you see them: their short description, the name you gave\nthem with |wrecog|n, or the end of their description, such as\n|wthe willowy woman|n. When two people match, put a number in front:\n|w1-willowy woman|n or |w2-willowy woman|n.",
+      "syntax": [
+       "pose <text>",
+       ".<text>"
+      ]
+     },
+     {
+      "title": "comma pose",
+      "body": "|w,<text>|n\n|wpose ,<text>|n\n\nStart with a comma to open the pose your own way. Your name does not go in\nfront, and your first verb stays as you typed it. Your first |wI|n becomes\nyour name.\n\nExample: |w,Grinning, I .lean back in my chair.|n\n\n  Others see:  Grinning, Sol leans back in her chair.",
+      "syntax": [
+       ",<text>",
+       "pose ,<text>"
+      ]
+     },
+     {
+      "title": "emote",
+      "body": "|wemote <text>|n\n|wemote ,<text>|n\n\nWrite what you do in the third person. Everyone reads the text as you typed\nit, after your name. Start with a comma to leave your name out. Names of\npeople in the room change for each reader, as in a pose.\n\nExample: |wemote waves at Prismodal.|n",
+      "syntax": [
+       "emote <text>",
+       "emote ,<text>"
+      ]
+     },
+     {
+      "title": "language",
+      "body": "|wlanguage [<language>]|n\n\nList your languages, or choose the one you speak.",
+      "syntax": [
+       "language [<language>]"
+      ]
+     },
+     {
+      "title": "looc",
+      "body": "|wlooc <message>|n\n\nSend an out-of-character message to the room.",
+      "syntax": [
+       "looc <message>"
+      ]
+     },
+     {
+      "title": "@afk",
+      "body": "|w@afk [<minutes>]|n\n|w@bak|n\n\nTell the room that you are away from the keyboard, for up to 99 minutes or\nwith no time limit. |w@bak|n tells the room you are back. Any other command\nalso ends it. Aliases: |w@away|n and |w@unafk|n.",
+      "syntax": [
+       "@afk [<minutes>]",
+       "@bak"
+      ]
+     },
+     {
+      "title": "tease",
+      "body": "|wtease <worn clothing> [at <person>]|n\n\nUse the move written into a piece of worn clothing. Alias: |wflaunt|n.\n\nTo read a syntax line, see |whelp syntax|n.\nFor your appearance, see |whelp description|n.\nFor small groups inside a room, see |whelp places|n.\nFor poses that stay on the room, see |whelp room poses|n.\nFor OOC channels, see |whelp channels|n.",
+      "syntax": [
+       "tease <worn clothing> [at <person>]"
+      ]
+     }
+    ],
+    "links": [
+     "syntax",
+     "description",
+     "places",
+     "room poses",
+     "channels"
+    ]
+   }
+  }
+ },
+ "searches": {
+  "bank": {
+   "kind": "search",
+   "query": "bank",
+   "hits": [
+    {
+     "query": "economy/bank",
+     "key": "economy",
+     "category": "Economy",
+     "section": "bank",
+     "snippet": "bank"
+    },
+    {
+     "query": "contracts/deliver",
+     "key": "contracts",
+     "category": "Economy",
+     "section": "deliver",
+     "snippet": "For general economy and banking, see help economy."
+    },
+    {
+     "query": "materials/Power",
+     "key": "materials",
+     "category": "Lore",
+     "section": "Power",
+     "snippet": "...al presses, and the presses squeeze banks of the mysterious power crystals that House Qamarat supplies. Under..."
+    },
+    {
+     "query": "ophirian league/Orderly Commerce",
+     "key": "ophirian league",
+     "category": "Lore",
+     "section": "Orderly Commerce",
+     "snippet": "...and has arranged enough convenient bankruptcies that most independent traders eventually discover the virtues..."
+    }
+   ]
+  },
+  "clothing": {
+   "kind": "search",
+   "query": "clothing",
+   "hits": [
+    {
+     "query": "tailoring/clothing token",
+     "key": "tailoring",
+     "category": "Crafting",
+     "section": "clothing token",
+     "snippet": "use clothing token"
+    },
+    {
+     "query": "inventory/wear",
+     "key": "inventory",
+     "category": "General",
+     "section": "wear",
+     "snippet": "wear <clothing/armor>"
+    },
+    {
+     "query": "lost and found/rummage",
+     "key": "lost and found",
+     "category": "General",
+     "section": "rummage",
+     "snippet": "...lse will not fit. For managing worn clothing, see help inventory."
+    },
+    {
+     "query": "roleplaying/tease",
+     "key": "roleplaying",
+     "category": "Roleplay",
+     "section": "tease",
+     "snippet": "tease <worn clothing> [at <person>]"
+    },
+    {
+     "query": "armorsmithing/reinforce",
+     "key": "armorsmithing",
+     "category": "Crafting",
+     "section": "reinforce",
+     "snippet": "For tailoring clothing, see help tailoring."
+    },
+    {
+     "query": "description/@naked",
+     "key": "description",
+     "category": "Roleplay",
+     "section": "@naked",
+     "snippet": "Put anything that clothing can cover on a body part, not in @setdesc."
+    },
+    {
+     "query": "newbie/Your First Minutes",
+     "key": "newbie",
+     "category": "General",
+     "section": "Your First Minutes",
+     "snippet": "Check what you carry with inventory, and put clothes on with wear <clothing>. See help inventory."
+    },
+    {
+     "query": "objects/uninstall",
+     "key": "objects",
+     "category": "General",
+     "section": "uninstall",
+     "snippet": "For managing worn clothing, see help inventory."
+    },
+    {
+     "query": "trust/Trust Categories",
+     "key": "trust",
+     "category": "Roleplay",
+     "section": "Trust Categories",
+     "snippet": "strip / dress: Removing or adding clothing on your body."
+    }
+   ]
+  }
+ }
+}

@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 from django.db import connections
 
 from evennia.server.portal import webclient as webclient_mod
-from evennia.server.portal.webclient import BATCH_MAX_FRAMES, RESUME_STASH_MAX, WebSocketClient
+from evennia.server.portal.webclient import BATCH_MAX_FRAMES, WebSocketClient
 
 
 class _Transport(WebSocketClient):
@@ -31,6 +31,7 @@ class _Transport(WebSocketClient):
         self.uid = uid
         self.protocol_flags = {"AZABAN_CAPS": caps} if caps is not None else {}
         self.wire_format = Mock(supports_resume=resume)
+        self.sessionhandler = Mock()
         self.sendMessage = Mock(side_effect=lambda data, isBinary=False: self.sent.append(data))
 
     def disconnect(self, reason=None):  # pragma: no cover - not reached in these tests
@@ -166,20 +167,15 @@ class TestResumeStamping(TestCase):
 
 
 class TestResumeHandshake(TestCase):
-    """The reconnect handshake: replay what was missed, then re-base the client."""
+    """The hello reply and the replay buffer on one connection.
+
+    Holding a dropped session and handing it to a reconnect is covered by
+    ``test_webclient_resume``, against a real session handler.
+    """
 
     def setUp(self):
-        webclient_mod._RESUME_STASH.clear()
-        self.addCleanup(webclient_mod._RESUME_STASH.clear)
-
-    def _disconnected(self, *, uid=7, token="tok"):
-        """A transport that sent three frames and then stashed them."""
-        t = _Transport(uid=uid)
-        for i in range(3):
-            t.sendEncoded({"t": "render", "n": i})
-        t.resume_token = token
-        t._stash_for_resume()
-        return t
+        webclient_mod._RESUMABLE.clear()
+        self.addCleanup(webclient_mod._RESUMABLE.clear)
 
     def test_hello_is_answered_even_without_a_resume_block(self):
         t = _Transport()
@@ -187,60 +183,35 @@ class TestResumeHandshake(TestCase):
         env = _frames(t)[-1]
         self.assertEqual(env["t"], "hello")
         self.assertFalse(env["resumed"])
+        t.sessionhandler.connect.assert_called_once_with(t)
 
-    def test_unicode_replay_obeys_live_and_global_byte_budgets(self):
+    def test_hello_issues_a_token_for_the_next_reconnect(self):
+        t = _Transport()
+        t._handle_client_hello({"t": "hello"})
+        token = _frames(t)[-1]["token"]
+        self.assertIs(webclient_mod._RESUMABLE[token], t)
+        t._handle_client_hello({"t": "hello"})
+        self.assertNotIn(token, webclient_mod._RESUMABLE)
+
+    def test_live_replay_budget_counts_escaped_unicode(self):
         """Replay accounting measures escaped JSON, including Unicode expansion."""
         content = {"t": "render", "body": "🙂漢"}
         size = len(json.dumps({**content, "s": 1}).encode("utf-8"))
-        with (
-            patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_BYTES", size, create=True),
-            patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_STASH_BYTES", size, create=True),
-        ):
-            for token in ("first", "second"):
-                transport = _Transport(uid=7)
-                transport.sendEncoded(content)
-                transport.sendEncoded(content)
-                self.assertEqual(len(transport.out_buffer), 1)
-                self.assertEqual(transport.out_buffer[0][0], 2)
-                line = transport.out_buffer[0][1]
-                self.assertTrue(line.isascii())
-                self.assertEqual(len(line), len(line.encode("utf-8")))
-                transport.resume_token = token
-                transport._stash_for_resume()
-            self.assertEqual(len(webclient_mod._RESUME_STASH), 1)
-            self.assertIn("second", webclient_mod._RESUME_STASH)
+        with patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_BYTES", size, create=True):
+            transport = _Transport(uid=7)
+            transport.sendEncoded(content)
+            transport.sendEncoded(content)
+        self.assertEqual(len(transport.out_buffer), 1)
+        self.assertEqual(transport.out_buffer[0][0], 2)
+        line = transport.out_buffer[0][1]
+        self.assertTrue(line.isascii())
+        self.assertEqual(len(line), len(line.encode("utf-8")))
 
     def test_fresh_hello_restarts_the_sequence(self):
         # The client re-bases off this `s`, so it must reflect the new counter.
         t = _Transport()
         t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 400}})
         self.assertEqual(_frames(t)[-1]["s"], 1)
-
-    def test_reconnect_replays_only_unseen_frames(self):
-        self._disconnected()
-        t = _Transport(uid=7)
-        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 1}})
-        envs = _frames(t)
-        self.assertEqual([e["n"] for e in envs if e["t"] == "render"], [1, 2])
-        self.assertTrue(envs[-1]["resumed"])
-
-    def test_hello_is_stamped_above_everything_it_replayed(self):
-        # The client assigns its cursor from `hello`, so a lower seq here would
-        # ask the next reconnect to resend frames it already has.
-        self._disconnected()
-        t = _Transport(uid=7)
-        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 0}})
-        envs = _frames(t)
-        replayed = [e["s"] for e in envs if e["t"] == "render"]
-        self.assertEqual(envs[-1]["s"], max(replayed) + 1)
-
-    def test_stash_is_not_replayed_to_another_uid(self):
-        self._disconnected(uid=7)
-        t = _Transport(uid=9)
-        t._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 0}})
-        envs = _frames(t)
-        self.assertEqual([e for e in envs if e["t"] == "render"], [])
-        self.assertFalse(envs[-1]["resumed"])
 
     def test_resume_reset_empties_the_replay_window(self):
         t = _Transport(uid=7)
@@ -249,30 +220,13 @@ class TestResumeHandshake(TestCase):
         t._reset_resume_buffer()
         self.assertEqual(len(t.out_buffer), 0)
 
-    def test_resume_reset_leaves_nothing_for_the_next_reconnect_to_replay(self):
-        # The symptom the reset exists for: a reloaded page presents no cursor,
-        # so anything still buffered comes back into the log the player just
-        # cleared.
-        t = self._disconnected()
+    def test_resume_reset_keeps_the_sequence_running(self):
+        t = _Transport(uid=7)
+        for i in range(3):
+            t.sendEncoded({"t": "render", "n": i})
         t._reset_resume_buffer()
-        t._stash_for_resume()
-        fresh = _Transport(uid=7)
-        fresh._handle_client_hello({"t": "hello", "resume": {"token": "tok", "last_seq": 0}})
-        self.assertEqual([e for e in _frames(fresh) if e["t"] == "render"], [])
-
-    def test_resume_reset_empties_a_bound_stash_but_keeps_its_cursor(self):
-        t = self._disconnected()
-        t._reset_resume_buffer()
-        stash = webclient_mod._RESUME_STASH["tok"]
-        self.assertEqual(len(stash["frames"]), 0)
-        self.assertEqual(stash["last_seq"], 3)
-
-    def test_resume_reset_does_not_clear_a_stash_this_socket_does_not_own(self):
-        self._disconnected(uid=7, token="tok")
-        other = _Transport(uid=9)
-        other.resume_token = "tok"
-        other._reset_resume_buffer()
-        self.assertEqual(len(webclient_mod._RESUME_STASH["tok"]["frames"]), 3)
+        t.sendEncoded({"t": "render", "n": 3})
+        self.assertEqual(_frames(t)[-1]["s"], 4)
 
     def test_resume_reset_is_handled_at_the_portal_and_not_forwarded(self):
         # The server has no say in what a browser keeps on screen, so the frame
@@ -285,44 +239,12 @@ class TestResumeHandshake(TestCase):
         self.assertEqual(len(t.out_buffer), 0)
         t.data_in.assert_not_called()
 
-    def test_stash_survives_a_rejected_claim_being_consumed(self):
-        # A wrong-uid claim pops the stash; that is fine (the owner's own
-        # reconnect brings a fresh buffer) but it must not leak frames.
-        self._disconnected(uid=7)
-        _Transport(uid=9)._handle_client_hello({"t": "hello", "resume": {"token": "tok"}})
-        self.assertNotIn("tok", webclient_mod._RESUME_STASH)
-
-    def test_stash_is_capped(self):
-        for n in range(RESUME_STASH_MAX + 10):
-            t = _Transport(uid=1)
-            t.sendEncoded({"t": "render"})
-            t.resume_token = f"tok{n}"
-            t._stash_for_resume()
-        self.assertLessEqual(len(webclient_mod._RESUME_STASH), RESUME_STASH_MAX)
-
-    def test_reconnect_replays_output_after_socket_loss(self):
-        """A retained Portal session keeps recording during its grace window."""
-        old = self._disconnected()
-        old.sendMessage = Mock()
-        old.sendEncoded({"t": "render", "n": 3})
-        fresh = _Transport(uid=7)
-        fresh._handle_client_hello({"resume": {"token": "tok", "last_seq": 3}})
-        self.assertEqual([e["n"] for e in _frames(fresh) if e["t"] == "render"], [3])
-        self.assertEqual(_frames(fresh)[-1]["s"], 5)
-        old.sendEncoded({"t": "render", "n": 4})
-        self.assertNotIn("tok", webclient_mod._RESUME_STASH)
-        self.assertEqual(fresh.out_seq, 5)
-
-    def test_retained_output_keeps_capacity_and_original_deadline(self):
-        """New output cannot extend retention or grow the bounded replay buffer."""
-        old = self._disconnected()
-        deadline = webclient_mod._RESUME_STASH["tok"]["deadline"]
+    def test_buffer_is_capped_by_count(self):
+        t = _Transport(uid=7)
         for n in range(webclient_mod.RESUME_BUFFER_MAX + 5):
-            old.sendEncoded({"t": "render", "n": n})
-        stash = webclient_mod._RESUME_STASH["tok"]
-        self.assertEqual(stash["deadline"], deadline)
-        self.assertEqual(len(stash["frames"]), webclient_mod.RESUME_BUFFER_MAX)
-        self.assertEqual(stash["last_seq"], old.out_seq)
+            t.sendEncoded({"t": "render", "n": n})
+        self.assertEqual(len(t.out_buffer), webclient_mod.RESUME_BUFFER_MAX)
+        self.assertEqual(t.out_buffer[-1][0], t.out_seq)
 
     @patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_BYTES", 90, create=True)
     def test_live_replay_evicts_oldest_whole_frames_by_bytes(self):
@@ -332,46 +254,6 @@ class TestResumeHandshake(TestCase):
         self.assertLessEqual(sum(len(frame.encode("utf-8")) for _, frame in t.out_buffer), 90)
         self.assertEqual(t.out_buffer[-1][0], t.out_seq)
         self.assertGreater(t.out_buffer[0][0], 1)
-
-    @patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_BYTES", 90, create=True)
-    def test_detached_replay_keeps_byte_cap_during_late_output(self):
-        old = self._disconnected()
-        for n in range(4):
-            old.sendEncoded({"t": "render", "n": n, "body": "x" * 20})
-        stash = webclient_mod._RESUME_STASH["tok"]
-        self.assertLessEqual(sum(len(frame.encode("utf-8")) for _, frame in stash["frames"]), 90)
-        self.assertEqual(stash["last_seq"], old.out_seq)
-
-    @patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_STASH_BYTES", 120, create=True)
-    def test_global_stash_byte_cap_evicts_oldest_stash(self):
-        for token in ("old", "new"):
-            t = _Transport(uid=7)
-            t.sendEncoded({"t": "render", "body": "x" * 50})
-            t.resume_token = token
-            t._stash_for_resume()
-            webclient_mod._RESUME_STASH[token]["deadline"] += token == "new"
-        self.assertNotIn("old", webclient_mod._RESUME_STASH)
-        self.assertIn("new", webclient_mod._RESUME_STASH)
-
-    def test_old_socket_cannot_update_a_replacement_stash(self):
-        """Reuse of a token does not join two sockets' replay streams."""
-        old = self._disconnected()
-        replacement = self._disconnected()
-        old.sendEncoded({"t": "render", "n": "stale"})
-        stash = webclient_mod._RESUME_STASH["tok"]
-        self.assertEqual(stash["last_seq"], replacement.out_seq)
-        self.assertNotIn("stale", str(stash["frames"]))
-
-    def test_retained_output_cannot_revive_an_expired_stash(self):
-        """The reconnect grace period ends even if the Server keeps sending."""
-        old = self._disconnected()
-        deadline = webclient_mod._RESUME_STASH["tok"]["deadline"]
-        with patch.object(webclient_mod.time, "time", return_value=deadline + 1):
-            old.sendEncoded({"t": "render", "n": "too late"})
-            fresh = _Transport(uid=7)
-            fresh._handle_client_hello({"resume": {"token": "tok", "last_seq": 0}})
-        self.assertFalse(_frames(fresh)[-1]["resumed"])
-        self.assertEqual([e for e in _frames(fresh) if e["t"] == "render"], [])
 
 
 class TestRecoveryBrowserAuth(TestCase):

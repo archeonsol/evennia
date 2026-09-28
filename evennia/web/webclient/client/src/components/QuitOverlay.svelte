@@ -3,6 +3,8 @@
   import { modal } from "../lib/modal";
 
   let reconnectBtn = $state<HTMLButtonElement | null>(null);
+  // The portal handed this session to another window (a copied tab).
+  const moved = $derived(connection.logoutReason === "superseded");
 </script>
 
 <div class="scrim">
@@ -10,7 +12,9 @@
   <div class="quit framed" role="alertdialog" aria-modal="true" aria-labelledby="quit-title" aria-describedby="quit-sub"
     use:modal={{ initial: reconnectBtn }}>
     <h2 class="glow-text" id="quit-title">Disconnected</h2>
-    <p class="sub" id="quit-sub">You have disconnected from Underspire.</p>
+    <p class="sub" id="quit-sub">
+      {moved ? "Your session has moved to another window." : "You have left Underspire."}
+    </p>
     <div class="acts">
       <button class="sh-cmd primary" bind:this={reconnectBtn} onclick={() => connection.reconnect()}>Reconnect</button>
       <a class="sh-cmd" href="/">Leave</a>

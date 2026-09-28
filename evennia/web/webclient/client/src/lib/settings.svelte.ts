@@ -106,6 +106,8 @@ interface Persisted {
   historyKeys: RecallKeys;
   /** Leave the compose pad open after sending from it, for the next pose. */
   composeStaysOpen: boolean;
+  /** Show help in its own panel instead of printing it into the terminal. */
+  helpPanel: boolean;
   customColors: Record<string, string>;
 }
 
@@ -143,6 +145,7 @@ const DEFAULTS: Persisted = {
   keepCommand: false,
   historyKeys: "edge",
   composeStaysOpen: false,
+  helpPanel: true,
   customColors: { ...CUSTOM_DEFAULTS },
 };
 
@@ -202,8 +205,15 @@ class Settings {
   keepCommand = $state(DEFAULTS.keepCommand);
   historyKeys = $state<RecallKeys>(DEFAULTS.historyKeys);
   composeStaysOpen = $state(DEFAULTS.composeStaysOpen);
+  helpPanel = $state(DEFAULTS.helpPanel);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;
+  private _lastHelp: boolean | null = null;
+
+  /** Help goes to the panel unless the player chose the log, or reads by screen reader. */
+  get helpInPanel(): boolean {
+    return this.helpPanel && !this.screenreader;
+  }
 
   init(): void {
     const p = load();
@@ -249,6 +259,13 @@ class Settings {
       import("./evennia.svelte").then(({ connection }) => {
         connection.sendOobRaw("webclient_options", [], { SCREENREADER: this.screenreader });
       });
+    }
+    // Tell the game where help goes. Sent again on every connect (main.ts),
+    // since a send before the socket opens is dropped.
+    if (this._lastHelp !== this.helpInPanel) {
+      this._lastHelp = this.helpInPanel;
+      const panel = this.helpInPanel;
+      import("./help.svelte").then(({ help }) => help.sendPreference(panel));
     }
     this.save();
   }

@@ -15,6 +15,7 @@ const DEFAULTS: Binding[] = [
   { id: "search", label: "Search log", combo: "Ctrl+F" },
   { id: "settings", label: "Open settings", combo: "Ctrl+," },
   { id: "clear", label: "Clear buffer", combo: "Ctrl+L" },
+  { id: "help", label: "Open help", combo: "F1" },
   // Focus jumps. A screen reader user otherwise tabs or arrows through every
   // panel to get from the command line to what the game just said.
   { id: "focusInput", label: "Go to command line", combo: "Alt+I" },

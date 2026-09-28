@@ -13,9 +13,15 @@ Code: `evennia/server/portal/webclient.py` (transport),
 
 ## The handshake
 
-The client opens with `hello` carrying `caps` and a `resume` block. The server
-replies with its own `hello` — `{protocol, resumed}` — **after** any replayed
-frames and stamped last, so its `s` is above everything it replayed.
+The client opens with `hello` carrying `caps` and a `resume` block (`token`,
+`last_seq`). The Portal does not connect a shell socket to the Server until that
+`hello` arrives (at most `HELLO_WAIT_SECONDS`, 5), because a socket that resumes
+a session must never reach the Server as a new connection. Other wire formats
+connect on open.
+
+The server replies with its own `hello` (`{protocol, resumed, token, gap?}`)
+**after** any replayed frames and stamped last, so its `s` is above everything
+it replayed. `token` is the resume token for the client's next reconnect.
 
 The client **assigns** its resume cursor from that `s` rather than taking a
 maximum. This is the whole point of the reply: when the server could not resume
@@ -24,29 +30,11 @@ would sit permanently above anything the new connection sends, and replay would
 silently never fire again for that browser. A monotonic cursor here is a bug that
 looks like working code.
 
-## Resume
+## Session continuity
 
-Outgoing frames carry a monotonic `s` and are buffered per connection. An unclean
-close stashes the buffer under the client's token for `RESUME_GRACE_SECONDS`; the
-client presents token + cursor in `hello` and gets back what it missed. State
-events are idempotent, so the parallel fresh-login pushes are safe.
-
-Three properties, each wrong by default:
-
-- **The token is per *tab***, held in `sessionStorage`. In `localStorage` every
-  tab of a browser presents the same token: they overwrite each other's stash on
-  close, and a reconnecting tab replays another tab's frames into its own log.
-  A reload keeps the tab, which is exactly the lifetime resume covers.
-- **A stash only replays to the uid that produced it.** The key is chosen by the
-  client, so it is bound to the authenticated uid at stash time and verified on
-  claim — otherwise holding someone's token is enough to be handed the tail of
-  their session.
-- **Replay storage has count and byte caps.** Each connection retains at most
-  400 frames and `WEBSOCKET_RESUME_BYTES` (default 32 MiB). Detached stashes
-  additionally share `WEBSOCKET_RESUME_STASH_BYTES` (default 128 MiB) and a
-  512-stash cap. Per-connection pressure evicts oldest whole frames; global
-  pressure evicts oldest-deadline stashes. Sequence counters retain the highest
-  sent value. Resume remains best effort when older frames have been evicted.
+A dropped socket does not end the game session. Holding it, the takeover by a
+reconnecting tab, the replay buffer, keepalive, and close logging are in
+[`webclient-session-continuity.md`](webclient-session-continuity.md).
 
 ## Frame encoding
 

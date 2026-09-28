@@ -15,6 +15,7 @@ evennia.server.portal
    evennia.server.portal.amp
    evennia.server.portal.amp_server
    evennia.server.portal.asyncio_transport
+   evennia.server.portal.charset
    evennia.server.portal.discord
    evennia.server.portal.gmcp_utils
    evennia.server.portal.grapevine

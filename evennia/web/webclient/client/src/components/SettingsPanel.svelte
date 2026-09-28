@@ -301,6 +301,7 @@
         </select>
       </label>
       {@render toggle("Keep compose open after sending", "composeStaysOpen")}
+      {@render toggle("Help in its own panel", "helpPanel")}
     {:else if view === "panels"}
       {#if openPanels.length}
         {#each openPanels as p (p.id)}

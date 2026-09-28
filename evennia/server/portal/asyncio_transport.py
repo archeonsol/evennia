@@ -2,7 +2,8 @@
 session protocols read (T3).
 
 The telnet + websocket session classes were written against a Twisted transport
-(``write``/``loseConnection``/``getPeer``/``client``/``setTcpKeepAlive``). When
+(``write``/``loseConnection``/``abortConnection``/``getPeer``/``client``/
+``setTcpKeepAlive``). When
 those same classes run on a native asyncio loop (``loop.create_server``), this
 shim presents the asyncio transport with that surface, so the session code is
 reused verbatim.
@@ -47,6 +48,14 @@ class AsyncioTransportShim:
         self.disconnecting = True
         try:
             self._t.close()
+        except Exception:
+            pass
+
+    def abortConnection(self):
+        """Close at once, dropping unsent data (a peer that stopped reading)."""
+        self.disconnecting = True
+        try:
+            self._t.abort()
         except Exception:
             pass
 

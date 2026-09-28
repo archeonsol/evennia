@@ -50,6 +50,12 @@ const PAGES = [
     report: () => window.__inputTest ?? null,
   },
   {
+    path: "tests/help.html",
+    label: "help panel",
+    done: () => window.__helpTest?.done === true,
+    report: () => window.__helpTest ?? null,
+  },
+  {
     path: "tests/display.html",
     label: "display regressions",
     done: () => /failures/.test(document.title),

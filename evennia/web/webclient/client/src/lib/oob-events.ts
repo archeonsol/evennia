@@ -118,6 +118,19 @@ export type EditorOpenPayload = any[];
 /** args[0] = 'saved' | 'unsaved'. */
 export type EditorStatusPayload = string;
 
+/** A help page: index, category, topic, section, search, or not_found. */
+export interface HelpViewPayload {
+  kind: string;
+  query: string;
+  categories?: any[];
+  category?: string;
+  topics?: any[];
+  topic?: Record<string, any>;
+  section?: string;
+  hits?: any[];
+  suggestions?: any[];
+}
+
 /** args[0] = image URL. */
 export type ImagePayload = string;
 
@@ -225,6 +238,7 @@ export type OobEvent =
   | "editor_close"
   | "editor_open"
   | "editor_status"
+  | "help_view"
   | "image"
   | "logout"
   | "play_music"
@@ -269,6 +283,7 @@ export interface OobEventMap {
   "editor_close": EditorClosePayload;
   "editor_open": EditorOpenPayload;
   "editor_status": EditorStatusPayload;
+  "help_view": HelpViewPayload;
   "image": ImagePayload;
   "logout": LogoutPayload;
   "play_music": PlayMusicPayload;

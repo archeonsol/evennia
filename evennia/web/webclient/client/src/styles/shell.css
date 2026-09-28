@@ -473,6 +473,12 @@ textarea.sh-field:focus {
   color: var(--fg-dim);
 }
 
+/* A note from the connection itself, such as output missed while offline. */
+.conn-note {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
 /* -- accessibility primitives ------------------------------------------- */
 
 /* Present to assistive tech, absent from the screen. */

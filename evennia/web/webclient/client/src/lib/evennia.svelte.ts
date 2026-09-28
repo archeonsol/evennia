@@ -20,6 +20,23 @@ const SUBPROTOCOL = "azaban.v1";
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 30000;
 
+// A socket can die without the browser being told: a phone that changes network
+// keeps the old one "open" until TCP gives up, minutes later, and commands typed
+// into it go nowhere. The portal pings us, but a page never sees those pings, so
+// the page asks for itself: after PROBE_QUIET_MS with nothing received it sends
+// a `ping`, and no `pong` within PROBE_TIMEOUT_MS means the socket is dead. The
+// reconnect that follows resumes the session, so being wrong costs little.
+const PROBE_QUIET_MS = 25000;
+const PROBE_TIMEOUT_MS = 10000;
+const LIVENESS_TICK_MS = 5000;
+
+// Close codes. 4000: this page gave up on a socket that stopped answering. It is
+// not 1000/1001, which end the session: the portal holds the session for the
+// reconnect. 4001: the portal handed this session to another connection (a
+// copied tab took it over), so reconnecting on our own would take it back.
+const CLOSE_ABANDONED = 4000;
+const CLOSE_SUPERSEDED = 4001;
+
 // Capabilities this shell announces to the server. As `render` / `patch` /
 // `asset` land, flip these on to opt into structured delivery for this session.
 const CLIENT_CAPS = {
@@ -32,24 +49,30 @@ const CLIENT_CAPS = {
   assets: false, // TODO: true once the asset channel exists
   images: true,
   theme: true,
+  // Shows `help_view` in the help panel; the game then sends help there, not to the log.
+  helpPanel: true,
 };
 
-// The resume token identifies *one connection's* replay buffer, so it belongs to
-// the tab, not the browser. In localStorage every tab presents the same token:
-// they overwrite each other's stash on close and a reconnecting tab replays
-// another tab's frames into its own log. sessionStorage is per-tab and survives
-// a reload, which is exactly the lifetime resume covers.
-function loadClientToken(): string {
-  const newToken = () =>
-    (crypto as any).randomUUID?.() ?? String(Date.now()) + Math.random().toString(36).slice(2);
+// The resume token names *one connection's* session at the portal, which issues
+// it in every `hello` reply and replaces it whenever a reconnect takes the
+// session over. It belongs to the tab, not the browser: in localStorage every
+// tab would present the same token and take over each other's session.
+// sessionStorage is per-tab and survives a reload.
+const TOKEN_KEY = "underspire.client.token";
+
+function loadClientToken(): string | null {
   try {
-    const existing = sessionStorage.getItem("underspire.client.token");
-    if (existing) return existing;
-    const t = newToken();
-    sessionStorage.setItem("underspire.client.token", t);
-    return t;
+    return sessionStorage.getItem(TOKEN_KEY);
   } catch {
-    return newToken();
+    return null;
+  }
+}
+
+function saveClientToken(token: string): void {
+  try {
+    sessionStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // Storage refused (private mode): resume still works for this page's life.
   }
 }
 
@@ -61,7 +84,7 @@ export class RpcError extends Error {
   }
 }
 
-class AzabanConnection {
+export class AzabanConnection {
   state = $state<ConnState>("connecting");
   loggedOut = $state(false); // server sent a `logout` (e.g. @quit): show the quit menu
   logoutReason = $state("");
@@ -76,13 +99,21 @@ class AzabanConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private manualClose = false;
-  // Resumable sessions: a stable token + the last server seq we've seen, sent in
-  // `hello` so the portal can replay frames missed across a brief disconnect.
-  private clientToken = loadClientToken();
+  // Resumable sessions: the portal's token for our session + the last server seq
+  // we applied, sent in `hello` so a reconnect takes the session back and is
+  // replayed what it missed.
+  private clientToken: string | null = loadClientToken();
   private lastSeq = 0;
+  // Liveness: when the last frame arrived, and the pending `pong` deadline.
+  private lastRx = 0;
+  private probeSeq = 0;
+  private probeTimer: ReturnType<typeof setTimeout> | null = null;
+  private livenessTimer: ReturnType<typeof setInterval> | null = null;
+  private lifecycleBound = false;
 
   init(): void {
     this.manualClose = false;
+    this.watchLifecycle();
     this.open();
   }
 
@@ -165,6 +196,7 @@ class AzabanConnection {
 
   close(): void {
     this.manualClose = true;
+    this.stopLiveness();
     this.sendEnvelope({ t: "websocket_close" });
     this.ws?.close();
   }
@@ -174,6 +206,7 @@ class AzabanConnection {
     this.loggedOut = true;
     this.logoutReason = reason;
     this.manualClose = true; // suppress the auto-reconnect on the close that follows
+    this.stopLiveness();
     this.ws?.close();
   }
 
@@ -219,9 +252,11 @@ class AzabanConnection {
     this.ws = ws;
 
     ws.onopen = () => {
+      if (this.ws !== ws) return;
       this.everOpen = true;
       this.reconnectAttempt = 0;
       this.state = "open";
+      this.lastRx = Date.now();
       // Announce our capabilities (replaces the CLIENT_NARRATIVE flag).
       this.sendEnvelope({
         t: "hello",
@@ -229,24 +264,33 @@ class AzabanConnection {
         caps: CLIENT_CAPS,
         resume: { token: this.clientToken, last_seq: this.lastSeq },
       });
+      this.startLiveness();
       this.handlers.get("connection_open")?.({ t: "connection_open" });
     };
     ws.onclose = (ev: CloseEvent) => {
+      if (this.ws !== ws) return; // a socket we already gave up on
+      this.stopLiveness();
       this.state = "closed";
       if (!this.manualClose && this.everOpen) {
         console.warn("azaban: websocket closed", ev.code, ev.reason || "(no reason)");
       }
-      // Fail any in-flight RPCs so callers don't hang across a disconnect.
-      for (const [seq, p] of this.pending) {
-        this.pending.delete(seq);
-        p.reject(new RpcError("offline", "connection closed"));
+      this.failPending();
+      if (ev.code === CLOSE_SUPERSEDED && !this.manualClose) {
+        // Another window has this session now. Reconnecting on our own would
+        // take it back, and that window would do the same.
+        this.markLoggedOut("superseded");
+        return;
       }
       if (!this.manualClose) this.scheduleReconnect();
     };
     ws.onerror = () => {
-      this.state = "error";
+      if (this.ws === ws) this.state = "error";
     };
     ws.onmessage = (ev: MessageEvent) => {
+      if (this.ws !== ws) return;
+      // Anything at all from the portal proves the socket is alive.
+      this.lastRx = Date.now();
+      this.clearProbe();
       let env: any;
       try {
         env = JSON.parse(ev.data);
@@ -258,7 +302,17 @@ class AzabanConnection {
     };
   }
 
+  /** Fail any in-flight RPCs so callers don't hang across a disconnect. */
+  private failPending(): void {
+    for (const [seq, p] of this.pending) {
+      this.pending.delete(seq);
+      p.reject(new RpcError("offline", "connection closed"));
+    }
+  }
+
   private dispatch(env: Record<string, any>): void {
+    // The heartbeat answer; its arrival already counted as proof of life.
+    if (env.t === "pong") return;
     // The server's `hello` closes the handshake, after any replay, and re-bases
     // our cursor: assign, never max. The server restarts its counter whenever it
     // could not resume us, so a cursor that only ever climbs would sit above
@@ -267,6 +321,11 @@ class AzabanConnection {
     if (env.t === "hello") {
       this.lastSeq = typeof env.s === "number" ? env.s : 0;
       this.resumed = env.resumed === true;
+      // The token for our next reconnect; the one we presented is spent.
+      if (typeof env.token === "string" && env.token) {
+        this.clientToken = env.token;
+        saveClientToken(env.token);
+      }
     } else if (typeof env.s === "number" && env.s > this.lastSeq) {
       // Track the highest server seq we've applied, for resume-on-reconnect.
       this.lastSeq = env.s;
@@ -307,7 +366,7 @@ class AzabanConnection {
     // Unhandled types are ignored (forward-compatible).
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect(soon = false): void {
     if (this.reconnectTimer || this.manualClose) return;
     // Jitter matters exactly when things are already going wrong: without it,
     // every client reconnects on the same millisecond after a server restart.
@@ -315,12 +374,99 @@ class AzabanConnection {
       RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_MS,
     );
-    const delay = Math.round(backoff * (0.75 + Math.random() * 0.5));
+    const delay = soon
+      ? Math.round(Math.random() * 500)
+      : Math.round(backoff * (0.75 + Math.random() * 0.5));
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.state !== "open") this.open();
     }, delay);
+  }
+
+  private startLiveness(): void {
+    this.stopLiveness();
+    this.livenessTimer = setInterval(() => this.probe(false), LIVENESS_TICK_MS);
+  }
+
+  private stopLiveness(): void {
+    if (this.livenessTimer) {
+      clearInterval(this.livenessTimer);
+      this.livenessTimer = null;
+    }
+    this.clearProbe();
+  }
+
+  private clearProbe(): void {
+    if (this.probeTimer) {
+      clearTimeout(this.probeTimer);
+      this.probeTimer = null;
+    }
+  }
+
+  /**
+   * Ask the portal whether this socket still works, if it has been quiet (or
+   * `now`, when the page has just come back). No answer in time: give it up.
+   */
+  private probe(now: boolean): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN || this.probeTimer) return;
+    if (!now && Date.now() - this.lastRx < PROBE_QUIET_MS) return;
+    this.sendEnvelope({ t: "ping", n: ++this.probeSeq });
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null;
+      if (this.ws === ws) this.abandon(ws);
+    }, PROBE_TIMEOUT_MS);
+  }
+
+  /**
+   * Stop waiting on a socket that no longer answers and reconnect at once. Its
+   * handlers are detached first, so whatever it does later changes nothing.
+   */
+  private abandon(ws: WebSocket): void {
+    ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
+    try {
+      ws.close(CLOSE_ABANDONED, "no answer");
+    } catch {
+      // already closing
+    }
+    this.ws = null;
+    this.stopLiveness();
+    this.state = "closed";
+    this.failPending();
+    this.reconnectAttempt = 0;
+    this.scheduleReconnect(true);
+  }
+
+  /** Check the link when the page comes back, instead of waiting for a timer. */
+  private watchLifecycle(): void {
+    if (this.lifecycleBound || typeof window === "undefined") return;
+    this.lifecycleBound = true;
+    const wake = () => this.wake();
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", (e) => {
+      if ((e as PageTransitionEvent).persisted) wake();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") wake();
+    });
+  }
+
+  /**
+   * The tab is visible again, the network is back, or the page came out of the
+   * back-forward cache. A phone that slept may be holding a dead socket, or
+   * sitting out a long backoff: probe the one, cut the other short.
+   */
+  private wake(): void {
+    if (this.manualClose) return;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.probe(true);
+    } else if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.reconnectAttempt = 0;
+      this.open();
+    }
   }
 }
 

@@ -12,6 +12,7 @@ import MediaPanel from "../components/MediaPanel.svelte";
 import SpawnsPanel from "../components/SpawnsPanel.svelte";
 import MyTicketsPanel from "../components/MyTicketsPanel.svelte";
 import PuppetsPanel from "../components/PuppetsPanel.svelte";
+import HelpPanel from "../components/HelpPanel.svelte";
 
 export const PANELS: Record<string, any> = {
   log: GameLog,
@@ -25,4 +26,5 @@ export const PANELS: Record<string, any> = {
   spawns: SpawnsPanel,
   mytickets: MyTicketsPanel,
   puppets: PuppetsPanel,
+  help: HelpPanel,
 };
