@@ -25,6 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.281 — One Server per game, and an unreplayable spool intent can no longer wedge a boot
+
+Two architectural guards close the failure class behind a production incident: a lifecycle race (a service restart racing a manual `evennia reload`) started a second Server, and the conflicting write-behind documents it produced were spooled at shutdown as intents that could never replay — every later boot blocked those rows, the Portal<->Server handshake died on a blocked read, and the unit restarted forever.
+
+### Server
+
+- **A second Server for the same game refuses to start** ([`server_lock.py`](evennia/server/server_lock.py), [`asyncio_bootstrap.py`](evennia/server/asyncio_bootstrap.py)). The Server takes an exclusive advisory lock beside its pidfile (`<pidfile>.lock`, byte 0, held for the process lifetime) before any game or database work. A second Server logs `FATAL: another Server process (pid N) already owns ...` and exits 1. Advisory locks die with the process, so a crash can never leave the game permanently locked.
+- **The Portal and the launcher probe the lock before spawning** ([`amp_server.py`](evennia/server/portal/amp_server.py), [`evennia_launcher.py`](evennia/server/evennia_launcher.py)). A held lock turns a duplicate start into an immediate, named refusal instead of two writers and a readiness timeout; `start`/`reload` no longer wait out the timeout when a Server is already alive.
+
+### Attributes
+
+- **Spool reclamation cannot block a boot** ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)). `reclaim_spooled_writes()` now returns a `SpoolReclaimReport` and, by default (`quarantine_conflicts=True`), moves an intent that can never replay — a three-way merge conflict with committed data, or an unreadable payload — to a sibling `jsonb_spool_quarantine_<UTC>_<pid>/` directory with a `manifest.jsonl`, logs `[EE] jsonb spool: quarantined ...`, and lets the boot proceed. The row serves committed truth; the preserved files stay for operator reconciliation. `PREPARED_BLOCKING` witnesses keep their operator-resolution contract and are never quarantined.
+- **New public helpers**: `SpoolReclaimReport`, `QuarantinedIntent`, `spool_quarantine_dirs()`.
+- **Migration notes**: `reclaim_spooled_writes()` returns a report, not an int; read `.reclaimed`. Callers that must keep the old leave-in-place behavior pass `quarantine_conflicts=False`.
+
+### Docs
+
+- [`docs/source/Components/Attributes.md`](docs/source/Components/Attributes.md) states the single-Server invariant and the quarantine contract; [`evennia.server.server_lock`](docs/source/api/evennia.server.server_lock.md) joins the API tree.
+
+### Tests
+
+- [`test_server_lock.py`](evennia/server/tests/test_server_lock.py) covers holder recording, contention refusal, stale lock files, pidfile parsing, refusal reporting, and the Portal spawn guard.
+- [`test_jsonb.py`](evennia/typeclasses/tests/test_jsonb.py) covers conflict quarantine (row freed, manifest written, committed truth served), the opt-out, and unreadable payloads.
+
 ## 6.0.0+underspire.280 — A dropped web socket no longer logs the player out; the web client gets one console look, opens help in a panel and keeps the typed line; tickets act in place; telnet negotiates UTF-8
 
 Two lines of this work were each prepared as `underspire.279` and never shipped: `.279` was cut on `underspire` in the meantime (silent rule shadowing now logs). This entry covers both lines and the session hold that followed them.
