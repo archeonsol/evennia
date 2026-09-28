@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.284 — `put` finds a container you carry
+
+Players could take an instrument out of a surgical kit in their hands but never put it back: `put scalpel in kit` answered "Could not find 'kit'." unless the kit sat on the floor.
+
+### Actions
+
+- **`put <item> in <container>` looks for the container among what the body carries, then the room** ([`objects.py`](evennia/actions/default/objects.py)). `Put.parse` searched only `actor.location`, so a bag on your back, a kit in your hands or a worn pouch could never be the container, although `look in <container>` searches the inventory and a game's `get <item> from <container>` can too. The new `_reachable_containers(actor)` passes the carried objects and then the room's contents as the search candidates, so a name that matches one of each still asks which you mean. The item is still taken from the hands (or from the room for a container that sets `accepts_room_character_put`), and the container's own rules still decide whether it accepts it.
+
+### Migration
+
+- A container rule that must only act on a container standing in the room now has to check the container's location itself, since a carried container of that type can be named. Underspire's confinement cages already do (`self.location is not caller.location`), and fixtures such as drop-off slots cannot be carried.
+
+### Tests
+
+- [`test_default_objects.py`](evennia/actions/tests/test_default_objects.py) `TestPutFindsItsContainer` covers a carried container, a container in the room, and an item that is not in hand. The carried-container test fails on the `underspire.282` source.
+
 ## 6.0.0+underspire.282 — A looping room track keeps looping
 
 Players heard a room's looping track once, then a long silence before it came back.
