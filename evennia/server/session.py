@@ -151,8 +151,11 @@ class Session:
 
         """
         if self.account:
+            from evennia.utils.dbserialize import deserialize
+
+            # Plain data: see ServerSession.update_flags.
             self.protocol_flags.update(
-                self.account.attributes.get("_saved_protocol_flags", None) or {}
+                deserialize(self.account.attributes.get("_saved_protocol_flags", None) or {})
             )
 
     # access hooks
