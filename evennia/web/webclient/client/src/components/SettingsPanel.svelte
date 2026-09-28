@@ -6,7 +6,7 @@
   import { parsePattern, matches } from "../lib/pattern";
   import { session } from "../lib/session.svelte";
   import { macros } from "../lib/macros.svelte";
-  import { keybinds, comboFromEvent } from "../lib/keybinds.svelte";
+  import { keybinds, comboFromEvent, displayCombo } from "../lib/keybinds.svelte";
   import { dock } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { exportConfig, importConfig } from "../lib/backup";
@@ -332,15 +332,16 @@
           <div class="row">
             <span>{b.label}</span>
             <button class="r-key" class:cap={capKey === b.id}
-              aria-label="{b.label}: {capKey === b.id ? 'press the new key, Escape to cancel' : b.combo}"
+              aria-label="{b.label}: {capKey === b.id ? 'press the new key, Escape to cancel' : displayCombo(b.combo)}"
               onclick={() => (capKey = capKey === b.id ? null : b.id)}
               onkeydown={(e) => capKey === b.id && onKbKey(e, b.id)}>
-              {capKey === b.id ? "Press key" : b.combo}
+              {capKey === b.id ? "Press key" : displayCombo(b.combo)}
             </button>
           </div>
         {/each}
         <!-- Fixed keys, listed so they can be found. -->
         <div class="row"><span>Read a recent line again</span><span class="r-fixed">Alt+1 to Alt+9</span></div>
+        <div class="row"><span>Select the whole log, in the output</span><span class="r-fixed">Ctrl+A</span></div>
         <div class="row"><span>Scroll output from the command line</span><span class="r-fixed">Page Up / Page Down</span></div>
       </div>
     {:else if view === "data"}

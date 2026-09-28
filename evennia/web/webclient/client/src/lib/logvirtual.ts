@@ -18,13 +18,19 @@
 // Everything is keyed by the line id (`getItemKey`), never by index: measured
 // heights survive a trim, and re-filtering the log re-anchors on the same
 // line rather than the same row number.
+//
+// Rows can also be held mounted outside the window (`getPinned`). A text
+// selection lives in DOM nodes, so the rows where one starts and ends must
+// survive the reader scrolling away from them, or the browser drops the
+// selection with the node (see lib/logcopy.ts).
 
 import {
   Virtualizer,
+  defaultRangeExtractor,
   observeElementOffset,
   observeElementRect,
 } from "@tanstack/virtual-core";
-import type { VirtualizerOptions } from "@tanstack/virtual-core";
+import type { Range, VirtualizerOptions } from "@tanstack/virtual-core";
 
 import { REPIN_PX } from "./autoscroll";
 
@@ -51,6 +57,11 @@ export interface LogVirtualizerOptions<T extends HTMLElement> {
   onChange: (instance: Virtualizer<T, HTMLElement>, sync: boolean) => void;
   /** The top our code just wrote, so the log can tell its own scroll from the user's. */
   onWrite?: (top: number) => void;
+  /**
+   * Row indexes to keep mounted wherever the viewport is. Read on every
+   * `sync()`, so call `sync()` when the answer changes.
+   */
+  getPinned?: () => number[];
   // Test seams; production uses the real element observers and the scroll write
   // below.
   scrollToFn?: ScrollFn<T>;
@@ -61,16 +72,66 @@ export interface LogVirtualizerOptions<T extends HTMLElement> {
 export interface LogVirtualizer<T extends HTMLElement> {
   instance: Virtualizer<T, HTMLElement>;
   /**
-   * Re-state the current count and keys. `setOptions` replaces the whole
-   * options object (it does not merge), so this must always hand over every
-   * option; call it whenever the line list changes.
+   * Re-state the current count, keys and pinned rows. `setOptions` replaces
+   * the whole options object (it does not merge), so this must always hand
+   * over every option; call it whenever the line list or the pinned rows
+   * change.
    */
   sync: () => void;
+}
+
+/**
+ * The window's indexes plus the pinned ones, ascending and unique.
+ *
+ * Ascending matters: the rows render in this order, and DOM order is what a
+ * text selection spans, so a held row must sit before or after the window
+ * exactly where its line is.
+ */
+export function withPinned(indexes: number[], pinned: number[], count: number): number[] {
+  const extra = pinned.filter((i) => Number.isInteger(i) && i >= 0 && i < count);
+  if (!extra.length) return indexes;
+  return Array.from(new Set([...indexes, ...extra])).sort((a, b) => a - b);
+}
+
+/**
+ * Where the line with this id sits in a scrollback list, or -1.
+ *
+ * Ids are handed out in arrival order and every list the log renders keeps
+ * that order (appends at the end, trims and filters only remove), so a binary
+ * search finds it without walking five thousand lines.
+ */
+export function indexOfId(lines: readonly { id: number }[], id: number): number {
+  let lo = 0;
+  let hi = lines.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const at = lines[mid].id;
+    if (at === id) return mid;
+    if (at < id) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
 }
 
 export function createLogVirtualizer<T extends HTMLElement>(
   options: LogVirtualizerOptions<T>,
 ): LogVirtualizer<T> {
+  // The virtualizer memoizes its rendered indexes on the extractor's identity,
+  // so a new extractor is made only when the pinned set changes. Handing over
+  // a fresh closure on every sync would recompute the window on every append.
+  let pinnedKey = "";
+  let extractor: (range: Range) => number[] = defaultRangeExtractor;
+  const rangeExtractor = (): ((range: Range) => number[]) => {
+    const pinned = options.getPinned?.() ?? [];
+    const key = pinned.join(",");
+    if (key !== pinnedKey) {
+      pinnedKey = key;
+      extractor = pinned.length
+        ? (range) => withPinned(defaultRangeExtractor(range), pinned, range.count)
+        : defaultRangeExtractor;
+    }
+    return extractor;
+  };
   const build = (): VirtualizerOptions<T, HTMLElement> => ({
     count: options.getCount(),
     getScrollElement: options.getScrollElement,
@@ -80,6 +141,7 @@ export function createLogVirtualizer<T extends HTMLElement>(
     followOnAppend: "auto",
     scrollEndThreshold: REPIN_PX,
     overscan: LOG_OVERSCAN,
+    rangeExtractor: rangeExtractor(),
     onChange: options.onChange,
     scrollToFn:
       options.scrollToFn ??

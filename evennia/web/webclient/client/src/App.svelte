@@ -24,6 +24,9 @@
   import { announcer } from "./lib/announce.svelte";
   import { focusRegion, type Region } from "./lib/regions";
   import { commandInput, shouldTypeCommand } from "./lib/focus";
+  import { commands } from "./lib/commands.svelte";
+  import { reviewCursor, type ReviewMove } from "./lib/review";
+  import type { LogLine } from "./lib/session.svelte";
 
   // The intro is a visual flourish; a screen reader user would only have to
   // find and dismiss it.
@@ -76,19 +79,20 @@
     ["focusScene", "scene"],
   ];
 
-  /** Read back the nth most recent line the log is showing (1 = newest). */
-  function review(n: number) {
-    let seen = 0;
-    for (let i = session.lines.length - 1; i >= 0; i--) {
-      const line = session.lines[i];
-      if (line.type === "media" || !logview.filters[line.cat] || !line.text.trim()) continue;
-      if (++seen === n) {
-        announcer.now(line.text);
-        return;
-      }
-    }
-    announcer.now(`No line ${n}.`);
-  }
+  // The review cursor reads what the log is showing: its filters apply, and
+  // media rows and blank lines have nothing to say.
+  const readable = (line: LogLine) =>
+    line.type !== "media" && !!logview.filters[line.cat] && !!line.text.trim();
+
+  const REVIEW_MOVES: [string, ReviewMove][] = [
+    ["reviewOlder", "older"],
+    ["reviewNewer", "newer"],
+    ["reviewOldest", "oldest"],
+    ["reviewNewest", "newest"],
+  ];
+
+  // Acting starts a fresh read: after a command, Alt+Up reads the newest line.
+  commands.onRun(() => reviewCursor.reset());
 
   function onKey(e: KeyboardEvent) {
     // An open dialog owns the keyboard; a jump would land behind it.
@@ -104,8 +108,16 @@
     const back = reviewIndex(e);
     if (back) {
       e.preventDefault();
-      review(back);
+      announcer.now(reviewCursor.recent(session.lines, readable, back));
       return;
+    }
+    for (const [id, move] of REVIEW_MOVES) {
+      if (modalOpen) break;
+      if (keybinds.match(e, id)) {
+        e.preventDefault();
+        announcer.now(reviewCursor[move](session.lines, readable));
+        return;
+      }
     }
     if (keybinds.match(e, "palette")) {
       e.preventDefault();

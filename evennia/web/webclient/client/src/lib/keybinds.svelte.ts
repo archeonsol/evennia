@@ -22,7 +22,18 @@ const DEFAULTS: Binding[] = [
   { id: "focusOutput", label: "Go to game output", combo: "Alt+O" },
   { id: "focusChannels", label: "Go to channels", combo: "Alt+C" },
   { id: "focusScene", label: "Go to scene", combo: "Alt+R" },
+  // The review cursor (lib/review.ts): read the scrollback a line at a time
+  // without leaving the command line.
+  { id: "reviewOlder", label: "Read the line before", combo: "Alt+ArrowUp" },
+  { id: "reviewNewer", label: "Read the line after", combo: "Alt+ArrowDown" },
+  { id: "reviewOldest", label: "Read the oldest line", combo: "Alt+Shift+ArrowUp" },
+  { id: "reviewNewest", label: "Read the newest line", combo: "Alt+Shift+ArrowDown" },
 ];
+
+/** A combo as a player reads it: "Alt+ArrowUp" is shown as "Alt+Up". */
+export function displayCombo(combo: string): string {
+  return combo.replace(/Arrow(Up|Down|Left|Right)/g, "$1");
+}
 
 /**
  * The key a combo names. With Alt held, macOS Option turns a letter into a

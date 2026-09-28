@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Virtualizer } from "@tanstack/virtual-core";
 
-import { createLogVirtualizer, estimateLinePx } from "./logvirtual";
+import { createLogVirtualizer, estimateLinePx, indexOfId, withPinned } from "./logvirtual";
 
 const VIEWPORT = 300;
 const ESTIMATE = 24;
@@ -66,6 +66,8 @@ interface Harness {
   keys: number[];
   /** Swap the list, as the log does when lines append or trim. */
   setKeys(next: number[]): void;
+  /** Re-state the options with the list unchanged, as a new selection does. */
+  resync(): void;
   /** Simulate a frame boundary: run rAF work, then the spacer/layout and scroll event. */
   settle(frames?: number): void;
   /** First measurement of a row (mount). */
@@ -85,7 +87,9 @@ function range(from: number, to: number): number[] {
  * it before `_willUpdate`, and in `onChange`), and scroll events are delivered
  * after each frame.
  */
-function makeHarness(init: { keys?: number[]; viewport?: number; estimate?: number } = {}): Harness {
+function makeHarness(
+  init: { keys?: number[]; viewport?: number; estimate?: number; pinned?: () => number[] } = {},
+): Harness {
   const win = new FakeWindow();
   const scroller = new FakeScroller(init.viewport ?? VIEWPORT, win);
   let keys = init.keys ?? range(0, 5000);
@@ -109,6 +113,7 @@ function makeHarness(init: { keys?: number[]; viewport?: number; estimate?: numb
     getCount: () => keys.length,
     getKey: (i) => keys[i],
     estimateSize: () => init.estimate ?? ESTIMATE,
+    getPinned: init.pinned,
     onChange: sync,
     observeElementRect: (_instance, cb) => {
       cb({ width: WIDTH, height: scroller.clientHeight });
@@ -130,6 +135,11 @@ function makeHarness(init: { keys?: number[]; viewport?: number; estimate?: numb
     },
     setKeys(next) {
       keys = [...next];
+      handle.sync();
+      sync();
+      v._willUpdate();
+    },
+    resync() {
       handle.sync();
       sync();
       v._willUpdate();
@@ -310,6 +320,90 @@ describe("createLogVirtualizer", () => {
     const after = h.topVisible();
     expect(after.key).toBe(before.key);
     expect(Math.abs(after.delta - before.delta)).toBeLessThan(1);
+  });
+});
+
+describe("pinned rows", () => {
+  it("mounts a pinned row far outside the window, in index order", () => {
+    let pinned: number[] = [];
+    const h = makeHarness({ pinned: () => pinned });
+    h.v.scrollToEnd();
+    h.settle();
+    const windowSize = h.v.getVirtualItems().length;
+    pinned = [7];
+    h.resync();
+    const items = h.v.getVirtualItems();
+    expect(items[0].index).toBe(7);
+    expect(items.length).toBe(windowSize + 1);
+    const indexes = items.map((i) => i.index);
+    expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
+  });
+
+  it("releases a row once it is no longer pinned", () => {
+    let pinned = [7];
+    const h = makeHarness({ pinned: () => pinned });
+    h.v.scrollToEnd();
+    h.settle();
+    expect(h.v.getVirtualItems().some((i) => i.index === 7)).toBe(true);
+    pinned = [];
+    h.resync();
+    expect(h.v.getVirtualItems().some((i) => i.index === 7)).toBe(false);
+  });
+
+  it("keeps the window's own rows memoized while the pinned set is unchanged", () => {
+    const pinned = [7];
+    const h = makeHarness({ pinned: () => pinned });
+    h.settle();
+    const extractor = h.v.options.rangeExtractor;
+    h.resync();
+    h.setKeys([...h.keys, 5000]);
+    expect(h.v.options.rangeExtractor).toBe(extractor);
+  });
+
+  it("does not disturb the reader's anchor", () => {
+    let pinned: number[] = [];
+    const h = makeHarness({ pinned: () => pinned });
+    h.v.scrollToOffset(30000);
+    h.settle();
+    const before = h.topVisible();
+    pinned = [3, 4990];
+    h.resync();
+    h.settle();
+    const after = h.topVisible();
+    expect(after.key).toBe(before.key);
+    expect(after.delta).toBe(before.delta);
+  });
+});
+
+describe("withPinned", () => {
+  it("adds pinned indexes to the window, ascending and unique", () => {
+    expect(withPinned([10, 11, 12], [3, 11, 40], 50)).toEqual([3, 10, 11, 12, 40]);
+  });
+
+  it("drops indexes outside the list", () => {
+    expect(withPinned([0, 1], [-1, 2, 9, 1.5], 5)).toEqual([0, 1, 2]);
+  });
+
+  it("hands back the window itself when nothing is pinned", () => {
+    const window = [4, 5, 6];
+    expect(withPinned(window, [], 10)).toBe(window);
+  });
+});
+
+describe("indexOfId", () => {
+  const lines = [2, 5, 9, 14, 20].map((id) => ({ id }));
+
+  it("finds a line by id", () => {
+    expect(indexOfId(lines, 2)).toBe(0);
+    expect(indexOfId(lines, 14)).toBe(3);
+    expect(indexOfId(lines, 20)).toBe(4);
+  });
+
+  it("answers -1 for a line that is not there", () => {
+    expect(indexOfId(lines, 1)).toBe(-1);
+    expect(indexOfId(lines, 6)).toBe(-1);
+    expect(indexOfId(lines, 99)).toBe(-1);
+    expect(indexOfId([], 1)).toBe(-1);
   });
 });
 

@@ -225,7 +225,8 @@ export function xtermHex(i: number): string {
 }
 
 /**
- * Resolve the palette classes a buffer actually uses against the live document.
+ * Resolve the palette classes a buffer actually uses against the live document,
+ * as a map from class to colour.
  *
  * Reading them back rather than shipping a copy of ansi-palette.css is what
  * makes a game's own overrides (loaded after the shell's neutral base) come out
@@ -238,7 +239,8 @@ export function xtermHex(i: number): string {
  * and only believed when it actually changes something; otherwise the standard
  * xterm value stands in.
  */
-function paletteCss(classes: Set<string>): string {
+function resolvePalette(classes: Set<string>): Map<string, string> {
+  const out = new Map<string, string>();
   const probe = document.createElement("span");
   const bare = document.createElement("span");
   for (const el of [probe, bare]) {
@@ -249,27 +251,31 @@ function paletteCss(classes: Set<string>): string {
   const base = getComputedStyle(bare);
   const baseFg = base.color;
   const baseBg = base.backgroundColor;
-  const rules: string[] = [];
   try {
     for (const cls of Array.from(classes).sort()) {
       probe.className = cls;
       const computed = getComputedStyle(probe);
       const bg = paletteIndex(cls, "bgcolor-");
       if (bg !== null) {
-        const value =
-          computed.backgroundColor !== baseBg ? computed.backgroundColor : xtermHex(bg);
-        rules.push(`.${cls}{background-color:${value}}`);
+        out.set(cls, computed.backgroundColor !== baseBg ? computed.backgroundColor : xtermHex(bg));
         continue;
       }
       const fg = paletteIndex(cls, "color-");
-      if (fg !== null) {
-        const value = computed.color !== baseFg ? computed.color : xtermHex(fg);
-        rules.push(`.${cls}{color:${value}}`);
-      }
+      if (fg !== null) out.set(cls, computed.color !== baseFg ? computed.color : xtermHex(fg));
     }
   } finally {
     probe.remove();
     bare.remove();
+  }
+  return out;
+}
+
+/** The palette classes in use, as stylesheet rules for the HTML download. */
+function paletteCss(classes: Set<string>): string {
+  const rules: string[] = [];
+  for (const [cls, value] of resolvePalette(classes)) {
+    const prop = paletteIndex(cls, "bgcolor-") !== null ? "background-color" : "color";
+    rules.push(`.${cls}{${prop}:${value}}`);
   }
   return rules.join("\n");
 }
@@ -278,6 +284,12 @@ function themeVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }
+
+//: System mono, not the player's chosen font: a saved file or a paste has no
+//: webfonts and no "Shell Glyphs" fallback with it, and a stack whose
+//: box-drawing characters come from somewhere at the wrong advance tears every
+//: table. The local monos all carry U+2500-25FF at their own cell width.
+const MONO_STACK = 'ui-monospace, "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
 
 /** Plain text, one line per log line. */
 function toText(lines: LogLine[], opts: TranscriptOptions): string {
@@ -320,10 +332,6 @@ function toHtml(lines: LogLine[], opts: TranscriptOptions): string {
     })
     .join("\n");
 
-  // System mono, not the player's chosen font: the file has no webfonts and no
-  // "Shell Glyphs" fallback with it, and a stack whose box-drawing characters
-  // come from somewhere at the wrong advance tears every table in the
-  // transcript. The local monos all carry U+2500-25FF at their own cell width.
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -336,7 +344,7 @@ body {
   margin: 0; padding: 1rem;
   background: ${themeVar("--bg", "#0a0806")};
   color: ${themeVar("--fg", "#cdbfa6")};
-  font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-family: ${MONO_STACK};
   font-size: 15px; line-height: 1.5;
 }
 .line { white-space: pre-wrap; word-break: break-word; }
@@ -370,4 +378,70 @@ export function buildTranscript(
     return { body: toHtml(lines, opts), mime: "text/html;charset=utf-8", ext: "html" };
   }
   return { body: toText(lines, opts), mime: "text/plain;charset=utf-8", ext: "txt" };
+}
+
+/** A link that only means something inside the client: MXP's `href="#"` and scripts. */
+function isDeadLink(a: Element): boolean {
+  const href = (a.getAttribute("href") ?? "").trim().toLowerCase();
+  return !href || href.startsWith("#") || href.startsWith("javascript:");
+}
+
+/**
+ * Log lines as clipboard HTML, one block per line, styled inline.
+ *
+ * A paste target never sees the client's stylesheet, so each palette class is
+ * resolved to a colour against the live document (as the HTML download does)
+ * and written onto its element. The block carries the log's own background,
+ * text colour and a mono stack, the way an editor's rich copy does, so light
+ * game text does not vanish into a white document. Links that only work inside
+ * the client (MXP commands) paste as their text.
+ *
+ * Each part is one line: its whole HTML, or a fragment cut from it when a
+ * selection starts or ends inside the line.
+ */
+export function clipboardHtml(parts: (string | DocumentFragment)[]): string {
+  const frags = parts.map((part) => (typeof part === "string" ? parse(part) : part));
+  const classes = new Set<string>();
+  for (const frag of frags) {
+    sanitize(frag);
+    for (const a of Array.from(frag.querySelectorAll("a"))) {
+      if (isDeadLink(a)) a.replaceWith(...Array.from(a.childNodes));
+    }
+    for (const el of Array.from(frag.querySelectorAll("[class]"))) {
+      for (const cls of el.classList) classes.add(cls);
+    }
+  }
+  const palette = resolvePalette(classes);
+
+  const root = document.createElement("div");
+  root.style.backgroundColor = themeVar("--bg", "#0a0806");
+  root.style.color = themeVar("--fg", "#cdbfa6");
+  root.style.fontFamily = MONO_STACK;
+  root.style.whiteSpace = "pre-wrap";
+  for (const frag of frags) {
+    for (const el of Array.from(frag.querySelectorAll<HTMLElement>("[class]"))) {
+      // An inline colour is the parser's truecolour, and it wins over the
+      // class in the client too.
+      for (const cls of el.classList) {
+        const value = palette.get(cls);
+        if (value === undefined) {
+          if (cls === "underline") el.style.textDecoration = "underline";
+          continue;
+        }
+        if (paletteIndex(cls, "bgcolor-") !== null) {
+          if (!el.style.backgroundColor) el.style.backgroundColor = value;
+        } else if (!el.style.color) {
+          el.style.color = value;
+        }
+      }
+      el.removeAttribute("class");
+    }
+    for (const el of Array.from(frag.querySelectorAll("[id]"))) el.removeAttribute("id");
+    const line = document.createElement("div");
+    line.appendChild(frag);
+    // An empty block collapses to nothing when pasted; a blank line must stay.
+    if (!line.textContent && !line.querySelector("img")) line.appendChild(document.createElement("br"));
+    root.appendChild(line);
+  }
+  return `<meta charset="utf-8">${root.outerHTML}`;
 }
