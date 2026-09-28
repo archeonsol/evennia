@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.285: Saved protocol flags no longer break the Portal sync
+
+A player whose saved options held a dict-valued flag broke every full session sync, so output to every player dropped each time the bus peer reset.
+
+### Server
+
+- **Saved protocol flags reach a session as plain data** ([`serversession.py`](evennia/server/serversession.py), [`session.py`](evennia/server/session.py)). `_saved_protocol_flags` reads back from its Attribute as a `_SaverDict`, and a dict-valued flag inside it (`SCREENWIDTH` and `SCREENHEIGHT` are `{0: n}`) as a nested `_SaverDict`. `ServerSession.update_flags` (login restore in `DefaultAccount.at_post_login` and game overrides) and `Session.at_sync` (every reload) copied those into `protocol_flags` unconverted. The admin serializer in [`amp_serde.py`](evennia/server/amp_serde.py) accepts only plain containers, so the next `SSYNC` for that session raised `TypeError: unsupported AMP session type: _SaverDict`. Raised inside `update_flags`, it aborted login part way (no `logged_in` message, no auto-puppet, and the error text reached the client). Raised on a later sync, it failed the frame, dropped the Portal peer (`peer is not ready` on every player's output), and on reconnect resynced every session's scene in one reactor turn (a 2.3s stall in production). The poisoned session failed again on each later full sync, about every 12 seconds in production. Both entry points now pass the flags through `dbserialize.deserialize`. The serializer is unchanged: it stays strict.
+- A nested `_SaverDict` in a session's flags also wrote session-side changes back to the account's saved flags; the plain copy ends that.
+
+### Tests
+
+- [`test_saved_protocol_flags.py`](evennia/server/tests/test_saved_protocol_flags.py) restores `{"SCREENWIDTH": {0: 100}}` from a real Attribute through `update_flags` and `at_sync`, packs the real `{sessid: get_sync_data()}` admin frame, and changes the nested value to check the account attribute is untouched. Without the fix, two tests raise the production `TypeError` and the third fails on the write-back.
+
 ## 6.0.0+underspire.284 — `put` finds a container you carry
 
 Players could take an instrument out of a surgical kit in their hands but never put it back: `put scalpel in kit` answered "Could not find 'kit'." unless the kit sat on the floor.
