@@ -86,6 +86,21 @@ Two lines of this work were each prepared as `underspire.279` and never shipped:
 - Telnet: CHARSET offer, acceptance, rejection, late acceptance and client-initiated requests in [`portal/tests.py`](evennia/server/portal/tests.py); every fold mapping, width preservation and legacy-encoding pass-through in [`test_textfold.py`](evennia/utils/tests/test_textfold.py).
 - Help panel: unit tests for the help text renderer ([`helpText.test.ts`](evennia/web/webclient/client/src/lib/helpText.test.ts)) and a browser page ([`tests/help.html`](evennia/web/webclient/client/tests/help.html)) driving the panel against recorded help views.
 
+## 6.0.0+underspire.279 — Silent rule shadowing now logs
+
+### Engine
+
+- **A name collision between provider mixins can no longer delete rules in silence** ([`registry.py`](evennia/actions/registry.py), [`events.py`](evennia/actions/events.py)). `RuleRegistry.collect()` indexes rules by method name across the aggregate class's MRO, so an undecorated method with the same name on any provider in the mix silently drops another mixin's rules regardless of action type. The override-without-`@rule` contract is deliberate and heavily used (277 game overrides of default rules re-declare under the same name), but an unrelated-mixin collision is always a bug and was invisible: a game `alias` verb bound to a method named `carry_out_alias` was shadowed by the default building rules' `carry_out_alias` (bound to `SetObjAlias`), and the dispatch fell through to the fail-closed nomatch with only an empty phase bucket to show for it. `collect()`, and the parallel `EventRegistry.collect()`, now compare the specs the winner re-declares against the specs it drops: unrelated-mixin collisions log a warning naming the method, both classes, and the lost `(action_type, phase)` pairs; same-hierarchy overrides (the documented disable path) log at info level. Overrides that re-declare the same coverage keys stay silent, so existing trees produce no new log volume.
+
+### Tests
+
+- **The warning contract is pinned both directions** ([`test_registry.py`](evennia/actions/tests/test_registry.py), [`test_events.py`](evennia/actions/tests/test_events.py)). Unrelated shadow without re-declaration warns and the shadowed rule stays out of the index; re-declaration under the same name logs nothing; the same-hierarchy drop logs info.
+- **The inline-fallback dispatch test patches the live seam** ([`test_dispatch.py`](evennia/actions/tests/test_dispatch.py)). Since push invalidation (`08ac4cd24`) dispatch consults `storage.ensure_authorization`, but the test still patched the older `prewarm_authorization`, so under push-enabled settings the real call succeeded and both fallback assertions failed. It now patches `ensure_authorization` with an `AsyncMock`, which is environment-independent either way.
+
+### Downstream (game-side)
+
+- No changes required; the logging is behavior-neutral. UNDERSPIRE renamed its colliding rules in `4958ed60` before this tag.
+
 ## 6.0.0+underspire.278 — Tab completes verbs and scope targets
 
 ### Webclient

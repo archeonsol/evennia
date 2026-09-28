@@ -781,14 +781,14 @@ class AuthorizationStorageTest(TestCase):
         self.assertIn("engine.object.edit", load_grants(principal).by_capability)
 
     def test_generation_cache_keys_are_backend_safe_and_bounded(self):
+        from evennia.authorization.storage import _generation_cache_key, resource_ref
+
         resource = UnsafeRefResource()
-
-        with patch("evennia.authorization.storage.cache.get", return_value=0) as cache_get:
-            load_resource(resource)
-
-        cache_key = cache_get.call_args.args[0]
-        self.assertNotRegex(cache_key, r"[\x00-\x20\x7f]")
-        self.assertLessEqual(len(cache_key), 250)
+        for namespace in ("resource", "principal"):
+            with self.subTest(namespace=namespace):
+                cache_key = _generation_cache_key(namespace, resource_ref(resource))
+                self.assertNotRegex(cache_key, r"[\x00-\x20\x7f]")
+                self.assertLessEqual(len(cache_key), 250)
 
     def test_live_driver_not_durable_owner_supplies_account_principal(self):
         driver = type("Account", (), {"pk": 9})()

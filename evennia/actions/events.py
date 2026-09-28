@@ -32,7 +32,17 @@ fires; it never hard-codes "rooms".
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from .registry import _warn_shadowed_method
+
 __all__ = ["Event", "subscribe", "EventSpec", "EventRegistry", "event_registry"]
+
+
+def _event_coverage_key(spec):
+    return spec.event_type
+
+
+def _event_label(spec):
+    return spec.event_type.__name__
 
 
 class Event:
@@ -101,15 +111,28 @@ class EventRegistry:
         """Walk ``cls``'s MRO, gather subscription specs, cache the index on the
         class. Most-derived definition of a method wins (an override without
         ``@subscribe`` shadows the base method's subscriptions). Returns the
-        ``event_type -> [EventSpec]`` index (also stored as ``cls.__evennia_events__``)."""
+        ``event_type -> [EventSpec]`` index (also stored as ``cls.__evennia_events__``).
+        """
         index = {}
-        seen_methods = set()
+        seen_methods = {}  # method name -> (defining class, specs)
         for klass in cls.__mro__:
             for name, attr in vars(klass).items():
+                specs = getattr(attr, "__evennia_event_specs__", None) or ()
                 if name in seen_methods:
+                    winner_class, winner_specs = seen_methods[name]
+                    _warn_shadowed_method(
+                        cls,
+                        name,
+                        klass,
+                        specs,
+                        winner_class,
+                        winner_specs,
+                        _event_coverage_key,
+                        _event_label,
+                        "subscription",
+                    )
                     continue
-                seen_methods.add(name)
-                specs = getattr(attr, "__evennia_event_specs__", None)
+                seen_methods[name] = (klass, tuple(specs))
                 if not specs:
                     continue
                 for spec in specs:
