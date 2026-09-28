@@ -40,6 +40,7 @@ evennia.server
    evennia.server.redis_transport
    evennia.server.runtime_db
    evennia.server.server
+   evennia.server.server_lock
    evennia.server.serversession
    evennia.server.service
    evennia.server.service_registry

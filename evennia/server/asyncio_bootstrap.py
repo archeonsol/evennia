@@ -220,6 +220,25 @@ def build_cmdline(
 def run_bootstrap(*, portal_mode: bool, argv=None):
     """Start an Evennia Portal or Server process without twistd."""
     args, _unknown = _parse_bootstrap_args(argv)
+
+    # The Server singleton lock is the authoritative guard against two Servers
+    # serving one game database. It must be taken before any game or database
+    # work and before the pidfile write, so a refused process never claims
+    # either. A second Server exits instead of running the game.
+    server_lock = None
+    if not portal_mode and args.pidfile:
+        from evennia.server.server_lock import (
+            ServerAlreadyRunning,
+            acquire_server_lock,
+            refuse_start,
+        )
+
+        try:
+            server_lock = acquire_server_lock(args.pidfile)
+        except ServerAlreadyRunning as err:
+            refuse_start(str(err))
+            raise SystemExit(1)
+
     _write_pidfile(args.pidfile)
 
     loop = loop_factory.new_process_loop()
@@ -292,6 +311,8 @@ def run_bootstrap(*, portal_mode: bool, argv=None):
         except Exception:
             logger.log_trace("error shutting down the worker executor")
         _remove_pidfile(args.pidfile)
+        if server_lock is not None:
+            server_lock.release()
         try:
             if not loop.is_closed():
                 loop.close()

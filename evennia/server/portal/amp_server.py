@@ -172,6 +172,19 @@ class AMPServerProtocol(amp.AMPMultiConnectionProtocol):
                 to pass to POpen to start the server.
 
         """
+        # Never spawn a second Server: the lock is held for the lifetime of a
+        # live Server process, and spawning into it produces the two-writer
+        # state the lock exists to prevent.
+        from evennia.server.server_lock import pidfile_from_cmd, server_lock_held
+
+        holder = server_lock_held(pidfile_from_cmd(server_twistd_cmd))
+        if holder is not None:
+            logger.log_err(
+                "Refusing to start a second Server: the server lock is held by pid %s."
+                % (holder or "an unknown process")
+            )
+            return
+
         # start the Server
         print("Portal starting server ... ")
         process = None

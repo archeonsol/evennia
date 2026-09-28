@@ -952,6 +952,16 @@ def start_evennia(pprofiler=False, sprofiler=False):
             print("Server is already running as process {pid}. Not restarted.".format(pid=spid))
             _reactor_stop()
         else:
+            from evennia.server.server_lock import server_lock_held
+
+            holder = server_lock_held(SERVER_PIDFILE)
+            if holder is not None:
+                print(
+                    "A Server for this game is already running (pid %s). "
+                    "Refusing to start another." % holder
+                )
+                _fail_launcher()
+                return
             print("Server starting {}...".format("(under cProfile)" if sprofiler else ""))
             send_instruction(SSTART, server_cmd)
             wait_for_status(True, True, _server_started)
@@ -1011,6 +1021,16 @@ def reload_evennia(sprofiler=False, reset=False):
             send_instruction(SRESET if reset else SRELOAD, {})
             wait_for_status(True, False, _server_stopped)
         else:
+            from evennia.server.server_lock import server_lock_held
+
+            holder = server_lock_held(SERVER_PIDFILE)
+            if holder is not None:
+                print(
+                    "A Server for this game is already running (pid %s). "
+                    "Refusing to start another." % holder
+                )
+                _fail_launcher()
+                return
             print("Server down. Re-starting ...")
             send_instruction(SSTART, server_cmd)
             wait_for_status(True, True, _server_restarted)
