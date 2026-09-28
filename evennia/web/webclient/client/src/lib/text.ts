@@ -5,6 +5,15 @@ const HIDDEN = new Set(["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"]);
 export function htmlToText(html: string): string {
   const template = document.createElement("template");
   template.innerHTML = html;
+  return nodesToText(template.content.childNodes);
+}
+
+/**
+ * Project already-parsed log markup to text, exactly as `htmlToText` projects
+ * the string. A copied part of a line arrives as a fragment, and it must come
+ * out in the same shape as the whole lines around it.
+ */
+export function nodesToText(nodes: Iterable<Node>): string {
   let text = "";
   let boundary = false;
 
@@ -34,6 +43,6 @@ export function htmlToText(html: string): string {
     node.childNodes.forEach(visit);
     if (block) boundary = true;
   };
-  template.content.childNodes.forEach(visit);
+  for (const node of Array.from(nodes)) visit(node);
   return text;
 }

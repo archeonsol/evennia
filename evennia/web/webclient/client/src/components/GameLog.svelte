@@ -6,11 +6,12 @@
   import { pinAfterScroll } from "../lib/autoscroll";
   import { settings } from "../lib/settings.svelte";
   import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
-  import { createLogVirtualizer, estimateLinePx, type LogVirtualizer } from "../lib/logvirtual";
+  import { createLogVirtualizer, estimateLinePx, indexOfId, type LogVirtualizer } from "../lib/logvirtual";
+  import { heldLines, selectRows, selectionSpan, spanToClipboard } from "../lib/logcopy";
   import { logReveal } from "../lib/logreveal";
   import { commandInput, isTypingTarget } from "../lib/focus";
   import { gridFor, screenSize } from "../lib/screensize";
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import type { Virtualizer } from "@tanstack/virtual-core";
 
   //: What each download format is for, in the order the menu offers them.
@@ -54,6 +55,12 @@
   // A row that unmounts leaves its element in the virtualizer's cache; sweep
   // disconnected nodes out once per microtask rather than once per row.
   let sweepQueued = false;
+  // The lines a live selection starts and ends on, by id. Their rows stay
+  // mounted however far the reader scrolls, or the browser would drop the
+  // selection along with the row (lib/logcopy.ts).
+  let heldIds = $state.raw<number[]>([]);
+  // Set while select-all is holding its rows; see selectAllLines.
+  let selectingAll = false;
 
   // Freeze the existing backlog so only lines that arrive after mount type in.
   onMount(() => markBacklog(session.lines.at(-1)?.id ?? -1));
@@ -169,6 +176,7 @@
         getScrollElement: () => node,
         getCount: () => filtered.length,
         getKey: (i) => filtered[i]?.id ?? i,
+        getPinned: () => heldIds.map((id) => indexOfId(filtered, id)).filter((i) => i >= 0),
         estimateSize: () => lineEstimate,
         onChange: (v) => {
           bumpRev();
@@ -194,8 +202,8 @@
   });
 
   // State the line list to the virtualizer whenever it changes (append, trim,
-  // filter) and, on the first pass, start pinned at the newest line as the old
-  // log did.
+  // filter) or a selection holds different rows, and, on the first pass, start
+  // pinned at the newest line as the old log did.
   let started = false;
   $effect(() => {
     const v = virtualizer;
@@ -205,6 +213,7 @@
     // length or the array reference the log already holds.
     void list[0]?.id;
     void list[n - 1]?.id;
+    void heldIds;
     if (!v || !logHandle) return;
     untrack(() => {
       // setOptions replaces the whole options object, so the factory re-states
@@ -422,12 +431,72 @@
   // itself lands there because focus moves before the character is inserted.
   // A screen reader in browse mode keeps its letter keys; they never get here.
   function onLogKey(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      void selectAllLines();
+      return;
+    }
     const printable = e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
     if (!printable && e.key !== "Escape") return;
     const input = commandInput();
     if (!input) return;
     if (e.key === "Escape") e.preventDefault();
     input.focus({ preventScroll: true });
+  }
+
+  // Selecting and copying (lib/logcopy.ts). Every selection change re-reads
+  // which lines its ends sit on, so those rows stay mounted while it lives.
+  function onSelectionChange(): void {
+    if (!el || selectingAll) return;
+    const ids = heldLines(el, document.getSelection());
+    if (ids.length !== heldIds.length || ids.some((id, i) => id !== heldIds[i])) heldIds = ids;
+  }
+
+  // A copy that spans lines comes from the scrollback, not from whichever rows
+  // are mounted; one inside a single line is the browser's own, and exact.
+  function onCopy(e: ClipboardEvent): void {
+    if (!el || !e.clipboardData) return;
+    const span = selectionSpan(el, document.getSelection());
+    const clip = span && spanToClipboard(filtered, span);
+    if (!clip) return;
+    e.clipboardData.setData("text/plain", clip.text);
+    e.clipboardData.setData("text/html", clip.html);
+    e.preventDefault();
+  }
+
+  $effect(() => {
+    document.addEventListener("selectionchange", onSelectionChange);
+    document.addEventListener("copy", onCopy);
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+      document.removeEventListener("copy", onCopy);
+    };
+  });
+
+  // Select all, in the log, means the scrollback rather than the page: hold
+  // the first and last lines mounted, then select from one to the other. The
+  // rows in between need not exist; a copy is built from the lines.
+  //
+  // Holding new rows can unmount the ones an older selection sat on, and the
+  // selectionchange that follows would release the new hold before the new
+  // selection exists. Until it does, selection changes are not read.
+  async function selectAllLines(): Promise<void> {
+    const list = filtered;
+    const node = el;
+    if (!node || !list.length) return;
+    const first = list[0].id;
+    const last = list[list.length - 1].id;
+    selectingAll = true;
+    try {
+      heldIds = first === last ? [first] : [first, last];
+      await tick();
+      if (selectRows(node, first, last)) return;
+      // The held rows render in the flush after the virtualizer re-reads them.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      selectRows(node, first, last);
+    } finally {
+      selectingAll = false;
+    }
   }
 
   // Opening the save list moves focus into it, so Enter on the button and

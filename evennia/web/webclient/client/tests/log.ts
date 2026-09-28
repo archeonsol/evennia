@@ -351,6 +351,146 @@ async function run(): Promise<void> {
   await settle(8);
   check("the report follows the log back", screenSize.current?.cols === fitsPerLine(), `${screenSize.current?.cols} vs ${fitsPerLine()}`);
 
+  // Selection and copy (lib/logcopy.ts). A selection is DOM nodes and the log
+  // mounts only a window of rows: the rows a selection starts and ends on must
+  // stay mounted wherever the reader scrolls, and a copy across lines must
+  // come from the scrollback, not from whichever rows happen to be mounted.
+  // Every category on: the checks above leave a chip toggled.
+  logview.reset();
+  session.clear();
+  await settle();
+  seed(3000, 0);
+  // A line with a break in it, and one with a palette colour and a link that
+  // only works inside the client: how the text reads and how the HTML travels.
+  session.append("<span>first half</span><br><span>second half</span>", "text");
+  session.append('<span class="color-196">red alert</span> and <a id="mxplink" href="#" onclick="return false">a link</a>', "text");
+  seed(200, 3002);
+  await settle();
+  await pinToBottom();
+
+  const sel = window.getSelection()!;
+  const byText = (text: string) => rows().find((r) => r.querySelector(".body")?.textContent === text);
+  const firstText = (row: HTMLElement) =>
+    document.createTreeWalker(row.querySelector(".body")!, NodeFilter.SHOW_TEXT).nextNode() as Text;
+  const mounted = (lid: number) => !!document.querySelector(`.log-line[data-lid="${lid}"]`);
+  const idOf = (text: string) => session.lines.find((l) => l.text === text)?.id ?? -1;
+  const indexOf = (text: string) => session.lines.findIndex((l) => l.text === text);
+  const copy = () => {
+    const data = new DataTransfer();
+    const event = new ClipboardEvent("copy", { clipboardData: data, bubbles: true, cancelable: true });
+    logEl().dispatchEvent(event);
+    return { event, data };
+  };
+  const scrollTo = async (top: number) => {
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+    el.scrollTop = top;
+    el.dispatchEvent(new Event("scroll"));
+    await settle();
+  };
+
+  await scrollTo(0);
+  const row5 = byText("line 5 marker5")!;
+  const row7 = byText("line 7 marker7")!;
+  sel.setBaseAndExtent(firstText(row5), 3, firstText(row7), 4);
+  await settle();
+  const lid5 = idOf("line 5 marker5");
+  const lid7 = idOf("line 7 marker7");
+  await scrollTo(el.scrollHeight);
+  check("a selection's first line stays mounted when the reader scrolls away", mounted(lid5));
+  check("a selection's last line stays mounted when the reader scrolls away", mounted(lid7));
+  check("held rows keep the DOM bounded", rowCount() < 84, `${rowCount()} rows`);
+  check(
+    "the selection survives the scroll",
+    sel.anchorNode?.isConnected === true && sel.toString().startsWith("e 5 marker5"),
+    JSON.stringify(sel.toString().slice(0, 40)),
+  );
+
+  // Extend it to a line near the bottom: three thousand lines, most unmounted.
+  const rowEnd = byText("line 3195 marker3195")!;
+  sel.extend(firstText(rowEnd), 6);
+  await settle();
+  check("extending keeps the start held", mounted(lid5));
+  check("extending releases the old end", !mounted(lid7));
+
+  // Rows that mount between the ends sit between them in the DOM, so the
+  // browser paints them selected.
+  await scrollTo(el.scrollHeight / 2);
+  const middle = rows().find((r) => {
+    const lid = Number(r.dataset.lid);
+    return lid > lid5 + 50 && lid < idOf("line 3195 marker3195") - 50;
+  });
+  check("a row scrolled into the middle of a selection is selected", !!middle && sel.containsNode(middle.querySelector(".body")!, true), middle?.textContent ?? "no middle row");
+
+  const expected = session.lines
+    .slice(indexOf("line 5 marker5"), indexOf("line 3195 marker3195") + 1)
+    .map((l) => l.text);
+  expected[0] = expected[0].slice(3);
+  expected[expected.length - 1] = expected[expected.length - 1].slice(0, 6);
+  const started = performance.now();
+  const across = copy();
+  const copyMs = performance.now() - started;
+  const text = across.data.getData("text/plain");
+  check("a copy across lines is built from the scrollback", across.event.defaultPrevented);
+  check("the copy holds every line in order, cut at both ends", text === expected.join("\n"), `${text.split("\n").length} lines vs ${expected.length}; starts ${JSON.stringify(text.slice(0, 30))}`);
+  check("a line with a break copies as two lines", text.includes("first half\nsecond half"));
+  check("a copy of three thousand lines is quick", copyMs < 1000, `${copyMs.toFixed(0)} ms`);
+
+  const html = across.data.getData("text/html");
+  const block = new DOMParser().parseFromString(html, "text/html").body.firstElementChild as HTMLElement | null;
+  const red = Array.from(block?.querySelectorAll("span") ?? []).find((s) => s.textContent === "red alert");
+  check("the HTML copy has one block per line", block?.children.length === expected.length, `${block?.children.length} blocks`);
+  check("the HTML copy carries the log's background", !!block?.style.backgroundColor);
+  check("a palette colour travels inline", red?.style.color === "rgb(255, 0, 0)", red?.getAttribute("style") ?? "no span");
+  check("a client-only link pastes as its text", !block?.querySelector("a") && html.includes("a link"));
+  check("no handler or class travels", !/onclick|class=|id=/i.test(html));
+
+  // A selection inside one line, or one that leaves the log, is the browser's.
+  await pinToBottom();
+  const single = byText("line 3195 marker3195")!;
+  sel.setBaseAndExtent(firstText(single), 0, firstText(single), 4);
+  await settle();
+  check("a copy inside one line is left to the browser", !copy().event.defaultPrevented);
+  const report = document.getElementById("results")!;
+  sel.setBaseAndExtent(firstText(single), 2, report.firstChild ?? report, 0);
+  await settle();
+  check("a copy reaching outside the log is left to the browser", !copy().event.defaultPrevented);
+
+  // Even a selection inside one line is held; clearing it lets the row go.
+  await scrollTo(0);
+  const top5 = byText("line 5 marker5")!;
+  sel.setBaseAndExtent(firstText(top5), 0, firstText(top5), 4);
+  await settle();
+  await pinToBottom();
+  check("a selection inside one line is held too", mounted(lid5));
+  sel.removeAllRanges();
+  await settle();
+  check("clearing the selection releases the held rows", !mounted(lid5) && rowCount() < 80, `${rowCount()} rows`);
+
+  // Select all in the log is the whole scrollback, including a line that is
+  // still typing in: its end is the end of the line, not of what has typed.
+  settings.reduceMotion = false;
+  settings.typewriterMs = 400;
+  const typing = "still typing ".repeat(8).trim();
+  session.append(`<span>${typing}</span>`, "text");
+  await settle(1);
+  logEl().focus();
+  logEl().dispatchEvent(new KeyboardEvent("keydown", { key: "a", code: "KeyA", ctrlKey: true, bubbles: true, cancelable: true }));
+  await settle(3);
+  check("select all holds the first and the last line", mounted(session.lines[0].id) && mounted(session.lines.at(-1)!.id));
+  const all = copy();
+  const allText = all.data.getData("text/plain");
+  check(
+    "select all copies the whole scrollback",
+    all.event.defaultPrevented && allText === session.lines.map((l) => l.text).join("\n"),
+    `${allText.split("\n").length} lines vs ${session.lines.length}; ends ${JSON.stringify(allText.slice(-30))}`,
+  );
+  check("a line still typing in copies whole", allText.endsWith(typing));
+  sel.removeAllRanges();
+  settings.typewriterMs = 0;
+  settings.reduceMotion = true;
+  await settle();
+  check("the DOM is a window again after select all", rowCount() < 80, `${rowCount()} rows`);
+
   // Clear empties the scrollback and the DOM.
   session.clear();
   await settle();

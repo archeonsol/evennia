@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { comboFromEvent, isModifierOnly, reviewIndex } from "./keybinds.svelte";
+import { comboFromEvent, displayCombo, isModifierOnly, keybinds, reviewIndex } from "./keybinds.svelte";
 
 function key(init: Partial<KeyboardEvent>): KeyboardEvent {
   return { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, key: "", code: "", ...init } as KeyboardEvent;
@@ -47,5 +47,35 @@ describe("bare modifiers", () => {
     expect(isModifierOnly("Ctrl+Shift+Shift")).toBe(true);
     expect(isModifierOnly("Ctrl+K")).toBe(false);
     expect(isModifierOnly(undefined)).toBe(false);
+  });
+});
+
+describe("review cursor keys", () => {
+  it("default to Alt+Up/Down, with Shift for the ends of the scrollback", () => {
+    keybinds.init();
+    expect(keybinds.match(key({ altKey: true, key: "ArrowUp", code: "ArrowUp" }), "reviewOlder")).toBe(true);
+    expect(keybinds.match(key({ altKey: true, key: "ArrowDown", code: "ArrowDown" }), "reviewNewer")).toBe(true);
+    expect(keybinds.match(key({ altKey: true, shiftKey: true, key: "ArrowUp", code: "ArrowUp" }), "reviewOldest")).toBe(true);
+    expect(keybinds.match(key({ altKey: true, shiftKey: true, key: "ArrowDown", code: "ArrowDown" }), "reviewNewest")).toBe(true);
+    // Plain arrows stay with the command line's history.
+    expect(keybinds.match(key({ key: "ArrowUp", code: "ArrowUp" }), "reviewOlder")).toBe(false);
+  });
+
+  it("do not collide with any other default", () => {
+    keybinds.init();
+    const combos = keybinds.list.map((b) => b.combo);
+    expect(new Set(combos).size).toBe(combos.length);
+  });
+});
+
+describe("displayCombo", () => {
+  it("shows arrow keys by their direction", () => {
+    expect(displayCombo("Alt+ArrowUp")).toBe("Alt+Up");
+    expect(displayCombo("Alt+Shift+ArrowDown")).toBe("Alt+Shift+Down");
+  });
+
+  it("leaves every other combo as it is", () => {
+    expect(displayCombo("Ctrl+K")).toBe("Ctrl+K");
+    expect(displayCombo("F1")).toBe("F1");
   });
 });
