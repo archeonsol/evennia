@@ -116,3 +116,50 @@ class TestAsyncCommit(unittest.TestCase):
         self.assertEqual([m for m in char.messages if "You put" in m], ["You put coins in chest."])
         self.assertEqual(len(broadcasts), 1)
         self.assertIs(broadcasts[0][1].get("exclude"), char)
+
+
+class _ScopedChar(CharacterObjectRules, FakeChar):
+    """A character whose search honours ``candidates`` and ``location`` as the real one does."""
+
+    def search(self, name, candidates=None, location=None, **kwargs):
+        pool = candidates if candidates is not None else getattr(location, "contents", ())
+        return next((obj for obj in pool or () if obj.key == name), None)
+
+
+class TestPutFindsItsContainer(unittest.TestCase):
+    """``put`` finds a container you carry as well as one standing in the room."""
+
+    def _scene(self):
+        room = FakeObj(key="room")
+        char = _ScopedChar()
+        char.location = room
+        coin = FakeObj(key="coin", location=char)
+        char.contents = [coin]
+        room.contents = [char]
+        return char, make_actor(char), room, coin
+
+    def test_a_carried_container(self):
+        char, actor, _room, coin = self._scene()
+        bag = FakeObj(key="bag", location=char)
+        char.contents.append(bag)
+        action = Put.parse("coin in bag", actor)
+        self.assertIs(action.container, bag)
+        self.assertIs(action.target, coin)
+        self.assertFalse(action._unresolved)
+
+    def test_a_container_in_the_room(self):
+        char, actor, room, coin = self._scene()
+        chest = FakeObj(key="chest", location=room)
+        room.contents.append(chest)
+        action = Put.parse("coin into chest", actor)
+        self.assertIs(action.container, chest)
+        self.assertIs(action.target, coin)
+
+    def test_an_item_is_still_taken_from_the_hands(self):
+        char, actor, room, _coin = self._scene()
+        chest = FakeObj(key="chest", location=room)
+        gem = FakeObj(key="gem", location=room)
+        room.contents.extend([chest, gem])
+        action = Put.parse("gem in chest", actor)
+        self.assertIsNone(action.target)
+        self.assertTrue(action._unresolved)
