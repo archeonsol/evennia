@@ -163,3 +163,89 @@ class TestPutFindsItsContainer(unittest.TestCase):
         action = Put.parse("gem in chest", actor)
         self.assertIsNone(action.target)
         self.assertTrue(action._unresolved)
+
+
+class _MessagingChar(CharacterObjectRules, FakeChar):
+    """A character whose search reports a miss to itself, as the real one does."""
+
+    def search(self, name, not_found=None, **kwargs):
+        found = self.search_map.get(name)
+        if found is None:
+            self.msg(not_found or f"Could not find '{name}'.")
+        return found
+
+    def search_for(self, *args, **kwargs):
+        return None
+
+
+class TestCheckStopsAfterItsOwnMessage(unittest.TestCase):
+    """A check that already told the player why stops dispatch without a second line."""
+
+    def _char(self):
+        room = FakeObj(key="room")
+        char = _MessagingChar()
+        char.location = room
+        return char, make_actor(char), room
+
+    def _dispatch_quietly(self, action, actor, providers):
+        with mock.patch("evennia.utils.logger.log_warn") as warn:
+            trace = _dispatch(action, actor, providers)
+        warn.assert_not_called()
+        return trace
+
+    @staticmethod
+    def _carry_out_fired(trace):
+        return [entry for entry in trace.phases if entry.phase == "carry_out"]
+
+    def test_dropping_what_you_do_not_carry_gives_one_message(self):
+        char, actor, _room = self._char()
+
+        trace = self._dispatch_quietly(Drop(mode="plain", obj_spec="coin"), actor, [char])
+
+        self.assertEqual(char.messages, ["You aren't carrying coin."])
+        self.assertEqual(trace.outcome, "blocked")
+        self.assertEqual(self._carry_out_fired(trace), [])
+
+    def test_a_vetoed_drop_stops_before_carry_out(self):
+        char, actor, _room = self._char()
+        coin = _coin(char, char)
+
+        def refuse(caller):
+            caller.msg("It is glued to your hand.")
+            return False
+
+        coin.at_pre_drop = refuse
+
+        trace = self._dispatch_quietly(Drop(mode="plain", obj_spec="coin"), actor, [char])
+
+        self.assertEqual(char.messages, ["It is glued to your hand."])
+        self.assertEqual(self._carry_out_fired(trace), [])
+        coin.move_to_async.assert_not_awaited()
+
+    def test_giving_to_nobody_gives_one_message(self):
+        char, actor, _room = self._char()
+        _coin(char, char)
+
+        trace = self._dispatch_quietly(
+            Give(mode="plain", item_spec="coin", target_spec="bob"), actor, [char]
+        )
+
+        self.assertEqual(char.messages, ["Could not find 'bob'."])
+        self.assertEqual(self._carry_out_fired(trace), [])
+
+    def test_a_container_refusing_an_item_gives_one_message(self):
+        char, actor, _room = self._char()
+        chest = _Container(key="chest")
+        coin = _coin(char, chest)
+
+        def refuse(moved_obj, caller):
+            caller.msg("The chest is locked.")
+            return False
+
+        chest.at_pre_arrive = refuse
+        coin.move_to_async = mock.AsyncMock(return_value=False)
+
+        trace = self._dispatch_quietly(Put(target=coin, container=chest), actor, [char, chest])
+
+        self.assertEqual(char.messages, ["The chest is locked."])
+        self.assertEqual(self._carry_out_fired(trace), [])
