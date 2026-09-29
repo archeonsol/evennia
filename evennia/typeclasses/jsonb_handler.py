@@ -281,7 +281,12 @@ def _row_key(obj):
 
 
 class JsonbRowState:
-    """Shared write-behind and durable-queue state for one model row."""
+    """Shared write-behind and durable-queue state for one model row.
+
+    Only ``visible_document`` is mutated in place. The other documents are
+    replaced whole, never edited, so ``mark_dirty`` can share
+    ``durable_document`` as the merge baseline without copying it.
+    """
 
     __slots__ = (
         "__weakref__",
@@ -337,7 +342,8 @@ class JsonbRowState:
         """Retain this row strongly until its volatile intent is durable."""
         self.mutation_serial += 1
         if not self.dirty:
-            self.volatile_baseline = deepcopy(self.durable_document)
+            # Shared, not copied: durable_document is only ever rebound.
+            self.volatile_baseline = self.durable_document
             self.dirty_since = time.monotonic()
         self.dirty = True
         _STRONG_ROW_STATES[self.key] = self

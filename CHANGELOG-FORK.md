@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.289: The first write after a flush no longer copies the row
+
+A production stall ended in `JsonbRowState.mark_dirty` deep-copying a character's attribute document, reached from a per-minute cyberware heat tick that writes to every chromed character.
+
+### Performance
+
+- **`mark_dirty` shares `durable_document` as the merge baseline instead of copying it** ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)). A row going from clean to dirty set `volatile_baseline = deepcopy(durable_document)`, so the first Attribute write after every flush paid a full deep copy of the row's document on the calling thread. Every path that changes `durable_document` or `volatile_baseline` assigns a new object, and the merges (`_three_way_merge`, `_apply_local_delta`), the spool writer and the flush read them without editing them. Only `visible_document` is edited in place, and it is always its own copy. Sharing the object is therefore safe, and the baseline keeps the pre-write document after `durable_document` is later replaced. The `JsonbRowState` docstring now states the rule this depends on: only `visible_document` is mutated in place.
+- Not measured on production documents. The cost removed is one deep copy per row per flush cycle, sized by the row's whole attribute document.
+- `JsonbRowState.__init__` still makes five copies of the document and a successful flush four. Under the same rule, all but `visible_document` could share one copy; left for a measured follow-up.
+
+### Tests
+
+- `TestDirtyBaseline` in [`test_jsonb.py`](evennia/typeclasses/tests/test_jsonb.py): `mark_dirty` on a clean row makes no deep copy and shares `durable_document` (fails before the fix), and after a write the baseline still holds the value from before it.
+
+---
+
 ## 6.0.0+underspire.288: Object checks stop when they have already told the player
 
 Production logged `check rule 'check_drop' on Character returned 'claim'; the check phase must be a pure predicate ... Result ignored.` for every `drop` of something the player was not carrying.
