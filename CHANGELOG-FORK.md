@@ -25,6 +25,18 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.287: Overlapping authorization publishes no longer flush every cache
+
+Production logged `authorization invalidation reconciled (gap)` every minute or two, and each one was followed by reactor stalls from cold capability checks (`is_staff` in a surface tick, among others).
+
+### Authorization
+
+- **`publish_generation` takes the revision and appends the event in one Lua script** ([`invalidation.py`](evennia/authorization/invalidation.py)). It ran `INCR` and then `XADD` as two commands, and `storage._publish_generation` runs publishes on `defer.background` pool threads. When two publishes overlapped, the second could append revision N+2 before the first appended N+1. Every reader then saw N+2 while at N, took it for a lost event, and ran `reconcile("gap")`, which flushes all local authorization caches; every check after that read the database inline until the caches refilled. The script (`_PUBLISH_SCRIPT`) makes stream order equal revision order. Real gaps (trimmed or failed appends) still reconcile as before. The job queue already runs `EVAL` in production, so no new Redis capability is needed.
+
+### Tests
+
+- `PublishOrderTest` in [`test_invalidation.py`](evennia/authorization/tests/test_invalidation.py) runs a second publish between the first publish's Redis commands. It checks the stream holds revisions in order, and that a reader at the previous revision applies both without reconciling. Without the fix the stream reads `[2, 1]` and the reader reconciles.
+
 ## 6.0.0+underspire.286: Verb reachability for a whole list in one pass
 
 A game that builds a player's full verb list (a Tab-completion lexicon, say) rebuilt the provider context once per registered action. In production one list cost about 270ms, and a Portal reconnect built one for every session in a single reactor turn (an 854ms stall).
