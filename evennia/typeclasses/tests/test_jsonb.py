@@ -504,6 +504,32 @@ class TestJsonbWriteBack(BaseEvenniaTest):
         self.assertIn(4, plain)
 
 
+class TestDirtyBaseline(BaseEvenniaTest):
+    evennia_fixtures = {"obj1"}
+
+    def setUp(self):
+        super().setUp()
+        self.handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        self.handler.add("stat", 1)
+        flush_all_dirty()
+        self.state = self.handler.backend._row_state
+        self.assertFalse(self.state.dirty)
+
+    def test_first_write_after_a_flush_copies_nothing(self):
+        with patch.object(jsonb_handler, "deepcopy", wraps=deepcopy) as copies:
+            self.state.mark_dirty()
+
+        copies.assert_not_called()
+        self.assertIs(self.state.volatile_baseline, self.state.durable_document)
+
+    def test_baseline_keeps_the_value_from_before_the_write(self):
+        self.handler.add("stat", 2)
+
+        self.assertTrue(self.state.dirty)
+        self.assertEqual(from_jsonb(self.state.volatile_baseline["~"]["_d"]["stat"]), 1)
+        self.assertEqual(self.handler.get("stat"), 2)
+
+
 # ---------------------------------------------------------------------------
 # Document persistence round-trip
 # ---------------------------------------------------------------------------
