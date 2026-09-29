@@ -53,6 +53,66 @@ class PublishTest(InvalidationTestBase):
             self.assertIsNone(invalidation.publish_generation("resource", "object:1", 1))
 
 
+class _InterleavingRedis:
+    """A Redis client where another publish lands after this one's first command.
+
+    Publishes run on pool threads, so a second publish can run between any two
+    Redis commands of the first.
+    """
+
+    def __init__(self, client):
+        self._client = client
+        self._interleaved = False
+
+    def __getattr__(self, name):
+        command = getattr(self._client, name)
+
+        def call(*args, **kwargs):
+            result = command(*args, **kwargs)
+            if not self._interleaved:
+                self._interleaved = True
+                invalidation.publish_generation("principal", "account:2", 1)
+            return result
+
+        return call
+
+
+class PublishOrderTest(InvalidationTestBase):
+    def test_overlapping_publishes_keep_stream_order(self):
+        client = _InterleavingRedis(self.fake)
+        with patch("django_redis.get_redis_connection", return_value=client):
+            invalidation.publish_generation("principal", "account:1", 1)
+
+        revisions = [
+            int(fields[b"r"]) for _id, fields in self.fake.xrange(invalidation._stream_key())
+        ]
+        self.assertEqual(revisions, [1, 2])
+
+    def test_overlapping_publishes_do_not_look_like_a_gap(self):
+        def entries():
+            return [
+                (entry_id.decode(), fields)
+                for entry_id, fields in self.fake.xrange(invalidation._stream_key())
+            ]
+
+        with (
+            patch.object(invalidation, "_applied_revision", 0),
+            patch.object(invalidation, "_persist_cursor"),
+        ):
+            invalidation.publish_generation("resource", "object:1", 1)
+            invalidation.apply_events(entries())
+            applied = len(entries())
+
+            client = _InterleavingRedis(self.fake)
+            with patch("django_redis.get_redis_connection", return_value=client):
+                invalidation.publish_generation("principal", "account:1", 1)
+
+            with patch.object(invalidation, "reconcile") as reconcile:
+                invalidation.apply_events(entries()[applied:])
+
+        reconcile.assert_not_called()
+
+
 class ApplyTest(InvalidationTestBase):
     def test_resource_event_drops_resource_and_policy_snapshots(self):
         storage._resource_cache["object:7"] = object()

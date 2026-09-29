@@ -136,6 +136,18 @@ def _record_error():
 # ---------------------------------------------------------------------------
 
 
+#: Takes the revision and appends its event in one Redis step. Publishes run on
+#: pool threads; as two commands, a second publish could land between them and
+#: put revision N+1 behind N+2 in the stream, which every reader then treats as
+#: a lost event and flushes all its authorization caches.
+_PUBLISH_SCRIPT = """
+local revision = redis.call('INCR', KEYS[1])
+redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[4], '*',
+    'r', revision, 'ns', ARGV[1], 'ref', ARGV[2], 'g', ARGV[3])
+return revision
+"""
+
+
 def publish_generation(namespace: str, ref: str, generation: int) -> int | None:
     """Append one invalidation event; worker-safe.
 
@@ -152,20 +164,17 @@ def publish_generation(namespace: str, ref: str, generation: int) -> int | None:
     """
 
     try:
-        client = _redis()
-        revision = int(client.incr(_revision_key()))
-        client.xadd(
+        revision = _redis().eval(
+            _PUBLISH_SCRIPT,
+            2,
+            _revision_key(),
             _stream_key(),
-            {
-                "r": str(revision),
-                "ns": str(namespace),
-                "ref": str(ref),
-                "g": str(int(generation)),
-            },
-            maxlen=_maxlen(),
-            approximate=True,
+            str(namespace),
+            str(ref),
+            str(int(generation)),
+            str(_maxlen()),
         )
-        return revision
+        return int(revision)
     except Exception:
         logger.log_trace("authorization invalidation publish failed")
         _record_error()
