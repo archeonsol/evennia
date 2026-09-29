@@ -29,7 +29,7 @@ from evennia.objects.character import DefaultCharacter
 from evennia.objects.object import DefaultObject
 
 from ..action import Action, GameObject, action
-from ..result import CLAIM, PASS, SKIP
+from ..result import CLAIM, PASS, SILENT_FAIL, SKIP
 from ..rule import rule
 
 __all__ = [
@@ -278,7 +278,7 @@ class CharacterObjectRules:
 
         objs = caller.search(args, location=caller.location, stacked=action.count)
         if not objs:
-            return CLAIM
+            return SILENT_FAIL
         objs = utils.make_iter(objs)
         if len(objs) == 1 and caller == objs[0]:
             return action.block(0, "You can't get yourself.")
@@ -295,7 +295,7 @@ class CharacterObjectRules:
                 err = getattr(getattr(obj, "db", None), "get_err_msg", None)
                 return action.block(0, err or "You can't get that.")
             if is_veto(obj.at_pre_get(caller)):
-                return CLAIM
+                return SILENT_FAIL
         action._get_objs = objs
         return PASS
 
@@ -357,13 +357,13 @@ class CharacterObjectRules:
             stacked=action.count,
         )
         if not objs:
-            return CLAIM
+            return SILENT_FAIL
         objs = utils.make_iter(objs)
         from evennia.utils.utils import is_veto
 
         for obj in objs:
             if is_veto(obj.at_pre_drop(caller)):
-                return CLAIM
+                return SILENT_FAIL
         action._drop_objs = objs
         return PASS
 
@@ -417,10 +417,10 @@ class CharacterObjectRules:
             stacked=action.count,
         )
         if not to_give:
-            return CLAIM
+            return SILENT_FAIL
         target = caller.search(action.target_spec)
         if not target:
-            return CLAIM
+            return SILENT_FAIL
         to_give = utils.make_iter(to_give)
         singular, plural = to_give[0].get_numbered_name(len(to_give), caller)
         if target == caller:
@@ -431,7 +431,7 @@ class CharacterObjectRules:
 
         for obj in to_give:
             if is_veto(obj.at_pre_give(caller, target)):
-                return CLAIM
+                return SILENT_FAIL
         action._give_objs = to_give
         action._give_target = target
         return PASS
@@ -467,7 +467,7 @@ class CharacterObjectRules:
         if action._usage:
             return action.block(0, "Usage: put <item> in <container>")
         if action._unresolved:
-            return CLAIM
+            return SILENT_FAIL
         caller = self
         obj = action.target
         container = action.container
@@ -489,7 +489,7 @@ class CharacterObjectRules:
         if action.target is None and not action._unresolved:
             return action.block(0, "Enter what? Usage: enter <object>")
         if action._unresolved:
-            return CLAIM
+            return SILENT_FAIL
         return PASS
 
 
@@ -526,7 +526,7 @@ class ContainerPutRules:
         from evennia.utils.utils import is_veto
 
         if hasattr(self, "at_pre_arrive") and is_veto(self.at_pre_arrive(obj, caller)):
-            return CLAIM
+            return SILENT_FAIL
         return PASS
 
     @rule(Put, phase="carry_out", priority=50)
@@ -574,7 +574,7 @@ class EnterableObjectRules:
         if not self._is_target(action):
             return SKIP
         if action._unresolved:
-            return CLAIM
+            return SILENT_FAIL
         if not callable(getattr(self, "at_enter", None)):
             return action.block(0, "You can't enter that.")
         return PASS

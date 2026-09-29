@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.288: Object checks stop when they have already told the player
+
+Production logged `check rule 'check_drop' on Character returned 'claim'; the check phase must be a pure predicate ... Result ignored.` for every `drop` of something the player was not carrying.
+
+### Actions
+
+- **Object check rules return `SILENT_FAIL` where they returned `CLAIM`** ([`objects.py`](evennia/actions/default/objects.py)). `check_get_plain`, `check_drop`, `check_give`, `check_put_character`, `check_put_container`, `check_enter_bare` and `check_enterable` returned `CLAIM` after `caller.search(...)` had already sent its not-found or ambiguity message, or after an `at_pre_*` hook had vetoed. `CLAIM` is not a check-phase result: the engine logged a contract warning, ignored it, and ran `carry_out`. For a missed search the carry-out found nothing stored and stopped quietly. For a container's `at_pre_arrive` veto, `carry_out_put` tried the move again, `move_to` ran the hook a second time, and the player got the hook's refusal followed by "You can't put that in there." `SILENT_FAIL` blocks the action and sends nothing more, so the one message the player saw stays the only one and `carry_out` never runs. The `_unresolved` branches in `check_put_character`, `check_enter_bare` and `check_enterable` changed the same way; dispatch skips the check phase for an unresolved action, so they only matter to a direct call.
+- The search inside these checks still messages the player directly, which is itself outside the check contract (a check must not message). Under `explain` a missed search in these checks still reaches the character.
+
+### Tests
+
+- `TestCheckStopsAfterItsOwnMessage` in [`test_default_objects.py`](evennia/actions/tests/test_default_objects.py) dispatches a `drop` of something not carried, a `drop` vetoed by `at_pre_drop`, a `give` to a missing target, and a `put` into a container whose `at_pre_arrive` refuses. Each gives exactly one message, runs no `carry_out` rule, and logs no warning. Without the fix all four log the contract warning.
+
 ## 6.0.0+underspire.287: Overlapping authorization publishes no longer flush every cache
 
 Production logged `authorization invalidation reconciled (gap)` every minute or two, and each one was followed by reactor stalls from cold capability checks (`is_staff` in a surface tick, among others).
