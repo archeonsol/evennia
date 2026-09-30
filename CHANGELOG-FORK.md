@@ -25,6 +25,32 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.290: Staff Activity panel in the web client
+
+### Web client
+
+- **New Activity panel for staff with observe authority** ([`ActivityPanel.svelte`](evennia/web/webclient/client/src/components/ActivityPanel.svelte), [`activity.svelte.ts`](evennia/web/webclient/client/src/lib/activity.svelte.ts)). A live feed of player texts (`handset.direct`, `handset.group`), LOOC and NPC actions, filterable by category, by free text, and by a Global or Watched scope. Staff can watch any character, NPC or location found by name or `#id`, including ones not yet in the feed, and add an NPC from an event to their puppets without taking control of it. The feed is virtualized, follows the latest event unless the reader scrolls up, and can be paused at a fixed cutoff. A Latest button counts the new arrivals that match the current filters. The screen-reader layout renders every row without virtualization.
+- The panel appears when the game sends `activity_role` with `allowed: true`, in both the docked and the screen-reader layout, and is removed when a role update revokes it. The panel list and `dock.openView` hide it from anyone without the role.
+- **Privacy:** feed events, watches and search results are held in memory only; nothing is written to browser storage. They are erased on revocation, on closing the panel (which also sends `activity_unsubscribe`), on `logout`, and on `logged_in`. On `logged_in` the client erases the data but keeps the panel: the `activity_role` that follows decides whether it stays, so staff keep the panel where they placed it across logins. Replies from an older stream, subscription or search are discarded.
+- **Stream integrity:** a subscription snapshot and live `activity_batch` messages are merged by event id and sequence number. Batches that arrive during a subscribe are queued and replayed. A hole in the sequence shows "Some activity was missed." A new `stream_id` (hub restart) resets the feed. History is capped at 1000 events.
+- The Puppets panel is now added inactive, so a new puppet no longer takes focus from the panel that added it.
+
+### Protocol
+
+- **`logged_in` is a registered OOB event** ([`core_events.py`](evennia/server/protocol/core_events.py)). `Account.at_post_login` already sent it; registering it puts it in the generated [`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts) so the client can route it. The client uses it to erase Activity data from the previous login.
+- **Game-side contract:** the game must register and send `activity_role` (`allowed`, `can_puppet`) and `activity_batch` (`stream_id`, `first_seq`, `last_seq`, `events`). Send `activity_role` to every web session after `logged_in`, with `allowed: false` for accounts without observe authority; a layout saved by a staff account keeps its Activity panel until that message arrives. On revocation, drop the subscription on the server, because the client sends no `activity_unsubscribe` once the role is gone. Answer the `activity` request namespace (`activity_subscribe`, `activity_unsubscribe`, `activity_search`, `activity_watch`, `activity_unwatch`) plus `puppets/puppet_add`. The engine ships no server side for these.
+
+### Commands
+
+- **`CmdIC` logs the traceback when a puppet fails** ([`account.py`](evennia/commands/default/account.py)), backfilled from `e5a1574bc`. The handler logged only the exception message, so a `RuntimeError` from deep in the puppet path (for example `StaleAttributeValueError`) gave no raise site.
+
+### Tests
+
+- [`activity.test.ts`](evennia/web/webclient/client/src/lib/activity.test.ts): request coalescing, replay dedupe, history cap, gap detection, stream reset, pause cutoff, watch filters, stale reply rejection, state erasure on close and revocation, and a Latest count that respects filters while paused.
+- Browser pages: [`tests/activity.ts`](evennia/web/webclient/client/tests/activity.ts) (bounded DOM for 1000 events, follow and reading position, pause, watch of an absent location, puppet denial) and new cases in [`tests/workspace.ts`](evennia/web/webclient/client/tests/workspace.ts) (panel add, close, reopen and revocation in both layouts; the same panel survives `logged_in` followed by the role; closing in the simple layout sends `activity_unsubscribe`).
+
+---
+
 ## 6.0.0+underspire.289: The first write after a flush no longer copies the row
 
 A production stall ended in `JsonbRowState.mark_dirty` deep-copying a character's attribute document, reached from a per-minute cyberware heat tick that writes to every chromed character.

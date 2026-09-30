@@ -14,6 +14,12 @@ import { chromium } from "playwright-core";
 // Each page reports when it is done and where its PASS/FAIL lines live.
 const PAGES = [
   {
+    path: "tests/activity.html",
+    label: "staff Activity",
+    done: () => window.__activityTest?.done === true,
+    report: () => window.__activityTest ?? null,
+  },
+  {
     path: "tests/log.html",
     label: "virtualized log",
     done: () => window.__logTest?.done === true,

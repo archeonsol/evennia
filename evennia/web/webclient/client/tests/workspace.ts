@@ -7,6 +7,10 @@
 import { mount, tick, unmount } from "svelte";
 
 import Workspace from "../src/components/Workspace.svelte";
+import SimpleWorkspace from "../src/components/SimpleWorkspace.svelte";
+import { activity } from "../src/lib/activity.svelte";
+import { simple } from "../src/lib/simpleLayout.svelte";
+import { puppets } from "../src/lib/puppets.svelte";
 import { chat } from "../src/lib/chat.svelte";
 import { dock } from "../src/lib/dock.svelte";
 
@@ -62,6 +66,54 @@ async function run(): Promise<void> {
   chat.handleOob("ticket_role", [], { staff: false });
   await settle();
   check("a player loses a queue panel restored from a staff layout", !has("tickets"));
+  unmount(app);
+
+  const calls: string[] = [];
+  activity.connect(async (_ns, action) => {
+    calls.push(action);
+    if (action === "activity_subscribe") return { stream_id: "workspace", last_seq: 0, events: [], watches: { characters: [], locations: [] }, role: { allowed: true, can_puppet: false } };
+    if (action === "puppet_add") return { puppets: [{ npc_id: 21, slot: 2, name: "Toma" }] };
+    return { ok: true };
+  }, (entries) => puppets.setManifest(entries));
+  app = mount(Workspace, { target: host });
+  await settle();
+  activity.setRole({ allowed: true, can_puppet: false });
+  await settle();
+  check("observe authority adds Activity independently of ticket role", has("activity") && !has("tickets"));
+  // The game sends logged_in and then the role on every login: main.ts clears on logged_in.
+  const beforeLogin = dock.api?.getPanel("activity");
+  activity.clear();
+  await settle();
+  activity.setRole({ allowed: true, can_puppet: false });
+  await settle();
+  check("a login refresh keeps the same Activity panel", !!beforeLogin && dock.api?.getPanel("activity") === beforeLogin);
+  dock.api?.getPanel("activity")?.api.close();
+  await settle();
+  check("closed Activity stays closed in docked layout", !has("activity"));
+  dock.openView("activity");
+  await settle();
+  check("Activity can be reopened", has("activity"));
+  dock.api?.getPanel("activity")?.api.setActive();
+  await activity.mutate("puppet_add", { npc_id: 21 });
+  await settle();
+  check("Add puppet leaves Activity selected and no NPC terminal open", dock.api?.activePanel?.id === "activity" && puppets.activeId === null);
+  activity.setRole({ allowed: false, can_puppet: false });
+  await settle();
+  check("revocation removes Activity from docked layout", !has("activity") && activity.events.length === 0);
+  unmount(app);
+
+  app = mount(SimpleWorkspace, { target: host });
+  await settle();
+  activity.setRole({ allowed: true, can_puppet: false });
+  await settle();
+  check("observe authority adds Activity in simple layout", simple.has("activity"));
+  calls.length = 0;
+  simple.close("activity");
+  await settle();
+  check("closed Activity stays closed in simple layout", !simple.has("activity"));
+  check("closing Activity unsubscribes", calls.includes("activity_unsubscribe"));
+  activity.setRole({ allowed: false, can_puppet: false });
+  await settle();
   unmount(app);
 
   const pre = document.getElementById("results");

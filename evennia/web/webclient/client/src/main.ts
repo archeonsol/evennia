@@ -31,6 +31,7 @@ import { renderBody, renderSender } from "./lib/markup";
 import { logview } from "./lib/logview.svelte";
 import { screenSize } from "./lib/screensize";
 import { help } from "./lib/help.svelte";
+import { activity } from "./lib/activity.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -79,6 +80,7 @@ compose.setPreviewSender((line) => connection.sendCommand(line));
 // A ticket toast opens its panel; the dock imports the chat store, so the
 // store is handed the opener rather than importing the dock.
 chat.setPanelOpener((view) => dock.openView(view));
+activity.connect((ns, action, data) => connection.request(ns, action, data), (entries) => puppets.setManifest(entries));
 
 // Local echo: the command as typed, in the terminal before the game's answer.
 commands.onRun((line) => {
@@ -186,6 +188,7 @@ connection.on("hello", (env) => {
 });
 
 connection.on("connection_open", () => {
+  void activity.ensureSubscribed();
   refreshPuppetManifest();
   // Screen size is a session flag, so a new connection starts without one.
   screenSize.resend();
@@ -209,6 +212,15 @@ const is = (event: string, name: OobEvent) => event === name;
 // other events can register here as consumers land.
 connection.on("oob", (env) => {
   const event = String(env.event ?? "");
+  if (is(event, "activity_role")) {
+    activity.setRole(env.kwargs as any);
+    return;
+  }
+  if (is(event, "activity_batch")) {
+    activity.batch(env.kwargs as any);
+    return;
+  }
+  if (is(event, "logged_in")) activity.clear();
   if (
     event.startsWith("channel_") ||
     is(event, "channels_list") ||
@@ -241,6 +253,7 @@ connection.on("oob", (env) => {
       dock.openWebPage(id, String(spec.title ?? "Web"), url);
     }
   } else if (is(event, "logout")) {
+    activity.logout();
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
     connection.markLoggedOut(String(reason ?? "quit"));

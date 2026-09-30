@@ -2,14 +2,28 @@
   // Screen-reader layout: one view at a time behind a tab list. Every view
   // stays mounted (hidden) so a channel draft or the log's reading position
   // survives switching away; `hidden` also takes it out of the reading order.
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { simple } from "../lib/simpleLayout.svelte";
   import { VIEWS } from "../lib/dock.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { chat } from "../lib/chat.svelte";
   import { puppets } from "../lib/puppets.svelte";
+  import { activity } from "../lib/activity.svelte";
 
   let tabEls: Record<string, HTMLButtonElement> = {};
+
+  $effect(() => {
+    const allowed = activity.allowed;
+    const known = activity.known;
+    untrack(() => {
+      if (allowed && !simple.has("activity")) {
+        simple.views = [...simple.views, { id: "activity", component: "activity", title: "Activity", closable: true }];
+      } else if (!allowed && known && simple.has("activity")) {
+        simple.views = simple.views.filter((view) => view.id !== "activity");
+        if (simple.active === "activity") simple.active = "log";
+      }
+    });
+  });
 
   // Staff and puppeteers get their extra views the same way the docked
   // workspace adds them: when the data that needs them first arrives.

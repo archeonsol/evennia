@@ -7,6 +7,7 @@ import { simple } from "./simpleLayout.svelte";
 import { chat } from "./chat.svelte";
 import { toasts } from "./toasts.svelte";
 import { announcer } from "./announce.svelte";
+import { activity } from "./activity.svelte";
 
 const LKEY = "underspire.layout.v2";
 const PRESET_PREFIX = "underspire.layout.preset.";
@@ -19,6 +20,7 @@ export const VIEWS: Record<string, { component: string; title: string }> = {
   chat: { component: "chat", title: "Channels" },
   // Staff-only. Named apart from My Tickets, which every player has.
   tickets: { component: "tickets", title: "Ticket Queue" },
+  activity: { component: "activity", title: "Activity" },
   media: { component: "media", title: "Media" },
   spawns: { component: "spawns", title: "Feeds" },
   mytickets: { component: "mytickets", title: "My Tickets" },
@@ -99,6 +101,7 @@ class Dock {
 
   /** Reopen (or focus) one of the standard panels. */
   openView(id: string): void {
+    if (id === "activity" && !activity.allowed) return;
     if (settings.screenreader) {
       const v = VIEWS[id] ?? (id === "puppets" ? { component: "puppets", title: "Puppets" } : null);
       if (v) simple.open({ id, ...v });
