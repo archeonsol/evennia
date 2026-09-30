@@ -352,6 +352,9 @@ class CmdIC(AccountCommand):
                 f"Puppet Failed: %s (Caller: {account}, Target: {new_character}, IP:"
                 f" {self.session.address})."
             )
+            # The message alone hides the raise site (e.g. StaleAttributeValueError,
+            # which subclasses RuntimeError); the traceback names the offending write.
+            logger.log_trace(f"Puppet Failed trace: {account} -> {new_character}")
 
 
 # note that this is inheriting from MuxAccountLookCommand,
