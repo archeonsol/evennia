@@ -11,6 +11,10 @@ unchecked string literal and nothing catches a rename.
 
 from evennia.server.protocol import register_event
 
+register_event(
+    "logged_in", fields={"_": "dict"}, doc="The authenticated session state was refreshed."
+)
+
 # -- session --------------------------------------------------------------
 register_event("logout", carrier="args", fields={"_": "str"}, doc="args[0] = reason (e.g. 'quit').")
 register_event(
