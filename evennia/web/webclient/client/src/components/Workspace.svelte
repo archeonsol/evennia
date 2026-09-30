@@ -8,6 +8,7 @@
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { puppets } from "../lib/puppets.svelte";
+  import { activity } from "../lib/activity.svelte";
 
   let host = $state<HTMLDivElement | null>(null);
 
@@ -115,6 +116,7 @@
           id: "puppets",
           component: "puppets",
           title: "Puppets",
+          inactive: true,
           position: api.getPanel("scene")
             ? { referencePanel: "scene", direction: "within" }
             : undefined,
@@ -123,6 +125,17 @@
         /* ignore */
       }
     }
+  });
+
+  $effect(() => {
+    if (!api) return;
+    const panel = api.getPanel("activity");
+    if (activity.allowed && !panel) {
+      api.addPanel({
+        id: "activity", component: "activity", title: VIEWS.activity.title,
+        position: api.getPanel("chat") ? { referencePanel: "chat", direction: "within" } : undefined,
+      });
+    } else if (!activity.allowed && activity.known && panel) panel.api.close();
   });
 
   // Surface total unread puppet activity on the Puppets tab so a GM juggling

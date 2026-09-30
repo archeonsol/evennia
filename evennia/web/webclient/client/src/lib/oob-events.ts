@@ -17,6 +17,18 @@ export interface StopAudioPayload {
   fade_out?: number;
 }
 
+export interface ActivityBatchPayload {
+  stream_id: string;
+  first_seq: number;
+  last_seq: number;
+  events: any[];
+}
+
+export interface ActivityRolePayload {
+  allowed: boolean;
+  can_puppet: boolean;
+}
+
 export interface AssistInboxPayload {
   threads: any[];
 }
@@ -134,6 +146,9 @@ export interface HelpViewPayload {
 /** args[0] = image URL. */
 export type ImagePayload = string;
 
+/** The authenticated session state was refreshed. */
+export type LoggedInPayload = Record<string, any>;
+
 /** args[0] = reason (e.g. 'quit'). */
 export type LogoutPayload = string;
 
@@ -218,6 +233,8 @@ export type OobEvent =
   | "PLAY_AUDIO"
   | "SET_AUDIO_VOLUME"
   | "STOP_AUDIO"
+  | "activity_batch"
+  | "activity_role"
   | "assist_inbox"
   | "assist_thread"
   | "audio"
@@ -240,6 +257,7 @@ export type OobEvent =
   | "editor_status"
   | "help_view"
   | "image"
+  | "logged_in"
   | "logout"
   | "play_music"
   | "play_yt"
@@ -263,6 +281,8 @@ export interface OobEventMap {
   "PLAY_AUDIO": PlayAudioPayload;
   "SET_AUDIO_VOLUME": SetAudioVolumePayload;
   "STOP_AUDIO": StopAudioPayload;
+  "activity_batch": ActivityBatchPayload;
+  "activity_role": ActivityRolePayload;
   "assist_inbox": AssistInboxPayload;
   "assist_thread": AssistThreadPayload;
   "audio": AudioPayload;
@@ -285,6 +305,7 @@ export interface OobEventMap {
   "editor_status": EditorStatusPayload;
   "help_view": HelpViewPayload;
   "image": ImagePayload;
+  "logged_in": LoggedInPayload;
   "logout": LogoutPayload;
   "play_music": PlayMusicPayload;
   "play_yt": PlayYtPayload;
