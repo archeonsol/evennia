@@ -24,7 +24,7 @@
   const totalSize = $derived.by(() => { void revision; return handle?.instance.getTotalSize() ?? 0; });
   const watchCount = $derived(activity.watches.characters.length + activity.watches.locations.length);
   const visible = $derived(settings.screenreader ? rows.map((row, index) => ({ index, start: 0, key: row.seq })) : virtualItems);
-  const unseen = $derived(Math.max(0, activity.lastSeq - seenSeq));
+  const unseen = $derived(activity.countAfter(seenSeq, category, watched, filter));
   const categories: { id: Category; label: string }[] = [{ id: "all", label: "All" }, { id: "text", label: "Text" }, { id: "looc", label: "LOOC" }, { id: "npc", label: "NPC" }];
 
   onMount(() => { activity.open(); return () => activity.close(); });

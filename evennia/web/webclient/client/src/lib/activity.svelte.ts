@@ -175,14 +175,21 @@ export class ActivityFeed {
 
   filtered(category: Category, watched: boolean, query: string): ActivityEvent[] {
     const needle = query.trim().toLocaleLowerCase();
-    return this.events.filter((event) => {
-      if (this.paused && event.seq > this.pauseCutoff) return false;
-      if (category === "text" && !event.kind.startsWith("handset.")) return false;
-      if (category === "looc" && event.kind !== "looc") return false;
-      if (category === "npc" && event.kind !== "npc.action") return false;
-      if (watched && !this.watched(event)) return false;
-      return !needle || [event.body, event.actor?.name, event.location?.name, ...event.targets.map((ref) => ref.name), ...event.npc_targets.map((ref) => ref.name), event.meta.group_name].some((value) => String(value ?? "").toLocaleLowerCase().includes(needle));
-    });
+    return this.events.filter((event) => !(this.paused && event.seq > this.pauseCutoff) && this.matches(event, category, watched, needle));
+  }
+
+  /** Events after `seq` that match the filters, counted past the pause cutoff. */
+  countAfter(seq: number, category: Category, watched: boolean, query: string): number {
+    const needle = query.trim().toLocaleLowerCase();
+    return this.events.filter((event) => event.seq > seq && this.matches(event, category, watched, needle)).length;
+  }
+
+  private matches(event: ActivityEvent, category: Category, watched: boolean, needle: string): boolean {
+    if (category === "text" && !event.kind.startsWith("handset.")) return false;
+    if (category === "looc" && event.kind !== "looc") return false;
+    if (category === "npc" && event.kind !== "npc.action") return false;
+    if (watched && !this.watched(event)) return false;
+    return !needle || [event.body, event.actor?.name, event.location?.name, ...event.targets.map((ref) => ref.name), ...event.npc_targets.map((ref) => ref.name), event.meta.group_name].some((value) => String(value ?? "").toLocaleLowerCase().includes(needle));
   }
 
   async search(query: string): Promise<void> {

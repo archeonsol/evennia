@@ -80,6 +80,13 @@ async function run(): Promise<void> {
   activity.setRole({ allowed: true, can_puppet: false });
   await settle();
   check("observe authority adds Activity independently of ticket role", has("activity") && !has("tickets"));
+  // The game sends logged_in and then the role on every login: main.ts clears on logged_in.
+  const beforeLogin = dock.api?.getPanel("activity");
+  activity.clear();
+  await settle();
+  activity.setRole({ allowed: true, can_puppet: false });
+  await settle();
+  check("a login refresh keeps the same Activity panel", !!beforeLogin && dock.api?.getPanel("activity") === beforeLogin);
   dock.api?.getPanel("activity")?.api.close();
   await settle();
   check("closed Activity stays closed in docked layout", !has("activity"));
@@ -100,12 +107,13 @@ async function run(): Promise<void> {
   activity.setRole({ allowed: true, can_puppet: false });
   await settle();
   check("observe authority adds Activity in simple layout", simple.has("activity"));
+  calls.length = 0;
   simple.close("activity");
   await settle();
   check("closed Activity stays closed in simple layout", !simple.has("activity"));
+  check("closing Activity unsubscribes", calls.includes("activity_unsubscribe"));
   activity.setRole({ allowed: false, can_puppet: false });
   await settle();
-  check("closing Activity unsubscribes", calls.includes("activity_unsubscribe"));
   unmount(app);
 
   const pre = document.getElementById("results");

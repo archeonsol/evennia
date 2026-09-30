@@ -73,6 +73,19 @@ describe("Activity stream", () => {
     expect(feed.filtered("all", false, "")).toHaveLength(2);
   });
 
+  it("counts only arrivals that match the current filters, even while paused", async () => {
+    const npc = { ...event(3), kind: "npc.action" as const };
+    const feed = new ActivityFeed(async () => snapshot([event(1)]));
+    feed.setRole({ allowed: true, can_puppet: true });
+    feed.open();
+    await feed.ensureSubscribed();
+    feed.togglePause();
+    feed.batch(batch([event(2), npc]));
+    expect(feed.countAfter(1, "all", false, "")).toBe(2);
+    expect(feed.countAfter(1, "npc", false, "")).toBe(1);
+    expect(feed.countAfter(1, "looc", false, "nothing")).toBe(0);
+  });
+
   it("revocation and close erase data and ignore stale asynchronous replies", async () => {
     let resolve!: (value: Snapshot) => void;
     const feed = new ActivityFeed(() => new Promise((done) => { resolve = done as typeof resolve; }));

@@ -220,7 +220,7 @@ connection.on("oob", (env) => {
     activity.batch(env.kwargs as any);
     return;
   }
-  if (is(event, "logged_in")) activity.logout();
+  if (is(event, "logged_in")) activity.clear();
   if (
     event.startsWith("channel_") ||
     is(event, "channels_list") ||
