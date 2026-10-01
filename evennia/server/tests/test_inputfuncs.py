@@ -255,6 +255,35 @@ class TestTextDispatchErrback(unittest.TestCase):
         self.assertIn("dispatch kaboom", logged)
 
 
+class TestTextLineTerminators(unittest.TestCase):
+    """Telnet delivers each line with a trailing newline; cmdhandler must
+    never see it, or it survives into ``action.raw_string`` and gets echoed
+    back inside nomatch messages. Trailing spaces stay: they are content.
+    """
+
+    def _dispatched(self, txt):
+        captured = []
+
+        async def capture(*args, **kwargs):
+            captured.append(args[1])
+
+        session = mock.MagicMock()
+        session.account = None
+        with mock.patch.object(inputfuncs, "cmdhandler", side_effect=capture):
+            inputfuncs.text(session, txt)
+        self.assertEqual(len(captured), 1)
+        return captured[0]
+
+    def test_telnet_newline_is_stripped(self):
+        self.assertEqual(self._dispatched("up\n"), "up")
+
+    def test_terminator_free_text_is_unchanged(self):
+        self.assertEqual(self._dispatched("up"), "up")
+
+    def test_trailing_spaces_are_kept(self):
+        self.assertEqual(self._dispatched("emote waves  \n"), "emote waves  ")
+
+
 class TestClientOptionsScreenSize(unittest.TestCase):
     """``client_options`` sets a session's screen size, as NAWS does for telnet.
 

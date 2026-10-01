@@ -25,6 +25,23 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.291: Line terminators no longer leak into echoed input
+
+A telnet client sending `up\r\n` got `Command 'up\r\n' is not available. ...`
+back: the line terminator reached the game as part of the command text.
+
+### Server
+
+- **The `text` inputfunc drops line terminators** ([`inputfuncs.py`](evennia/server/inputfuncs.py)). The telnet portal relays every completed wire line with a single trailing `\n` (`applicationDataReceived` appends it after conch normalizes CR LF and CR NUL), and it used to travel into `cmdhandler` intact. Since the action-engine bridge replaced the legacy cmdset path for normal input, the line reaches `action.raw_string` verbatim (the legacy path stripped it; it is now only reachable via `cmdobj=` injection), so anything echoing the raw line, the nomatch message above, sent the `\n` back to the client, where telnet output encoding turned it into `\r\n` mid-message. The inputfunc now `rstrip`s `\r\n` from the text before the idle check, MXP strip, nick replacement, and the `cmdhandler` handoff, the same place `ssh_asyncio.py` already did it. It is a no-op for protocols that deliver terminator-free text (webclient, bots). Leading and trailing spaces are deliberately kept: they are content for commands that echo the raw line (emotes, poses).
+- The stale note in `get_input`'s docstring ([`menus.py`](evennia/actions/menus.py)), which told callers the result keeps the client's trailing newline, now states the real contract. The defensive strips in consumers (`eveditor.py`, the nick inputline pattern suffix) are left in place and are inert.
+
+### Tests
+
+- `TestTextLineTerminators` in [`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py): `"up\n"` reaches `cmdhandler` as `"up"`, terminator-free input is unchanged, and trailing spaces survive.
+- `TestTelnet.test_line_relayed_with_single_trailing_newline` in [`portal/tests.py`](evennia/server/portal/tests.py): pins the portal contract (unchanged behavior) that `b"up\r\n"` relays once as `text=b"up\n"`.
+
+---
+
 ## 6.0.0+underspire.290: Staff Activity panel in the web client
 
 ### Web client
