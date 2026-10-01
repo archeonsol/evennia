@@ -668,6 +668,25 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
         )
         self.assertEqual(document["~"]["_d"], {"captured": 1, "later": 2, "remote": 3})
 
+    def test_slow_flush_preparation_names_row_count_and_slowest_row(self):
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        with (
+            patch.object(jsonb_handler, "_SLOW_FLUSH_PREPARATION", 0.0),
+            patch("evennia.utils.logger.log_warn") as warn,
+        ):
+            snapshots, _failures = jsonb_handler._prepare_async_row_flushes()
+        warn.assert_called_once()
+        message = warn.call_args.args[0]
+        self.assertIn(f"for {len(snapshots)} row(s)", message)
+        self.assertIn("slowest ", message)
+        self.assertIn(" bytes", message)
+
+        handler.add("again", 2)
+        with patch("evennia.utils.logger.log_warn") as warn:
+            jsonb_handler._prepare_async_row_flushes()
+        warn.assert_not_called()
+
     def _capture_async_snapshot(self, handler):
         snapshots, preparation_failures = jsonb_handler._prepare_async_row_flushes()
         self.assertEqual(preparation_failures, 0)
