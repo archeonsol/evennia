@@ -2464,6 +2464,27 @@ class _FlushClaim:
     outcome: "_AsyncFlushOutcome | None" = None
 
 
+#: A flush preparation at least this long (seconds) logs its row count and slowest row.
+_SLOW_FLUSH_PREPARATION = 0.1
+
+
+def _log_slow_flush_preparation(seconds, copy_seconds, rows, slowest_seconds, slowest_state):
+    """Name a slow preparation's size and costliest row; serializes only that row."""
+    from evennia.utils import logger
+
+    detail = ""
+    if slowest_state is not None:
+        size = len(json.dumps(slowest_state.visible_document, default=str))
+        detail = (
+            f"; slowest {slowest_state.model._meta.label} #{slowest_state.pk} "
+            f"{slowest_seconds * 1000:.0f}ms, {size} bytes"
+        )
+    logger.log_warn(
+        f"Slow JSONB flush preparation: {seconds * 1000:.0f}ms for {rows} row(s), "
+        f"snapshot copies {copy_seconds * 1000:.0f}ms{detail}"
+    )
+
+
 def _prepare_async_row_flushes():
     """Capture immutable dirty-row snapshots without handing game state to workers."""
     _require_io_thread("JSONB asynchronous flush preparation")
@@ -2472,6 +2493,9 @@ def _prepare_async_row_flushes():
             "Attribute query barriers may not run inside blocking_update callbacks."
         )
 
+    started = time.perf_counter()
+    copy_seconds = 0.0
+    slowest_seconds, slowest_state = 0.0, None
     snapshots = []
     failed = 0
     for state in sorted(dirty_jsonb_row_states(), key=lambda item: item.key):
@@ -2489,6 +2513,7 @@ def _prepare_async_row_flushes():
         except AttributeUpdateError:
             failed += 1
             continue
+        copy_started = time.perf_counter()
         snapshots.append(
             _AsyncFlushSnapshot(
                 key=state.key,
@@ -2501,6 +2526,15 @@ def _prepare_async_row_flushes():
                 mutation_serial=state.mutation_serial,
                 flush_failures=state.flush_failures,
             )
+        )
+        row_seconds = time.perf_counter() - copy_started
+        copy_seconds += row_seconds
+        if row_seconds > slowest_seconds:
+            slowest_seconds, slowest_state = row_seconds, state
+    elapsed = time.perf_counter() - started
+    if elapsed >= _SLOW_FLUSH_PREPARATION:
+        _log_slow_flush_preparation(
+            elapsed, copy_seconds, len(snapshots), slowest_seconds, slowest_state
         )
     return tuple(snapshots), failed
 
