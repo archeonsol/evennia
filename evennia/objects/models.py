@@ -98,24 +98,36 @@ class ContentsHandler:
             objects (list): the Objects inside this location
 
         """
+        try:
+            return [self._idcache[pk] for pk in self._pks(exclude, content_type)]
+        except KeyError:
+            # An object in this cache was evicted from the idmapper. Rebuilding
+            # from the database reloads it, and drops any entry for an object
+            # that is no longer here.
+            cached = set(self._pkcache)
+            self.init()
+            stale = cached - set(self._pkcache)
+            if stale:
+                logger.log_warn(
+                    f"contents cache for {self.obj.key} (#{self.obj.pk}) "
+                    f"dropped stale entries {sorted(stale)}"
+                )
+            try:
+                return [self._idcache[pk] for pk in self._pks(exclude, content_type)]
+            except KeyError:
+                # this means an actual failure of caching. Return real database match.
+                logger.log_err("contents cache failed for %s." % self.obj.key)
+                return self.load()
+
+    def _pks(self, exclude, content_type):
+        """The cached pks of this location's contents, filtered as ``get`` asks."""
         if content_type is not None:
             pks = self._typecache[content_type].keys()
         else:
             pks = self._pkcache.keys()
         if exclude:
             pks = set(pks) - {excl.pk for excl in make_iter(exclude)}
-        try:
-            return [self._idcache[pk] for pk in pks]
-        except KeyError:
-            # this can happen if the idmapper cache was cleared for an object
-            # in the contents cache. If so we need to re-initialize and try again.
-            self.init()
-            try:
-                return [self._idcache[pk] for pk in pks]
-            except KeyError:
-                # this means an actual failure of caching. Return real database match.
-                logger.log_err("contents cache failed for %s." % self.obj.key)
-                return self.load()
+        return pks
 
     def add(self, obj):
         """
@@ -150,6 +162,21 @@ class ContentsHandler:
         self._pkcache = {}
         self._typecache = defaultdict(dict)
         self.init()
+
+
+def _contents_views(location):
+    """``location`` and, when it differs, the idmapper's current instance of its row.
+
+    An object can still hold a location the idmapper has since evicted and
+    reloaded, and each instance keeps its own contents cache. The current one
+    is touched only if its cache is built, so this adds no query.
+    """
+    if not location:
+        return ()
+    current = type(location).__instance_cache__.get(location.pk)
+    if current is None or current is location or "contents_cache" not in current.__dict__:
+        return (location,)
+    return (location, current)
 
 
 # -------------------------------------------------------------
@@ -380,10 +407,10 @@ class ObjectDB(TypedObject):
         after adopting the worker's row into memory.
         """
 
-        if old_location:
-            old_location.contents_cache.remove(self)
-        if self.db_location:
-            self.db_location.contents_cache.add(self)
+        for location in _contents_views(old_location):
+            location.contents_cache.remove(self)
+        for location in _contents_views(self.db_location):
+            location.contents_cache.add(self)
         # keep _loaded_location_id in sync so at_db_location_postsave
         # has the right baseline if db_location is later saved directly.
         self._loaded_location_id = self.db_location_id
