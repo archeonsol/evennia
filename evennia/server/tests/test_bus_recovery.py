@@ -223,3 +223,26 @@ class TestPeerOutageLogging(TestCase):
         warn.assert_called_once()
         info.assert_called_once()
         self.assertIn("peer synchronization restored", info.call_args.args[0])
+
+    def test_dropped_frame_burst_logs_one_warning_without_traceback(self):
+        """A generation change drops many frames; the log carries one summary."""
+        from evennia.server.bus_result import TransportUnavailable
+
+        bus = RedisServerBus(SimpleNamespace())
+        error = TransportUnavailable("connection generation replaced")
+        with (
+            patch("evennia.server.redis_bus.clock.call_later") as call_later,
+            patch("evennia.server.redis_bus.logger.log_warn") as warn,
+            patch("evennia.server.redis_bus.logger.log_trace") as trace,
+        ):
+            for key in ("MsgServer2Portal", "MsgServer2Portal", "AdminServer2Portal"):
+                bus.errback(error, key)
+            call_later.assert_called_once()
+            _delay, report, *args = call_later.call_args.args
+            report(*args)
+        trace.assert_not_called()
+        warn.assert_called_once()
+        message = warn.call_args.args[0]
+        self.assertIn("dropped 3 frames", message)
+        self.assertIn("AdminServer2Portal x1, MsgServer2Portal x2", message)
+        self.assertEqual(bus._dropped_frames, {})

@@ -41,6 +41,7 @@ class _RedisBusMixin:
         self._published_ready = False
         self._draining = False
         self._sync_failure_logged = False
+        self._dropped_frames = {}
         self._snapshot_waiters = {}
         self._shutdown_deadline = None
         self._tick_handle = None
@@ -282,7 +283,19 @@ class _RedisBusMixin:
             logger.log_trace("redis bus: stop")
 
     def errback(self, err, info):
-        logger.log_trace("redis bus errback (%s): %s" % (info, err))
+        if not isinstance(err, TransportUnavailable):
+            logger.log_err(f"redis bus errback ({info}): {err!r}")
+            return
+        # A generation change rejects every queued frame in one loop callback;
+        # report the burst once on the next turn rather than once per frame.
+        if not self._dropped_frames:
+            clock.call_later(0, self._report_dropped_frames, err, _task_kind="transport")
+        self._dropped_frames[info] = self._dropped_frames.get(info, 0) + 1
+
+    def _report_dropped_frames(self, err):
+        dropped, self._dropped_frames = self._dropped_frames, {}
+        counts = ", ".join(f"{key} x{count}" for key, count in sorted(dropped.items()))
+        logger.log_warn(f"redis bus dropped {sum(dropped.values())} frames ({counts}): {err}")
 
     def broadcast(self, command, sessid, **kwargs):
         """Publish when no live server AMP shim is attached (redis-only path)."""
