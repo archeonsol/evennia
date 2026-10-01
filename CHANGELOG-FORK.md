@@ -25,6 +25,20 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.292: Back and quit share one line at the foot of a menu
+
+Menus spent a full row on each way out, so `b: Back` and `q: Quit` read like two more choices. They share one line at the foot now: `  |wb|n: Back   |wq|n: Quit`.
+
+### Engine
+
+- **`format_menu_prompt` collects the exit keys into a foot line** ([`menus.py`](evennia/actions/menus.py)). Options whose key is `b` or `q` (case-insensitively) render once, in that order, joined with three spaces, after the ordinary option rows; `allow_quit` still supplies `q: Quit` when the menu has no exit option of its own, and `allow_look` appends `l: Look` to the same line. A menu that labels `b` or `q` itself keeps its label; a second option on the same key stays a row, so no choice is dropped. The keys keep their ordinary option semantics for `parse_menu_choice`; only the rendering changes.
+
+### Tests
+
+- `TestFormatMenuPrompt` in [`test_engine.py`](evennia/actions/tests/test_engine.py): back and quit share the last line while the choices stay rows; a menu-labeled quit key keeps its label in the foot; a foot-only menu is body, blank line, foot; a repeated key stays a row; look joins the foot; and `parse_menu_choice` still returns `b` and `q` as themselves.
+
+---
+
 ## 6.0.0+underspire.291: Line terminators no longer leak into echoed input
 
 A telnet client sending `up\r\n` got `Command 'up\r\n' is not available. ...`
