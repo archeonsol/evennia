@@ -18,7 +18,7 @@ from twisted.internet.defer import Deferred, succeed
 
 from evennia.actions.action import Action
 from evennia.actions.engine import RuleEngine
-from evennia.actions.menus import MenuPrompt, format_menu_prompt
+from evennia.actions.menus import MenuPrompt, format_menu_prompt, parse_menu_choice
 from evennia.actions.rule import rule
 
 # The package re-exports the ``engine`` *instance*, which shadows the ``engine``
@@ -641,6 +641,58 @@ class TestFormatMenuPrompt(unittest.TestCase):
         )
         self.assertIn("|wq|n: Exit interface", text)
         self.assertNotIn("|wq|n: Quit", text)
+
+    def test_back_and_quit_share_one_line_at_the_foot(self):
+        text = format_menu_prompt(
+            MenuPrompt(
+                "Hub",
+                options=[("1", "One"), ("2", "Two"), ("b", "Back")],
+                allow_quit=True,
+            )
+        )
+        lines = text.split("\n")
+        self.assertEqual(lines[-1], "  |wb|n: Back   |wq|n: Quit")
+        self.assertEqual(lines[-3:-1], ["  |w1|n: One", "  |w2|n: Two"])
+        self.assertEqual(text.count("Back"), 1)
+
+    def test_a_quit_key_the_menu_labels_itself_keeps_its_label_in_the_foot(self):
+        text = format_menu_prompt(
+            MenuPrompt(
+                "Hub",
+                options=[("1", "One"), ("b", "Cancel"), ("q", "Step away")],
+                allow_quit=False,
+            )
+        )
+        self.assertEqual(text.split("\n")[-1], "  |wb|n: Cancel   |wq|n: Step away")
+
+    def test_a_menu_of_only_a_foot_has_no_rows(self):
+        text = format_menu_prompt(MenuPrompt("Done.", options=[("b", "Back")], allow_quit=False))
+        self.assertEqual(text, "Done.\n\n  |wb|n: Back")
+
+    def test_a_second_back_key_stays_a_row(self):
+        text = format_menu_prompt(
+            MenuPrompt(
+                "Hub",
+                options=[("b", "Back"), ("b", "Browse")],
+                allow_quit=False,
+            )
+        )
+        lines = text.split("\n")
+        self.assertEqual(lines[-2:], ["  |wb|n: Browse", "  |wb|n: Back"])
+
+    def test_look_joins_the_foot(self):
+        text = format_menu_prompt(
+            MenuPrompt("Hub", options=[("1", "One")], allow_quit=True, allow_look=True)
+        )
+        self.assertEqual(text.split("\n")[-1], "  |wq|n: Quit   |wl|n: Look")
+
+    def test_the_foot_keys_still_parse_as_ordinary_options(self):
+        menu = MenuPrompt(
+            "Hub", options=[("1", "One"), ("b", "Back"), ("q", "Quit")], allow_quit=False
+        )
+        self.assertEqual(parse_menu_choice("b", menu), "b")
+        self.assertEqual(parse_menu_choice("Q", menu), "q")
+        self.assertEqual(parse_menu_choice("2", menu), "b")
 
 
 class TestDeferredRule(unittest.TestCase):
