@@ -25,6 +25,52 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.294: Dropped bus frames log one line per burst
+
+A Server reload logged two `[!!]` lines for every frame queued before the first
+handshake: `redis bus errback (MsgServer2Portal): connection generation replaced`
+followed by a bogus `NoneType: None` traceback. One reload produced over a hundred.
+
+### Server
+
+- **`errback` no longer calls `log_trace`** ([`redis_bus.py`](evennia/server/redis_bus.py)). It runs as a publication observer, outside any `except` block, so `format_exc()` returned `NoneType: None` and the log showed a fake traceback for each frame.
+- **`TransportUnavailable` rejections are summarized per burst.** A generation change rejects every queued frame in one loop callback (`RedisTransport._reject_stale`). The first rejection schedules `_report_dropped_frames` on the next loop turn, which logs one warning with the total and a count per command key, e.g. `redis bus dropped 3 frames (AdminServer2Portal x1, MsgServer2Portal x2): connection generation replaced`. Other errors log once each with `log_err`.
+- The frames are still dropped; only their logging changed.
+
+### Tests
+
+- `test_dropped_frame_burst_logs_one_warning_without_traceback` in [`test_bus_recovery.py`](evennia/server/tests/test_bus_recovery.py).
+
+---
+
+## 6.0.0+underspire.293: Moves update the live room instance
+
+Backfilled; shipped as tag `underspire.293` (`eb43580bc`) without a version bump.
+
+### Objects
+
+- **Moves update the current cached location** ([`objects/models.py`](evennia/objects/models.py)). An object could hold a location instance the idmapper had since evicted and reloaded. Moves updated only that stale instance, so the reloaded room kept a ghost contents entry and later logged `contents cache failed`. Moves now also update the current cached instance, and a contents rebuild after eviction drops stale entries and logs them.
+
+### Tests
+
+- New cases in [`test_objects.py`](evennia/objects/tests/test_objects.py).
+
+---
+
+## 6.0.0+underspire.292: Slow outbuf turns name their slowest sends
+
+Backfilled; shipped as tag `underspire.292` (`4a0dd08aa`) without a version bump.
+
+### Server
+
+- **Slow outbuf flush logging** ([`sessionhandler.py`](evennia/server/sessionhandler.py)). A flush turn of 100ms or more logs one warning with the total time, send and session counts, prepare and clean time, and the five slowest sends named by frame command keys and recipient count. Message content is never logged.
+
+### Tests
+
+- New cases in [`test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py).
+
+---
+
 ## 6.0.0+underspire.291: Line terminators no longer leak into echoed input
 
 A telnet client sending `up\r\n` got `Command 'up\r\n' is not available. ...`
