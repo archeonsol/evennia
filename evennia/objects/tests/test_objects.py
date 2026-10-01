@@ -592,6 +592,45 @@ class TestContentHandler(BaseEvenniaTest):
         self.obj2.move_to(self.room2)
         self.assertEqual(self.room2.contents, [self.obj1, self.obj2])
 
+    def _reload(self, room):
+        """Evict ``room`` from the idmapper and load a fresh instance of its row."""
+        room.flush_from_cache(force=True)
+        fresh = ObjectDB.objects.get(pk=room.pk)
+        self.assertIsNot(fresh, room)
+        return fresh
+
+    def test_move_out_through_an_evicted_location_leaves_no_ghost(self):
+        fresh = self._reload(self.room1)
+        self.assertIn(self.obj1, fresh.contents)
+
+        self.obj1.location = self.room2  # obj1 still holds the evicted room1
+
+        self.assertNotIn(self.obj1, fresh.contents)
+
+    def test_move_in_through_an_evicted_location_reaches_the_current_one(self):
+        self.obj1.location = self.room2
+        stale = self.room1
+        fresh = self._reload(stale)
+        self.assertNotIn(self.obj1, fresh.contents)
+
+        self.obj1.location = stale
+
+        self.assertIn(self.obj1, fresh.contents)
+
+    def test_rebuild_after_eviction_drops_and_names_a_stale_entry(self):
+        self.assertIn(self.obj1, self.room1.contents)
+        ObjectDB.objects.filter(pk=self.obj1.pk).update(db_location=self.room2)
+        ghost = self.obj1.pk
+        self.obj1.flush_from_cache(force=True)
+
+        with patch("evennia.objects.models.logger") as logger:
+            contents = self.room1.contents
+
+        self.assertNotIn(ghost, [obj.pk for obj in contents])
+        logger.log_warn.assert_called_once()
+        self.assertIn(str(ghost), logger.log_warn.call_args.args[0])
+        logger.log_err.assert_not_called()
+
 
 class TestMoveResult(BaseEvenniaTest):
     """The truthful, bool-compatible result of ``move_to`` (MoveResult)."""
