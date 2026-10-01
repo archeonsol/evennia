@@ -25,6 +25,20 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.295: Slow JSONB flush preparation names its cause
+
+A production reactor stall (~432ms) landed in `_prepare_async_row_flushes`, which deep-copies each dirty row's whole attribute document three times on the reactor before the worker writes it. Nothing said whether the cost came from many dirty rows, one large document, or the copy itself.
+
+### Attributes
+
+- **Slow flush preparation logging** ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)). A preparation of 100ms or more (`_SLOW_FLUSH_PREPARATION`) logs one warning with the total time, row count, total snapshot copy time, and the slowest row's model, pk, copy time, and serialized size, e.g. `Slow JSONB flush preparation: 432ms for 180 row(s), snapshot copies 410ms; slowest objects.ObjectDB #14830 9ms, 31121 bytes`. Only the slowest row is serialized, and only when the threshold is crossed; a fast preparation pays two `perf_counter` calls per row.
+
+### Tests
+
+- `test_slow_flush_preparation_names_row_count_and_slowest_row` in [`test_jsonb.py`](evennia/typeclasses/tests/test_jsonb.py).
+
+---
+
 ## 6.0.0+underspire.294: Dropped bus frames log one line per burst
 
 A Server reload logged two `[!!]` lines for every frame queued before the first
