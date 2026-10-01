@@ -91,6 +91,9 @@ def text(session, *args, **kwargs):
     # also valid
     if txt is None:
         return
+    # telnet delivers each line with a trailing newline; it would otherwise
+    # survive into raw_string and get echoed to the client.
+    txt = txt.rstrip("\r\n")
     # this is treated as a command input
     # handle the 'idle' command
     if txt.strip() in _idle_commands():

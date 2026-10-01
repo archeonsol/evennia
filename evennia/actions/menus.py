@@ -355,8 +355,8 @@ def get_input(caller, prompt, callback, session=None, *args, **kwargs):
         RuntimeError: If ``callback`` is not callable.
 
     Notes:
-        The result is raw (it usually keeps the trailing newline from the
-        client), so strip before comparing. While running, the prompt is backed
+        The result is the raw input line with any line terminators removed.
+        While running, the prompt is backed
         by a :class:`GetInputState` on the caller's focus body (not an ndb
         attribute or a cmdset); the action engine routes the next input line to
         it. A new ``get_input`` on the same caller replaces any active one

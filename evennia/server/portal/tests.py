@@ -249,6 +249,21 @@ class TestTelnet(TwistedTestCase):
         return d
 
     @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_line_relayed_with_single_trailing_newline(self):
+        """Portal contract: each completed wire line reaches the server
+        exactly once, with the CR/LF terminator normalized to one newline. The
+        server-side inputfunc strips it before the command parser sees it."""
+        self.transport.client = ["localhost"]
+        self.transport.setTcpKeepAlive = Mock()
+        d = self.proto.makeConnection(self.transport)
+        self.proto.data_in = Mock()
+        self.proto.dataReceived(b"up\r\n")
+        self.proto.data_in.assert_called_once_with(text=b"up\n")
+        self.proto.nop_keep_alive.stop()
+        self.proto._handshake_delay.cancel()
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
     def test_mudlet_ttype(self):
         self.transport.client = ["localhost"]
         self.transport.setTcpKeepAlive = Mock()
