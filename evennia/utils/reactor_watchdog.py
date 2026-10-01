@@ -15,7 +15,9 @@ and logs the live stack trace of the IO thread using `sys._current_frames()` to
 pinpoint the exact blocking code site.
 """
 
+import os
 import sys
+import sysconfig
 import threading
 import time
 import traceback
@@ -30,6 +32,60 @@ from evennia.utils import clock, logger
 _INTERVAL_FRACTION = 0.25
 _MIN_INTERVAL = 0.025  # seconds
 _MAX_INTERVAL = 1.0  # seconds
+
+_ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LIBRARY_DIRS = tuple(
+    {
+        os.path.abspath(path) + os.sep
+        for name in ("stdlib", "platstdlib", "purelib", "platlib")
+        if (path := sysconfig.get_paths().get(name))
+    }
+)
+
+
+def _short_path(filename):
+    """``filename`` relative to the deepest of the game and engine checkouts holding it."""
+    path = os.path.abspath(filename)
+    roots = [
+        os.path.abspath(r)
+        for r in (os.path.dirname(_ENGINE_DIR), getattr(settings, "GAME_DIR", None))
+        if r
+    ]
+    for root in sorted(roots, key=len, reverse=True):
+        if path.startswith(root + os.sep):
+            return os.path.relpath(path, root)
+    return path
+
+
+def _frame_label(frame):
+    code = frame.f_code
+    return f"{_short_path(code.co_filename)}:{frame.f_lineno} {code.co_name}"
+
+
+def _work_label(frame):
+    """Locate blocked work: ``inner via outer`` game frames, else the innermost engine frame.
+
+    The innermost game frame is where the time is going; the outermost is the
+    entry point that started it (a system run, a command). With no game code on
+    the stack the innermost engine frame is named, then the innermost frame.
+    """
+    game, engine, innermost = [], None, None
+    while frame is not None:
+        code = getattr(frame, "f_code", None)
+        if code is not None:
+            filename = code.co_filename
+            innermost = innermost or frame
+            path = os.path.abspath(filename)
+            if path.startswith(_ENGINE_DIR + os.sep):
+                engine = engine or frame
+            elif not filename.startswith("<") and not path.startswith(_LIBRARY_DIRS):
+                game.append(frame)
+        frame = getattr(frame, "f_back", None)
+    if game:
+        inner, outer = _frame_label(game[0]), _frame_label(game[-1])
+        return inner if inner == outer else f"{inner} via {outer}"
+    chosen = engine or innermost
+    return _frame_label(chosen) if chosen is not None else "unknown work"
 
 
 class ReactorStallWatchdog:
@@ -84,6 +140,7 @@ class ReactorStallWatchdog:
         self._heartbeat_episode = 0
         self._sample_episode = None
         self._last_sample_log_time = 0.0
+        self._stall_work = None
 
     @property
     def enabled(self) -> bool:
@@ -126,12 +183,43 @@ class ReactorStallWatchdog:
 
     def _sampler_loop(self) -> None:
         """Background thread that sleeps and checks if the reactor thread is frozen."""
-        sample_interval = max(0.1, min(0.5, self.sample_threshold_ms / 3000.0))
+        # Waking at half the warning threshold lets a warned stall be located
+        # before it ends.
+        sample_interval = max(
+            0.05,
+            min(0.5, self.sample_threshold_ms / 3000.0, self.threshold_ms / 2000.0),
+        )
         while self._running:
             time.sleep(sample_interval)
             if not self._running:
                 break
-            self._sample_stall(self._now())
+            now = self._now()
+            self._note_stalled_work(now)
+            self._sample_stall(now)
+
+    def _loop_frame(self):
+        """The loop thread's current frame, or None."""
+        target_id = self._target_thread_id or (
+            clock.get_loop_thread_id()
+            or (threading.main_thread().ident if threading.main_thread() else None)
+        )
+        return sys._current_frames().get(target_id) if target_id else None
+
+    def _note_stalled_work(self, now):
+        """Record where the loop thread is while it is blocked past the warning threshold."""
+        with self._state_lock:
+            last = self._last_heartbeat
+            episode = self._heartbeat_episode
+        if last is None or (now - last - self.interval) * 1000.0 <= self.threshold_ms:
+            return None
+        frame = self._loop_frame()
+        if frame is None:
+            return None
+        label = _work_label(frame)
+        with self._state_lock:
+            if episode == self._heartbeat_episode:
+                self._stall_work = (episode, label)
+        return label
 
     def _stall_candidate(self, now):
         """Return ``(elapsed, episode)`` for a current qualifying stall."""
@@ -150,7 +238,10 @@ class ReactorStallWatchdog:
         with self._state_lock:
             if episode != self._heartbeat_episode:
                 return False
-            if self._sample_episode == episode and now - self._last_sample_log_time < 5.0:
+            if (
+                self._sample_episode == episode
+                and now - self._last_sample_log_time < 5.0
+            ):
                 return False
             self._sample_episode = episode
             self._last_sample_log_time = now
@@ -164,16 +255,12 @@ class ReactorStallWatchdog:
         elapsed_s, episode = candidate
         if not self._reserve_sample(episode, now):
             return False
-        target_id = self._target_thread_id or (
-            clock.get_loop_thread_id()
-            or (threading.main_thread().ident if threading.main_thread() else None)
-        )
-        frame = sys._current_frames().get(target_id) if target_id else None
+        frame = self._loop_frame()
         if frame:
             stack_str = "".join(traceback.format_stack(frame))
             logger.log_warn(
-                f"Live reactor stall in progress (~{elapsed_s * 1000.0:.0f}ms blocked)! "
-                f"Live IO thread execution stack:\n{stack_str}"
+                f"Live reactor stall in progress (~{elapsed_s * 1000.0:.0f}ms blocked) "
+                f"at {_work_label(frame)}! Live IO thread execution stack:\n{stack_str}"
             )
             return True
         return False
@@ -182,6 +269,12 @@ class ReactorStallWatchdog:
         """Measure the gap since the last tick; warn if it exceeds threshold."""
         now = self._now()
         with self._state_lock:
+            ended = self._heartbeat_episode
+            work = (
+                self._stall_work[1]
+                if self._stall_work and self._stall_work[0] == ended
+                else None
+            )
             self._last_heartbeat = now
             self._heartbeat_episode += 1
         if self._last is not None:
@@ -189,7 +282,8 @@ class ReactorStallWatchdog:
             if stall_ms > self.threshold_ms:
                 logger.log_warn(
                     "Reactor stall: a single reactor turn blocked for ~%.0fms "
-                    "(threshold %.0fms). Move blocking I/O off the reactor with "
-                    "evennia.utils.defer." % (stall_ms, self.threshold_ms)
+                    "(threshold %.0fms) at %s. Move blocking I/O off the reactor with "
+                    "evennia.utils.defer."
+                    % (stall_ms, self.threshold_ms, work or "work not sampled")
                 )
         self._last = now

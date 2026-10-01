@@ -8,8 +8,12 @@ normal ticks none. The start/stop wiring (LoopingCall, disabled-when-zero) is
 checked separately.
 """
 
+import os
+import sysconfig
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
 from evennia.utils import reactor_watchdog
@@ -31,7 +35,9 @@ class _Clock:
 
 class TestStallDetection(SimpleTestCase):
     def _make(self, clock, threshold_ms=200, interval=0.05):
-        return ReactorStallWatchdog(threshold_ms=threshold_ms, interval=interval, _now=clock)
+        return ReactorStallWatchdog(
+            threshold_ms=threshold_ms, interval=interval, _now=clock
+        )
 
     def test_over_threshold_block_warns_exactly_once(self):
         clock = _Clock()
@@ -64,6 +70,126 @@ class TestStallDetection(SimpleTestCase):
         mock_warn.assert_not_called()
 
 
+def _frames(*sites):
+    """A frame chain from (path, line, function) sites, innermost first."""
+    frame = None
+    for path, line, name in reversed(sites):
+        frame = SimpleNamespace(
+            f_code=SimpleNamespace(co_filename=path, co_name=name),
+            f_lineno=line,
+            f_back=frame,
+        )
+    return frame
+
+
+_STDLIB_SITE = (
+    os.path.join(sysconfig.get_paths()["stdlib"], "json", "encoder.py"),
+    10,
+    "encode",
+)
+_ENGINE_SITE = (
+    os.path.join(reactor_watchdog._ENGINE_DIR, "server", "server.py"),
+    20,
+    "run",
+)
+
+
+def _game_site(relpath, line, name):
+    return (os.path.join(settings.GAME_DIR, relpath), line, name)
+
+
+class TestWorkLabel(SimpleTestCase):
+    def test_names_innermost_and_outermost_game_frames(self):
+        frame = _frames(
+            _STDLIB_SITE,
+            _game_site("world/medical/clinic_stock.py", 88, "_stock_counts"),
+            _game_site("world/food/courier_stock.py", 12, "iter_restock_demands"),
+            _game_site("world/rpg/courier.py", 300, "generate"),
+            _ENGINE_SITE,
+        )
+
+        self.assertEqual(
+            reactor_watchdog._work_label(frame),
+            "world/medical/clinic_stock.py:88 _stock_counts via world/rpg/courier.py:300 generate",
+        )
+
+    def test_falls_back_to_innermost_engine_frame(self):
+        frame = _frames(_STDLIB_SITE, _ENGINE_SITE)
+
+        self.assertEqual(
+            reactor_watchdog._work_label(frame), "evennia/server/server.py:20 run"
+        )
+
+
+class TestStallWorkInWarning(SimpleTestCase):
+    def _make(self, clock):
+        wd = ReactorStallWatchdog(threshold_ms=200, interval=0.05, _now=clock)
+        wd._target_thread_id = 123
+        return wd
+
+    def test_turn_warning_names_work_sampled_during_the_stall(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        frame = _frames(_game_site("world/rpg/courier.py", 300, "generate"))
+
+        with (
+            patch.object(
+                reactor_watchdog.sys, "_current_frames", return_value={123: frame}
+            ),
+            patch.object(reactor_watchdog.logger, "log_warn") as mock_warn,
+        ):
+            wd._tick()
+            clock.advance(0.30)
+            wd._note_stalled_work(clock())
+            clock.advance(0.05)
+            wd._tick()
+
+        self.assertIn("at world/rpg/courier.py:300 generate", mock_warn.call_args[0][0])
+
+    def test_turn_warning_says_when_no_work_was_sampled(self):
+        clock = _Clock()
+        wd = self._make(clock)
+
+        with patch.object(reactor_watchdog.logger, "log_warn") as mock_warn:
+            wd._tick()
+            clock.advance(0.35)
+            wd._tick()
+
+        self.assertIn("at work not sampled", mock_warn.call_args[0][0])
+
+    def test_sample_from_an_earlier_stall_is_not_reused(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        frame = _frames(_game_site("world/rpg/courier.py", 300, "generate"))
+
+        with (
+            patch.object(
+                reactor_watchdog.sys, "_current_frames", return_value={123: frame}
+            ),
+            patch.object(reactor_watchdog.logger, "log_warn") as mock_warn,
+        ):
+            wd._tick()
+            clock.advance(0.30)
+            wd._note_stalled_work(clock())
+            clock.advance(0.05)
+            wd._tick()
+            clock.advance(0.35)
+            wd._tick()
+
+        self.assertIn("at work not sampled", mock_warn.call_args[0][0])
+
+    def test_no_sample_while_reactor_keeps_up(self):
+        clock = _Clock()
+        wd = self._make(clock)
+
+        with patch.object(reactor_watchdog.sys, "_current_frames") as frames:
+            wd._tick()
+            clock.advance(0.10)
+            self.assertIsNone(wd._note_stalled_work(clock()))
+
+        frames.assert_not_called()
+
+
 class TestLiveSampling(SimpleTestCase):
     """Live stacks are throttled within, never across, stall episodes."""
 
@@ -80,8 +206,12 @@ class TestLiveSampling(SimpleTestCase):
 
     def _sampling_patches(self):
         return (
-            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: object()}),
-            patch.object(reactor_watchdog.traceback, "format_stack", return_value=["stack"]),
+            patch.object(
+                reactor_watchdog.sys, "_current_frames", return_value={123: object()}
+            ),
+            patch.object(
+                reactor_watchdog.traceback, "format_stack", return_value=["stack"]
+            ),
             patch.object(reactor_watchdog.logger, "log_warn"),
         )
 
