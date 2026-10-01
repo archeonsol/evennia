@@ -108,16 +108,40 @@ def _menu_has_exit_option(menu: MenuPrompt) -> bool:
     return False
 
 
+#: Option keys that leave a menu. They share one line at its foot.
+_FOOT_KEYS = ("b", "q")
+
+
 def format_menu_prompt(menu: MenuPrompt) -> str:
-    """Render option keys and descriptions (EvMenu / matrix formatter style)."""
+    """Render option keys and descriptions (EvMenu / matrix formatter style).
+
+    The options that leave the menu (``b`` and ``q``) share one line at the foot,
+    ``  |wb|n: Back   |wq|n: Quit``, instead of a row each, so a menu reads as its
+    choices and then how to leave. They stay ordinary options for
+    :func:`parse_menu_choice`. A second option on the same key stays a row.
+
+    Args:
+        menu (MenuPrompt): the menu to render.
+
+    Returns:
+        str: the body, a blank line, the option rows, and the foot line.
+    """
     lines = [menu.text.rstrip(), ""]
+    foot = {}
     for key, desc in menu.options:
         label = desc or key
+        lowered = str(key).lower()
+        if lowered in _FOOT_KEYS and lowered not in foot:
+            foot[lowered] = f"|w{key}|n: {label}"
+            continue
         lines.append(f"  |w{key}|n: {label}")
     if menu.allow_quit and not _menu_has_exit_option(menu):
-        lines.append("  |wq|n: Quit")
+        foot.setdefault("q", "|wq|n: Quit")
+    items = [foot[key] for key in _FOOT_KEYS if key in foot]
     if menu.allow_look:
-        lines.append("  |wl|n: Look")
+        items.append("|wl|n: Look")
+    if items:
+        lines.append("  " + "   ".join(items))
     return "\n".join(lines)
 
 
