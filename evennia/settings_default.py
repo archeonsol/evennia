@@ -860,6 +860,10 @@ SERVER_SHUTDOWN_EMERGENCY_TIMEOUT = 30.0
 # (not dropped) and admitted on a later tick, ranked by workload class then how
 # overdue they are, so latency-sensitive work wins and nothing starves.
 SYSTEM_TICK_MAX_ADMISSIONS = None
+# The system scheduler yields to the event loop between systems once this much wall
+# time (ms) has passed since its last yield, so systems that come due together run
+# as several short turns, not one long one. 0 runs every due system in one turn.
+SYSTEM_TICK_SLICE_MS = 25
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).
 ENGINE_PROMETHEUS_METRICS_ENABLED = True
 # --- Tier 1 performance (RP / command path) ---

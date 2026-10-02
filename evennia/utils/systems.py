@@ -135,6 +135,7 @@ Worked example (game-side module listed in `SYSTEM_MODULES`)::
         )
 """
 
+import asyncio
 import calendar as _stdlib_calendar
 import importlib
 import inspect
@@ -750,16 +751,25 @@ class SystemDriver:
     length check per tick. Owned and started/stopped by
     `evennia.server.service` alongside the maintenance task.
 
+    Systems that are due in the same tick run back to back, in priority order.
+    The loop's tick (`tick_sliced`) hands the reactor back to other work between
+    two of them once `SYSTEM_TICK_SLICE_MS` of wall time has gone by, so ten
+    systems that come due together (the five-minute marks line up several) cost
+    ten short turns instead of one long one. A single body is never interrupted.
+
     Args:
         now (callable, optional): Wall clock returning epoch seconds,
             injectable for testing. Defaults to `time.time`. Cadence logic
             never calls time itself.
+        perf (callable, optional): Monotonic clock for slicing, injectable for
+            testing. Defaults to `time.perf_counter`.
 
     """
 
-    def __init__(self, now=time.time):
+    def __init__(self, now=time.time, perf=time.perf_counter):
         self._now = now
-        self._loop = clock.make_looping(self.tick)
+        self._perf = perf
+        self._loop = clock.make_looping(self.tick_sliced)
         # Live fire tasks, kept so shutdown can drain/cancel them before the
         # final durability barrier (a fire finishing after the last attribute
         # flush would re-dirty state that then never persists).
@@ -822,9 +832,54 @@ class SystemDriver:
         latency-sensitive work wins and a deferred system ages until it
         outranks fresher work. When `settings.SYSTEM_TICK_MAX_ADMISSIONS` caps
         how many may start in one tick, the overflow is left due (not dropped)
-        and admitted a later tick."""
-        if not _SYSTEM_REGISTRY:
+        and admitted a later tick.
+
+        Fires every admitted system in one turn. The running loop uses
+        :meth:`tick_sliced`, which is the same tick with pauses."""
+        plan = self._plan_tick()
+        if plan is None:
             return
+        now, admitted = plan
+        for system in admitted:
+            self._fire_contained(system, now)
+
+    async def tick_sliced(self):
+        """The loop's tick: :meth:`tick`, yielding between systems once a slice is spent.
+
+        Admission, order and the instant every system sees (`ctx.now`) are the
+        same as `tick`. After each system, if `settings.SYSTEM_TICK_SLICE_MS` of
+        wall time has passed since the slice began, the tick yields once so
+        queued commands and timers run before the next system. Cancelling the
+        tick between systems leaves the rest due; they fire on the next one.
+        """
+        plan = self._plan_tick()
+        if plan is None:
+            return
+        now, admitted = plan
+        slice_seconds = float(getattr(settings, "SYSTEM_TICK_SLICE_MS", 25) or 0) / 1000.0
+        slice_started = self._perf()
+        for system in admitted:
+            self._fire_contained(system, now)
+            if slice_seconds and self._perf() - slice_started >= slice_seconds:
+                await asyncio.sleep(0)
+                slice_started = self._perf()
+
+    def _fire_contained(self, system, now):
+        """Fire one system, logging a scheduling-side failure instead of raising."""
+        try:
+            self._fire(system, now)
+        except Exception:
+            logger.log_trace(f"System scheduler: error firing '{system.name}'")
+
+    def _plan_tick(self):
+        """Choose what this tick fires.
+
+        Returns:
+            tuple or None: `(now, admitted)`, the tick's instant and the due
+            systems in firing order, or `None` when nothing is due.
+        """
+        if not _SYSTEM_REGISTRY:
+            return None
         now = self._now()
         due = []
         for system in list(_SYSTEM_REGISTRY.values()):
@@ -837,7 +892,7 @@ class SystemDriver:
                 # the fire coroutine's handler instead
                 logger.log_trace(f"System scheduler: error scheduling '{system.name}'")
         if not due:
-            return
+            return None
 
         def _overdue_age(system):
             # never-fired (last_run None) ranks as maximally overdue so it is
@@ -848,17 +903,13 @@ class SystemDriver:
 
         cap = getattr(settings, "SYSTEM_TICK_MAX_ADMISSIONS", None)
         admitted = due if not cap else due[: int(cap)]
-        for system in admitted:
-            try:
-                self._fire(system, now)
-            except Exception:
-                logger.log_trace(f"System scheduler: error firing '{system.name}'")
         deferred = len(due) - len(admitted)
         if deferred:
             logger.log_info(
                 "system scheduler: %d due system(s) deferred past the admission "
                 "budget (%s); they age and admit on a later tick." % (deferred, cap)
             )
+        return now, admitted
 
     def _check_due(self, system, now):
         """
