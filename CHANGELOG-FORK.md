@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.298: Reactor stalls cut at the source
+
+Production reactor stalls came from costs that all landed on the loop: Python
+3.14's incremental collector marking the whole heap in one step, an idmapper
+pressure check that swept a healthy cache every few minutes, dbref lookups that
+asked the database for objects already in memory, a system tick that ran ten due
+systems back to back, and a fresh PostgreSQL connection for every unit of work.
+Each is fixed where it starts.
+
+### Engine
+
+- **Managed collection policy** ([`gc_policy.py`](evennia/utils/gc_policy.py), `2f22f2765`). On Python 3.14 the incremental collector marks the whole heap at the start of each old-generation cycle — about every six minutes, in one 0.5–1.3 s step — and scans an increment of the old generation on most other collections, finding almost nothing (7.5 thousand objects in two hours against 4.6 million from young collections). `ENGINE_GC_POLICY = "managed"` (the new default) disables automatic collection after boot, runs one full collection with the survivors frozen (`ENGINE_GC_FREEZE_AT_START`), drives young-generation passes from a loop timer (`ENGINE_GC_YOUNG_THRESHOLD`, `ENGINE_GC_INTERVAL_MS`) and takes a full "deep clean" from the system scheduler when no one is connected (`ENGINE_GC_DEEP_CLEAN_INTERVAL`, `ENGINE_GC_DEEP_CLEAN_MAX_DEFER`). On a 9.7M-object heap the max pause fell from 700–1500 ms to 11 ms; a deep clean of the frozen heap took 49 ms against 2.1 s. `"default"` restores the interpreter's collector.
+- **Collection telemetry and stall attribution** ([`reactor_watchdog.py`](evennia/utils/reactor_watchdog.py), [`prometheus_metrics.py`](evennia/server/prometheus_metrics.py)). Every collection is timed; pauses feed `evennia_gc_pause_seconds` and long ones log (`ENGINE_GC_PAUSE_WARN_MS`). A stall the watchdog blames on a collection now says so instead of naming the frame the collection landed in, stall durations export as `evennia_reactor_stall_seconds{cause}`, and the sampler wakes every 25 ms (100 ms missed 35% of stalls).
+- **Idmapper pressure reads current memory and counts caches once** ([`idmapper/models.py`](evennia/utils/idmapper/models.py), `d88b6a2e6`). `conditional_flush` read `ru_maxrss`, the process's peak, which never falls after a spike; with the default 400 MB limit and 790 MB resident it swept the whole cache every five to ten minutes (about 1.1 thousand evictions and 230 worker queries per sweep, each on a fresh connection). It now reads current resident memory (psutil, then `/proc/self/statm`, then the peak), treats "over the limit" as pressure on its own, and stays quiet until memory has grown 10% past where the previous sweep started. `cache_size()` no longer adds one database class's shared cache once per typeclass reading it, which had made a few thousand objects count as tens of thousands.
+- **`search_object("#id")` answers from the idmapper** ([`objects/manager.py`](evennia/objects/manager.py), `5c158b99a`). A dbref lookup cost a query for an object already in memory, and two for a missing one (the miss fell through to a name search). Game code looks objects up by stored id constantly (214 call sites, a courier tick that resolves hundreds). The cached match returns as a pre-evaluated queryset, so indexing, `bool`, `count` and chaining behave as before; `candidates`, `use_dbref=False` and non-IO threads are unchanged.
+- **The system scheduler yields between due systems** ([`systems.py`](evennia/utils/systems.py), `610bf276c`). `SystemDriver.tick_sliced` (the loop's tick) yields to the event loop once `SYSTEM_TICK_SLICE_MS` (25) of wall time has passed since its last yield, so systems that line up on the five-minute marks cost several short turns instead of one 130–270 ms turn. Admission, order, `ctx.now` and overlap rules are unchanged; a body is never interrupted; `tick()` is the same tick without pauses.
+- **Optional PostgreSQL connection pool** ([`db_pool.py`](evennia/server/db_pool.py), [`db_backend/`](evennia/server/db_backend), `9402051d7`). A Django wrapper still belongs to one task and still closes at its end, but `ENGINE_DATABASE_POOL=True` parks the raw connection in a bounded process-wide pool and hands it to the next wrapper. A connection is parked only when demonstrably clean (open, idle, no database error, autocommit as Django set it) and reused only when one socket poll shows the server has not hung up; the age counts from the physical connect (`ENGINE_DATABASE_POOL_MAX_AGE`, default 1800 s), the pool is bounded (`ENGINE_DATABASE_POOL_MAX_IDLE`, default 16), a forked child drops what it inherits, and the session-initialisation receiver skips a recycled connection. Off by default; with psycopg 3, which has its own pool, the setting does nothing. Production was opening about five short-lived connections a second, roughly 12% of reactor work.
+
+### Settings
+
+All new, all with defaults; no game changes required. `ENGINE_GC_POLICY` (`"managed"` — behavior change: CPython's automatic collector is now off by default), `ENGINE_GC_YOUNG_THRESHOLD`, `ENGINE_GC_INTERVAL_MS`, `ENGINE_GC_FREEZE_AT_START`, `ENGINE_GC_DEEP_CLEAN_INTERVAL`, `ENGINE_GC_DEEP_CLEAN_MAX_DEFER`, `ENGINE_GC_PAUSE_WARN_MS`; `SYSTEM_TICK_SLICE_MS` (25); `ENGINE_DATABASE_POOL` (off), `ENGINE_DATABASE_POOL_MAX_IDLE` (16), `ENGINE_DATABASE_POOL_MAX_AGE` (1800). Set `ENGINE_GC_POLICY = "default"` to restore the interpreter's collector.
+
+### Tests
+
+- `test_gc_policy.py`, `test_reactor_watchdog.py`, `test_engine_systems.py`: policy behavior, pause telemetry, stall attribution and deep-clean scheduling.
+- `test_idmapper_pressure.py`: one count per shared cache, the RSS fallback chain and the sweep hysteresis.
+- `test_objects.py`: a cached dbref costs no query, a miss still reaches the database, candidates and queryset chaining behave.
+- `test_systems.py`: slicing, priority order, shared `ctx.now`, and cancellation between slices leaving the rest due.
+- `test_db_pool.py`, `test_db_backend_pool.py`, `test_database_postgres.py`: pool rules without a database, plus the real backend against PostgreSQL (the same server session returns, a killed connection is replaced, and an open transaction, a database error or an atomic block is never parked).
+
+---
+
 ## 6.0.0+underspire.297: Contents reads follow the idmapper's live instance
 
 An idmapper-evicted room can be re-cached by a later `save()` while viewers still hold the reloaded instance. Moves reconciled only the held and currently-cached instances (`.293`), so the orphaned view never learned of arrivals: people who walked in stayed out of the room description and off target lists, while their speech and emotes still reached the room. This is the invisibility regression reported in production after `.293`.
