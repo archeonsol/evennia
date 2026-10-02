@@ -30,7 +30,7 @@ from evennia.server.signals import (
     SIGNAL_ACCOUNT_POST_LOGIN,
     SIGNAL_ACCOUNT_POST_LOGOUT,
 )
-from evennia.utils.logger import log_trace
+from evennia.utils.logger import log_trace, log_warn
 from evennia.utils.utils import (
     callables_from_module,
     class_from_module,
@@ -100,6 +100,30 @@ def _output_frame_key(value, _depth=0):
     if isinstance(value, float):
         return ("float", repr(value))
     return (type(value).__name__, value)
+
+
+#: An outbuf flush turn at least this long (seconds) logs its slowest sends.
+_SLOW_OUTBUF_TURN = 0.1
+#: How many sends a slow-turn log line names.
+_SLOW_OUTBUF_SENDS = 5
+
+
+def _log_slow_outbuf_turn(total, prepare, clean, sends, session_count):
+    """Name a slow flush turn's costliest sends by frame command keys, never content.
+
+    ``sends`` holds ``(seconds, frame, recipient_count)`` per publication; the
+    send time includes packing the frame for the Portal.
+    """
+    slowest = sorted(sends, key=lambda send: send[0], reverse=True)[:_SLOW_OUTBUF_SENDS]
+    named = ", ".join(
+        f"{'+'.join(sorted(str(key) for key in frame))} x{recipients} {seconds * 1000:.0f}ms"
+        for seconds, frame, recipients in slowest
+    )
+    log_warn(
+        f"Slow outbuf flush: {total * 1000:.0f}ms, {len(sends)} send(s) to "
+        f"{session_count} session(s); prepare {prepare * 1000:.0f}ms, "
+        f"clean {clean * 1000:.0f}ms; slowest sends: {named}"
+    )
 
 
 def _safe_frame_key(value):
@@ -1121,6 +1145,7 @@ class ServerSessionHandler(SessionHandler):
         recipient's original message order.
         """
         self._outbuf_flush_scheduled = False
+        turn_started = time.perf_counter()
         prepared = []
         for uid in list(self._outbuf):
             try:
@@ -1132,6 +1157,9 @@ class ServerSessionHandler(SessionHandler):
                 prepared.append(result)
         if not prepared:
             return
+        prepare_seconds = time.perf_counter() - turn_started
+        clean_seconds = 0.0
+        sends = []
 
         bus = evennia.EVENNIA_SERVER_SERVICE.portal_bus
         clean_cache = {}
@@ -1153,6 +1181,7 @@ class ServerSessionHandler(SessionHandler):
                         log_trace()
                         continue
                     self._record_clean_duration(clean_started)
+                    clean_seconds += time.perf_counter() - clean_started
                     if cache_key is not None:
                         clean_cache[cache_key] = frame
                 if _watch.WATCHES:
@@ -1174,6 +1203,7 @@ class ServerSessionHandler(SessionHandler):
                 else:
                     group[1].append(session)
             for frame, sessions in groups.values():
+                send_started = time.perf_counter()
                 try:
                     if len(sessions) == 1:
                         bus.send_MsgServer2Portal(sessions[0], **frame)
@@ -1183,6 +1213,11 @@ class ServerSessionHandler(SessionHandler):
                         )
                 except Exception:
                     log_trace()
+                sends.append((time.perf_counter() - send_started, frame, len(sessions)))
+
+        total = time.perf_counter() - turn_started
+        if total >= _SLOW_OUTBUF_TURN:
+            _log_slow_outbuf_turn(total, prepare_seconds, clean_seconds, sends, len(prepared))
 
     def get_inputfuncs(self):
         """

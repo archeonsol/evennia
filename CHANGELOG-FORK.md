@@ -25,17 +25,63 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.292: Back and quit share one line at the foot of a menu
+## 6.0.0+underspire.295: Slow JSONB flush preparation names its cause
 
-Menus spent a full row on each way out, so `b: Back` and `q: Quit` read like two more choices. They share one line at the foot now: `  |wb|n: Back   |wq|n: Quit`.
+A production reactor stall (~432ms) landed in `_prepare_async_row_flushes`, which deep-copies each dirty row's whole attribute document three times on the reactor before the worker writes it. Nothing said whether the cost came from many dirty rows, one large document, or the copy itself.
 
-### Engine
+### Attributes
 
-- **`format_menu_prompt` collects the exit keys into a foot line** ([`menus.py`](evennia/actions/menus.py)). Options whose key is `b` or `q` (case-insensitively) render once, in that order, joined with three spaces, after the ordinary option rows; `allow_quit` still supplies `q: Quit` when the menu has no exit option of its own, and `allow_look` appends `l: Look` to the same line. A menu that labels `b` or `q` itself keeps its label; a second option on the same key stays a row, so no choice is dropped. The keys keep their ordinary option semantics for `parse_menu_choice`; only the rendering changes.
+- **Slow flush preparation logging** ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)). A preparation of 100ms or more (`_SLOW_FLUSH_PREPARATION`) logs one warning with the total time, row count, total snapshot copy time, and the slowest row's model, pk, copy time, and serialized size, e.g. `Slow JSONB flush preparation: 432ms for 180 row(s), snapshot copies 410ms; slowest objects.ObjectDB #14830 9ms, 31121 bytes`. Only the slowest row is serialized, and only when the threshold is crossed; a fast preparation pays two `perf_counter` calls per row.
 
 ### Tests
 
-- `TestFormatMenuPrompt` in [`test_engine.py`](evennia/actions/tests/test_engine.py): back and quit share the last line while the choices stay rows; a menu-labeled quit key keeps its label in the foot; a foot-only menu is body, blank line, foot; a repeated key stays a row; look joins the foot; and `parse_menu_choice` still returns `b` and `q` as themselves.
+- `test_slow_flush_preparation_names_row_count_and_slowest_row` in [`test_jsonb.py`](evennia/typeclasses/tests/test_jsonb.py).
+
+---
+
+## 6.0.0+underspire.294: Dropped bus frames log one line per burst
+
+A Server reload logged two `[!!]` lines for every frame queued before the first
+handshake: `redis bus errback (MsgServer2Portal): connection generation replaced`
+followed by a bogus `NoneType: None` traceback. One reload produced over a hundred.
+
+### Server
+
+- **`errback` no longer calls `log_trace`** ([`redis_bus.py`](evennia/server/redis_bus.py)). It runs as a publication observer, outside any `except` block, so `format_exc()` returned `NoneType: None` and the log showed a fake traceback for each frame.
+- **`TransportUnavailable` rejections are summarized per burst.** A generation change rejects every queued frame in one loop callback (`RedisTransport._reject_stale`). The first rejection schedules `_report_dropped_frames` on the next loop turn, which logs one warning with the total and a count per command key, e.g. `redis bus dropped 3 frames (AdminServer2Portal x1, MsgServer2Portal x2): connection generation replaced`. Other errors log once each with `log_err`.
+- The frames are still dropped; only their logging changed.
+
+### Tests
+
+- `test_dropped_frame_burst_logs_one_warning_without_traceback` in [`test_bus_recovery.py`](evennia/server/tests/test_bus_recovery.py).
+
+---
+
+## 6.0.0+underspire.293: Moves update the live room instance
+
+Backfilled; shipped as tag `underspire.293` (`eb43580bc`) without a version bump.
+
+### Objects
+
+- **Moves update the current cached location** ([`objects/models.py`](evennia/objects/models.py)). An object could hold a location instance the idmapper had since evicted and reloaded. Moves updated only that stale instance, so the reloaded room kept a ghost contents entry and later logged `contents cache failed`. Moves now also update the current cached instance, and a contents rebuild after eviction drops stale entries and logs them.
+
+### Tests
+
+- New cases in [`test_objects.py`](evennia/objects/tests/test_objects.py).
+
+---
+
+## 6.0.0+underspire.292: Slow outbuf turns name their slowest sends
+
+Backfilled; shipped as tag `underspire.292` (`4a0dd08aa`) without a version bump.
+
+### Server
+
+- **Slow outbuf flush logging** ([`sessionhandler.py`](evennia/server/sessionhandler.py)). A flush turn of 100ms or more logs one warning with the total time, send and session counts, prepare and clean time, and the five slowest sends named by frame command keys and recipient count. Message content is never logged.
+
+### Tests
+
+- New cases in [`test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py).
 
 ---
 

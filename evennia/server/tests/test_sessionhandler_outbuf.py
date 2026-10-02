@@ -382,3 +382,49 @@ class TestGroupedOutput(TestCase):
             self.handler._flush_all_outbuf()
         bus = engine.EVENNIA_SERVER_SERVICE.portal_bus
         bus.send_MsgServer2Portal.assert_called_once_with(self.sessions[1], text="source")
+
+
+class TestSlowOutbufTurnLog(TestCase):
+    """A slow flush turn names its costliest sends by command key, never content."""
+
+    def setUp(self):
+        self.handler = ServerSessionHandler()
+        self.handler[1] = _session(1)
+        self.clock = [0.0]
+
+    def _flush(self, send_seconds):
+        self.handler._outbuf[1] = [
+            {"activity_batch": (["SECRET body"], {})},
+            {"map": ([{"rows": ["SECRET row"]}], {})},
+        ]
+
+        def send(_session, **frame):
+            self.clock[0] += send_seconds[next(iter(frame))]
+
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(self.handler, "clean_senddata", side_effect=lambda _s, frame: frame),
+            patch("evennia.server.sessionhandler.time.perf_counter", lambda: self.clock[0]),
+            patch("evennia.server.sessionhandler.log_warn") as warn,
+        ):
+            engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2Portal.side_effect = send
+            self.handler._flush_all_outbuf()
+        return warn
+
+    def test_slow_turn_names_sends_slowest_first(self):
+        warn = self._flush({"activity_batch": 0.01, "map": 0.3})
+
+        warn.assert_called_once()
+        message = warn.call_args.args[0]
+        self.assertIn("Slow outbuf flush: 310ms, 2 send(s) to 1 session(s)", message)
+        self.assertLess(message.index("map x1 300ms"), message.index("activity_batch x1 10ms"))
+
+    def test_slow_turn_log_carries_no_content(self):
+        warn = self._flush({"activity_batch": 0.01, "map": 0.3})
+
+        self.assertNotIn("SECRET", warn.call_args.args[0])
+
+    def test_fast_turn_logs_nothing(self):
+        warn = self._flush({"activity_batch": 0.01, "map": 0.02})
+
+        warn.assert_not_called()
