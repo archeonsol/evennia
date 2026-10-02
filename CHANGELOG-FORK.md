@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.297: Contents reads follow the idmapper's live instance
+
+An idmapper-evicted room can be re-cached by a later `save()` while viewers still hold the reloaded instance. Moves reconciled only the held and currently-cached instances (`.293`), so the orphaned view never learned of arrivals: people who walked in stayed out of the room description and off target lists, while their speech and emotes still reached the room. This is the invisibility regression reported in production after `.293`.
+
+### Engine
+
+- **`ContentsHandler.get` reads through the idmapper's live instance** ([`objects/models.py`](evennia/objects/models.py)). When `self.obj` is no longer the instance the idmapper holds for its row, the read delegates to the live instance's handler, whose cache receives move reconciliations. An evicted row with no live replacement keeps the existing rebuild path. Reads through any pre-existing orphan self-heal without a reload.
+
+### Diagnostics
+
+- **Reactor-stall warnings name the work that blocked the loop** ([`reactor_watchdog.py`](evennia/utils/reactor_watchdog.py), `ba6e496c9`). A warned stall now labels the game frames on the stack as `inner via outer` (the innermost frame is where the time went; the outermost is the entry point), or names the innermost engine frame when no game frame is involved, relative to the game and engine checkouts; library and stdlib paths fall back to the full path. The watchdog also wakes at half the warning threshold so a warned stall can be located before it ends.
+
+### Performance
+
+- The common path adds one idmapper dictionary lookup per `contents` read: 74 ns against a 2.6 µs read of a populated room (~3%), with no query and no `load()` fallback. Delegation runs only for an orphaned instance, and builds the live instance's handler at most once. The `.293` stall fix's synchronous rebuild pressure is not reintroduced.
+
+### Tests
+
+- `test_arrival_reaches_a_view_through_an_orphaned_instance` in [`test_objects.py`](evennia/objects/tests/test_objects.py): evict a room from the idmapper, reload it, re-cache the stale instance with a save, move a newcomer in, and assert the viewer holding the reloaded instance sees them.
+
+---
+
 ## 6.0.0+underspire.296: Back and quit share a foot line; a Redis outage no longer blocks login
 
 A login could be aborted by a Redis blip: `LOGIN_THROTTLE.check` read the `throttle` cache unguarded, so a stale pooled connection (`Error 32 while writing to socket. Broken pipe.`) raised `ConnectionInterrupted` through `Account.aauthenticate` into the login action, which logged an untrapped error and dropped the connection. Separately, menus spent a full row on each way out, so `b: Back` and `q: Quit` read like two more choices.
