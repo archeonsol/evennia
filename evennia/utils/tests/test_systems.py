@@ -1000,3 +1000,123 @@ class TestDriverLifecycle(_SchedulerTestMixin, BaseEvenniaTestCase):
 
     def test_empty_registry_tick_is_a_noop(self):
         self.driver.tick()  # no raise, nothing registered
+
+
+class _PerfClock:
+    """Manually advanced stand-in for ``time.perf_counter``."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, seconds):
+        self.t += seconds
+
+
+@override_settings(SYSTEM_TICK_SLICE_MS=25)
+class TestSlicedTick(_SchedulerTestMixin, BaseEvenniaTestCase):
+    """The loop's tick hands the reactor back between systems once a slice is spent."""
+
+    def setUp(self):
+        super().setUp()
+        self.perf = _PerfClock()
+        self.driver = SystemDriver(now=self.clock, perf=self.perf)
+        self.events = []
+
+    def _register(self, name, cost, workload=None):
+        def run(ctx):
+            self.events.append(name)
+            self.fires.append(ctx)
+            self.perf.advance(cost)
+            if name == "A":
+                # something else becomes ready while A is running
+                asyncio.get_running_loop().call_soon(lambda: self.events.append("other"))
+
+        kwargs = {"workload_class": workload} if workload else {}
+        register(name=name, cadence=every_tick(), scope=global_scope(), run=run, **kwargs)
+
+    def _run_tick(self):
+        async def scenario():
+            await self.driver.tick_sliced()
+            await asyncio.sleep(0)
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(scenario())
+        finally:
+            loop.close()
+
+    def test_a_spent_slice_lets_other_work_run_before_the_next_system(self):
+        for name in ("A", "B", "C"):
+            self._register(name, cost=0.030)
+
+        self._run_tick()
+
+        self.assertEqual(self.events, ["A", "other", "B", "C"])
+
+    def test_cheap_systems_share_one_turn(self):
+        for name in ("A", "B", "C"):
+            self._register(name, cost=0.001)
+
+        self._run_tick()
+
+        self.assertEqual(self.events, ["A", "B", "C", "other"])
+
+    @override_settings(SYSTEM_TICK_SLICE_MS=0)
+    def test_a_zero_slice_keeps_the_single_turn_tick(self):
+        for name in ("A", "B", "C"):
+            self._register(name, cost=0.030)
+
+        self._run_tick()
+
+        self.assertEqual(self.events, ["A", "B", "C", "other"])
+
+    def test_every_system_sees_the_same_instant(self):
+        for name in ("A", "B", "C"):
+            self._register(name, cost=0.030)
+        self.clock.set(42.0)
+
+        self._run_tick()
+
+        self.assertEqual([ctx.now for ctx in self.fires], [42.0, 42.0, 42.0])
+
+    def test_priority_order_survives_slicing(self):
+        self._register("A", cost=0.030, workload=systems.MAINTENANCE)
+        self._register("B", cost=0.030, workload=systems.INTERACTIVE)
+        self._register("C", cost=0.030, workload=systems.SIMULATION)
+
+        self._run_tick()
+
+        self.assertEqual([e for e in self.events if e != "other"], ["B", "C", "A"])
+
+    def test_cancelling_between_slices_leaves_the_rest_due(self):
+        for name in ("A", "B", "C"):
+            self._register(name, cost=0.030)
+
+        async def scenario():
+            task = asyncio.ensure_future(self.driver.tick_sliced())
+            await asyncio.sleep(0)  # A runs, the slice is spent, the tick yields
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(scenario())
+        finally:
+            loop.close()
+        self.assertEqual([e for e in self.events if e != "other"], ["A"])
+
+        self.driver.tick()  # the next tick still finds B and C due
+
+        # never-fired systems rank first, so the next tick runs B and C before A again
+        self.assertEqual([e for e in self.events if e != "other"], ["A", "B", "C", "A"])
+
+    def test_the_loop_drives_the_sliced_tick(self):
+        self.assertEqual(self.driver._loop._fn, self.driver.tick_sliced)
+
+    def test_an_empty_registry_costs_nothing(self):
+        self._run_tick()
+
+        self.assertEqual(self.events, [])

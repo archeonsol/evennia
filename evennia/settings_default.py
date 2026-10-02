@@ -860,6 +860,10 @@ SERVER_SHUTDOWN_EMERGENCY_TIMEOUT = 30.0
 # (not dropped) and admitted on a later tick, ranked by workload class then how
 # overdue they are, so latency-sensitive work wins and nothing starves.
 SYSTEM_TICK_MAX_ADMISSIONS = None
+# The system scheduler yields to the event loop between systems once this much wall
+# time (ms) has passed since its last yield, so systems that come due together run
+# as several short turns, not one long one. 0 runs every due system in one turn.
+SYSTEM_TICK_SLICE_MS = 25
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).
 ENGINE_PROMETHEUS_METRICS_ENABLED = True
 # --- Tier 1 performance (RP / command path) ---
@@ -874,6 +878,28 @@ LOOK_ATTR_PREFETCH_ENABLED = True
 # Warn when a single reactor turn blocks longer than this (ms; 0 = disabled).
 # Instruments blocking sites that should move off-reactor via evennia.utils.defer.
 REACTOR_STALL_WARNING_MS = 200
+# Garbage collection policy (evennia.utils.gc_policy). "managed" disables
+# CPython's automatic collector after boot and collects the young generation from
+# a game-loop timer, so no collection ever marks the whole heap while players
+# wait; "default" leaves the interpreter's collector alone. Collection timing and
+# the evennia_gc_pause_seconds histogram run under either policy.
+ENGINE_GC_POLICY = "managed"
+# Managed policy: collect the young generation once this many more objects have
+# been allocated than freed (CPython's own default is 2000), checked every
+# ENGINE_GC_INTERVAL_MS milliseconds.
+ENGINE_GC_YOUNG_THRESHOLD = 2000
+ENGINE_GC_INTERVAL_MS = 50
+# Managed policy: freeze the boot heap after its one full collection, so modules
+# and registries are never scanned again.
+ENGINE_GC_FREEZE_AT_START = True
+# Managed policy: a full "deep clean" reclaims cycles that outlived a young
+# collection. It is due every ENGINE_GC_DEEP_CLEAN_INTERVAL seconds (0 = never),
+# waits for a moment with no sessions connected, and runs anyway once
+# ENGINE_GC_DEEP_CLEAN_MAX_DEFER seconds have passed since the last one.
+ENGINE_GC_DEEP_CLEAN_INTERVAL = 86400
+ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 259200
+# Log any single collection that pauses the process at least this long (ms; 0 = off).
+ENGINE_GC_PAUSE_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # Diagnostic protocol record emitted after the complete CM1 input lifecycle.
@@ -976,6 +1002,17 @@ ENGINE_DATABASE_CONN_HEALTH_CHECKS = True
 # Enable for PgBouncer transaction-pool deployments. The PostgreSQL settings
 # helper then forces non-persistent connections and client-side cursor fetching.
 ENGINE_DATABASE_TRANSACTION_POOLING = False
+# Park closed PostgreSQL connections in a process-wide pool and reuse them, instead of
+# opening a fresh connection (TCP connect, login, SET statements) for every command,
+# callback and scheduled system that touches the database. A wrapper still closes at
+# the end of its task, so no transaction ever leaks between tasks; only the physical
+# connection is recycled. Applies to the engine's own backend, which
+# apply_postgres_engine_defaults swaps in when this is on (see evennia.server.db_pool).
+ENGINE_DATABASE_POOL = False
+# Idle connections kept in the pool, and the longest any one connection lives from
+# the moment it was opened (seconds), however often it is reused.
+ENGINE_DATABASE_POOL_MAX_IDLE = 16
+ENGINE_DATABASE_POOL_MAX_AGE = 1800
 # Async ORM connections on the game loop must belong to a supervised runtime
 # root. ``warn`` preserves third-party compatibility while exposing violations;
 # use ``error`` in CI once a game has removed unmanaged task creation.

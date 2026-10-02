@@ -1106,14 +1106,81 @@ post_save.connect(update_cached_instance)
 LAST_FLUSH = None
 
 
+def _rss_from_statm(path="/proc/self/statm", page_size=None):
+    """Read the resident set size from a Linux ``statm`` file, in MB.
+
+    Args:
+        path (str, optional): The ``statm`` file to read.
+        page_size (int, optional): Bytes per page. Defaults to the system page size.
+
+    Returns:
+        float or None: Resident megabytes, or ``None`` if the file cannot be read.
+    """
+    try:
+        with open(path, "rb") as handle:
+            resident_pages = int(handle.read().split()[1])
+        page_size = page_size or os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError, AttributeError):
+        return None
+    return resident_pages * page_size / (1024.0 * 1024.0)
+
+
+def _current_rss_mb():
+    """Return the resident memory of this process right now, in MB.
+
+    This is the *current* resident set, not the peak: ``ru_maxrss`` never falls,
+    so a check built on it keeps reporting pressure for as long as the process
+    lives once memory has ever spiked. The peak is only a last resort, for hosts
+    that offer nothing better.
+
+    Returns:
+        float or None: Resident megabytes, or ``None`` if the host cannot say.
+    """
+    try:
+        import psutil
+
+        return psutil.Process(os.getpid()).memory_info().rss / (1024.0 * 1024.0)
+    except ImportError:
+        pass
+    except Exception:
+        logger.log_trace("idmapper: psutil could not read this process's memory")
+    rss = _rss_from_statm()
+    if rss is not None:
+        return rss
+    try:
+        import resource
+        import sys
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except (ImportError, OSError, ValueError):
+        return None
+    # ru_maxrss is bytes on macOS and kilobytes elsewhere
+    return peak / (1024.0 * 1024.0) if sys.platform == "darwin" else peak / 1024.0
+
+
+#: A sweep is not repeated until the process has grown this much past the
+#: resident size the last sweep started at. Python rarely hands freed memory back
+#: to the operating system, so a process that stays over its limit after a sweep
+#: would otherwise be swept again every interval, evicting its hot cache each time.
+_FLUSH_RSS_HYSTERESIS = 1.10
+LAST_FLUSH_RSS = None
+
+
 def conditional_flush(max_rmem, force=False):
     """
-    Flush the cache if the estimated memory usage exceeds `max_rmem`.
+    Flush the cache if the process is under memory pressure.
+
+    Pressure means the process's current resident memory exceeds `max_rmem`, or
+    the cache holds as many instances as `max_rmem` is estimated to afford while
+    resident memory is within 10% of it.
 
     The flusher has a timeout to avoid flushing over and over
     in particular situations (this means that for some setups
     the memory usage will exceed the requirement and a server with
-    more memory is probably required for the given game).
+    more memory is probably required for the given game). It also stays quiet
+    until resident memory has grown 10% past where the previous sweep started,
+    because a sweep that did not bring the process under its limit would not
+    help the next time either.
 
     Args:
         max_rmem (int): memory-usage estimation-treshold after which
@@ -1122,7 +1189,7 @@ def conditional_flush(max_rmem, force=False):
             Defaults to `False`.
 
     """
-    global LAST_FLUSH
+    global LAST_FLUSH, LAST_FLUSH_RSS
 
     def mem2cachesize(desired_rmem):
         """
@@ -1163,36 +1230,32 @@ def conditional_flush(max_rmem, force=False):
     # check actual memory usage
     Ncache_max = mem2cachesize(max_rmem)
     Ncache, _ = cache_size()
-    try:
-        if os.name == "nt":
-            # Windows: use psutil if available, else skip the RSS check.
-            import psutil
+    actual_rmem = _current_rss_mb()
+    known = actual_rmem is not None
+    if not known:
+        # host cannot say: assume at the limit so cache-count alone decides
+        actual_rmem = max_rmem
 
-            actual_rmem = psutil.Process(os.getpid()).memory_info().rss / (1024.0 * 1024.0)
-        else:
-            import resource
-            import sys
+    over_limit = known and actual_rmem > max_rmem
+    crowded = Ncache >= Ncache_max and actual_rmem > max_rmem * 0.9
+    if not (over_limit or crowded):
+        return
+    if (
+        not force
+        and known
+        and LAST_FLUSH_RSS is not None
+        and actual_rmem < LAST_FLUSH_RSS * _FLUSH_RSS_HYSTERESIS
+    ):
+        return
 
-            rusage = resource.getrusage(resource.RUSAGE_SELF)
-            if sys.platform == "darwin":
-                # macOS: ru_maxrss is in bytes
-                actual_rmem = rusage.ru_maxrss / (1024.0 * 1024.0)
-            else:
-                # Linux/other Unix: ru_maxrss is in kilobytes
-                actual_rmem = rusage.ru_maxrss / 1024.0
-    except Exception:
-        # If memory info is unavailable, fall back to cache-count heuristic only.
-        actual_rmem = max_rmem  # assume at limit so cache-count alone decides
-
-    if Ncache >= Ncache_max and actual_rmem > max_rmem * 0.9:
-        # flush cache when number of objects in cache is big enough and our
-        # actual memory use is within 10% of our set max
-        if clock.loop_running():
-            if _start_incremental_cache_flush():
-                LAST_FLUSH = now
-        else:
-            flush_cache()
+    if clock.loop_running():
+        if _start_incremental_cache_flush():
             LAST_FLUSH = now
+            LAST_FLUSH_RSS = actual_rmem if known else None
+    else:
+        flush_cache()
+        LAST_FLUSH = now
+        LAST_FLUSH_RSS = actual_rmem if known else None
 
 
 def cache_size(mb=True):
@@ -1206,22 +1269,28 @@ def cache_size(mb=True):
     Python is clearly reusing memory behind the scenes that we cannot
     catch in an easy way here.  Ideas are appreciated. /Griatch
 
+    Every typeclass of one database class shares that class's single cache, so
+    a cache is counted once however many typeclasses read it. Counting it per
+    typeclass made a few thousand cached objects look like tens of thousands and
+    kept the pressure check permanently satisfied.
+
     Returns:
       total_num, {objclass:total_num, ...}
 
     """
-    numtotal = [0]  # use mutable to keep reference through recursion
+    caches = {}  # id(cache) -> number of instances held
     classdict = {}
 
     def get_recurse(submodels):
         for submodel in submodels:
             subclasses = submodel.__subclasses__()
             if not subclasses:
-                num = len(submodel.__dbclass__.__instance_cache__)
-                numtotal[0] += num
+                cache = submodel.__dbclass__.__instance_cache__
+                num = len(cache)
+                caches[id(cache)] = num
                 classdict[submodel.__dbclass__.__name__] = num
             else:
                 get_recurse(subclasses)
 
     get_recurse(SharedMemoryModel.__subclasses__())
-    return numtotal[0], classdict
+    return sum(caches.values()), classdict

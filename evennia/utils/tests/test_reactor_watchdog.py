@@ -11,7 +11,7 @@ checked separately.
 import os
 import sysconfig
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.test import SimpleTestCase, override_settings
@@ -35,9 +35,7 @@ class _Clock:
 
 class TestStallDetection(SimpleTestCase):
     def _make(self, clock, threshold_ms=200, interval=0.05):
-        return ReactorStallWatchdog(
-            threshold_ms=threshold_ms, interval=interval, _now=clock
-        )
+        return ReactorStallWatchdog(threshold_ms=threshold_ms, interval=interval, _now=clock)
 
     def test_over_threshold_block_warns_exactly_once(self):
         clock = _Clock()
@@ -116,9 +114,7 @@ class TestWorkLabel(SimpleTestCase):
     def test_falls_back_to_innermost_engine_frame(self):
         frame = _frames(_STDLIB_SITE, _ENGINE_SITE)
 
-        self.assertEqual(
-            reactor_watchdog._work_label(frame), "evennia/server/server.py:20 run"
-        )
+        self.assertEqual(reactor_watchdog._work_label(frame), "evennia/server/server.py:20 run")
 
 
 class TestStallWorkInWarning(SimpleTestCase):
@@ -133,9 +129,7 @@ class TestStallWorkInWarning(SimpleTestCase):
         frame = _frames(_game_site("world/rpg/courier.py", 300, "generate"))
 
         with (
-            patch.object(
-                reactor_watchdog.sys, "_current_frames", return_value={123: frame}
-            ),
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: frame}),
             patch.object(reactor_watchdog.logger, "log_warn") as mock_warn,
         ):
             wd._tick()
@@ -163,9 +157,7 @@ class TestStallWorkInWarning(SimpleTestCase):
         frame = _frames(_game_site("world/rpg/courier.py", 300, "generate"))
 
         with (
-            patch.object(
-                reactor_watchdog.sys, "_current_frames", return_value={123: frame}
-            ),
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: frame}),
             patch.object(reactor_watchdog.logger, "log_warn") as mock_warn,
         ):
             wd._tick()
@@ -206,12 +198,8 @@ class TestLiveSampling(SimpleTestCase):
 
     def _sampling_patches(self):
         return (
-            patch.object(
-                reactor_watchdog.sys, "_current_frames", return_value={123: object()}
-            ),
-            patch.object(
-                reactor_watchdog.traceback, "format_stack", return_value=["stack"]
-            ),
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: object()}),
+            patch.object(reactor_watchdog.traceback, "format_stack", return_value=["stack"]),
             patch.object(reactor_watchdog.logger, "log_warn"),
         )
 
@@ -297,3 +285,83 @@ class TestLifecycle(SimpleTestCase):
         # interval derives from threshold, clamped into range
         self.assertGreaterEqual(wd.interval, reactor_watchdog._MIN_INTERVAL)
         self.assertLessEqual(wd.interval, reactor_watchdog._MAX_INTERVAL)
+
+
+class TestGcAttribution(SimpleTestCase):
+    """A stall the collector caused is named as the collector, not as the stack."""
+
+    def _stall(self, probe, *, sampled_work=None, stall=0.30):
+        """Drive one stall of ``stall`` seconds and return the warning and recorded cause."""
+        clock = _Clock()
+        wd = ReactorStallWatchdog(threshold_ms=200, interval=0.05, _now=clock, _gc_probe=probe)
+        wd._target_thread_id = 123
+        frames = {123: _frames(_game_site(*sampled_work))} if sampled_work else {}
+        with (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value=frames),
+            patch.object(reactor_watchdog.logger, "log_warn") as warn,
+            patch.object(reactor_watchdog.prometheus_metrics, "record_reactor_stall") as record,
+        ):
+            wd._tick()
+            clock.advance(0.05)
+            if sampled_work:
+                wd._note_stalled_work(clock() + stall)
+            clock.advance(stall)
+            wd._tick()
+        return warn, record
+
+    def test_a_stall_mostly_inside_the_collector_names_the_collection(self):
+        probe = Mock(return_value=(0.28, (1.0, 1.28, 2, 1234)))
+
+        warn, record = self._stall(probe)
+
+        message = warn.call_args.args[0]
+        self.assertIn("at garbage collection (generation 2, 280ms, 1234 objects collected", message)
+        self.assertIn("ENGINE_GC_POLICY", message)
+        self.assertNotIn("Move blocking I/O", message)
+        self.assertEqual(record.call_args.args[1], "gc")
+
+    def test_the_probe_is_asked_about_the_blocked_span(self):
+        probe = Mock(return_value=(0.0, None))
+
+        self._stall(probe)
+
+        start, end = probe.call_args.args
+        self.assertAlmostEqual(start, 0.05)
+        self.assertAlmostEqual(end, 0.35)
+
+    def test_the_sampled_work_is_kept_alongside_the_collection(self):
+        probe = Mock(return_value=(0.28, (1.0, 1.28, 1, 7)))
+
+        warn, _record = self._stall(probe, sampled_work=("world/rpg/courier.py", 300, "generate"))
+
+        self.assertIn("; running world/rpg/courier.py:300 generate)", warn.call_args.args[0])
+
+    def test_a_minor_collector_share_does_not_hide_the_blocking_code(self):
+        probe = Mock(return_value=(0.05, (1.0, 1.05, 1, 7)))
+
+        warn, record = self._stall(probe, sampled_work=("world/rpg/courier.py", 300, "generate"))
+
+        message = warn.call_args.args[0]
+        self.assertIn(
+            "at world/rpg/courier.py:300 generate (garbage collection took 50ms of it)", message
+        )
+        self.assertIn("Move blocking I/O", message)
+        self.assertEqual(record.call_args.args[1], "work")
+
+    def test_no_collector_time_leaves_the_message_as_it_was(self):
+        warn, record = self._stall(Mock(return_value=(0.0, None)))
+
+        self.assertIn("at work not sampled. Move blocking I/O", warn.call_args.args[0])
+        self.assertEqual(record.call_args.args[1], "unknown")
+
+
+class TestSamplerCadence(SimpleTestCase):
+    def test_wakes_often_enough_to_catch_a_stall_barely_past_the_threshold(self):
+        for sample_ms in (250, 1500):
+            with self.subTest(sample_ms=sample_ms):
+                wd = ReactorStallWatchdog(threshold_ms=200, sample_threshold_ms=sample_ms)
+                self.assertLessEqual(wd.sample_interval, 0.03)
+
+    def test_cadence_scales_with_a_larger_threshold(self):
+        wd = ReactorStallWatchdog(threshold_ms=2000, sample_threshold_ms=2000)
+        self.assertAlmostEqual(wd.sample_interval, 0.25)

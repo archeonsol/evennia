@@ -60,6 +60,28 @@ class TestApplyPostgresEngineDefaults(SimpleTestCase):
         self.assertTrue(out["default"]["DISABLE_SERVER_SIDE_CURSORS"])
         self.assertTrue(out["default"]["CONN_HEALTH_CHECKS"])
 
+    def test_pool_setting_points_stock_postgres_at_the_pooled_backend(self):
+        with self.settings(ENGINE_DATABASE_POOL=True):
+            out = dbpg.apply_postgres_engine_defaults({"default": self._pg()})
+
+        self.assertEqual(out["default"]["ENGINE"], dbpg.POOLED_ENGINE)
+        self.assertEqual(out["default"]["ENGINE"], "evennia.server.db_backend.postgresql")
+
+    def test_pool_setting_off_leaves_the_engine_alone(self):
+        with self.settings(ENGINE_DATABASE_POOL=False):
+            out = dbpg.apply_postgres_engine_defaults({"default": self._pg()})
+
+        self.assertEqual(out["default"]["ENGINE"], "django.db.backends.postgresql")
+
+    def test_pool_setting_only_swaps_the_stock_postgres_backend(self):
+        custom = {"ENGINE": "myproject.backends.postgresql"}
+        sqlite_cfg = {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+        with self.settings(ENGINE_DATABASE_POOL=True):
+            out = dbpg.apply_postgres_engine_defaults({"a": custom, "b": sqlite_cfg})
+
+        self.assertEqual(out["a"]["ENGINE"], "myproject.backends.postgresql")
+        self.assertEqual(out["b"], sqlite_cfg)
+
     def test_non_postgres_aliases_untouched(self):
         sqlite_cfg = {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
         out = dbpg.apply_postgres_engine_defaults({"default": sqlite_cfg})
@@ -138,6 +160,22 @@ class TestConnectionCreatedReceiver(SimpleTestCase):
         with self.settings(ENGINE_DATABASE_STATEMENT_TIMEOUT_MS=0):
             dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
         cursor.execute.assert_any_call("SET default_transaction_read_only = on")
+
+    def test_a_connection_recycled_from_the_pool_is_not_set_up_again(self):
+        conn, cursor = self._fake_connection(alias="default")
+        conn.evennia_pool_reused = True
+        with self.settings(ENGINE_DATABASE_STATEMENT_TIMEOUT_MS=30000):
+            dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
+
+        conn.cursor.assert_not_called()
+
+    def test_a_connection_opened_fresh_is_set_up_even_with_the_pool_on(self):
+        conn, cursor = self._fake_connection(alias="default")
+        conn.evennia_pool_reused = False
+        with self.settings(ENGINE_DATABASE_STATEMENT_TIMEOUT_MS=30000):
+            dbpg._apply_engine_pg_session_init(sender=None, connection=conn)
+
+        cursor.execute.assert_any_call("SET statement_timeout = 30000")
 
     def test_non_postgres_vendor_skipped(self):
         conn, _ = self._fake_connection(vendor="sqlite", alias="default")

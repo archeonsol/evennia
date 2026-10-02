@@ -25,6 +25,7 @@ evennia.server
    evennia.server.collectstatic_cache
    evennia.server.connection_wizard
    evennia.server.database_postgres
+   evennia.server.db_pool
    evennia.server.deprecations
    evennia.server.engine_systems
    evennia.server.evennia_launcher
@@ -56,6 +57,7 @@ evennia.server
 .. toctree::
    :maxdepth: 6
 
+   evennia.server.db_backend
    evennia.server.game_index_client
    evennia.server.management
    evennia.server.portal

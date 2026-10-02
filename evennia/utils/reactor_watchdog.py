@@ -13,6 +13,11 @@ daemon thread periodically monitors the reactor heartbeat. If the reactor is
 actively stalled beyond `REACTOR_STALL_SAMPLE_MS` (default: 1500ms), it captures
 and logs the live stack trace of the IO thread using `sys._current_frames()` to
 pinpoint the exact blocking code site.
+
+A stall is not always the code that was running. When the collector accounts for
+most of it (see `evennia.utils.gc_policy`) the warning names the collection, with
+its generation and length, instead of blaming whatever frame happened to be on the
+stack when the pause landed.
 """
 
 import os
@@ -24,7 +29,8 @@ import traceback
 
 from django.conf import settings
 
-from evennia.utils import clock, logger
+from evennia.server import prometheus_metrics
+from evennia.utils import clock, gc_policy, logger
 
 #: Default poll interval as a fraction of the threshold, floored, so the
 #: measured stall stays close to the true block duration without polling
@@ -53,7 +59,8 @@ def _short_path(filename):
     ]
     for root in sorted(roots, key=len, reverse=True):
         if path.startswith(root + os.sep):
-            return os.path.relpath(path, root)
+            # forward slashes everywhere, so a log line reads the same on any host
+            return os.path.relpath(path, root).replace(os.sep, "/")
     return path
 
 
@@ -105,6 +112,9 @@ class ReactorStallWatchdog:
             Defaults to max(1500.0, threshold_ms * 3).
         _now (callable, optional): Monotonic clock returning seconds, injectable
             for testing. Defaults to `time.perf_counter`.
+        _gc_probe (callable, optional): `(start, end) -> (seconds, longest)`
+            reporting collector time inside a window on the same clock,
+            injectable for testing. Defaults to `gc_policy.pause_overlap`.
 
     """
 
@@ -114,6 +124,7 @@ class ReactorStallWatchdog:
         interval=None,
         sample_threshold_ms=None,
         _now=time.perf_counter,
+        _gc_probe=None,
     ):
         if threshold_ms is None:
             threshold_ms = getattr(settings, "REACTOR_STALL_WARNING_MS", 200)
@@ -130,6 +141,7 @@ class ReactorStallWatchdog:
             )
         self.sample_threshold_ms = float(sample_threshold_ms or 1500.0)
         self._now = _now
+        self._gc_probe = _gc_probe or gc_policy.pause_overlap
         self._last = None
         self._last_heartbeat = None
         self._loop = clock.make_looping(self._tick)
@@ -141,6 +153,17 @@ class ReactorStallWatchdog:
         self._sample_episode = None
         self._last_sample_log_time = 0.0
         self._stall_work = None
+
+    @property
+    def sample_interval(self) -> float:
+        """float: Seconds between sampler wake-ups.
+
+        Fine enough that a stall barely past the warning threshold is still caught
+        in the act: a wake-up has to land in the sliver between the threshold and
+        the end of the stall, and a 100 ms cadence missed 35% of production stalls.
+        An idle wake-up is two attribute reads, so waking often is cheap.
+        """
+        return max(0.01, min(0.5, self.threshold_ms / 8000.0, self.sample_threshold_ms / 3000.0))
 
     @property
     def enabled(self) -> bool:
@@ -183,12 +206,7 @@ class ReactorStallWatchdog:
 
     def _sampler_loop(self) -> None:
         """Background thread that sleeps and checks if the reactor thread is frozen."""
-        # Waking at half the warning threshold lets a warned stall be located
-        # before it ends.
-        sample_interval = max(
-            0.05,
-            min(0.5, self.sample_threshold_ms / 3000.0, self.threshold_ms / 2000.0),
-        )
+        sample_interval = self.sample_interval
         while self._running:
             time.sleep(sample_interval)
             if not self._running:
@@ -238,10 +256,7 @@ class ReactorStallWatchdog:
         with self._state_lock:
             if episode != self._heartbeat_episode:
                 return False
-            if (
-                self._sample_episode == episode
-                and now - self._last_sample_log_time < 5.0
-            ):
+            if self._sample_episode == episode and now - self._last_sample_log_time < 5.0:
                 return False
             self._sample_episode = episode
             self._last_sample_log_time = now
@@ -271,19 +286,50 @@ class ReactorStallWatchdog:
         with self._state_lock:
             ended = self._heartbeat_episode
             work = (
-                self._stall_work[1]
-                if self._stall_work and self._stall_work[0] == ended
-                else None
+                self._stall_work[1] if self._stall_work and self._stall_work[0] == ended else None
             )
             self._last_heartbeat = now
             self._heartbeat_episode += 1
         if self._last is not None:
             stall_ms = (now - self._last - self.interval) * 1000.0
             if stall_ms > self.threshold_ms:
-                logger.log_warn(
-                    "Reactor stall: a single reactor turn blocked for ~%.0fms "
-                    "(threshold %.0fms) at %s. Move blocking I/O off the reactor with "
-                    "evennia.utils.defer."
-                    % (stall_ms, self.threshold_ms, work or "work not sampled")
-                )
+                self._report_stall(stall_ms, self._last + self.interval, now, work)
         self._last = now
+
+    def _report_stall(self, stall_ms, window_start, window_end, work) -> None:
+        """Log one over-threshold stall, naming the collector when it caused it."""
+        paused, longest = self._gc_probe(window_start, window_end)
+        cause = "work" if work else "unknown"
+        if longest is not None and paused * 1000.0 >= stall_ms * 0.5:
+            cause = "gc"
+            start, end, generation, collected = longest
+            running = f"; running {work}" if work else ""
+            message = (
+                "Reactor stall: a single reactor turn blocked for ~%.0fms (threshold %.0fms) "
+                "at garbage collection (generation %s, %.0fms, %s objects collected%s). "
+                "The collector was running, not blocking I/O; see ENGINE_GC_POLICY."
+                % (
+                    stall_ms,
+                    self.threshold_ms,
+                    generation,
+                    (end - start) * 1000.0,
+                    collected,
+                    running,
+                )
+            )
+        else:
+            share = (
+                " (garbage collection took %.0fms of it)" % (paused * 1000.0)
+                if longest is not None
+                else ""
+            )
+            message = (
+                "Reactor stall: a single reactor turn blocked for ~%.0fms "
+                "(threshold %.0fms) at %s%s. Move blocking I/O off the reactor with "
+                "evennia.utils.defer."
+                % (stall_ms, self.threshold_ms, work or "work not sampled", share)
+            )
+        logger.log_warn(message)
+        prometheus_metrics.best_effort(
+            "reactor stall", prometheus_metrics.record_reactor_stall, stall_ms / 1000.0, cause
+        )

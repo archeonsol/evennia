@@ -535,6 +535,12 @@ class EvenniaServerService(MultiService):
         self.stall_watchdog = ReactorStallWatchdog()
         self.stall_watchdog.start()
 
+        # take over garbage collection last, once the boot heap is complete; the
+        # one full collection it runs is the last long pause of startup.
+        from evennia.utils import gc_policy
+
+        gc_policy.apply_gc_policy()
+
     async def _await_hooks(self, instances, hook_name, *args, **kwargs):
         """Run ``hook_name`` on each instance and await any returned awaitables."""
         import asyncio

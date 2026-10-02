@@ -58,6 +58,9 @@ IDMAPPER_FLUSH_BATCHES_TOTAL = None
 IDMAPPER_FLUSH_OBJECTS_TOTAL = None
 IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = None
 IDMAPPER_FLUSH_FAILURES_TOTAL = None
+GC_PAUSE_SECONDS = None
+REACTOR_STALL_SECONDS = None
+DB_POOL_EVENTS_TOTAL = None
 BUS_OUTGOING_DEPTH = None
 BUS_OUTGOING_BYTES = None
 BUS_INCOMING_DEPTH = None
@@ -137,7 +140,8 @@ def _create_metrics() -> bool:
     global IDMAPPER_FLUSH_DURATION_SECONDS, IDMAPPER_FLUSH_ACTIVE_SECONDS
     global IDMAPPER_FLUSH_BATCHES_TOTAL
     global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
-    global IDMAPPER_FLUSH_FAILURES_TOTAL
+    global IDMAPPER_FLUSH_FAILURES_TOTAL, GC_PAUSE_SECONDS, REACTOR_STALL_SECONDS
+    global DB_POOL_EVENTS_TOTAL
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
     global BUS_INCOMING_DEPTH, BUS_INCOMING_BYTES, BUS_INCOMING_WAIT_SECONDS
     global BUS_REJECTED_TOTAL, BUS_WRITE_BATCH_SIZE
@@ -402,6 +406,24 @@ def _create_metrics() -> bool:
         "evennia_idmapper_flush_failures_total",
         "Automatic idmapper pressure sweeps aborted by an error",
     )
+    GC_PAUSE_SECONDS = Histogram(
+        "evennia_gc_pause_seconds",
+        "Wall time the process spent inside one garbage collection",
+        ("generation",),
+        buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5),
+    )
+    REACTOR_STALL_SECONDS = Histogram(
+        "evennia_reactor_stall_seconds",
+        "Reactor turns that blocked past REACTOR_STALL_WARNING_MS, by suspected cause",
+        ("cause",),
+        buckets=(0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.5, 5.0, 10.0, 30.0),
+    )
+    DB_POOL_EVENTS_TOTAL = Counter(
+        "evennia_db_pool_events_total",
+        "Database connection pool events: opened (new connection), reused, parked, "
+        "evicted (pool full) and discarded (hung up or too old)",
+        ("event",),
+    )
     return True
 
 
@@ -464,6 +486,51 @@ def record_idmapper_flush(
         IDMAPPER_FLUSH_ROW_QUERIES_TOTAL.inc(int(stats.get("row_queries") or 0))
     if failed and IDMAPPER_FLUSH_FAILURES_TOTAL is not None:
         IDMAPPER_FLUSH_FAILURES_TOTAL.inc()
+
+
+def record_gc_pause(generation: int, duration_seconds: float) -> None:
+    """Record one garbage collection's wall time, labelled by generation.
+
+    Args:
+        generation (int): Collector generation (``0`` young, ``1`` increment,
+            ``2`` full). Anything else is labelled ``other``.
+        duration_seconds (float): Time between the collector's start and stop
+            notifications.
+    """
+    if not _init_metrics() or GC_PAUSE_SECONDS is None:
+        return
+    label = str(generation) if generation in (0, 1, 2) else "other"
+    GC_PAUSE_SECONDS.labels(generation=label).observe(max(0.0, float(duration_seconds)))
+
+
+_STALL_CAUSES = frozenset({"gc", "work", "unknown"})
+_DB_POOL_EVENTS = frozenset({"opened", "reused", "parked", "evicted", "discarded"})
+
+
+def record_reactor_stall(duration_seconds: float, cause: str) -> None:
+    """Record one reactor stall the watchdog warned about.
+
+    Args:
+        duration_seconds (float): How long the turn blocked.
+        cause (str): ``gc`` when the collector accounted for most of it, ``work``
+            when the watchdog sampled the code that was running, else ``unknown``.
+    """
+    if not _init_metrics() or REACTOR_STALL_SECONDS is None:
+        return
+    label = cause if cause in _STALL_CAUSES else "unknown"
+    REACTOR_STALL_SECONDS.labels(cause=label).observe(max(0.0, float(duration_seconds)))
+
+
+def record_db_pool_event(event: str) -> None:
+    """Count one database connection pool event.
+
+    Args:
+        event (str): ``opened``, ``reused``, ``parked``, ``evicted`` or
+            ``discarded``; anything else is dropped rather than minting a series.
+    """
+    if event not in _DB_POOL_EVENTS or not _init_metrics() or DB_POOL_EVENTS_TOTAL is None:
+        return
+    DB_POOL_EVENTS_TOTAL.labels(event=event).inc()
 
 
 def record_location_cmdset_cache_hit() -> None:

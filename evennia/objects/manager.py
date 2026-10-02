@@ -358,6 +358,39 @@ class ObjectDBManager(TypedObjectManager):
 
     # main search methods and helper functions
 
+    def _cached_dbref_match(self, dbref):
+        """
+        Answer a dbref lookup from the idmapper when the object is already loaded.
+
+        A dbref lookup used to cost a query even for an object that is sitting in
+        memory, and one that is gone from the database cost two, because the miss
+        fell through to a name search. Game code asks by dbref constantly, so a
+        tick that resolves a few hundred stored ids paid for it on the reactor.
+        The idmapper already answers ``.get(pk=...)`` this way.
+
+        Args:
+            dbref (int): The primary key to look up.
+
+        Returns:
+            QuerySet or None: A queryset already holding the cached object, which
+            still chains like any other, or ``None`` when the object is not in
+            memory (or this thread may not read the cache) and the database
+            must be asked.
+
+        """
+        try:
+            pk = int(dbref)  # the parsed dbref may be text; the cache is keyed by int
+        except (TypeError, ValueError):
+            return None
+        instance = self.model.get_cached_instance(pk)
+        if instance is None:
+            return None
+        matches = self.filter(id=pk)
+        # Pre-evaluated: reading it costs nothing, and any further ``.filter()`` builds a
+        # new lazy queryset that asks the database as usual.
+        matches._result_cache = [instance]
+        return matches
+
     def search_object(
         self,
         searchdata,
@@ -461,7 +494,7 @@ class ObjectDBManager(TypedObjectManager):
         dbref = not attribute_name and exact and use_dbref and self.dbref(searchdata)
         if dbref:
             # Easiest case - dbref matching (always exact)
-            dbref_match = self.dbref_search(dbref)
+            dbref_match = self._cached_dbref_match(dbref) or self.dbref_search(dbref)
             if dbref_match:
                 dmatch = dbref_match[0]
                 if not candidates or dmatch in candidates:

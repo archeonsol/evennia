@@ -37,6 +37,12 @@ from typing import Any, Dict, Set
 from django.db.backends.signals import connection_created
 from django.dispatch import receiver
 
+#: The engine's PostgreSQL backend, which recycles connections (``ENGINE_DATABASE_POOL``).
+POOLED_ENGINE = "evennia.server.db_backend.postgresql"
+_STOCK_POSTGRES_ENGINES = frozenset(
+    {"django.db.backends.postgresql", "django.db.backends.postgresql_psycopg2"}
+)
+
 # Aliases registered by ``build_read_replica_entry``. Read by the
 # ``connection_created`` receiver to issue ``SET default_transaction_read_only = on``
 # on those connections.
@@ -47,6 +53,10 @@ def apply_postgres_engine_defaults(databases: Dict[str, Any]) -> Dict[str, Any]:
     """
     Return a copy of ``DATABASES`` with Underspire engine connection defaults applied
     to PostgreSQL backends.
+
+    With ``ENGINE_DATABASE_POOL`` on, also points each stock PostgreSQL entry at
+    the engine's backend, which parks closed connections for reuse
+    (:mod:`evennia.server.db_pool`).
 
     Applies ``CONN_MAX_AGE`` / ``CONN_HEALTH_CHECKS`` here. When
     ``ENGINE_DATABASE_TRANSACTION_POOLING`` is enabled, persistent connections
@@ -61,12 +71,16 @@ def apply_postgres_engine_defaults(databases: Dict[str, Any]) -> Dict[str, Any]:
     health_checks = bool(getattr(settings, "ENGINE_DATABASE_CONN_HEALTH_CHECKS", True))
     transaction_pooling = bool(getattr(settings, "ENGINE_DATABASE_TRANSACTION_POOLING", False))
 
+    pool_connections = bool(getattr(settings, "ENGINE_DATABASE_POOL", False))
+
     for alias, cfg in out.items():
         if not isinstance(cfg, dict):
             continue
         engine = cfg.get("ENGINE", "")
         if "postgresql" not in engine and "postgres" not in engine:
             continue
+        if pool_connections and engine in _STOCK_POSTGRES_ENGINES:
+            cfg["ENGINE"] = POOLED_ENGINE
         if transaction_pooling:
             cfg["CONN_MAX_AGE"] = 0
             cfg["DISABLE_SERVER_SIDE_CURSORS"] = True
@@ -105,6 +119,9 @@ def _apply_engine_pg_session_init(sender, connection, **kwargs):
     parameter); see the module docstring.
     """
     if connection.vendor != "postgresql":
+        return
+    if getattr(connection, "evennia_pool_reused", False) is True:
+        # recycled from the pool: it was set up when it was first opened
         return
     from django.conf import settings
 
