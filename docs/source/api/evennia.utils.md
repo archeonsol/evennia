@@ -27,6 +27,7 @@ evennia.utils
    evennia.utils.evtable
    evennia.utils.funcparser
    evennia.utils.gametime
+   evennia.utils.gc_policy
    evennia.utils.hex_colors
    evennia.utils.http
    evennia.utils.inflection
