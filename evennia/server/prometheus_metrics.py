@@ -59,6 +59,8 @@ IDMAPPER_FLUSH_OBJECTS_TOTAL = None
 IDMAPPER_FLUSH_ROW_QUERIES_TOTAL = None
 IDMAPPER_FLUSH_FAILURES_TOTAL = None
 GC_PAUSE_SECONDS = None
+GC_RECLAIM_TOTAL = None
+GC_RECLAIMED_OBJECTS_TOTAL = None
 REACTOR_STALL_SECONDS = None
 DB_POOL_EVENTS_TOTAL = None
 BUS_OUTGOING_DEPTH = None
@@ -117,6 +119,50 @@ def best_effort(label: str, recorder, *args, **kwargs) -> None:
         logger.log_warn(f"prometheus: {label} telemetry failed: {err}")
 
 
+def _register_memory_gauges(Gauge) -> None:
+    """Register gauges that read the process when scraped.
+
+    These answer "where did the memory go" without a debugger: how many objects
+    the idmapper holds, how many the collector no longer looks at, and how many
+    blocks the interpreter has allocated. Each is a cheap read.
+    """
+
+    def idmapper_instances() -> float:
+        from evennia.utils.idmapper.models import cache_size
+
+        return float(cache_size()[0])
+
+    def frozen_objects() -> float:
+        import gc
+
+        return float(gc.get_freeze_count())
+
+    def allocated_blocks() -> float:
+        import sys
+
+        return float(sys.getallocatedblocks())
+
+    for name, doc, reader in (
+        (
+            "evennia_idmapper_cached_instances",
+            "Instances held by the idmapper caches (each shared cache counted once)",
+            idmapper_instances,
+        ),
+        (
+            "evennia_gc_frozen_objects",
+            "Objects frozen out of garbage collection after boot",
+            frozen_objects,
+        ),
+        (
+            "evennia_python_allocated_blocks",
+            "Memory blocks currently allocated by the interpreter's object allocator",
+            allocated_blocks,
+        ),
+    ):
+        gauge = Gauge(name, doc)
+        gauge.set_function(reader)
+
+
 def _create_metrics() -> bool:
     """Build every metric on the default registry; caller holds the lock."""
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_RUNS_TOTAL
@@ -141,6 +187,7 @@ def _create_metrics() -> bool:
     global IDMAPPER_FLUSH_BATCHES_TOTAL
     global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
     global IDMAPPER_FLUSH_FAILURES_TOTAL, GC_PAUSE_SECONDS, REACTOR_STALL_SECONDS
+    global GC_RECLAIM_TOTAL, GC_RECLAIMED_OBJECTS_TOTAL
     global DB_POOL_EVENTS_TOTAL
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
     global BUS_INCOMING_DEPTH, BUS_INCOMING_BYTES, BUS_INCOMING_WAIT_SECONDS
@@ -412,6 +459,16 @@ def _create_metrics() -> bool:
         ("generation",),
         buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5),
     )
+    GC_RECLAIM_TOTAL = Counter(
+        "evennia_gc_reclaim_total",
+        "Full collections run by the managed GC policy, by what asked for them",
+        ("reason",),
+    )
+    GC_RECLAIMED_OBJECTS_TOTAL = Counter(
+        "evennia_gc_reclaimed_objects_total",
+        "Unreachable objects freed by the managed GC policy's full collections",
+    )
+    _register_memory_gauges(Gauge)
     REACTOR_STALL_SECONDS = Histogram(
         "evennia_reactor_stall_seconds",
         "Reactor turns that blocked past REACTOR_STALL_WARNING_MS, by suspected cause",
@@ -488,6 +545,21 @@ def record_idmapper_flush(
         IDMAPPER_FLUSH_FAILURES_TOTAL.inc()
 
 
+def record_gc_reclaim(reason: str, collected: int) -> None:
+    """Count one full collection run by the managed GC policy.
+
+    Args:
+        reason (str): ``growth``, ``requested``, ``scheduled``, ``overdue`` or ``manual``.
+        collected (int): Unreachable objects it freed.
+    """
+    if not _init_metrics() or GC_RECLAIM_TOTAL is None:
+        return
+    label = reason if reason in _GC_RECLAIM_REASONS else "manual"
+    GC_RECLAIM_TOTAL.labels(reason=label).inc()
+    if GC_RECLAIMED_OBJECTS_TOTAL is not None and collected > 0:
+        GC_RECLAIMED_OBJECTS_TOTAL.inc(int(collected))
+
+
 def record_gc_pause(generation: int, duration_seconds: float) -> None:
     """Record one garbage collection's wall time, labelled by generation.
 
@@ -504,6 +576,7 @@ def record_gc_pause(generation: int, duration_seconds: float) -> None:
 
 
 _STALL_CAUSES = frozenset({"gc", "work", "unknown"})
+_GC_RECLAIM_REASONS = frozenset({"growth", "requested", "scheduled", "overdue", "manual"})
 _DB_POOL_EVENTS = frozenset({"opened", "reused", "parked", "evicted", "discarded"})
 
 

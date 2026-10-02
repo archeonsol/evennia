@@ -36,6 +36,7 @@ evennia.utils
    evennia.utils.optionclasses
    evennia.utils.optionhandler
    evennia.utils.picklefield
+   evennia.utils.process_memory
    evennia.utils.reactor_watchdog
    evennia.utils.search
    evennia.utils.systems

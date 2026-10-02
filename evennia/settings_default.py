@@ -892,12 +892,23 @@ ENGINE_GC_INTERVAL_MS = 50
 # Managed policy: freeze the boot heap after its one full collection, so modules
 # and registries are never scanned again.
 ENGINE_GC_FREEZE_AT_START = True
-# Managed policy: a full "deep clean" reclaims cycles that outlived a young
-# collection. It is due every ENGINE_GC_DEEP_CLEAN_INTERVAL seconds (0 = never),
-# waits for a moment with no sessions connected, and runs anyway once
-# ENGINE_GC_DEEP_CLEAN_MAX_DEFER seconds have passed since the last one.
-ENGINE_GC_DEEP_CLEAN_INTERVAL = 86400
-ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 259200
+# Managed policy: a full collection ("deep clean") reclaims cycles that outlived a
+# young collection. Every instance the idmapper drops (evicted, or deleted) is one,
+# so a policy that only collects the young generation leaks them. A deep clean runs:
+#  - when the number of blocks the interpreter has allocated has grown
+#    ENGINE_GC_RECLAIM_GROWTH_PERCENT percent since the last full collection
+#    (0 = never). A collection that finds little (the growth was live data) doubles
+#    the growth the next one waits for, up to eight times;
+#  - on request (evennia.utils.gc_policy.request_reclaim), never closer than
+#    ENGINE_GC_RECLAIM_MIN_INTERVAL seconds to the previous full collection;
+#  - as a backstop, every ENGINE_GC_DEEP_CLEAN_INTERVAL seconds with no other full
+#    collection (0 = never). The backstop waits for a moment with no sessions
+#    connected and runs anyway once ENGINE_GC_DEEP_CLEAN_MAX_DEFER seconds have
+#    passed since the last one.
+ENGINE_GC_RECLAIM_GROWTH_PERCENT = 15
+ENGINE_GC_RECLAIM_MIN_INTERVAL = 300
+ENGINE_GC_DEEP_CLEAN_INTERVAL = 21600
+ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 43200
 # Log any single collection that pauses the process at least this long (ms; 0 = off).
 ENGINE_GC_PAUSE_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).

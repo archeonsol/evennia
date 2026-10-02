@@ -7,25 +7,47 @@ production heap (several million tracked objects, mostly idmapper instances and
 the JSONB documents behind them) the Python 3.14 incremental collector marks the
 whole heap in one uninterrupted step at the start of each old-generation cycle,
 about every six minutes, for 0.5 to 1.3 seconds, and scans a further increment
-of the old generation on most other collections. Those passes found almost
-nothing: 7.5 thousand objects in two hours, against 4.6 million from young
-collections. The pauses bought no memory.
+of the old generation on most other collections.
+
+Those pauses do buy something: they are the only thing that frees a cycle which
+outlived a young collection, and the largest source of such cycles is the
+idmapper itself. An evicted instance and its handlers refer to one another, so
+reference counting never frees it, and on production each cache sweep leaves
+dozens of container objects behind per evicted instance. A policy that only
+collects the young generation therefore leaks every eviction. (The first version
+of this module did exactly that and the process grew by about 5 MB a minute.)
 
 The ``managed`` policy keeps what the collector is good at and drops what costs:
 
 * **Boot.** One full collection runs after startup, while nobody is waiting, and
   the survivors are frozen. Frozen objects (modules, registries, the code) are
-  never scanned again, which also makes every later full collection cheaper.
+  never scanned again, which also makes every later full collection cheaper. A
+  frozen cycle is never freed either, so an instance that was cached at boot and
+  is evicted later stays until the next restart.
 * **Steady state.** Automatic collection is disabled. A timer on the game loop
   collects the young generation once enough new objects have accumulated. A young
   pass touches only objects allocated since the last one, so it costs about
   35 ns per object and cannot trigger an old-generation mark. Because the timer
   fires between turns rather than at an allocation in the middle of one, most of
   a turn's temporary cycles are already dead when it runs.
-* **Deep clean.** A full collection reclaims cycles that outlived a young pass.
-  It runs from the system scheduler when no one is connected (or, after
-  ``ENGINE_GC_DEEP_CLEAN_MAX_DEFER``, regardless) and reports how much it found,
-  so an operator can see whether the interval is right.
+* **Reclaim.** A full collection of the unfrozen heap frees what young passes
+  cannot. It costs a fraction of a second (the unfrozen live objects, not the
+  garbage, set the price), so it runs when the interpreter's object heap has grown
+  by ``ENGINE_GC_RECLAIM_GROWTH_PERCENT`` since the last one, and as a backstop from
+  the system scheduler (:func:`deep_clean_if_due`). Growth is counted in allocated
+  blocks, not process size: freed memory goes back to the allocator's pool, not to
+  the operating system, so the process stops growing while garbage fills the pool
+  and a trigger on its size would wait ever longer. A clean that finds little (the
+  growth was live data, such as a cache filling) doubles the growth the next one
+  waits for, so it does not cost a pause every few minutes. Each reports what it
+  found and the process size before and after, so an operator can see whether the
+  trigger is right. Code that knows it just dropped a great deal can ask for one
+  with :func:`request_reclaim`.
+
+Under Python 3.14 a collection's ``generation`` is 0 for a young-only pass (what
+``gc.collect(0)`` runs), 1 for an increment (the young generation plus a slice of
+the old one, which is what the automatic collector runs) and 2 for a full pass.
+``python_gc_*`` metrics use the same numbers.
 
 Every collection, in either policy, is timed. Pauses feed the
 ``evennia_gc_pause_seconds`` histogram, long ones are logged, and the reactor
@@ -36,6 +58,7 @@ named as such rather than blamed on whatever code happened to be running.
 from __future__ import annotations
 
 import gc
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -43,7 +66,7 @@ from dataclasses import dataclass
 from django.conf import settings
 
 from evennia.server import prometheus_metrics
-from evennia.utils import clock, logger
+from evennia.utils import clock, logger, process_memory
 
 #: Seam for tests: the monotonic clock collection timestamps are taken from.
 #: The reactor stall watchdog uses the same clock, so windows compare directly.
@@ -55,6 +78,16 @@ _POLICIES = ("managed", "default")
 _REMEMBER_PAUSE_SECONDS = 0.005
 #: Long-pause warnings are spaced at least this far apart (seconds).
 _WARN_EVERY_SECONDS = 10.0
+#: How often the growth trigger counts the interpreter's allocated blocks (seconds).
+#: The count visits every allocator pool, about a millisecond for a 1.5 GB heap.
+_GROWTH_CHECK_SECONDS = 15.0
+#: A full collection that frees fewer unreachable objects than this found little: the
+#: growth that asked for it was not garbage.
+_USEFUL_OBJECTS = 20_000
+#: The growth trigger waits at most this many times ``ENGINE_GC_RECLAIM_GROWTH_PERCENT``.
+_MAX_GROWTH_FACTOR = 8
+#: Reasons that label ``evennia_gc_reclaim_total``; anything else is ``manual``.
+_RECLAIM_REASONS = frozenset({"growth", "requested", "scheduled", "overdue", "manual"})
 
 _RECENT_PAUSES: deque = deque(maxlen=128)
 
@@ -72,6 +105,11 @@ class _State:
         self.booted = False
         self.was_enabled = True
         self.last_deep_clean = 0.0
+        self.last_reclaim = None
+        self.pending = None
+        self.blocks_floor = None
+        self.growth_factor = 1
+        self.next_growth_check = 0.0
         self.started = None
         self.last_warn = None
         self.suppressed = 0
@@ -248,6 +286,7 @@ class _YoungCollector:
         try:
             if gc.get_count()[0] >= self.threshold:
                 gc.collect(0)
+            _reclaim_if_needed()
         except Exception:
             logger.log_trace("gc_policy: young-generation collection failed")
         finally:
@@ -288,6 +327,8 @@ def _manage(loop):
             gc.freeze()
         _state.booted = True
         _state.last_deep_clean = time.time()
+        _state.last_reclaim = _now()
+        _state.blocks_floor = _allocated_blocks()
         logger.log_info(
             f"gc: boot heap settled in {(_now() - started) * 1000:.0f}ms "
             f"({collected} unreachable objects collected{', survivors frozen' if freeze else ''})."
@@ -341,27 +382,117 @@ def stop_gc_policy():
             gc.enable()
 
 
+def _rss_mb():
+    """Resident memory of this process in MB, or ``None``. A seam for tests."""
+    return process_memory.current_rss_mb()
+
+
+def _allocated_blocks():
+    """Memory blocks the interpreter has allocated right now. A seam for tests."""
+    return sys.getallocatedblocks()
+
+
 def deep_clean(reason="manual"):
     """Run one full collection and report what it cost.
 
     A full collection marks the whole unfrozen heap, so it pauses the process for
-    a noticeable fraction of a second. Call it when no one is waiting.
+    a noticeable fraction of a second. Every full collection the policy runs comes
+    through here, which is how the growth trigger knows where the process stood
+    afterwards and how much the collection was worth.
 
     Args:
-        reason (str, optional): Free text for the log line.
+        reason (str, optional): Why it ran (``sweep``, ``growth``, ``scheduled``,
+            ``overdue`` or ``manual``), for the log line and the metrics.
 
     Returns:
         DeepClean: How many objects were freed and how long it took.
     """
+    rss_before, blocks_before = _rss_mb(), _allocated_blocks()
     started = _now()
     collected = _intentional_collect()
-    seconds = _now() - started
+    ended = _now()
+    seconds = ended - started
     _state.last_deep_clean = time.time()
+    _state.last_reclaim = ended
+    rss_after, blocks_after = _rss_mb(), _allocated_blocks()
+    _state.blocks_floor = blocks_after
+    if collected < _USEFUL_OBJECTS:
+        _state.growth_factor = min(_state.growth_factor * 2, _MAX_GROWTH_FACTOR)
+    else:
+        _state.growth_factor = 1
+    size = (
+        f", process {rss_before:.0f} -> {rss_after:.0f} MB"
+        if rss_before is not None and rss_after is not None
+        else ""
+    )
     logger.log_info(
         f"gc deep clean ({reason}): {collected} unreachable objects collected "
-        f"in {seconds * 1000:.0f}ms."
+        f"in {seconds * 1000:.0f}ms (allocated blocks {blocks_before} -> {blocks_after}{size})."
+    )
+    label = reason if reason in _RECLAIM_REASONS else "manual"
+    prometheus_metrics.best_effort(
+        "gc reclaim", prometheus_metrics.record_gc_reclaim, label, collected
     )
     return DeepClean(collected, seconds)
+
+
+def request_reclaim(reason="requested"):
+    """Ask for a full collection at the game loop's next free moment.
+
+    For code that knows it just dropped a great deal of cyclic garbage. Nothing
+    runs inside this call. The loop timer that drives young collections notices the
+    request and runs :func:`deep_clean` between turns, no sooner than
+    ``ENGINE_GC_RECLAIM_MIN_INTERVAL`` seconds after the previous full collection,
+    so a burst of requests costs one pause. Safe to call from any thread.
+
+    Args:
+        reason (str, optional): Why, for the metrics label.
+
+    Returns:
+        bool: Whether the request was taken. ``False`` unless the managed policy is
+        in force: under ``default`` the interpreter's own collector finds the
+        garbage and there is nothing to ask for.
+    """
+    if not _state.managed:
+        return False
+    if _state.pending is None:
+        _state.pending = reason if reason in _RECLAIM_REASONS else "requested"
+    return True
+
+
+def _reclaim_min_interval():
+    return float(getattr(settings, "ENGINE_GC_RECLAIM_MIN_INTERVAL", 300) or 0)
+
+
+def _grown_enough():
+    """Whether the object heap has grown enough since the last full collection to ask for one."""
+    percent = float(getattr(settings, "ENGINE_GC_RECLAIM_GROWTH_PERCENT", 15) or 0)
+    if percent <= 0 or not _state.blocks_floor:
+        return False
+    limit = _state.blocks_floor * (1.0 + percent * _state.growth_factor / 100.0)
+    return _allocated_blocks() >= limit
+
+
+def _reclaim_if_needed():
+    """Run the full collection a request or the growth trigger calls for, if spacing allows.
+
+    Called from the loop timer after each young check, so it runs between turns.
+    """
+    if not _state.managed:
+        return
+    now = _now()
+    last = _state.last_reclaim
+    spaced = last is None or now - last >= _reclaim_min_interval()
+    if _state.pending is not None:
+        if spaced:
+            reason, _state.pending = _state.pending, None
+            deep_clean(reason)
+        return
+    if now < _state.next_growth_check:
+        return
+    _state.next_growth_check = now + _GROWTH_CHECK_SECONDS
+    if spaced and _grown_enough():
+        deep_clean("growth")
 
 
 def _connected_sessions():
