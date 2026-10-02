@@ -1,3 +1,5 @@
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from mock import MagicMock, patch
 
 from evennia.authorization.policy import Always, Never, PredicateRequirement, RequiresCapability
@@ -325,6 +327,55 @@ class DefaultObjectTest(BaseEvenniaTest):
         self.assertEqual(
             self.obj1.get_numbered_name(1, self.char1, return_string=True, no_article=True), "Obj"
         )
+
+
+class TestDbrefSearchUsesTheCache(BaseEvenniaTest):
+    """``search_object("#id")`` answers from the idmapper before it asks the database."""
+
+    def test_a_cached_object_is_found_without_a_query(self):
+        with self.assertNumQueries(0):
+            matches = ObjectDB.objects.search_object(f"#{self.obj1.id}")
+            self.assertTrue(matches)
+            self.assertIs(matches[0], self.obj1)
+            self.assertEqual(list(matches), [self.obj1])
+            self.assertEqual(matches.count(), 1)
+
+    def test_an_object_that_left_the_cache_is_still_found_in_the_database(self):
+        pk = self.obj1.id
+        ObjectDB.flush_cached_instance(self.obj1, force=True)
+
+        with CaptureQueriesContext(connection) as queries:
+            matches = ObjectDB.objects.search_object(f"#{pk}")
+            found = [obj.id for obj in matches]
+
+        self.assertEqual(found, [pk])
+        self.assertGreaterEqual(len(queries), 1)
+
+    def test_a_missing_dbref_finds_nothing(self):
+        self.assertEqual(list(ObjectDB.objects.search_object("#99999999")), [])
+
+    def test_candidates_still_restrict_a_cached_match(self):
+        dbref = f"#{self.obj1.id}"
+
+        self.assertEqual(list(ObjectDB.objects.search_object(dbref, candidates=[self.obj2])), [])
+        self.assertEqual(
+            list(ObjectDB.objects.search_object(dbref, candidates=[self.obj1])), [self.obj1]
+        )
+
+    def test_the_result_is_still_a_queryset_that_chains(self):
+        matches = ObjectDB.objects.search_object(f"#{self.obj1.id}")
+
+        self.assertEqual(list(matches.filter(db_key=self.obj1.key)), [self.obj1])
+        self.assertEqual(list(matches.filter(db_key="no such key")), [])
+
+    def test_a_non_dbref_search_is_unchanged(self):
+        self.assertEqual(list(ObjectDB.objects.search_object(self.obj1.key)), [self.obj1])
+
+    def test_a_search_that_turns_off_dbref_lookup_treats_the_text_as_a_name(self):
+        with patch.object(ObjectDB, "get_cached_instance") as cached:
+            ObjectDB.objects.search_object(f"#{self.obj1.id}", use_dbref=False)
+
+        cached.assert_not_called()
 
 
 class TestObjectManager(BaseEvenniaTest):
