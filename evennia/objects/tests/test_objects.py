@@ -631,6 +631,26 @@ class TestContentHandler(BaseEvenniaTest):
         self.assertIn(str(ghost), logger.log_warn.call_args.args[0])
         logger.log_err.assert_not_called()
 
+    def test_arrival_reaches_a_view_through_an_orphaned_instance(self):
+        """A stale held instance must not hide people who move in later.
+
+        The idmapper can evict a room and a later save re-cache the stale
+        instance over the reloaded one. A viewer holding the reloaded instance
+        reads through the live row, so an arrival reconciled against the
+        re-cached instance is still seen.
+        """
+        fresh = self._reload(self.room1)
+        newcomer = create.create_object(key="newcomer", location=self.room2)
+        self.assertNotIn(newcomer, fresh.contents)
+
+        self.room1.save()  # re-cache the stale, evicted instance
+        self.assertIs(ObjectDB.__instance_cache__.get(self.room1.pk), self.room1)
+
+        newcomer.location = self.room1
+
+        self.assertIn(newcomer, self.room1.contents)
+        self.assertIn(newcomer, fresh.contents)
+
 
 class TestMoveResult(BaseEvenniaTest):
     """The truthful, bool-compatible result of ``move_to`` (MoveResult)."""

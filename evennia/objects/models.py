@@ -98,6 +98,17 @@ class ContentsHandler:
             objects (list): the Objects inside this location
 
         """
+        # A held instance can outlive its time as the idmapper's live one: the
+        # row may be evicted and reloaded, or a save may re-cache the stale
+        # instance over the reloaded one. Moves reconcile the instance they and
+        # the idmapper currently hold, so an orphaned instance's own cache never
+        # learns of later arrivals -- a viewer holding it would stop seeing
+        # people who walk in. When the idmapper holds a different live instance
+        # for this row, read through it instead. An evicted row with no live
+        # replacement falls through to the cache rebuild below.
+        current = type(self.obj).__instance_cache__.get(self.obj.pk)
+        if current is not None and current is not self.obj:
+            return current.contents_cache.get(exclude=exclude, content_type=content_type)
         try:
             return [self._idcache[pk] for pk in self._pks(exclude, content_type)]
         except KeyError:
