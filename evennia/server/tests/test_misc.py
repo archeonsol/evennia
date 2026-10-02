@@ -66,10 +66,34 @@ class TestDeprecations(TestCase):
         )
 
 
+class _UnavailableStorage:
+    """Storage stand-in whose every operation fails, as a downed Redis does."""
+
+    def __getattr__(self, name):
+        def _fail(*args, **kwargs):
+            raise ConnectionError("storage unavailable")
+
+        return _fail
+
+
 class ThrottleTest(BaseEvenniaTest):
     """
     Class for testing the connection/IP throttle.
     """
+
+    def test_check_fails_open_when_storage_unavailable(self):
+        """A storage outage during a check must not block the caller."""
+        throttle = Throttle(name="testing", limit=5)
+        throttle.storage = _UnavailableStorage()
+
+        self.assertFalse(throttle.check("256.256.256.257"))
+
+    def test_update_swallows_storage_errors(self):
+        """A storage outage while recording a failure must not raise."""
+        throttle = Throttle(name="testing", limit=5)
+        throttle.storage = _UnavailableStorage()
+
+        throttle.update("256.256.256.257")
 
     def test_throttle(self):
         ips = ("256.256.256.257", "257.257.257.257", "258.258.258.258")

@@ -112,27 +112,31 @@ class Throttle:
         """
         cache_key = self.get_cache_key(ip)
 
-        # Get current status
-        previously_throttled = self.check(ip)
+        try:
+            # Get current status
+            previously_throttled = self.check(ip)
 
-        # Get previous failures, if any
-        entries = self.storage.get(cache_key, [])
-        entries.append(time.time())
+            # Get previous failures, if any
+            entries = self.storage.get(cache_key, [])
+            entries.append(time.time())
 
-        # Store updated record
-        self.storage.set(cache_key, deque(entries, maxlen=self.cache_size), self.timeout)
+            # Store updated record
+            self.storage.set(cache_key, deque(entries, maxlen=self.cache_size), self.timeout)
 
-        # See if this update caused a change in status
-        currently_throttled = self.check(ip)
+            # See if this update caused a change in status
+            currently_throttled = self.check(ip)
 
-        # If this makes it engage, log a single activation event
-        if not previously_throttled and currently_throttled:
-            logger.log_sec(
-                f"Throttle Activated: {failmsg} (IP: {ip}, "
-                f"{self.limit} hits in {self.timeout} seconds.)"
-            )
+            # If this makes it engage, log a single activation event
+            if not previously_throttled and currently_throttled:
+                logger.log_sec(
+                    f"Throttle Activated: {failmsg} (IP: {ip}, "
+                    f"{self.limit} hits in {self.timeout} seconds.)"
+                )
 
-        self.record_ip(ip)
+            self.record_ip(ip)
+        except Exception:
+            # an unavailable storage must never raise through the caller
+            logger.log_trace("Throttle: storage unavailable on update; ignoring failure.")
 
     def remove(self, ip, *args, **kwargs):
         """
@@ -209,17 +213,22 @@ class Throttle:
 
         cache_key = self.get_cache_key(ip)
 
-        # checking mode
-        latest_fails = self.storage.get(cache_key)
-        if latest_fails and len(latest_fails) >= self.limit:
-            # too many fails recently
-            if now - latest_fails[-1] < self.timeout:
-                # too soon - timeout in play
-                self.touch(cache_key)
-                return True
+        try:
+            # checking mode
+            latest_fails = self.storage.get(cache_key)
+            if latest_fails and len(latest_fails) >= self.limit:
+                # too many fails recently
+                if now - latest_fails[-1] < self.timeout:
+                    # too soon - timeout in play
+                    self.touch(cache_key)
+                    return True
+                else:
+                    # timeout has passed. clear faillist
+                    self.remove(ip)
+                    return False
             else:
-                # timeout has passed. clear faillist
-                self.remove(ip)
                 return False
-        else:
+        except Exception:
+            # an unavailable storage must never block the caller
+            logger.log_trace("Throttle: storage unavailable on check; failing open.")
             return False
