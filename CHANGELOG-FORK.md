@@ -25,6 +25,26 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.296: Back and quit share a foot line; a Redis outage no longer blocks login
+
+A login could be aborted by a Redis blip: `LOGIN_THROTTLE.check` read the `throttle` cache unguarded, so a stale pooled connection (`Error 32 while writing to socket. Broken pipe.`) raised `ConnectionInterrupted` through `Account.aauthenticate` into the login action, which logged an untrapped error and dropped the connection. Separately, menus spent a full row on each way out, so `b: Back` and `q: Quit` read like two more choices.
+
+### Engine
+
+- **`format_menu_prompt` collects the exit keys into a foot line** ([`menus.py`](evennia/actions/menus.py)). Options whose key is `b` or `q` (case-insensitively) render once, in that order, joined with three spaces, after the ordinary option rows; `allow_quit` still supplies `q: Quit` when the menu has no exit option of its own, and `allow_look` appends `l: Look` to the same line. A menu that labels `b` or `q` itself keeps its label; a second option on the same key stays a row, so no choice is dropped. The keys keep their ordinary option semantics for `parse_menu_choice`; only the rendering changes.
+
+### Server
+
+- **`Throttle.check`/`update` fail open when storage raises** ([`throttle.py`](evennia/server/throttle.py)). A cache backend that raises (a downed Redis, a stale pooled socket) used to propagate through `LOGIN_THROTTLE.check` and abort the login as an untrapped error. `check` now logs once and returns `False` (not throttled); `update` logs once and becomes a no-op. Throttling is degraded, never fatal.
+- Games on django_redis can additionally set `"IGNORE_EXCEPTIONS": True` (and `"DJANGO_REDIS_LOG_IGNORED_EXCEPTIONS": True`) in each Redis cache's `OPTIONS` so the cache returns defaults instead of raising; the engine no longer depends on it. `"CONNECTION_POOL_KWARGS": {"health_check_interval": 30}` prunes stale pooled sockets before use.
+
+### Tests
+
+- `TestFormatMenuPrompt` in [`test_engine.py`](evennia/actions/tests/test_engine.py): back and quit share the last line while the choices stay rows; a menu-labeled quit key keeps its label in the foot; a foot-only menu is body, blank line, foot; a repeated key stays a row; look joins the foot; and `parse_menu_choice` still returns `b` and `q` as themselves.
+- `test_check_fails_open_when_storage_unavailable` and `test_update_swallows_storage_errors` in [`test_misc.py`](evennia/server/tests/test_misc.py): with a storage stand-in whose every operation raises `ConnectionError`, `check` returns `False` and `update` does not raise.
+
+---
+
 ## 6.0.0+underspire.295: Slow JSONB flush preparation names its cause
 
 A production reactor stall (~432ms) landed in `_prepare_async_row_flushes`, which deep-copies each dirty row's whole attribute document three times on the reactor before the worker writes it. Nothing said whether the cost came from many dirty rows, one large document, or the copy itself.
