@@ -1002,6 +1002,17 @@ ENGINE_DATABASE_CONN_HEALTH_CHECKS = True
 # Enable for PgBouncer transaction-pool deployments. The PostgreSQL settings
 # helper then forces non-persistent connections and client-side cursor fetching.
 ENGINE_DATABASE_TRANSACTION_POOLING = False
+# Park closed PostgreSQL connections in a process-wide pool and reuse them, instead of
+# opening a fresh connection (TCP connect, login, SET statements) for every command,
+# callback and scheduled system that touches the database. A wrapper still closes at
+# the end of its task, so no transaction ever leaks between tasks; only the physical
+# connection is recycled. Applies to the engine's own backend, which
+# apply_postgres_engine_defaults swaps in when this is on (see evennia.server.db_pool).
+ENGINE_DATABASE_POOL = False
+# Idle connections kept in the pool, and the longest any one connection lives from
+# the moment it was opened (seconds), however often it is reused.
+ENGINE_DATABASE_POOL_MAX_IDLE = 16
+ENGINE_DATABASE_POOL_MAX_AGE = 1800
 # Async ORM connections on the game loop must belong to a supervised runtime
 # root. ``warn`` preserves third-party compatibility while exposing violations;
 # use ``error`` in CI once a game has removed unmanaged task creation.
