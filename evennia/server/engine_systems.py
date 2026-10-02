@@ -77,16 +77,42 @@ async def _run_flush(ctx):
         )
 
 
+def _run_gc_deep_clean(ctx):
+    """
+    Body of the `gc-deep-clean` system: run a full collection when it is due.
+
+    The clean itself decides: it waits for a moment with no sessions connected
+    and never runs unless the managed collection policy is in force (see
+    `evennia.utils.gc_policy`). This hourly check is cheap.
+
+    Args:
+        ctx (SystemContext): The per-fire context.
+
+    """
+    from evennia.utils import gc_policy
+
+    gc_policy.deep_clean_if_due()
+
+
 def register_systems():
     """
     Register engine systems. Called by `systems.load_system_modules`.
 
-    Registers `flush-attributes` unless `ATTRIBUTE_FLUSH_INTERVAL` is 0.
+    Registers `flush-attributes` unless `ATTRIBUTE_FLUSH_INTERVAL` is 0, and
+    `gc-deep-clean` unless `ENGINE_GC_DEEP_CLEAN_INTERVAL` is 0.
 
     """
     global _consecutive_flush_failures, _flush_fire_count
     _consecutive_flush_failures = 0
     _flush_fire_count = 0
+    if getattr(settings, "ENGINE_GC_DEEP_CLEAN_INTERVAL", 0):
+        systems.register(
+            name="gc-deep-clean",
+            cadence=systems.every(3600),
+            scope=systems.global_scope(),
+            run=_run_gc_deep_clean,
+            workload_class=systems.MAINTENANCE,
+        )
     interval = getattr(settings, "ATTRIBUTE_FLUSH_INTERVAL", 60) or 0
     if interval <= 0:
         logger.log_info("flush-attributes system disabled (ATTRIBUTE_FLUSH_INTERVAL is 0).")

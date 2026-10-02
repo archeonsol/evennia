@@ -128,6 +128,12 @@ class EvenniaPortalService(MultiService):
 
         self.register_plugins()
 
+        # The Portal carries every player's output, so a collector pause here is
+        # as visible as one in the Server; its heap is small but not free.
+        from evennia.utils import gc_policy
+
+        gc_policy.apply_gc_policy()
+
     def register_plugins(self):
         self.plugins.extend(
             mod_import(module) for module in make_iter(settings.PORTAL_SERVICES_PLUGIN_MODULES)

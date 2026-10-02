@@ -3,9 +3,10 @@
 import asyncio
 from unittest.mock import Mock, call, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from evennia.server import engine_systems
+from evennia.utils import systems
 
 
 class TestFlushFailureEscalation(SimpleTestCase):
@@ -147,3 +148,46 @@ class TestFlushFailureEscalation(SimpleTestCase):
                 self.assertEqual(engine_systems._consecutive_flush_failures, 3)
                 self.logger.log_trace.assert_called_once()
                 self.assertEqual(self.logger.log_err.call_count, 2)
+
+
+class TestGcDeepCleanSystem(SimpleTestCase):
+    """The deep clean is a scheduled system whose body defers to the GC policy."""
+
+    def setUp(self):
+        """Run against an empty registry and restore the real one afterwards."""
+        super().setUp()
+        saved = dict(systems._SYSTEM_REGISTRY)
+        systems._clear_registry()
+
+        def restore():
+            systems._clear_registry()
+            systems._SYSTEM_REGISTRY.update(saved)
+
+        self.addCleanup(restore)
+
+    @override_settings(ENGINE_GC_DEEP_CLEAN_INTERVAL=86400, ATTRIBUTE_FLUSH_INTERVAL=1)
+    def test_registered_as_maintenance_work_when_enabled(self):
+        engine_systems.register_systems()
+
+        system = systems.get_system("gc-deep-clean")
+        self.assertIsNotNone(system)
+        self.assertEqual(system.workload_class, systems.MAINTENANCE)
+        self.assertIsNotNone(systems.get_system("flush-attributes"))
+
+    @override_settings(ENGINE_GC_DEEP_CLEAN_INTERVAL=0, ATTRIBUTE_FLUSH_INTERVAL=1)
+    def test_absent_when_deep_cleans_are_disabled(self):
+        engine_systems.register_systems()
+
+        self.assertIsNone(systems.get_system("gc-deep-clean"))
+
+    @override_settings(ENGINE_GC_DEEP_CLEAN_INTERVAL=86400, ATTRIBUTE_FLUSH_INTERVAL=0)
+    def test_still_registered_when_attribute_flush_is_off(self):
+        engine_systems.register_systems()
+
+        self.assertIsNotNone(systems.get_system("gc-deep-clean"))
+
+    def test_body_defers_to_the_policy(self):
+        with patch("evennia.utils.gc_policy.deep_clean_if_due") as due:
+            engine_systems._run_gc_deep_clean(None)
+
+        due.assert_called_once_with()

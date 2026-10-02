@@ -874,6 +874,28 @@ LOOK_ATTR_PREFETCH_ENABLED = True
 # Warn when a single reactor turn blocks longer than this (ms; 0 = disabled).
 # Instruments blocking sites that should move off-reactor via evennia.utils.defer.
 REACTOR_STALL_WARNING_MS = 200
+# Garbage collection policy (evennia.utils.gc_policy). "managed" disables
+# CPython's automatic collector after boot and collects the young generation from
+# a game-loop timer, so no collection ever marks the whole heap while players
+# wait; "default" leaves the interpreter's collector alone. Collection timing and
+# the evennia_gc_pause_seconds histogram run under either policy.
+ENGINE_GC_POLICY = "managed"
+# Managed policy: collect the young generation once this many more objects have
+# been allocated than freed (CPython's own default is 2000), checked every
+# ENGINE_GC_INTERVAL_MS milliseconds.
+ENGINE_GC_YOUNG_THRESHOLD = 2000
+ENGINE_GC_INTERVAL_MS = 50
+# Managed policy: freeze the boot heap after its one full collection, so modules
+# and registries are never scanned again.
+ENGINE_GC_FREEZE_AT_START = True
+# Managed policy: a full "deep clean" reclaims cycles that outlived a young
+# collection. It is due every ENGINE_GC_DEEP_CLEAN_INTERVAL seconds (0 = never),
+# waits for a moment with no sessions connected, and runs anyway once
+# ENGINE_GC_DEEP_CLEAN_MAX_DEFER seconds have passed since the last one.
+ENGINE_GC_DEEP_CLEAN_INTERVAL = 86400
+ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 259200
+# Log any single collection that pauses the process at least this long (ms; 0 = off).
+ENGINE_GC_PAUSE_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
 COMMAND_TRACE_ENABLED = True
 # Diagnostic protocol record emitted after the complete CM1 input lifecycle.
