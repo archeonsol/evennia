@@ -25,6 +25,60 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.301: Alias order is insertion order; tabs badge news
+
+Two changes that make author intent visible: which alias of an object reads
+as its display name, and which tabs flag that something waits behind them.
+
+### Engine
+
+- **Aliases keep insertion order** ([`tags.py`](evennia/typeclasses/tags.py)).
+  `TagHandler.all()` sorted every tag alphabetically, so the first alias of an
+  object was whatever came first alphabetically, whatever the author set.
+  The first alias is the display alias (exit short names in look lines:
+  `There are exits to the N110 (northwest)` where the author wants `(nw)`).
+  New class attribute `TagHandler._sort_all` (default `True`; tags and
+  permissions are unchanged) and `AliasHandler._sort_all = False`. Both fetch
+  paths now order the through-table by pk, so cache, cold reads and
+  `prime_tag_caches` agree: `TagHandler._query_all` and
+  `TypedObjectManager.get_tags_for_objects` ([`managers.py`](evennia/typeclasses/managers.py)).
+
+### Migration notes
+
+- **Aliases that were alphabetized by accident.** Existing rows keep their
+  historical add order, which for old objects is whatever the loader did. To
+  choose the display alias now: clear and re-set in the wanted order
+  (`@alias <obj> =` then `@alias <obj> = nw,northwest`). No data migration:
+  the stored rows are already ordered by add time; only the read changed.
+- Any caller that treated `aliases.all()` output as alphabetically sorted
+  must sort explicitly. A sweep of both this repo and the game found no such
+  caller (all use membership or sort for display).
+
+### Webclient
+
+- **Tab news badges** ([`Workspace.svelte`](evennia/web/webclient/client/src/components/Workspace.svelte)).
+  A panel whose feed holds something unread carries `[!!]` in its tab title
+  (Puppets, Channels, Ticket Queue), so news on another tab is visible from
+  this one. The staff queue badge flags tickets new or changed since the
+  viewer last focused the queue panel (per browser,
+  `underspire.queue.seen.v1`); focusing the panel counts the news as seen.
+  Replaces the old `Puppets (N)` count: the marker carries no number. The
+  screen-reader layout reads the queue tab `(new)`.
+- **Ticket queue leads with the newest** ([`TicketsPanel.svelte`](evennia/web/webclient/client/src/components/TicketsPanel.svelte)).
+  Priority still leads, but within a priority the newest ticket is first;
+  oldest-first buried incoming urgent tickets behind stale ones nobody could
+  action. Games should pair this with `-created_at` inside the priority tier
+  server-side (`world/tickets/core.py` in the game).
+
+### Tests
+
+- `TestAliasOrder` ([`test_typeclasses.py`](evennia/typeclasses/tests/test_typeclasses.py)):
+  warm, cold-reload and primed-cache order, re-add moves to the end, tags
+  stay sorted. Client vitest: badge derivation (arrival, update,
+  focused-arrival, player never flagged, channel totals).
+
+---
+
 ## 6.0.0+underspire.300: Reachable verbs one class at a time
 
 A game that asks which of the registry's verbs an actor can reach (the webclient's
