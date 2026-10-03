@@ -11,6 +11,7 @@ to a private :class:`ActionParser`.
 import unittest
 from dataclasses import dataclass, field
 from typing import Literal
+from unittest.mock import patch
 
 from evennia.actions.action import Action, GameObject
 from evennia.actions.exceptions import AmbiguousTarget, ParseError
@@ -19,6 +20,7 @@ from evennia.actions.parser import (
     NoMatchAction,
     ParseResult,
     _verb_reachable,
+    iter_reachable_actions,
     reachable_actions,
 )
 from evennia.actions.predicate import HasCapability
@@ -662,6 +664,54 @@ class TestReachableActions(unittest.TestCase):
 
     def test_unshaped_actor_fails_closed(self):
         self.assertEqual(reachable_actions(self._CLASSES, _Obj("husk")), [])
+
+
+class TestIterReachableActions(unittest.TestCase):
+    """The lazy form gives the batch answer, a class at a time."""
+
+    _CLASSES = (Dig, Wave, Ping)
+
+    def test_yields_what_the_batch_form_returns_in_the_same_order(self):
+        for perms in (("Player",), ("engine.world.build",)):
+            actor = _gated_actor(perms=perms)
+            self.assertEqual(
+                list(iter_reachable_actions(self._CLASSES, actor)),
+                reachable_actions(self._CLASSES, actor),
+            )
+
+    def test_reads_nothing_until_the_first_class_is_asked_for(self):
+        actor = _gated_actor(perms=("Player",))
+        actor.location = _CountingRoom([_Kiosk()])
+
+        reachable = iter_reachable_actions(self._CLASSES, actor)
+        self.assertEqual(actor.location.reads, 0)
+        next(reachable)
+
+        self.assertEqual(actor.location.reads, 1)
+
+    def test_reads_the_room_once_however_many_classes_are_taken(self):
+        actor = _gated_actor(perms=("Player",))
+        actor.location = _CountingRoom([_Kiosk()])
+
+        list(iter_reachable_actions(self._CLASSES, actor))
+
+        self.assertEqual(actor.location.reads, 1)
+
+    def test_evaluates_a_gate_only_when_its_class_is_reached(self):
+        actor = _gated_actor(perms=("engine.world.build",))
+        seen = []
+        with patch("evennia.actions.parser._context_reachable") as reachable:
+            reachable.side_effect = lambda context, cls, who: seen.append(cls) or True
+
+            taken = iter_reachable_actions(self._CLASSES, actor)
+            next(taken)
+            self.assertEqual(seen, [self._CLASSES[0]])
+            next(taken)
+
+        self.assertEqual(seen, list(self._CLASSES[:2]))
+
+    def test_unshaped_actor_fails_closed(self):
+        self.assertEqual(list(iter_reachable_actions(self._CLASSES, _Obj("husk"))), [])
 
 
 class TestPrefixSuggestions(unittest.TestCase):
