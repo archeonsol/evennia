@@ -46,6 +46,8 @@
   // page body with it hidden. Put it on the new view's tab instead.
   $effect(() => {
     const id = simple.active;
+    chat.queueActive = id === "tickets";
+    if (chat.queueActive) chat.markQueueSeen();
     tick().then(() => {
       const a = document.activeElement;
       if (!a || a === document.body || a.closest("[role=tabpanel][hidden]")) tabEls[id]?.focus();
@@ -58,6 +60,7 @@
       return n ? `${title} (${n} unread)` : title;
     }
     if (id === "puppets" && puppets.totalUnread) return `${title} (${puppets.totalUnread})`;
+    if (id === "tickets" && chat.queueUnseen) return `${title} (new)`;
     return title;
   }
 

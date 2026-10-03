@@ -97,10 +97,17 @@
     });
     // New panels pick up any saved per-panel overrides.
     const addSub = dv.onDidAddPanel(() => applyPanelPrefs());
+    // The queue's badge flags what has not been looked at: focusing the panel
+    // is looking at it, so its arrivals and updates count as seen from then on.
+    const activeSub = dv.onDidActivePanelChange((e: any) => {
+      chat.queueActive = e.panel?.id === "tickets";
+      if (chat.queueActive) chat.markQueueSeen();
+    });
 
     return () => {
       sub.dispose();
       addSub.dispose();
+      activeSub.dispose();
       dv.dispose();
       api = null;
       dock.set(null);
@@ -138,18 +145,27 @@
     } else if (!activity.allowed && activity.known && panel) panel.api.close();
   });
 
-  // Surface total unread puppet activity on the Puppets tab so a GM juggling
-  // several NPCs sees which needs attention without opening the panel.
+  // A tab whose feed holds something unread carries [!!] in its title, so
+  // news on another tab is visible from this one. The count stays inside the
+  // panel; the tab only flags that something waits.
   $effect(() => {
-    const panel: any = api?.getPanel?.("puppets");
-    if (!panel) return;
-    const unread = puppets.totalUnread;
-    const title = unread ? `Puppets (${unread})` : "Puppets";
-    try {
-      if (typeof panel.setTitle === "function") panel.setTitle(title);
-      else if (panel.api?.setTitle) panel.api.setTitle(title);
-    } catch {
-      /* dockview title update is best-effort */
+    if (!api) return;
+    const flagged: Record<string, [string, boolean]> = {
+      puppets: ["Puppets", puppets.totalUnread > 0],
+      chat: ["Channels", chat.channelsUnseen > 0],
+      tickets: [VIEWS.tickets.title, chat.queueUnseen > 0],
+    };
+    for (const [id, [base, hot]] of Object.entries(flagged)) {
+      const panel: any = api.getPanel(id);
+      if (!panel) continue;
+      const title = hot ? `${base} [!!]` : base;
+      if (panel.title === title) continue;
+      try {
+        if (typeof panel.setTitle === "function") panel.setTitle(title);
+        else if (panel.api?.setTitle) panel.api.setTitle(title);
+      } catch {
+        /* dockview title update is best-effort */
+      }
     }
   });
 
@@ -170,9 +186,6 @@
               ? { referencePanel: "chat", direction: "within" }
               : undefined,
           });
-        } else if (panel.title !== VIEWS.tickets.title) {
-          // Layouts saved before the rename still say "Tickets".
-          panel.api.setTitle(VIEWS.tickets.title);
         }
       } catch {
         /* ignore */

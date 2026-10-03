@@ -36,7 +36,9 @@
     return [t.short_id, t.subject, t.requester_name, t.account_name, t.preview, t.label, t.assignee]
       .some((v) => String(v ?? "").toLowerCase().includes(q));
   }
-  // Filter by kind and state, then highest priority first, then longest-waiting.
+  // Filter by kind and state, then highest priority first, then newest first.
+  // Oldest-first buried fresh tickets behind stale ones nobody could action
+  // (blocked, or deliberately parked at low priority).
   const rows = $derived(
     [...source]
       .filter((t: any) => kindFilter === "all" || t.kind === kindFilter)
@@ -45,7 +47,7 @@
       )
       .filter((t: any) => history || matches(t))
       .sort(
-        (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (a.updated ?? 0) - (b.updated ?? 0),
+        (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (b.created ?? 0) - (a.created ?? 0),
       ),
   );
   const counts = $derived({

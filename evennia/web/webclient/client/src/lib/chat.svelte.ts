@@ -39,6 +39,7 @@ export interface ChatMsg {
 
 const MAX_PER_CHANNEL = 500;
 const SEEN_KEY = "underspire.tickets.seen.v1";
+const QUEUE_SEEN_KEY = "underspire.queue.seen.v1";
 
 /** The answer to a ticket action, for the panel to show. */
 export interface TicketResult {
@@ -49,6 +50,13 @@ export interface TicketResult {
 function loadSeen(): Record<string, number> {
   try {
     return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+function loadQueueSeen(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(QUEUE_SEEN_KEY) || "{}");
   } catch {
     return {};
   }
@@ -232,6 +240,7 @@ class Chat {
           const upd = next.find((t: any) => t.id === this.ticket.id);
           if (upd) this.ticket = { ...this.ticket, ...upd };
         }
+        if (this.queueActive) this.markQueueSeen();
         break;
       }
       case "ticket_thread":
@@ -280,6 +289,7 @@ class Chat {
           );
         if (this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTickets = restatus(this.myTickets);
         if (this.tickets.some((t: any) => t.id === kwargs.id)) this.tickets = restatus(this.tickets);
+        if (this.queueActive) this.markQueueSeen();
         // Refresh the list's status and preview for the owner's own tickets.
         if (!this.staff || this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTicketsRev += 1;
         this.announceTicket(kwargs, openStaff, openMine);
@@ -505,6 +515,47 @@ class Chat {
   // "Last seen" per ticket, so My Tickets can mark a reply the player has not
   // read. Per browser, like the rest of the panel's conveniences.
   seen = $state<Record<string, number>>(loadSeen());
+
+  // Staff queue: which tickets this browser has already been shown, so the
+  // tab badge can flag arrivals and updates the viewer has not looked at.
+  queueSeen = $state<Record<string, number>>(loadQueueSeen());
+  /** The queue panel is the focused panel: news there is seen at once. */
+  queueActive = false;
+
+  /** New or changed staff-queue tickets the viewer has not opened. */
+  get queueUnseen(): number {
+    if (!this.staff) return 0;
+    return this.tickets.filter((t: any) => (t.updated ?? 0) > (this.queueSeen[t.id] ?? 0)).length;
+  }
+
+  /** Total unread across channels (per-channel counts already exist). */
+  get channelsUnseen(): number {
+    let n = 0;
+    for (const v of Object.values(this.unread)) n += v ?? 0;
+    return n;
+  }
+
+  markQueueSeen(): void {
+    let changed = false;
+    const next: Record<string, number> = {};
+    for (const t of this.tickets) {
+      const seen = this.queueSeen[t.id] ?? 0;
+      const fresh = t.updated ?? 0;
+      next[t.id] = Math.max(seen, fresh);
+      if (next[t.id] !== seen) changed = true;
+    }
+    // Rows only count while open; forget ids that left the queue with them.
+    for (const id of Object.keys(this.queueSeen)) {
+      if (!(id in next)) changed = true;
+    }
+    if (!changed) return;
+    this.queueSeen = next;
+    try {
+      localStorage.setItem(QUEUE_SEEN_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }
   private markSeen(t: any): void {
     if (!t?.id) return;
     const last = Math.max(t.updated ?? 0, ...(t.messages ?? []).map((m: any) => m.ts ?? 0));
