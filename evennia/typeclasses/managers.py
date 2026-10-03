@@ -206,12 +206,16 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
         # concrete dbclass (e.g. "objectdb"), not the typeclass proxy
         dbmodel = self.model.__dbclass__.__name__.lower()
         through = self.model.db_tags.through
-        conns = through.objects.select_related("tag").filter(
-            **{
-                "%s__id__in" % dbmodel: obj_ids,
-                "tag__db_model": dbmodel,
-                "tag__db_tagtype": tagtype,
-            }
+        conns = (
+            through.objects.select_related("tag")
+            .filter(
+                **{
+                    "%s__id__in" % dbmodel: obj_ids,
+                    "tag__db_model": dbmodel,
+                    "tag__db_tagtype": tagtype,
+                }
+            )
+            .order_by("id")
         )
         obj_id_field = "%s_id" % dbmodel
         for conn in conns:

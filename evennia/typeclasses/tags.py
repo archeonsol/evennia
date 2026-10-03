@@ -312,6 +312,10 @@ class TagHandler(object):
 
     _m2m_fieldname = "db_tags"
     _tagtype = None
+    # When True, all() returns keys sorted alphabetically. Subclasses that
+    # treat first position as meaningful (aliases) set this False to get
+    # insertion order instead.
+    _sort_all = True
 
     def __init__(self, obj):
         """
@@ -357,6 +361,7 @@ class TagHandler(object):
             for conn in getattr(self.obj, self._m2m_fieldname)
             .through.objects.select_related("tag")
             .filter(**query)
+            .order_by("id")
         ]
 
     def _populate_from_tags(self, tags):
@@ -833,9 +838,11 @@ class TagHandler(object):
         if settings.TYPECLASS_AGGRESSIVE_CACHE:
             if not self._cache_complete:
                 self._fullcache()
-            tags = sorted(self._cache.values())
+            tags = list(self._cache.values())
         else:
-            tags = sorted(self._query_all())
+            tags = list(self._query_all())
+        if self._sort_all:
+            tags = sorted(tags)
 
         if return_key_and_category:
             # return tuple (key, category)
@@ -998,9 +1005,13 @@ class AliasHandler(TagHandler):
     """
     A handler for the Alias Tag type.
 
+    Alias order is insertion order: the first alias is the display alias
+    (exit short names, look lines), so authors control it by add order.
+
     """
 
     _tagtype = "alias"
+    _sort_all = False
 
 
 class PermissionProperty(TagProperty):

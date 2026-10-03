@@ -382,6 +382,40 @@ class TestTags(BaseEvenniaTest):
         )
 
 
+class TestAliasOrder(BaseEvenniaTest):
+    """Aliases keep insertion order; the first alias is the display alias."""
+
+    evennia_fixtures = {"obj1"}
+
+    def test_all_returns_insertion_order(self):
+        self.obj1.aliases.add(["nw", "northwest"])
+        self.assertEqual(self.obj1.aliases.all(), ["nw", "northwest"])
+        self.assertEqual(str(self.obj1.aliases), "nw,northwest")
+
+    def test_order_survives_a_cold_reload(self):
+        self.obj1.aliases.add(["nw", "northwest"])
+        flush_cache()
+        obj = self.obj1.__class__.objects.get(id=self.obj1.id)
+        self.assertEqual(obj.aliases.all(), ["nw", "northwest"])
+
+    def test_order_survives_a_primed_cache(self):
+        self.obj1.aliases.add(["nw", "northwest"])
+        flush_cache()
+        objs = list(self.obj1.__class__.objects.filter(id=self.obj1.id))
+        self.obj1.__class__.objects.prime_tag_caches(objs, tagtype="alias")
+        self.assertEqual(objs[0].aliases.all(), ["nw", "northwest"])
+
+    def test_readd_moves_the_alias_to_the_end(self):
+        self.obj1.aliases.add(["nw", "northwest"])
+        self.obj1.aliases.remove("nw")
+        self.obj1.aliases.add("nw")
+        self.assertEqual(self.obj1.aliases.all(), ["northwest", "nw"])
+
+    def test_tags_handler_stays_sorted(self):
+        self.obj1.tags.add(["zz_tag", "aa_tag"])
+        self.assertEqual(self.obj1.tags.all(), ["aa_tag", "zz_tag"])
+
+
 class TestTagMissCache(BaseEvenniaTest):
     """A known-absent tag must not re-query until a write invalidates it.
 
