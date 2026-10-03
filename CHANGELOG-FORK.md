@@ -25,6 +25,51 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.299: The managed collector frees what young passes cannot
+
+`underspire.298` fixed the reactor stalls and introduced a memory leak. Its managed
+collection policy collected only the young generation, so nothing freed a reference
+cycle once it had survived a young pass, and every instance the idmapper drops is
+one: an instance and its handlers (attributes, tags, ndb and the rest) refer to one
+another, so removing the cache's reference to an evicted or deleted instance does not
+free it. Of 200 evicted instances, reference counting freed none and a full
+collection freed all of them (about 56 containers each). On production the process
+grew about 5 MB a minute after the `.298` restart (663 MB to 1.5 GB in two and a half
+hours), where earlier runs flattened at 850 to 980 MB. Nothing was lost; the garbage
+was waiting for the 24 hour deep clean, and the machine would have run out of memory first.
+
+**Correction to the `.298` entry.** It said the old-generation passes "found almost
+nothing: 7.5 thousand objects in two hours against 4.6 million from young
+collections". That compared `python_gc_*` generation labels as if they meant the same
+thing on Python 3.14. The automatic collector's passes are generation 1 (an
+increment); generation 0 is only what `gc.collect(0)` runs, and generation 2 is a
+full pass. In the 4.25 hours before `.298` the increments collected 10.5 million
+objects, most of them evicted instances. The stall fixes in `.298` stand: no
+collection marks the whole heap while players wait. What was missing is a way to free
+the cycles young passes cannot.
+
+### Engine
+
+- **Full collections when they are worth it** ([`gc_policy.py`](evennia/utils/gc_policy.py)). Under `ENGINE_GC_POLICY = "managed"` a full collection of the unfrozen heap (the frozen boot heap is still never scanned) now runs when the interpreter's allocated blocks have grown `ENGINE_GC_RECLAIM_GROWTH_PERCENT` (15) since the last one, when code calls `gc_policy.request_reclaim()`, and as a backstop from the scheduler (`ENGINE_GC_DEEP_CLEAN_INTERVAL`, now 21600 s, and `ENGINE_GC_DEEP_CLEAN_MAX_DEFER`, now 43200 s; they were 24 h and 72 h). Growth is counted in blocks, not process size: freed memory goes back to the allocator's pool rather than to the operating system, so the process stops growing while garbage refills the pool, and a trigger on its size would wait ever longer. A clean that finds under 20,000 objects (the growth was live data, such as the cache filling) doubles the growth the next one waits for, up to eight times, and no two requested cleans run within `ENGINE_GC_RECLAIM_MIN_INTERVAL` (300 s). Each logs what it found with the allocated blocks and process size either side.
+- **Telemetry.** `evennia_gc_reclaim_total{reason}` (`growth`, `requested`, `scheduled`, `overdue`, `manual`) and `evennia_gc_reclaimed_objects_total` count the cleans; the scrape-time gauges `evennia_idmapper_cached_instances`, `evennia_gc_frozen_objects` and `evennia_python_allocated_blocks` answer where the memory went without a debugger. `evennia_gc_pause_seconds{generation="2"}` still times each clean.
+- **`evennia.utils.process_memory`** ([`process_memory.py`](evennia/utils/process_memory.py)). The current-resident-size reader the idmapper's pressure check used (psutil, then `/proc/self/statm`, then the peak) moves here so the collector shares it. `idmapper.models._current_rss_mb` remains as an alias.
+
+### Settings
+
+`ENGINE_GC_RECLAIM_GROWTH_PERCENT` (15; 0 turns the trigger off), `ENGINE_GC_RECLAIM_MIN_INTERVAL` (300). `ENGINE_GC_DEEP_CLEAN_INTERVAL` and `ENGINE_GC_DEEP_CLEAN_MAX_DEFER` change their defaults (see above). No game changes are required. A game whose whole world fits in memory gains most by raising `IDMAPPER_CACHE_MAXSIZE` (default 400 MB) above its steady-state size: the pressure check compares the process's resident size, not the cache's, with that limit, so a process that is already over it sweeps and evicts whenever it grows 10%, and each eviction is garbage a full collection must then free.
+
+### Measured
+
+On a real asyncio loop with a 3.7 million object frozen heap and a cache of 4,000 cyclic instances, a third of which is evicted and reloaded every four seconds, the `.298` policy grew 789 MB in 60 s without levelling off; with the trigger the process levelled off at 1,379 MB after four full collections. A full collection took about 0.8 s on that synthetic heap: the pause is set by the unfrozen live objects, not by the garbage, so it falls with the number of instances kept in the cache.
+
+### Tests
+
+- `test_gc_policy.py`: the request path and its spacing; the growth trigger in blocks, including garbage that refills the allocator's pool while the process stays the same size; the backoff, its cap and its reset; the real collector freeing a cycle a young pass cannot; the gauges.
+- `test_gc_evicted_instances.py`: real typeclass instances are cyclic garbage after eviction and a deep clean frees them.
+- `test_process_memory.py`: the moved reader.
+
+---
+
 ## 6.0.0+underspire.298: Reactor stalls cut at the source
 
 Production reactor stalls came from costs that all landed on the loop: Python
