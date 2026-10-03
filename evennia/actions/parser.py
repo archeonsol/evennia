@@ -43,6 +43,7 @@ __all__ = [
     "LoginStartAction",
     "DynamicVerbResolver",
     "reachable_actions",
+    "iter_reachable_actions",
 ]
 
 #: Maximum suggestions offered on a no-match (prefix candidates + fuzzy).
@@ -390,11 +391,45 @@ def _verb_reachable(action_cls, actor) -> bool:
     return _context_reachable(context, action_cls, actor)
 
 
+def iter_reachable_actions(action_classes, actor):
+    """Yield the action classes whose verbs may be offered to ``actor``, one at a time.
+
+    The lazy form of :func:`reachable_actions`, with the same answer in the same
+    order. The actor's states, equipment and room are read once, when the first
+    class is asked for; after that each class costs only the evaluation of its own
+    gates. A caller that must not hold the game loop for the whole registry (a
+    registry of hundreds of verbs is hundreds of gate evaluations) takes a few
+    classes per turn and carries on next turn. The answer reflects the actor as it
+    was when the iterator started.
+
+    Args:
+        action_classes (iterable): candidate :class:`~evennia.actions.action.Action`
+            subclasses.
+        actor: the asking actor.
+
+    Yields:
+        type: each reachable class, in input order. Nothing at all when the
+        provider context cannot be built for ``actor`` (fail closed).
+    """
+    from .context import build_contexts
+
+    action_classes = list(action_classes)
+    try:
+        contexts = build_contexts(actor, action_classes)
+    except Exception:
+        return
+    for action_cls, context in zip(action_classes, contexts):
+        if _context_reachable(context, action_cls, actor):
+            yield action_cls
+
+
 def reachable_actions(action_classes, actor) -> list:
     """The action classes whose verbs may be offered to ``actor``.
 
     Gives the same answer as :func:`_verb_reachable` for each class, but reads
-    the actor's states, equipment and room once for the whole list.
+    the actor's states, equipment and room once for the whole list. See
+    :func:`iter_reachable_actions` for the form that can be driven a few classes
+    at a time.
 
     Args:
         action_classes (iterable): candidate :class:`~evennia.actions.action.Action`
@@ -405,18 +440,7 @@ def reachable_actions(action_classes, actor) -> list:
         list: the reachable classes, in input order. Empty when the provider
         context cannot be built for ``actor`` (fail closed).
     """
-    from .context import build_contexts
-
-    action_classes = list(action_classes)
-    try:
-        contexts = build_contexts(actor, action_classes)
-    except Exception:
-        return []
-    return [
-        action_cls
-        for action_cls, context in zip(action_classes, contexts)
-        if _context_reachable(context, action_cls, actor)
-    ]
+    return list(iter_reachable_actions(action_classes, actor))
 
 
 def _context_reachable(context, action_cls, actor) -> bool:

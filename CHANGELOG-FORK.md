@@ -25,6 +25,27 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.300: Reachable verbs one class at a time
+
+A game that asks which of the registry's verbs an actor can reach (the webclient's
+Tab-completion lexicon, built on every reconnect) was holding the loop for the whole
+answer: several hundred verbs, each running the gates its rules carry, which on
+production took half a second of unbroken loop time for a character in a busy room.
+
+### Engine
+
+- **`iter_reachable_actions(action_classes, actor)`** ([`parser.py`](evennia/actions/parser.py)). The generator form of `reachable_actions`, with the same answer in the same order. The actor's states, equipment and room are read once, when the first class is asked for; after that each class costs only its own gates, so a caller takes a few per loop turn and carries on the next. `reachable_actions` is now `list()` over it, so the two cannot drift. Fail-closed as before: an actor the provider context cannot be built for yields nothing.
+
+### Settings
+
+None.
+
+### Tests
+
+- `test_parser.py` (`TestIterReachableActions`): the same answer and order as the list form, nothing read before the first class is taken, the room read once however many are taken, a gate evaluated only when its class is reached, and the fail-closed result.
+
+---
+
 ## 6.0.0+underspire.299: The managed collector frees what young passes cannot
 
 `underspire.298` fixed the reactor stalls and introduced a memory leak. Its managed
