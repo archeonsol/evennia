@@ -7,6 +7,7 @@ real collection or leaves the interpreter's collector disabled.
 """
 
 import gc
+import weakref
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, override_settings
@@ -392,7 +393,325 @@ class TestDeepClean(_PolicyTestCase):
         self.assertIn("test", message)
 
 
+class _ManagedCase(_PolicyTestCase):
+    """The managed policy applied over fakes: a scripted clock, loop, process and collector.
+
+    The clock starts at 100 s with the boot collection at that moment, the process at
+    600 MB, the interpreter holding 10 million blocks, and every collection freeing
+    50,000 objects unless a test says otherwise.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.loop = _Loop()
+        self.rss = 600.0
+        self.blocks = 10_000_000
+        self.freed = 50_000
+        self.gc = {}
+        for name in ("collect", "freeze", "disable", "enable", "get_count", "isenabled"):
+            patcher = patch.object(gc_policy.gc, name)
+            self.gc[name] = patcher.start()
+            self.addCleanup(patcher.stop)
+        self.gc["get_count"].return_value = (0, 0, 0)
+        self.gc["isenabled"].return_value = True
+        self.gc["collect"].side_effect = lambda *args: self.freed
+        for patcher in (
+            patch.object(gc_policy.clock, "get_bound_loop", return_value=self.loop),
+            patch.object(gc_policy, "_rss_mb", lambda: self.rss),
+            patch.object(gc_policy, "_allocated_blocks", lambda: self.blocks),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        gc_policy.apply_gc_policy()
+        self.gc["collect"].reset_mock()  # forget the boot collection
+
+    def tick(self, advance=0.05):
+        """Let the loop timer fire after ``advance`` seconds."""
+        self.clock.advance(advance)
+        self.loop.fire_last()
+
+    def full_collections(self):
+        return [call for call in self.gc["collect"].call_args_list if call.args == ()]
+
+
+@override_settings(
+    ENGINE_GC_POLICY="managed",
+    ENGINE_GC_RECLAIM_GROWTH_PERCENT=15,
+    ENGINE_GC_RECLAIM_MIN_INTERVAL=300,
+)
+class TestRequestedReclaim(_ManagedCase):
+    def test_a_request_runs_a_full_collection_between_turns(self):
+        self.clock.advance(400)
+
+        self.assertTrue(gc_policy.request_reclaim())
+        self.assertEqual(self.full_collections(), [], "nothing runs inside the request")
+        self.tick()
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_the_request_waits_out_the_minimum_interval(self):
+        self.clock.advance(100)  # 100 s after the boot collection
+        gc_policy.request_reclaim()
+        self.tick()
+        self.assertEqual(self.full_collections(), [])
+
+        self.tick(250.0)  # 350 s after it
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_a_burst_of_requests_costs_one_collection(self):
+        self.clock.advance(400)
+        for _ in range(5):
+            gc_policy.request_reclaim()
+
+        self.tick()
+        self.tick()
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_a_request_made_while_one_is_spaced_out_is_kept_not_dropped(self):
+        self.clock.advance(400)
+        gc_policy.request_reclaim()
+        self.tick()  # runs
+        gc_policy.request_reclaim()
+        self.tick(10.0)  # too soon after that one
+        self.assertEqual(len(self.full_collections()), 1)
+
+        self.tick(300.0)
+
+        self.assertEqual(len(self.full_collections()), 2)
+
+    def test_nothing_is_requested_without_the_managed_policy(self):
+        gc_policy.stop_gc_policy()
+
+        self.assertFalse(gc_policy.request_reclaim())
+
+    def test_the_log_names_the_reason_and_the_sizes_either_side(self):
+        self.clock.advance(400)
+        self.rss, self.blocks = 1500.0, 12_000_000
+
+        def collect(*args):
+            self.rss, self.blocks = 1100.0, 9_000_000
+            return 90_000
+
+        self.gc["collect"].side_effect = collect
+        gc_policy.request_reclaim()
+
+        with patch.object(gc_policy.logger, "log_info") as info:
+            self.tick()
+
+        message = info.call_args.args[0]
+        self.assertIn("(requested)", message)
+        self.assertIn("90000 unreachable objects", message)
+        self.assertIn("allocated blocks 12000000 -> 9000000", message)
+        self.assertIn("process 1500 -> 1100 MB", message)
+
+    def test_the_metrics_count_the_reason_and_what_was_freed(self):
+        self.clock.advance(400)
+        gc_policy.request_reclaim()
+
+        with patch.object(gc_policy.prometheus_metrics, "record_gc_reclaim") as record:
+            self.tick()
+
+        record.assert_called_once_with("requested", 50_000)
+
+    def test_an_unlisted_reason_is_counted_as_requested(self):
+        self.clock.advance(400)
+        gc_policy.request_reclaim("a mass delete")
+
+        with patch.object(gc_policy.prometheus_metrics, "record_gc_reclaim") as record:
+            self.tick()
+
+        record.assert_called_once_with("requested", 50_000)
+
+
+@override_settings(
+    ENGINE_GC_POLICY="managed",
+    ENGINE_GC_RECLAIM_GROWTH_PERCENT=15,
+    ENGINE_GC_RECLAIM_MIN_INTERVAL=300,
+)
+class TestReclaimAfterGrowth(_ManagedCase):
+    def test_growth_past_the_threshold_runs_a_full_collection(self):
+        self.clock.advance(400)
+        self.blocks = 11_400_000  # 14% over the boot heap: not enough
+        self.tick(16.0)
+        self.assertEqual(self.full_collections(), [])
+
+        self.blocks = 11_600_000  # 16% over it
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_garbage_filling_the_allocators_pool_still_counts_as_growth(self):
+        """Why growth is counted in blocks: freed memory is reused, so the process stops growing."""
+        self.clock.advance(400)
+        self.rss = 600.0
+        self.blocks = 12_500_000
+
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_the_blocks_are_only_counted_every_few_seconds(self):
+        self.clock.advance(400)
+        self.tick(16.0)
+        counts = []
+        with patch.object(
+            gc_policy, "_allocated_blocks", side_effect=lambda: counts.append(1) or 10_000_000
+        ):
+            for _ in range(20):
+                self.tick(0.05)  # a second of ticks
+
+        self.assertEqual(counts, [])
+
+    def test_growth_is_measured_from_where_the_last_collection_left_the_heap(self):
+        self.clock.advance(400)
+
+        def collect(*args):
+            self.blocks = 9_000_000  # the collection frees a tenth of the heap
+            return 50_000
+
+        self.gc["collect"].side_effect = collect
+        self.blocks = 11_600_000
+        self.tick(16.0)
+        self.assertEqual(len(self.full_collections()), 1)
+
+        self.blocks = 10_300_000  # 14% over the 9 million it was left at
+        self.tick(400.0)
+        self.assertEqual(len(self.full_collections()), 1)
+
+        self.blocks = 10_400_000  # 15.5% over
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 2)
+
+    def test_growth_does_not_collect_inside_the_minimum_interval(self):
+        self.clock.advance(100)
+        self.blocks = 40_000_000
+
+        self.tick(16.0)
+
+        self.assertEqual(self.full_collections(), [])
+
+    @override_settings(ENGINE_GC_RECLAIM_GROWTH_PERCENT=0)
+    def test_zero_turns_the_growth_trigger_off(self):
+        self.clock.advance(400)
+        self.blocks = 10**9
+
+        self.tick(16.0)
+
+        self.assertEqual(self.full_collections(), [])
+
+    def test_a_collection_that_finds_little_doubles_what_the_next_one_waits_for(self):
+        self.freed = 100  # growth that was live data
+        self.clock.advance(400)
+        self.blocks = 11_600_000
+        self.tick(16.0)
+        self.assertEqual(len(self.full_collections()), 1)
+        self.assertEqual(gc_policy._state.growth_factor, 2)
+
+        self.blocks = 14_000_000  # 20.7% over 11.6 million: enough for 15%, not for 30%
+        self.tick(400.0)
+        self.assertEqual(len(self.full_collections()), 1)
+
+        self.blocks = 15_200_000  # 31% over
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 2)
+
+    def test_the_wait_stops_doubling_at_a_cap(self):
+        self.freed = 0
+        for _ in range(8):
+            self.clock.advance(400)
+            self.blocks = int(self.blocks * (1 + 0.15 * gc_policy._state.growth_factor) + 10)
+            self.tick(16.0)
+
+        self.assertEqual(gc_policy._state.growth_factor, gc_policy._MAX_GROWTH_FACTOR)
+
+    def test_a_collection_that_finds_a_lot_resets_the_wait(self):
+        gc_policy._state.growth_factor = 4
+        self.freed = 100_000
+        self.clock.advance(400)
+        self.blocks = 16_100_000  # 61% over: past 4 x 15%
+
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 1)
+        self.assertEqual(gc_policy._state.growth_factor, 1)
+
+
+class _Node:
+    """A reference cycle's member, with a weak reference allowed."""
+
+
+@override_settings(ENGINE_GC_POLICY="default")
+class TestReclaimFreesRealGarbage(SimpleTestCase):
+    """The reason the policy needs a full collection at all, against the real collector."""
+
+    def setUp(self):
+        super().setUp()
+        gc_policy._reset_for_tests()
+        self.addCleanup(gc_policy._reset_for_tests)
+        self._was_enabled = gc.isenabled()
+        gc.collect()
+        gc.disable()  # no automatic pass may free the garbage under test
+        self.addCleanup(lambda: gc.enable() if self._was_enabled else None)
+
+    def test_a_cycle_that_outlived_a_young_pass_is_freed_only_by_a_full_collection(self):
+        refs, keep = [], []
+        for _ in range(50):
+            first, second = _Node(), _Node()
+            first.peer, second.peer = second, first
+            refs.append(weakref.ref(first))
+            keep.append(first)
+        del first, second
+        gc.collect(0)  # the cycles are alive here, so they are promoted
+        gc.collect(0)
+        keep.clear()  # ...and die later
+
+        gc.collect(0)
+        alive_after_a_young_pass = sum(ref() is not None for ref in refs)
+        result = gc_policy.deep_clean("manual")
+        alive_after_a_deep_clean = sum(ref() is not None for ref in refs)
+
+        self.assertEqual(alive_after_a_young_pass, 50)
+        self.assertEqual(alive_after_a_deep_clean, 0)
+        self.assertGreaterEqual(result.collected, 100)
+
+
 class TestRecordMetric(SimpleTestCase):
+    def test_the_memory_gauges_answer_when_scraped(self):
+        from prometheus_client import REGISTRY
+
+        from evennia.server import prometheus_metrics
+
+        if not prometheus_metrics._init_metrics():
+            self.skipTest("metrics are disabled")
+
+        for name in (
+            "evennia_idmapper_cached_instances",
+            "evennia_gc_frozen_objects",
+            "evennia_python_allocated_blocks",
+        ):
+            self.assertIsNotNone(REGISTRY.get_sample_value(name), name)
+        self.assertGreater(REGISTRY.get_sample_value("evennia_python_allocated_blocks"), 0)
+
+    def test_record_gc_reclaim_counts_the_reason_and_the_objects(self):
+        from evennia.server import prometheus_metrics
+
+        reasons, objects = Mock(), Mock()
+        with (
+            patch.object(prometheus_metrics, "_init_metrics", return_value=True),
+            patch.object(prometheus_metrics, "GC_RECLAIM_TOTAL", reasons),
+            patch.object(prometheus_metrics, "GC_RECLAIMED_OBJECTS_TOTAL", objects),
+        ):
+            prometheus_metrics.record_gc_reclaim("growth", 1234)
+            prometheus_metrics.record_gc_reclaim("typed by an operator", 0)
+
+        reasons.labels.assert_any_call(reason="growth")
+        reasons.labels.assert_any_call(reason="manual")
+        objects.inc.assert_called_once_with(1234)
+
     def test_record_gc_pause_is_a_noop_when_metrics_are_unavailable(self):
         from evennia.server import prometheus_metrics
 

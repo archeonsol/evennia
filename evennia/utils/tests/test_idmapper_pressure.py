@@ -1,7 +1,5 @@
 """Tests for the idmapper's memory-pressure check: what it counts and when it sweeps."""
 
-import sys
-import tempfile
 import time
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -41,34 +39,6 @@ class TestCacheSize(SimpleTestCase):
 
         self.assertEqual(total, 4)
         self.assertEqual(by_class, {"ObjectTable": 3, "AccountTable": 1})
-
-
-class TestResidentMemory(SimpleTestCase):
-    def test_reads_the_resident_pages_from_a_statm_file(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".statm", delete=False) as handle:
-            handle.write("123456 51200 900 10 0 4000 0\n")
-
-        self.assertAlmostEqual(idmapper._rss_from_statm(handle.name, page_size=4096), 200.0)
-
-    def test_an_unreadable_statm_file_is_unknown_not_an_error(self):
-        self.assertIsNone(idmapper._rss_from_statm("/no/such/statm", page_size=4096))
-
-    def test_prefers_the_current_size_over_the_peak(self):
-        fake = SimpleNamespace(
-            Process=lambda pid: SimpleNamespace(
-                memory_info=lambda: SimpleNamespace(rss=600 * 1024 * 1024)
-            )
-        )
-
-        with patch.dict(sys.modules, {"psutil": fake}):
-            self.assertAlmostEqual(idmapper._current_rss_mb(), 600.0)
-
-    def test_falls_back_to_statm_when_psutil_is_absent(self):
-        with (
-            patch.dict(sys.modules, {"psutil": None}),
-            patch.object(idmapper, "_rss_from_statm", return_value=321.0),
-        ):
-            self.assertEqual(idmapper._current_rss_mb(), 321.0)
 
 
 class _PressureCase(SimpleTestCase):
