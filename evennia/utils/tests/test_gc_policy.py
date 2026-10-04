@@ -393,6 +393,123 @@ class TestDeepClean(_PolicyTestCase):
         self.assertIn("test", message)
 
 
+class TestRefreeze(_PolicyTestCase):
+    """A deep clean may freeze its survivors, and the backstops thaw them first."""
+
+    def setUp(self):
+        super().setUp()
+        self.calls = []
+
+        def recorder(name, result=None):
+            def call(*args, **kwargs):
+                self.calls.append(name)
+                return result
+
+            return call
+
+        for name, result in (("collect", 42), ("freeze", None), ("unfreeze", None)):
+            patcher = patch.object(gc_policy.gc, name, side_effect=recorder(name, result))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        gc_policy._state.managed = True
+
+    def test_it_is_off_unless_asked_for(self):
+        gc_policy.deep_clean("growth")
+
+        self.assertEqual(self.calls, ["collect"])
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_a_growth_clean_freezes_what_it_found_alive(self):
+        gc_policy.deep_clean("growth")
+
+        self.assertEqual(self.calls, ["collect", "freeze"])
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_a_requested_clean_does_not_thaw(self):
+        gc_policy.deep_clean("requested")
+
+        self.assertEqual(self.calls, ["collect", "freeze"])
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_the_backstops_thaw_collect_and_freeze_again(self):
+        for reason in ("scheduled", "overdue"):
+            with self.subTest(reason=reason):
+                self.calls.clear()
+                gc_policy.deep_clean(reason)
+
+                self.assertEqual(self.calls, ["unfreeze", "collect", "freeze"])
+
+    @override_settings(ENGINE_GC_REFREEZE=False)
+    def test_a_backstop_does_not_thaw_when_nothing_was_frozen_by_it(self):
+        gc_policy.deep_clean("scheduled")
+
+        self.assertEqual(self.calls, ["collect"])
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_the_log_says_how_much_is_frozen(self):
+        with patch.object(gc_policy.logger, "log_info") as info, patch.object(
+            gc_policy.gc, "get_freeze_count", return_value=1234
+        ):
+            gc_policy.deep_clean("growth")
+
+        self.assertIn("1234 frozen", info.call_args.args[0])
+
+
+class _Cyclic:
+    """Takes part in a reference cycle, so only the collector can free it."""
+
+    def __init__(self):
+        self.me = self
+
+
+class TestRefreezeAgainstTheRealCollector(SimpleTestCase):
+    """What the freeze costs and what the thaw gives back, with nothing patched."""
+
+    def setUp(self):
+        super().setUp()
+        gc_policy._reset_for_tests()
+        self.addCleanup(gc_policy._reset_for_tests)
+        # Whatever this test freezes belongs to the test process, not to the next test.
+        self.addCleanup(gc.unfreeze)
+        gc_policy._state.managed = True
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_a_cycle_frozen_alive_outlives_a_normal_clean_and_dies_at_the_backstop(self):
+        survivor = _Cyclic()
+        ref = weakref.ref(survivor)
+        gc_policy.deep_clean("growth")  # alive: its cycle is frozen with the rest
+        self.assertGreater(gc.get_freeze_count(), 0)
+
+        del survivor
+        gc_policy.deep_clean("growth")
+        self.assertIsNotNone(ref(), "a frozen cycle was collected by an ordinary clean")
+
+        gc_policy.deep_clean("scheduled")
+        self.assertIsNone(ref(), "the backstop did not free a cycle that died while frozen")
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_a_cycle_made_after_the_freeze_is_freed_by_the_next_ordinary_clean(self):
+        gc_policy.deep_clean("growth")
+        later = _Cyclic()
+        ref = weakref.ref(later)
+        del later
+
+        gc_policy.deep_clean("growth")
+
+        self.assertIsNone(ref())
+
+    @override_settings(ENGINE_GC_REFREEZE=False)
+    def test_without_the_setting_a_dead_cycle_is_freed_as_ever(self):
+        survivor = _Cyclic()
+        ref = weakref.ref(survivor)
+        gc_policy.deep_clean("growth")
+        del survivor
+
+        gc_policy.deep_clean("growth")
+
+        self.assertIsNone(ref())
+
+
 class _ManagedCase(_PolicyTestCase):
     """The managed policy applied over fakes: a scripted clock, loop, process and collector.
 
