@@ -1535,6 +1535,49 @@ class TestIssue2627(TwistedTestCase, BaseEvenniaTest):
         return d
 
 
+class TestCommandTelemetry(TwistedTestCase, BaseEvenniaTest):
+    """Input that goes through the action bridge is counted on its session."""
+
+    def setUp(self):
+        self.patch(sys.modules["evennia.server.sessionhandler"], "delay", _mockdelay)
+        super().setUp()
+
+    def _dispatch(self, line, recorder):
+        async def _consumed(*args, **kwargs):
+            return None
+
+        self.session.record_command = recorder
+        with patch("evennia.actions.dispatch.try_action_dispatch", _consumed):
+            return ensureDeferred(
+                cmdhandler.cmdhandler(
+                    self.session, line, callertype="session", session=self.session
+                )
+            )
+
+    def test_a_dispatched_line_is_counted_under_its_first_word(self):
+        recorder = MagicMock()
+        d = self._dispatch("look here", recorder)
+
+        def _check(_):
+            recorder.assert_called_once_with("look")
+
+        d.addCallback(_check)
+        return d
+
+    def test_a_counter_that_fails_does_not_lose_the_command(self):
+        recorder = MagicMock(side_effect=RuntimeError("telemetry down"))
+        d = self._dispatch("look", recorder)
+
+        def _check(_):
+            recorder.assert_called_once_with("look")
+
+        d.addCallback(_check)
+        return d
+
+    def test_a_session_with_no_counter_is_fine(self):
+        return self._dispatch("look", None)
+
+
 class TestCmdSetMergeObjBindings(TestCase):
     """Test that cmdset merges preserve correct cmd.obj bindings."""
 

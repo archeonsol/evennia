@@ -895,6 +895,17 @@ async def cmdhandler(
         if action_session is None and callertype == "session":
             action_session = called_by
         key = str(raw_string or "").strip().split(" ", 1)[0]
+        # Per-session command telemetry, which moderation reads as the session's
+        # ``command_count``. The hook belongs to the game's ServerSession (the
+        # engine's has none), and failing to count must never cost a player their
+        # command. The cmdset path used to call it; the typed-action bridge did
+        # not, so every session recorded zero commands.
+        recorder = getattr(action_session, "record_command", None)
+        if callable(recorder):
+            try:
+                recorder(key)
+            except Exception:
+                logger.log_trace("cmdhandler: session command telemetry failed")
         scope = command_trace_scope(
             caller=called_by,
             session=action_session,
