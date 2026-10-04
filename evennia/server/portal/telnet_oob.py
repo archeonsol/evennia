@@ -27,9 +27,6 @@ This implements the following telnet OOB communication protocols:
 import re
 import weakref
 
-# General Telnet
-from evennia.server.portal.telnet_parser import IAC, SB, SE
-
 from .gmcp_utils import decode_gmcp as _decode_gmcp
 from .gmcp_utils import encode_gmcp as _encode_gmcp_str
 
@@ -364,8 +361,8 @@ class TelnetOOB:
 
         if self.MSDP:
             encoded_oob = self.encode_msdp(cmdname, *args, **kwargs)
-            self.protocol()._write(IAC + SB + MSDP + encoded_oob + IAC + SE)
+            self.protocol()._write_subneg(MSDP, encoded_oob)
 
         if self.GMCP:
             encoded_oob = self.encode_gmcp(cmdname, *args, **kwargs)
-            self.protocol()._write(IAC + SB + GMCP + encoded_oob + IAC + SE)
+            self.protocol()._write_subneg(GMCP, encoded_oob)

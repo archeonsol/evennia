@@ -416,6 +416,14 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
         data = data.replace(b"\n", b"\r\n").replace(b"\r\r\n", b"\r\n")
         super()._write(mccp_compress(self, data))
 
+    def _write_binary(self, data):
+        """Write raw protocol bytes without the text line-ending rewrite.
+
+        Subnegotiation payloads are binary frames; rewriting line endings into
+        them (as ``_write`` does for text) would corrupt their contents.
+        """
+        self.transport.write(mccp_compress(self, data))
+
     def sendLine(self, line):
         """
         Hook overloading the one used by linereceiver.

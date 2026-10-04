@@ -140,6 +140,25 @@ class Telnet:
     def _write(self, data):
         self.transport.write(data)
 
+    def _write_binary(self, data):
+        """Write raw protocol bytes, bypassing any text normalization in ``_write``.
+
+        Subclasses whose ``_write`` rewrites line endings (telnet) override this
+        so binary frames keep their exact bytes.
+        """
+        self.transport.write(data)
+
+    def _write_subneg(self, option, payload):
+        """Write one RFC 854 subnegotiation frame: IAC SB <option> <payload> IAC SE.
+
+        IAC bytes inside the payload are doubled so they cannot be read as the
+        frame terminator; an unescaped IAC would desynchronize the client until
+        the next subnegotiation arrives. The payload must not be text-normalized
+        (see :meth:`_write_binary`).
+        """
+        payload = payload.replace(IAC, IAC + IAC)
+        self._write_binary(IAC + SB + option + payload + IAC + SE)
+
     class _OptionState:
         class _Perspective:
             state = "no"
@@ -223,8 +242,7 @@ class Telnet:
 
     def requestNegotiation(self, about, data):
         """Send a subnegotiation for option ``about`` with ``data`` payload."""
-        data = data.replace(IAC, IAC * 2)
-        self._write(IAC + SB + about + data + IAC + SE)
+        self._write_subneg(about, data)
 
     def dataReceived(self, data):
         appDataBuffer = []

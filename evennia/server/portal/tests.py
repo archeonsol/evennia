@@ -39,7 +39,7 @@ from .mxp import MXP
 from .naws import DEFAULT_HEIGHT, DEFAULT_WIDTH
 from .suppress_ga import SUPPRESS_GA
 from .telnet import TelnetProtocol, TelnetServerFactory
-from .telnet_oob import MSDP, MSDP_VAL, MSDP_VAR
+from .telnet_oob import GMCP, MSDP, MSDP_VAL, MSDP_VAR
 from .ttype import IS, TTYPE
 from .webclient import WebSocketClient
 
@@ -313,6 +313,41 @@ class TestTelnet(TwistedTestCase):
         self.assertFalse(self.proto.protocol_flags["MXP"])
         self.assertEqual(self.proto.handshakes, 2)
         # clean up to prevent Unclean reactor
+        self.proto.nop_keep_alive.stop()
+        self.proto._handshake_delay.cancel()
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_subneg_framing_preserves_payload_bytes(self):
+        """Subnegotiation frames are binary: line-ending rewriting must not
+        touch the payload and an IAC byte inside it must be doubled, or the
+        frame terminator is eaten and the client desynchronizes until the next
+        subnegotiation."""
+        self.transport.client = ["localhost"]
+        self.transport.setTcpKeepAlive = Mock()
+        d = self.proto.makeConnection(self.transport)
+        self.transport.clear()
+        self.proto._write_subneg(GMCP, b"Char.Vitals\nhp\xffmax")
+        self.assertEqual(
+            self.transport.value(),
+            IAC + SB + GMCP + b"Char.Vitals\nhp" + IAC + IAC + b"max" + IAC + SE,
+        )
+        self.proto.nop_keep_alive.stop()
+        self.proto._handshake_delay.cancel()
+        return d
+
+    @mock.patch.object(portalsessionhandler, "clock", new=MagicMock())
+    def test_oob_data_out_frames_as_subneg(self):
+        """OOB output ships as proper IAC SB ... IAC SE subnegotiations."""
+        self.transport.client = ["localhost"]
+        self.transport.setTcpKeepAlive = Mock()
+        d = self.proto.makeConnection(self.transport)
+        self.proto.oob.GMCP = True
+        self.transport.clear()
+        self.proto.oob.data_out("char_vitals", hp=1)
+        frame = self.transport.value()
+        self.assertTrue(frame.startswith(IAC + SB + GMCP + b"Char.Vitals "))
+        self.assertTrue(frame.endswith(IAC + SE))
         self.proto.nop_keep_alive.stop()
         self.proto._handshake_delay.cancel()
         return d
