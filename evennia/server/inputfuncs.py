@@ -691,8 +691,18 @@ def _not_implemented(session, *args, **kwargs):
 external_discord_hello = _not_implemented
 
 
+# GMCP External.Discord.Get is requested by Mudlet; the game ships no Discord
+# link, so the request is answered with silence. Without this stub every Mudlet
+# login logs an unknown-inputfunc ERROR.
+external_discord_get = _not_implemented
+
+
 # GMCP Client.Gui is sent by Mudlet for gui setup.
 client_gui = _not_implemented
+
+# GMCP Client.Name / Client.Version are announced by Mudlet at connect.
+client_name = _not_implemented
+client_version = _not_implemented
 
 
 # -------------------------------------------------------------------------
