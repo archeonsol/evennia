@@ -25,6 +25,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.303: Subnegotiation frames keep their bytes
+
+A subnegotiation payload could contain a raw `IAC` (0xFF) byte, and every
+payload passed through the text line-ending rewrite on its way to the
+transport. A strict telnet parser reads the unescaped `IAC` as the start of
+the frame terminator, swallows the `SE` that follows it, and stays out of
+sync until the next subnegotiation's terminator arrives; a payload byte 0x0A
+was rewritten to CRLF mid-frame. Mudlet, with the strictest parser, showed
+this as commands being dropped until the next `IAC SB` completed.
+
+### Engine
+
+- **`_write_subneg` / `_write_binary`** ([`telnet_parser.py`](evennia/server/portal/telnet_parser.py),
+  [`telnet.py`](evennia/server/portal/telnet.py)). `Telnet._write_subneg(option,
+  payload)` writes one RFC 854 frame: `IAC SB <option> <payload> IAC SE`, with
+  `IAC` doubled inside the payload. It writes through `_write_binary`, which
+  bypasses the `\n`-to-`\r\n` rewrite in `TelnetProtocol._write` but keeps MCCP
+  compression. `requestNegotiation` now delegates to it.
+- **OOB output uses it** ([`telnet_oob.py`](evennia/server/portal/telnet_oob.py)).
+  `TelnetOOB.data_out` ships MSDP and GMCP through `_write_subneg` instead of
+  hand-building frames and sending them through the text `_write`.
+- **Client handshake GMCP stubs** ([`inputfuncs.py`](evennia/server/inputfuncs.py)).
+  `client_name`, `client_version`, and `external_discord_get` are no-op stubs
+  next to the existing `client_gui` / `external_discord_hello`; before this,
+  every Mudlet login logged an unknown-inputfunc ERROR for them.
+
+### Migration notes
+
+None. The wire format only changes for payloads that previously produced
+invalid frames (raw `IAC`, raw 0x0A); GMCP's JSON encoder is already
+ASCII-escaped, MSDP was the reachable path.
+
+### Tests
+
+`evennia/server/portal/tests.py`: `_write_subneg` preserves a raw newline and
+doubles `IAC` in the payload; `data_out` ships a well-formed GMCP frame.
+
 ## 6.0.0+underspire.302: Menu Back and Quit are separate words
 
 One `q` used to end only the level it was typed at, and a menu that wanted
