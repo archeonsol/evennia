@@ -82,6 +82,7 @@ from .menus import (
     InputCaptureState,
     MenuInputAction,
     MenuPrompt,
+    MenuQuit,
     ask_yes_no,
     confirm,
     format_menu_prompt,
@@ -227,6 +228,7 @@ __all__ = [
     # interaction states
     "MenuInputAction",
     "MenuPrompt",
+    "MenuQuit",
     "InputCaptureState",
     "DisambiguationState",
     "format_menu_prompt",

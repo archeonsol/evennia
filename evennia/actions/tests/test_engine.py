@@ -18,7 +18,13 @@ from twisted.internet.defer import Deferred, succeed
 
 from evennia.actions.action import Action
 from evennia.actions.engine import RuleEngine
-from evennia.actions.menus import MenuPrompt, format_menu_prompt, parse_menu_choice
+from evennia.actions.menus import (
+    QUIT,
+    MenuPrompt,
+    MenuQuit,
+    format_menu_prompt,
+    parse_menu_choice,
+)
 from evennia.actions.rule import rule
 
 # The package re-exports the ``engine`` *instance*, which shadows the ``engine``
@@ -574,9 +580,32 @@ class MenuPicker:
     def pick(self, action, actor):
         choice = yield MenuPrompt(
             "Pick one:",
-            options=[("a", "Alpha"), ("b", "Beta")],
+            options=[("a", "Alpha"), ("z", "Zeta")],
         )
         self.fired.append(f"choice:{choice}")
+        return CLAIM
+
+
+class NestedMenu:
+    """Two menu levels: the inner one returns to the outer, which says goodbye."""
+
+    def __init__(self, fired, catch_quit=False):
+        self.fired = fired
+        self.catch_quit = catch_quit
+
+    def _inner(self):
+        choice = yield MenuPrompt("Inner:", options=[("1", "One")])
+        self.fired.append(f"inner:{choice}")
+
+    @rule(Kick, phase="carry_out", priority=10)
+    def hub(self, action, actor):
+        try:
+            yield from self._inner()
+            self.fired.append("outer:after_inner")
+        except MenuQuit:
+            if not self.catch_quit:
+                raise
+            self.fired.append("outer:goodbye")
         return CLAIM
 
 
@@ -597,11 +626,31 @@ class TestMenuPromptRule(unittest.TestCase):
             _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(MenuPicker(fired))))
         self.assertEqual(fired, ["choice:a"])
 
-    def test_menu_prompt_quit_returns_none(self):
+    def test_back_resumes_the_menu_with_none(self):
+        for answer in ("b", "back", "cancel", ""):
+            fired = []
+            with self._auto_answer(answer):
+                _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(MenuPicker(fired))))
+            self.assertEqual(fired, ["choice:None"], answer)
+
+    def test_back_returns_one_level(self):
+        fired = []
+        with self._auto_answer("b"):
+            _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(NestedMenu(fired))))
+        self.assertEqual(fired, ["inner:None", "outer:after_inner"])
+
+    def test_quit_ends_the_whole_flow(self):
+        for answer in ("q", "quit", "exit"):
+            fired = []
+            with self._auto_answer(answer):
+                _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(NestedMenu(fired))))
+            self.assertEqual(fired, [], answer)
+
+    def test_an_outer_level_can_catch_quit(self):
         fired = []
         with self._auto_answer("q"):
-            _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(MenuPicker(fired))))
-        self.assertEqual(fired, ["choice:None"])
+            _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(NestedMenu(fired, catch_quit=True))))
+        self.assertEqual(fired, ["outer:goodbye"])
 
     def test_twisted_driver_waits_on_pending_asyncio_input_future(self):
         loop = asyncio.new_event_loop()
@@ -620,79 +669,68 @@ class TestMenuPromptRule(unittest.TestCase):
 
 class TestFormatMenuPrompt(unittest.TestCase):
     def test_shows_option_keys_not_renumbered(self):
-        text = format_menu_prompt(
-            MenuPrompt(
-                "Header",
-                options=[("c", "Create a group"), ("b", "Back")],
-                allow_quit=True,
-            )
-        )
+        text = format_menu_prompt(MenuPrompt("Header", options=[("c", "Create a group")]))
         self.assertIn("|wc|n: Create a group", text)
-        self.assertIn("|wb|n: Back", text)
         self.assertNotIn("1: Create", text)
 
-    def test_skips_global_quit_when_exit_option_present(self):
-        text = format_menu_prompt(
-            MenuPrompt(
-                "Hub",
-                options=[("q", "Exit interface")],
-                allow_quit=True,
-            )
-        )
-        self.assertIn("|wq|n: Exit interface", text)
-        self.assertNotIn("|wq|n: Quit", text)
-
-    def test_back_and_quit_share_one_line_at_the_foot(self):
-        text = format_menu_prompt(
-            MenuPrompt(
-                "Hub",
-                options=[("1", "One"), ("2", "Two"), ("b", "Back")],
-                allow_quit=True,
-            )
-        )
+    def test_the_foot_offers_back_and_quit(self):
+        text = format_menu_prompt(MenuPrompt("Hub", options=[("1", "One"), ("2", "Two")]))
         lines = text.split("\n")
         self.assertEqual(lines[-1], "  |wb|n: Back   |wq|n: Quit")
         self.assertEqual(lines[-3:-1], ["  |w1|n: One", "  |w2|n: Two"])
-        self.assertEqual(text.count("Back"), 1)
 
-    def test_a_quit_key_the_menu_labels_itself_keeps_its_label_in_the_foot(self):
-        text = format_menu_prompt(
-            MenuPrompt(
-                "Hub",
-                options=[("1", "One"), ("b", "Cancel"), ("q", "Step away")],
-                allow_quit=False,
-            )
-        )
-        self.assertEqual(text.split("\n")[-1], "  |wb|n: Cancel   |wq|n: Step away")
-
-    def test_a_menu_of_only_a_foot_has_no_rows(self):
-        text = format_menu_prompt(MenuPrompt("Done.", options=[("b", "Back")], allow_quit=False))
+    def test_a_menu_without_quit_offers_only_back(self):
+        text = format_menu_prompt(MenuPrompt("Done.", allow_quit=False))
         self.assertEqual(text, "Done.\n\n  |wb|n: Back")
 
-    def test_a_second_back_key_stays_a_row(self):
-        text = format_menu_prompt(
-            MenuPrompt(
-                "Hub",
-                options=[("b", "Back"), ("b", "Browse")],
-                allow_quit=False,
-            )
-        )
-        lines = text.split("\n")
-        self.assertEqual(lines[-2:], ["  |wb|n: Browse", "  |wb|n: Back"])
-
     def test_look_joins_the_foot(self):
-        text = format_menu_prompt(
-            MenuPrompt("Hub", options=[("1", "One")], allow_quit=True, allow_look=True)
-        )
-        self.assertEqual(text.split("\n")[-1], "  |wq|n: Quit   |wl|n: Look")
+        text = format_menu_prompt(MenuPrompt("Hub", options=[("1", "One")], allow_look=True))
+        self.assertEqual(text.split("\n")[-1], "  |wb|n: Back   |wq|n: Quit   |wl|n: Look")
 
-    def test_the_foot_keys_still_parse_as_ordinary_options(self):
-        menu = MenuPrompt(
-            "Hub", options=[("1", "One"), ("b", "Back"), ("q", "Quit")], allow_quit=False
-        )
-        self.assertEqual(parse_menu_choice("b", menu), "b")
+
+class TestMenuPromptKeys(unittest.TestCase):
+    def test_back_words_are_reserved(self):
+        for key in ("b", "B", "back", "cancel"):
+            with self.assertRaises(ValueError, msg=key):
+                MenuPrompt("Hub", options=[(key, "Leave")], allow_quit=False)
+
+    def test_quit_words_are_reserved_while_quit_is_allowed(self):
+        for key in ("q", "quit", "exit"):
+            with self.assertRaises(ValueError, msg=key):
+                MenuPrompt("Hub", options=[(key, "Leave")])
+
+    def test_a_menu_without_quit_may_declare_a_quit_key(self):
+        menu = MenuPrompt("Hub", options=[("1", "One"), ("q", "Sign out")], allow_quit=False)
         self.assertEqual(parse_menu_choice("Q", menu), "q")
-        self.assertEqual(parse_menu_choice("2", menu), "b")
+        self.assertEqual(parse_menu_choice("2", menu), "q")
+
+    def test_parse_maps_back_and_quit(self):
+        menu = MenuPrompt("Hub", options=[("1", "One")])
+        self.assertIsNone(parse_menu_choice("Back", menu))
+        self.assertIsNone(parse_menu_choice("  ", menu))
+        self.assertEqual(parse_menu_choice("Quit", menu), QUIT)
+        self.assertEqual(parse_menu_choice("1", menu), "1")
+        self.assertEqual(parse_menu_choice("2", menu), "__invalid__")
+
+
+class TestMenuPromptText(unittest.TestCase):
+    def test_a_line_that_names_no_option_resumes_with_the_line(self):
+        menu = MenuPrompt("Hub", options=[("1", "One"), ("c", "Collect")], accept_text=True)
+        self.assertEqual(parse_menu_choice("  Short Blade ", menu), "Short Blade")
+        self.assertEqual(parse_menu_choice("9", menu), "9")
+        self.assertEqual(parse_menu_choice("show short blade", menu), "show short blade")
+
+    def test_keys_back_and_quit_still_win(self):
+        menu = MenuPrompt("Hub", options=[("1", "One"), ("c", "Collect")], accept_text=True)
+        self.assertEqual(parse_menu_choice("C", menu), "c")
+        self.assertEqual(parse_menu_choice("1", menu), "1")
+        self.assertIsNone(parse_menu_choice("cancel", menu))
+        self.assertIsNone(parse_menu_choice("", menu))
+        self.assertEqual(parse_menu_choice("exit", menu), QUIT)
+
+    def test_a_screen_with_its_own_rows_shows_only_the_foot(self):
+        text = format_menu_prompt(MenuPrompt("  1. Blades", accept_text=True))
+        self.assertEqual(text, "  1. Blades\n\n  |wb|n: Back   |wq|n: Quit")
 
 
 class TestDeferredRule(unittest.TestCase):

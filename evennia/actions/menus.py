@@ -33,6 +33,7 @@ from .state import StateProvider, capture_holder, enter_state, exit_state
 __all__ = [
     "MenuInputAction",
     "MenuPrompt",
+    "MenuQuit",
     "InputCaptureState",
     "GetInputState",
     "YesNoState",
@@ -66,21 +67,58 @@ class MenuInputAction(Action):
 # --------------------------------------------------------------------------- #
 
 
+#: Typed words that go up one level. The menu resumes with ``None``.
+BACK_WORDS = frozenset({"b", "back", "cancel"})
+#: Typed words that leave the whole menu. The driver throws :class:`MenuQuit`.
+QUIT_WORDS = frozenset({"q", "quit", "exit"})
+#: What :func:`parse_menu_choice` returns for a quit.
+QUIT = "__quit__"
+
+
+class MenuQuit(Exception):
+    """Thrown into a menu flow at its ``yield`` when the player quits.
+
+    It rises through every ``yield from`` level, so one ``q`` leaves the whole
+    menu. A level that holds unsaved work or says a leaving line catches it;
+    when nothing does, the driver ends the flow.
+    """
+
+
 @dataclass
 class MenuPrompt:
     """Structured yield for branching hub menus in ``@interactive`` rules.
 
+    The foot always offers ``b: Back`` (resumes with ``None``) and, when
+    ``allow_quit``, ``q: Quit`` (throws :class:`MenuQuit`). Their words are
+    reserved: a menu cannot declare them as option keys.
+
     Attributes:
         text (str): body shown above the option list.
         options (list): ``(key, description)`` pairs; keys may be numeric strings.
-        allow_quit (bool): accept ``q`` / ``quit`` to end the flow (returns ``None``).
+        allow_quit (bool): accept ``q`` / ``quit`` / ``exit`` to leave the whole flow.
         allow_look (bool): accept ``l`` / ``look`` to re-show the menu (returns ``"__look__"``).
+        accept_text (bool): resume with the typed line, stripped, when it names no
+            option, for a screen that also takes names or commands. Back and Quit
+            words still go back and quit. A screen that draws its own rows in
+            ``text`` may leave ``options`` empty.
+
+    Raises:
+        ValueError: an option key is a reserved Back or Quit word.
     """
 
     text: str
     options: list = field(default_factory=list)
     allow_quit: bool = True
     allow_look: bool = False
+    accept_text: bool = False
+
+    def __post_init__(self):
+        reserved = BACK_WORDS | QUIT_WORDS if self.allow_quit else BACK_WORDS
+        for key, _desc in self.options:
+            if str(key).lower() in reserved:
+                raise ValueError(
+                    f"menu option key {key!r} is reserved: the foot already offers Back and Quit"
+                )
 
 
 def session_mismatch(state_session, actor) -> bool:
@@ -98,27 +136,11 @@ def session_mismatch(state_session, actor) -> bool:
     return state_session is not getattr(actor, "session", None)
 
 
-_EXIT_KEYS = frozenset({"q", "quit", "exit"})
-
-
-def _menu_has_exit_option(menu: MenuPrompt) -> bool:
-    for key, _desc in menu.options:
-        if str(key).lower() in _EXIT_KEYS:
-            return True
-    return False
-
-
-#: Option keys that leave a menu. They share one line at its foot.
-_FOOT_KEYS = ("b", "q")
-
-
 def format_menu_prompt(menu: MenuPrompt) -> str:
-    """Render option keys and descriptions (EvMenu / matrix formatter style).
+    """Render the body, one row per option, and the foot.
 
-    The options that leave the menu (``b`` and ``q``) share one line at the foot,
-    ``  |wb|n: Back   |wq|n: Quit``, instead of a row each, so a menu reads as its
-    choices and then how to leave. They stay ordinary options for
-    :func:`parse_menu_choice`. A second option on the same key stays a row.
+    The foot is one line, ``  |wb|n: Back   |wq|n: Quit``, with ``l: Look``
+    added when the menu allows it.
 
     Args:
         menu (MenuPrompt): the menu to render.
@@ -127,33 +149,32 @@ def format_menu_prompt(menu: MenuPrompt) -> str:
         str: the body, a blank line, the option rows, and the foot line.
     """
     lines = [menu.text.rstrip(), ""]
-    foot = {}
     for key, desc in menu.options:
-        label = desc or key
-        lowered = str(key).lower()
-        if lowered in _FOOT_KEYS and lowered not in foot:
-            foot[lowered] = f"|w{key}|n: {label}"
-            continue
-        lines.append(f"  |w{key}|n: {label}")
-    if menu.allow_quit and not _menu_has_exit_option(menu):
-        foot.setdefault("q", "|wq|n: Quit")
-    items = [foot[key] for key in _FOOT_KEYS if key in foot]
+        lines.append(f"  |w{key}|n: {desc or key}")
+    foot = ["|wb|n: Back"]
+    if menu.allow_quit:
+        foot.append("|wq|n: Quit")
     if menu.allow_look:
-        items.append("|wl|n: Look")
-    if items:
-        lines.append("  " + "   ".join(items))
+        foot.append("|wl|n: Look")
+    lines.append("  " + "   ".join(foot))
     return "\n".join(lines)
 
 
 def parse_menu_choice(raw, menu: MenuPrompt):
-    """Map player input to an option key, ``None`` (quit), or ``"__look__"``."""
+    """Map player input to an option key, ``None`` (back), :data:`QUIT`, or ``"__look__"``.
+
+    Input that names no option is ``"__invalid__"``, or the stripped line itself
+    when the menu has ``accept_text``.
+    """
     if raw is None:
         return None
     token = raw.strip()
     if not token:
         return None
     lowered = token.lower()
-    if menu.allow_quit and lowered in ("q", "quit", "exit"):
+    if menu.allow_quit and lowered in QUIT_WORDS:
+        return QUIT
+    if lowered in BACK_WORDS:
         return None
     if menu.allow_look and lowered in ("l", "look"):
         return "__look__"
@@ -164,8 +185,7 @@ def parse_menu_choice(raw, menu: MenuPrompt):
         idx = int(token)
         if 1 <= idx <= len(menu.options):
             return menu.options[idx - 1][0]
-        return "__invalid__"
-    return "__invalid__"
+    return token if menu.accept_text else "__invalid__"
 
 
 # --------------------------------------------------------------------------- #
@@ -177,8 +197,9 @@ def confirm(prompt, yes_label="Yes", no_label="No"):
     """Yes/no sub-flow for an ``@interactive`` generator.
 
     Use as ``ok = yield from confirm("Leave group?")``. Returns ``True`` only on
-    the yes option; declining or quitting (``q``) is ``False``. Yields a
-    :class:`MenuPrompt`, so it composes inside any flow the engine drives.
+    the yes option; declining or going back is ``False``. Quitting leaves the
+    whole flow like any other menu. Yields a :class:`MenuPrompt`, so it
+    composes inside any flow the engine drives.
     """
     choice = yield MenuPrompt(prompt, options=[("y", yes_label), ("n", no_label)])
     return choice == "y"

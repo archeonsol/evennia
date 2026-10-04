@@ -25,6 +25,55 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.302: Menu Back and Quit are separate words
+
+One `q` used to end only the level it was typed at, and a menu that wanted
+both "up one level" and "leave" had to declare its own `b` and `q` options.
+Back and Quit are now engine words with fixed meanings, so every menu reads
+and answers the same way.
+
+### Engine
+
+- **Back and Quit split** ([`menus.py`](evennia/actions/menus.py),
+  [`engine.py`](evennia/actions/engine.py)). `BACK_WORDS` (`b`, `back`,
+  `cancel`, or a blank line) resume the flow with `None`: up one level.
+  `QUIT_WORDS` (`q`, `quit`, `exit`) throw the new `MenuQuit` into the flow
+  at its `yield`. It rises through every `yield from` level, so one `q`
+  leaves the whole menu; a level that holds unsaved work or says a leaving
+  line catches it. An uncaught `MenuQuit` ends the flow with `None`.
+  `MenuQuit` is exported from `evennia.actions`.
+- **The foot is fixed.** `format_menu_prompt` always draws
+  `b: Back   q: Quit` (plus `l: Look` when allowed). `MenuPrompt` raises
+  `ValueError` when an option key is a Back word, or a Quit word while
+  `allow_quit` is on.
+- **`MenuPrompt(accept_text=True)`.** A line that names no option resumes
+  the flow with the stripped line instead of "Invalid option", so a screen
+  that takes names or commands shares the engine foot and words. Back and
+  Quit words keep their meaning.
+- `confirm()`: going back is `False`; quitting leaves the whole flow.
+
+### Migration notes
+
+- **Breaking.** A game menu that declares a `b`, `back`, `cancel`, `q`,
+  `quit` or `exit` option key now raises `ValueError` when it opens. Drop
+  those options; the foot offers them.
+- A flow that treated `None` from a `MenuPrompt` as "quit" now gets `None`
+  only on Back. Catch `MenuQuit` where the flow must save work or print a
+  leaving line on quit.
+
+### Settings
+
+None.
+
+### Tests
+
+- `test_engine.py`: Back resumes with `None`, Quit throws through nested
+  `yield from` levels and is caught or ends the flow, reserved keys raise,
+  the foot is fixed, and `accept_text` returns the typed line while Back and
+  Quit keep their meaning.
+
+---
+
 ## 6.0.0+underspire.301: Alias order is insertion order; tabs badge news
 
 Two changes that make author intent visible: which alias of an object reads
