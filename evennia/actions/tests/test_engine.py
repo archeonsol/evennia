@@ -713,6 +713,26 @@ class TestMenuPromptKeys(unittest.TestCase):
         self.assertEqual(parse_menu_choice("2", menu), "__invalid__")
 
 
+class TestMenuPromptText(unittest.TestCase):
+    def test_a_line_that_names_no_option_resumes_with_the_line(self):
+        menu = MenuPrompt("Hub", options=[("1", "One"), ("c", "Collect")], accept_text=True)
+        self.assertEqual(parse_menu_choice("  Short Blade ", menu), "Short Blade")
+        self.assertEqual(parse_menu_choice("9", menu), "9")
+        self.assertEqual(parse_menu_choice("show short blade", menu), "show short blade")
+
+    def test_keys_back_and_quit_still_win(self):
+        menu = MenuPrompt("Hub", options=[("1", "One"), ("c", "Collect")], accept_text=True)
+        self.assertEqual(parse_menu_choice("C", menu), "c")
+        self.assertEqual(parse_menu_choice("1", menu), "1")
+        self.assertIsNone(parse_menu_choice("cancel", menu))
+        self.assertIsNone(parse_menu_choice("", menu))
+        self.assertEqual(parse_menu_choice("exit", menu), QUIT)
+
+    def test_a_screen_with_its_own_rows_shows_only_the_foot(self):
+        text = format_menu_prompt(MenuPrompt("  1. Blades", accept_text=True))
+        self.assertEqual(text, "  1. Blades\n\n  |wb|n: Back   |wq|n: Quit")
+
+
 class TestDeferredRule(unittest.TestCase):
     def test_native_asyncio_dispatch_waits_on_pending_deferred_rule(self):
         loop = asyncio.new_event_loop()

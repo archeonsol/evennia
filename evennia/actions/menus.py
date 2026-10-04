@@ -97,6 +97,10 @@ class MenuPrompt:
         options (list): ``(key, description)`` pairs; keys may be numeric strings.
         allow_quit (bool): accept ``q`` / ``quit`` / ``exit`` to leave the whole flow.
         allow_look (bool): accept ``l`` / ``look`` to re-show the menu (returns ``"__look__"``).
+        accept_text (bool): resume with the typed line, stripped, when it names no
+            option, for a screen that also takes names or commands. Back and Quit
+            words still go back and quit. A screen that draws its own rows in
+            ``text`` may leave ``options`` empty.
 
     Raises:
         ValueError: an option key is a reserved Back or Quit word.
@@ -106,6 +110,7 @@ class MenuPrompt:
     options: list = field(default_factory=list)
     allow_quit: bool = True
     allow_look: bool = False
+    accept_text: bool = False
 
     def __post_init__(self):
         reserved = BACK_WORDS | QUIT_WORDS if self.allow_quit else BACK_WORDS
@@ -156,7 +161,11 @@ def format_menu_prompt(menu: MenuPrompt) -> str:
 
 
 def parse_menu_choice(raw, menu: MenuPrompt):
-    """Map player input to an option key, ``None`` (back), :data:`QUIT`, or ``"__look__"``."""
+    """Map player input to an option key, ``None`` (back), :data:`QUIT`, or ``"__look__"``.
+
+    Input that names no option is ``"__invalid__"``, or the stripped line itself
+    when the menu has ``accept_text``.
+    """
     if raw is None:
         return None
     token = raw.strip()
@@ -176,8 +185,7 @@ def parse_menu_choice(raw, menu: MenuPrompt):
         idx = int(token)
         if 1 <= idx <= len(menu.options):
             return menu.options[idx - 1][0]
-        return "__invalid__"
-    return "__invalid__"
+    return token if menu.accept_text else "__invalid__"
 
 
 # --------------------------------------------------------------------------- #
