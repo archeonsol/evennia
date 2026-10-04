@@ -419,7 +419,7 @@ class TestMenuCombinators(unittest.TestCase):
             gen.send("y")
         self.assertIs(cm.exception.value, True)
 
-    def test_confirm_no_and_quit(self):
+    def test_confirm_no_and_back(self):
         from evennia.actions.menus import confirm
 
         for reply in ("n", None):

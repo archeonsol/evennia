@@ -128,25 +128,33 @@ async def _drive_generator(gen, actor):
     * ``str`` → a prompt; suspend on :func:`_get_input_future`, resume with the
       player's line (sent back into the generator).
     * :class:`~evennia.actions.menus.MenuPrompt` → render numbered options, capture
-      input, resume with the chosen key (``None`` on quit).
+      input, resume with the chosen key (``None`` on back). A quit throws
+      :class:`~evennia.actions.menus.MenuQuit` in at the ``yield``.
     * ``int`` / ``float`` → a pause; suspend on :func:`_sleep`.
     * ``Deferred`` → await it; resume with its result.
     * anything else → ignored (resume with ``None``).
 
     Returns:
         Deferred: fires with the value the generator ``return``\\s (``None`` if it
-        falls off the end).
+        falls off the end or a quit leaves it uncaught).
     """
-    from .menus import MenuPrompt, format_menu_prompt, parse_menu_choice
+    from .menus import QUIT, MenuPrompt, MenuQuit, format_menu_prompt, parse_menu_choice
 
     caller = _caller_for(actor)
     to_send = None
+    to_throw = None
     while True:
         try:
-            value = gen.send(to_send)
+            if to_throw is not None:
+                value = gen.throw(to_throw)
+            else:
+                value = gen.send(to_send)
         except StopIteration as stop:
             return getattr(stop, "value", None)
+        except MenuQuit:
+            return None
         to_send = None
+        to_throw = None
         if _is_deferred(value):
             to_send = await clock.maybe_await(value)
         elif isinstance(value, MenuPrompt):
@@ -159,7 +167,10 @@ async def _drive_generator(gen, actor):
                 if choice == "__invalid__":
                     caller.msg("Invalid option. Try again.")
                     continue
-                to_send = choice
+                if choice == QUIT:
+                    to_throw = MenuQuit()
+                else:
+                    to_send = choice
                 break
         elif isinstance(value, str):
             to_send = await clock.maybe_await(_get_input_future(actor, value))
