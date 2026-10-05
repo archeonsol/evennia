@@ -14,6 +14,7 @@ class LogView {
     pose: true,
     combat: true,
     comms: true,
+    ooc: true,
     look: true,
     system: true,
   });
