@@ -23,6 +23,20 @@ _GA = object.__getattribute__
 _DA = object.__delattr__
 
 
+_warned_unmonitorable = set()
+
+
+def _warn_unmonitorable(fieldname):
+    """Say once per name that an Attribute monitor was ignored, not once per request."""
+    if fieldname in _warned_unmonitorable:
+        return
+    _warned_unmonitorable.add(fieldname)
+    logger.log_warn(
+        f"Monitor on Attribute '{fieldname}' ignored: Attributes are stored as JSONB and "
+        "do not report changes to the monitor handler. Only db_* fields can be monitored."
+    )
+
+
 class MonitorHandler(object):
     """
     This is a resource singleton that allows for registering
@@ -157,6 +171,12 @@ class MonitorHandler(object):
             obj = obj.attributes.get(fieldname, category=category, return_obj=True)
             if not obj:
                 return
+            if not hasattr(obj, "_meta"):
+                # An Attribute held in JSONB is a plain object, not a model. Changes to
+                # it are never reported to this handler, so the monitor could not fire,
+                # and the definition cannot be pickled to survive a reload.
+                _warn_unmonitorable(fieldname)
+                return
             fieldname = self._attr_category_fieldname("db_value", category)
 
         # we try to serialize this data to test it's valid. Otherwise we won't accept it.
@@ -182,14 +202,17 @@ class MonitorHandler(object):
         Remove a monitor.
         """
         if not fieldname.startswith("db_") or not hasattr(obj, fieldname):
-            obj = obj.attributes.get(fieldname, return_obj=True)
+            obj = obj.attributes.get(fieldname, category=category, return_obj=True)
             if not obj:
                 return
             fieldname = self._attr_category_fieldname("db_value", category)
 
-        idstring_dict = self.monitors[obj][fieldname]
-        if idstring in idstring_dict:
-            del self.monitors[obj][fieldname][idstring]
+        # Looked up, not indexed: indexing the defaultdict would add an entry for an
+        # object nothing was ever registered on, and Attribute objects are made afresh
+        # on every read, so each logout would leave one behind.
+        idstring_dict = self.monitors.get(obj, {}).get(fieldname)
+        if idstring_dict and idstring in idstring_dict:
+            del idstring_dict[idstring]
 
     def clear(self):
         """
@@ -209,13 +232,11 @@ class MonitorHandler(object):
 
         """
         output = []
-        objs = [obj] if obj else self.monitors
+        objs = [obj] if obj else list(self.monitors)
 
         for obj in objs:
-            for fieldname in self.monitors[obj]:
-                for idstring, (callback, persistent, kwargs) in self.monitors[obj][
-                    fieldname
-                ].items():
+            for fieldname, monitors in self.monitors.get(obj, {}).items():
+                for idstring, (callback, persistent, kwargs) in monitors.items():
                     output.append((obj, fieldname, idstring, persistent, kwargs))
         return output
 
