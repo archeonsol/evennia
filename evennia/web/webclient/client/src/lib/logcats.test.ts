@@ -45,12 +45,26 @@ describe("categorize", () => {
     expect(categorize("Handset")).toBe("comms");
   });
 
-  it("returns a category every filter chip can toggle", () => {
-    // A category with no chip would be permanently unfilterable.
-    const ids = new Set(CATS.map((c) => c.id));
+  it("files an announcement as a notice", () => {
+    expect(categorize("announce")).toBe("notice");
+    expect(categorize("Announce")).toBe("notice");
+    // An announcement wins over the words it is also made of.
+    expect(categorize("channel_announce")).toBe("notice");
+  });
+
+  it("does not take a word that holds announce for one", () => {
+    expect(categorize("announcer")).toBe("system");
+  });
+
+  it("returns a category every filter chip can toggle, or a notice, which nothing filters", () => {
+    // A category with no chip would be permanently unfilterable. A notice is
+    // that on purpose, and the only one.
+    const ids = new Set<string>(CATS.map((c) => c.id));
     for (const type of ["say", "emote", "combat_hit", "page", "look", "looc", "handset", "?"]) {
-      expect(ids.has(categorize(type))).toBe(true);
+      expect(ids.has(categorize(type)), type).toBe(true);
     }
+    expect(ids.has("notice")).toBe(false);
+    expect(categorize("announce")).toBe("notice");
   });
 
   it("has a chip for OOC, after comms", () => {

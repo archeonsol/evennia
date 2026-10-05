@@ -2,9 +2,20 @@
 // `scene-ops.ts` beside `scene.svelte.ts`) so it can be unit tested and so the
 // session store can import it without pulling in reactive state.
 
-export type LogCat = "speech" | "pose" | "combat" | "comms" | "ooc" | "look" | "system";
+export type LogCat =
+  | "speech"
+  | "pose"
+  | "combat"
+  | "comms"
+  | "ooc"
+  | "look"
+  | "system"
+  | "notice";
 
-export const CATS: { id: LogCat; label: string }[] = [
+/** A category with a filter chip. A notice has none: nothing filters it out. */
+export type ChipCat = Exclude<LogCat, "notice">;
+
+export const CATS: { id: ChipCat; label: string }[] = [
   { id: "speech", label: "Speech" },
   { id: "pose", label: "Pose" },
   { id: "combat", label: "Combat" },
@@ -17,6 +28,10 @@ export const CATS: { id: LogCat; label: string }[] = [
 // A type is read as words, not as a string to search: "smell" is not "sm", and
 // "channel_ooc" is the two words "channel" and "ooc".
 //
+// What the game says to everyone, such as a staff announcement. It is never
+// filtered: a player who switched System off to quiet the log still reads that
+// the server is going down.
+const NOTICE = new Set(["announce"]);
 // Out of character: LOOC, and every channel. A channel here is the game's chat
 // between players, not something a character says; in-character radio arrives
 // as comms.
@@ -35,6 +50,7 @@ function lens(type: string): LogCat {
   if (t === "pose" || t === "emote") return "pose";
   if (t.includes("combat") || t.includes("damage")) return "combat";
   const words = t.split(/[^a-z0-9]+/);
+  if (words.some((w) => NOTICE.has(w))) return "notice";
   if (words.some((w) => OOC.has(w))) return "ooc";
   if (words.some((w) => COMMS.has(w))) return "comms";
   if (t === "look" || t === "room") return "look";
