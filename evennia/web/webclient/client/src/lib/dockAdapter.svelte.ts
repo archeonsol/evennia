@@ -1,7 +1,8 @@
 // Bridge dockview-core (imperative, framework-agnostic) to Svelte 5. dockview
 // asks for a content renderer per panel; we mount a Svelte component into the
 // panel's element and unmount it on dispose. `params.params` from addPanel is
-// passed through as props.
+// passed through as props, and `api.updateParameters` changes them in place:
+// the props are reactive state, so the component updates without a remount.
 //
 // This file *is* the Svelte binding, which is why we depend on `dockview-core`
 // rather than the `dockview` package: that one is the React binding, and
@@ -16,13 +17,18 @@
 
 import { mount, unmount } from "svelte";
 import { markDockviewPackageLoaded } from "dockview-core";
-import type { IContentRenderer, GroupPanelPartInitParameters } from "dockview-core";
+import type {
+  IContentRenderer,
+  GroupPanelPartInitParameters,
+  PanelUpdateEvent,
+} from "dockview-core";
 
 markDockviewPackageLoaded();
 
 class SveltePanel implements IContentRenderer {
   readonly element: HTMLElement;
   private instance: any = null;
+  private props: Record<string, unknown> = $state({});
 
   constructor(private Component: any) {
     this.element = document.createElement("div");
@@ -32,10 +38,13 @@ class SveltePanel implements IContentRenderer {
   }
 
   init(params: GroupPanelPartInitParameters): void {
-    this.instance = mount(this.Component, {
-      target: this.element,
-      props: (params.params ?? {}) as Record<string, unknown>,
-    });
+    Object.assign(this.props, params.params ?? {});
+    this.instance = mount(this.Component, { target: this.element, props: this.props });
+  }
+
+  /** dockview passes the merged parameters after `updateParameters`. */
+  update(event: PanelUpdateEvent): void {
+    Object.assign(this.props, event.params ?? {});
   }
 
   dispose(): void {

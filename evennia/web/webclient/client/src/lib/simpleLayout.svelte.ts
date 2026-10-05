@@ -29,9 +29,10 @@ class SimpleLayout {
     return this.views.some((v) => v.id === id);
   }
 
-  /** Add a view if it is new, then show it. */
+  /** Add a view if it is new, or give an open one its new title and params; then show it. */
   open(view: Omit<SimpleView, "closable"> & { closable?: boolean }): void {
     if (!this.has(view.id)) this.views = [...this.views, { closable: true, ...view }];
+    else this.views = this.views.map((v) => (v.id === view.id ? { ...v, ...view } : v));
     this.active = view.id;
   }
 

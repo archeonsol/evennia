@@ -8,6 +8,7 @@ import { chat } from "./chat.svelte";
 import { toasts } from "./toasts.svelte";
 import { announcer } from "./announce.svelte";
 import { activity } from "./activity.svelte";
+import { iframeTarget } from "./iframePanels";
 
 const LKEY = "underspire.layout.v2";
 const PRESET_PREFIX = "underspire.layout.preset.";
@@ -133,7 +134,11 @@ class Dock {
     this.openIframe(id, title, url);
   }
 
-  /** Open an embedded web page as a panel in the shell. */
+  /**
+   * Open an embedded web page as a panel in the shell. `id` is the page's base:
+   * the page loads into that base's unpinned panel, or a new one beside any
+   * pinned panel (see iframePanels.ts).
+   */
   openIframe(id: string, title: string, url: string): void {
     if (settings.screenreader) {
       const fresh = !simple.has(id);
@@ -142,8 +147,14 @@ class Dock {
       return;
     }
     if (!this.api) return;
-    const existing = this.api.getPanel(id);
+    const target = iframeTarget(
+      this.api.panels.map((p) => ({ id: p.id, params: p.params as Record<string, unknown> })),
+      id,
+    );
+    let panelId = target.freshId;
+    const existing = target.reuse ? this.api.getPanel(target.reuse) : undefined;
     if (existing) {
+      if (existing.params?.url !== url) existing.api.updateParameters({ url, title });
       // Saved layouts kept the old postage-stamp float, so a page that was
       // opened small before comes back small forever. Reopen it at size.
       const g: any = existing.group;
@@ -153,6 +164,7 @@ class Dock {
         existing.api.setActive();
         return;
       }
+      panelId = existing.id;
       existing.api.close();
     }
     // dockview's default float is a few hundred pixels square, which left the
@@ -165,12 +177,18 @@ class Dock {
     const width = Math.max(w - 40, Math.min(w, 480));
     const height = Math.max(h - 40, Math.min(h, 360));
     this.api.addPanel({
-      id,
+      id: panelId,
       component: "iframe",
       title,
-      params: { url, title },
+      params: { url, title, base: id, panelId },
       floating: { x: Math.max(0, (w - width) / 2), y: Math.max(0, (h - height) / 2), width, height },
     });
+  }
+
+  /** Pin a web page panel so the next page for its base opens beside it, or unpin it. */
+  togglePin(panelId: string): void {
+    const panel = this.api?.getPanel(panelId);
+    if (panel) panel.api.updateParameters({ pinned: !panel.params?.pinned });
   }
 
   /**
