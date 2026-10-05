@@ -11,13 +11,16 @@
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { exportConfig, importConfig } from "../lib/backup";
   import { modal } from "../lib/modal";
+  import { reading } from "../lib/reading.svelte";
+  import { aimedSample, aimedValue, coloursWith, label as colourLabel, speechSample } from "../lib/reading";
+  import { pipeToHtml } from "../lib/markup";
   import { tick, untrack } from "svelte";
 
   let { onclose, initial = "hub" }: { onclose: () => void; initial?: string } = $props();
   const s = settings as any;
 
   type View =
-    | "hub" | "visual" | "crt" | "audio" | "text"
+    | "hub" | "visual" | "crt" | "audio" | "text" | "reading"
     | "notify" | "access" | "triggers" | "feeds" | "macros" | "keys" | "panels" | "data";
   let view = $state<View>("hub");
 
@@ -25,6 +28,7 @@
     { id: "visual", glyph: "▦", label: "Visual" },
     { id: "crt", glyph: "⌁", label: "Effects" },
     { id: "text", glyph: "≡", label: "Text" },
+    { id: "reading", glyph: "¶", label: "Reading" },
     { id: "audio", glyph: "◊", label: "Audio" },
     { id: "notify", glyph: "◔", label: "Alerts" },
     { id: "access", glyph: "✵", label: "Access" },
@@ -109,11 +113,19 @@
   let cameFrom: View | null = null;
   async function openView(id: View) {
     if (id === "feeds") rdraft = routing.routes.map((r) => ({ ...r }));
+    // These live in the game, not in this browser: ask for them as the page opens.
+    if (id === "reading") void reading.load();
     if (id !== "hub") cameFrom = id;
     view = id;
     await tick();
     const tile = id === "hub" && cameFrom ? document.getElementById(`settings-tile-${cameFrom}`) : null;
     (tile ?? heading)?.focus();
+  }
+  // A reading flag flips from what the game last said. Until it answers, a
+  // second click would send the same value again, so it waits.
+  function flip(setting: "you" | "spacing", on: boolean) {
+    if (reading.busy) return;
+    void reading.set(setting, on ? "off" : "on");
   }
   function commitRoutes() {
     routing.routes = rdraft.map((r) => ({ ...r }));
@@ -164,6 +176,13 @@
   }}>
     <span>{label}</span>
     <span class="sh-plate ind" class:hot={s[key]} class:dim={!s[key]} aria-hidden="true">{s[key] ? "On" : "Off"}</span>
+  </button>
+{/snippet}
+
+{#snippet flag(text: string, on: boolean, onflip: () => void)}
+  <button class="row toggle" role="switch" aria-checked={on} onclick={onflip}>
+    <span>{text}</span>
+    <span class="sh-plate ind" class:hot={on} class:dim={!on} aria-hidden="true">{on ? "On" : "Off"}</span>
   </button>
 {/snippet}
 
@@ -302,6 +321,45 @@
       </label>
       {@render toggle("Keep compose open after sending", "composeStaysOpen")}
       {@render toggle("Help in its own panel", "helpPanel")}
+    {:else if view === "reading"}
+      <!-- Kept by the game on the account, not in this browser: they follow the
+           player to every client, and the @reading command shows the same list. -->
+      {#if reading.values}
+        {@const v = reading.values}
+        <p class="note">These change only what you read. They are kept on your account and follow you to every client. The @reading command shows the same list.</p>
+        {@render flag("Show “you” for my own name", v.you, () => flip("you", v.you))}
+        <label class="row select">
+          <span>Colour for speech</span>
+          <select value={v.speech} onchange={(e) => void reading.set("speech", e.currentTarget.value || "off")}>
+            <option value="">None</option>
+            {#each coloursWith(reading.colours, v.speech, v.speech_name) as c (c.code)}
+              <option value={c.code}>{colourLabel(c.name)}</option>
+            {/each}
+          </select>
+        </label>
+        <div class="preview">{@html pipeToHtml(speechSample(v))}</div>
+        <label class="row select">
+          <span>Colour for lines aimed at me</span>
+          <select value={v.aimed_colour}
+            onchange={(e) => void reading.set("aimed", aimedValue(e.currentTarget.value, v.aimed_marker))}>
+            <option value="">None</option>
+            {#each coloursWith(reading.colours, v.aimed_colour, v.aimed_colour_name) as c (c.code)}
+              <option value={c.code}>{colourLabel(c.name)}</option>
+            {/each}
+          </select>
+        </label>
+        {@render flag("Marker on lines aimed at me", v.aimed_marker, () => {
+          if (!reading.busy) void reading.set("aimed", aimedValue(v.aimed_colour, !v.aimed_marker));
+        })}
+        <div class="preview">{@html pipeToHtml(aimedSample(v))}</div>
+        {@render flag("Blank line between posts", v.spacing, () => flip("spacing", v.spacing))}
+        {#if reading.problem}<p class="note" role="alert">{reading.problem}</p>{/if}
+        <button class="sh-cmd reset" onclick={() => void reading.set("reset")}>Reset to defaults</button>
+      {:else if reading.state === "unavailable"}
+        <p class="note">The game did not answer. Try again, or type @reading on the command line.</p>
+      {:else}
+        <p class="note" role="status">Loading.</p>
+      {/if}
     {:else if view === "panels"}
       {#if openPanels.length}
         {#each openPanels as p (p.id)}
@@ -541,6 +599,7 @@
   .toggle:hover .ind.dim { color: var(--fg); }
   .note { color: var(--fg-faint); font-size: 0.72rem; padding: 8px 0; }
   .pop { margin-left: auto; }
+  .reset { margin-top: 10px; }
   /* Structured rule rows (macros / triggers) */
   .grp {
     display: flex; align-items: baseline;

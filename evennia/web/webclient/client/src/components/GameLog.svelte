@@ -698,6 +698,7 @@
   /* Category accents - only the standouts get a marker, to avoid noise. */
   .log-line[data-cat="combat"] { border-left: 2px solid var(--alert); padding-left: 7px; margin-left: -9px; }
   .log-line[data-cat="comms"] { border-left: 2px solid var(--gold); padding-left: 7px; margin-left: -9px; }
+  .log-line[data-cat="notice"] { border-left: 2px solid var(--accent-bright); padding-left: 7px; margin-left: -9px; }
   .log-line.hit { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .log-line.active { background: color-mix(in srgb, var(--accent) 30%, transparent); outline: 1px solid var(--accent); }
 </style>

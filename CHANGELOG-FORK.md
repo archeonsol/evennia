@@ -25,6 +25,57 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.305: The Reading client, and a Server stop that keeps connections
+
+The webclient gains the Reading surface (a Reading page in Settings, an OOC log
+filter, multi-line compose, announcements no filter hides), the narrative
+delivery pipeline keeps its transform order instead of re-sorting per message,
+the launcher gains `rstop` (stop only the Server in reload mode, the Portal
+holding every connection until `sstart`), and two client handshake stubs stop
+filling the log with errors.
+
+### Engine
+
+- **The Reading client** ([`reading.ts`](evennia/web/webclient/client/src/lib/reading.ts),
+  [`reading.svelte.ts`](evennia/web/webclient/client/src/lib/reading.svelte.ts),
+  [`logcats.ts`](evennia/web/webclient/client/src/lib/logcats.ts),
+  [`compose-modes.ts`](evennia/web/webclient/client/src/lib/compose-modes.ts),
+  [`SettingsPanel.svelte`](evennia/web/webclient/client/src/components/SettingsPanel.svelte)).
+  A Reading page in Settings reads and writes the game's reading settings; an OOC
+  log filter groups messages from people under Comms; a pose typed over several
+  lines in the compose pad keeps its lines; an announcement is a notice that no
+  log filter hides. The prebuilt shell is rebuilt for the changes
+  ([`shell.js`](evennia/web/static/webclient/shell/shell.js)).
+- **`rstop`** ([`evennia_launcher.py`](evennia/server/evennia_launcher.py)).
+  Stops only the Server in reload mode and leaves it stopped: the Server runs its
+  reload hooks and final flush while the Portal keeps every client connection, and
+  `sstart` (or `reload`) starts it again. `sstop` is not that: it stops in shutdown
+  mode, which unpuppets every character. Safe to repeat; a Portal that is not
+  running fails the launcher.
+- **Client handshake stubs** ([`inputfuncs.py`](evennia/server/inputfuncs.py)).
+  A bare `ping` (sent about once a minute by some clients) and GMCP
+  `Core.Supports.Add`/`Core.Supports.Remove` (which amend the package list
+  `Core.Supports.Set` already provided) were each logged as an unknown-inputfunc
+  ERROR. They now answer `_not_implemented` and log nothing.
+
+### Performance
+
+- **Transform order is kept** ([`pipeline.py`](evennia/narrative/pipeline.py)).
+  `transforms()` sorted the registry for every node of every delivery; the ordered
+  tuple is now built once and dropped when a transform is registered or removed.
+  `transforms()` still returns the same deterministic order.
+
+### Tests
+
+- [`test_launcher.py`](evennia/server/tests/test_launcher.py): `rstop` stops in
+  reload mode, repeats safely, and fails when the Portal is not running.
+- [`test_inputfunc_stubs.py`](evennia/server/tests/test_inputfunc_stubs.py): the
+  stubs are declared and quiet.
+- [`test_transform_order.py`](evennia/narrative/tests/test_transform_order.py):
+  the order tuple is stable until the registry changes.
+
+---
+
 ## 6.0.0+underspire.304: Device tokens land; attribute writes go heap-only
 
 Two broken fingerprints are repaired (the device token never verified, and no
