@@ -447,8 +447,9 @@ class TestRefreeze(_PolicyTestCase):
 
     @override_settings(ENGINE_GC_REFREEZE=True)
     def test_the_log_says_how_much_is_frozen(self):
-        with patch.object(gc_policy.logger, "log_info") as info, patch.object(
-            gc_policy.gc, "get_freeze_count", return_value=1234
+        with (
+            patch.object(gc_policy.logger, "log_info") as info,
+            patch.object(gc_policy.gc, "get_freeze_count", return_value=1234),
         ):
             gc_policy.deep_clean("growth")
 
