@@ -4,6 +4,7 @@
 //   npx vite --port 5300   then open /tests/preview.html
 //   ?panel=tickets  opens My Tickets; ?theme=<id> picks a theme.
 //   ?help=<query>   opens the help panel on a recorded page ("" is the index).
+//   ?settings=<view>  opens Settings, on a page when one is named (reading).
 //
 // Nothing here is under test; the browser suites live beside it.
 
@@ -15,6 +16,7 @@ import "../src/styles/shell.css";
 import "../src/styles/ansi-palette.css";
 import App from "../src/App.svelte";
 import { chat } from "../src/lib/chat.svelte";
+import { compose } from "../src/lib/compose.svelte";
 import { connection } from "../src/lib/evennia.svelte";
 import { scene } from "../src/lib/scene.svelte";
 import { session } from "../src/lib/session.svelte";
@@ -47,6 +49,40 @@ const thread = {
     { origin: "staff", sender: "Mira", text: "Fixed the lock. Try it now.", ts: now - 240 },
   ],
 };
+// The game's reading settings, kept in memory the way the account keeps them.
+const readingColours = [
+  { name: "red", code: "|r" },
+  { name: "green", code: "|g" },
+  { name: "yellow", code: "|y" },
+  { name: "cyan", code: "|c" },
+  { name: "orange", code: "|520" },
+  { name: "violet", code: "|552" },
+];
+let reading = {
+  you: true,
+  speech: "",
+  speech_name: "",
+  aimed_colour: "",
+  aimed_colour_name: "",
+  aimed_marker: false,
+  spacing: false,
+};
+const colourName = (code: string) => readingColours.find((c) => c.code === code)?.name ?? "";
+function readingSet(setting: string, value: string) {
+  if (setting === "reset") {
+    reading = { you: true, speech: "", speech_name: "", aimed_colour: "", aimed_colour_name: "", aimed_marker: false, spacing: false };
+  } else if (setting === "you" || setting === "spacing") {
+    reading = { ...reading, [setting]: value === "on" };
+  } else if (setting === "speech") {
+    const code = value === "off" ? "" : value;
+    reading = { ...reading, speech: code, speech_name: colourName(code) };
+  } else if (setting === "aimed") {
+    const words = value.split(" ").filter((w) => w && w !== "off");
+    const code = words.find((w) => w !== "marker") ?? "";
+    reading = { ...reading, aimed_colour: code, aimed_colour_name: colourName(code), aimed_marker: words.includes("marker") };
+  }
+  return { settings: reading, colours: readingColours };
+}
 const helpViews = helpFixtures.views as Record<string, HelpPage>;
 const helpSearches = helpFixtures.searches as Record<string, HelpPage>;
 (connection as any).request = async (_ns: string, action: string, data?: any) => {
@@ -54,11 +90,19 @@ const helpSearches = helpFixtures.searches as Record<string, HelpPage>;
   if (action === "help_view") return helpViews[q] ?? { kind: "not_found", query: q, hits: [], suggestions: [] };
   if (action === "help_search") return helpSearches[q] ?? { kind: "search", query: q, hits: [] };
   if (action === "help_prefs") return { panel: true };
+  if (action === "reading_get") return { settings: reading, colours: readingColours };
+  if (action === "reading_set") return readingSet(String(data?.setting ?? ""), String(data?.value ?? ""));
   if (action === "my_tickets") return { tickets: mine };
   if (action === "my_ticket") return thread;
   if (action === "ticket_list") return { tickets: [] };
   return {};
 };
+// The game answers a compose preview with the post as each reader sees it. A post
+// of several lines keeps them, with a gutter before every line after the first.
+compose.setPreviewSender((line) => {
+  const post = line.replace(/^@preview_rp \w+ /, "").split("|/").join("\n|x│|n ");
+  compose.applyPreview({ you: `You ${post}`, room: `A lean courier ${post}` });
+});
 (connection as any).init = () => {};
 connection.state = "open";
 
@@ -90,6 +134,8 @@ const lines: [string, string][] = [
   ["text", "Kettle slides a bowl across the counter without looking up."],
   ["combat", "<span class=\"ansi-red\">A drone clips the window with a burst of static. Glass spiders across the pane.</span>"],
   ["text", "The courier pockets a folded chit and nods toward the stairs down."],
+  ["handset", "[Oct 05 20:11] Mira: you still coming to the stacks?"],
+  ["looc", "<span class=\"ansi-cyan\">[LOOC]</span> The lean courier: brb, kettle's boiling over"],
 ];
 for (const [cat, html] of lines) session.append(`<span>${html}</span>`, cat);
 
@@ -113,7 +159,9 @@ setTimeout(() => {
   if (params.has("thread")) {
     setTimeout(() => document.querySelector<HTMLElement>(".mine .sh-row")?.click(), 700);
   }
-  if (params.has("settings")) window.dispatchEvent(new CustomEvent("underspire:settings", { detail: {} }));
+  if (params.has("settings")) {
+    window.dispatchEvent(new CustomEvent("underspire:settings", { detail: { view: params.get("settings") || undefined } }));
+  }
   if (params.has("quit")) (connection as any).loggedOut = true;
   if (params.has("compose")) setTimeout(() => document.querySelector<HTMLElement>(".compose-btn")?.click(), 300);
   if (params.has("toast")) {
