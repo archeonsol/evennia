@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from evennia.authorization import invalidation
 from evennia.authorization import service as authorization_service
+from evennia.authorization import storage as authorization_storage
 from evennia.authorization.legacy_import.migration import migrate_resource
 from evennia.authorization.service import access_check, authorize
 from evennia.authorization.storage import (
@@ -204,6 +205,28 @@ class AuthorizationPrewarmTest(TransactionTestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(len(requests[0]["principals"]), 2)
         self.assertEqual(len(requests[0]["resources"]), 2)
+
+    def test_a_cancelled_prewarm_stays_cancelled_and_is_counted_as_such(self):
+        """Cancelling the wait must not turn into an UnboundLocalError (seen at every restart)."""
+
+        async def run():
+            with (
+                patch.object(
+                    authorization_storage,
+                    "_fetch_authorization_snapshots",
+                    side_effect=asyncio.CancelledError,
+                ),
+                patch("evennia.server.prometheus_metrics.record_authorization_prewarm") as record,
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await authorization_storage._execute_authorization_prewarm(
+                        {"principals": [], "resources": []}
+                    )
+            return record
+
+        record = asyncio.run(run())
+
+        self.assertEqual(record.call_args.args[0], "cancelled")
 
     def test_prewarm_metrics_distinguish_wait_from_ready_cache(self):
         principal = FakePrincipal()

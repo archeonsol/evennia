@@ -25,6 +25,117 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.304: Device tokens land; attribute writes go heap-only
+
+Two broken fingerprints are repaired (the device token never verified, and no
+session counted its commands), session-wire losses and shutdown noise are
+closed, the GIN index that made every attribute flush rewrite its row is
+retired, and the managed collector gains the option to freeze the survivors of
+a deep clean.
+
+### Engine
+
+- **Percent-encoded device cookie** ([`device.py`](evennia/moderation/device.py)).
+  The page copies the signed token back with `encodeURIComponent`, which turns
+  the colon between value and signature into `%3A`, and the portal compared
+  that encoded form against a signature that wants a literal colon, so every
+  session recorded an empty `device_token` (all 5,321 sessions in seven days).
+  Cookie values are percent-decoded before verification. The raw form the
+  server writes has no percent sign and reads the same; a forged token still
+  fails its signature.
+- **Command counts on the typed bridge** ([`cmdhandler.py`](evennia/commands/cmdhandler.py)).
+  `ServerSession.record_command` was called on the cmdset path only; when
+  player input moved onto the action bridge nothing called it, so moderation
+  showed zero commands for every session. The bridge now calls the hook, when
+  the session has one, with the first word of the line; a hook that raises is
+  logged and the command still runs.
+- **Non-string output keys ship** ([`amp_serde.py`](evennia/server/amp_serde.py)).
+  A payload dict with a non-str key raised `TypeError` and the sender dropped
+  the whole frame (13 times in two days from one reconnecting client). Keys
+  that JSON can write (`int`, `bool`, `None`, finite `float`) are converted to
+  the spelling `json.dumps` gives them; two keys that collide after conversion,
+  or a key JSON cannot write, are still refused. The first conversion in each
+  ten minutes logs one warning naming the key's type and value and the frame's
+  top-level keys.
+- **Monitors on JSONB Attributes** ([`monitorhandler.py`](evennia/scripts/monitorhandler.py)).
+  An Attribute holds a weakref, so registering a monitor on one logged
+  "cannot pickle 'weakref.ReferenceType'" plus an invalid-definition traceback
+  for every webclient connect that asked for saved options and every MSDP/GMCP
+  report of "desc". `add()` now returns early for such objects and says so
+  once per name; `remove()`/`all()` no longer leave defaultdict entries behind,
+  and `remove()` passes the category so categorised monitors can be removed.
+- **Cancelled prewarm stays cancelled** ([`storage.py`](evennia/authorization/storage.py),
+  [`prometheus_metrics.py`](evennia/server/prometheus_metrics.py)).
+  `CancelledError` is not an `Exception`, so a prewarm cancelled mid-wait
+  reached the `finally` block with `outcome` unset and logged
+  `UnboundLocalError: cannot access local variable 'outcome'` at every restart.
+  The outcome now starts as `"cancelled"`, the metric accepts that label, and
+  the cancellation propagates.
+
+### Migration notes
+
+- **The `db_attrs` GIN indexes are retired** (objects
+  [`0020_drop_objectdb_db_attrs_gin`](evennia/objects/migrations/0020_drop_objectdb_db_attrs_gin.py),
+  accounts `0020`, comms `0028`, scripts `0027`). PostgreSQL only; each is
+  `DROP INDEX CONCURRENTLY IF EXISTS` in a non-atomic migration, because
+  `CONCURRENTLY` refuses a transaction. The reverse recreates the index as the
+  original migration made it. Other backends never had the index and no-op.
+  Deploys run `evennia migrate` automatically; no manual SQL.
+  `objects_objectdb`'s index was 328 MB against a 7 MB heap and had been
+  scanned 52 times in its lifetime; without it the handful of attribute
+  lookups that used it are sequential scans of about ten milliseconds.
+
+### Performance
+
+- **Every attribute flush can be heap-only again.** While an index covers
+  `db_attrs`, an update to that column cannot be a hot update: each flush
+  rewrites the row, adds an index entry, and logs full-page images. A
+  synthetic run of the production flush pattern (20,000 transactions of 8
+  updates over 11,000 rows) measured:
+
+  | variant | p99 | p99.9 | WAL/txn | HOT updates |
+  |---|---|---|---|---|
+  | GIN (before) | 83 ms | 987 ms | 47.9 KB | 0% |
+  | GIN, fastupdate=off | 22 ms | 770 ms | 82.5 KB | 0% |
+  | no GIN (after) | 5.96 ms | 202 ms | 12.9 KB | 96.6% |
+
+  Expected on production: the 328 MB index and the write amplification it fed
+  go away; the writes stop paying for an index reads almost never touched.
+- **`ENGINE_GC_REFREEZE`** ([`gc_policy.py`](evennia/utils/gc_policy.py)).
+  A full collection marks the whole unfrozen heap (0.3–1.3 s on production,
+  about 50 growth cleans a day and 24% of stall seconds). With the option on,
+  each deep clean freezes its survivors, so the next marks only what was
+  allocated since: a 3.0M-object heap measured 313 ms before, 12 ms after.
+  The `scheduled` and `overdue` backstop cleans thaw first, collect
+  everything, and freeze again, so a cycle frozen alive and dead since is
+  freed at the next backstop rather than never.
+
+### Settings
+
+- New: `ENGINE_GC_REFREEZE = False` ([`settings_default.py`](evennia/settings_default.py)).
+  Leave off if the idmapper evicts often (a small `IDMAPPER_CACHE_MAXSIZE`),
+  since an evicted instance that was frozen waits for a backstop.
+
+### Tests
+
+- `test_device.py`: an encoded cookie verifies; a raw cookie is unchanged; a
+  forged signature still fails.
+- `tests.py` (commands): the bridge calls `record_command` once with the first
+  word; a raising hook does not cost the command.
+- `test_amp_serde.py`: int/bool/None/float keys convert as `json.dumps` would;
+  colliding and unwritable keys are refused; the warning fires once per window.
+- `tests.py` (scripts): a monitor on an Attribute is ignored once, field
+  monitors still register, logout leaves no entry, categorised monitors
+  remove.
+- `test_storage.py` (authorization): a cancelled prewarm increments `cancelled`
+  and propagates.
+- `test_attrs_gin_migrations.py`: each migration drops `CONCURRENTLY`, reverses
+  to the original name, is non-atomic, and no-ops on non-PostgreSQL.
+- `test_gc_policy.py`: the refreeze call order against a patched collector;
+  a frozen cycle survives an ordinary clean and is freed by a backstop.
+
+---
+
 ## 6.0.0+underspire.303: Subnegotiation frames keep their bytes
 
 A subnegotiation payload could contain a raw `IAC` (0xFF) byte, and every

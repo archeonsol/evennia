@@ -1,6 +1,7 @@
 """The device token: minting, verification, and what the portal makes of it."""
 
 from types import SimpleNamespace
+from urllib.parse import quote
 
 from django.test import TestCase, override_settings
 
@@ -53,6 +54,34 @@ class CookieParsingTest(TestCase):
         headers = {"cookie": f'{device.cookie_name()}="{token}"'}
 
         self.assertEqual(device.token_from_headers(headers), device.verify(token))
+
+    def test_a_percent_encoded_token_reads_like_the_raw_one(self):
+        """The page rewrites the cookie with encodeURIComponent, which encodes the colon.
+
+        Production recorded no device token for any session because the
+        portal compared the encoded form against a signature that wants a
+        literal colon.
+        """
+        token = device.mint()
+        encoded = quote(token, safe="")
+        self.assertIn("%3A", encoded)
+        headers = {"cookie": f"{device.cookie_name()}={encoded}; theme=dark"}
+
+        self.assertEqual(device.token_from_headers(headers), device.verify(token))
+        self.assertNotEqual(device.token_from_headers(headers), "")
+
+    def test_a_quoted_and_encoded_token_is_handled(self):
+        token = device.mint()
+        headers = {"cookie": f'{device.cookie_name()}="{quote(token, safe="")}"'}
+
+        self.assertEqual(device.token_from_headers(headers), device.verify(token))
+
+    def test_decoding_does_not_launder_a_forged_token(self):
+        token = device.mint()
+        forged = "f" * 32 + token[32:]
+        headers = {"cookie": f"{device.cookie_name()}={quote(forged, safe='')}"}
+
+        self.assertEqual(device.token_from_headers(headers), "")
 
     def test_no_cookie_header_is_no_device(self):
         for headers in ({}, None, {"cookie": ""}, {"cookie": "sessionid=x"}):

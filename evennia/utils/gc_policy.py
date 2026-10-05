@@ -43,6 +43,11 @@ The ``managed`` policy keeps what the collector is good at and drops what costs:
   found and the process size before and after, so an operator can see whether the
   trigger is right. Code that knows it just dropped a great deal can ask for one
   with :func:`request_reclaim`.
+* **Refreeze.** Optionally (``ENGINE_GC_REFREEZE``) the survivors of each full
+  collection are frozen too, so the next one marks only what was allocated since
+  and costs a few percent of the first. What that gives up is the freeing of a
+  cycle that was alive when frozen and dies later, so the two backstop collections
+  thaw the permanent generation, collect all of it, and freeze again.
 
 Under Python 3.14 a collection's ``generation`` is 0 for a young-only pass (what
 ``gc.collect(0)`` runs), 1 for an increment (the young generation plus a slice of
@@ -86,6 +91,8 @@ _GROWTH_CHECK_SECONDS = 15.0
 _USEFUL_OBJECTS = 20_000
 #: The growth trigger waits at most this many times ``ENGINE_GC_RECLAIM_GROWTH_PERCENT``.
 _MAX_GROWTH_FACTOR = 8
+#: Deep cleans that thaw the permanent generation first when ``ENGINE_GC_REFREEZE`` is on.
+_THAW_REASONS = frozenset({"scheduled", "overdue"})
 #: Reasons that label ``evennia_gc_reclaim_total``; anything else is ``manual``.
 _RECLAIM_REASONS = frozenset({"growth", "requested", "scheduled", "overdue", "manual"})
 
@@ -407,9 +414,17 @@ def deep_clean(reason="manual"):
     Returns:
         DeepClean: How many objects were freed and how long it took.
     """
+    refreeze = bool(getattr(settings, "ENGINE_GC_REFREEZE", False))
+    # Only the backstops look at the frozen heap, so a cycle frozen alive and dead
+    # since is freed at the next one rather than never.
+    thaw = refreeze and reason in _THAW_REASONS
     rss_before, blocks_before = _rss_mb(), _allocated_blocks()
     started = _now()
+    if thaw:
+        gc.unfreeze()
     collected = _intentional_collect()
+    if refreeze:
+        gc.freeze()
     ended = _now()
     seconds = ended - started
     _state.last_deep_clean = time.time()
@@ -425,9 +440,11 @@ def deep_clean(reason="manual"):
         if rss_before is not None and rss_after is not None
         else ""
     )
+    frozen = f", {gc.get_freeze_count()} frozen" if refreeze else ""
     logger.log_info(
         f"gc deep clean ({reason}): {collected} unreachable objects collected "
-        f"in {seconds * 1000:.0f}ms (allocated blocks {blocks_before} -> {blocks_after}{size})."
+        f"in {seconds * 1000:.0f}ms (allocated blocks {blocks_before} -> {blocks_after}"
+        f"{size}{frozen})."
     )
     label = reason if reason in _RECLAIM_REASONS else "manual"
     prometheus_metrics.best_effort(
