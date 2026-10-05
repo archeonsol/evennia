@@ -288,6 +288,87 @@ class TestLauncher(TwistedTestCase):
         )
 
 
+class TestReloadStopServer(TwistedTestCase):
+    """``rstop``: stop the Server in reload mode and leave it down, for a deploy."""
+
+    def setUp(self):
+        super().setUp()
+        evennia_launcher.LAUNCHER_FAILED = False
+        self.calls = []
+
+    def tearDown(self):
+        evennia_launcher.LAUNCHER_FAILED = False
+        evennia_launcher.AMP_CONNECTION = None
+        evennia_launcher.REACTOR_RUN = False
+        super().tearDown()
+
+    def _rstop(self, status, *, wait_outcome="done"):
+        def fake_send(op, args, callback=None, errback=None):
+            self.calls.append(("send", op))
+            if op == evennia_launcher.PSTATUS:
+                if status is None:
+                    errback(Exception("no portal"))
+                else:
+                    callback({"status": pack_status(status)})
+
+        def fake_wait(portal_running, server_running, callback=None, errback=None, rate=0.5):
+            self.calls.append(("wait", portal_running, server_running))
+            handler = callback if wait_outcome == "done" else errback
+            handler(None)
+
+        with (
+            patch.object(evennia_launcher, "send_instruction", side_effect=fake_send),
+            patch.object(evennia_launcher, "wait_for_status", side_effect=fake_wait),
+            patch.object(evennia_launcher, "_reactor_stop") as stop,
+            patch("evennia.server.evennia_launcher.print"),
+        ):
+            evennia_launcher.reload_stop_server()
+        return stop
+
+    def test_it_sends_a_reload_stop_then_waits_for_the_server_to_go_down(self):
+        self._rstop((True, True, 11, 22, "pinfo", "sinfo"))
+
+        self.assertLess(
+            self.calls.index(("send", evennia_launcher.SRELOAD)),
+            self.calls.index(("wait", True, False)),
+        )
+
+    def test_it_never_sends_a_shutdown_or_a_start(self):
+        # SSHUTD would unpuppet every character; SSTART would defeat the point.
+        self._rstop((True, True, 11, 22, "pinfo", "sinfo"))
+
+        sent = {call[1] for call in self.calls if call[0] == "send"}
+        self.assertNotIn(evennia_launcher.SSHUTD, sent)
+        self.assertNotIn(evennia_launcher.SSTART, sent)
+        self.assertNotIn(evennia_launcher.PSHUTD, sent)
+
+    def test_a_server_that_is_already_down_is_a_success(self):
+        stop = self._rstop((True, False, 11, 0, "pinfo", "sinfo"))
+
+        self.assertNotIn(("send", evennia_launcher.SRELOAD), self.calls)
+        self.assertFalse(evennia_launcher.LAUNCHER_FAILED)
+        stop.assert_called_once()
+
+    def test_no_portal_fails_the_launcher(self):
+        self._rstop(None)
+
+        self.assertTrue(evennia_launcher.LAUNCHER_FAILED)
+
+    def test_a_server_that_does_not_stop_in_time_fails_the_launcher(self):
+        self._rstop((True, True, 11, 22, "pinfo", "sinfo"), wait_outcome="timeout")
+
+        self.assertTrue(evennia_launcher.LAUNCHER_FAILED)
+
+    def test_success_leaves_the_launcher_unfailed(self):
+        self._rstop((True, True, 11, 22, "pinfo", "sinfo"))
+
+        self.assertFalse(evennia_launcher.LAUNCHER_FAILED)
+
+    def test_rstop_is_a_launcher_option_and_in_its_help(self):
+        self.assertIn("rstop", evennia_launcher.ARG_OPTIONS)
+        self.assertIn('elif option == "rstop"', inspect.getsource(evennia_launcher.main))
+
+
 class TestLauncherIPCConnection(unittest.TestCase):
     """The shared launcher IPC connection must be created and mutated safely."""
 

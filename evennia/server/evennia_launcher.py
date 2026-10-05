@@ -466,6 +466,8 @@ ARG_OPTIONS = """Actions on installed server. One of:
  istart      - start server in foreground (until reload)
  ipstart     - start portal in foreground
  sstop       - stop only server
+ rstop       - stop only server, in reload mode: the Portal keeps every connection
+               until `sstart` (or `reload`) starts the Server again
  kill        - send kill signal to portal+server (force)
  skill       - send kill signal only to server
  status      - show server and portal run state
@@ -1239,6 +1241,46 @@ def stop_server_only(when_stopped=None, interactive=False):
         if interactive:
             print("Start Evennia normally first, then use `istart` to switch to interactive mode.")
         _reactor_stop()
+
+    send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
+
+
+def reload_stop_server():
+    """
+    Stop only the Server, in reload mode, and leave it stopped.
+
+    This is the first half of :func:`reload_evennia`: the Server runs its reload hooks and
+    its final flush, and the Portal keeps every client connection. Nothing starts the Server
+    again until ``sstart`` (or ``reload``), so a deploy can replace code and run migrations
+    in between without disconnecting anyone. ``sstop`` is not that: it stops in shutdown mode,
+    which unpuppets every character.
+
+    Safe to repeat: a Server that is already down is a success. A Portal that is not
+    running, or a Server that does not stop in time, fails the launcher.
+
+    """
+
+    def _server_stopped(*args):
+        print("... Server stopped. The Portal keeps its connections; `sstart` starts the Server.")
+        _reactor_stop()
+
+    def _not_stopped(*args):
+        print("The Server did not stop in time.")
+        _fail_launcher()
+
+    def _portal_running(response):
+        _, srun, _, _, _, _ = _parse_status(response)
+        if srun:
+            print("Server stopping (reload mode) ...")
+            send_instruction(SRELOAD, {})
+            wait_for_status(True, False, _server_stopped, _not_stopped)
+        else:
+            print("Server is not running.")
+            _reactor_stop()
+
+    def _portal_not_running(fail):
+        print("Evennia is not running: there is no Portal to hold the connections.")
+        _fail_launcher()
 
     send_instruction(PSTATUS, None, _portal_running, _portal_not_running)
 
@@ -2474,6 +2516,7 @@ def main():
         "reset",
         "stop",
         "sstop",
+        "rstop",
         "kill",
         "skill",
         "sstart",
@@ -2506,6 +2549,8 @@ def main():
             stop_evennia()
         elif option == "sstop":
             stop_server_only()
+        elif option == "rstop":
+            reload_stop_server()
         elif option == "sstart":
             start_only_server()
         elif option == "kill":
