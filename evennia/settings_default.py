@@ -909,6 +909,15 @@ ENGINE_GC_RECLAIM_GROWTH_PERCENT = 15
 ENGINE_GC_RECLAIM_MIN_INTERVAL = 300
 ENGINE_GC_DEEP_CLEAN_INTERVAL = 21600
 ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 43200
+# Managed policy: freeze the survivors of each deep clean, so the next one marks only
+# what has been allocated since. A full pass costs 0.3 to 1.3 s on a production-sized
+# heap, and nearly all of that is live objects that were there last time too. A frozen
+# cycle is never freed, so the two backstop cleans (reasons "scheduled" and "overdue")
+# thaw the permanent generation first, collect everything, and freeze again: a cycle
+# that was alive when frozen and has died since is freed at the next backstop, not
+# never. Leave off if the idmapper evicts often (a small IDMAPPER_CACHE_MAXSIZE), since
+# every evicted instance that was frozen waits for a backstop.
+ENGINE_GC_REFREEZE = False
 # Log any single collection that pauses the process at least this long (ms; 0 = off).
 ENGINE_GC_PAUSE_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).
