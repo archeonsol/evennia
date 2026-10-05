@@ -3,7 +3,11 @@ Tests for secure AMP session serialization.
 """
 
 import pickle
+from unittest import mock
 
+from django.test import SimpleTestCase
+
+from evennia.server import amp_serde
 from evennia.server.amp_serde import (
     pack_admin_message,
     pack_launcher_args,
@@ -110,3 +114,88 @@ class TestAMPSerde(BaseEvenniaTest):
         self.assertEqual(sessid, 1)
         self.assertEqual(len(out["sessiondata"]), 200)
         self.assertEqual(out["sessiondata"][5], {"flag": 5})
+
+
+class TestNonStringKeysOnTheWire(SimpleTestCase):
+    """Output with a dict key that is not a str reaches the player, converted.
+
+    A frame that failed here was dropped whole, and with it whatever the player was
+    about to read. Inbound data and the strict type rules are unchanged.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # The warning is rate limited per process; each test starts fresh.
+        patcher = mock.patch.object(amp_serde, "_last_coerced_key_warning", float("-inf"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_int_keys_are_sent_as_json_writes_them(self):
+        wire = pack_session_message(3, {"panel": [{"rows": {1: "a", 2: "b"}}]})
+
+        _sessid, out = unpack_session_message(wire)
+
+        self.assertEqual(out["panel"][0]["rows"], {"1": "a", "2": "b"})
+
+    def test_bool_none_and_float_keys_read_as_json_writes_them(self):
+        wire = pack_session_message(3, {"x": {True: 1, None: 2, 2.5: 3}})
+
+        _sessid, out = unpack_session_message(wire)
+
+        self.assertEqual(out["x"], {"true": 1, "null": 2, "2.5": 3})
+
+    def test_multicast_frames_are_converted_too(self):
+        wire = pack_multicast_message([1, 2], {"x": {7: "seven"}})
+
+        _sessids, out = unpack_multicast_message(wire)
+
+        self.assertEqual(out, {"x": {"7": "seven"}})
+
+    def test_two_keys_that_read_the_same_are_refused_not_merged(self):
+        for payload in ({1: "a", "1": "b"}, {"1": "a", 1: "b"}):
+            with self.subTest(payload=payload), self.assertRaises(TypeError):
+                pack_session_message(3, {"x": payload})
+
+    def test_a_key_json_cannot_write_is_still_refused(self):
+        with self.assertRaises(TypeError):
+            pack_session_message(3, {"x": {(1, 2): "a"}})
+        with self.assertRaises(ValueError):
+            pack_session_message(3, {"x": {float("nan"): "a"}})
+
+    def test_the_strict_default_is_unchanged(self):
+        with self.assertRaises(TypeError):
+            sanitize_session_kwargs({"x": {1: "a"}})
+        with self.assertRaises(TypeError):
+            sanitize_session_kwargs({"x": {1: "a"}}, enforce_limits=False)
+
+    def test_the_producer_is_named_once_not_once_per_frame(self):
+        with mock.patch("evennia.utils.logger.log_warn") as warn:
+            pack_session_message(3, {"shell_state": {5: "a"}, "text": "hi"})
+            pack_session_message(3, {"shell_state": {6: "b"}})
+
+        warn.assert_called_once()
+        message = warn.call_args.args[0]
+        self.assertIn("int 5", message)
+        self.assertIn("shell_state", message)
+
+    def test_it_warns_again_after_the_interval(self):
+        with (
+            mock.patch("evennia.utils.logger.log_warn") as warn,
+            mock.patch.object(amp_serde.time, "monotonic", side_effect=[1000.0, 1000.0 + 601.0]),
+        ):
+            pack_session_message(3, {"x": {1: "a"}})
+            pack_session_message(3, {"x": {1: "a"}})
+
+        self.assertEqual(warn.call_count, 2)
+
+    def test_a_failing_logger_does_not_cost_the_frame(self):
+        with mock.patch("evennia.utils.logger.log_warn", side_effect=RuntimeError("log down")):
+            wire = pack_session_message(3, {"x": {1: "a"}})
+
+        self.assertEqual(unpack_session_message(wire)[1], {"x": {"1": "a"}})
+
+    def test_frames_with_only_str_keys_never_warn(self):
+        with mock.patch("evennia.utils.logger.log_warn") as warn:
+            pack_session_message(3, {"x": {"1": "a"}, "text": "hi"})
+
+        warn.assert_not_called()

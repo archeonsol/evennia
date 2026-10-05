@@ -8,6 +8,7 @@ from unittest import TestCase, mock
 
 from evennia import DefaultScript
 from evennia.objects.objects import DefaultObject
+from evennia.scripts import monitorhandler
 from evennia.scripts.manager import ScriptDBManager
 from evennia.scripts.models import ObjectDoesNotExist, ScriptDB
 from evennia.scripts.monitorhandler import MonitorHandler
@@ -258,6 +259,63 @@ class TestMonitorHandler(TestCase):
         """Remove attribute from the handler and assert that it is gone"""
         self.handler.remove(obj, fieldname, idstring=idstring, category=category)
         self.assertEqual(self.handler.monitors[index][name], {})
+
+
+class _PlainAttribute:
+    """What a JSONB-backed Attribute is: a plain object, not a Django model."""
+
+
+class TestMonitorHandlerJsonbAttributes(TestCase):
+    """A monitor on an Attribute held in JSONB can never fire, so it is not kept.
+
+    Registering one used to fail while pickling the definition, which logged two
+    tracebacks for every webclient connect that asked for its saved options.
+    """
+
+    def setUp(self):
+        self.handler = MonitorHandler()
+        warned = mock.patch.object(monitorhandler, "_warned_unmonitorable", set())
+        warned.start()
+        self.addCleanup(warned.stop)
+        self.owner = mock.Mock()
+        self.owner.attributes.get.return_value = _PlainAttribute()
+
+    def test_it_is_ignored_without_a_traceback(self):
+        with mock.patch.object(monitorhandler, "logger") as log:
+            self.handler.add(self.owner, "desc", dummy_func, idstring="s1")
+
+        self.assertEqual(len(self.handler.monitors), 0)
+        log.log_trace.assert_not_called()
+
+    def test_it_is_reported_once_per_name(self):
+        with mock.patch.object(monitorhandler, "logger") as log:
+            self.handler.add(self.owner, "desc", dummy_func, idstring="s1")
+            self.handler.add(self.owner, "desc", dummy_func, idstring="s2")
+            self.handler.add(self.owner, "_saved_webclient_options", dummy_func, idstring="s1")
+
+        self.assertEqual(log.log_warn.call_count, 2)
+        self.assertIn("'desc'", log.log_warn.call_args_list[0].args[0])
+
+    def test_a_field_monitor_is_unaffected(self):
+        # db_* fields are model fields: the handler is told when they change.
+        owner = mock.Mock()
+
+        self.handler.add(owner, "db_key", dummy_func, idstring="s1")
+
+        self.assertIn("s1", self.handler.monitors[owner]["db_key"])
+
+    def test_removing_what_was_never_added_leaves_nothing_behind(self):
+        # Attribute objects are new on every read, so an entry per call is a leak.
+        for _ in range(3):
+            self.owner.attributes.get.return_value = _PlainAttribute()
+            self.handler.remove(self.owner, "_saved_webclient_options", idstring="s1")
+
+        self.assertEqual(len(self.handler.monitors), 0)
+
+    def test_listing_an_unwatched_object_leaves_nothing_behind(self):
+        self.assertEqual(self.handler.all(obj=self.owner), [])
+
+        self.assertEqual(len(self.handler.monitors), 0)
 
 
 class TestTaskHandlerTask(TestCase):

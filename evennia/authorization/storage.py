@@ -1919,6 +1919,10 @@ async def _execute_authorization_prewarm(request: dict) -> bool:
     """Run one primitive snapshot request and install its result."""
 
     started = time.perf_counter()
+    # CancelledError is not an Exception, so neither branch below sees it. Without a
+    # starting value the finally block read an unset name and the cancellation (a
+    # shutdown, an action abandoned mid-wait) surfaced as an UnboundLocalError.
+    outcome = "cancelled"
     try:
         from evennia.utils import clock, defer
 
