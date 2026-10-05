@@ -25,6 +25,10 @@ __all__ = [
 ]
 
 _TRANSFORMS = {}
+#: The registry in execution order, built when first asked for and dropped when
+#: the registry changes. ``transforms()`` is called for every node for every
+#: viewer, and sorting the registry each time was most of what it cost.
+_ORDERED = None
 
 
 class _DropDelivery:
@@ -47,12 +51,14 @@ def register_transform(key, fn=None, *, priority=0, override=False):
     """
 
     def _set(transform):
+        global _ORDERED
         normalized = str(key or "").strip().lower()
         if not normalized:
             raise ValueError("render transform key is required")
         if normalized in _TRANSFORMS and not override:
             raise ValueError(f"render transform already registered: {normalized}")
         _TRANSFORMS[normalized] = (int(priority), transform)
+        _ORDERED = None
         return transform
 
     if fn is None:
@@ -62,15 +68,26 @@ def register_transform(key, fn=None, *, priority=0, override=False):
 
 def unregister_transform(key):
     """Remove and return one registered transform."""
+    global _ORDERED
     entry = _TRANSFORMS.pop(str(key or "").strip().lower(), None)
-    return entry[1] if entry else None
+    if entry is None:
+        return None
+    _ORDERED = None
+    return entry[1]
 
 
 def transforms():
-    """Return transforms in deterministic execution order."""
-    return tuple(
-        (key, fn)
-        for key, (_priority, fn) in sorted(
-            _TRANSFORMS.items(), key=lambda item: (item[1][0], item[0])
+    """Return transforms in deterministic execution order.
+
+    The same tuple comes back until a transform is registered or removed.
+    """
+    global _ORDERED
+    ordered = _ORDERED
+    if ordered is None:
+        ordered = _ORDERED = tuple(
+            (key, fn)
+            for key, (_priority, fn) in sorted(
+                _TRANSFORMS.items(), key=lambda item: (item[1][0], item[0])
+            )
         )
-    )
+    return ordered
