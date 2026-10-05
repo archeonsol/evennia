@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import secrets
+from urllib.parse import unquote
 
 from django.conf import settings
 from django.core import signing
@@ -75,13 +76,20 @@ def _cookies_from_header(header) -> dict:
 
     The portal sees websocket handshake headers, not an ``HttpRequest``, so
     ``request.COOKIES`` is not available where this is needed.
+
+    Values are percent-decoded. The server writes the token raw, but a page
+    that copies it back into the cookie with ``encodeURIComponent`` turns the
+    colon between value and signature into ``%3A``, and the signature then no
+    longer parses. That is how every browser's token read as empty: the page
+    rewrote the cookie the server had just set. A raw token has no ``%`` in it,
+    so decoding changes nothing for the form the server writes.
     """
     cookies = {}
     for part in str(header or "").split(";"):
         name, separator, value = part.partition("=")
         if not separator:
             continue
-        cookies[name.strip()] = value.strip().strip('"')
+        cookies[name.strip()] = unquote(value.strip().strip('"'))
     return cookies
 
 
