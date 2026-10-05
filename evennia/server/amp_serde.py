@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Dict, List, Tuple, Union
 
 from django.conf import settings
@@ -54,7 +55,68 @@ def _max_depth() -> int:
     return int(getattr(settings, "AMP_SESSION_MAX_DEPTH", _MAX_DEPTH) or _MAX_DEPTH)
 
 
-def sanitize_value(value: Any, *, depth: int = 0, enforce_limits: bool = True) -> Any:
+#: Seconds between warnings about dict keys that had to be converted for the wire.
+_COERCED_KEY_WARN_INTERVAL = 600.0
+#: How many converted keys one frame reports; the rest are converted without a record.
+_COERCED_KEY_SAMPLE = 3
+_last_coerced_key_warning = float("-inf")
+
+
+def _wire_key(key: Any, coerced: list | None) -> str:
+    """Return the string JSON would write for a non-str dict key.
+
+    Server output may reach this with ``coerced`` set, which allows the keys JSON
+    itself converts (int, bool, None, finite float). Everything else, and every key
+    when ``coerced`` is None, is refused as before.
+    """
+    if coerced is None:
+        raise TypeError("AMP session dict keys must be str")
+    if key is None:
+        text = "null"
+    elif key is True:
+        text = "true"
+    elif key is False:
+        text = "false"
+    elif isinstance(key, int):
+        text = str(int(key))
+    elif isinstance(key, float):
+        if key != key or key in (float("inf"), float("-inf")):  # noqa: PLR0124
+            raise ValueError("AMP session float must be finite")
+        text = json.dumps(key)
+    else:
+        raise TypeError(f"AMP session dict keys must be str, not {type(key).__name__}")
+    if len(coerced) < _COERCED_KEY_SAMPLE:
+        coerced.append(key)
+    return text
+
+
+def _note_coerced_keys(kwargs: dict, coerced: list) -> None:
+    """Say, at most once per interval, that a frame carried keys that are not strings.
+
+    Dropping the whole frame for it would lose the player's output, so it is sent
+    with the keys converted; the producer is still wrong and this is how it gets found.
+    """
+    global _last_coerced_key_warning
+    now = time.monotonic()
+    if now - _last_coerced_key_warning < _COERCED_KEY_WARN_INTERVAL:
+        return
+    _last_coerced_key_warning = now
+    try:
+        from evennia.utils import logger
+
+        sample = ", ".join(f"{type(key).__name__} {repr(key)[:40]}" for key in coerced)
+        top = sorted(str(key) for key in kwargs)[:8]
+        logger.log_warn(
+            f"AMP session payload had dict keys that are not str ({sample}); sent as JSON "
+            f"writes them. Frame keys: {top}. The code that built this payload should use str keys."
+        )
+    except Exception:  # noqa: BLE001 - a log line must never cost the frame
+        pass
+
+
+def sanitize_value(
+    value: Any, *, depth: int = 0, enforce_limits: bool = True, coerced: list | None = None
+) -> Any:
     """
     Allow only JSON-safe primitives and containers.
 
@@ -65,6 +127,10 @@ def sanitize_value(value: Any, *, depth: int = 0, enforce_limits: bool = True) -
     trusted data and AMP already frames/splits oversized payloads at the wire
     level, so callers there pass ``enforce_limits=False`` to avoid rejecting
     legitimate large outbound messages.
+
+    ``coerced`` is the outbound-only allowance for dict keys that are not strings: when
+    a list is passed, int/bool/None/float keys are converted as JSON converts them and
+    the first few are recorded in the list. None (the default) keeps str keys required.
     """
     if enforce_limits and depth > _max_depth():
         raise ValueError("AMP session payload exceeds max nesting depth")
@@ -87,36 +153,61 @@ def sanitize_value(value: Any, *, depth: int = 0, enforce_limits: bool = True) -
     if isinstance(value, list):
         if enforce_limits and len(value) > _MAX_LIST_LEN:
             raise ValueError("AMP session list exceeds max length")
-        return [sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits) for v in value]
+        return [
+            sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits, coerced=coerced)
+            for v in value
+        ]
     if isinstance(value, tuple):
         if enforce_limits and len(value) > _MAX_LIST_LEN:
             raise ValueError("AMP session tuple exceeds max length")
-        return [sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits) for v in value]
+        return [
+            sanitize_value(v, depth=depth + 1, enforce_limits=enforce_limits, coerced=coerced)
+            for v in value
+        ]
     if isinstance(value, dict):
         if enforce_limits and len(value) > _MAX_DICT_KEYS:
             raise ValueError("AMP session dict exceeds max keys")
         out = {}
+        converted = False
         for key, val in value.items():
             if not isinstance(key, str):
-                raise TypeError("AMP session dict keys must be str")
+                key = _wire_key(key, coerced)
+                converted = True
+            # Distinct keys cannot collide until one is converted; after that, two
+            # that now read the same would drop a value without saying so.
+            if converted and key in out:
+                raise TypeError(f"AMP session dict keys collide once converted to str: {key!r}")
             if enforce_limits and len(key) > 128:
                 raise ValueError("AMP session dict key too long")
-            out[key] = sanitize_value(val, depth=depth + 1, enforce_limits=enforce_limits)
+            out[key] = sanitize_value(
+                val, depth=depth + 1, enforce_limits=enforce_limits, coerced=coerced
+            )
         return out
     raise TypeError(f"unsupported AMP session type: {type(value).__name__}")
 
 
-def sanitize_session_kwargs(kwargs: dict, *, enforce_limits: bool = True) -> dict:
+def sanitize_session_kwargs(
+    kwargs: dict, *, enforce_limits: bool = True, coerced: list | None = None
+) -> dict:
     if not isinstance(kwargs, dict):
         raise TypeError("session kwargs must be a dict")
-    return sanitize_value(kwargs, depth=0, enforce_limits=enforce_limits)
+    return sanitize_value(kwargs, depth=0, enforce_limits=enforce_limits, coerced=coerced)
+
+
+def _sanitize_outbound(kwargs: dict) -> dict:
+    """Sanitize server-generated kwargs: no caps, and non-str dict keys are converted."""
+    coerced: list = []
+    clean = sanitize_session_kwargs(kwargs, enforce_limits=False, coerced=coerced)
+    if coerced:
+        _note_coerced_keys(kwargs, coerced)
+    return clean
 
 
 def pack_session_message(sessid: int, kwargs: dict) -> bytes:
     """Pack (sessid, kwargs) for Msg* AMP commands."""
     if not isinstance(sessid, int) or sessid < 0:
         raise ValueError("sessid must be a non-negative int")
-    clean = sanitize_session_kwargs(kwargs, enforce_limits=False)
+    clean = _sanitize_outbound(kwargs)
     body = json.dumps([sessid, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return _SESSION_MAGIC + body
 
@@ -154,7 +245,7 @@ def pack_multicast_message(sessids: list[int] | tuple[int, ...], kwargs: dict) -
         raise ValueError("multicast sessids must be positive ints")
     if len(set(clean_ids)) != len(clean_ids):
         raise ValueError("multicast sessids must be unique")
-    clean = sanitize_session_kwargs(kwargs, enforce_limits=False)
+    clean = _sanitize_outbound(kwargs)
     body = json.dumps([clean_ids, clean], separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return _MULTICAST_MAGIC + body
 
