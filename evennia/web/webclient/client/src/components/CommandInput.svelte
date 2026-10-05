@@ -354,15 +354,13 @@
       {#if compose.preview.error}
         <div class="c-err">{compose.preview.error}</div>
       {:else if compose.preview.you || compose.preview.room}
+        <!-- The lines of a post are kept: no template whitespace inside, because
+             the preview is laid out pre-wrap. -->
         {#if compose.preview.you}
-          <div class="c-line {specFor(compose.mode).msgClass}">
-            {@html composePreviewToHtml(compose.preview.you)}
-          </div>
+          <div class="c-line {specFor(compose.mode).msgClass}">{@html composePreviewToHtml(compose.preview.you)}</div>
         {/if}
         {#if compose.preview.room}
-          <div class="c-line c-room {specFor(compose.mode).msgClass}">
-            {@html composePreviewToHtml(compose.preview.room)}
-          </div>
+          <div class="c-line c-room {specFor(compose.mode).msgClass}">{@html composePreviewToHtml(compose.preview.room)}</div>
         {/if}
       {:else}
         <div class="c-empty">Preview</div>
@@ -493,7 +491,8 @@
     min-height: 2.4em; border-left: 2px solid var(--border-bright);
     padding: 2px 0 2px 8px; font-size: 0.84rem; line-height: 1.45;
   }
-  .c-line { color: var(--fg); }
+  /* A post of several lines previews as several lines. */
+  .c-line { color: var(--fg); white-space: pre-wrap; }
   .c-room { color: var(--fg-dim); }
   .c-empty, .c-err { color: var(--fg-faint); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .c-err { color: var(--accent-ember, var(--fg-dim)); }

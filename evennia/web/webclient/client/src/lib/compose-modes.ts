@@ -30,6 +30,23 @@ export function specFor(mode: ComposeMode): ComposeModeSpec {
 }
 
 /**
+ * A draft's line breaks, written the way the game reads them.
+ *
+ * A pose or emote may run over several lines, and the game takes `|/` as the
+ * break between them. The pad's own line breaks become that here, so the
+ * preview and the send read a draft the same way and nothing on the way treats
+ * a newline as the end of a command. A say, LOOC or look line is one line, so
+ * its breaks become spaces. Blank lines are dropped, and each line is trimmed.
+ */
+export function withBreaks(mode: ComposeMode, text: string): string {
+  const lines = (text ?? "")
+    .split(/\r\n?|\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.join(mode === "pose" || mode === "emote" ? "|/" : " ");
+}
+
+/**
  * The command line a composed draft actually sends.
  *
  * Pose uses the "." verb-marker shorthand rather than `pose <text>` because the
@@ -37,7 +54,7 @@ export function specFor(mode: ComposeMode): ComposeModeSpec {
  * strips exactly one leading "." to stay consistent with the send.
  */
 export function composeToCommand(mode: ComposeMode, text: string): string {
-  const t = (text ?? "").trim();
+  const t = withBreaks(mode, text);
   if (!t) return "";
   switch (mode) {
     case "pose":
@@ -55,6 +72,6 @@ export function composeToCommand(mode: ComposeMode, text: string): string {
 
 /** The `@preview_rp <mode> <text>` line for a draft, or "" if there is nothing to preview. */
 export function composeToPreview(mode: ComposeMode, text: string): string {
-  const t = (text ?? "").trim();
+  const t = withBreaks(mode, text);
   return t ? `@preview_rp ${mode} ${t}` : "";
 }
