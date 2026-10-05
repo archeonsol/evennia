@@ -704,6 +704,16 @@ client_gui = _not_implemented
 client_name = _not_implemented
 client_version = _not_implemented
 
+# GMCP Core.Supports.Add / Core.Supports.Remove amend the package list a client gave in
+# Core.Supports.Set, which is the one acted on (``supports_set``). Clients send the other
+# two after connecting, and each was logged as an unknown-inputfunc ERROR.
+supports_add = _not_implemented
+supports_remove = _not_implemented
+
+# A bare ``ping`` is sent about once a minute by some clients (MUSHclient was seen on
+# production, and each one was logged as an ERROR). The server has nothing to answer.
+ping = _not_implemented
+
 
 # -------------------------------------------------------------------------
 # Rich editor (EvEditor web frontend) OOB protocol
