@@ -729,6 +729,14 @@ class TypeclassManager(TypedObjectManager):
                 on the model base used.
 
         """
+        if not args and len(kwargs) == 1:
+            # The added db_typeclass_path makes this a two-kwarg lookup, which
+            # SharedMemoryManager.get always sends to SQL; read the idmapper here.
+            (key, value), = kwargs.items()
+            if key.removesuffix("__exact") in ("pk", self.model._meta.pk.attname):
+                inst = self.model.get_cached_instance(value)
+                if inst is not None and inst.db_typeclass_path == self.model.path:
+                    return inst
         kwargs.update({"db_typeclass_path": self.model.path})
         return super().get(**kwargs)
 

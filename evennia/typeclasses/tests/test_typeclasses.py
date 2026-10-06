@@ -325,6 +325,36 @@ class TestSearchTypeclassFamily(EvenniaTestCase):
         self.assertEqual(set(res2), {self.obj_parent, self.obj1, self.obj2, self.obj_child})
 
 
+class TestTypeclassManagerGet(EvenniaTestCase):
+    """``get(pk=...)`` on a typeclass manager reads the idmapper first."""
+
+    def setUp(self):
+        self.obj, _ = TestSearchManagerTypeclass.create(key="obj")
+        self.child, _ = TestSearchManagerTypeclassChild.create(key="child")
+
+    def test_cached_pk_costs_no_query(self):
+        for kwargs in ({"pk": self.obj.pk}, {"id": self.obj.pk}, {"pk__exact": self.obj.pk}):
+            with self.assertNumQueries(0):
+                self.assertIs(TestSearchManagerTypeclass.objects.get(**kwargs), self.obj)
+
+    def test_evicted_pk_is_queried(self):
+        pk = self.obj.pk
+        self.obj.flush_from_cache(force=True)
+        reloaded = TestSearchManagerTypeclass.objects.get(pk=pk)
+        self.assertIsNot(reloaded, self.obj)
+        self.assertEqual(reloaded.pk, pk)
+
+    def test_cached_pk_of_another_typeclass_is_not_found(self):
+        with self.assertRaises(DefaultObject.DoesNotExist):
+            TestSearchManagerTypeclass.objects.get(pk=self.child.pk)
+        with self.assertRaises(DefaultObject.DoesNotExist):
+            TestSearchManagerTypeclassChild.objects.get(pk=self.obj.pk)
+
+    def test_other_lookups_use_sql(self):
+        with self.assertNumQueries(1):
+            self.assertIs(TestSearchManagerTypeclass.objects.get(db_key="obj"), self.obj)
+
+
 class TestTags(BaseEvenniaTest):
     evennia_fixtures = {"obj1"}
 
